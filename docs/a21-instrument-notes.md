@@ -1298,3 +1298,545 @@ withdrawn-with-a-replacement; nothing loses its only enforcer.
 | RES-5 | `:1718-1730` | NARROWED to model obedience (7.7) |
 | RES-1, RES-2 | `:1690-1705` | AMENDED (8.3, 11) |
 | - | - | **NEW: AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-5(f), AC-6n (now with clause (iv)), RES-11 (renumbered from a colliding RES-10, 8.2/11)** |
+
+---
+
+# 14. INSTRUMENT 4 - AC-5(g), THE VARIANCE CLAUSE: M14's FIRST REAL ENFORCER
+
+Test-notes and oracle seat (`loop-test-author`), 2026-09-20, appended after the
+disposal round. **This section is scoped to ONE gap: mutant M14, "the composer
+ignores `args.outline` and always renders the empty arm".** It adds exactly one
+criterion, AC-5(g), and one residual, RES-12.
+
+**What it does NOT touch, named so a delta checker attacks the new material
+instead of re-litigating settled work:** AC-5(c') (6.3) is kept verbatim and is
+NOT reverted - 6.3's measurement that `pasted` and `saved` are byte-identical at
+a fixed outline still stands and AC-5(g) depends on it being true; the minted
+`promptAnnouncementOutlineBlockHeader()` / `FROZEN_OUTLINE_BLOCK_HEADER` (6.5.2,
+6.5.3) is kept byte-for-byte; AC-6n(iv) (7.5a), AC-24 (8.2) and every other
+disposal-round correction are untouched. Where this section interacts with one
+of them it SAYS SO (14.7) rather than editing it.
+
+**Tree state.** `git rev-parse --short HEAD` -> `0181a2e`. `git status --short`
+returned EMPTY before this pass and EMPTY after it. This pass wrote exactly one
+file, `docs/a21-instrument-notes.md`, and touched no source file. Line count
+before the append: **1300** under both instruments
+(`@(Get-Content docs/a21-instrument-notes.md).Count` -> 1300 and
+`wc -l docs/a21-instrument-notes.md` -> 1300, measured this pass; they agree
+here, unlike the 42-line disagreement `docs/loop/this-repo.md` section 3
+records on a `.tsx` file).
+
+**No API key, no model output.** Everything below measures OUR OWN STATIC
+STRING - the value `buildPromptAnnouncementPrompt` returns. Nothing here asks a
+model anything, and no criterion in this section is satisfiable or falsifiable
+by model behaviour. **RES-5** still owns "does the model obey the prompt", and
+this section does not narrow it.
+
+---
+
+## 14.1 The measurement that reframes M14: it had ZERO enforcers, not two
+
+The round-3 checker reported M14 killed "ONLY by AC-5(d) and AC-7(b)", both
+running through the fabricated `OUTLINE_BLOCK_HEADER`. 6.5 minted a real
+in-tree replacement and left open, as an ARGUED honest limit, whether those two
+still fire once bound to it. **I measured it rather than inheriting either
+reading, and the answer is worse than the checker's.**
+
+| Probe | Command | Result |
+|---|---|---|
+| AC-5(d) + AC-5(f) as frozen-block checks, run against a composer mutated to M14 | `node ../../node_modules/vitest/vitest.mjs run --root . probe-header.test.ts` in the sandbox (14.6) | **`Tests 2 passed (2)` - GREEN under M14** |
+| AC-7(b) exactly as `a21-scope.md:1375-1381` states it, with the fifth marker corrected to `FROZEN_OUTLINE_BLOCK_HEADER` per 6.5.3, run against the same M14 composer | `node ../../node_modules/vitest/vitest.mjs run --root . probe-ac7b.test.ts` | **`Tests 1 passed (1)` - GREEN under M14** |
+
+So once the fabricated symbol is replaced by the real one, **neither AC-5(d) nor
+AC-7(b) kills M14**. The header is still emitted, still byte-frozen, still
+kind-gated, and still in the right order - M14 changes only the CONTENT behind
+it, and an ordering-plus-presence assertion cannot see content. 6.5.3's honest
+limit was correct and is now MEASURED rather than argued.
+
+**Correction to a CREDIT, not to a criterion.** AC-5(d) and AC-7(b) are unchanged
+and keep every kill they legitimately have. What changes is the ledger: neither
+may be listed as an M14 enforcer. Section 9's M14 row said "RED only via AC-5(d)
+and AC-7(b)"; the honest row is **M14 SURVIVED EVERY CRITERION IN THIS FILE
+BEFORE AC-5(g)**. That is the silent-green the orchestrator named, stated at its
+true size - a kill count of two that was really a kill count of zero is exactly
+the "instrument that does not measure what it claims, wearing a number" that
+practice 2 exists to prevent.
+
+---
+
+## 14.2 The construction: how the outline pair is built, and why the two are guaranteed to render differently
+
+**Stated as a construction, not an example.** The pair is built by one rule, and
+the rule is derived from `renderOutlineBlock`'s own body, opened at
+`src/lib/walkthrough-announcement-prompt.ts:243-261` this pass.
+
+### 14.2.1 The four fields the function reads, each with its line
+
+`renderOutlineBlock` reads exactly four members of its argument, and nothing
+else:
+
+| Field | Where it is read | What changing it does to the output |
+|---|---|---|
+| `outline.sections` | `:244` (the length-zero branch) and `:248` (`outline.sections.map(renderOutlineSection)`) | selects the empty arm versus the section arm, and sets one output line per section |
+| `outline.dueDateSectionIndex` | `:250-252` | picks between `Has a due-date block, in section N.` and `Has no due-date block.` |
+| `outline.todoSectionIndex` | `:255-257` | picks between the `"what to do this week"` present and absent lines |
+| `outline.hasLinks` | `:259` | `Contains links: yes.` versus `Contains links: no.` |
+
+And, inside `renderOutlineSection` (`:219-234`), each section contributes
+`section.break` (`:220`), `section.listKind` (`:222-226`), `section.sentenceRange`
+(`:227`) and `section.heading` (`:230-231`).
+
+**`hasGreeting` and `hasSignOff` are NOT read by either function.** Confirmed by
+reading the whole of `:219-261`: neither identifier appears. Two outlines
+differing only in those two fields render IDENTICALLY, which is why the rule
+below holds them EQUAL rather than varying them.
+
+### 14.2.2 The rule
+
+> **Build `OUTLINE_A` and `OUTLINE_B` as hand-typed `AnnouncementOutline`
+> literals that differ in EVERY field `renderOutlineBlock` reads and in NO field
+> it does not.**
+
+Typed literals, not `deriveAnnouncementOutline(text)`: the deriver's output is
+not predictable without running it, and a pair that happened to derive to the
+same outline - or to `EMPTY_ANNOUNCEMENT_OUTLINE` twice - would make every
+assertion below vacuous. A literal is checked by tsc against
+`AnnouncementOutline`, so a fifth field added upstream is a compile error rather
+than a silently unvaried axis. (AC-15 legitimately uses the deriver; its
+question is containment, not variance.)
+
+The pair used in the reference run, and the pair the implementer should copy:
+
+```ts
+const OUTLINE_A: AnnouncementOutline = {
+  sections: [
+    { index: 1, heading: "This week", break: "heading", listKind: null, sentenceRange: [2, 4] },
+  ],
+  hasGreeting: true,   // held EQUAL to B on purpose - renderOutlineBlock never reads it
+  hasSignOff: true,    // ditto
+  dueDateSectionIndex: null,
+  todoSectionIndex: null,
+  hasLinks: false,
+};
+
+const OUTLINE_B: AnnouncementOutline = {
+  sections: [
+    { index: 1, heading: null, break: "paragraph-break", listKind: "unordered", sentenceRange: [1, 1] },
+    { index: 2, heading: "Due this week", break: "heading", listKind: "ordered", sentenceRange: [3, 6] },
+  ],
+  hasGreeting: true,
+  hasSignOff: true,
+  dueDateSectionIndex: 2,
+  todoSectionIndex: 1,
+  hasLinks: true,
+};
+```
+
+### 14.2.3 Why the two are GUARANTEED to render differently
+
+Four independent guarantees, any one of which suffices, all traced through the
+function's own branches rather than asserted:
+
+1. `A.sections.length === 1` and `B.sections.length === 2`, so `:248` emits one
+   section line for A and two for B. A one-line difference in the number of
+   `Section N: ...` lines cannot be absorbed.
+2. `A.dueDateSectionIndex === null` takes the `:252` arm; `B`'s `2` takes the
+   `:251` arm. Two different literal strings.
+3. `A.todoSectionIndex === null` takes `:257`; `B`'s `1` takes `:256`.
+4. `A.hasLinks === false` yields `Contains links: no.` at `:259`; `B` yields
+   `yes.`
+
+Additionally every per-section field differs (`break`, `listKind`,
+`sentenceRange`, `heading`), so the first section line differs even before the
+count does.
+
+**The guarantee is not left as an argument.** Clause (i) of the criterion below
+ASSERTS it at run time by calling the real imported `renderOutlineBlock` on both
+outlines, so a future edit to the pair that accidentally collapses it goes RED on
+the precondition instead of quietly making every downstream assertion vacuous.
+That is the anchor-resolves discipline this seat's definition demands, applied to
+a pair rather than to a slice.
+
+### 14.2.4 Why `renderOutlineBlock` in the test is an oracle and not a tautology
+
+The tautology hazard on record here is an oracle produced by calling **the
+subject under test**. `renderOutlineBlock` is not the subject: it is a shipped,
+unmodified upstream function that A21 REUSES (`a21-scope.md` 5.1, row
+`renderOutlineBlock` `:243`), and the criterion is precisely "the composer hands
+`args.outline` to it". Calling it in the test is therefore the reference oracle
+for "the right outline was rendered", the same relationship AC-5(b) already
+relies on when it calls the imported function and slices its first sentence.
+
+**Its honest limit, stated rather than glossed:** if `renderOutlineBlock`'s own
+prose changes upstream, both the oracle and the subject move together and
+AC-5(g) stays green. That is correct and deliberate - AC-5(g) pins a
+RELATIONSHIP (this outline, rendered by that function, reaches the prompt), never
+that function's spelling, which its own module's tests own and which
+`traps-tests.md:62-66` forbids this seat from pinning.
+
+---
+
+## 14.3 AC-5(g) - THE COMPOSED PROMPT VARIES WITH THE OUTLINE
+
+**Six clauses. Each names its object, its instrument and its direction.**
+
+Shared fixture, and it is load-bearing: a single frozen `BASE` args object, with
+both calls produced by `{ ...BASE, resolvedKind: kind, outline }`. One fixed
+`briefNonce` for every call in this criterion, per 7.2 - a per-call nonce would
+make every pair of prompts differ unconditionally and turn the whole criterion
+green for the wrong reason. Clause (ii) is what makes that a checked fact rather
+than a convention.
+
+The kind axis is a `Record<ResolvedTemplate["kind"], boolean>` naming, for each
+of the three upstream kinds, whether it carries an outline - `none: false`,
+`pasted: true`, `saved: true` - iterated by `Object.keys` of the Record itself.
+A fourth upstream kind is TS2741 at the Record, not an untested arm; this is the
+same construction AC-5 and AC-18 already use.
+
+**(i) Preconditions - the pair actually renders differently.**
+- *Object:* `renderOutlineBlock(OUTLINE_A)`, `renderOutlineBlock(OUTLINE_B)`,
+  `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)`, and the kind Record.
+- *Instrument:* all three renders at least 40 characters (the vacuity floor
+  AC-5(b) already uses, because `"anything".includes("") === true`);
+  `RENDER_A !== RENDER_B`; neither render contains the other (so every
+  `not.toContain` below is a real absence claim and not a substring artefact);
+  neither equals nor contains `RENDER_EMPTY`; the Record has exactly 3 keys with
+  at least one `true` and at least one `false`.
+- *Direction:* **RED if the pair is ever rebuilt into two outlines that
+  `renderOutlineBlock` cannot distinguish** - the instrument refuses to run
+  vacuously rather than passing while proving nothing. The at-least-one-true and
+  at-least-one-false assertions are the same guard on the kind axis: an
+  all-false Record would make clause (iii)-(v) iterate over nothing and clause
+  (vi) carry the whole criterion.
+
+**(ii) The one-key control - nothing but the outline differs.**
+- *Object:* the two argument objects themselves, not their output.
+- *Instrument:* `Object.keys(a).sort()` equals `Object.keys(b).sort()`, then
+  `keys.filter((k) => a[k] !== b[k])` computed over `Object.keys(BASE)` and
+  asserted `toEqual(["outline"])`. A computed difference set, never an eyeballed
+  one.
+- *Direction:* RED the moment any second argument varies between the two calls -
+  the nonce above all, but equally `promptText`, `courseLabel` or `styleBlock`.
+  This is the clause that stops AC-5(g) from being satisfied for an unrelated
+  reason, and 14.4 measures it firing.
+
+**(iii) Per outline-carrying kind: the composed prompt differs.**
+- *Object:* `buildPromptAnnouncementPrompt({...BASE, resolvedKind, outline: A})`
+  against the same with `outline: B`, for each kind whose Record value is `true`.
+- *Instrument:* `expect(...).not.toBe(...)`.
+- *Direction:* RED if the composed prompt is invariant under the outline swap -
+  the plainest statement of the criterion, and the one an implementer will read
+  first.
+- **Honest limit, measured:** across every mutant in 14.5, clause (iii) is killed
+  by nothing that clause (iv) does not also kill. It is retained because it
+  states the requirement in its own words and localizes a failure, **not because
+  it is independently load-bearing.** Saying so is cheaper than letting a reader
+  count six enforcers where the measurement shows five.
+
+**(iv) Per outline-carrying kind: each prompt carries ITS OWN rendered outline,
+exactly once, and not the other's, and not the empty one.**
+- *Object:* the two composed prompts.
+- *Instrument:* `composed.split(RENDER_X).length - 1 === 1` for the matching
+  render (an exact occurrence count, so an implementation emitting the block
+  twice is RED); `not.toContain` the other outline's render; `not.toContain`
+  `RENDER_EMPTY`.
+- *Direction:* RED if the composer renders any outline other than the one it was
+  given - M14's exact shape - and RED if it renders no outline at all, or emits
+  the block twice. The `RENDER_EMPTY` absence is the clause aimed squarely at
+  M14's literal form.
+
+**(v) The rendered outline is the ONLY thing that changed - the attribution
+clause.**
+- *Object:* the two composed prompts, normalized.
+- *Instrument:* assert neither prompt already contains the sentinel
+  `"<<OUTLINE REGION>>"` (the anchor - a sentinel that occurs naturally would
+  make the comparison meaningless), then
+  `expect(composedA.replace(RENDER_A, MARK)).toBe(composedB.replace(RENDER_B, MARK))`.
+  `String.replace` with a string pattern replaces the first occurrence only,
+  which is sound because (iv) has already pinned the count at exactly one.
+- *Direction:* **RED if the prompt varies with the outline ANYWHERE other than
+  inside the rendered outline block.** This is what makes AC-5(g) immune to an
+  implementation that satisfies (iii) with a cheap echo - a length, a hash, a
+  `JSON.stringify` - instead of the real render. Measured against two such
+  implementations in 14.4.
+
+**(vi) The non-outline kinds are INVARIANT under the same swap.**
+- *Object:* `buildPromptAnnouncementPrompt` at each kind whose Record value is
+  `false` (today, `none` alone), over the same outline pair.
+- *Instrument:* `expect(composedA).toBe(composedB)`, plus `not.toContain` for
+  all three renders.
+- *Direction:* RED if an outline reaches the `none` prompt at all. This is the
+  negative control that keeps the variance measured in (iii)-(v) ATTRIBUTABLE to
+  the outline arm, and it is simultaneously the guard against the obvious
+  over-correction - "fix M14 by emitting the outline unconditionally" - which
+  would contradict 4.3's specification that `none` carries no outline and would
+  put a false statement back in the prompt.
+
+---
+
+## 14.4 ATTACKING MY OWN GUARD: the passing-but-wrong implementations, executed
+
+Practice: write the passing-but-wrong implementation yourself and run the
+instrument against it. Four were written and run. Two are implementation mutants
+(14.5); two attack the TEST's own discipline and are reported here as **control
+probes, never counted as coverage.**
+
+**Probe T1 - the unrelated-reason attack.** The composer is CORRECT; the test is
+altered so the two calls also differ in `briefNonce` (`"aaaa..."` versus
+`"bbbb..."`). Command:
+`node ../../node_modules/vitest/vitest.mjs run --root . probe-T1.test.ts`.
+Measured `Tests 4 failed | 8 passed (12)`:
+
+- clause (ii) FAILED - the one-key control fired, naming the extra differing key;
+- clause (v) FAILED at both outline-carrying kinds;
+- clause (vi) FAILED - `none` is no longer invariant;
+- **clause (iii) PASSED.** The prompts did differ. A bare "the composed prompt
+  varies with the outline" assertion is GREEN on a test that proves nothing.
+
+That is the measured justification for clauses (ii) and (v) existing at all, and
+it is the specific failure the orchestrator predicted.
+
+**Probe T2 - the badly-built pair.** The composer is CORRECT; `OUTLINE_B` is
+rebuilt to differ from `OUTLINE_A` only in `hasGreeting` and `hasSignOff` -
+fields `renderOutlineBlock` never reads (14.2.1). Command:
+`node ../../node_modules/vitest/vitest.mjs run --root . probe-T2.test.ts`.
+Measured `Tests 5 failed | 7 passed (12)`: clause (i)'s
+"renderOutlineBlock itself distinguishes the pair" FAILED first, followed by
+(iii) and (iv) at both kinds. The instrument refuses to run on a pair that cannot
+discriminate, rather than reporting a pass.
+
+---
+
+## 14.5 THE SABOTAGE TABLE, MEASURED
+
+Every row was EXECUTED against the reference implementation (14.6) with a `cp`
+backup and a byte-identical restore - never `git checkout --`, which reverts an
+uncommitted chunk to the index. Driver: `node mutate.mjs` in the sandbox, which
+applies each mutation to `composer.ts`, runs the suite, records the output under
+`runs/<id>.txt`, and restores the original before the next row. Each mutation
+asserts its own anchor resolved (`mutated !== ORIGINAL`), so a mutation that
+silently failed to apply is reported as skipped rather than banked as a survivor
+- the "mutated the wrong object" failure this repo has on record.
+
+Clean baseline: `Test Files 1 passed (1)` / `Tests 12 passed (12)`.
+
+| # | Mutation | Expected | MEASURED | Discriminates? |
+|---|---|---|---|---|
+| MV0 | a comment only (no-op control) | GREEN | **GREEN, `Tests 12 passed (12)`** | control - proves the runner can pass, so the reds below are real |
+| MV1 | **M14 proper**: the outline arm always renders `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)` | RED | **RED, `Tests 4 failed \| 8 passed (12)`**: (iii) and (iv), at BOTH `pasted` and `saved` | **Yes.** This is the kill the whole section exists for |
+| MV2 | the outline arm echoes `JSON.stringify(args.outline)` instead of calling `renderOutlineBlock` | RED | **RED, `Tests 4 failed \| 8 passed (12)`**: (iv) and (v) at both kinds. **(iii) PASSED** | **Yes - and this is the row that proves (iv)/(v) are required.** A bare variance check is GREEN on it |
+| MV3 | the outline arm honours `args.outline` on `saved` but renders EMPTY on `pasted` | RED | **RED, `Tests 2 failed \| 10 passed (12)`**: (iii) and (iv), **at `pasted` only** | **Yes - and this is the row that proves the kind loop is required.** A criterion written at `saved` alone survives it |
+| MV4 | the outline block is emitted on EVERY kind, including `none` (the over-correction) | RED | **RED, `Tests 1 failed \| 11 passed (12)`**: (vi) alone | **Yes - the row that proves the negative control is required** |
+| MV5 | renders the RIGHT outline, but also echoes `outline.sections.length` into the floor block | RED | **RED, `Tests 3 failed \| 9 passed (12)`**: (v) at both kinds, and (vi). **(iii) and (iv) PASSED** | **Yes - the row that proves the attribution clause is required** |
+| restore control | original restored | GREEN | **GREEN, `Tests 12 passed (12)`**, and `composer.ts` byte-identical to the backup | control |
+
+**Rows whose verdict is NOT a kill, named so nobody counts them as coverage:**
+
+- **MV1 against clause (v): GREEN.** Under M14 both prompts are identical, so
+  neither `replace` finds its pattern and the two normalized strings are equal.
+  The attribution clause does not see M14. Crediting it would be the inflated
+  kill count practice 2 forbids.
+- **AC-5(d), AC-5(f) and AC-7(b) against MV1: GREEN** (14.1). Recorded in the
+  ledger as survivals, not kills.
+- **An upstream edit to `renderOutlineBlock`'s own prose: GREEN by
+  construction** (14.2.4). AC-5(g) cannot see it and is not meant to; that
+  function's own module owns its wording.
+
+**Clause-to-mutant map, so no clause is decorative:** (i) killed by T2; (ii)
+killed by T1; (iii) killed by MV1 and MV3 but by nothing (iv) misses - **not
+independently load-bearing, stated in 14.3**; (iv) killed by MV1, MV2, MV3;
+(v) killed by MV2, MV5, T1; (vi) killed by MV4, MV5, T1.
+
+---
+
+## 14.6 THE REFERENCE SANDBOX: rebuilt, located, and torn down
+
+Practice 1 is an obligation and the disposal round could not discharge it
+because section 2's `.a21ref` tree no longer exists. **It was rebuilt.**
+
+**Result: `Test Files 1 passed (1)` / `Tests 12 passed (12)` green against a
+correct composer**, command
+`node ../../node_modules/vitest/vitest.mjs run --root .` run from the sandbox.
+So AC-5(g) is a specification, not a wish: something has passed it.
+
+**Where it lived, and why that location is gate-safe.**
+`<repo>/.vercel/a21ref-variance`. Both properties were verified, not assumed:
+
+| Gate | Why it does not reach the sandbox | How verified |
+|---|---|---|
+| `src/source-bytes.structure.test.ts` (walks `process.cwd()`, i.e. the REPO ROOT) | `.vercel` is a member of its `SKIP_DIRS` | `sed -n '37,38p' src/source-bytes.structure.test.ts` -> `const ROOT = process.cwd();` and `SKIP_DIRS = new Set([".git", "node_modules", ".next", ".claude", "coverage", "dist", ".vercel"])` |
+| `vitest` collection | `include: ["src/**/*.test.ts"]`, rooted at the repo root | `grep -n "include" vitest.config.ts` -> `:28` |
+| `src/lib/no-emojis.test.ts` | its roots are `["src", "docs"]` | `grep -n "roots" src/lib/no-emojis.test.ts` -> `:243` |
+| `src/file-size-ceiling.structure.test.ts` | scans `path.resolve(repoRoot, "src")` | `sed -n '103,105p' src/file-size-ceiling.structure.test.ts` |
+| git, and the auto-commit hook | `.vercel` is gitignored, so nothing under it can be staged even by a `git add -A` a sibling agent runs | `git check-ignore -v .vercel/a21ref-variance` -> `.gitignore:38:.vercel` |
+
+**This is the correction section 2 could not make.** `.a21ref` was chosen for
+Node resolution and WAS byte-scanned by `source-bytes` whenever `npm test` ran;
+`.vercel/<name>` is the same resolution benefit with the gate actually closed by
+construction rather than by nobody running the suite at the wrong moment. Every
+other cwd-walking test in the suite was enumerated
+(`grep -rn "= process.cwd()\s*;" src --include=*.test.ts` -> 6 files) and each
+one reads named paths or a `src`-rooted subtree; only `source-bytes` walks the
+whole root.
+
+**`node_modules` was NEVER junctioned or symlinked.** The repo's recorded
+failure is that junctioning it into a throwaway tree and removing the tree
+EMPTIES the real one, recoverable only by `npm ci`. Node resolves `vitest@4.1.9`
+by walking up from the sandbox to the repo's own `node_modules`, which needs no
+link at all.
+
+| Instrument | Before | After teardown |
+|---|---|---|
+| `ls node_modules \| wc -l` (the baseline instrument, both times) | **447** | **447** |
+| `ls -A node_modules \| wc -l` | not taken | 450 |
+| `(Get-ChildItem node_modules).Count` (PowerShell) | not taken | 450 |
+
+**The 447/450 gap is an instrument disagreement, not a loss**, and it is recorded
+rather than silently reconciled: `ls` hides dot-entries and `ls -A` does not, so
+the three-entry difference is `node_modules`'s own hidden entries. The
+before/after comparison that matters uses the SAME instrument on both sides and
+is unchanged at 447. `vitest` did create a `node_modules/.vite` cache INSIDE the
+sandbox; it was verified to be a real directory with one entry
+(`ls -la .vercel/a21ref-variance/` shows `drwxr-xr-x`, not a link;
+`find .vercel/a21ref-variance/node_modules -maxdepth 2` -> `.vite/vitest` only),
+never a link to the real one.
+
+**Teardown, proven.** The tree was archived to the session scratchpad
+(`.../scratchpad/a21ref-variance`, holding `composer.ts`, `render-outline.ts`,
+`outline-types.ts`, `variance.test.ts`, `vitest.config.ts`, `mutate.mjs` and
+`runs/`) and then removed with
+`Remove-Item -LiteralPath <repo>\.vercel -Recurse -Force`. Verified after:
+`ls -d .vercel` -> `No such file or directory`; `git status --short` -> EMPTY.
+
+**What the reference is and is not.** `renderOutlineBlock`,
+`renderOutlineSection`, `headingLabelClause`, `AnnouncementOutline`,
+`OutlineSection` and `EMPTY_ANNOUNCEMENT_OUTLINE` were transcribed VERBATIM from
+`src/lib/walkthrough-announcement-prompt.ts:139-141,219-234,243-261` and
+`src/lib/announcement-outline-types.ts`, opened this pass. **Unlike section 2's
+run, the outline arm's CALLER was not rewritten and invents no symbol** - it
+emits `promptAnnouncementOutlineBlockHeader()` exactly as 6.5.2 mints it,
+followed by `renderOutlineBlock(args.outline)`. The rest of the composer (the
+two framings, the floor block, the `none` block, the sentinels) is a faithful
+but non-frozen stand-in: AC-5(g) asserts nothing about their prose, so their
+spelling is not load-bearing here and no criterion in this section depends on
+it.
+
+---
+
+## 14.7 INTERACTIONS with settled items, declared rather than edited
+
+- **AC-5(c') (6.3) is untouched, and AC-5(g) is the orthogonal axis it cannot
+  see.** (c') varies the KIND at a fixed outline; (g) varies the OUTLINE at a
+  fixed kind. Together they are the two axes of one cross, and neither
+  substitutes for the other. (c')'s direction clause - RED if `saved` differs
+  from `pasted` at the same outline - remains correct for the reason 6.3 gives
+  and must NOT be reverted: `renderOutlineBlock` genuinely receives the same
+  outline for both kinds, so the round-2 "three distinct outputs" criterion was
+  measured unsatisfiable. What (g) removes is the PERVERSE INCENTIVE in (c'):
+  an implementation that discards the outline entirely satisfies (c') perfectly
+  and is RED on (g) clauses (iii) and (iv). 6.5.6's recorded note - that (c')
+  inherits the gap rather than closing it - is now discharged by (g), and 6.5.6
+  needs no edit to say so.
+- **AC-5(f) and the minted header (6.5.2-6.5.3) are untouched.** (g) neither
+  asserts nor requires the header's bytes; it asserts the CONTENT behind it.
+  6.5.3's honest limit is the exact statement (g) closes, and 14.1 upgrades that
+  limit from argued to measured.
+- **AC-5(d) is untouched.** Measured GREEN under M14 (14.1); it keeps its own
+  kills and loses only a credit it never earned.
+- **AC-7(b) is untouched.** Its `file:line` correction in section 13 stands. Only
+  the M14 credit is withdrawn (14.1).
+- **AC-6 and the nonce (7.1-7.2, AC-6n(iv)) are untouched, and (g) is consistent
+  with them by construction.** AC-6 holds the outline fixed and varies
+  `promptText`; (g) holds `promptText` fixed and varies the outline. Both require
+  ONE fixed nonce across their corpus, which 7.2 already mandates and which (g)
+  clause (ii) now enforces mechanically.
+- **AC-18 (4.3) is untouched, and the pair AC-18 + AC-5(g) is what closes
+  "instructor picks a saved format, the draft ignores it" at the two ends it
+  covers.** AC-18 proves the chosen template and its outline reach the REQUEST;
+  (g) proves the COMPOSER uses the outline it is given. The segment between them
+  is not covered by either - see RES-12.
+
+---
+
+## 14.8 Executable here versus argued - delta to section 10
+
+**EXECUTABLE, and EXECUTED in this pass:** AC-5(g) clauses (i) through (vi), at
+12 assertions green on a correct composer, 6 implementation mutants and 2 test
+control probes, all measured in the sandbox of 14.6.
+
+**MEASURED IN THIS PASS, replacing an argued claim:** that AC-5(d), AC-5(f) and
+AC-7(b) are GREEN under M14 (14.1). Section 10's "not re-run against a sandbox
+because none exists any more" no longer applies to these three.
+
+**EXECUTABLE here but NOT executed in this pass:** AC-5(g) against the REAL
+`renderOutlineBlock` and the REAL upstream types. The sandbox used a verbatim
+transcription, not the shipped module. The implementer runs it against the real
+imports, where it is an ordinary unit test on a pure leaf and needs no mock, no
+key and no network.
+
+**ARGUED, NOT VERIFIED - never to be reported as measured:**
+
+- That a model given a different outline block writes a differently-shaped
+  announcement. **RES-5**, unchanged and unnarrowed. AC-5(g) measures OUR OWN
+  STATIC STRING and nothing else.
+- That the instructor's chosen format is the one the exemplar library returns.
+  That is AC-12's identity join and AC-18's routing, not this clause.
+
+---
+
+## 14.9 Residual register - one addition
+
+- **RES-12 (NEW, 14.7).** *What is open:* AC-18 proves the outline reaches
+  `PromptAnnouncementDraftRequest`, and AC-5(g) proves the composer uses the
+  outline it is handed. **Nothing proves the ACTION threads `request.outline`
+  into the composer.** A `draftPromptAnnouncementAction` that built its
+  composer args with `EMPTY_ANNOUNCEMENT_OUTLINE`, or with a re-derived
+  look-alike, is GREEN on both criteria and reproduces M14's user-visible effect
+  one layer up. *Owner:* the implementer's own sabotage pass, which
+  `iteration-caps.md` cap 4 never caps. *Instrument:* the production path, per
+  practice 3 - drive `draftPromptAnnouncementAction` under `vi.mock("@/lib/llm")`
+  (the 53-file precedent re-measured in section 1), capture the `contents` text
+  handed to `callLlm`, and apply AC-5(g)'s clauses (ii), (iv) and (v) verbatim to
+  that captured prompt over the SAME `OUTLINE_A`/`OUTLINE_B` pair. Never by
+  importing the composer into the action's test. *Step:* the build wave that
+  writes `src/app/actions/prompt-announcement-draft.ts`, alongside AC-10(d),
+  which already drives that same action under that same mock. *Named mutant for
+  that pass:* **M21** - the action passes `EMPTY_ANNOUNCEMENT_OUTLINE` to the
+  composer instead of `request.outline`; expected RED on the relocated (iv).
+  *This is a residual with an owner, an instrument and a step. If it ships
+  without all three it is a deletion, and it should be called that.*
+
+RES-1 through RES-11 are unchanged by this section.
+
+---
+
+## 14.10 Disposition delta to section 13
+
+| Item | Disposition here |
+|---|---|
+| AC-5(c') (6.3) | KEPT VERBATIM. Not reverted. Its inherited gap is closed by the new **(g)**, not by amending it |
+| AC-5(d) (6.2) | KEPT. Its M14 CREDIT is withdrawn as measured-false (14.1); the criterion is unchanged |
+| AC-5(f) (6.5.3) | KEPT VERBATIM, header bytes unchanged. Its 6.5.3 honest limit is now MEASURED and is closed by **(g)** |
+| AC-7(b) (`a21-scope.md:1375-1381`, corrected in section 13) | KEPT. Its M14 CREDIT is withdrawn as measured-false (14.1) |
+| section 9's M14 row | **CORRECTED**: the honest verdict is that M14 survived every criterion in this file before AC-5(g), and is killed by (g) clauses (iii) and (iv) at both outline-carrying kinds |
+| - | **NEW: AC-5(g) (six clauses), mutants MV0-MV5, control probes T1/T2, RES-12** |
+
+## 14.11 What I could not determine in this pass
+
+- **Whether AC-5(g) is green against the REAL `renderOutlineBlock`.** The
+  reference used a verbatim transcription of `:219-261`, not the shipped module.
+  The transcription was made by opening the file this pass, and the risk is a
+  transcription error, not a design error - but it is unverified and I am not
+  going to call it measured.
+- **Whether `npx tsc --noEmit` over the whole repo stays clean with AC-5(g)'s
+  literals.** Not run: the repo's `tsc` has exactly one legitimate caller (it
+  races on `tsconfig.tsbuildinfo`) and a sibling agent is editing
+  `docs/a22-scope.md` in this window. The literals are ordinary object literals
+  typed against an existing interface, so the risk is low - but low is not
+  measured.
+- **Whether `OUTLINE_A`/`OUTLINE_B` are REALISTIC outlines**, i.e. shapes
+  `deriveAnnouncementOutline` would actually produce from a real announcement.
+  They are type-valid and they discriminate, which is all AC-5(g) needs; whether
+  the deriver can emit them is a different question and is not asked here.
+- **The content of the checker's MAJ-7**, still not transmitted. Unchanged by
+  this pass.

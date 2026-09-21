@@ -75,13 +75,14 @@ describe("grading-results client files stay client-bundle-safe", () => {
     "./FilesCell.tsx", // A16-1: the Files-column cell moved out to its own file.
     "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
     "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
+    "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.
     "../GradingResults.tsx",
   ];
 
-  // KNOWN GAP, not this chunk's file: classTrendsEntry.ts (A16-1) type-only
-  // imports the banned "@/lib/grade" barrel; fixing it edits a file outside
-  // this chunk's owns. Excluded from R4's sweep, filed as a follow-up.
-  const KNOWN_UNREGISTERED_LOCAL_FILES = ["./classTrendsEntry.ts"];
+  // A22: this scan reads RAW SOURCE - comments included, nothing stripped.
+  // A banned specifier appearing only in a comment reds the file. The
+  // accepted mitigation is prose discipline in the scanned files, not
+  // comment stripping (RES-A22-1, docs/a22-scope.md section 3.4).
 
   // Ruling R part 2: narrowed to exempt "@/lib/grade/types" only - a
   // near-miss like "@/lib/grade/typesFoo" is still banned.
@@ -132,15 +133,37 @@ describe("grading-results client files stay client-bundle-safe", () => {
 
   // Ruling R part 4: a completeness sweep so a future file cannot escape
   // CLIENT_FILES by omission - the gap FilesCell.tsx/ungradedDisclosure.ts left.
-  it("CLIENT_FILES lists every non-test .ts/.tsx file in this directory (Ruling R part 4)", () => {
+  it("CLIENT_FILES lists EXACTLY this directory's non-test .ts/.tsx files, plus exactly its parent's non-local consumers (Ruling R part 4; A22)", () => {
     const dir = fileURLToPath(new URL(".", import.meta.url));
     const localFiles = readdirSync(dir)
       .filter(
         (n) => /\.(ts|tsx)$/.test(n) && !n.endsWith(".test.ts") && !n.endsWith(".test.tsx") && !n.endsWith(".d.ts")
       )
-      .map((n) => `./${n}`)
-      .filter((n) => !KNOWN_UNREGISTERED_LOCAL_FILES.includes(n));
-    for (const name of localFiles) expect(CLIENT_FILES).toContain(name);
+      .map((n) => `./${n}`);
+    expect(localFiles.slice().sort()).toEqual(
+      CLIENT_FILES.filter((p) => p.startsWith("./")).slice().sort()
+    );
+    // A22 (B1, then Ruling R1 in the round-3 disposal): the non-local
+    // entries have no directory of their own to enumerate, but "which files
+    // elsewhere import from this directory" IS a computable question.
+    // Re-derive it from the parent directory rather than freezing it by
+    // hand, so a deleted or unregistered consumer cannot be edited into
+    // agreement with CLIENT_FILES without also deleting the consumer file
+    // itself - see docs/a22-scope.md section 4(c).
+    const parentDir = fileURLToPath(new URL("..", import.meta.url));
+    const nonLocalConsumers = readdirSync(parentDir)
+      .filter(
+        (n) => /\.(ts|tsx)$/.test(n) && !n.endsWith(".test.ts") && !n.endsWith(".test.tsx") && !n.endsWith(".d.ts")
+      )
+      .filter((n) =>
+        /from ["']\.\/grading-results\/|from ["']@\/app\/components\/grading-results\//.test(
+          readFileSync(fileURLToPath(new URL(`../${n}`, import.meta.url)), "utf8")
+        )
+      )
+      .map((n) => `../${n}`);
+    expect(CLIENT_FILES.filter((p) => !p.startsWith("./")).slice().sort()).toEqual(
+      nonLocalConsumers.slice().sort()
+    );
   });
 });
 

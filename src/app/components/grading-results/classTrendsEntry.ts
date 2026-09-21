@@ -19,10 +19,17 @@
 // posting or persisting capability (app/actions, lib/canvas*,
 // lib/lms-generation, lib/llm*, lib/gemini*).
 //
-// Type-only imports from "@/lib/grade" only - see GradingResults.tsx's own
-// header comment on gradingResultsHelpers.ts for why a VALUE import from
-// that barrel is a client-bundle hazard this file must never introduce.
-import type { GradingRun, GradingRunEntry } from "@/lib/grade";
+// Imports the two GradingRun types through the narrow type surface,
+// "@/lib/grade/types", and never through the "@/lib/grade" barrel: a VALUE
+// import of that barrel is a client-bundle hazard (see GradingResults.tsx's
+// own header comment on gradingResultsHelpers.ts for the shipped incident).
+//
+// NOTE FOR FUTURE EDITORS: the client-bundle guard in
+// gradingResultsHelpersWiring.test.ts matches RAW SOURCE, comments included.
+// Do not write the word "from" immediately before the quoted barrel
+// specifier anywhere in this file - name the barrel without that preceding
+// word, as this comment does.
+import type { GradingRun, GradingRunEntry } from "@/lib/grade/types";
 
 export interface ClassTrendsEntryMeta {
   courseName: string;

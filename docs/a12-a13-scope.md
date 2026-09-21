@@ -859,10 +859,45 @@ specific false positive; re-run against the real file this round with `node
 frozen literal. This is narrower than a full comment-aware parse and is
 recorded as such: a future line-comment or block-comment opener that is NOT
 prefixed with `*` or `//` after trimming could still produce a false positive
-this filter misses. That residual risk is smaller than the one it replaces
-(round 3's regex missed real code constructs; this filter can only be
-defeated by an unusually-formatted comment) and is accepted as part of Ruling
-U3's disposal rather than deferred as a new residual.
+this filter misses.
+
+**CORRECTED 2026-09-20 - THE SENTENCE THAT USED TO SIT HERE WAS FALSE, AND IT
+WAS TEACHING THE NEXT READER SOMETHING WRONG.** It claimed this filter "can
+only be defeated by an unusually-formatted comment". It cannot. The filter
+tests `line.includes(' from "')` - DOUBLE QUOTES ONLY. Five hazards were
+executed against the real `src/lib/grade/types.ts` by the A22 pass and
+reproduced by its checker:
+
+| Hazard | Result |
+|---|---|
+| double-quoted server import | CAUGHT |
+| SINGLE-QUOTED server import | MISSED |
+| `require(...)` | MISSED |
+| dynamic `await import(...)` | MISSED |
+| single-quoted `export * from` | MISSED |
+
+So TWO of the four constructs that got round 3's `VALUE_IMPORT_PATTERN`
+withdrawn still escape its replacement, and single-quoting defeats the other
+two. The replacement is narrower than the thing it replaced in one dimension
+and no wider in the others.
+
+This matters more than a residual, because `types.ts` is NOT a declaration
+file: `grep -c "^export \(const\|function\|class\|async function\)\|^export
+default" src/lib/grade/types.ts` returns **10** value exports - including
+`composeOverallComment`, `RESUBMIT_NOTICE`, `isUngraded`, `gradedResults` and
+`ungradedResults`. (This document elsewhere names five; ten is the measured
+figure.) It is a live module that other chunks are being told is walled.
+
+THE ORCHESTRATOR OWNS THIS ONE. Ruling U3 asked for a walled set, accepted
+the words "walled set", and never ran it - the same failure this repo keeps
+recording, committed by the ruling rather than caught by it. Tracked on
+backlog row **A23**, which covers both this filter and the sibling type-only
+classifier in `repo-grades` measured broken in both directions the same day.
+The fix is NOT a better pattern: the caps forbid answering a repeat failure
+by strengthening the same mechanism, and this is now the second such failure
+in this family. When it is fixed, the single-quoted case must go RED against
+today's filter first, as a positive control, so the instrument is proven
+before it is trusted.
 
 The relative path resolves from this test file
 (`src/app/components/grading-results/`) up three levels to `src/`, then into

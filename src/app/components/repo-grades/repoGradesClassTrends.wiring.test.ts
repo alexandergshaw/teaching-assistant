@@ -7,6 +7,13 @@
 //
 // Helpers are DUPLICATED into this file, never imported from another
 // *.test.ts (no-cross-test-file-imports).
+//
+// Wave-3 as-built verification (docs/a16-wave3-verify.md) found 18 fresh
+// mutations surviving this suite. This revision closes them: exit rules now
+// count every exit-shaped statement kind, not only `if`; the collector and
+// the cohort setter are pinned by REFERENCE count, not call count; a wrapper
+// attribute rule and a duplicate-element rule guard the mount; and three
+// rules are tightened to match scope revision 1's exact wording.
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +25,7 @@ type Stmt = import("typescript").Statement;
 type Expr = import("typescript").Expression;
 type SF = import("typescript").SourceFile;
 type Block = import("typescript").Block;
+type JsxTag = import("typescript").JsxOpeningElement | import("typescript").JsxSelfClosingElement;
 function read(rel: string): string {
   return readFileSync(join(process.cwd(), rel), "utf8");
 }
@@ -70,6 +78,9 @@ function findFunctionBody(sourceFile: SF, name: string): Block | undefined {
 function directStmts(block: Block): Stmt[] {
   return [...block.statements];
 }
+/** Every occurrence of Identifier `name` anywhere under `root` - a REFERENCE
+ * count, not a call count, so an alias's own declaration, a destructure and
+ * a property-access name (when it reuses the identifier text) all count. */
 function countIdentRefs(root: Node, name: string): number {
   let n = 0;
   (function visit(node: Node): void {
@@ -94,6 +105,29 @@ function countIfStatements(root: Node): number {
   })(root);
   return n;
 }
+/** Counts every node of any of `kinds` anywhere under `root` - the exit-rule
+ * instrument: a `switch`, loop, `try`, labelled or `throw` statement is an
+ * exit or a control path the direct-statement enumeration does not name, so
+ * revision 1's "exactly the statements listed, in order" is enforced by
+ * requiring zero of every OTHER exit-shaped kind, not by re-listing them. */
+function countKinds(root: Node, kinds: import("typescript").SyntaxKind[]): number {
+  let n = 0;
+  (function visit(node: Node): void {
+    if (kinds.includes(node.kind)) n += 1;
+    ts.forEachChild(node, visit);
+  })(root);
+  return n;
+}
+const EXOTIC_EXIT_KINDS = [
+  ts.SyntaxKind.SwitchStatement,
+  ts.SyntaxKind.WhileStatement,
+  ts.SyntaxKind.DoStatement,
+  ts.SyntaxKind.ForStatement,
+  ts.SyntaxKind.ForInStatement,
+  ts.SyntaxKind.ForOfStatement,
+  ts.SyntaxKind.TryStatement,
+  ts.SyntaxKind.LabeledStatement,
+];
 /** True when `stmt` is `<collector>.push(...<chain>)`. */
 function isSpreadPush(stmt: Stmt, collector: string, chain: string[]): boolean {
   if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) return false;
@@ -107,18 +141,32 @@ function setLastRunCohortCalls(stmts: Stmt[]): import("typescript").CallExpressi
     .filter((s): s is import("typescript").ExpressionStatement => ts.isExpressionStatement(s) && ts.isCallExpression(s.expression) && isIdent((s.expression as import("typescript").CallExpression).expression, "setLastRunCohort"))
     .map((s) => s.expression as import("typescript").CallExpression);
 }
+/** THE shipped collector-declaration predicate (A-2b), lifted out of its
+ * describe block so canary S-26 exercises the REAL detector rather than a
+ * reimplemented copy (docs/a16-wave3-verify.md section 2: "the canary is
+ * decorative"). */
+function collectorDecl(stmts: Stmt[]): import("typescript").VariableDeclaration | undefined {
+  for (const s of stmts) {
+    if (!ts.isVariableStatement(s) || !(s.declarationList.flags & ts.NodeFlags.Const)) continue;
+    const [d] = s.declarationList.declarations;
+    if (d && isIdent(d.name, "runResults") && d.initializer && ts.isArrayLiteralExpression(d.initializer) && d.initializer.elements.length === 0) return d;
+  }
+  return undefined;
+}
 function parseFixture(src: string, tsx = false): SF {
   return ts.createSourceFile("f", src, ts.ScriptTarget.Latest, true, tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
 }
 
 // ---- A-1: useRepoGradesBulkGrade.ts's gradeOneTarget push ----
 
-describe("A-1: gradeOneTarget's collector push is direct and follows both early-return ifs", () => {
-  const stmts = directStmts(findFunctionBody(bulkHookFile, "gradeOneTarget")!);
-  it("a direct statement spreads result.run.results onto runResults, after >=2 direct ifs", () => {
+describe("A-1: gradeOneTarget's collector push is direct and follows exactly both early-return ifs", () => {
+  const body = findFunctionBody(bulkHookFile, "gradeOneTarget")!;
+  const stmts = directStmts(body);
+  it("a direct statement spreads result.run.results onto runResults, after exactly 2 ifs, no other exit-shaped statement", () => {
     const idx = stmts.findIndex((s) => isSpreadPush(s, "runResults", ["result", "run", "results"]));
     expect(idx).toBeGreaterThan(-1);
-    expect(stmts.slice(0, idx).filter(ts.isIfStatement).length).toBeGreaterThanOrEqual(2);
+    expect(countIfStatements(body)).toBe(2);
+    expect(countKinds(body, EXOTIC_EXIT_KINDS)).toBe(0);
   });
   it("canary S-25: `if (first) { runResults.push(...) }` is NOT a direct statement", () => {
     const fixture = `const gradeOneTarget = async (t, r) => {
@@ -129,6 +177,16 @@ describe("A-1: gradeOneTarget's collector push is direct and follows both early-
     };`;
     const s = directStmts(findFunctionBody(parseFixture(fixture), "gradeOneTarget")!);
     expect(s.some((x) => isSpreadPush(x, "runResults", ["result", "run", "results"]))).toBe(false);
+  });
+  it("canary F-7: a third if before the push makes the count wrong", () => {
+    const fixture = `const gradeOneTarget = async (t, r) => {
+      if ("error" in result) return { rubricUsed: null };
+      if ("noSubmission" in result) return { rubricUsed: null };
+      if (first?.rubricAreas?.length) return { rubricUsed: result.rubric };
+      runResults.push(...result.run.results);
+      return { rubricUsed: result.rubric };
+    };`;
+    expect(countIfStatements(findFunctionBody(parseFixture(fixture), "gradeOneTarget")!)).not.toBe(2);
   });
 });
 
@@ -151,24 +209,11 @@ describe("A-2: runBulkGrade's refusal, collector declaration, and return", () =>
 
   // "runResults" is A-1's own collector name - not re-discovered generically,
   // so this row and A-1 name the same identifier by construction.
-  function collectorDecl() {
-    for (const s of stmts) {
-      if (!ts.isVariableStatement(s) || !(s.declarationList.flags & ts.NodeFlags.Const)) continue;
-      const [d] = s.declarationList.declarations;
-      if (d && isIdent(d.name, "runResults") && d.initializer && ts.isArrayLiteralExpression(d.initializer) && d.initializer.elements.length === 0) return d;
-    }
-    return undefined;
-  }
   it("(b) a direct `const runResults: T[] = []` declares the collector", () => {
-    expect(collectorDecl()).toBeTruthy();
+    expect(collectorDecl(stmts)).toBeTruthy();
   });
-  it("(c) runResults is never the LEFT side of an assignment anywhere in the file", () => {
-    let assigned = false;
-    (function visit(node: Node): void {
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && isIdent(node.left, "runResults")) assigned = true;
-      ts.forEachChild(node, visit);
-    })(bulkHookFile);
-    expect(assigned).toBe(false);
+  it("(c) runResults is referenced EXACTLY 3 times in the file: its declaration, the one push, and the return", () => {
+    expect(countIdentRefs(bulkHookFile, "runResults")).toBe(3);
   });
   it("(d) the LAST direct statement returns runResults, preceded by an awaited Promise.all", () => {
     const last = stmts[stmts.length - 1];
@@ -178,7 +223,7 @@ describe("A-2: runBulkGrade's refusal, collector declaration, and return", () =>
     );
     expect(hasAwaitedAll).toBe(true);
   });
-  it("canary S-26: a useRef-backed collector is not a direct const array-literal declaration", () => {
+  it("canary S-26: a useRef-backed collector fails the SHIPPED collectorDecl predicate", () => {
     const fixture = `const runBulkGrade = async (p, r) => {
       if (runningFolder !== null) return null;
       const runResults = collectorRef.current;
@@ -186,8 +231,22 @@ describe("A-2: runBulkGrade's refusal, collector declaration, and return", () =>
       return runResults;
     };`;
     const s = directStmts(findFunctionBody(parseFixture(fixture), "runBulkGrade")!);
-    const hasArrayDecl = s.some((x) => ts.isVariableStatement(x) && x.declarationList.flags & ts.NodeFlags.Const && x.declarationList.declarations[0]?.initializer && ts.isArrayLiteralExpression(x.declarationList.declarations[0].initializer!));
-    expect(hasArrayDecl).toBe(false);
+    expect(collectorDecl(s)).toBeUndefined();
+  });
+  it.each([
+    ["F-1: runResults.length = 0 alongside the real push", "runResults.length = 0;"],
+    ["F-2: runResults.splice(0) alongside the real push", "runResults.splice(0);"],
+    ["F-3: a duplicated push", "runResults.push(...result.run.results);"],
+  ])("canary %s raises the reference count above 3", (_label, extra) => {
+    const fixture = `const runBulkGrade = async (p, r) => {
+      if (runningFolder !== null) return null;
+      const runResults = [];
+      runResults.push(...result.run.results);
+      ${extra}
+      await Promise.all([]);
+      return runResults;
+    };`;
+    expect(countIdentRefs(parseFixture(fixture), "runResults")).not.toBe(3);
   });
 });
 
@@ -201,14 +260,19 @@ function containsAwait(node: Node): boolean {
   return found;
 }
 
-describe("A-3: handleGradeColumn - one if, an attempt-time clear, an unconditional final set", () => {
+describe("A-3: handleGradeColumn - one if, an attempt-time clear, an unconditional final set, no other exit", () => {
   const body = findFunctionBody(actionsHookFile, "handleGradeColumn")!;
   const stmts = directStmts(body);
-  it("exactly one IfStatement (the pre-existing empty-plan return), with no setLastRunCohort in its then-block", () => {
+  it("exactly one IfStatement (the pre-existing empty-plan return), no setLastRunCohort in its then-block", () => {
     expect(countIfStatements(body)).toBe(1);
     const ifStmt = stmts.find(ts.isIfStatement)!;
     const thenStmts = ts.isBlock(ifStmt.thenStatement) ? [...ifStmt.thenStatement.statements] : [ifStmt.thenStatement];
     expect(setLastRunCohortCalls(thenStmts)).toHaveLength(0);
+  });
+  it("no switch/loop/try/labelled statement, no throw, and exactly ONE return in the whole body", () => {
+    expect(countKinds(body, EXOTIC_EXIT_KINDS)).toBe(0);
+    expect(countKinds(body, [ts.SyntaxKind.ThrowStatement])).toBe(0);
+    expect(countKinds(body, [ts.SyntaxKind.ReturnStatement])).toBe(1);
   });
   it("(a) exactly one setLastRunCohort(null), after the if and before the first await-containing statement", () => {
     const ifIndex = stmts.findIndex(ts.isIfStatement);
@@ -228,7 +292,7 @@ describe("A-3: handleGradeColumn - one if, an attempt-time clear, an uncondition
       expect(ts.isCallExpression(arg) && isIdent(arg.expression, "buildRepoRunCohort")).toBe(true);
     }
   });
-  it("(c) the object literal binds folder/courseId/course by shorthand, results to the preceding awaited runBulkGrade call", () => {
+  it("(c) the object literal binds folder/courseId/course by shorthand, results to a preceding `const <r> = await runBulkGrade(...)`", () => {
     const last = stmts[stmts.length - 1] as import("typescript").ExpressionStatement;
     const outer = last.expression as import("typescript").CallExpression;
     const inner = outer.arguments[0] as import("typescript").CallExpression; // buildRepoRunCohort(...)
@@ -245,7 +309,7 @@ describe("A-3: handleGradeColumn - one if, an attempt-time clear, an uncondition
     expect(resultsIdent && ts.isIdentifier(resultsIdent)).toBe(true);
     const resultsName = (resultsIdent as import("typescript").Identifier).text;
     const declIndex = stmts.findIndex((s) => {
-      if (!ts.isVariableStatement(s)) return false;
+      if (!ts.isVariableStatement(s) || !(s.declarationList.flags & ts.NodeFlags.Const)) return false;
       const [d] = s.declarationList.declarations;
       if (!d || !isIdent(d.name, resultsName) || !d.initializer || !ts.isAwaitExpression(d.initializer)) return false;
       const call = d.initializer.expression;
@@ -263,6 +327,37 @@ describe("A-3: handleGradeColumn - one if, an attempt-time clear, an uncondition
       if (runResults?.length === 0) { setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course })); }
     };`;
     expect(countIfStatements(findFunctionBody(parseFixture(fixture), "handleGradeColumn")!)).toBe(2);
+  });
+  it("canary F-4: `let <r>` instead of `const <r>` fails the results-binding const check", () => {
+    const fixture = `const handleGradeColumn = async (folder) => {
+      const plan = buildBulkGradePlan({});
+      if (plan.targets.length === 0) { return; }
+      setLastRunCohort(null);
+      let runResults = await runBulkGrade(plan, resolved);
+      runResults = [];
+      setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course }));
+    };`;
+    const b = findFunctionBody(parseFixture(fixture), "handleGradeColumn")!;
+    const s = directStmts(b);
+    const declIndex = s.findIndex((x) => ts.isVariableStatement(x) && (x.declarationList.flags & ts.NodeFlags.Const) && isIdent(x.declarationList.declarations[0]?.name, "runResults"));
+    expect(declIndex).toBe(-1);
+  });
+  it.each([
+    ["F-5: a while-exit before the final set", "while (runResults?.length) return;"],
+    ["F-5b: a switch-exit before the final set", "switch (runResults?.length) { case 0: break; default: return; }"],
+    ["F-6: a short-circuit throw before the final set", "runResults?.length && (() => { throw new Error(\"x\"); })();"],
+  ])("canary %s trips the exotic-exit or return count", (_label, extra) => {
+    const fixture = `const handleGradeColumn = async (folder) => {
+      const plan = buildBulkGradePlan({});
+      if (plan.targets.length === 0) { return; }
+      setLastRunCohort(null);
+      const runResults = await runBulkGrade(plan, resolved);
+      ${extra}
+      setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course }));
+    };`;
+    const b = findFunctionBody(parseFixture(fixture), "handleGradeColumn")!;
+    const bad = countKinds(b, EXOTIC_EXIT_KINDS) > 0 || countKinds(b, [ts.SyntaxKind.ThrowStatement]) > 0 || countKinds(b, [ts.SyntaxKind.ReturnStatement]) !== 1;
+    expect(bad).toBe(true);
   });
 });
 
@@ -296,13 +391,31 @@ describe("A-5: trendsEntry, and the hook's other invariants", () => {
       expect(isIdent(init.arguments[0], "lastRunCohort") && isIdent(init.arguments[1], "courseId")).toBe(true);
     }
   });
-  it("the returned object literal includes trendsEntry; hasTrendableResults is unreferenced; setLastRunCohort has exactly 3 call sites", () => {
+  it("the returned object literal includes trendsEntry; hasTrendableResults is unreferenced", () => {
     const returnStmt = stmts.find(ts.isReturnStatement) as import("typescript").ReturnStatement | undefined;
     expect(returnStmt?.expression && ts.isObjectLiteralExpression(returnStmt.expression)).toBe(true);
     const props = (returnStmt!.expression as import("typescript").ObjectLiteralExpression).properties;
     expect(props.some((p) => ts.isShorthandPropertyAssignment(p) && p.name.text === "trendsEntry")).toBe(true);
     expect(countIdentRefs(actionsHookFile, "hasTrendableResults")).toBe(0);
+  });
+  it("setLastRunCohort is REFERENCED (not merely called) exactly 4 times: the useState binding, plus A-3a/A-3b/A-4's calls", () => {
+    expect(countIdentRefs(actionsHookFile, "setLastRunCohort")).toBe(4);
     expect(countCallsTo(actionsHookFile, "setLastRunCohort")).toBe(3);
+  });
+  it("canary F-13: an alias (`const clearTrends = setLastRunCohort`) raises the reference count above 4", () => {
+    const fixture = `function useRepoGradesGradingActions() {
+      const [lastRunCohort, setLastRunCohort] = useState(null);
+      const clearTrends = setLastRunCohort;
+      if (courseId !== columnPostingResetForCourse) { setLastRunCohort(null); }
+      const handleGradeColumn = async (folder) => {
+        const plan = buildBulkGradePlan({});
+        if (plan.targets.length === 0) { clearTrends(null); return; }
+        setLastRunCohort(null);
+        const runResults = await runBulkGrade(plan, resolved);
+        setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course }));
+      };
+    }`;
+    expect(countIdentRefs(parseFixture(fixture), "setLastRunCohort")).not.toBe(4);
   });
 });
 
@@ -310,11 +423,24 @@ describe("A-5: trendsEntry, and the hook's other invariants", () => {
 function skipParens(node: Node): Node {
   return ts.isParenthesizedExpression(node.parent) ? node.parent : node;
 }
+function isDefaultExportedFunction(node: Node | undefined): boolean {
+  if (!node || !ts.isFunctionDeclaration(node)) return false;
+  const mods = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+  return !!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) && !!mods?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+}
+function enclosingFunction(node: Node): Node | undefined {
+  let n: Node | undefined = node.parent;
+  while (n && !ts.isFunctionDeclaration(n) && !ts.isArrowFunction(n) && !ts.isFunctionExpression(n)) n = n.parent;
+  return n;
+}
 /** Walks from `wrapper` (the element directly enclosing the mount) up to the
  * render root, requiring EXACTLY the chain section 13.2's A-6 row names: an
  * optional parens, one `trendsEntry &&` BinaryExpression, a JsxExpression,
- * the top-level JsxFragment, and a ReturnStatement - "enumerate the whole
- * path" (ruling W3-1(b)), not "find one ancestor". Returns the gating
+ * the top-level JsxFragment, then a ReturnStatement that is a DIRECT
+ * statement of the DEFAULT-EXPORTED component's own body (scope A-6:
+ * "a DIRECT statement of the default-exported component function's body" -
+ * the as-built check stopped at "parent is a ReturnStatement", which F-8's
+ * non-default-function fixture passed; this closes that). Returns the gating
  * JsxExpression on success, for A-8's sibling-order check. */
 function gatePathFromWrapper(wrapper: Node): import("typescript").JsxExpression | null {
   let node = skipParens(wrapper);
@@ -326,7 +452,9 @@ function gatePathFromWrapper(wrapper: Node): import("typescript").JsxExpression 
   const jsxExpr = node.parent;
   if (!ts.isJsxFragment(jsxExpr.parent)) return null;
   const up = skipParens(jsxExpr.parent);
-  return ts.isReturnStatement(up.parent) ? jsxExpr : null;
+  if (!ts.isReturnStatement(up.parent)) return null;
+  const fn = enclosingFunction(up.parent);
+  return isDefaultExportedFunction(fn) ? jsxExpr : null;
 }
 function findJsxSelfClosing(root: Node, tagName: string): import("typescript").JsxSelfClosingElement[] {
   const found: import("typescript").JsxSelfClosingElement[] = [];
@@ -336,6 +464,18 @@ function findJsxSelfClosing(root: Node, tagName: string): import("typescript").J
   })(root);
   return found;
 }
+/** Every element with `tagName`, self-closing OR open/close - a duplicate
+ * mounted as `<Tag ...></Tag>` is a JsxElement, not a JsxSelfClosingElement,
+ * so an "exactly one" check must count both forms (F-16). */
+function countAnyJsxByTag(root: Node, tagName: string): number {
+  let n = 0;
+  (function visit(node: Node): void {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === tagName) n += 1;
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === tagName) n += 1;
+    ts.forEachChild(node, visit);
+  })(root);
+  return n;
+}
 function containsTag(node: Node, tagName: string): boolean {
   let found = false;
   (function visit(n: Node): void {
@@ -343,6 +483,34 @@ function containsTag(node: Node, tagName: string): boolean {
     ts.forEachChild(n, visit);
   })(node);
   return found;
+}
+/** Every JsxOpeningElement/JsxSelfClosingElement from `start` up to the
+ * source file - the wrapper-attribute rule walks this list. */
+function ancestorTags(start: Node): JsxTag[] {
+  const tags: JsxTag[] = [];
+  let n: Node | undefined = start;
+  while (n) {
+    if (ts.isJsxElement(n)) tags.push(n.openingElement);
+    if (ts.isJsxSelfClosingElement(n)) tags.push(n);
+    n = n.parent;
+  }
+  return tags;
+}
+/** `hidden`, any `aria-hidden*`, or a `style`/`className` whose text hides
+ * the element (`hidden`, `display: none`, `visibility: hidden`) - the exact
+ * set the wrapper-attribute rule (brief FIX 4) forbids on any ancestor of
+ * the mount, justified because each is a way to keep an element in the DOM
+ * while removing its visible/AT-exposed leverage, which is the class F-9
+ * and F-14 demonstrated. */
+function hidingAttrNames(el: JsxTag): string[] {
+  const bad: string[] = [];
+  for (const p of el.attributes.properties) {
+    if (!ts.isJsxAttribute(p)) continue;
+    const n = p.name.getText();
+    if (n === "hidden" || n.startsWith("aria-hidden")) bad.push(n);
+    if ((n === "style" || n === "className") && /hidden|display:\s*none|visibility:\s*hidden/i.test(p.getText())) bad.push(n);
+  }
+  return bad;
 }
 /** The three fixture shapes section 13.2 requires as canaries for the mount
  * gate, each expected to fail. */
@@ -359,14 +527,19 @@ const A6_CANARIES: Array<[string, string]> = [
     "S-23b: a ConditionalExpression sits on the path",
     `function C() { return (<>{flag ? (trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)) : null}</>); }`,
   ],
+  [
+    "F-8: the wrapping return belongs to a non-default, non-exported function",
+    `function helperRender() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+  ],
 ];
 
-describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enumerated path", () => {
+describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enumerated path, no hiding ancestor", () => {
   const panels = findJsxSelfClosing(indexFile, "ClassTrendsPanel");
   it("imports the default export from ../drafted-grades/ClassTrendsPanel", () => {
     expect(/import\s+ClassTrendsPanel\s+from\s+"\.\.\/drafted-grades\/ClassTrendsPanel"/.test(INDEX_SOURCE)).toBe(true);
   });
-  it("exactly one <ClassTrendsPanel>, entry={trendsEntry} (bare), defaultExpanded present with NO value (Tightening 3)", () => {
+  it("exactly one ClassTrendsPanel element in EITHER form, entry={trendsEntry} (bare), defaultExpanded with NO value", () => {
+    expect(countAnyJsxByTag(indexFile, "ClassTrendsPanel")).toBe(1);
     expect(panels).toHaveLength(1);
     const [panel] = panels;
     const entryAttr = panel.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText() === "entry") as import("typescript").JsxAttribute | undefined;
@@ -374,9 +547,21 @@ describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enume
     const expandedAttr = panel.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText() === "defaultExpanded") as import("typescript").JsxAttribute | undefined;
     expect(expandedAttr && expandedAttr.initializer === undefined).toBe(true);
   });
-  it("the enumerated ancestor path from the panel's wrapper to the render root holds (the intended shape passes)", () => {
+  it("the enumerated ancestor path from the panel's wrapper to the default-exported component's return holds", () => {
     expect(ts.isJsxElement(panels[0].parent)).toBe(true);
     expect(gatePathFromWrapper(panels[0].parent)).not.toBeNull();
+  });
+  it("no ancestor from the panel to the render root carries a hiding attribute", () => {
+    expect(ancestorTags(panels[0]).flatMap(hidingAttrNames)).toEqual([]);
+  });
+  it("canary F-9: a `<div hidden>` wrapper is flagged by the hiding-attribute walk", () => {
+    const fixture = `function C() { return (<>{trendsEntry && (<div hidden><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`;
+    const [panel] = findJsxSelfClosing(parseFixture(fixture, true), "ClassTrendsPanel");
+    expect(ancestorTags(panel).flatMap(hidingAttrNames)).not.toEqual([]);
+  });
+  it("canary F-16: a second open/close ClassTrendsPanel raises the any-form count above 1", () => {
+    const fixture = `function C() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}<ClassTrendsPanel entry={trendsEntry} defaultExpanded></ClassTrendsPanel></>); }`;
+    expect(countAnyJsxByTag(parseFixture(fixture, true), "ClassTrendsPanel")).not.toBe(1);
   });
 
   it.each(A6_CANARIES)("canary: %s -> fails", (_label, fixture) => {
@@ -386,8 +571,8 @@ describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enume
   });
 });
 
-describe("A-7: the label sits inside the panel's own wrapper, imported from the leaf, with no role/aria", () => {
-  it("exactly one repoRunTrendsLabel(trendsEntry) call, inside a role/aria-free <p> that is a sibling of the panel, in the SAME wrapper", () => {
+describe("A-7: the label sits inside the panel's own wrapper, imported from the leaf, with no role/aria/hiding attribute", () => {
+  it("exactly one repoRunTrendsLabel(trendsEntry) call, inside a role/aria/hiding-free <p> that is a sibling of the panel, in the SAME wrapper", () => {
     const calls: import("typescript").CallExpression[] = [];
     (function visit(node: Node): void {
       if (ts.isCallExpression(node) && isIdent(node.expression, "repoRunTrendsLabel")) calls.push(node);
@@ -406,11 +591,22 @@ describe("A-7: the label sits inside the panel's own wrapper, imported from the 
       // .getText(), not .text: JsxAttributeName is Identifier | JsxNamespacedName,
       // and only the former has .text - getText() handles both without a cast,
       // and a namespaced name (`ns:role`) correctly never matches either literal.
-      expect(pElement.openingElement.attributes.properties.some((p) => ts.isJsxAttribute(p) && (p.name.getText() === "role" || p.name.getText().startsWith("aria")))).toBe(false);
+      expect(pElement.openingElement.attributes.properties.some((p) => ts.isJsxAttribute(p) && p.name.getText() === "role")).toBe(false);
+      expect(hidingAttrNames(pElement.openingElement)).toEqual([]);
     }
     const [panel] = findJsxSelfClosing(indexFile, "ClassTrendsPanel");
     expect(pElement.parent).toBe(panel.parent);
     expect(/import\s*\{\s*repoRunTrendsLabel\s*\}\s*from\s*"\.\/classTrendsFolderEntry"/.test(INDEX_SOURCE)).toBe(true);
+  });
+  it("canary F-14: `<p hidden>` is flagged by the same hiding-attribute check", () => {
+    const fixture = `function C() { return (<p hidden className="x">{repoRunTrendsLabel(trendsEntry)}</p>); }`;
+    const fragment = parseFixture(fixture, true);
+    let pElement: import("typescript").JsxElement | undefined;
+    (function visit(n: Node): void {
+      if (ts.isJsxElement(n) && n.openingElement.tagName.getText() === "p") pElement = n;
+      ts.forEachChild(n, visit);
+    })(fragment);
+    expect(hidingAttrNames(pElement!.openingElement)).not.toEqual([]);
   });
 });
 
@@ -428,14 +624,31 @@ describe("A-8: source position and binding", () => {
     expect(gateIndex).toBeGreaterThan(postSummaryIndex);
     expect(gateIndex).toBeLessThan(gridIndex);
   });
-  it("hasTrendableResults is unreferenced, and trendsEntry is bound by exactly one destructuring pattern", () => {
+  it("hasTrendableResults is unreferenced, and trendsEntry is bound by the useRepoGradesGradingActions(...) call's own destructure", () => {
     expect(countIdentRefs(indexFile, "hasTrendableResults")).toBe(0);
-    expect(countIdentRefs(indexFile, "trendsEntry")).toBeGreaterThan(1);
-    let bindingCount = 0;
+    let boundToHookCall = false;
     (function visit(node: Node): void {
-      if (ts.isBindingElement(node) && isIdent(node.name, "trendsEntry")) bindingCount += 1;
+      if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && isIdent(node.initializer.expression, "useRepoGradesGradingActions") && ts.isObjectBindingPattern(node.name)) {
+        if (node.name.elements.some((e) => isIdent(e.name, "trendsEntry"))) boundToHookCall = true;
+      }
       ts.forEachChild(node, visit);
     })(indexFile);
-    expect(bindingCount).toBe(1);
+    expect(boundToHookCall).toBe(true);
+  });
+  it("canary F-12: a locally rebuilt `{ trendsEntry }` (not the hook call's destructure) fails the binding check", () => {
+    const fixture = `function C() {
+      const { model } = useRepoGradesGradingActions({});
+      const { trendsEntry } = { trendsEntry: null };
+      return trendsEntry;
+    }`;
+    const f = parseFixture(fixture, true);
+    let boundToHookCall = false;
+    (function visit(node: Node): void {
+      if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && isIdent(node.initializer.expression, "useRepoGradesGradingActions") && ts.isObjectBindingPattern(node.name)) {
+        if (node.name.elements.some((e) => isIdent(e.name, "trendsEntry"))) boundToHookCall = true;
+      }
+      ts.forEachChild(node, visit);
+    })(f);
+    expect(boundToHookCall).toBe(false);
   });
 });

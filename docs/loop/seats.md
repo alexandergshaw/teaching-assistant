@@ -89,7 +89,7 @@ become the thing every later seat is measured against: a criterion that is
 vague, unsatisfiable or bound to the wrong object is inherited by the
 architect, the test seat and the implementer before any checker sees the
 consequence. (The three test-seat practices recorded on 2026-09-20 briefly
-appeared here by an editing error and now sit under `## Test seat`, where
+appeared here by an editing error and now sit under the Test seat brief below, where
 they belong - they are about reference implementations and mutants, not
 criteria.)
 

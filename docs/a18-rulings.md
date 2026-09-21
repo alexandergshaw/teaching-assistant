@@ -227,3 +227,143 @@ strongest validation of the notes' construction available. But concurrent
 agents share this checkout, an auto-commit hook bundles whatever is dirty, and
 a sabotage left live is one `git add -A` away from shipping. RESTORE-BEFORE-
 REPORT IS NOT OPTIONAL, and the proof of restoration belongs in the report.
+
+---
+
+# Round 3 - rulings on the check of test notes revision 2
+
+Revision 2 came back DEFECTIVE: 4 blockers (2 new, 2 repeat), 6 majors, 4
+minors. The check executed everything it reported and found the artifact's
+core sound - ALL NINE FROZEN LITERALS ARE BYTE-IDENTICAL TO HEAD modulo
+exactly the intended removal, in both directions, which is the single thing
+most likely to have been wrong and is the strongest part of the work. Section
+2's partition, both `tsc` claims, the red-then-green direction and every
+subsidiary count reproduce. None of that is reopened.
+
+## RULING 11 - A8 WIDENS TO SIX FILES. This contradiction is mine, not the seat's.
+
+Blocker 2, and the check is right that two full ruling rounds passed over it.
+
+`docs/a18-ac.md` A8 names exactly four files and goes RED if any other `src/`
+file appears. But the same document's R-6 instructs the test seat to close the
+privacy-disclosure gap, which can only be done in
+`walkthrough-announcement.structure.test.ts`, and the P5 guard needs
+`src/app/actions/walkthrough-announcement.test.ts`. A faithful implementer
+either fails the wave gate or silently drops the one residual the seat was
+told to close.
+
+**A8'S WRITE SET IS NOW SIX FILES**: the two prompt modules, their two sibling
+tests, `src/app/components/.../walkthrough-announcement.structure.test.ts` and
+`src/app/actions/walkthrough-announcement.test.ts`. NO PRODUCTION FILE BEYOND
+THE TWO PROMPT MODULES. The direction of failure is unchanged for everything
+else.
+
+The seat's error was smaller and is still an error: it printed a six-file list
+under A8's own heading and closed with A8's phrase, relabelling a conflict
+instead of surfacing it. SURFACING A CONTRADICTION BETWEEN TWO CLAUSES OF THE
+DOCUMENT YOU ARE BUILDING AGAINST IS PART OF THE JOB.
+
+## RULING 12 - bound the governed REGION by completeness, not by freezing everything
+
+Blocker 1 is a REPEAT of Ruling 5, so the mechanism does not get another
+attempt - but the check moved the object, and it is right. Ruling 5 said bound
+the region, not its endpoints. Revision 2 bounded the BLOCK THAT STATES THE
+NOTICE and left THE REGION THE NOTICE GOVERNS unbounded. Measured: the
+withdrawal sentence inserted into the very next segment is ALL GREEN, and the
+A18 defect itself - asserting a screen recording happened - reappears with no
+record-family token, ALL GREEN, twice. Only 15% of the announcement prompt's
+instruction text is bounded; the other 85% rests on the token blocklist that
+A7b exists to call insufficient.
+
+**THE RULING: A COMPLETENESS ASSERTION OVER SEGMENTS.** For a fixed fixture,
+the composed prompt's segment list must be asserted COMPLETE - every segment
+is accounted for, and each is either (a) frozen by equality, or (b) carries
+its fact pins AND the negative set. A segment that appears, disappears or is
+added fails the completeness assertion. That bounds the governed region
+without converting the whole prompt into one byte-frozen literal.
+
+**I AM NOT ORDERING WHOLE-PROMPT EQUALITY**, because the check also measured
+that equality already rejects legitimate changes, and freezing 100% of the
+prompt multiplies that cost. If the seat judges completeness insufficient,
+that is a stated, owned residual - NOT a claim that the trap is answered.
+
+**R-4 IS RE-OPENED.** Revision 2 closed it "by construction" on the strength
+of a position-level fix; the class is alive one segment away. A class-level
+residual cannot be closed by a position-level fix.
+
+## RULING 13 - the oracle the notes assert they supply must actually be in them
+
+Blocker 3. Section 5.7 says the protected block's three bullets are
+"transcribed whole" and THEY ARE NOWHERE IN THE DOCUMENT. It is the longest
+block, the only one with escaped double quotes, module-private so it cannot be
+imported, and section 10 forbids both `readFileSync` and exporting a constant
+to make a test easier. So the implementer must hand-copy from the code under
+test - which is precisely the compare-to-self failure the notes forbid twice
+on the same page - and the cheapest repair on a mismatch is to paste the
+received value.
+
+**TRANSCRIBE THE LITERAL INTO 5.7.** And state the general rule it violates:
+**REPAIR-BY-PASTE IS BANNED.** When a frozen literal mismatches, the repair is
+to decide whether the CHANGE was intended and rewrite the literal
+deliberately, never to paste the received value. Put that sentence in the
+notes where the implementer will hit it.
+
+## RULING 14 - delete the control that cannot fire, and state the real cost
+
+Blocker 4, a REPEAT of Ruling 6's class, so it closes here.
+
+The no-op reflow control is offered as the proof that equality does not
+over-specify. It CANNOT FAIL: no assertion reads either module's source, so a
+source reflow is unobservable in principle. It tests that the mutation was a
+no-op. Delete it, per the rule already applied to the positional assertion.
+
+Replace it with the check's measured rejection list as the DECLARED COST, and
+widen the declared bound, which currently says "a semantically neutral synonym
+swap". Measured rejections include an ADDITION of a fourth bullet to a
+protected block, which is not a rewording at all and satisfies the criterion
+in full, and a known-good improvement COPIED FROM THE APP'S OWN SIBLING PROMPT
+that the script prompt lacks. Also name the compounding mechanism the notes
+never state: on every future legitimate edit the cheapest repair is the paste
+Ruling 13 bans.
+
+## RULING 15 - wire the exhaustiveness axis, or it compiles and iterates nothing
+
+M-1. The `Record<Union, true>` form gives the type error on union growth, which
+is what Ruling 6 asked for - but the GUARANTEE was that a record claim in a
+not-yet-existing block goes red, and that holds only if the inventory
+assertion EXECUTES ONCE PER AXIS VALUE. No sentence says so. Say it.
+
+And apply the same rule to the dimensions that have no axis at all: the
+researched-resources arms, the outline arms, and the notes and coverage
+blocks. Two of at least five branch dimensions were axised.
+
+## RULING 16 - carried, not re-rounded
+
+- **M-2**: R-8 dropped half of the AC's R-1. Both halves stand: no commit-hash
+  entry in `REGRESSION.md`, AND the stale 427 against a measured 763 at
+  `:41936`. Fixing an instrument is not licence to drop a requirement.
+- **M-3**: four further non-discriminating assertions beyond the ones section
+  12 admits, including one that makes a LANDED assertion dead. Name them all;
+  a self-report that is 60% complete reads as 100%.
+- **M-4**: the target test file's own header says never pin a whole sentence
+  verbatim, citing the same recorded class. The notes append whole-block
+  equality to that file without quoting the comment or arguing against it.
+  THE ARGUMENT MUST BE MADE TO THAT COMMENT, IN THE DIFF - amend it or delete
+  it deliberately, with the reasoning attached.
+- **M-5**: section 7's mutant table has no "Killed by" column, unlike section
+  9's. Counts without attribution are not independently checkable. Add it.
+- **M-6**: `segments()` is used throughout and never defined, and the two
+  plausible definitions give different segment sets while A1 asserts
+  positionally. One line.
+- **m-1** eight edits, five one-word not seven; **m-2** P5 is `:533-534`, an
+  off-by-one inherited from the criteria; **m-3** the owner force-check covers
+  two blocks and leaves A1(a), A4 and A5 unread by anyone; **m-4** eleven of
+  the twelve insurance regexes are undetermined, and they are the sole backstop
+  at exactly the future-edit moment R-3 names.
+
+## Scope of the next pass
+
+MECHANICAL AND BOUNDED. Rulings 11 through 16 are transcription, deletion,
+completeness and attribution - not a third attempt at a mechanism. Do not
+rebuild what measured clean: the nine literals, the partition, the `tsc`
+axes, the red-then-green direction, or the `:219` line-level expression.

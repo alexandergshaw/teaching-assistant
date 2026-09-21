@@ -1,9 +1,10 @@
 # A16 wave plan: what is left, cut into waves
 
-Seat: WAVE PLAN, **revision 4** - a bounded, mechanical pass under
-`docs/a16-rulings.md` round 5 (rulings 19-24). Not another revision of any
-mechanism: every construction is named there and this revision builds it. All
-five rounds of that file win where they and this one conflict, except where this
+Seat: WAVE PLAN, **revision 5** - a tightly bounded CARRY of the round-5
+constructions into section 9.3, the gate table an implementer actually binds.
+Revision 4 built those constructions in 5.5 and 5.5.1 and did not carry them
+there. **No new mechanism, and no ruling implicated.** All rounds of
+`docs/a16-rulings.md` win where they and this file conflict, except where this
 file reports a measured conflict and adopts neither value.
 
 **Tree state at authoring.** `git rev-parse --short HEAD` returns **`bd94c60`**
@@ -40,7 +41,24 @@ with a canary. Nothing here is recalled.
 | **B3** - "exactly twice" is red on the shipped A16-1 precedent, which builds a const and uses it twice, and the plan's own constraints force three or four reads | **COUNT CLAUSE WITHDRAWN, per ruling 21.** The whitelist moves to **the expression assigned to the const**, which is where the one-hop evasion would have to appear. The disclosure line is pinned too | **5.5.1**, 9.3 |
 | **Ruling 22** - the gate's literal commands wrote both snapshots into the repo root, so the second appeared in its own output and the gate failed deterministically on its own artifact | **FIXED**: both snapshots go to the session scratchpad | 9.0 |
 | **Ruling 23** - error path never clears the cohort; row-state mapping unstated; wave 1's set fixed two placeholder filenames before its scoping pass picks a target; the wave-1 floor was priced with only its weaker half; the no-second-predicate row dropped its qualifier | **ALL FIVE APPLIED** | 9.3, 5.5, 3.3, 5.6 |
-| **Ruling 24** - 7 lines / 10 occurrences, not 8; cite the region by MARKER; the strip helper is module-local and must be duplicated; seven canary describes, not four; the ref mirror is a text-proof route | **ALL FIVE APPLIED**, one with a measurement that narrows the last | 5.5.1, 9.3 |
+| **Ruling 24** - 7 lines / 10 occurrences, not 8; cite the region by MARKER; the strip helper is module-local and must be duplicated; seven canary describes, not four; the ref mirror is a text-proof route | **FOUR APPLIED IN REVISION 4, ONE MISSED - now fixed.** Revision 4 claimed all five and left "eight legitimate occurrences" standing in 9.3 and section 12, which is the exact number ruling 24 corrected. A disposition row claiming a fix that is not in the document is the class this table exists to prevent, so it is recorded rather than quietly amended | 5.5.1, 9.3, 12 |
+
+### 0.000 Round 6 - a bounded CARRY into the gate table
+
+The round-5 constructions were right and revision 4 applied them to 5.5 and
+5.5.1 but **did not carry them into 9.3**, which is the table an implementer
+actually binds. No new mechanism; no ruling implicated.
+
+| Finding | Disposition | Where |
+|---|---|---|
+| **B1** - P13/P15/P16 sit under the leaf's unit test, where they cannot see argument selection or post-failure state; the ruling-19 source pin existed only in 5.5.1 prose; and **no row anywhere required the panel to CALL `buildRunCohort`** | **FOUR ROWS ADDED to 9.3**: `result.results` as the first argument, `r.assessment` in the projection, `setLastRunCohort(null)` in every non-success branch, and a leaf-is-called row modelled on wave 1's import-and-reference | 9.3 |
+| **B2** - 9.3's whitelist row still stated the WITHDRAWN shape and is red on every possible implementation | **STATED ONCE at the const's initialiser, and QUOTED VERBATIM in 9.3** | 5.5.1, 9.3 |
+| **M1** - the row-state mapping is inconsistent with the types it feeds, two of four states are unreachable, `stoppedBy` has no truthful member, and the row's stated stake is false at HEAD | **RE-DERIVED** against `classifyGradingResult`'s two-member return | 9.3 |
+| **M2** - the positive pin asserts on `setLastRunCohort`'s argument and is red on the natural post-leaf shape | **RE-TARGETED** to the `buildRunCohort(` call's own arguments | 9.3 |
+| **M3** - no gate row required the mount to be GATED, and `DraftedGradesTab.tsx:627` is a live ungated precedent to copy | **ROW ADDED**, reusing the shipped detector | 9.3 |
+| **M4** - 4.1 reported w1 at 12 paths while 3.3 publishes 10 | **FIXED** | 4.1 |
+| **M5** - "the ONE permitted read" is false at HEAD | **FIXED**: the handler already reads the array at `:551-556` | 5.5 |
+| **m** - the `:612` courseName precedent is a render-time read; the readiness early return also leaves a stale cohort; the disclosure pin excluded its own helper; `classTrendsMountIsGated` is `:277-281` | **ALL FOUR APPLIED** | 5.5, 5.5.1, 9.3 |
 
 ### 0.0 Round 3
 
@@ -424,7 +442,12 @@ Sets written to files verbatim from 3.2-3.6, then intersected:
 
 ```bash
 for f in w1 w2 w3 a18; do printf "%s = %s paths\n" $f "$(wc -l < $f.txt)"; done
-# w1 = 12 paths / w2 = 6 paths / w3 = 6 paths / a18 = 6 paths
+# w1 = 10 paths / w2 = 6 paths / w3 = 6 paths / a18 = 6 paths
+#   (w1 is 3.3's FIXED part; the scoping pass appends its destination and test
+#    before dispatch, and the intersections are re-run then. Revision 4 printed
+#    12 here against a set 3.3 published as 10 - a canary counting a set nobody
+#    published, which is ruling 2's class. The conclusions are unchanged: the
+#    two paths it over-counted were the placeholder leaf names, in no other set.)
 ```
 
 ```bash
@@ -626,13 +649,22 @@ surface and revision 1 did not cite it.
 >   an identity projection, and the two meta strings, and returns the cohort by
 >   merging each result's `classifyGradingResult` output onto its identity row.
 >   The handler does not merge inline.
-> - **The identity projection is the ONE permitted read of the row array**
->   (ruling 20): a single read INSIDE `handleGradeAll`, SOLELY to project
->   `id`, `studentName` and `assessment` for the rows in this run's results, and
->   passed to `buildRunCohort` as an argument. **Forbidden everywhere else, and
->   at render time absolutely.**
-> - `courseName` <- `selectedCourse?.name ?? ""` at capture. Precedent in this
->   same file: `currentGradingLog` already does exactly this at `:612`.
+> - **The identity projection is the ONE read this feature ADDS** (ruling 20): a
+>   single read INSIDE `handleGradeAll`, SOLELY to project `id`, `studentName`
+>   and `assessment` for the rows in this run's results, passed to
+>   `buildRunCohort` as an argument. **Forbidden everywhere else, and at render
+>   time absolutely.** Revision 4 said "the ONE permitted read", which is false
+>   at HEAD: `handleGradeAll` already reads the array at `:551-556` to build
+>   `submissions`, and a clause forbidding that would forbid shipped code. The
+>   projection may be folded into that existing read or taken as a second one -
+>   the constraint is on WHERE (inside the handler) and on WHAT FOR, never on a
+>   count.
+> - `courseName` <- `selectedCourse?.name ?? ""` at capture. **The precedent at
+>   `:612` is for the EXPRESSION, not for the timing**: `currentGradingLog` sits
+>   at two-space indent in the component body, so it is a RENDER-TIME read
+>   re-evaluated every render. Only `assignmentName` has a real capture-timing
+>   precedent (`GithubGradingPanel.tsx:398`). Revision 4 cited `:612` as though
+>   it precedented both; it precedents one.
 > - `assignmentName` <- `assessmentId` (which is `assessmentLabel.trim()`) at
 >   capture, or `""`. Precedent: `GithubGradingPanel.tsx:398/:861`.
 > - `canvasUrl` <- `""`. Measured: `grep -c "canvasUrl"` on the panel returns
@@ -834,7 +866,7 @@ consequences plus the one-hop evasion:**
 - **Reuse the shipped detector shapes rather than inventing them.**
   `gradingResultsExtraction.wiring.test.ts` already carries
   `importsAndRendersClassTrendsPanel` (`:242-246`, three canaries at `:248-266`)
-  and `classTrendsMountIsGated` (`:277-282`, three canaries at `:284-300`) - and
+  and `classTrendsMountIsGated` (`:277-281`, three canaries at `:284-300`) - and
   `classTrendsMountIsGated` is written FOR the const shape, matching
   `hasTrendableResults(...) &&` followed within 400 characters by the tag. **The
   canary-describe shape appears SEVEN times in that file**, not four:
@@ -1127,20 +1159,26 @@ paraphrase drift was BL-2.
 
 | Instrument | Pass |
 |---|---|
-| `npx vitest run .../classTrendsRunCohort.test.ts` | the per-row mapping over an **enumerated product** of the four `AssessmentRowState` members (`"pending" \| "grading" \| "ready" \| "failed"` - four, not three) x {areas, no areas} |
+| `npx vitest run .../classTrendsRunCohort.test.ts` | the per-row mapping over an **enumerated product** of `classifyGradingResult`'s TWO-member return (`state: "failed" \| "ready"`) x {areas, no areas}. **Not the four `AssessmentRowState` members** - two of those are unreachable from this row source, and enumerating them forces impossible fixtures or a silently-widened cohort (see the mapping rows below) |
 | **same file - THE MERGE ITSELF (ruling 19)** | `buildRunCohort(results, identity, meta)` is exercised **directly**, with `results` produced by running the real `classifyGradingResult` over a real success result and `identity` carrying real `id`/`studentName`/`assessment`. The returned cohort carries **at least one row with non-empty `rubricAreas`**, and `hasTrendableResults(toRunCohortEntry(cohort))` is **true**. Because the merge is a leaf, this test sees the real merge rather than a fixture of it - which is what revision 3's version could not do |
 | **same file - PER-ROW `assessment` (ruling 20)** | over an identity projection whose rows carry **two different** `assessment` values, the returned cohort's rows carry **their own** values - not one value repeated. Sabotage P15. Without this row the implementer's likely resolution (fill from the single in-scope `assessmentId`) makes `cohortLabelSpread` false on every run and **the disclosure line never appears**, which is the mitigation shipping dead and green |
-| **same file - THE ROW-STATE MAPPING, STATED (ruling 23)** | the mapping is fixed here rather than left for the adapter to define and its test to encode: `"ready"` -> `GradedResult`; `"failed"` -> `UngradedResult` with `ungraded.kind: "grading-failed"` and `message: row.error`; `"pending"` and `"grading"` -> `UngradedResult` with `ungraded.kind: "not-attempted"`. Enumerated over all four members. **These counts feed `ungradedCounts` and then a student-facing disclosure**, so an adapter that invents its own mapping produces a wrong denominator that reads as a fact |
-| **same file - THE ERROR PATH CLEARS THE COHORT (ruling 23)** | `buildRunCohort` is not the only thing gated: after a run that returns `{ error }` or throws, `lastRunCohort` is **null**. Revision 3's handler returned early on both paths without touching it, so a failed run left the panel sitting directly under the grading error **still reporting the previous run's trends**. Sabotage P16 |
+| **same file - THE ROW-STATE MAPPING, RE-DERIVED** | **TWO cases, not four**, enumerated over `classifyGradingResult`'s actual return x {areas, no areas}: `"ready"` -> `GradedResult`; `"failed"` -> `UngradedResult` with `ungraded: { kind: "grading-failed", sourceIndex, student, message: classified.error }`. **`message` comes from the CLASSIFIER, not from `row.error`** - `row.error` is outside the permitted identity projection, and `classifyGradingResult`'s failed branch already returns `error`, so a safe implementation exists and this names it. **No `not-attempted` row is ever emitted**, and the row asserts that: `classifyGradingResult` returns only `state: "failed" \| "ready"`, so `"pending"` and `"grading"` are unreachable from this row source, and `NotAttemptedOutcome.stoppedBy` (`types.ts:142`) is `"submission-count-bound" \| "run-deadline"` - **both false of a pending recording row**, so there is no truthful value to emit. Revision 4's four-member enumeration forced impossible fixtures or a widened cohort |
+| **same file - WHY THE MAPPING MATTERS, stated correctly** | revision 4 claimed these counts "feed a student-facing disclosure". **Measured false at HEAD**: `grep -rln "ungradedCounts" src \| wc -l` returns **1** (`class-trends.ts` itself, built at `:275`, returned at `:349`), canary `grep -rln "gradedResults" src \| wc -l` returns **4**, so the instrument fires and nothing reads that count. The real reason is stronger: **a widened cohort is INVISIBLE.** `class-trends.ts:270-273` counts `totalResults` from `gradedResults` only, and its own comment says including ungraded rows "would raise totalResults without raising any area's resultsWithArea". So fabricated not-attempted rows change no counted output and no gate sees them |
+| **same file - THE ERROR PATH CLEARS THE COHORT (ruling 23)** | after ANY non-success exit, `lastRunCohort` is **null**. **Three branches, not two**: the readiness refusal at `:541-546` (revision 4 missed this one - it returns before the run starts and leaves the previous cohort standing), the `"error" in result` early return, and the `catch`. Sabotage P16 |
 | same file | `Object.keys(emitted)` does not contain `userId`, and `JSON.stringify(emitted)` does not contain `"userId"`. `GradedResult.userId` is optional, so `tsc` permits an adapter that emits it - this is the only runtime enforcer |
 | **same file - THE POSITIVE IDENTITY ROW (ruling 17 M3)** | every emitted result's `student` **equals the cohort row's `studentName`**, on a fixture whose `studentName` is a distinctive non-empty value. Revision 2 called this a requirement and gave it no gate row while its negative twin had a dedicated one - but the type forces A value, not the RIGHT one, so an adapter emitting `""` passed everything and silently broke N13b's per-student attribution later. Sabotage P14 |
 | same file | `computeClassTrends(toRunCohortEntry(cohort)).totalResults` equals the count of `"ready"` rows. An inflated N reaches `buildAreaSummary` and a sentence addressed to STUDENTS |
 | **same file - THE META PROJECTION** | `runCohortMeta(cohort)` returns `{ courseName: cohort.courseName, assignmentName: cohort.assignmentName, canvasUrl: "" }` and reads **no row field**. Enumerated over {cohort.assignmentName is `""`; is a label; rows carry a DIFFERENT single label; rows carry `undefined`}: the returned `assignmentName` equals `cohort.assignmentName` in **all four** cells. **This is the cell revision 1 got wrong, and the row that makes the rule checkable rather than stated** |
 | **same file - THE DISCLOSURE PREDICATE** | `cohortLabelSpread(cohort)` is true exactly when the captured rows carry more than one distinct `assessment` value, **counting `undefined` as one**. Enumerated over {all one label; label + `undefined`; two labels; all `undefined`}: true in cells 2 and 3, false in 1 and 4 |
 | same file | wave 2 declares **no second TRENDABLE predicate, no second meta type and no re-export of either** (rulings 10, 18, 23). The panel imports `hasTrendableResults` directly from `grading-results/classTrendsEntry`. **The qualifier is load-bearing and revision 3 dropped it**, leaving a row that was red on this plan's own mandated export list, which includes the predicate `cohortLabelSpread`. RED only if the cohort leaf exports or re-exports a **trendable-results** predicate |
-| `npx vitest run .../GradingRecordingPanel.wiring.test.ts` - **THE PROVENANCE PIN, POSITIVE HALF** | over the **COMMENT-STRIPPED body of `handleGradeAll`** (5.5.1): the `setLastRunCohort(` argument **MUST mention** `assessmentId` (or `assessmentLabel`) **and** `selectedCourse`. A run-time capture is REQUIRED, not forbidden - revision 1's detectors banned `assessmentLabel` outright and would have made the precedented solution fail. **Stripping is what makes P8 kill**: against raw source the mandated 10-14 line hinge comment satisfies this row on its own, which is the tautology shape this repo has recorded twice |
-| **same file - THE PROVENANCE PIN, NEGATIVE HALF, as a WHITELIST** | over the **COMMENT-STRIPPED render body** (from the component's single top-level `return (`, measured at **`:642`** by `grep -n "^  return ("`, to end of file - a region that excludes every handler body): the `<ClassTrendsPanel` tag's `entry={...}` value matches **exactly one expression whose only free identifier is `lastRunCohort`**. Not a ban over the region - 5.5.1 measures eight LEGITIMATE occurrences of `assessmentLabel`/`assessmentId`/`courseId` there (the controls' own values, the empty-label hint, the declaration-controls props), so a ban would be red at HEAD |
-| **same file - THE DISCLOSURE LINE IS PINNED TOO (ruling 21)** | the disclosure line's own value expression is rooted **only** at the entry const or `lastRunCohort`. Revision 3 left it unpinned, sitting in a region where the live identifiers legitimately appear **ten times** - the same door the mount pin closes, one prop over |
+| `npx vitest run .../GradingRecordingPanel.wiring.test.ts` - **THE LEAF IS CALLED (B1)** | over the **COMMENT-STRIPPED body of `handleGradeAll`**: the handler **imports `buildRunCohort` AND calls it**. Modelled on wave 1's import-and-reference row and on the shipped `importsAndRendersClassTrendsPanel` shape, with its three canaries (true on import+call, false on a dead import, false on a local reimplementation). **Nothing in revision 4 required the panel to call the leaf at all** - the leaf could have shipped correct, tested and unreferenced, which is this repo's recorded dead-code-behind-a-green-gate class |
+| **same file - THE FIRST ARGUMENT IS THIS RUN'S RESULTS (B1, closes P13)** | in the same comment-stripped region, `buildRunCohort(`'s **first argument names `result.results`**, and names neither `gradingRows.rawRows` nor `gradingRows.rows`. **This is the instrument P13 needs**: the leaf's unit test constructs its own arguments and can never observe what the panel passes, because no test in this repo executes `handleGradeAll` - the panel is imported only by a `.tsx`, and `.test.tsx` is not collected |
+| **same file - THE PROJECTION NAMES `assessment` (B1, closes P15)** | in the same region, the identity projection handed to `buildRunCohort` **names `r.assessment`** (a per-row read) and does **not** name a bare `assessmentId`/`assessmentLabel` as the source of that field. Same reason as the row above: the projection is handler code, and 9.3's leaf-side row passes its own identity array, so the leaf would copy P15's mutation through invisibly |
+| **same file - THE CLEAR IS IN EVERY NON-SUCCESS BRANCH (B1, closes P16)** | in the same region, `setLastRunCohort(null)` appears in **all three** non-success branches (`:541-546` readiness, the `"error" in result` return, the `catch`). A pure leaf's unit test cannot assert anything about panel state after a failed run, which is where revision 4 filed this |
+| **same file - THE PROVENANCE PIN, POSITIVE HALF, RE-TARGETED (M2)** | over the same region: **`buildRunCohort(`'s meta argument** mentions `assessmentId` (or `assessmentLabel`) **and** `selectedCourse`, tolerating a hoisted `const meta = {...}` by following that binding. **Revision 4 asserted on `setLastRunCohort`'s argument and was red on the natural post-leaf shape** - `setLastRunCohort(buildRunCohort(result.results, identity, meta))` mentions neither identifier, so only a fully inlined call passed, and this plan documents what an implementer does with a red pin. **Stripping is what makes P8 kill**: against raw source the mandated hinge comment satisfies this row on its own |
+| **same file - THE WHITELIST, QUOTED VERBATIM FROM 5.5.1 (B2)** | over the **COMMENT-STRIPPED render body**, located by the `/^  return \(/m` MARKER: *"there is exactly one `const <name> = <expr>;` binding the trends entry, and `<expr>`'s only free identifiers are `lastRunCohort` and the imported helpers (`toRunCohortEntry`, `runCohortMeta`). The mount's `entry={...}` is that `<name>`."* **Revision 4's row still stated the WITHDRAWN shape** - `entry={...}` matching one expression whose only free identifier is `lastRunCohort` - which is red on the mandated const (the free identifier is the const's name) AND red inlined (the free identifiers include the helper), and inlining also breaks 5.5.1's own one-const requirement. **No implementation satisfied both.** Not a ban over the region either: 5.5.1 measures **7 lines / 10 occurrences** of `assessmentLabel`/`assessmentId`/`courseId` there legitimately |
+| **same file - THE MOUNT IS GATED (M3)** | `hasTrendableResults(<name>) &&` precedes the `<ClassTrendsPanel` tag within the same gated expression, reusing the shipped `classTrendsMountIsGated` detector (`gradingResultsExtraction.wiring.test.ts:277-281`, three canaries at `:284-300`). **Revision 4 asserted import-and-render and never that the mount was gated** - and `DraftedGradesTab.tsx:627` is a LIVE UNGATED PRECEDENT sitting in the tree to copy: `grep -rn "<ClassTrendsPanel" src --include=*.tsx` returns two sites, and `grep -c "hasTrendableResults" src/app/components/DraftedGradesTab.tsx` returns **0**. Without the guard the panel renders a Button reading `Trends (0)` |
+| **same file - THE DISCLOSURE LINE IS PINNED TOO (ruling 21)** | the disclosure line's value expression's only free identifiers are the entry const, `lastRunCohort`, **and `cohortLabelSpread`** - the helper the line must call. Revision 4 wrote "rooted only at the entry const or `lastRunCohort`", which **excludes its own mandated helper** and is the same red-on-a-correct-implementation shape, one prop over. Revision 3 left the line unpinned entirely, in a region where the live identifiers legitimately appear ten times |
 | same file | a whole-file, raw-source form of either pin is **RED at HEAD before any wave-2 code exists** - `grep -n "gradingRows\.\(rawRows\|rows\)" <panel>` returns pre-existing legitimate hits - so an implementer who writes it finds it red and loosens it rather than fixing it. **Region plus whitelist, never a file-wide ban** |
 | same file | the panel imports AND renders `<ClassTrendsPanel` above `<GradingTable>`. **Detector plus canary**: prove it returns false on a dead import and on a local reimplementation, in the shape `gradingResultsExtraction.wiring.test.ts` already uses four times |
 | `npx vitest run .../classTrendsDraft.not-postable.test.ts` | green with the cohort leaf as a **sixth** root at `:213-223` **and the `it()` title at `:209-210` updated to name it**. Explicit `{ timeout: 30000 }` on any new walk, per `:211` |
@@ -1155,9 +1193,12 @@ attacks, so the clause, the unit test and the mutation cannot drift apart.
 | P2 | Remove the `hasTrendableResults(...)` guard | the gate | the guard assertion. Without it the panel renders a Button reading `Trends (0)` |
 | P3 | Capture the cohort rows from `gradingRows.rawRows` at render instead of in the handler | rule, `rows` clause | the negative whitelist pin |
 | P4 | Resolve the cohort against `gradingRows.rawRows` by id at render | rule, `rows` clause | the negative whitelist pin |
-| **P13** | **Call `buildRunCohort` with the pre-grade row array in place of this run's `results`** - inside the handler, correct timing, wrong argument. This is what revisions 1 and 2 endorsed | rule, `rows` clause | **THE MERGE ITSELF.** Every row is pre-grade with `rubricAreas: []` (`grading-row.ts:224`), so `hasTrendableResults` is false and the assertion fails. **It kills because the merge is a leaf and the leaf's test sees its arguments** - revision 3's version could not kill at all, since no test in this repo executes the panel's capture code |
-| **P15** | **Fill every cohort row's `assessment` from the single in-scope `assessmentId`** instead of from its own identity row | rule, identity projection | **PER-ROW `assessment`.** This is the resolution an implementer reaches for when the source is unclear, and it silently makes `cohortLabelSpread` false on every run |
-| **P16** | **Delete the cohort clear from the error and `catch` branches** | the error path | **THE ERROR PATH CLEARS THE COHORT.** The panel then reports the previous run's trends beneath a grading error |
+| **P13** | **Call `buildRunCohort` with the pre-grade row array in place of this run's `results`** - inside the handler, correct timing, wrong argument | rule, `rows` clause | **THE FIRST ARGUMENT row**, a source-text pin over the comment-stripped handler. **Not the leaf's unit test**: that test constructs its own arguments and can never see what the panel passes, because no test here executes `handleGradeAll`. Revision 4 filed P13 under the leaf's test and it could not have killed |
+| **P15** | **Fill every cohort row's `assessment` from the single in-scope `assessmentId`** instead of from its own identity row | rule, identity projection | **THE PROJECTION NAMES `assessment` row**, same region, same reason: the projection is handler code, so the leaf-side row would have copied this mutation through invisibly |
+| **P16** | **Delete `setLastRunCohort(null)` from any one of the three non-success branches**, including the readiness refusal at `:541-546` | the error path | **THE CLEAR IS IN EVERY NON-SUCCESS BRANCH row**, same region. A pure leaf's unit test cannot assert anything about panel state after a failed run |
+| **P17** | **Delete the `buildRunCohort` call and inline the merge in the handler** | ruling 19's kind change | **THE LEAF IS CALLED row.** Without it the leaf ships correct, tested and unreferenced, and every other leaf-side row still passes |
+| **P18** | **Remove `hasTrendableResults(...) &&` from the mount**, copying `DraftedGradesTab.tsx:627`'s live ungated shape | the gate | **THE MOUNT IS GATED row** (shipped `classTrendsMountIsGated`). Revision 4 had no row for this at all |
+| **P19** | **Emit a `not-attempted` row for any input** | the mapping | **THE ROW-STATE MAPPING row.** `totalResults` counts graded results only (`class-trends.ts:270-273`) and nothing reads `ungradedCounts`, so a widened cohort changes no counted output - this is the mutation that is invisible to every other gate |
 | **P14** | Emit `student: ""` instead of `row.studentName` | rule, identity | **the POSITIVE IDENTITY ROW.** `tsc` permits it, every other row passes, and N13b's attribution breaks silently later |
 | P5 | Emit every cohort row as a `GradedResult` | the mapping | the `totalResults` assertion |
 | **P6** | `assignmentName={assessmentLabel}` at the MOUNT | rule, `assignmentName` clause | **the negative provenance pin.** The door revision 1 closed |
@@ -1303,6 +1344,23 @@ text; the strip helper was cited as precedent without noting it is module-local
 and must be duplicated; and the canary-describe shape was called four when it is
 seven (ruling 24).
 
+**Revision 4:** the round-5 constructions were applied to 5.5 and 5.5.1 and **not
+carried into 9.3**, the table an implementer binds - P13, P15 and P16 stayed
+filed under the leaf's unit test, where argument selection and post-failure state
+are invisible; the ruling-19 source pin lived only in 5.5.1 prose; **no row
+anywhere required the panel to call `buildRunCohort`**; 9.3's whitelist row still
+stated the withdrawn shape and was red on every possible implementation; the
+row-state mapping enumerated four states when only two are reachable, sourced
+`message` from `row.error` (outside the permitted projection), specified no
+`stoppedBy`, and claimed a stake that is false at HEAD; the positive pin asserted
+on `setLastRunCohort`'s argument and was red on the natural post-leaf shape; no
+row required the mount to be gated, with a live ungated precedent in the tree;
+4.1 reported w1 at 12 against a published 10; "the ONE permitted read" forbade a
+pre-existing read; the `:612` precedent was cited for timing when it is a
+render-time expression; the readiness early return was missed; the disclosure pin
+excluded its own helper; and "eight occurrences" survived in two more places
+(ruling 24 again).
+
 ### 11.3 Confirmed correct, so no later round "fixes" them back
 
 - `ALLOWED_OVERAGE` is at `src/file-size-ceiling.structure.test.ts:64`, not `:68`.
@@ -1339,10 +1397,12 @@ seven (ruling 24).
   ruling 19's leaf is what makes the question non-load-bearing, since the leaf is
   tested on its arguments rather than on the panel's text.
 - **Whether ruling 15's region contains zero legitimate occurrences of the three
-  identifiers.** It does not - I measured eight, and 5.5.1 reports the conflict
-  and adopts neither the ruling's claim nor a ban built on it. The region itself
-  IS adopted; only the assertion shape changed, from a ban to a whitelist. If the
-  next round believes the eight occurrences should have moved, that is a
+  identifiers.** It does not - I measured **7 lines / 10 occurrences** (revision
+  4 said "eight" here and in 9.3, which is neither number and is exactly what
+  ruling 24 corrected), and 5.5.1 reports the conflict and adopts neither the
+  ruling's claim nor a ban built on it. The region itself IS adopted; only the
+  assertion shape changed, from a ban to a whitelist. If the
+  next round believes those occurrences should have moved, that is a
   different change (extracting the assessment fieldset) and belongs to wave 1's
   scoping pass, not to a detector.
 - **Wave 3's surface is not enumerated.** 3.5 is a floor and says so.

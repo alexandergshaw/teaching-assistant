@@ -561,8 +561,20 @@ nested - each misses what the other catches:
 
 | Form | violations | nodes | `canvas.ts` caught | inside `lib/canvas/` caught |
 |---|---|---|---|---|
-| WITH `/` boundary | 15 | 45 | no | yes |
-| NO boundary (repo idiom) | 3 | 44 | yes | no |
+| WITH `/` boundary | 14 | 45 | no | yes |
+| NO boundary (repo idiom) | 2 | 44 | yes | no |
+
+**VIOLATION COUNTS CORRECTED 2026-09-21. The figures first published here were
+`15` and `3` - each ONE HIGH, from a systematic off-by-one in the walker I ran.
+The test seat measured `14` and `2`, reported that it could not reconcile mine
+rather than matching them, and an independent checker then reproduced the
+seat's numbers exactly (and the sibling instance too: `app/actions` no-slash
+`v=11 n=68 flagged=true`, with-slash `v=53 n=69 flagged=false`). THE SEAT'S
+FIGURES STAND AND MINE DO NOT.** The `nodes` column and every boolean were
+correct throughout, and no requirement asserts a violation COUNT on this
+configuration - which is why the error survived three readings. Recorded rather
+than silently overwritten, because the wrong numbers had already travelled into
+two other documents.
 
 Real siblings exist for FOUR of that walker's five prefixes - `src/app/actions.ts`,
 `src/lib/canvas.ts`, `src/lib/llm.ts`, `src/lib/gemini.ts` - and the precedent's

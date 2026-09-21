@@ -44418,3 +44418,127 @@ wave 0 section names only the class-trends mount sites, the grading-recording
 absence, and the `classTrendsEntry.ts` contract, all covered above. Nothing
 else in `docs/a16-plan.md`'s wave 0 section names an additional baseline
 target.
+
+## 434. Repo Grades bulk-run handler and hooks, before A16 wave 3 (W3A)
+
+Written BEFORE hand-off for A16 wave 3 (`docs/a16-wave3-scope.md` revision 1,
+section 10, "W3A, the baseline"), per `docs/DEV_LOOP.md`'s Baseline paragraph.
+Entry 433's own "Not baselined here" section named the Repo Grades
+folder-entry surface explicitly as out of its scope, so this entry covers it.
+This entry records what the code DOES today, read out of the source, at the
+sites wave 3's build wave (W3B) changes. It is an oracle, not a requirement.
+
+**Read at `0618b4c`** (`git rev-parse HEAD`). `git status --short` returns
+exactly ` M docs/css-orphans.md` - dirty from outside this loop per the
+standing exemption, untouched here. Nothing below was executed; this repo's
+vitest is node-env and renders no component, so every claim about a rendered
+panel or a gated mount is a READING claim, not a run one.
+
+### `handleGradeColumn`'s four steps and its `void` discard
+
+`useRepoGradesGradingActions.ts:747-757`:
+
+1. `:748` builds `const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: bulkSelectionOnly })`.
+2. `:749-753` an empty-plan `if (plan.targets.length === 0)` announces the
+   skip reasons via `setPostSummary` and returns.
+3. `:754-755` looks up the column by folder (`columns.find(...)`, falling back
+   to `{ folder, assignmentId: null }`) and resolves ONE rubric via
+   `await resolveRubricForColumn(column.assignmentId)`.
+4. `:756` calls `void runBulkGrade(plan, resolved)` - the run's return value is
+   discarded. Nothing after this line reads what the run produced.
+
+### `runBulkGrade`'s `Promise<void>`, its refusal guard, and its end-of-run order
+
+`useRepoGradesBulkGrade.ts`:
+
+- `:154` `UseRepoGradesBulkGradeResult.runBulkGrade` is typed
+  `(plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<void>`.
+- `:174` `if (runningFolder !== null) return;` - a second concurrent run is
+  refused with a bare `return`, which resolves the returned `Promise<void>`
+  to `undefined`.
+- `:181` `const outcomes: BulkGradeOutcome[] = [];` is the only collector
+  declared in this function; there is no collector of `GradeResult`s anywhere
+  in this file today.
+- End-of-run order, `:374-377`, all four DIRECT statements of `runBulkGrade`'s
+  body, in this order: `onOutcomes(outcomes);` then
+  `onAnnounce(bulkGradeSummaryLine(outcomes, plan));` then
+  `setRunningFolder(null);` then `setProgress(null);`. None of the four is
+  inside a `try`/`finally` - see RES-W3-9 for the consequence on a rejection.
+- The function returns nothing (falls off the end after `setProgress(null)`),
+  so its resolved value is always `undefined` on every path.
+
+### `BulkGradeOutcome`'s five fields
+
+`repoGradesBulkGrade.ts:144-159`:
+
+```
+export interface BulkGradeOutcome {
+  repo: string;
+  folder: string;
+  status: "graded" | "failed" | "no-submission";
+  score: string;
+  detail: string;
+}
+```
+
+No field on it carries a `GradeResult`, a `GradingRun`, or `rubricAreas`. The
+per-target `GradeResult` a successful `gradeRepoAction` call returns
+(`result.run.results`, `useRepoGradesBulkGrade.ts:222`) is read once, at
+`:222-268`, to build the `onCellUpdate` patch and the outcome's `score`/
+`detail` strings, and is not retained anywhere past that call.
+
+### RULE 1c's already-graded skip
+
+`repoGradesBulkGrade.ts:115-124`: inside `buildBulkGradePlan`, a row whose
+merged `cell.score !== ""` is pushed to `skipped` with reason
+`"already graded"` and `continue`s, never entering `targets`. A bulk run over
+a column where some cells were graded one at a time therefore grades only the
+rest - the run's cohort is a strict subset of the column.
+
+### `cellEdits` not persisting
+
+`index.tsx:180`: `const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);` -
+plain `useState`, no `load`/`persist` pair. `repoGradesUiState.ts`'s
+`load`/`persist` function pairs (`:192/:208`, `:236/:250`, `:300/:308`,
+`:347/:356`, `:396/:405`, `:532/:543`, `:558/:566`) cover ui state, selected
+repo ids, the assignment mapping, the activity log, the folder selection, and
+the rubric choice/text - none of them is `cellEdits`. Every graded score,
+comment, and `rubricAreas` value lives only in this one `useState` and is lost
+on reload.
+
+### Both course-reset branches
+
+- `index.tsx:539-544`: `if (uiState.courseId !== cellStateResetForCourse)`
+  resets `cellStateResetForCourse`, `cellEdits` (to
+  `EMPTY_REPO_GRADE_CELL_EDITS`), `postSummary` (to `""`), and `log` (loaded
+  fresh for the new course) - a render-phase compare-and-adjust branch, not a
+  `useEffect`.
+- `useRepoGradesGradingActions.ts:196-199`:
+  `if (courseId !== columnPostingResetForCourse)` resets
+  `columnPostingResetForCourse` and `columnPosting` (to `{}`) - the same
+  idiom, in the hook that owns posting-busy state, run in the same render as
+  the branch above.
+
+Neither branch clears or knows about anything a bulk run produced beyond
+`cellEdits` itself, because nothing today accumulates a run's results past
+the run (see the `BulkGradeOutcome` section above).
+
+### The canaried absence of any trends mount on the view
+
+- `grep -rn "ClassTrendsPanel\|hasTrendableResults\|toClassTrendsEntry\|computeClassTrends" src/app/components/repo-grades` returns no matches.
+  Canary: the same pattern over `src/app/components/grading-results/GradingResults.tsx`
+  and `src/app/components/grading-recording/GradingRecordingPanel.tsx` finds
+  hits in both, so the pattern fires when the mount exists.
+- `grep -rlic "trend" src/app/components/repo-grades/` returns nothing.
+- Repo Grades does not render `GradingResults`: every `GradingResults`
+  mention in `index.tsx` and `RepoGradesGrid.tsx` is a comment.
+- `index.tsx`'s render body (`:698-` on) has no `<ClassTrendsPanel` element
+  and no import of `../drafted-grades/ClassTrendsPanel`.
+
+### Not baselined here
+
+The internals of `ClassTrendsPanel`, `computeClassTrends`, and the leaf
+adapter A16-5 will add (`classTrendsFolderEntry.ts`) - those are the surface
+being built, not today's behaviour. `RepoGradesGrid.tsx`'s "Grade all" button
+and its `onGradeColumn(column.folder)` call are unchanged by wave 3 and are
+not re-measured here.

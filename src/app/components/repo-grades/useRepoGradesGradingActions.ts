@@ -58,6 +58,11 @@ import {
 } from "./repoGradesPosting";
 import { buildBulkGradePlan, type BulkGradeOutcome } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
+// A16 wave 3 (docs/a16-wave3-scope.md section 7): the folder-entry adapter.
+// This hook CALLS both, and holds no condition over either result - see
+// classTrendsFolderEntry.ts's own header for why that placement matters.
+import { buildRepoRunCohort, repoRunTrendsEntry, type RepoRunCohort } from "./classTrendsFolderEntry";
+import type { GradingRunEntry } from "@/lib/grade/types";
 // Type-only: ResolvedRubric is useRepoGradesRubricSource.ts's own return
 // shape (docs/repo-grades-rubric-picker-acceptance-criteria.md). This file
 // never resolves a rubric itself - both grading paths below call the ONE
@@ -162,6 +167,9 @@ export interface UseRepoGradesGradingActionsResult {
   handleGradeColumn: (folder: string) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
+  /** A16 wave 3: the last "Grade all" run's trends, or null - see
+   * classTrendsFolderEntry.ts's repoRunTrendsEntry for the one gate. */
+  trendsEntry: GradingRunEntry | null;
 }
 
 export function useRepoGradesGradingActions(
@@ -193,9 +201,14 @@ export function useRepoGradesGradingActions(
   // commits land together and a course switch cannot leave one course's
   // posting-busy flags visible against another course's rows.
   const [columnPostingResetForCourse, setColumnPostingResetForCourse] = useState<string | null>(null);
+  // A16 wave 3: lastRunCohort is cleared in the SAME render-phase branch, so
+  // a course switch can never leave one course's trends visible against
+  // another's rows (build-packet branch 7).
+  const [lastRunCohort, setLastRunCohort] = useState<RepoRunCohort | null>(null);
   if (courseId !== columnPostingResetForCourse) {
     setColumnPostingResetForCourse(courseId);
     setColumnPosting({});
+    setLastRunCohort(null);
   }
 
   const handleScoreChange = (repo: string, folder: string, score: string) => {
@@ -749,12 +762,24 @@ export function useRepoGradesGradingActions(
     if (plan.targets.length === 0) {
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);
+      // A16 wave 3, ruling W3-4: nothing ran, so the previous run's trends
+      // stay on screen. The clear below runs only once a run is attempted.
       return;
     }
+    // A16 wave 3: a run is about to be attempted, so its trends replace
+    // whatever the previous run left on screen once this one finishes.
+    setLastRunCohort(null);
     const column = columns.find((c) => c.folder === folder) ?? { folder, assignmentId: null };
     const resolved = await resolveRubricForColumn(column.assignmentId);
-    void runBulkGrade(plan, resolved);
+    const runResults = await runBulkGrade(plan, resolved);
+    // A16 wave 3: UNCONDITIONAL - buildRepoRunCohort itself owns the null
+    // decision (runBulkGrade refused vs. a real, possibly empty, run).
+    setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course }));
   };
+
+  // A16 wave 3: the ONE gate for this surface's trends. No condition here
+  // over `lastRunCohort` - the leaf owns every decision (classTrendsFolderEntry.ts).
+  const trendsEntry = repoRunTrendsEntry(lastRunCohort, courseId);
 
   return {
     handleScoreChange,
@@ -766,5 +791,6 @@ export function useRepoGradesGradingActions(
     handleGradeColumn,
     bulkRunningFolder,
     bulkProgress,
+    trendsEntry,
   };
 }

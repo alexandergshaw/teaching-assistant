@@ -204,10 +204,11 @@ describe("canary 2b - a synthetic depth-2 fixture, proving the walk recurses", (
   });
 });
 
-describe("canary 3 - the real check: layer C's own six files reach nothing forbidden", () => {
+describe("canary 3 - the real check: layer C's own seven files reach nothing forbidden", () => {
   it(
     "zero violations rooted at class-trends-draft.ts, classTrendsDraftState.ts, " +
-      "ClassTrendsDraftPanel.tsx, ClassTrendsPanel.tsx, classTrendsEntry.ts, and classTrendsRunCohort.ts",
+      "ClassTrendsDraftPanel.tsx, ClassTrendsPanel.tsx, classTrendsEntry.ts, classTrendsRunCohort.ts, " +
+      "and classTrendsFolderEntry.ts",
     { timeout: 30000 },
     () => {
       const roots = [
@@ -225,6 +226,10 @@ describe("canary 3 - the real check: layer C's own six files reach nothing forbi
         // built in render and handed straight to the panel, never posted or
         // persisted anywhere.
         join(SRC, "app/components/grading-recording/classTrendsRunCohort.ts"),
+        // A16 wave 3 (docs/a16-wave3-scope.md section 7.1): the SAME
+        // reasoning applies to Repo Grades' own run-cohort leaf - built in
+        // render, handed straight to the panel, never posted or persisted.
+        join(SRC, "app/components/repo-grades/classTrendsFolderEntry.ts"),
       ];
       const violations = walkForForbiddenImports(roots);
       expect(

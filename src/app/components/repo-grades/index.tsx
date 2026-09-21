@@ -74,6 +74,11 @@ import {
 } from "./repoGradesCellEdits";
 import RepoGradesGrid from "./RepoGradesGrid";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
+// A16 wave 3: mounts this run's trends above the grid - see
+// classTrendsFolderEntry.ts's header for why the leaf lives in this
+// directory rather than importing the recording surface's own cohort.
+import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel";
+import { repoRunTrendsLabel } from "./classTrendsFolderEntry";
 import { useRepoGradesRubricSource } from "./useRepoGradesRubricSource";
 import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
 import gridStyles from "./repo-grades.module.css";
@@ -669,6 +674,7 @@ export default function RepoGradesTab() {
     handleGradeColumn,
     bulkRunningFolder,
     bulkProgress,
+    trendsEntry,
   } = useRepoGradesGradingActions({
     rows: sortedRows,
     cellEdits,
@@ -838,6 +844,17 @@ export default function RepoGradesTab() {
         <p role="status" aria-live="polite" className={gridStyles.statusBanner}>
           {postSummary}
         </p>
+      )}
+
+      {/* A16 wave 3 (docs/a16-wave3-scope.md section 7.4): the last "Grade
+          all" run's trends, gated on trendsEntry alone - no role/aria-live,
+          matching classTrendsFolderEntry.ts's own header on why this is a
+          reachability change, not a second live region. */}
+      {trendsEntry && (
+        <div>
+          <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
+          <ClassTrendsPanel entry={trendsEntry} defaultExpanded />
+        </div>
       )}
 
       {/* U1.3b - rows follow columns, DISPLAY ONLY (section 5: buildBulkGradePlan

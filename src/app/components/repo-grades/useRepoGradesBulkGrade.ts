@@ -39,6 +39,7 @@
 import { useState } from "react";
 import { gradeRepoAction } from "@/app/actions";
 import type { LlmProvider } from "@/lib/llm";
+import type { GradeResult } from "@/lib/grade/types";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 import {
   bulkGradeSummaryLine,
@@ -150,8 +151,10 @@ export interface UseRepoGradesBulkGradeResult {
   /** AC item 50 - the hook's own `rubric` param is REMOVED; the caller
    * resolves ONE rubric for the whole run (the same shared resolver a
    * per-cell grade uses) and hands the result straight in here, once, before
-   * the run starts. */
-  runBulkGrade: (plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<void>;
+   * the run starts.
+   * A16 wave 3 (W3-1(d)): `null` means refused (no run happened); otherwise
+   * this run's own `GradeResult`s, by reference, once the pool drains. */
+  runBulkGrade: (plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<readonly GradeResult[] | null>;
 }
 
 /**
@@ -168,10 +171,11 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const runBulkGrade = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<void> => {
+  const runBulkGrade = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<readonly GradeResult[] | null> => {
     // Guard against a second concurrent run - see this function's own header
-    // comment above for why this is a refusal, not a queue.
-    if (runningFolder !== null) return;
+    // comment above for why this is a refusal, not a queue. `null` means
+    // "refused, no run happened" (A16 wave 3, ruling W3-1(d)).
+    if (runningFolder !== null) return null;
 
     const targets = plan.targets;
     const folder = targets[0]?.folder ?? null;
@@ -179,6 +183,10 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     setProgress({ done: 0, total: targets.length });
 
     const outcomes: BulkGradeOutcome[] = [];
+    // A16 wave 3 (W3-1(d)): this run's own GradeResults, by reference - a
+    // `const` empty-array literal declared here, never a `useRef` or module
+    // array (either would outlive this run). Never reassigned.
+    const runResults: GradeResult[] = [];
     let done = 0;
 
     /** One target's grading call, applied to cell state/outcomes exactly the
@@ -293,6 +301,9 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
       const detail = [readmeNote, rubricNote, feedbackNote].filter((part) => part !== "").join(" | ");
       outcomes.push({ repo: target.repo, folder: target.folder, status: "graded", score, detail });
+      // A16 wave 3: pushes onto the run's trends collector above. A direct
+      // statement, following both early-return branches - never nested.
+      runResults.push(...result.run.results);
       return { rubricUsed: result.rubric };
     };
 
@@ -375,6 +386,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     onAnnounce(bulkGradeSummaryLine(outcomes, plan));
     setRunningFolder(null);
     setProgress(null);
+    return runResults;
   };
 
   return { runningFolder, progress, runBulkGrade };

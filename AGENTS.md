@@ -95,6 +95,53 @@ items while the summary was written. The tell is a turn that ends by describing
 the backlog instead of changing it. Write the summary AFTER the dispatch, about
 work already running.
 
+**THE TWO SHAPES THAT DEFEATED THE TEST ABOVE ON 2026-09-20, both in one
+session, after it had already been tightened twice. The test was not wrong;
+it was not APPLIED, because neither turn felt like a stall.**
+
+**SHAPE 1 - THE OFF-BACKLOG INTERRUPT.** The owner asked for help with an
+unrelated file (a resume document). That work was legitimate, foreground and
+correctly done - and for three consecutive turns ZERO backlog work was running,
+because the interrupt absorbed the whole turn. A user handing you another task
+does NOT pause the loop. It changes what the FOREGROUND of the turn is; the
+background queue is supposed to keep moving underneath it. THE RULE: when an
+off-backlog request arrives, dispatch or confirm backlog work IN THE SAME TURN
+you start the new task. The mechanical test does not have an exemption for
+"the owner asked me something else", and it must not grow one - an interrupt is
+the easiest moment to stall while feeling maximally responsive.
+
+**SHAPE 2 - THE DISMISSED QUESTION.** A question was asked, the owner dismissed
+it, and the turn ended with "Standing by." That is a stall wearing deference's
+clothes. A dismissal is not an instruction to stop working; it is a refusal of
+THAT QUESTION. Two separate errors compounded: the question should not have
+been a gate in the first place (see the tightening below), and once dismissed,
+the correct move is to keep the backlog moving while waiting - not to idle.
+NEVER END A TURN WITH "standing by", "let me know", "waiting on you", or any
+variant, while the backlog has a dispatchable item.
+
+**THE CONTROL, tightened to close both.** The test above asks whether work is
+running. Both failures answered "no" honestly and ended the turn anyway,
+because the turn had an obvious non-backlog purpose. So the test now has a
+second clause, and it is not optional:
+
+> **A TURN THAT ENDS WITH NO BACKLOG WORK RUNNING IS A STALL REGARDLESS OF WHAT
+> ELSE THE TURN ACCOMPLISHED. Not if the owner asked for something else. Not if
+> a question was dismissed. Not if the other work was urgent, correct and
+> finished. The only legitimate stop is the one named above: every remaining
+> item is owner-blocked, and you have said so and listed what each needs.**
+
+Two corollaries, both learned the same day:
+
+- **A blocking question is still forbidden when it is about someone else's
+  file.** The dismissed question asked which of three readings of a formatting
+  request was meant. The correct shape was to pick the most likely reading, act
+  on it, and let the question ride alongside - exactly as for a product fork.
+  "I measured X and your screen shows Y, so my model is wrong" is a finding to
+  report while continuing, not a reason to stop.
+- **When measurement and the owner disagree, the owner is describing the
+  artefact and you are describing your model of it.** Say the measurement,
+  believe the owner, and act. Do not ask them to reconcile it for you.
+
 **Do not:**
 - Ask "should I proceed?", "want me to continue?", or any variant.
 - End a turn by NAMING the next item instead of starting it ("Next up: X").
@@ -106,6 +153,11 @@ work already running.
   requested feature already exists, so the real job is fixing why it looks
   absent — state that and start the reframed work immediately.
 - Wait for a reply after finishing a chunk. A push is not a checkpoint.
+- End a turn with "standing by", "let me know", or any idle-waiting phrase
+  while a backlog item is dispatchable.
+- Let an off-backlog request from the owner absorb a whole turn with no backlog
+  work running underneath it.
+- Treat a dismissed question as an instruction to stop working.
 
 **Do:**
 - Finish a chunk, push it, and start the next one in the same turn.

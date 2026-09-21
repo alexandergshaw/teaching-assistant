@@ -1,18 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import {
   listAnnouncementsAction,
   createAnnouncementAction,
-  draftAnnouncementAction,
+  listCourseHubAction,
 } from "../../actions";
+import {
+  getMostRecentAnnouncementExemplarAction,
+  listAnnouncementExemplarsAction,
+} from "@/app/actions/walkthrough-announcement";
+import { draftPromptAnnouncementAction } from "@/app/actions/prompt-announcement-draft";
+import { postPromptAnnouncementAction } from "@/app/actions/prompt-announcement-post";
 import CoursePicker from "../CoursePicker";
+import type { AnnouncementExemplarSummary } from "@/app/components/walkthrough-announcement/AnnouncementCourseFieldset";
+import {
+  EXEMPLAR_FETCH_TIMEOUT_MS,
+  choiceId,
+  defaultOptionLabel,
+  savedFormatsStatusText,
+  type LiveDefaults,
+  type ResolvedTemplate,
+  type SavedFormatsState,
+  type TemplateChoice,
+} from "@/app/components/walkthrough-announcement/announcement-draft-slots";
+import { raceWithTimeout } from "@/lib/bounded-race";
+import {
+  optionsForChoice,
+  posterFor,
+  resolveHubCourseIdForCanvasUrl,
+  browserLocalStorage,
+  readStoredPrompt,
+  writeStoredPrompt,
+} from "./promptAnnouncementTemplate";
+import { buildPromptDraftRequest, applyPromptDraftResult } from "./promptAnnouncementDraft";
+import type { PromptDraftUiState } from "@/lib/prompt-announcement-types";
 import type { CanvasAnnouncement } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { PROMPT_ANNOUNCEMENT_MAX_CHARS } from "@/lib/prompt-announcement-prompt";
 import styles from "../../page.module.css";
 import { COURSE_URL_KEY, formatWhen, toDatetimeLocalValue } from "./utils";
 
@@ -31,15 +62,98 @@ function AnnouncementsPanel() {
     message: "",
   });
 
-  const [draftPrompt, setDraftPrompt] = useState("");
+  // AC-14: persisted across reloads under STORAGE_KEY_PROMPT, via the pure
+  // leaf's read/write - not inlined here, so the storage logic stays
+  // testable (docs/a21-instrument-notes.md section 8.3).
+  const [draftPrompt, setDraftPromptState] = useState<string>(() => readStoredPrompt(browserLocalStorage));
+  const setDraftPrompt = useCallback((next: string) => {
+    setDraftPromptState(next.slice(0, PROMPT_ANNOUNCEMENT_MAX_CHARS));
+  }, []);
+  useEffect(() => {
+    writeStoredPrompt(browserLocalStorage, draftPrompt);
+  }, [draftPrompt]);
+
   const [drafting, setDrafting] = useState(false);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
+  const [lastResolved, setLastResolved] = useState<ResolvedTemplate | null>(null);
+  const [receipt, setReceipt] = useState("");
   // Optional scheduled visibility (datetime-local string); blank = post now.
   const [visibleAt, setVisibleAt] = useState("");
   const [posting, setPosting] = useState(false);
   const [postNote, setPostNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [lastPosted, setLastPosted] = useState<CanvasAnnouncement | null>(null);
+
+  // AC-12: the identity join between this panel's Canvas course URL and the
+  // exemplar library's app Course row id. Fetched once and re-derived per
+  // course/institution change - refuses to guess on ambiguity.
+  const [hubCourses, setHubCourses] = useState<
+    readonly { id: string; canvasUrl: string | null; institution: string | null }[]
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await listCourseHubAction();
+      if (cancelled || "error" in result) return;
+      setHubCourses(result.courses);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const hubCourseId = resolveHubCourseIdForCanvasUrl(hubCourses, courseUrl, activeInstitution);
+
+  // Saved-exemplar template picker: choice + live defaults, matching the
+  // shared vocabulary this panel reuses (announcement-draft-slots.ts). This
+  // surface has no paste box, so `hasPastedText`/`pastedOutline` stay false/
+  // null - "pasted" never appears as a picker option here.
+  const [choice, setChoice] = useState<TemplateChoice>({ kind: "default" });
+  const [mostRecentExemplar, setMostRecentExemplar] = useState<AnnouncementExemplarSummary | null>(null);
+  const [savedExemplars, setSavedExemplars] = useState<AnnouncementExemplarSummary[]>([]);
+  const [savedFormatsState, setSavedFormatsState] = useState<SavedFormatsState>("loaded");
+  const exemplarRunId = useRef(0);
+
+  useEffect(() => {
+    const runId = ++exemplarRunId.current;
+    const stale = () => exemplarRunId.current !== runId;
+    void (async () => {
+      await Promise.resolve();
+      if (stale()) return;
+      setMostRecentExemplar(null);
+      setSavedExemplars([]);
+      setSavedFormatsState("loaded");
+      setChoice({ kind: "default" });
+      if (!hubCourseId) return;
+      setSavedFormatsState("loading");
+      const outcome = await raceWithTimeout(
+        Promise.all([
+          getMostRecentAnnouncementExemplarAction(hubCourseId),
+          listAnnouncementExemplarsAction(hubCourseId),
+        ]),
+        EXEMPLAR_FETCH_TIMEOUT_MS
+      );
+      if (stale()) return;
+      if (outcome.kind === "timedout") {
+        setSavedFormatsState("timedout");
+        return;
+      }
+      if (outcome.kind === "failed") {
+        setSavedFormatsState("failed");
+        return;
+      }
+      const [mostRecentResult, listResult] = outcome.value;
+      if (!("error" in mostRecentResult)) setMostRecentExemplar(mostRecentResult.exemplar);
+      if ("error" in listResult) {
+        setSavedFormatsState("failed");
+      } else {
+        setSavedExemplars(listResult.exemplars);
+        setSavedFormatsState("loaded");
+      }
+    })();
+    return () => {
+      exemplarRunId.current += 1;
+    };
+  }, [hubCourseId]);
 
   // Clear loaded announcements + course list when the institution changes — they
   // belonged to the previous school.
@@ -80,18 +194,41 @@ function AnnouncementsPanel() {
     void loadAnnouncements(url);
   };
 
+  const liveDefaults: LiveDefaults = {
+    pastedOutline: null,
+    mostRecent: mostRecentExemplar
+      ? { id: mostRecentExemplar.id, label: mostRecentExemplar.label || "Most recent", outline: mostRecentExemplar.outline }
+      : null,
+  };
+
   const handleDraft = async () => {
     if (!draftPrompt.trim()) return;
     setDrafting(true);
     setPostNote(null);
-    const result = await draftAnnouncementAction(draftPrompt.trim(), provider);
+    const uiState: PromptDraftUiState = {
+      promptText: draftPrompt,
+      courseLabel: courseName || courseUrl,
+      choice,
+      live: liveDefaults,
+      provider,
+      title,
+      message,
+      lastResolved,
+      receipt,
+      error: null,
+    };
+    const request = buildPromptDraftRequest(uiState);
+    const result = await draftPromptAnnouncementAction(request);
+    const next = applyPromptDraftResult(uiState, result);
     setDrafting(false);
-    if ("error" in result) {
-      setPostNote({ kind: "error", text: result.error });
+    if (!result.ok) {
+      setPostNote({ kind: "error", text: next.error ?? "Could not draft the announcement." });
       return;
     }
-    setTitle(result.title);
-    setMessage(result.message);
+    setTitle(next.title);
+    setMessage(next.message);
+    setLastResolved(next.lastResolved);
+    setReceipt(next.receipt);
   };
 
   const handlePost = async () => {
@@ -115,13 +252,24 @@ function AnnouncementsPanel() {
 
     setPosting(true);
     setPostNote(null);
-    const result = await createAnnouncementAction(
-      courseUrl.trim(),
-      title.trim(),
-      message.trim(),
-      activeInstitution || undefined,
-      delayedPostAt
-    );
+    // AC-11/AC-20: the poster is chosen by provenance, so today's behaviour
+    // (plain text) is byte-unchanged for a draft with no template applied.
+    const result =
+      posterFor(lastResolved) === "markdown"
+        ? await postPromptAnnouncementAction(
+            courseUrl.trim(),
+            title.trim(),
+            message.trim(),
+            activeInstitution || undefined,
+            delayedPostAt
+          )
+        : await createAnnouncementAction(
+            courseUrl.trim(),
+            title.trim(),
+            message.trim(),
+            activeInstitution || undefined,
+            delayedPostAt
+          );
     setPosting(false);
     if ("error" in result) {
       setPostNote({ kind: "error", text: result.error });
@@ -138,12 +286,25 @@ function AnnouncementsPanel() {
     setMessage("");
     setVisibleAt("");
     setDraftPrompt("");
+    setLastResolved(null);
+    setReceipt("");
     setAnnouncements((prev) => [result.announcement, ...prev]);
   };
 
   // Any chosen visibility time means "schedule" for the button label; the input's
   // min blocks past times, and handlePost re-checks against the actual clock.
   const willSchedule = visibleAt.trim().length > 0;
+
+  const templateOptionSource = {
+    hasPastedText: false,
+    mostRecent: mostRecentExemplar
+      ? { id: mostRecentExemplar.id, label: mostRecentExemplar.label || "Most recent", outline: mostRecentExemplar.outline }
+      : null,
+    saved: savedExemplars.map((e) => ({ id: e.id, label: e.label || "Untitled format", outline: e.outline })),
+    savedState: savedFormatsState,
+  };
+  const templateOptions = optionsForChoice(choice, templateOptionSource);
+  const statusText = savedFormatsStatusText(savedFormatsState, savedExemplars.length);
 
   return (
     <div className={styles.form}>
@@ -219,13 +380,35 @@ function AnnouncementsPanel() {
         <label htmlFor="canvas-ann-draft">Draft with AI (optional)</label>
         <TextField
           id="canvas-ann-draft"
-          type="text"
-          size="small"
+          multiline
+          minRows={3}
           fullWidth
           placeholder="e.g. Remind students project 2 is due Friday and office hours moved to 3pm"
           value={draftPrompt}
           onChange={(e) => setDraftPrompt(e.target.value)}
         />
+        <label htmlFor="canvas-ann-template">Match a format (optional)</label>
+        <Select
+          id="canvas-ann-template"
+          size="small"
+          value={choiceId(choice)}
+          onChange={(e) => {
+            const next = templateOptions.find((o) => o.id === e.target.value);
+            if (next) setChoice(next.choice);
+          }}
+          sx={{ alignSelf: "flex-start", minWidth: "220px" }}
+        >
+          {templateOptions.map((o) => (
+            <MenuItem key={o.id} value={o.id}>
+              {o.label}
+              {o.unavailable ? " (no longer available)" : ""}
+            </MenuItem>
+          ))}
+        </Select>
+        {choice.kind === "default" && (
+          <p className={styles.fieldHint}>{defaultOptionLabel(templateOptionSource)}</p>
+        )}
+        {statusText && <p className={styles.fieldHint}>{statusText}</p>}
         <Button
           variant="outlined"
           size="small"
@@ -237,6 +420,7 @@ function AnnouncementsPanel() {
         </Button>
         <p className={styles.fieldHint}>
           Generates a title and message you can edit below. Nothing is posted until you click Post.
+          {receipt && ` ${receipt}.`}
         </p>
       </div>
 

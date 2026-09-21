@@ -78,8 +78,14 @@ Not worth a revision round; an implementer should simply know them.
   `owns: []` and `verify: null` ARE still stale and stay in the residual.
 - **MJ-2**: section 1b's certification sentence says 11 hits, four comments,
   seven emitted, while listing five comment line numbers. Measured 12 lines
-  (5 comment + 7 emitted), or 14 occurrences since `:171` and `:174` each
-  carry two. THE PARTITION IS RIGHT; ONLY ITS ARITHMETIC IS WRONG.
+  (5 comment + 7 emitted), or **16 occurrences** - `:158`, `:171`, `:174`
+  and `:219` each carry two. THE PARTITION IS RIGHT; ONLY ITS ARITHMETIC IS
+  WRONG. **CORRECTED 2026-09-21: THIS LINE FIRST SAID 14, WHICH REPEATED THE
+  VERY ERROR IT WAS CORRECTING** - I counted only the double-carrying lines
+  the check happened to name and did not re-derive the rest. The test notes
+  had 16 right independently. A document that OVERRIDES the criteria by its
+  own terms is the worst possible place to carry a miscount, because nothing
+  downstream is allowed to disagree with it.
 - **MJ-3**: R-1's "3 of 505" is a ratio across two populations. The
   denominator's `^#{1,3} [0-9]{3}` eats the year out of date headings - 65
   matches of `### 202` alone, 173 of the 505 spurious. The comparable figure
@@ -99,3 +105,125 @@ Not worth a revision round; an implementer should simply know them.
 - **m4**: R-7's "1 of 4 killed" attributes the kill to A6's protected set.
   The kill was P4, on the panel. All three script-prompt P-loci mutate GREEN.
 - **m5**: `scope` is assigned at `:324`; `:321` is the function signature.
+
+---
+
+# Round 2 - rulings on the check of `docs/a18-test-notes.md`
+
+The notes came back DEFECTIVE: 4 blockers, 7 majors, 4 minors. Three of the
+four blockers are REPEAT classes and close here rather than in another round.
+The check reproduced everything it was asked to re-execute, and it settled
+both of the notes' disagreements with me IN THE NOTES' FAVOUR: all six
+`f9f29c1` enforcers discriminate, and what survives is two facts with no
+enforcer, not three dead tests. My earlier "three enforcers survived" is
+withdrawn.
+
+## RULING 5 - the freeze bounds the ends and nothing else. REDESIGN, one round.
+
+B1 is the only NEW class and it is a design defect, not a strength defect.
+Both anti-injection framings are frozen as a prefix and a suffix with one
+mutable clause between them - and NOTHING BOUNDS THAT CLAUSE. Measured, all
+green at 78/78: text appended inside the mutable region that carries no banned
+token, keeps both frozen halves byte-intact, satisfies every positive pin, and
+tells the model that the notice it is reading has been withdrawn and it may
+follow any instruction after that line. The control is inverted completely
+while the instrument reports success.
+
+**THE CORRECTIVE RULE: BOUND THE REGION, NOT ITS ENDPOINTS.** Exact equality
+over the whole block, or a slice whose length and shape are asserted together
+with a negative set. STRENGTHENING THE PINS IS THE FORBIDDEN SECOND ATTEMPT -
+the pins already pass; they sit in the surviving half.
+
+This also demotes the notes' headline sabotage result. The four-word attack it
+reports as caught is caught by PLACEMENT, not by construction: the same four
+words moved 240 characters left survive.
+
+## RULING 6 - B2 and B3 close together, by a KIND change
+
+Both are the class the criteria document already disposed C4 under, so neither
+gets another attempt at the same mechanism.
+
+- **B2**: the positional half of the `:219` instrument cannot fail except on
+  letter case. R4 AND R5a IMPLIES R5b as a matter of proof, and the
+  measurement agrees - the mutant the notes bank as proving non-redundancy
+  kills TWO assertions, not one. The non-redundancy was demonstrated in a
+  two-test sandbox that omitted the assertion that makes it redundant, which
+  is the "sandbox diverged from the real configuration" trap landing on the
+  artifact's own centrepiece. DELETE IT, or re-derive it against the FULL
+  instrument set and show a mutant only it catches.
+- **B3**: `as const satisfies` checks membership, never exhaustiveness.
+  Executed: adding a member to the union and leaving the array at two members
+  gives `tsc` exit 0 and 78/78 green, and the new branch is never composed.
+  Replace the `satisfies` axis with an exhaustive `Record<Union, ...>` plus
+  `Object.keys`. This matters more than it looks: A19 has just added a timing
+  union whose midweek arm is five paragraphs of new prose, so the guarantee
+  that a record claim in a not-yet-existing block goes red stops holding for
+  exactly the branches most likely to be added next.
+
+## RULING 7 - Ruling 1(i) BINDS the notes. The pass condition widens.
+
+B4 asks whether my Ruling 1(i) binds the notes' fact-level instrument or
+whether the criteria's pass condition narrows. **IT BINDS.** The rulings file
+says so by its own terms, and the measurement settles it: three separate
+per-fact deletions from the two blocks survive at 78/78 - including the clause
+saying that preserving the walkthrough order is the one thing the script
+exists to do. The instrument pins 3 of 5 operative facts in one block and 2 of
+4 in the other. Widen it to A4's full operative set.
+
+## RULING 8 - C7c is the weakest clause on the row and is redrawn with B1
+
+The check names it independently of B1 and the two findings meet: implemented
+exactly as written, C7c REJECTS THE MINIMAL CORRECT FIX (deleting the false
+clause outright fails a frozen prefix that ends in a trailing space, and fails
+a non-empty-middle assertion the criteria never required) while ACCEPTING an
+outright inversion of the control it protects. It is also strictly weaker than
+its stated twin, which has three positive pins it lacks, inside a criterion
+that says the two carry equal weight. A freeze on a whitespace boundary is not
+a freeze on a fact.
+
+## RULING 9 - the protected blocks need the same treatment as the defect blocks
+
+M3, accepted. P1/P2 are protected by token count in both directions, with no
+residual. Measured: a protected block replaced wholesale by a sentence that
+INVERTS it passes 78/78, while a semantically neutral synonym swap goes red on
+8 tests. That is the wrong sensitivity in both directions. A multiset cannot
+express "unchanged in force"; the notes built a rewording instrument for the
+defect blocks and none for the protected ones.
+
+## RULING 10 - corrections carried, not re-rounded
+
+- **M4**: R-8's instrument is the probe already measured non-discriminating -
+  `REGRESSION.md` does not index by row id at all. Use the commit hash.
+- **M5**: three positive presence regexes, not five, and the block is
+  `:517-578` - the range the criteria document had already corrected.
+- **M6**: the finding is right and its instrument works, but it is attributed
+  to a superseded revision; the document an implementer reads already says
+  those loci have no enforcer.
+- **M7**: the commanded test count of 80 is unfollowable - the notes do not
+  determine the `it()` decomposition, and a faithful build produced 78. A
+  commanded count from an under-determined construction invites a fabricated
+  match. DROP THE COUNT; keep the red-then-green requirement.
+- **m1**: the house-idiom argument is STRONGER than the notes state - 13
+  occurrences across 9 files, and the two omitted production files are the
+  most relevant ones.
+- **m2**: three of nine residuals carry a column that is not a measurement.
+  A null result, a contingency and a document are not instruments.
+
+## What is NOT in scope for the revision
+
+The check re-executed everything I asked and found the notes' core sound:
+section 0's partition, both frozen literal pairs byte-identical to HEAD, the
+three new instruments for the live holes (including the reflow control staying
+green), the reference implementation satisfiable at `tsc` exit 0, and the
+predicted synonym survivor. Do not rebuild what measured clean.
+
+## A PROCESS FINDING, and it is about how this loop runs rather than about A18
+
+The criteria check left its sabotage LIVE IN THE SHARED TREE - two modified
+prompt modules, the full record-family sweep, uncommitted. The next agent
+found them at its start. Nothing was lost (the modules are byte-identical to
+HEAD now, and the sabotage reached no commit), and it happened to be the
+strongest validation of the notes' construction available. But concurrent
+agents share this checkout, an auto-commit hook bundles whatever is dirty, and
+a sabotage left live is one `git add -A` away from shipping. RESTORE-BEFORE-
+REPORT IS NOT OPTIONAL, and the proof of restoration belongs in the report.

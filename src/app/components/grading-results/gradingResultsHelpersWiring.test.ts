@@ -12,6 +12,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { composeOverallCommentLocal } from "./gradingResultsHelpers";
 // Safe ONLY here: this is a test file, never bundled to the client. See
@@ -29,6 +30,12 @@ import {
 
 const SRC = join(process.cwd(), "src");
 const GRADING_RESULTS_DIR = join(SRC, "app", "components", "grading-results");
+
+// R-5e(ii): parses this file's OWN source with the compiler's real parser -
+// never a regex over raw text, which can only count calls it matches (a
+// second argument that is an object literal, or a first argument containing
+// a comma, is invisible to a pattern).
+const ts = createRequire(import.meta.url)("typescript") as typeof import("typescript");
 
 describe("composeOverallCommentLocal stays byte-identical to composeOverallComment", () => {
   // gradingResultsHelpers.ts deliberately does NOT import composeOverallComment
@@ -140,13 +147,57 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     expect(canary.violations.some((v) => v.resolved?.includes("lib/supabase/server"))).toBe(true); // R-5c
   });
 
+  it("R-5d: the second canary - node:async_hooks via owner-context.ts", () => {
+    const ownerContext = join(SRC, "lib", "supabase", "owner-context.ts");
+    const canary = walkRuntimeGraph([ownerContext], OPTIONS);
+    // Pinned to the SPECIFIC entry the forbiddenBareSpecifiers branch pushes
+    // (resolved: null), not merely `violations.length > 0` - this closure
+    // also reaches a forbidden MODULE (a different violations.push site,
+    // resolved: a path) so a bare length check would stay green even if the
+    // bare-specifier branch this canary exists to prove were deleted.
+    expect(canary.violations.some((v) => v.specifier === "node:async_hooks" && v.resolved === null)).toBe(true);
+    expect(canary.unallowed.some((u) => u.specifier === "node:async_hooks")).toBe(true);
+  });
+
   it("R-5e: both walkRuntimeGraph calls above take the SAME shared options identifier", () => {
+    // Parsed with ts.createSourceFile, not a regex: a regex over raw text can
+    // only count calls it matches, so a second argument that is an object
+    // literal - or a first argument containing a comma - is invisible to it.
     const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
-    const calls = [...source.matchAll(/walkRuntimeGraph\(\s*[^,]+,\s*([A-Za-z_$][\w$]*)\s*\)/g)];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    const names = new Set(calls.map((m) => m[1]));
-    expect(names.size).toBe(1);
-    expect(names.has("OPTIONS")).toBe(true);
+    const sourceFile = ts.createSourceFile("guard.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const names: string[] = [];
+    function visit(node: import("typescript").Node): void {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "walkRuntimeGraph") {
+        const arg = node.arguments[1];
+        expect(Boolean(arg && ts.isIdentifier(arg))).toBe(true);
+        if (arg && ts.isIdentifier(arg)) names.push(arg.text);
+      }
+      ts.forEachChild(node, visit);
+    }
+    ts.forEachChild(sourceFile, visit);
+    expect(names.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(names).size).toBe(1);
+    expect(names[0]).toBe("OPTIONS");
+  });
+
+  it("OPTIONS' every field is the named import from client-boundary-policy.ts", () => {
+    expect(OPTIONS.forbiddenPathPrefixes).toEqual(FORBIDDEN_PATH_PREFIXES);
+    expect(OPTIONS.browserSafeModules).toEqual(BROWSER_SAFE_MODULES);
+    expect(OPTIONS.forbiddenBareSpecifiers).toEqual(FORBIDDEN_BARE_SPECIFIERS);
+    expect(OPTIONS.allowedBareSpecifiers).toEqual(ALLOWED_BARE_SPECIFIERS);
+    expect(OPTIONS.allowedAssetExtensions).toEqual(ALLOWED_ASSET_EXTENSIONS);
+  });
+
+  it("Fix 4: no root in this closure is itself a `use server` file", () => {
+    const roots = [
+      ...directoryRoots(GRADING_RESULTS_DIR),
+      join(GRADING_RESULTS_DIR, "..", "GradingResults.tsx"),
+      join(SRC, "lib", "grade", "types.ts"),
+    ];
+    for (const root of roots) {
+      const scan = scanRuntimeEdges(readFileSync(root, "utf8"), root);
+      expect(scan.directives).not.toContain("use server");
+    }
   });
 
   it("canary: scanRuntimeEdges finds a real edge for a known-bad value import, and none for a type-only one", () => {

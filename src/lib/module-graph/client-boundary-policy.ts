@@ -30,9 +30,11 @@ export const FORBIDDEN_BARE_SPECIFIERS = ["next/headers", "node:async_hooks", "s
 
 // THE ALLOW LIST. Every literal bare specifier that is not a walked module
 // and not an allowed asset must be on this list, or the guard FAILS. Starts
-// as a transcription of the 18 distinct bare specifiers dropped by the two
-// guarded closures before Z1 (docs/a23-architecture.md:591-635) - every one
-// browser-safe on the build's own evidence (RES-A23-5).
+// as a transcription of the 18 distinct specifiers dropped by the two
+// guarded closures before Z1 (docs/a23-architecture.md:591-635) - 14 bare
+// specifiers here plus 4 CSS assets covered separately by
+// ALLOWED_ASSET_EXTENSIONS below - every one browser-safe on the build's own
+// evidence (RES-A23-5).
 export const ALLOWED_BARE_SPECIFIERS = [
   "@monaco-editor/react",
   "@mui/material",

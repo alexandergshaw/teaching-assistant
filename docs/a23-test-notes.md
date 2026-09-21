@@ -1179,18 +1179,28 @@ Command: `node --experimental-strip-types <sandbox>/mutants.ts` and
 |---|---|---|---|---|
 | **M1** | `directoryRoots` returns `[]` | `R2.rg_roots` 32 -> **0**, `gr_local_roots` 11 -> **0**; `RG.violations` 0 (green both ways); `RG.nodes` 149 -> 0; both canaries green | **R-2 only** | YES - the ONLY mutant R-2 catches and nothing else does |
 | **M2** | `srcRoot` = repo root, not `src/` | `RG.ua` 0 -> **23**, `GR.ua` 0 -> **4**; `nodes` 149 -> 45; `MJ4.mismatches` 0 -> **5** | **R-3, R-14** | YES |
-| **M3** | `importClauseIsErased` ignores the DEFAULT binding | 8 fixtures red, all `default-inline-type/import` | **R-6a** | YES - this is AC-2(c) |
+| **M3** | `importClauseIsErased` ignores the DEFAULT binding | **CORRECTED (as-built verification, 2026-09-21): 14 fixtures red, not 8, and a second shape - measured 6 `default/import/*` plus 8 `default-inline-type/import/*`.** | **R-6a** | YES - this is AC-2(c) |
 | **M4** | import side: `.some` not `.every` | 8 fixtures red, all `mixed-inline/import`; `RG.nodes` 149 -> 127; `R5d.owner_v_gt0` true -> **false**; `RG.violations` stays 0 | **R-6a, R-5d** | YES - note R-1 does NOT see it |
 | **M5** | non-literal specifiers silently dropped (the pre-Z1 `continue`) | **2** fixtures red (`computed`, `template-substituted`); both closures unchanged | **R-6a only** | YES via the fixtures; **R-4 is green in BOTH directions and discriminates NOTHING here** |
 | **M6** | the `unallowed` bucket removed - **REBUILT this round, see below** | `R5b.barrel_ua_gt0` true -> **false**; `R5d.owner_names_async_hooks` true -> **false** | **R-5b, R-5d** | YES after the rebuild; **R-3 is green in BOTH directions.** Without R-5b this mutant SURVIVES the entire suite |
 | **M7** | `ScriptKind` always TS, never TSX | 2 fixtures red (`require-inside-jsx/*`); `R7.tsx` `["@/lib/grade"] -> []` | **R-7, R-6a** | YES - rebuilt in round 1; now caught twice |
-| **M8** | the `"use server"` wall removed | `RG` `v 0 -> 104, ua 0 -> 12, n 149 -> 454`; `GR` `v 0 -> 104, n 93 -> 418` | **R-1, R-3, R-9** | YES |
+| **M8** | the `"use server"` wall removed | `RG` `v 0 -> 104, ua 0 -> 12, n 149 -> 454`; `GR` `v 0 -> 104, n 93 -> 418` | **R-1, R-3** (**CORRECTED, 2026-09-21: NOT R-9** - R-9's own oracle already sets `treatUseServerAsWall: false`, so it cannot discriminate a change to that same field) | YES |
 | **M9** | `isForbiddenPath` gains a `/` boundary - **THE WITHDRAWN m-3 FIX** | `R8a` true -> **false**; `R8b(canvas sibling)` true -> **false**; `R8c(canvas inside)` false -> true | **R-8 only** | YES, two-sidedly |
 | **M10** | `browserSafeModules` ignored | `RG.violations` 0 -> **1** (`index.tsx -> useRepoGradesData.ts -> SupabaseProvider.tsx` value-imports `@/lib/supabase/client`) | **R-1** | YES |
-| **M11** | the forbidden-path check removed entirely | `barrel v` 4 -> **0**; `R5c` both forms true -> **false**; `R5d.owner_v_gt0` -> false; all three R-8 booleans -> false | **R-5a, R-5c, R-5d, R-8** | YES |
+| **M11** | the forbidden-path check removed entirely | `barrel v` 4 -> **0**; `R5c` both forms true -> **false**; `R5d.owner_v_gt0` -> false; all three R-8 booleans -> false | **R-5c, R-5d, R-8** (**CORRECTED, 2026-09-21: NOT R-5a** - with the path check gone the walk recurses INTO `lib/supabase/server.ts`, which value-imports `next/headers`, so `FORBIDDEN_BARE_SPECIFIERS` keeps `violations` non-empty and R-5a's `> 0` assertion still passes) | YES |
 | **M12** | the walk never recurses (direct-only) | `barrel v` 4 -> **0**, `barrel ua` 6 -> **0**; `RG.nodes` 149 -> 32; `GR.nodes` 93 -> 13 | **R-5a, R-5b** | YES |
 | **M13** | **NEW.** EXPORT side: the `elements.length > 0` guard dropped - the checker's passing-but-wrong implementation | **8 fixtures red, all `empty-braces/export/*`**; every closure, canary and policy assertion unchanged | **R-6a only, via cells that did not exist in round 1** | YES - **this is blocker B-1, and only the SIDE dimension kills it** |
 | **M17** | **NEW (Ruling V4). IMPORT side: the same `elements.length > 0` guard dropped, on the import clause instead of the export clause - the import-side twin of M13.** | **8 fixtures red, all `empty-braces/import/*`**; every closure, canary and policy assertion unchanged | **R-6a only, via cells that did not exist in round 1** | YES - independent of the compiler-configuration question section 3.4 argues: SWC (Ruling V1) measures `empty-braces/import` a real edge under BOTH configurations, so this kill does not hinge on the contested cell the way M13's does |
+
+**CORRECTION (as-built verification, 2026-09-21): M13 and M17 are NOT
+independent against the SHIPPED code.** The shipped `namedElementsConveyValue`
+(`runtime-import-graph.ts:68-74`) is ONE function used on both the import and
+the export side (`:88` and `:103`) - it was never written as two separate
+`elements.length > 0` guards, one per side, the way M13/M17's descriptions
+imply. A single edit to that one function reds BOTH sides' `empty-braces/*`
+cells at once; the SIDE dimension still reds both cells either way, so no
+coverage is lost, but a report that runs M13 and M17 as two distinct mutants
+is describing the same mutation twice, not two independent kills.
 | **M15** | **NEW.** `classifySpecifier`'s `missing` branch deleted (falls through to `package`) | `MJ4.mismatches` 0 -> **3**; every closure, canary and fixture assertion unchanged | **R-14 only** | YES - **killed by NOTHING ELSE in this document** |
 | **M16** | **NEW.** `classifySpecifier`'s asset check deleted | `RG.ua` 0 -> **23**, `GR.ua` 0 -> **10**; `MJ4.mismatches` 0 -> **2** | **R-3, R-14** | YES |
 | **M14** | the DECORATIVE guard file: the real walk passes `forbiddenPathPrefixes: []`, the canary keeps the shared constant | **byte-identical to baseline on every walk**; R-1, R-3, R-4, R-5a-d and R-10 all pass | **R-5e only** | YES - section 5.3 runs the instrument against it and two further attacks |

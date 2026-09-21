@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createRequire } from "node:module";
 import { directoryRoots, scanRuntimeEdges, walkRuntimeGraph } from "@/lib/module-graph/runtime-import-graph";
 import {
   ALLOWED_ASSET_EXTENSIONS,
@@ -31,6 +32,12 @@ import {
 function read(relativePath: string): string {
   return readFileSync(join(process.cwd(), relativePath), "utf8");
 }
+
+// R-5e(ii): parses this file's OWN source with the compiler's real parser -
+// never a regex over raw text, which can only count calls it matches (a
+// second argument that is an object literal, or a first argument containing
+// a comma, is invisible to a pattern).
+const ts = createRequire(import.meta.url)("typescript") as typeof import("typescript");
 
 const SRC = join(process.cwd(), "src");
 const REPO_GRADES_DIR = join(SRC, "app", "components", "repo-grades");
@@ -357,14 +364,42 @@ describe("R-5: a PLANTED POSITIVE proves this walk actually discriminates", () =
   });
 });
 
+describe("R-5d: the second canary - node:async_hooks via owner-context.ts", () => {
+  it("violations contains exactly the node:async_hooks entry, and unallowed contains it too", () => {
+    const ownerContext = join(SRC, "lib", "supabase", "owner-context.ts");
+    const canary = walkRuntimeGraph([ownerContext], OPTIONS);
+    // Pinned to the SPECIFIC entry the forbiddenBareSpecifiers branch pushes
+    // (resolved: null), not merely `violations.length > 0` - this closure
+    // also reaches a forbidden MODULE (a different violations.push site,
+    // resolved: a path) so a bare length check would stay green even if the
+    // bare-specifier branch this canary exists to prove were deleted.
+    expect(canary.violations.some((v) => v.specifier === "node:async_hooks" && v.resolved === null)).toBe(true);
+    expect(canary.unallowed.some((u) => u.specifier === "node:async_hooks")).toBe(true);
+  });
+});
+
 describe("R-5e: both walkRuntimeGraph calls in this file take the SAME shared options identifier", () => {
-  it("at least two calls, every second argument is a bare Identifier, all the same name", () => {
+  it("at least two calls, EVERY second argument is a bare Identifier (never an object literal), all the same name", () => {
+    // Parsed with ts.createSourceFile, not a regex: a regex over raw text can
+    // only count calls it matches, so a second argument that is an object
+    // literal - or a first argument containing a comma - is invisible to it.
+    // See the fixed version's PASSING-BUT-WRONG predecessor in
+    // docs/a23-test-notes.md's R-5e disposition for exactly this hole.
     const source = read("src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts");
-    const calls = [...source.matchAll(/walkRuntimeGraph\(\s*[^,]+,\s*([A-Za-z_$][\w$]*)\s*\)/g)];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    const names = new Set(calls.map((m) => m[1]));
-    expect(names.size).toBe(1);
-    expect(names.has("OPTIONS")).toBe(true);
+    const sourceFile = ts.createSourceFile("guard.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const names: string[] = [];
+    function visit(node: import("typescript").Node): void {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "walkRuntimeGraph") {
+        const arg = node.arguments[1];
+        expect(Boolean(arg && ts.isIdentifier(arg))).toBe(true);
+        if (arg && ts.isIdentifier(arg)) names.push(arg.text);
+      }
+      ts.forEachChild(node, visit);
+    }
+    ts.forEachChild(sourceFile, visit);
+    expect(names.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(names).size).toBe(1);
+    expect(names[0]).toBe("OPTIONS");
   });
   it("OPTIONS' every field is the named import from client-boundary-policy.ts", () => {
     expect(OPTIONS.forbiddenPathPrefixes).toEqual(FORBIDDEN_PATH_PREFIXES);
@@ -372,6 +407,21 @@ describe("R-5e: both walkRuntimeGraph calls in this file take the SAME shared op
     expect(OPTIONS.forbiddenBareSpecifiers).toEqual(FORBIDDEN_BARE_SPECIFIERS);
     expect(OPTIONS.allowedBareSpecifiers).toEqual(ALLOWED_BARE_SPECIFIERS);
     expect(OPTIONS.allowedAssetExtensions).toEqual(ALLOWED_ASSET_EXTENSIONS);
+  });
+});
+
+describe("Fix 4: no root in the repo-grades closure is itself a `use server` file", () => {
+  it("none of directoryRoots(repo-grades)'s own directive prologues include use server", () => {
+    // R-9's oracle proves removing the wall EXPLODES the closure (149 -> 454
+    // nodes); nothing proved the wall was not instead SWALLOWING a root -
+    // treatUseServerAsWall would silently skip an entire root file's own
+    // edges, and R-2 (root-set identity) and R-1/R-3/R-4 (v=0 is the pass
+    // condition) both stay green regardless.
+    const roots = directoryRoots(REPO_GRADES_DIR);
+    for (const root of roots) {
+      const scan = scanRuntimeEdges(readFileSync(root, "utf8"), root);
+      expect(scan.directives).not.toContain("use server");
+    }
   });
 });
 

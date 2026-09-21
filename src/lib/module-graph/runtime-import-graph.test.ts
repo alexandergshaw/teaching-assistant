@@ -228,6 +228,29 @@ function buildNonClauseFixtures(): Fixture[] {
       want: "edge",
     });
   }
+  // Fix 5 (a23-test-notes.md's founding class, reappearing a third time): TS's
+  // import-equals form is a fourth declaration kind, neither an erased
+  // type-only declaration nor one of the three previously-enumerated kinds.
+  // Both spellings are edges; neither is expressible by valueImportSpecifiers
+  // (no `from` token), so both are positive controls by construction.
+  out.push({
+    shape: "import-equals",
+    side: "-",
+    separator: "-",
+    quote: '"',
+    source: `import g = require("${SPEC}");`,
+    fileName: "fixture.ts",
+    want: "edge",
+  });
+  out.push({
+    shape: "export-import-equals",
+    side: "-",
+    separator: "-",
+    quote: '"',
+    source: `export import g = require("${SPEC}");`,
+    fileName: "fixture.ts",
+    want: "edge",
+  });
   return out;
 }
 
@@ -243,6 +266,8 @@ const NONCLAUSE_SHAPES = [
   "in-comment",
   "in-string",
   "require-inside-jsx",
+  "import-equals",
+  "export-import-equals",
 ];
 
 const CLAUSE_FIXTURES = buildClauseFixtures();
@@ -287,18 +312,18 @@ describe("R-6b: every fixture carries a direction label derived from want, not f
   it("splits into 60 positive controls and 97 regression canaries", () => {
     const positive = FIXTURES.filter((f) => label(f) === "positive-control").length;
     const canary = FIXTURES.filter((f) => label(f) === "regression-canary").length;
-    expect(positive).toBe(60);
+    expect(positive).toBe(62);
     expect(canary).toBe(97);
   });
 });
 
 describe("R-6c: the fixture count is frozen, and so is the shape count", () => {
-  it("fixtures.length === 157", () => {
-    expect(FIXTURES.length).toBe(157);
+  it("fixtures.length === 159", () => {
+    expect(FIXTURES.length).toBe(159);
   });
-  it("CLAUSE_SHAPES.length === 12 and NONCLAUSE_SHAPES.length === 10", () => {
+  it("CLAUSE_SHAPES.length === 12 and NONCLAUSE_SHAPES.length === 12", () => {
     expect(CLAUSE_SHAPES.length).toBe(12);
-    expect(NONCLAUSE_SHAPES.length).toBe(10);
+    expect(NONCLAUSE_SHAPES.length).toBe(12);
   });
 });
 

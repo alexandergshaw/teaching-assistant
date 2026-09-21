@@ -4,10 +4,13 @@
 // leaked - see docs/a23-architecture.md and docs/a23-test-notes.md.
 //
 // Edge extraction is done by the TypeScript compiler's own parser
-// (`ts.createSourceFile`), never by a pattern over raw text: an
-// un-enumerated SYNTAX is not matched by any pattern here, because there is
-// no pattern - it is either an erased type-only declaration or a followed
-// edge. Reachability is judged by a capability predicate on the RESOLVED
+// (`ts.createSourceFile`), never by a pattern over raw text: the visitor
+// enumerates a small, closed set of DECLARATION KINDS - import declarations,
+// export-from declarations, import-equals/require-equals declarations, and
+// the call forms of dynamic `import()`/`require()` - rather than inferring
+// intent from a line's spelling. Every syntax form is one of those enumerated
+// kinds, an erased type-only declaration, or a followed edge. Reachability
+// is judged by a capability predicate on the RESOLVED
 // path (docs/a23-architecture.md:472-527), under an ALLOW list for bare
 // specifiers (Ruling Z1) - an un-enumerated SPECIFIER fails loudly rather
 // than being silently permitted.
@@ -103,6 +106,21 @@ export function scanRuntimeEdges(source: string, fileName: string): EdgeScan {
           isEdge = namedElementsConveyValue(clause.elements);
         }
         if (isEdge) edges.push({ specifier, kind: "export-from" });
+      }
+    } else if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly) {
+      // `import x = require(S)` and `export import x = require(S)` (the
+      // ExportKeyword is a modifier, not a different node kind) - a fourth
+      // declaration kind alongside import/export-from/call, followed exactly
+      // like a static import: a string-literal argument is an edge, anything
+      // else is residue, never silently dropped.
+      const ref = node.moduleReference;
+      if (ts.isExternalModuleReference(ref)) {
+        const text = literalText(ref.expression);
+        if (text !== null) {
+          edges.push({ specifier: text, kind: "require" });
+        } else {
+          unresolvable.push(`require(${ref.expression.getText(sourceFile)})`);
+        }
       }
     } else if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;

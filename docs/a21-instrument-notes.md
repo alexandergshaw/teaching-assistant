@@ -24,7 +24,16 @@ minors.
 
 ---
 
-## 1. Every quantity in this file, with the command that produced it
+## 1. Every quantity in sections 1-13, with the command that produced it
+
+**Scope note (disposal round, section 15, Ruling S3, blocker B2):** this
+table's title originally read "every quantity in this file" and covered none
+of section 14's or section 15's own quantities - both of which carry their own
+measured-quantity tables (14.1, 14.3, 14.5, 14.6, and 15's own tables) rather
+than duplicating them here. Narrowed rather than extended, per the ruling's
+choice: extending this table would either duplicate those tables or omit rows
+from them, and this file already has one recorded instance (1a) of a
+duplicated count drifting from its source.
 
 | Quantity | Command | Value |
 |---|---|---|
@@ -676,15 +685,19 @@ fabricated import.
   (`:1376-1377`) and AC-5's per-kind marker-substring Record both cited. Both
   are corrected in section 13 to depend on THIS constant, never on any upstream
   symbol.
-- **Honest limit, stated rather than closed:** this proves the header's
-  presence, byte-fixedness, and kind-gating. It does NOT prove the outline arm
-  actually reads `args.outline` when the outline varies - a header can be
-  emitted correctly while the content behind it is wrong, which is exactly
-  mutant M14's shape. Whether AC-5(d) and AC-7(b), now bound to a real
-  constant, in fact go RED on M14 is unmeasured in this disposal round (no
-  reference sandbox exists to re-run it - section 2 records it archived out of
-  the tree) and is left to the implementer's own sabotage pass, which
-  `iteration-caps.md` never caps.
+- **Honest limit, stated rather than closed, and now MEASURED (corrected,
+  section 15 Ruling S3, blocker B2):** this proves the header's presence,
+  byte-fixedness, and kind-gating. It does NOT prove the outline arm actually
+  reads `args.outline` when the outline varies - a header can be emitted
+  correctly while the content behind it is wrong, which is exactly mutant
+  M14's shape. **Whether AC-5(d) and AC-7(b), now bound to the real constant,
+  in fact go RED on M14 is no longer unmeasured: section 14 measured it, and
+  the answer is NO - both stay GREEN under M14 (14.1).** The real enforcer for
+  M14 is section 14's **AC-5(g)**, not this criterion. This paragraph
+  previously said the question was "left to the implementer's own sabotage
+  pass" and "unmeasured in this disposal round"; both phrases are stale as of
+  section 14 and are corrected here rather than left to contradict it two
+  sections later.
 
 ### 6.5.4 RES-3, widened
 
@@ -1133,7 +1146,7 @@ sixteen kills and measured none.
 | M12-OLD2 | the isolating form: A21's block PLUS a truncated copy | - | **RED on (e) ONLY. Under round 2's criteria it SURVIVES** | **REBUILT** - see 6.2 |
 | M12-NEW | the whole first sentence with a different tail | RED on (b) | **RED on (b) and (e)** | **Yes** - this is the replacement row |
 | M13 | the action hand-rolls a deterministic draft instead of the shipped scaffold | RED | **RED**: AC-10(d) table + scaffold row | **Yes** |
-| M14 | the composer's outline arm ignores `args.outline` and always renders `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)` | RED | **Checker-measured (round 3), not this pass's sandbox** (archived - section 2): RED only via AC-5(d) and AC-7(b), and prior to this disposal BOTH ran through the fabricated `OUTLINE_BLOCK_HEADER`. 6.5 mints the real constant; whether AC-5(d)/AC-7(b) still fire once bound to it is unmeasured here and left to the implementer's sabotage pass | **Disputed - see 6.5.3's honest limit** |
+| M14 | the composer's outline arm ignores `args.outline` and always renders `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)` | RED | **CORRECTED (section 15 Ruling S3, blocker B2; supersedes this row as originally written).** This row previously read "RED only via AC-5(d) and AC-7(b) ... whether AC-5(d)/AC-7(b) still fire once bound to it is unmeasured here and left to the implementer's sabotage pass" - that text is now stale and wrong in both halves. Section 14 measured it directly: bound to the real `FROZEN_OUTLINE_BLOCK_HEADER`, **AC-5(d) and AC-7(b) both stay GREEN under M14** (14.1) - the fabricated-symbol-era "RED only via" credit was false even before the real constant was substituted in. The honest verdict is **M14 survived every criterion in this file before section 14's AC-5(g)**, which is its first real enforcer: RED on clauses (iii) and (iv), at both outline-carrying kinds (14.5, row MV1) | **Real enforcer: AC-5(g) (section 14). AC-5(d) and AC-7(b) keep their own legitimate kills but never had this one - see 6.5.3's honest limit, now measured, not the "disputed" state this row previously named** |
 | M15 | hoist `const HOISTED_NONCE = newBriefNonce()` to module scope (one nonce per process) | RED | **Checker-measured (round 3): GREEN at 44/44 under round-2's AC-6n(i)-(iii)**, RED under new AC-6n(iv) (7.5a) | **Yes, but only after 7.5a - this is the row that proves (iv) is required** |
 | M16 | the action passes a hardcoded 32-hex string and never calls `newBriefNonce` | RED | **Checker-measured (round 3): GREEN at 44/44 under round-2's AC-6n(i)-(iii)**, RED under new AC-6n(iv) (7.5a) | **Yes, but only after 7.5a** |
 
@@ -1362,6 +1375,19 @@ true size - a kill count of two that was really a kill count of zero is exactly
 the "instrument that does not measure what it claims, wearing a number" that
 practice 2 exists to prevent.
 
+**CHECKER-CONFIRMED (section 15, disposal round).** The probe results in the
+table above were independently reproduced: under M14, `probe-header.test.ts`
+passes `2/2` and `probe-ac7b.test.ts` passes `1/1`, so AC-5(d), AC-5(f) and
+AC-7(b) are **all GREEN** under M14 - confirming, not merely repeating, the
+table above. The section 15 checker additionally read every OTHER criterion in
+this file for M14-sensitivity - AC-5(a)(b)(c'), AC-6, AC-6n(i)-(iv), AC-7(a)(c),
+AC-15, AC-18 - and none of them fires on M14 either (M14 changes only the
+composer's outline arm; it does not touch the nonce, the framings, the cap, the
+receipt, the routing, or `buildPromptDraftRequest`, which is what each of those
+criteria actually measures). So "M14 survived every criterion in this file
+before AC-5(g)" is recorded as **CHECKER-CONFIRMED**, not merely this seat's own
+prior claim.
+
 ---
 
 ## 14.2 The construction: how the outline pair is built, and why the two are guaranteed to render differently
@@ -1384,7 +1410,28 @@ else:
 
 And, inside `renderOutlineSection` (`:219-234`), each section contributes
 `section.break` (`:220`), `section.listKind` (`:222-226`), `section.sentenceRange`
-(`:227`) and `section.heading` (`:230-231`).
+(`:227`), `section.index` (`:229`) and `section.heading` (`:230-231`).
+
+**Corrected (major M1, section 15).** This section-level list originally
+omitted `section.index`, read at `:229`
+(`` const parts = [`Section ${section.index}: starts with ...`] ``), so
+14.2.2's rule "differ in EVERY field `renderOutlineBlock` reads" was not
+satisfied by its own pair as first written: `OUTLINE_A.sections[0].index ===
+OUTLINE_B.sections[0].index === 1`. **This is a factual error in a measured
+enumeration, not an instrument defect - kill power is unaffected**, because
+clause (iv) (14.3) compares against the WHOLE real render via an exact
+occurrence count, so a mangled `index` dies on that comparison regardless of
+whether the pair varies it directly. `index` is **POSITIONALLY DETERMINED**
+(`announcement-outline-types.ts:32-33`: "1-based position in the document, so
+a section can be referred to by INDEX rather than by heading text"), so it
+cannot be varied independently of a section's position in the array - the
+existing pair already varies it in the only way available, by `OUTLINE_B`
+carrying a second section (`index: 2`) where `OUTLINE_A` has one. No change to
+`OUTLINE_A`/`OUTLINE_B` (14.2.2) is needed; only this table's enumeration was
+short. **The four-member claim for `renderOutlineBlock` itself (`outline.sections`,
+`outline.dueDateSectionIndex`, `outline.todoSectionIndex`, `outline.hasLinks`)
+is exactly right, and `hasGreeting`/`hasSignOff` are genuinely never read** -
+only the section-level list needed the row above.
 
 **`hasGreeting` and `hasSignOff` are NOT read by either function.** Confirmed by
 reading the whole of `:219-261`: neither identifier appears. Two outlines
@@ -1512,13 +1559,32 @@ same construction AC-5 and AC-18 already use.
 **(ii) The one-key control - nothing but the outline differs.**
 - *Object:* the two argument objects themselves, not their output.
 - *Instrument:* `Object.keys(a).sort()` equals `Object.keys(b).sort()`, then
-  `keys.filter((k) => a[k] !== b[k])` computed over `Object.keys(BASE)` and
-  asserted `toEqual(["outline"])`. A computed difference set, never an eyeballed
-  one.
+  `keys.filter((k) => a[k] !== b[k])` computed over
+  **`[...new Set([...Object.keys(a), ...Object.keys(b)])]`** and asserted
+  `toEqual(["outline"])`. A computed difference set, never an eyeballed one.
+  **Corrected (minor m2, section 15):** this previously filtered over
+  `Object.keys(BASE)`, which the stated direction - "RED the moment any second
+  argument varies" - does not actually satisfy: a key present in BOTH call
+  objects but absent from `BASE` (for example one added by a future spread that
+  bypasses `BASE` entirely) escapes a filter keyed on `BASE`'s own keys. The
+  union of both calls' own keys does not have that gap; the two calls' key sets
+  are already asserted equal one line above, so the union and either call's own
+  key set coincide when this clause is satisfied, and the union is what still
+  works when it is not.
 - *Direction:* RED the moment any second argument varies between the two calls -
   the nonce above all, but equally `promptText`, `courseLabel` or `styleBlock`.
   This is the clause that stops AC-5(g) from being satisfied for an unrelated
   reason, and 14.4 measures it firing.
+- **Wording limit (minor m3, section 15).** "Clause (ii) catches the per-call
+  nonce mechanically" is true only of the FIXTURE hazard - a test that
+  accidentally lets the two calls' `briefNonce` (or any other argument) differ.
+  A composer that generates its OWN nonce internally, which 7.2 forbids by
+  construction, is INVISIBLE to (ii): both call objects would still carry the
+  same test-supplied `briefNonce` field, identical to each other, while the
+  composer silently ignored it and minted its own. That hazard is caught by
+  (v) and (vi) - the composed output would then vary (or fail to be invariant)
+  for a reason neither call's arguments show. Recorded here so nobody leans on
+  (ii) for a hazard it cannot see.
 
 **(iii) Per outline-carrying kind: the composed prompt differs.**
 - *Object:* `buildPromptAnnouncementPrompt({...BASE, resolvedKind, outline: A})`
@@ -1544,6 +1610,64 @@ exactly once, and not the other's, and not the empty one.**
   given - M14's exact shape - and RED if it renders no outline at all, or emits
   the block twice. The `RENDER_EMPTY` absence is the clause aimed squarely at
   M14's literal form.
+- **Third row, added (major M2, section 15).** Every row above holds an
+  outline-carrying kind at a NON-EMPTY outline and asserts `RENDER_EMPTY` is
+  ABSENT - there was no row anywhere in this file asserting the empty-outline
+  arm is actually PRESENT when an outline-carrying kind legitimately receives
+  an empty outline (an instructor's pasted or saved exemplar can itself have no
+  discernible structure). Without this, a composer that emits the header
+  (6.5.2-6.5.3) followed by nothing at all for an empty outline on `pasted`/
+  `saved` is green on every clause here - the same "header with no content
+  behind it" shape 6.5.1 named for M14, one input value over. Add: a THIRD
+  build at `resolvedKind: "pasted"`, `outline: EMPTY_ANNOUNCEMENT_OUTLINE`
+  (`docs/a21-scope.md:484` relies on this arm firing), asserting
+  `composed.split(RENDER_EMPTY).length - 1 === 1` - the positive enforcer this
+  arm otherwise has nowhere in the file. Scoped to `pasted` alone, per the
+  ruling, rather than duplicated onto `saved` as well - AC-5(c') (6.3) already
+  proves `pasted` and `saved` are byte-identical at a fixed outline, so a
+  `saved`-side failure of this same shape is not a distinct, uncovered
+  possibility the way the `pasted`-alone gap was.
+- **Fourth addition: the render's OWN position, closing blocker B3 (Ruling S2,
+  section 15).** Every assertion above pins the render's CONTENT and its
+  OCCURRENCE COUNT; nothing pinned its INDEX relative to the untrusted framing.
+  `docs/a21-scope.md`'s AC-7 Direction requires "RED if the outline block
+  escapes above the untrusted framing (attacker-influenceable heading text
+  unframed)" - the heading text lives in the RENDER
+  (`headingLabelClause(section.heading)`,
+  `src/lib/walkthrough-announcement-prompt.ts:230-231`), not in the header
+  AC-7(b) pins the index of. AC-7(b) pins the HEADER's position; AC-5(f) pins
+  the header's presence; this clause's own occurrence-count and content
+  assertions pin nothing about where the render sits; and nothing anywhere
+  required the header and the render to be adjacent. Add, per outline-carrying
+  kind, using this test file's own `RENDER_A`/`RENDER_B` and a
+  `FROZEN_UNTRUSTED_FRAMING` literal typed in here exactly as AC-7's own test
+  defines it (duplicated, not imported - this repo forbids cross-test-file
+  imports of a shared helper; a frozen literal is exactly the case AC-5(d)/(e)/(f)
+  already duplicate rather than import):
+  `expect(composed.indexOf(FROZEN_UNTRUSTED_FRAMING)).toBeGreaterThanOrEqual(0)`
+  as the anchor, then
+  `expect(composed.indexOf(RENDER_X)).toBeGreaterThan(composed.indexOf(FROZEN_UNTRUSTED_FRAMING))`
+  for the matching render. **Direction:** RED if the outline render sits at or
+  before the untrusted framing, in particular if the composer hoists
+  `renderOutlineBlock(args.outline)` above
+  `promptAnnouncementInstructionFraming()` while still emitting the header in
+  its usual place - the header's own index says nothing about where the CONTENT
+  behind it landed. **Named sabotage: MV6** - `kindBlock` returns the header
+  alone and `renderOutlineBlock(args.outline)` is hoisted above
+  `promptAnnouncementInstructionFraming()`, entirely outside the untrusted
+  region, gated off for `none` so the negative control in clause (vi) still
+  holds. Pre-disposal, MV6 was checker-measured GREEN on every existing gate:
+  AC-5(g) 12/12, AC-7(b) 1/1, AC-5(d)/(f) 2/2 - the instructor's pasted
+  exemplar's own heading text reached the model as un-framed instruction-region
+  content with every gate green. This new assertion is what makes MV6 RED; it
+  was not re-run in a sandbox by this pass (none exists - 14.6's teardown), so
+  its post-disposal RED is a construction, stated as such, not claimed as
+  measured. **Explicitly NOT re-opened, per the ruling:** `FROZEN_OUTLINE_BLOCK_HEADER`
+  (6.5.2-6.5.3) and AC-7(b)'s settled fifth-marker correction (section 13) are
+  unchanged - this closes in clause (iv) precisely because `RENDER_A`/`RENDER_B`
+  already exist here as named objects and the occurrence count is already
+  computed, which is what makes it a one-line addition rather than a reopened
+  design question.
 
 **(v) The rendered outline is the ONLY thing that changed - the attribution
 clause.**
@@ -1628,6 +1752,7 @@ Clean baseline: `Test Files 1 passed (1)` / `Tests 12 passed (12)`.
 | MV3 | the outline arm honours `args.outline` on `saved` but renders EMPTY on `pasted` | RED | **RED, `Tests 2 failed \| 10 passed (12)`**: (iii) and (iv), **at `pasted` only** | **Yes - and this is the row that proves the kind loop is required.** A criterion written at `saved` alone survives it |
 | MV4 | the outline block is emitted on EVERY kind, including `none` (the over-correction) | RED | **RED, `Tests 1 failed \| 11 passed (12)`**: (vi) alone | **Yes - the row that proves the negative control is required** |
 | MV5 | renders the RIGHT outline, but also echoes `outline.sections.length` into the floor block | RED | **RED, `Tests 3 failed \| 9 passed (12)`**: (v) at both kinds, and (vi). **(iii) and (iv) PASSED** | **Yes - the row that proves the attribution clause is required** |
+| MV6 (Ruling S2, section 15) | `kindBlock` returns the header alone; `renderOutlineBlock(args.outline)` is hoisted above `promptAnnouncementInstructionFraming()`, entirely outside the untrusted region, gated off for `none` | RED, on clause (iv)'s new position assertion only | **Pre-disposal, checker-measured GREEN on every gate that existed then: AC-5(g) 12/12, AC-7(b) 1/1, AC-5(d)/(f) 2/2.** Post-disposal: RED on (iv)'s new `indexOf` assertion **by construction - not re-run in a sandbox this pass (none exists, 14.6)**, so this is stated as a construction, not claimed as measured | **Yes, but only after the position assertion added in this disposal round - this is the row that proves it is required, and the sharpest finding of the round: the exemplar's own heading text reached the model as un-framed instruction-region content with every prior gate green** |
 | restore control | original restored | GREEN | **GREEN, `Tests 12 passed (12)`**, and `composer.ts` byte-identical to the backup | control |
 
 **Rows whose verdict is NOT a kill, named so nobody counts them as coverage:**
@@ -1644,8 +1769,13 @@ Clean baseline: `Test Files 1 passed (1)` / `Tests 12 passed (12)`.
 
 **Clause-to-mutant map, so no clause is decorative:** (i) killed by T2; (ii)
 killed by T1; (iii) killed by MV1 and MV3 but by nothing (iv) misses - **not
-independently load-bearing, stated in 14.3**; (iv) killed by MV1, MV2, MV3;
-(v) killed by MV2, MV5, T1; (vi) killed by MV4, MV5, T1.
+independently load-bearing, stated in 14.3**; (iv) killed by MV1, MV2, MV3, and
+- on its new position sub-clause only (section 15) - by **MV6**; (v) killed by
+MV2, MV5, T1; (vi) killed by MV4, MV5, T1. The third row added to (iv) for
+major M2 (section 15, the `pasted`-at-empty-outline positive enforcer) has no
+dedicated mutant of its own in this table - the ruling priced it at one row,
+not a residual, and the row's own vacuity guard (`RENDER_EMPTY` must actually
+occur once) is what keeps it from being decorative without one.
 
 ---
 
@@ -1656,8 +1786,19 @@ because section 2's `.a21ref` tree no longer exists. **It was rebuilt.**
 
 **Result: `Test Files 1 passed (1)` / `Tests 12 passed (12)` green against a
 correct composer**, command
-`node ../../node_modules/vitest/vitest.mjs run --root .` run from the sandbox.
-So AC-5(g) is a specification, not a wish: something has passed it.
+`node ../../node_modules/vitest/vitest.mjs run --root . variance.test.ts` run
+from the sandbox. So AC-5(g) is a specification, not a wish: something has
+passed it. **Corrected (minor m1, section 15):** this command was previously
+quoted bare, without `variance.test.ts`, and the bare form does not produce the
+quoted quantity - `--root .` alone collects every test file under the sandbox
+root (this section's `variance.test.ts` plus the disposal round's own
+`probe-header.test.ts`, `probe-ac7b.test.ts`, `probe-T1.test.ts` and
+`probe-T2.test.ts`), giving a different file/test count than `1 file / 12
+tests`. The FACT (12 green) is true; the COMMAND as quoted was
+under-specified, which is what entry gate 1 exists to catch. `mutate.mjs`'s own
+driver command (not reproduced in this file, and itself archived - 14.6 below)
+carries the same bare form and needs the same filename appended if it is ever
+reconstructed; this doc has no other copy of that command to correct.
 
 **Where it lived, and why that location is gate-safe.**
 `<repo>/.vercel/a21ref-variance`. Both properties were verified, not assumed:
@@ -1703,8 +1844,12 @@ never a link to the real one.
 
 **Teardown, proven.** The tree was archived to the session scratchpad
 (`.../scratchpad/a21ref-variance`, holding `composer.ts`, `render-outline.ts`,
-`outline-types.ts`, `variance.test.ts`, `vitest.config.ts`, `mutate.mjs` and
-`runs/`) and then removed with
+`outline-types.ts`, `variance.test.ts`, `vitest.config.ts`, `mutate.mjs`,
+`runs/`, **the four control-probe files (`probe-header.test.ts`,
+`probe-ac7b.test.ts`, `probe-T1.test.ts`, `probe-T2.test.ts`), the `.bak`
+copies `mutate.mjs` writes and restores from, and the sandbox's own
+`node_modules/.vite` cache (14.6 above) - all omitted from this inventory as
+first written (nit, section 15)**) and then removed with
 `Remove-Item -LiteralPath <repo>\.vercel -Recurse -Force`. Verified after:
 `ls -d .vercel` -> `No such file or directory`; `git status --short` -> EMPTY.
 
@@ -1720,6 +1865,14 @@ two framings, the floor block, the `none` block, the sentinels) is a faithful
 but non-frozen stand-in: AC-5(g) asserts nothing about their prose, so their
 spelling is not load-bearing here and no criterion in this section depends on
 it.
+
+**Nit (section 15).** The archived `render-outline.ts`'s own header comment
+cites the transcription source as `:218-234`/`:243-262`; the correct lines,
+confirmed by opening `src/lib/walkthrough-announcement-prompt.ts` again this
+pass, are `:219-234`/`:243-261` (this file's own citation above is correct).
+The archived file is gone (14.6's teardown) and this document cannot edit its
+header; recorded here so the one-line discrepancy is not silently lost if the
+sandbox is ever rebuilt a third time.
 
 ---
 
@@ -1761,8 +1914,13 @@ it.
 ## 14.8 Executable here versus argued - delta to section 10
 
 **EXECUTABLE, and EXECUTED in this pass:** AC-5(g) clauses (i) through (vi), at
-12 assertions green on a correct composer, 6 implementation mutants and 2 test
-control probes, all measured in the sandbox of 14.6.
+**12 `it` blocks (about 30 `expect` calls - corrected, nit, section 15; this
+previously said "12 assertions")** green on a correct composer, 6
+implementation mutants (MV0-MV5) and 2 test control probes, all measured in the
+sandbox of 14.6. **MV6 (Ruling S2, section 15) is a seventh mutant, added after
+this pass's measurement and not re-run in that sandbox** - see 14.5's own row
+for what it measured pre-disposal and what is constructed, not measured,
+post-disposal.
 
 **MEASURED IN THIS PASS, replacing an argued claim:** that AC-5(d), AC-5(f) and
 AC-7(b) are GREEN under M14 (14.1). Section 10's "not re-run against a sandbox
@@ -1784,27 +1942,31 @@ key and no network.
 
 ---
 
-## 14.9 Residual register - one addition
+## 14.9 Residual register - one addition, later PROMOTED (see section 15)
 
-- **RES-12 (NEW, 14.7).** *What is open:* AC-18 proves the outline reaches
+- **RES-12 (NEW, 14.7). WITHDRAWN as a residual in section 15, Ruling S1 -
+  PROMOTED to criterion AC-5(h). This entry is kept, struck through in effect
+  rather than deleted, so the history of the ruling is legible in place.**
+  *What was open:* AC-18 proves the outline reaches
   `PromptAnnouncementDraftRequest`, and AC-5(g) proves the composer uses the
-  outline it is handed. **Nothing proves the ACTION threads `request.outline`
+  outline it is handed. **Nothing proved the ACTION threads `request.outline`
   into the composer.** A `draftPromptAnnouncementAction` that built its
   composer args with `EMPTY_ANNOUNCEMENT_OUTLINE`, or with a re-derived
-  look-alike, is GREEN on both criteria and reproduces M14's user-visible effect
-  one layer up. *Owner:* the implementer's own sabotage pass, which
-  `iteration-caps.md` cap 4 never caps. *Instrument:* the production path, per
-  practice 3 - drive `draftPromptAnnouncementAction` under `vi.mock("@/lib/llm")`
-  (the 53-file precedent re-measured in section 1), capture the `contents` text
-  handed to `callLlm`, and apply AC-5(g)'s clauses (ii), (iv) and (v) verbatim to
-  that captured prompt over the SAME `OUTLINE_A`/`OUTLINE_B` pair. Never by
-  importing the composer into the action's test. *Step:* the build wave that
-  writes `src/app/actions/prompt-announcement-draft.ts`, alongside AC-10(d),
-  which already drives that same action under that same mock. *Named mutant for
-  that pass:* **M21** - the action passes `EMPTY_ANNOUNCEMENT_OUTLINE` to the
-  composer instead of `request.outline`; expected RED on the relocated (iv).
-  *This is a residual with an owner, an instrument and a step. If it ships
-  without all three it is a deletion, and it should be called that.*
+  look-alike, was GREEN on both criteria and reproduced M14's user-visible
+  effect one layer up. *Original owner:* the implementer's own sabotage pass -
+  **this is exactly the assignment `docs/DEV_LOOP.md:25-26` forbids** ("the
+  implementer and the verifier are never the same agent"), which is why
+  section 15 promotes it rather than leaving it here. *Instrument (carried
+  forward into AC-5(h) verbatim):* the production path, per practice 3 - drive
+  `draftPromptAnnouncementAction` under `vi.mock("@/lib/llm")` (the 53-file
+  precedent re-measured in section 1), capture the `contents` text handed to
+  `callLlm`, and apply AC-5(g)'s clauses (ii), (iv) and (v) to that captured
+  prompt over the SAME `OUTLINE_A`/`OUTLINE_B` pair. Never by importing the
+  composer into the action's test. *Named mutant:* **M21** - the action passes
+  `EMPTY_ANNOUNCEMENT_OUTLINE` to the composer instead of `request.outline`;
+  expected RED on the relocated (iv). See section 15 for the promoted
+  criterion, its object, its full instrument, and why the third instance of
+  this defect class is disposed differently from the first two.
 
 RES-1 through RES-11 are unchanged by this section.
 
@@ -1823,11 +1985,19 @@ RES-1 through RES-11 are unchanged by this section.
 
 ## 14.11 What I could not determine in this pass
 
-- **Whether AC-5(g) is green against the REAL `renderOutlineBlock`.** The
-  reference used a verbatim transcription of `:219-261`, not the shipped module.
-  The transcription was made by opening the file this pass, and the risk is a
-  transcription error, not a design error - but it is unverified and I am not
-  going to call it measured.
+- **UPGRADED to MEASURED (section 15, disposal round).** This bullet
+  previously read "unverified ... I am not going to call it measured" for
+  whether AC-5(g) is green against the REAL `renderOutlineBlock`, on the
+  grounds that the reference used a transcription of `:219-261`. **The section
+  15 checker diffed the transcription against the real file rather than
+  arguing about it:** `sed -n '139,141p;219,234p;243,261p'
+  src/lib/walkthrough-announcement-prompt.ts`, compared against the archived
+  `render-outline.ts`, returns an **EMPTY diff - byte-identical** - and the
+  archived `outline-types.ts` matches `src/lib/announcement-outline-types.ts`
+  field-for-field, including `EMPTY_ANNOUNCEMENT_OUTLINE`. So AC-5(g) is
+  MEASURED against the real `renderOutlineBlock`, not merely a transcription of
+  it, and this bullet is retracted as a residual: there is no gap left here to
+  carry forward.
 - **Whether `npx tsc --noEmit` over the whole repo stays clean with AC-5(g)'s
   literals.** Not run: the repo's `tsc` has exactly one legitimate caller (it
   races on `tsconfig.tsbuildinfo`) and a sibling agent is editing
@@ -1840,3 +2010,331 @@ RES-1 through RES-11 are unchanged by this section.
   the deriver can emit them is a different question and is not asked here.
 - **The content of the checker's MAJ-7**, still not transmitted. Unchanged by
   this pass.
+
+---
+
+# 15. DISPOSAL ROUND: section 14 / AC-5(g)'s narrow check - 3 blockers, 2 majors, 3 minors
+
+Test-notes and oracle seat (`loop-test-author`), 2026-09-20, applying the
+orchestrator's rulings on the round-3 (relative to section 14) check of AC-5(g)
+mechanically. Per `iteration-caps.md` cap 1, one of the three blockers (B1,
+below) is a REPEAT of a class this file has already disposed twice, and goes to
+disposal now rather than another revision. The other two blockers (B2, B3) are
+this round's rulings on NEW classes, applied as rulings per the "stopping point
+says rulings - the orchestrator rules, do not re-dispatch the author" routing.
+Two upgrades are applied first, because they are corrections owed to prior
+work, not new findings.
+
+**Tree state.** `git status --short` returned EMPTY before this pass. This pass
+writes exactly one file, `docs/a21-instrument-notes.md`, and touches no source
+file - every construction below is specified for the implementer's build wave,
+none of it built here.
+
+---
+
+## 15.1 Two upgrades applied in place
+
+Both are corrections to existing text, not new material, and both are applied
+at their original location rather than here, so a reader hits the corrected
+claim where the stale one used to be instead of needing this section as a
+patch layer:
+
+- **14.11's first bullet** ("whether AC-5(g) is green against the real
+  `renderOutlineBlock` ... unverified, I will not call it measured") is
+  upgraded to **MEASURED**, on a byte-identical diff between the transcription
+  and the real file. Applied in place at 14.11.
+- **14.1's corollary** ("M14 survived every criterion in this file before
+  AC-5(g)") is upgraded to **CHECKER-CONFIRMED**: the two probe files
+  reproduced independently (`probe-header.test.ts` 2/2,
+  `probe-ac7b.test.ts` 1/1, so AC-5(d), AC-5(f) and AC-7(b) are all GREEN
+  under M14), and every other criterion in the file - AC-5(a)(b)(c'), AC-6,
+  AC-6n(i)-(iv), AC-7(a)(c), AC-15, AC-18 - was read for M14-sensitivity and
+  none fires. Applied in place at 14.1.
+
+---
+
+## 15.2 RULING S1 - blocker B1 disposed by PROMOTING RES-12 to AC-5(h)
+
+### 15.2.1 The class, and why it is a REPEAT
+
+RES-12 (14.9) names the same defect class this file has already disposed
+twice, each time by MINTING A CRITERION rather than a residual:
+
+| Instance | Where the gap was found | How it was disposed |
+|---|---|---|
+| 1st | blocker B-1: the ACTION could receive `callLlm`-usable text on the deterministic arm, unenforced at the object where it mattered | **AC-10(d)** (section 3.2) - a new criterion driving the action itself |
+| 2nd | the nonce-freshness leaf was measured, but not the ACTION call site that actually ships it (M15/M16) | **AC-6n(iv)** (7.5a) - a new criterion driving the action itself |
+| 3rd | AC-18 proves the outline reaches the request; AC-5(g) proves the composer honours the outline it is given; nothing proves the ACTION threads one into the other | RES-12 (14.9) - **a residual**, until this ruling |
+
+The shape is identical each time: an earlier criterion binds a LEAF (the route
+union, the nonce generator, the composer), a later measurement shows the
+production call site - the action - is where the unenforced gap actually
+ships, and the fix is to add a criterion driving the action itself. Disposing
+the third instance as a mere residual, rather than a criterion, is an
+**inconsistency inside this one document**, and the ruling is explicit that
+promoting it is what corrects that inconsistency rather than introducing a
+new inconsistency between the disposal and its own history.
+
+The residual as originally written also names an owner `iteration-caps.md`
+already forbids: "the implementer's own sabotage pass" is the implementer
+checking the implementer's own work, which `docs/DEV_LOOP.md:25-26` rules out
+in as many words ("the implementer and the verifier are never the same
+agent"). And the hole is mechanical, not a matter of diligence: a sabotage
+pass proves an EXISTING assertion can fail; RES-12's own named mutant M21 is
+"expected RED on the relocated (iv)", and nothing in `iteration-caps.md`
+OBLIGES clause (iv) to be relocated to the action's test file at all, because
+Verify exercises every CRITERION, not every RESIDUAL. Skip it, and M14's
+headline failure - the instructor's chosen format silently discarded - ships
+one layer up, at the action, green on every test that exists.
+
+### 15.2.2 Where the promoted criterion goes, and why
+
+**AC-5(h), not a fourth clause of AC-6n(iv).** AC-6n(iv) drives the same
+production call site under the same mocks, which is precisely why the
+orchestrator offered it as an option - the instrument is buildable there
+without new plumbing. But AC-6n(iv)'s SUBJECT is nonce freshness: it exists to
+catch a hoisted or hardcoded nonce (M15, M16), an axis that has nothing to do
+with whether the outline threaded through. Folding an outline-threading
+assertion into a nonce-freshness criterion would make one criterion measure
+two unrelated properties, so a future reader auditing "does AC-6n(iv) still
+hold" would have to also reason about outline threading to answer a question
+about nonces, and vice versa - exactly the kind of criterion-to-object
+mis-binding this file's own INSTRUMENT 1 (section 3) and INSTRUMENT 2
+(section 4) disposals exist to prevent. **AC-5(h) is the right object**
+because it is substantively the same claim as AC-5(g) - "the outline that was
+given is the outline that is used" - asked one layer further from the leaf,
+at the action instead of the composer. AC-5(g) and AC-5(h) are now the two
+ends of one chain: AC-18 (the request), AC-5(h) (the action), AC-5(g) (the
+composer).
+
+### 15.2.3 AC-5(h). The action threads `request.outline` into the composer, unmodified.
+
+- **Object:** `draftPromptAnnouncementAction(request)`, the production path -
+  never the composer imported directly, per practice 3 (section 2) and the
+  same discipline AC-10(d) and AC-6n(iv) already apply to this action.
+- **Instrument:** the AC-10(d)/AC-6n(iv) mocks
+  (`vi.mock("@/lib/llm", async () => ({ ...await vi.importActual(...),
+  callLlm: vi.fn() }))` plus `vi.mock("@/lib/supabase/auth")`), with
+  `provider: "gemini"` on every call - the positive-control provider, so
+  `callLlm` actually fires and the capture below is not vacuous, the same
+  vacuity guard AC-10(d) and AC-6n(iv) already carry.
+  1. Call the action twice, everything held fixed except
+     `request.outline`, which is `OUTLINE_A` (14.2.2) on the first call and
+     `OUTLINE_B` on the second, at `resolvedTemplate.kind: "pasted"` -
+     `PromptAnnouncementDraftRequest` (4.2) carries no `briefNonce` field, so
+     the two `request` objects differ in exactly one key by construction, and
+     **clause (ii) applies unmodified to the two request objects** without
+     needing to hold a nonce fixed at this layer (the composer generates its
+     own per 7.2, and each call is expected to get a fresh one per AC-6n(iv) -
+     that is a separate, already-measured fact, not this criterion's concern).
+  2. Because clauses (iv) and (v) compare the two CAPTURED PROMPT TEXTS, and
+     the action generates a fresh nonce per call (AC-6n(iv)), the two captured
+     texts will differ in their nonce region even when threading is correct.
+     **Neutralise this the same way 7.2 and 14.3 already hold the nonce fixed
+     for a composer-level corpus**: mock `newBriefNonce` (exported from
+     `src/lib/prompt-announcement-prompt.ts`, 7.1) via
+     `vi.spyOn(promptModule, "newBriefNonce").mockReturnValue(FIXED_NONCE)` for
+     this test only. This is not new design - it is 7.2's own "hold the nonce
+     fixed to compare everything else" convention, applied at the one layer
+     where AC-6n(iv) has already proven the action would otherwise vary it.
+     AC-6n(iv)'s own test file does NOT do this, because freshness is exactly
+     what it measures; AC-5(h)'s test file does, because threading is exactly
+     what IT measures and the nonce is a confound for that question, not its
+     subject.
+  3. Extract each call's captured prompt text via
+     `vi.mocked(callLlm).mock.calls[n][0].contents[0].parts[0].text` (the same
+     shape AC-6n(iv) already establishes as real and inspectable, 7.5a).
+  4. Apply AC-5(g)'s clauses (ii), (iv) and (v) - **verbatim**, including
+     15.3's new position sub-clause on (iv) - to the two captured texts, using
+     the same `RENDER_A`/`RENDER_B`/`FROZEN_UNTRUSTED_FRAMING` literals AC-5(g)
+     defines (duplicated into this test file, not imported, per the no-cross-
+     test-file-import rule).
+- **Direction:** RED if the action does not thread `request.outline` verbatim
+  into the composer - in particular RED if it substitutes
+  `EMPTY_ANNOUNCEMENT_OUTLINE` or a re-derived look-alike (**named mutant
+  M21**, carried over from RES-12 unchanged: the action passes
+  `EMPTY_ANNOUNCEMENT_OUTLINE` to the composer instead of `request.outline`;
+  expected RED on the relocated clause (iv)). RED if either captured prompt
+  omits its outline's render, contains the other's, or lets non-outline
+  content vary between the two calls (clause (v), inherited).
+- **Honest limit, stated:** this proves the action's OWN threading, at the one
+  `resolvedTemplate.kind` exercised (`pasted`). It does not re-prove AC-5(g)'s
+  composer-level guarantees for `saved` - AC-5(c')'s byte-identity between
+  `pasted` and `saved` at a fixed outline (6.3) is what makes `pasted` alone a
+  faithful proxy for the threading question at this layer, the same reasoning
+  major M2's third clause-(iv) row already applies. **Not built or executed in
+  this pass** - EXECUTABLE at the implementer's build wave (alongside AC-10(d)
+  and AC-6n(iv), which already drive this same action under this same mock),
+  not argued here as a design that has never been tried: 3.2's `not.toHaveBeenCalled`
+  shape and 7.5a's `mock.calls[n][0].contents[0].parts[0].text` capture are
+  both independently proven working at this exact object already.
+
+**RES-12 is DELETED as a residual, per the corollary in `iteration-caps.md`:
+"a requirement whose enforcer is an already-landed test cannot be relocated to
+an artifact that does not exist yet"** - inverted here in the direction that
+closes it: a residual whose instrument now IS a fully specified criterion, at
+an object and mock this file already proves buildable, is not a residual
+either. 14.9 keeps the original entry, marked WITHDRAWN/PROMOTED, so the
+history of the ruling stays legible rather than silently vanishing.
+
+---
+
+## 15.3 RULING S2 - blocker B3 disposed by one assertion on AC-5(g) clause (iv)
+
+Applied directly at 14.3's clause (iv) (the position assertion and its
+sabotage row MV6) and at 14.5's sabotage table (the MV6 row) and 14.8 (the
+mutant-count note). Summarized here rather than re-quoted: **AC-7's Direction
+requires the outline block not escape above the untrusted framing, because the
+heading text it carries is attacker-influenceable
+(`headingLabelClause(section.heading)`,
+`src/lib/walkthrough-announcement-prompt.ts:230-231`, opened and confirmed this
+pass) and unframed if it does.** AC-7(b) pins the HEADER's index; nothing pinned
+the RENDER's index, and nothing required the two to be adjacent. Closed with
+one `indexOf`-based assertion per outline-carrying kind, reusing the
+`RENDER_A`/`RENDER_B` objects clause (iv) already has and the
+`FROZEN_UNTRUSTED_FRAMING` literal AC-7's own test already defines (duplicated
+here, not imported). Named sabotage **MV6**: the header stays in place but
+`renderOutlineBlock(args.outline)` is hoisted above
+`promptAnnouncementInstructionFraming()`, entirely outside the untrusted
+region. Pre-disposal this was checker-measured GREEN on AC-5(g) (12/12),
+AC-7(b) (1/1) and AC-5(d)/(f) (2/2) - the sharpest finding of the round: an
+instructor's own pasted heading text reaching the model as un-framed
+instruction-region content with every gate green. Explicitly **not** re-opened:
+`FROZEN_OUTLINE_BLOCK_HEADER` (6.5.2-6.5.3) and AC-7(b)'s settled fifth-marker
+correction (section 13) are unchanged.
+
+---
+
+## 15.4 RULING S3 - blocker B2 disposed by correcting three stale sites
+
+Applied directly, all three:
+
+1. **Section 9's M14 row** (originally `:1136`) - corrected in place. It said
+   "unmeasured here and left to the implementer's sabotage pass"; section 14
+   measured it (GREEN under M14 for both AC-5(d) and AC-7(b)) before this
+   round even began. The row now says so and points at AC-5(g) as the real
+   enforcer.
+2. **6.5.3's honest limit** (originally `:683-687`) - corrected in place, same
+   correction, same reason: the "unmeasured in this disposal round ... left to
+   the implementer's own sabotage pass" phrasing was two sections stale by the
+   time section 14 measured it.
+3. **Section 1's title and scope** - narrowed rather than extended, per the
+   ruling's own choice of remedy: "Every quantity in this file" covered zero
+   of section 14's and this section's own quantities, both of which carry
+   their own measured tables already. Extending section 1 to also enumerate
+   14.3's, 14.5's and this section's quantities would either duplicate those
+   tables (a fresh place for a count to drift, the exact failure 1a is on
+   record for) or omit some of them (the exact failure this ruling is about).
+   Narrowing costs one sentence and adds nothing to keep in sync.
+
+An implementer whose natural first stop is the mutant ledger would otherwise
+have been handed the inflated, two-round-stale "AC-5(d) and AC-7(b) already
+catch M14" credit - exactly the failure section 14 exists to retract, sitting
+uncorrected one section before this one.
+
+---
+
+## 15.5 Majors
+
+**M1 - 14.2.1's field enumeration corrected.** Applied directly at 14.2.1: a
+row is added for `section.index` (`:229`), noting it is positionally
+determined and cannot be varied independently of a section's position in the
+array - `OUTLINE_B`'s second section is what already varies it. No change to
+`OUTLINE_A`/`OUTLINE_B` themselves; kill power was never affected, because
+clause (iv) compares the whole real render, not an enumerated field list. The
+four-member claim for `renderOutlineBlock` itself, and that `hasGreeting`/
+`hasSignOff` are never read, both stand as originally measured.
+
+**M2 - the empty-outline arm on `pasted`/`saved` gets a positive enforcer.**
+Applied directly at 14.3's clause (iv): a third row builds `resolvedKind:
+"pasted"` with `outline: EMPTY_ANNOUNCEMENT_OUTLINE` and asserts
+`RENDER_EMPTY` occurs exactly once. Scoped to `pasted` alone, leaning on
+AC-5(c')'s already-measured byte-identity between `pasted` and `saved` at a
+fixed outline (6.3) rather than duplicating the row onto `saved` as well - the
+checker priced this at one row versus a residual, and the row is taken.
+
+---
+
+## 15.6 Minors
+
+- **m1** - 14.6's quoted baseline command corrected to include
+  `variance.test.ts`; the bare `--root .` form was under-specified and would
+  collect all of the sandbox's test files, not just `variance.test.ts`.
+  `mutate.mjs`'s own driver command is not reproduced in this document to
+  correct - it is archived (14.6) - and is flagged so the same fix is applied
+  if the sandbox is ever rebuilt again.
+- **m2** - clause (ii)'s difference set is now computed over the union of both
+  calls' own keys (`[...new Set([...Object.keys(a), ...Object.keys(b)])]`),
+  not `Object.keys(BASE)`, so a key present in both calls but absent from
+  `BASE` cannot escape the filter. Applied directly at 14.3.
+- **m3** - one sentence added at clause (ii) stating its actual scope: it
+  catches the FIXTURE hazard (the two calls' own arguments differing) and is
+  blind to a composer that mints its own nonce internally, which (v) and (vi)
+  catch instead. Applied directly at 14.3.
+- Nits (14.6's archive inventory; 14.8's assertion count; the archived
+  `render-outline.ts` header's line citation) applied directly at their
+  locations, or recorded as unfixable where the cited text lives in an
+  archived file this document cannot edit.
+
+---
+
+## 15.7 Disposition delta
+
+| Item | Disposition here |
+|---|---|
+| 14.11's first bullet | UPGRADED to MEASURED (15.1) |
+| 14.1's corollary | UPGRADED to CHECKER-CONFIRMED (15.1) |
+| RES-12 (14.9) | **WITHDRAWN as a residual, PROMOTED to new criterion AC-5(h)** (15.2). Entry kept at 14.9, marked accordingly |
+| AC-5(g) clause (iv) | AMENDED: a third row (major M2) and a position assertion against `FROZEN_UNTRUSTED_FRAMING` with named sabotage MV6 (Ruling S2) |
+| AC-5(g) clause (ii) | AMENDED: union-based difference set (minor m2); one sentence on scope (minor m3) |
+| 14.2.1's field table | AMENDED: `section.index` row added (major M1) |
+| Section 9's M14 row | CORRECTED (Ruling S3) - supersedes 14.10's own correction note, which was itself stale |
+| 6.5.3's honest limit | CORRECTED (Ruling S3) |
+| Section 1 | NARROWED in title and scope to sections 1-13 (Ruling S3) |
+| - | **NEW: AC-5(h), mutant MV6, and the section-15 versions of every table row listed above** |
+
+---
+
+## 15.8 Residual register - net delta
+
+- **RES-12 is removed** (promoted to AC-5(h), 15.2). No replacement residual is
+  created - the promoted criterion is the disposal.
+- RES-1 through RES-11 are unchanged by this section.
+- **No new residual is created by this section.** Every finding in the ruling
+  was disposed by relocation (a) or construction, never by (c) - which is the
+  intended shape for a disposal round: `iteration-caps.md` caps argument, not
+  measurement, and every disposal here ends in something an implementer builds
+  and runs, not another round of prose.
+
+---
+
+## 15.9 What I could not do, or think is wrong
+
+Nothing in the five rulings (the two upgrades plus S1/S2/S3) could not be
+applied as stated. Everything specified was either already true of the
+document (the two upgrades) or mechanically addable at the object the ruling
+named (S1's AC-5(h), S2's position clause, S3's three corrections) without
+inventing new design. Two points are flagged rather than silently absorbed,
+because both required a small filled-in detail the ruling did not spell out:
+
+- **AC-5(h)'s nonce handling.** The ruling specifies the object, the mocks and
+  which of AC-5(g)'s clauses to apply, but does not address that the action
+  generates a fresh nonce per call (AC-6n(iv)), which would make clauses (iv)
+  and (v) fail on a CORRECT implementation if left unhandled - the two
+  captured prompts would legitimately differ in their nonce region regardless
+  of threading. I resolved this by mocking `newBriefNonce` to a fixed value for
+  this test only (15.2.3, point 2), which is 7.2's own established convention
+  applied at a new layer, not a new mechanism - but it is a filled gap, not
+  something the ruling stated, and is called out as such rather than silently
+  assumed.
+- **AC-5(h)'s coverage of `saved`.** Per major M2's precedent, I scoped the
+  new criterion to `pasted` alone and leaned on AC-5(c')'s already-measured
+  `pasted`/`saved` byte-identity rather than doubling the row. This mirrors a
+  choice the ruling made explicitly for M2 but did not make explicitly for
+  AC-5(h); I applied the same reasoning rather than inventing a different one,
+  and say so here rather than presenting it as directly specified.
+
+Neither is a refusal of any part of the ruling; both are the minimum filled-in
+detail needed to make the specified instrument actually executable, named so
+an implementer or checker can attack them specifically rather than inheriting
+them silently.

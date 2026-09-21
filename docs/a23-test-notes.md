@@ -51,7 +51,7 @@ so a row cannot have been shaped to fit an id it was assigned first.
 
 | Finding (round 1) | Disposition | Where it lands now |
 |---|---|---|
-| **B-1.** O-A claims the fixture set "is a product, not a hand-written list", but the product is over SEPARATORS x QUOTES only; CONSTRUCTS is a hand-written 25 - the thing `traps-tests.md:22` condemns. An implementation omitting ONE export-side guard passes all 132 fixtures while dropping `export {} from "@/lib/grade"`. | **KEPT, by CONSTRUCTION (Ruling W2).** IMPORT/EXPORT is now a third product dimension over the clause shapes. The missing cell is unrepresentable: 3 new shape/side cells (24 fixtures) exist because the product emits them, not because anyone wrote them down. The mutant that motivated the blocker is now **M13** and it is **killed** (section 6). | O-A, section 4; R-6; M13 |
+| **B-1.** O-A claims the fixture set "is a product, not a hand-written list", but the product is over SEPARATORS x QUOTES only; CONSTRUCTS is a hand-written 25 - the thing `traps-tests.md:22` condemns. An implementation omitting ONE export-side guard passes all 132 fixtures while dropping `export {} from "@/lib/grade"`. | **KEPT, by CONSTRUCTION (Ruling W2).** IMPORT/EXPORT is now a third product dimension over the clause shapes. The missing cell is unrepresentable: 3 new shape/side cells (24 fixtures) exist because the product emits them, not because anyone wrote them down. The mutant that motivated the blocker is now **M13** and it is **killed** (section 6), **with an import-side twin M17 added by Ruling V4 so the kill does not hinge on the one contested compiler-configuration cell (section 3.4).** | O-A, section 4; R-6; M13, M17 |
 | **B-2.** R-5's "the same options object the real assertion uses and only the root set replaced" is the entire reason the canary means anything, and nothing asserts it. A guard whose REAL walk passes `forbiddenPathPrefixes: []` is byte-identical to baseline. | **KEPT, by CONSTRUCTION (Ruling W3).** ONE `const OPTIONS`, both call sites take it, plus a parsed assertion over the guard file's own source that every `walkRuntimeGraph` call's second argument is the SAME bare identifier. I built the decorative implementation and two further attacks and ran the instrument against all three: it REDS all three and PASSES the correct one (section 5.3). | R-5e; section 5.3 |
 | **B-3.** R-8's failure direction pins the LOOSENED prefix form and cites `classTrendsDraft.not-postable.test.ts:46-53` as authority, but that header records the OPPOSITE defect. | **KEPT, INVERTED (Ruling W1).** R-8's direction is now "a SIBLING is NOT flagged". The citation is relocated to the line that documents the direction it now asserts. M9 is now the WITHDRAWN m-3 fix and is killed two-sidedly. | R-8; M9 |
 | **B-4.** R-11's three clauses describe three different sets; `[].every(p => p.endsWith(".test.ts"))` is true forever. | **KEPT, RECONCILED (Ruling W4).** All three clauses now bind the same set (EVERY file under `src/`, test and non-test) and the vacuous form is made unrepresentable by a min-count clause, not by prose. | R-11 |
@@ -78,28 +78,56 @@ so a row cannot have been shaped to fit an id it was assigned first.
 
 ### 1.4 Round-1 requirements, kept / changed / withdrawn
 
-| Round-1 id | Status | Note |
-|---|---|---|
-| R-1 | KEPT unchanged | |
-| R-2 | KEPT, O-C's oracle rebuilt (MJ-2) | O-B unchanged |
-| R-3 | KEPT unchanged | the checker ruled O-1's honesty SUFFICIENT; the caveat stands |
-| R-4 | KEPT unchanged | same |
-| R-5 | KEPT, clause **R-5e ADDED** (W3) | R-5c's wording now flags the architecture divergence (MJ-3) |
-| R-6 | KEPT, table rebuilt on the 3-dimension product | 132 -> 157 |
-| R-7 | KEPT unchanged | now ALSO killed by R-6a, because the JSX shape is a fixture |
-| R-8 | KEPT, **DIRECTION INVERTED** (W1) | |
-| R-9 | KEPT; its count is explicitly NOT frozen | the count moved 105 -> 104 between rounds; section 10 |
-| R-10 | KEPT, widened from three lists to five (mn-3) | |
-| R-11 | KEPT, **all three clauses reconciled** (W4) | |
-| R-12, R-13 | KEPT unchanged | gate rows |
-| - | **R-14 NEW** (MJ-4) | `classifySpecifier`'s bucket/candidate table |
-| RES-T-1..5, RES-A23-12, -13 | all KEPT | RES-T-3 re-scoped by W4; two residuals added |
+**Correction against my own table, per orchestrator Ruling MAJOR-3.** Four
+rows below were reported "KEPT unchanged" or "KEPT" while their SCOPE tag
+changed - R-1, R-3 and R-4 dropped `[LEAF]` (now `[G1] [G2]` only) and R-9
+gained it (now `[LEAF] [G1] [G2]`). No enforcer is lost: the assertions still
+exist in the guard files, and R-9's instrument is honestly stated as "R-1's own
+numbers" rather than an independent one. But `iteration-caps.md:117-122` makes
+this table mandatory precisely so a scope change cannot hide behind "KEPT",
+and a checker is told to audit it before reading the round on its own terms.
+The Scope column below is the fix - "unchanged" is now reserved for rows whose
+tag truly did not move.
 
-**Nothing from round 1 was withdrawn.** No requirement lost its enforcer.
+| Round-1 id | Status | Scope | Note |
+|---|---|---|---|
+| R-1 | KEPT, **scope narrowed** | `[G1][G2][LEAF]` -> `[G1][G2]` | assertions unchanged; `[LEAF]` no longer separately claims this row |
+| R-2 | KEPT, O-C's oracle rebuilt (MJ-2) | `[G1][G2]` unchanged | O-B unchanged |
+| R-3 | KEPT, **scope narrowed** | `[G1][G2][LEAF]` -> `[G1][G2]` | the checker ruled O-1's honesty SUFFICIENT; the caveat stands |
+| R-4 | KEPT, **scope narrowed** | `[G1][G2][LEAF]` -> `[G1][G2]` | same |
+| R-5 | KEPT, clause **R-5e ADDED** (W3) | `[G1][G2]` unchanged | R-5c's wording now flags the architecture divergence (MJ-3) |
+| R-6 | KEPT, table rebuilt on the 3-dimension product | `[LEAF]` unchanged | 132 -> 157 |
+| R-7 | KEPT unchanged | `[LEAF]` unchanged | now ALSO killed by R-6a, because the JSX shape is a fixture |
+| R-8 | KEPT, **DIRECTION INVERTED** (W1) | `[LEAF]` unchanged | |
+| R-9 | KEPT, **scope widened** | `[G1][G2]` -> `[LEAF][G1][G2]` | its count is explicitly NOT frozen; the count moved 105 -> 104 between rounds (section 10); **the new `[LEAF]` scope has no enforcer of its own - its Instrument line says so, naming R-1's numbers, which is honest given R-1 is no longer `[LEAF]`** |
+| R-10 | KEPT, widened from three lists to five (mn-3) | `[LEAF]` unchanged | |
+| R-11 | KEPT, **all three clauses reconciled** (W4) | `[LEAF]` unchanged | |
+| R-12, R-13 | KEPT unchanged | gate rows, no scope tag | |
+| - | **R-14 NEW** (MJ-4) | `[LEAF]` | `classifySpecifier`'s bucket/candidate table |
+| - | **R-15 NEW** (MJ-3) | `[LEAF]` | pins `Violation.resolved`'s path form |
+| RES-T-1..7, RES-A23-12, -13 | all KEPT | n/a | RES-T-3 re-scoped by W4; RES-T-6 closed this round (Ruling V1); RES-T-7 added (mn-5) |
+
+**Nothing from round 1 was withdrawn.** No requirement lost its enforcer; two
+scope tags moved without their enforcer moving with them, and that movement is
+now named rather than hidden inside "unchanged".
 
 ---
 
 ## 2. MJ-1: Ruling Y3's re-derivation, DELIVERED - five wrong cells and two now measured
+
+**SUPERSESSION (Ruling V5, disposing MJ-1). This section SUPERSEDES
+`docs/a23-criteria.md` sections 2.3 and 6 as the measured map.** `docs/a23-criteria.md`
+is at its own round cap (`iteration-caps.md`, cap 2); this section's
+re-derivation found five wrong cells in those tables, one of them refuted by
+code already committed in the guarded file
+(`gradingResultsHelpersWiring.test.ts:99,101,106`, which feeds single-quoted
+fixtures to `fires()` and asserts `true`, directly contradicting the criteria
+cell that calls the single-quoted form "ESCAPES"). No criteria round follows
+from this, and no acceptance criterion needs rescoping: `BANNED_IMPORT_PATTERNS`,
+the mechanism the wrong cells describe, is deleted outright by this row's fix
+in favour of the `ts.createSourceFile` walk, so the wrong cells describe a
+mechanism that does not survive the wave. **A reader of either document should
+land here, not there, for guard 2's behaviour.**
 
 `docs/a23-criteria.md:237-243` obliges this seat to re-derive criteria sections
 2.3 and 6 **from its own run** and report every cell those tables got wrong.
@@ -302,8 +330,9 @@ unused" (the first run of this oracle was contaminated by exactly that and is
 discarded).
 
 Command: `node --experimental-strip-types <sandbox>/emit-oracle2.ts`.
-**Six of twenty shape/side cells diverge, and they are exactly the cells whose
-import clause EMPTIES after type-stripping:**
+**Six of the nineteen clause/side cells diverge, and they are exactly the cells
+whose import clause EMPTIES after type-stripping** (O-A's shape table below
+lists 19 clause/side rows, not twenty):
 
 | shape/side | repo `tsconfig.json` emits the edge | `+ verbatimModuleSyntax` emits the edge | my `want` |
 |---|---|---|---|
@@ -340,11 +369,48 @@ repo's tsconfig today and matches AC-2(a)'s permitted set - changing it would
 contradict a criterion, which is not this seat's to do.
 
 **This is a fail-closed choice on one axis and a criteria-conformant choice on
-the other, and the two are not the same rule.** That asymmetry is deliberate and
-is the honest state; it is registered as **RES-T-6** with the instrument that
-settles it. **Note it does not weaken W2's disposal at all**: whichever direction
-the cell is pinned, it DISCRIMINATES, and M13 dies either way. What was wrong in
-round 1 was that the cell did not exist.
+the other, and the two are not the same rule.** That asymmetry is deliberate.
+
+**RES-T-6 CLOSED BY ORCHESTRATOR RULING V1, measured, not argued.** Section 12
+and this document's first version asserted `next build` was the only instrument
+for SWC's erasure semantics and that this checkout could not run it. That is
+false: `@next/swc-win32-x64-msvc` is installed and exposes `transformSync`.
+Measured directly against it (`node <sandbox>/swc-probe.ts`, the raw binding
+called the way `node_modules/next/dist/build/swc/index.js:1174-1194` calls it -
+`bindings.transformSync(src, false, Buffer.from(JSON.stringify(options)))`,
+`jsc.parser.syntax: "typescript"`, `module.type: "es6"`):
+
+```
+"import {} from \"@/lib/grade\";"   -> emits "import \"@/lib/grade\";"   (a real edge)
+"export {} from \"@/lib/grade\";"   -> emits ""                          (erased - nothing)
+"import { type X } from ...";  "export { type X } from ...";
+"import type { X } from ...";  "export type { X } from ...";            -> all four emit "" (erased)
+```
+
+**`empty-braces/import` is a measured SWC edge and `empty-braces/export` is a
+measured SWC erasure.** The repo's own `tsc` was the outlier on the import cell,
+not SWC - had the reference implementation followed `tsc`'s reading instead of
+reasoning fail-closed, the import cell would have pinned a hole. The four
+`inline-type` cells are measured safe under SWC in the permissive direction,
+confirming section 3.4's `want=erased` pin for that axis.
+
+Confirmed separately: Next never passes `verbatimModuleSyntax` to SWC -
+`grep -rln verbatimModuleSyntax node_modules/next/dist/` finds it only in
+`lib/typescript/writeConfigurationDefaults.js` (the file that WRITES a
+`tsconfig.json` default), never in `build/swc/options.js` or `build/swc/index.js`
+where the transform options are built. So the `verbatimModuleSyntax` column of
+section 3.4's table describes a configuration SWC is never handed; it is useful
+only as the ES-semantics cross-check it was built for.
+
+**Disposition on `want=edge` for `empty-braces/{import,export}`: KEPT for BOTH
+cells**, and for different reasons now that they are separately measured -
+`import` because SWC agrees it is a real edge, `export` because plain ES module
+semantics still make it a `ModuleRequest` even though SWC elides it, and a false
+positive there is cheaper than the false negative this row exists to fix (the
+same fail-closed ground section 3.4 already gave, now resting on a measured
+divergence rather than an unmeasured one). One line on the other engine, per the
+orchestrator's allowance: Turbopack is a separate engine and its emit for these
+six cells was not measured here.
 
 ---
 
@@ -462,8 +528,9 @@ implementation, and it reds those 8 fixtures (section 6).
 `edge` = a real runtime edge; `erased` = the declaration disappears; `residue` =
 the specifier is not a string literal, so the extractor must REPORT it as
 unclassifiable and emit no edge; `none` = the text is not an import at all.
-**Six of the twenty clause cells' ground truth is compiler-configuration-
-dependent - see section 3.4, which states which way I pinned each and why.**
+**Six of the nineteen clause/side cells' ground truth was compiler-
+configuration-dependent under `tsc` and is now measured under SWC - see
+section 3.4, which states which way each is pinned and why.**
 
 **`XP.fixtures = 157` is itself an assertion** (R-6c): deleting a shape, a side
 or an applicability rule changes it. The per-cell `n` column is the frozen
@@ -489,6 +556,21 @@ H6 -> `named-value/import/brace-wrap/double`;
 H10 -> `named-value/export/inline/double`. **The `u3` column is what makes this
 claim checkable for the guard-2 rows** - round 1's four columns could not
 express H6 or H10's instrument at all, which is MJ-1's substance.
+
+**Known bound, recorded rather than extended (minor (f)).** The shape axis is
+still a hand-written list, and two legal shapes are missing from it: `import
+type * as N from S` (measured `grep -rn "import type \* as" src/` -> 0
+occurrences repo-wide) and `export type * from S` (measured `grep -n "export
+type \* from" src/lib/use-server-exports.test.ts` -> 4 hits, all string
+fixtures inside that test, not a real emitted shape). Both are legal TypeScript
+the product cannot emit today. Both are fail-closed in every mishandling
+direction available to this walker - a mishandled `type *` clause can only
+either wrongly emit an edge (safe, over-flags) or wrongly erase one that was
+never real to begin with (there is no runtime specifier for the AST classifier
+to drop). This is a REPEAT of B-1's class - a hand-written enumeration missing
+a legal cell - so per `iteration-caps.md`'s cap it routes to disposal, not
+another round of the oracle. **Recording it as a known bound; the shape table
+above is not extended with it.**
 
 **AC-8's direction labels fall out of the table mechanically**: a fixture is a
 **POSITIVE CONTROL** (expected RED at landing step 1) iff `valueImportSpecifiers`
@@ -543,18 +625,35 @@ ruling round 1's literal would have made `[G2]` carry THREE representations of
 the same eleven names, two of them hand-maintained and both redding on any file
 addition.
 
-**Construction, rebuilt.** O-C declares NO literal of its own. The root set is
-built from the literal `[G2]` already has:
+**Construction, corrected by orchestrator Ruling V2.** This document's own
+round-2 text defined `[G2]`'s root set two incompatible ways: this section said
+`roots = CLIENT_FILES.map(...) ++ [types.ts]` (the hand-maintained literal IS
+the walk's roots), while the trap paragraph below said "with `directoryRoots`
+returning `[]` the grading-results closure is still 93 nodes" - a sentence only
+meaningful if `directoryRoots` FEEDS the roots. `docs/a23-architecture.md:1332`
+and `:1661-1667` rule this explicitly, twice: **the walk's root set IS
+`directoryRoots(dir)`'s output, for BOTH guarded directories**, and the
+frozen-`CLIENT_FILES`-comparison is the SEPARATE completeness control kept
+alongside it - never the roots themselves. Under the literal reading this
+section shipped, `[G2]`'s walk would be list-bounded, which is exactly the
+coverage-by-omission shape RES-A23-2 already records against this row.
+
+O-C declares NO literal of its own either way - only the WIRING changes:
 
 ```
-roots = CLIENT_FILES.map(p => resolve(thisDir, p))            // the existing
-                                                              // literal, :62-80
-        ++ [ src/lib/grade/types.ts ]                         // Ruling Z3
+roots = directoryRoots(dir)                                   // the walk's
+                                                              // real roots
+        ++ [ ../GradingResults.tsx, src/lib/grade/types.ts ]  // Ruling Z3
 ```
 
-and R-2's frozen-literal comparison is `directoryRoots(dir)` mapped to
-`./<basename>` against `CLIENT_FILES.filter(p => p.startsWith("./"))` - the
-existing literal, not a new one. Measured:
+`CLIENT_FILES` is the COMPARISON ONLY - R-2's frozen-literal check, `directoryRoots(dir)`
+mapped to `./<basename>` against `CLIENT_FILES.filter(p => p.startsWith("./"))`,
+the existing literal, not a new one. Measured today (`OC.derived_eq_existing_literal=true`
+below): `directoryRoots(dir)` and `CLIENT_FILES`'s `./` half name the SAME 11
+files, so this correction changes no number in this document - it changes which
+object the walk is wired to, which is exactly the thing M1 (section 6) is owed
+against. **The vacuity-trap paragraph originally at this point in the document
+stands as written**; it was the tell, not the error.
 
 ```
 node --experimental-strip-types <sandbox>/probe5.ts
@@ -656,6 +755,25 @@ missing** (`CLASSIFY.unallowed_bucket_census=[["node-builtin",6],["package",1]]`
 Three of five buckets have no positive control anywhere on the real tree, so
 deleting the `missing` branch changes nothing observable. M15 proves it:
 **M15 is killed by this table and by NOTHING else in this document.**
+
+### One item is the owner's and blocks nothing - a (b) reduce, with the measurement attached
+
+Distinct from the residual register (section 11): this is a scope question,
+not an unmeasured fact, so `iteration-caps.md`'s disposal (b) is the right
+shape rather than a residual triple. Under the capability walk, **ELEVEN
+modules besides `types.ts` move from banned to permitted** relative to the
+name-based list this row replaces - `class-trends{,-draft,-insight}`,
+`constants`, `parsing`, `postable`, `prompts`, `repo-content`, `rubric-tiers`,
+`submission-kind`, `utils` - against **four that stay banned**: `lib/grade.ts`,
+`grade/engine.ts`, `grade/extraction.ts`, `grade/rubric.ts`. That is the
+design's stated intent, and none of today's closures on the real tree contain
+any of the eleven, so **nothing changes on this tree** whether or not the
+question is answered now. AC-11's discharge never states the set explicitly,
+though, and how much name-based coverage the capability model may retire is a
+product call, not a test-notes call. **THE QUESTION FOR THE OWNER:** should
+AC-11's discharge name this eleven/four split explicitly, so a future reader
+does not have to re-derive it from the capability walk's rules by hand? Ships
+either way; nothing in this wave depends on the answer.
 
 ---
 
@@ -769,10 +887,15 @@ B-2 and Ruling W3 disposes it by construction, not by stronger prose.**
     .toEqual(FORBIDDEN_PATH_PREFIXES)` and the same for the other four, so a
     hand-typed copy of a list is caught as well as a dropped one.
   - **(ii) The assertion that makes (i) checkable.** `[LEAF]`'s own test parses
-    BOTH guard files' source and asserts: at least 2 `walkRuntimeGraph` calls per
-    file; EVERY call's second argument is a bare `Identifier` (never an
-    `ObjectLiteralExpression`); and all those identifiers are the SAME name. The
-    identifier's SPELLING is not pinned - the FACT is "one object, every call".
+    BOTH guard files' source and asserts, PER FILE: at least 2 `walkRuntimeGraph`
+    calls; EVERY call's second argument is a bare `Identifier` (never an
+    `ObjectLiteralExpression`); and, WITHIN THAT FILE, all those identifiers are
+    the SAME name. **This is a within-file comparison only** - `[G1]` and `[G2]`
+    are two separate files and this clause does not compare their identifiers
+    to each other, so it does not pin either file's spelling, and it does not
+    require the two guard files to name their options object the same thing.
+    The identifier's SPELLING is not pinned - the FACT is "one object, every
+    call, per file".
 - **Direction.** Any of a-d false: the detector has stopped discriminating, and
   every green in R-1/R-3/R-4 is vacuous. For (e): a call site with an inline
   object literal, a second separately-built options object, or fewer than two
@@ -880,7 +1003,7 @@ the repo's documented idiom and exists SO THAT a sibling is caught.
   | R-8c | `src/lib/canvas/announcements.ts` | `lib/canvas` | some flagged path starts with `lib/canvas/` |
 
 - **Instrument.** `node --experimental-strip-types <sandbox>/assert.ts`. Measured
-  today: `R8a=true`, `R8c(canvas sibling)=true`, `R8d(canvas inside)=true`.
+  today: `R8a=true`, `R8b(canvas sibling)=true`, `R8c(canvas inside)=true`.
 - **Direction of failure: a SIBLING IS NOT FLAGGED** (R-8a, R-8b), or nothing
   inside the directory is (R-8c). Measured with the boundary added (mutant M9):
   `R8a true -> false` and `R8b true -> false`. **That is the m-3 fix going red,
@@ -912,8 +1035,14 @@ the repo's documented idiom and exists SO THAT a sibling is caught.
   grading-results `violations 0 -> 104`, `nodes 93 -> 418`.
 - **Direction.** The closures explode. **Assert the EXPLOSION, never a frozen
   count** - the violation count moved 105 -> 104 between rounds of this document
-  alone (section 10). The honest assertion is `nodes` growing by more than 3x,
-  or `violations` going from 0 to more than 50.
+  alone (section 10). **R-1's own numbers are the enforcer, not a separate
+  ratio**: R-1 already asserts each closure's `violations` array is empty on
+  the real tree, so `violations` going from 0 to a triple-digit count with the
+  wall removed is what R-1 catches when the wall is missing - stating a
+  multiplier on top (measured 454/149 = 3.047x, a 1.5% margin above a naive
+  "3x" threshold) adds a second, more brittle instrument for the same fact.
+  Assert `violations` going from 0 to more than 50 in both closures, which
+  clears with a wide margin (104 measured, more than double), and nothing else.
 - This is the 339-false-positive incident
   (`canvas-client-boundary.transitive.test.ts:34-37`) and the architecture's own
   reproduction, measured a third time here.
@@ -1010,11 +1139,18 @@ a non-test sweep at all. **The reading kept is the architecture's own
 
 - **Object.** `Violation.resolved` and `Unallowed`'s trail entries, for any
   violation produced by any walk.
-- **Instrument.** `[LEAF]` asserts that every `resolved` on the R-5 canary walk
-  is **relative to `srcRoot`, POSIX-separated, with no leading `./` and no drive
-  letter** - e.g. `expect(v.resolved).toMatch(/^[a-z]/)` plus
-  `expect(v.resolved).not.toContain("\\")`. Measured today:
-  `["lib/supabase/server.ts","lib/supabase/effective-identity.ts", ...]`.
+- **Instrument, corrected by orchestrator Ruling V3.** The regex pair this
+  clause originally specified does not bind: `"src/lib/supabase/server.ts"` -
+  the exact value section 3.3 says the architecture's own probe printed, and
+  the entire reason MJ-3 exists - **passes both** `expect(v.resolved).toMatch(/^[a-z]/)`
+  and `expect(v.resolved).not.toContain("\\")`, and so does a lowercase drive
+  letter. A regex enumeration is not a construction; the seam stays
+  underdetermined and nothing reds. **`[LEAF]` instead asserts a COMPUTED
+  expectation**: `expect(v.resolved).toBe(relative(srcRoot, abs).split(sep).join("/"))`,
+  built with Node's own `path.relative`/`path.sep`, for every violation on the
+  R-5 canary walk - the construction, not an enumeration of its properties.
+  Measured today: `["lib/supabase/server.ts","lib/supabase/effective-identity.ts", ...]`,
+  which is exactly what the computed expectation yields on this tree.
 - **Direction.** An absolute or repo-relative path. That is not a cosmetic
   failure: it is what makes `docs/a23-architecture.md:1276`'s prescribed
   `.startsWith("lib/supabase/server")` true in one implementation and false in
@@ -1025,7 +1161,7 @@ a non-test sweep at all. **The reading kept is the architecture's own
 
 ---
 
-## 6. The sabotage pass - sixteen mutants, two rebuilt, and what got through
+## 6. The sabotage pass - seventeen mutants, three rebuilt, and what got through
 
 **Method.** Each mutation was applied to a COPY of the reference implementation
 (`cp`-backup, never `git checkout --`, which reverts to the index and destroys
@@ -1049,11 +1185,12 @@ Command: `node --experimental-strip-types <sandbox>/mutants.ts` and
 | **M6** | the `unallowed` bucket removed - **REBUILT this round, see below** | `R5b.barrel_ua_gt0` true -> **false**; `R5d.owner_names_async_hooks` true -> **false** | **R-5b, R-5d** | YES after the rebuild; **R-3 is green in BOTH directions.** Without R-5b this mutant SURVIVES the entire suite |
 | **M7** | `ScriptKind` always TS, never TSX | 2 fixtures red (`require-inside-jsx/*`); `R7.tsx` `["@/lib/grade"] -> []` | **R-7, R-6a** | YES - rebuilt in round 1; now caught twice |
 | **M8** | the `"use server"` wall removed | `RG` `v 0 -> 104, ua 0 -> 12, n 149 -> 454`; `GR` `v 0 -> 104, n 93 -> 418` | **R-1, R-3, R-9** | YES |
-| **M9** | `isForbiddenPath` gains a `/` boundary - **THE WITHDRAWN m-3 FIX** | `R8a` true -> **false**; `R8b(canvas sibling)` true -> **false**; `R8b(actions inside)` false -> true | **R-8 only** | YES, two-sidedly |
+| **M9** | `isForbiddenPath` gains a `/` boundary - **THE WITHDRAWN m-3 FIX** | `R8a` true -> **false**; `R8b(canvas sibling)` true -> **false**; `R8c(canvas inside)` false -> true | **R-8 only** | YES, two-sidedly |
 | **M10** | `browserSafeModules` ignored | `RG.violations` 0 -> **1** (`index.tsx -> useRepoGradesData.ts -> SupabaseProvider.tsx` value-imports `@/lib/supabase/client`) | **R-1** | YES |
 | **M11** | the forbidden-path check removed entirely | `barrel v` 4 -> **0**; `R5c` both forms true -> **false**; `R5d.owner_v_gt0` -> false; all three R-8 booleans -> false | **R-5a, R-5c, R-5d, R-8** | YES |
 | **M12** | the walk never recurses (direct-only) | `barrel v` 4 -> **0**, `barrel ua` 6 -> **0**; `RG.nodes` 149 -> 32; `GR.nodes` 93 -> 13 | **R-5a, R-5b** | YES |
 | **M13** | **NEW.** EXPORT side: the `elements.length > 0` guard dropped - the checker's passing-but-wrong implementation | **8 fixtures red, all `empty-braces/export/*`**; every closure, canary and policy assertion unchanged | **R-6a only, via cells that did not exist in round 1** | YES - **this is blocker B-1, and only the SIDE dimension kills it** |
+| **M17** | **NEW (Ruling V4). IMPORT side: the same `elements.length > 0` guard dropped, on the import clause instead of the export clause - the import-side twin of M13.** | **8 fixtures red, all `empty-braces/import/*`**; every closure, canary and policy assertion unchanged | **R-6a only, via cells that did not exist in round 1** | YES - independent of the compiler-configuration question section 3.4 argues: SWC (Ruling V1) measures `empty-braces/import` a real edge under BOTH configurations, so this kill does not hinge on the contested cell the way M13's does |
 | **M15** | **NEW.** `classifySpecifier`'s `missing` branch deleted (falls through to `package`) | `MJ4.mismatches` 0 -> **3**; every closure, canary and fixture assertion unchanged | **R-14 only** | YES - **killed by NOTHING ELSE in this document** |
 | **M16** | **NEW.** `classifySpecifier`'s asset check deleted | `RG.ua` 0 -> **23**, `GR.ua` 0 -> **10**; `MJ4.mismatches` 0 -> **2** | **R-3, R-14** | YES |
 | **M14** | the DECORATIVE guard file: the real walk passes `forbiddenPathPrefixes: []`, the canary keeps the shared constant | **byte-identical to baseline on every walk**; R-1, R-3, R-4, R-5a-d and R-10 all pass | **R-5e only** | YES - section 5.3 runs the instrument against it and two further attacks |
@@ -1132,6 +1269,8 @@ closures, on `unresolvable`, on `unallowed`, on violations, and on the Z2 canary
 architecture's specified assertions alone do not catch:**
 
 - **M13** - caught only by cells the SIDE dimension created.
+- **M17** - the import-side twin of M13 (Ruling V4), caught the same way, on a
+  cell SWC (Ruling V1) confirms is not compiler-configuration-dependent.
 - **M14** - caught only by R-5e, and byte-identical to baseline otherwise.
 - **M15** - caught only by R-14, and invisible to every walk on the real tree.
 
@@ -1241,7 +1380,7 @@ separated; both real closures' violations, residue and unallowed; both root-set
 derivations against their literals, with O-C's proved equal to the EXISTING
 `CLIENT_FILES` half; both planted-positive canaries with all clauses; the
 decorative-guard measurement and the R-5e instrument against three attacks;
-sixteen mutants with anchor-occurrence counts and restore verification; the
+seventeen mutants with anchor-occurrence counts and restore verification; the
 `classifySpecifier` 18-row table and the directory scan that built it; the
 whole-`src` residue count and parse ceiling, three times; the `.tsx`
 script-kind discrimination; the prefix-boundary pair on the documented
@@ -1258,10 +1397,14 @@ typecheck.
 - **The walk's cost under vitest.** The figures in section 8 are node wall time.
   vitest adds transform and setup; the architecture's 3.5%-of-suite estimate is
   not re-derived here.
-- **That SWC emits the six diverging cells of section 3.4 the way I pinned
-  them.** `next build` is the only instrument and this checkout has no `.env`.
-  **RES-T-6.** This is the single largest argued claim in the document and the
-  only one that could move a `want` value.
+- **That SWC's emit for the six diverging cells is measured** (section 3.4,
+  10.4) - `transformSync` from the installed `@next/swc-win32-x64-msvc`
+  package, not `next build` itself, which this checkout still cannot run.
+  **RES-T-6 is closed on that measurement.** What remains argued, and is not
+  the same claim: that `next build`'s full pipeline (loader config, Turbopack
+  vs. the webpack/SWC path actually selected) treats these two cells the same
+  way the bare `transformSync` call does, and that Turbopack's own emit agrees
+  with SWC's.
 - **That `next build` still compiles after the change.** RES-A23-5; the build
   gate is the `Compiled successfully` line and never the exit code
   (`this-repo.md:52-54`). Nothing here changes runtime code, but that is a
@@ -1400,14 +1543,16 @@ other two figures so nobody later reads "2" as a whole-tree fact: without the
 wall the closure has 6 importers, and across all of `src/` the file is reached
 by 13 runtime edges.
 
-### 10.4 NEW: the `want` column for the empty-brace shapes is compiler-configuration-dependent
+### 10.4 The `want` column for the empty-brace shapes was compiler-configuration-dependent under `tsc` - CLOSED under SWC (Ruling V1)
 
-Section 3.4. Six of twenty clause cells diverge between the repo's own
-`tsconfig.json` and `verbatimModuleSyntax`. I pin `want=edge` for
-`empty-braces/{import,export}` fail-closed and `want=erased` for the four
-`inline-type` cells to stay criteria-conformant, state both measurements, and
-register **RES-T-6** with the instrument that settles it. **Round 1's O-A
-asserted the language settled this; it does not.**
+Section 3.4. Six of the nineteen clause/side cells diverge between the repo's
+own `tsconfig.json` and `verbatimModuleSyntax`. `want=edge` for
+`empty-braces/{import,export}` and `want=erased` for the four `inline-type`
+cells are both KEPT. **Round 1's O-A asserted the language settled this; it
+does not - but SWC, measured this round, does**: `empty-braces/import` is a
+real SWC edge and `empty-braces/export` is an SWC erasure, so the `edge` pin on
+the export cell is a measured false-positive in the safe direction, not an
+unmeasured guess. RES-T-6 is closed.
 
 ### 10.5 NEW: an R-8 count I could not reconcile, and am therefore not asserting
 
@@ -1440,7 +1585,7 @@ architecture share, whose retired ids (3, 6) stay retired.
 | RES-T-3 | **RE-SCOPED by Ruling W4. R-11 clause (ii) has no positive control until the wave lands** - zero non-test importers exist and none can be planted without writing a file into `src/`. **Clause (i) DOES have one and it lands at step 3** (red before, green after), so the requirement is no longer wholly uncontrolled. | Implementer, wave step 3 | clause (i) flipping red -> green at step 3 IS the control; for clause (ii), accept the post-wave importer list and read it | Wave step 3 |
 | RES-T-4 | **R-10 has no executed sabotage** (section 6). A frozen-literal freeze prevents a silent widening or narrowing; it detects nothing about whether an entry is CORRECT. `BROWSER_SAFE_MODULES` having one entry and no minimality test is RES-A23-15's substance. | Repo owner, at review | read the diff of any commit that changes one of the five lists | Every future wave that touches either directory |
 | RES-T-5 | **R-2's frozen root lists go stale by design.** Adding a file to either guarded directory reds the guard until the literal is updated in the same commit. Intended contract, and also friction. **Reduced for `[G2]` by MJ-2**: it now reds the EXISTING `CLIENT_FILES` literal, which already had this contract, rather than a second one. | Repo owner | the failing assertion names the added file | The next row that adds a file to either directory |
-| RES-T-6 | **NEW. `want` for `empty-braces/{import,export}` is pinned FAIL-CLOSED against a measured compiler divergence (3.4, 10.4).** ES semantics and `verbatimModuleSyntax` say edge; the repo's current `tsc` emit says no edge; **SWC, which is what `next build` uses, is UNMEASURED.** If SWC elides, two of 157 fixtures pin a stricter rule than the build enforces - a false-positive direction, not a hole. | Repo owner (it is a policy call about which compiler the guard defends against), on the architect's advice | build a two-file probe under `next build` - a client file with `export {} from "@/lib/grade"` - and read the `Compiled successfully` line and the emitted chunk; OR set `verbatimModuleSyntax: true` in `tsconfig.json`, which makes the question moot in the fail-closed direction | Owner verification after A23's push; it blocks nothing in the wave |
+| RES-T-6 | **CLOSED by orchestrator Ruling V1, measured (3.4, 10.4).** SWC (`@next/swc-win32-x64-msvc`, installed, called via `transformSync` through `createRequire`) measures `empty-braces/import` a real edge and `empty-braces/export` an erasure; Next never passes `verbatimModuleSyntax` to it. `want=edge` is KEPT for both cells on separately-measured grounds (SWC agreement for import, ES-semantics fail-closed for export). Turbopack's emit for these six cells remains unmeasured and is a separate engine. | Closed - no further owner action | `node <sandbox>/swc-probe.ts` against the installed `@next/swc-win32-x64-msvc`, reproduced in this round | Closed this round |
 | RES-T-7 | **NEW. `.mts` is in `tsconfig.json`'s `include` and is skipped by `directoryRoots` and by this document's derivation (mn-5).** Measured zero `.mts`/`.cts` under `src/` today. Fail-OPEN. Not widened, because a zero count is not a reason to change a guard in either direction (3.1). | Implementer, at the first row that adds a `.mts` under `src/` | `find src -name '*.mts' -o -name '*.cts' \| wc -l`; non-zero means `directoryRoots`'s predicate needs widening in that same commit | The first row that adds one |
 | RES-A23-12 | Unchanged from the architecture: whether `typescript` loads under vitest at all is UNMEASURED; the `createRequire` form is measured working under node, here and there. **Widened by R-5e clause (ii)**, which needs `typescript` in `[LEAF]`'s test too - same loader, same risk, no new one. | Implementer | `npx vitest run src/lib/module-graph/runtime-import-graph.test.ts` with each form | Wave step 2 |
 | RES-A23-13 | Unchanged: the architecture's ten probes are not committed, so its quantities are not re-runnable from the repo. **My own probes are not committed either**, for the same reason - this pass owns one path - and this document states every command and every input needed to rebuild them. | Implementer (wave step 0) | commit the probes to `docs/a23/`, re-run, diff against the architecture's sections and this document's sections 4-8 | Wave step 0 |
@@ -1455,9 +1600,11 @@ architecture share, whose retired ids (3, 6) stay retired.
 - **Why Ruling W1's `v=3` and my `v=2` differ on the same R-8 configuration**
   (10.5). `nodes` agrees at 44 and the load-bearing boolean agrees. R-8 asserts
   no count, so nothing rests on it, but I did not close it.
-- **What SWC emits for the six diverging cells of section 3.4.** RES-T-6. This is
-  the one open question that could change a `want` value, and it is the reason
-  that residual names a specific runnable probe rather than "review it".
+- **What SWC emits for the six diverging cells of section 3.4 - RESOLVED this
+  round**, by Ruling V1's measurement against the installed
+  `@next/swc-win32-x64-msvc`. RES-T-6 is closed. What is still open is whether
+  `next build`'s selected pipeline and Turbopack agree with the bare
+  `transformSync` reading - unmeasured, and named in section 9.
 - **Whether the architecture's 23-construct list, had it existed, would agree
   with mine.** I built the product from construction rather than guessing at a
   list I cannot read. Unknowable without the probe (RES-A23-13).

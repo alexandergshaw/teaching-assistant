@@ -1,386 +1,653 @@
-# A23 - acceptance criteria
+# A23 - acceptance criteria (round 2)
 
-**Row:** `docs/backlog.yml:429` (`id: 'A23'`, `kind: 'bug'`, `state: 'unscoped'`).
-**Seat:** acceptance criteria (`loop-ac`). **Date:** 2026-09-20. **Tree:** `b90cf03`.
-**Prior version of this document:** none. `ls docs/ | grep -i a23` returns nothing,
-so there is no disposition table to ship - this is round 1.
+**Row:** `docs/backlog.yml:429` (`id: 'A23'`, `kind: 'bug'` at `:438`,
+`state: 'unscoped'` at `:430`).
+**Seat:** acceptance criteria (`loop-ac`). **Date:** 2026-09-20.
+**Tree:** `a0c1b53` (`git log --oneline -1`).
+**Prior version:** round 1, committed at `52af8d0`. A fresh checker returned NOT
+CLEAN: 2 blockers, 2 majors, 5 minors. The orchestrator disposed both blockers by
+ruling (X1, X2). Section 11 is the finding disposition table; section 12 is the
+criterion disposition table, and its id column was derived LAST, after all
+renumbering.
 
 **Scope of this document:** WHAT must hold and HOW ITS FAILURE WOULD SHOW. The
-choice of construction is the architect's, the oracle and the sabotage design
-are the test seat's, and neither is decided here.
+choice of construction is the architect's; the oracle, the sabotage design and
+**the enumerated fixture cross-product** are the test seat's (Ruling X2 (d)).
+Neither is decided here.
 
 ---
 
 ## 0. Leverage line - FIRED AND DECLINED
 
-`docs/backlog.yml:438` carries `kind: 'bug'`, and `seats.md` ("Acceptance
-criteria") rules that on a bug fix "there is no claim to make; record that as
-the fired trigger and move on." Trigger fired: **bug fix**. **No leverage
-claim.** This row builds no capability a user reaches; it repairs two shipped
-guards. There is no removal test to hand the test seat, and inventing a class
-here would describe the app rather than this work.
+`docs/backlog.yml:438` carries `kind: 'bug'`, and `seats.md:70-75`
+("Acceptance criteria") rules that on a bug fix "there is no claim to make;
+record that as the fired trigger and move on." Trigger fired: **bug fix**.
+**No leverage claim.** This row builds no capability a user reaches; it repairs
+two shipped guards. There is no removal test to hand the test seat, and
+inventing a class here would describe the app rather than this work.
 
 ---
 
 ## 1. The owner's words this document is written from
 
-From `docs/backlog.yml`, row A23:
+From `docs/backlog.yml`, row A23, as it reads at `a0c1b53` (the row was
+corrected by the orchestrator at that commit; round 1's F-1 is discharged and
+its residual struck - see section 11).
 
-- `title` (`:431`): "The type-only import classifier ... collects ONLY lines
-  matching /^\s*import\b/, so a MULTI-LINE VALUE IMPORT of the banned
-  @/lib/grade barrel is never tested at all - and separately it flags an inline
-  all-type import that should pass."
+- `title` (`:431`): "The type-only import classifier at
+  `repoGradesFeedbackAndFiles.wiring.test.ts:295-297` collects ONLY lines
+  matching `/^\s*import\b/`, so a MULTI-LINE VALUE IMPORT of the banned
+  `@/lib/grade` barrel is never tested at all - and separately it flags an
+  inline all-type import that should pass."
 - `note` (`:439`): "SO THIS ROW NOW COVERS TWO GUARDS, not one, because they are
   the same class with the same corrective rule: a text filter inferring import
   intent, defeated by a form nobody enumerated. **Fix them together or
   neither.**"
+- `note` (`:439`): "**THE FIX MUST BIND EACH GUARD TO EACH CONSTRUCT PER WRAP
+  POSITION PER QUOTE STYLE, measured, not reasoned from one guard to the
+  other.**"
+- `note` (`:439`): "ORCHESTRATOR RULING, 2026-09-20: OPTION (b) - delete the
+  classifier and let the whole-file ban stand unconditionally - **IS OFF THE
+  TABLE.**"
 - `note` (`:439`): "WHAT THIS ROW MUST NOT DO: reach for a better regex."
 - `note` (`:439`): "whoever takes this must state WHICH DIRECTION each frozen
   fixture pins - the third repo-grades fixture currently pins WRONG behaviour".
 - `note` (`:439`): "FIRST STEP, owed before any fix: find out what the guard was
   protecting and whether the false negative has already let something through."
 
-Where these criteria and those sentences diverge, the sentences win. Two places
-below say plainly where I narrowed a sentence, and why.
+Where these criteria and those sentences diverge, the sentences win. Section 5
+says plainly at each point where I narrowed a sentence, and why.
 
 ---
 
-## 2. The measurement owed before criteria - has the permissive direction already let something through?
+## 2. The measurement owed before criteria
+
+Every quantity below was produced by one of the two scripts in **Appendix A**,
+which are reproduced in full there precisely so the next reader can re-run them.
+Round 1's numbers came from a session-local scratchpad script that no longer
+exists; the numbers were independently reproduced by the checker to the digit,
+but they were not re-runnable. That is fixed here, not re-asserted.
+
+### 2.1 Has the permissive direction already let something through?
 
 **Answer: NO, on the row's own test - and the hole is nonetheless live.**
 
-**Command.** A multi-line-aware import scanner over every non-test `.ts`/`.tsx`
-file in `src/app/components/repo-grades/`, run as
-`node <scratchpad>/scan.js src/app/components/repo-grades`. It matched
-`/(^|\n)[ \t]*(import\b[\s\S]*?from\s*(['"])([^'"]+)\3)/g` plus `require(...)`
-and dynamic `import(...)`, and classified each hit as VALUE / TYPE(keyword) /
-TYPE(inline-all) with its line span.
+**Command.** `node a23-scan.mjs src/app/components/repo-grades` (Appendix A.2),
+a multi-line-aware import scanner over every non-test `.ts`/`.tsx` file in that
+directory.
 
-**Result.** 32 files scanned, 171 import statements seen, 3 hits on a banned
-specifier:
+```
+root=src/app/components/repo-grades
+files scanned = 32
+import statements (from-bearing) = 171
+require( occurrences = 0
+dynamic import( occurrences = 3
+banned-specifier hits:
+  src/app/components/repo-grades/repoGradesCellEdits.ts:30  @/lib/grade  lines=1  TYPE(keyword)
+  src/app/components/repo-grades/repoGradesPosting.ts:56  @/lib/grade/postable  lines=1  VALUE
+  src/app/components/repo-grades/repoGradesPosting.ts:72  @/lib/grade  lines=1  TYPE(keyword)
+per-file, the four files in REPO_GRADES_CLIENT_FILES (imports / multi-line):
+  RepoGradeCellControl.tsx         19 / 0
+  repoGradesCellEdits.ts           4 / 0
+  useRepoGradesGradingActions.ts   12 / 2
+  useRepoGradesBulkGrade.ts        6 / 1
+```
 
-| Site | Specifier | Lines spanned | Kind |
-|---|---|---|---|
-| `repoGradesCellEdits.ts:30` | `@/lib/grade` | 1 | TYPE (keyword) |
-| `repoGradesPosting.ts:56` | `@/lib/grade/postable` | 1 | **VALUE** |
-| `repoGradesPosting.ts:72` | `@/lib/grade` | 1 | TYPE (keyword) |
+**The `dynamic import( occurrences = 3` line is a false positive of my own
+counter and I am saying so rather than letting it read as three dynamic
+imports.** Command:
+`grep -rn "import *(" src/app/components/repo-grades --include=*.ts --include=*.tsx | grep -v "\.test\."`
+returns three lines, all of them the English phrase "Type-only import (erased at
+build time" in a comment - `repoGradesCellEdits.ts:25`, `repoGradesPosting.ts:67`,
+`useRepoGradesData.ts:58`. **Real dynamic imports in the directory: zero.**
+Round 1's "zero dynamic import" was correct; the scanner's regex is the thing
+that is loose.
 
-Zero `require(...)`, zero dynamic `import(...)`, **zero multi-line imports of a
-banned specifier anywhere in the directory.** So on the row's stated test - "any
-file in repo-grades currently carrying a multi-line value import of the barrel" -
-nothing has escaped, and **A23 is a hygiene chore, not a bug fix in the sense of
-having shipped a live client-bundle defect.**
+**So on the row's stated test** - "any file in repo-grades currently carrying a
+multi-line value import of the barrel" - nothing has escaped, and **A23 is a
+hygiene chore on that test, not a bug fix in the sense of having shipped a live
+client-bundle defect.**
 
 **Two qualifications that stop that from being reassuring, both measured.**
 
-1. **The multi-line form is already present in the guarded files.** Command:
-   the same scanner restricted to the four files in `REPO_GRADES_CLIENT_FILES`
-   (`repoGradesFeedbackAndFiles.wiring.test.ts:265-270`). Result:
-   `RepoGradeCellControl.tsx` 19 imports / 0 multi-line;
-   `repoGradesCellEdits.ts` 4 / 0; `useRepoGradesGradingActions.ts` 12 /
-   **2 multi-line**; `useRepoGradesBulkGrade.ts` 6 / **1 multi-line**. Three
-   statements the guard reads and silently skips today. Only the specifier has
-   not yet been a banned one. The hole is not theoretical; it is exercised.
-2. **A file carrying a banned-specifier VALUE import is outside the guard's
-   list entirely.** `repoGradesPosting.ts:56` value-imports
-   `@/lib/grade/postable`, which `BANNED_IMPORT_PATTERNS` (`:258-263`, the `@/lib/grade/` prefix at `:260`) bans,
-   and that file is not one of the four the guard asserts over. That is a
-   COVERAGE-BY-OMISSION gap, a different defect class from the line filter, and
-   it is **not chartered by this row** - see RES-A23-2. It is also not a bundle
-   hazard today: `grep -n "^import\|^export \*\|require(" src/lib/grade/postable.ts`
-   returns exactly one line, `:70 import type { GradeResult, RubricAreaResult } from "./types";`,
-   and `src/lib/grade/types.ts:1` is likewise a single type-only import.
+1. **The multi-line form is already present in the guarded files.** Per-file, in
+   the scan output above: `useRepoGradesGradingActions.ts` carries 2 multi-line
+   statements, `useRepoGradesBulkGrade.ts` 1. Three statements the guard reads
+   and silently skips today. Only the specifier has not yet been a banned one.
+   The hole is not theoretical; it is exercised.
+2. **A file carrying a banned-specifier VALUE import is outside the guard's list
+   entirely.** `repoGradesPosting.ts:56` value-imports `@/lib/grade/postable`,
+   which the `@/lib/grade/` prefix pattern at
+   `repoGradesFeedbackAndFiles.wiring.test.ts:260` bans (the constant opens at
+   `:258` and closes at `:263`), and that file is not one of the four in
+   `REPO_GRADES_CLIENT_FILES` (`:265-270`). That is a COVERAGE-BY-OMISSION gap, a
+   different defect class from the line filter, and it is **not chartered by
+   this row** - see F-2 and RES-A23-2. It is also not a bundle hazard today:
+   `grep -n "^import\|^export \*\|require(" src/lib/grade/postable.ts` returns
+   exactly one line,
+   `:70 import type { GradeResult, RubricAreaResult } from "./types";`, and
+   `sed -n '1,3p' src/lib/grade/types.ts` shows `:1` is likewise a single
+   type-only import.
 
-**Both guards re-measured here, not recalled.** Command:
-`node <scratchpad>/probe.js src/lib/grade/types.ts`, which runs each guard's
-filter verbatim (guard 1 from
-`repoGradesFeedbackAndFiles.wiring.test.ts:295-297`, measured - the row's
-`title` and `instrument` fields still cite the stale `:287-291`, see F-1; guard
-2 from `gradingResultsHelpersWiring.test.ts:128-131`, measured and matching the
-row exactly: file 241 lines by `wc -l`, `it(` at `:123`, filter `:128-130`,
-frozen literal `:131`).
+### 2.2 Both guards re-measured PER CONSTRUCT, by execution
+
+**Command.** `node a23-probe.mjs` from the repo root (Appendix A.1). It runs each
+guard's decision procedure verbatim:
+
+- **Guard 1** - `repoGradesFeedbackAndFiles.wiring.test.ts`: the patterns at
+  `:258-263`, the line filter at `:295-297`, the assertion at `:298-301`.
+  305 lines by `wc -l`.
+- **Guard 2** - `gradingResultsHelpersWiring.test.ts`: the `fromLines` filter at
+  `:128-130` with its frozen literal at `:131`, inside the `it(` opened at
+  `:123`. 241 lines by `wc -l`. The Ruling U3 comment it implements is at
+  `:119-122`; `types.ts` is read-only to it per S14's precedent (`:122`).
+
+Guard 1, double-quoted specifier. **The single-quoted block of the same output
+is line-for-line identical**, because guard 1's four patterns all carry `["']`
+(`:259-262`):
 
 ```
-GUARD 1  P1 single-line VALUE import : flagged=true  want=true   OK
-GUARD 1  P2 MULTI-LINE VALUE import  : flagged=false want=true   FAIL (false negative)
-GUARD 1  P3 inline ALL-TYPE import   : flagged=true  want=false  FAIL (false positive)
-
-GUARD 2  H0 unmodified real types.ts : passes=true (want true)
-GUARD 2  H1 double-quoted server VALUE import  : caught
-GUARD 2  H2 SINGLE-QUOTED server VALUE import  : ESCAPES
-GUARD 2  H3 require()                          : ESCAPES
-GUARD 2  H4 dynamic await import()             : ESCAPES
-GUARD 2  H5 SINGLE-QUOTED export *             : ESCAPES
-GUARD 2  H6 MULTI-LINE double-quoted import    : caught
+G1 P1   single-line VALUE import                       flagged=true  want=true  OK
+G1 P2a  WRAP inside the braces                         flagged=false want=true  FAIL(ESCAPES)
+G1 P2b  WRAP between from and the specifier            flagged=false want=true  FAIL(ESCAPES)
+G1 P2c  TAB between from and the specifier             flagged=false want=true  FAIL(ESCAPES)
+G1 P3   inline ALL-TYPE import                         flagged=true  want=false FAIL(false positive)
+G1 P4   MIXED inline-type + value binding              flagged=true  want=true  OK
+G1 P5   DEFAULT value binding + inline-type binding    flagged=true  want=true  OK
+G1 P6   bare SIDE-EFFECT import                        flagged=false want=true  FAIL(ESCAPES)
+G1 C1   export * from                                  flagged=false want=true  FAIL(ESCAPES)
+G1 C2   export { x } from                              flagged=false want=true  FAIL(ESCAPES)
+G1 C3   require(<literal>)                             flagged=false want=true  FAIL(ESCAPES)
+G1 C4   await import(<literal>)                        flagged=false want=true  FAIL(ESCAPES)
 ```
 
-H6 is mine, not the row's, and it matters: **the two guards do not share a
-failure MODE.** Guard 1 is defeated by line wrapping; guard 2 is immune to line
-wrapping and defeated by quote style and by non-`import` constructs. They share
-a CLASS ("a text filter inferring import intent") and a corrective rule, which
-is what justifies the row's "together or neither" - but a criterion written as
-"close the multi-line hole in both" would bind guard 2 to a hole it does not
-have. AC-3 and AC-4 are written to guard 2's measured holes.
+Guard 2, injected one construct at a time into a copy of the real
+`src/lib/grade/types.ts`:
+
+```
+G2 H0   unmodified real types.ts                       passes=true  OK
+G2 H1   DOUBLE-quoted server VALUE import              passes=false caught
+G2 H2   SINGLE-quoted server VALUE import              passes=true  ESCAPES
+G2 H3   require(<literal>)                             passes=true  ESCAPES
+G2 H4   await import(<literal>)                        passes=true  ESCAPES
+G2 H5   SINGLE-quoted export * from                    passes=true  ESCAPES
+G2 H6   WRAP inside the braces, double-quoted          passes=false caught
+G2 H7   WRAP between from and the specifier            passes=true  ESCAPES
+G2 H8   TAB between from and the specifier             passes=true  ESCAPES
+G2 H9   bare SIDE-EFFECT import                        passes=true  ESCAPES
+G2 H10  export { x } from, double-quoted               passes=false caught
+```
+
+### 2.3 The failure-mode map, MEASURED PER GUARD PER CONSTRUCT
+
+Round 1 wrote a symmetry claim. This is not a symmetry claim; it is the two
+measured result sets set side by side. Nothing here is inferred from one guard
+to the other. Every cell is a line of the output above.
+
+| Construct | Guard 1 | Guard 2 |
+|---|---|---|
+| single-line value import, double quote | caught (P1) | caught (H1) |
+| single-line value import, single quote | caught (P1, single block) | **ESCAPES** (H2) |
+| wrap inside the braces | **ESCAPES** (P2a) | caught (H6) |
+| wrap between `from` and the specifier | **ESCAPES** (P2b) | **ESCAPES** (H7) |
+| TAB between `from` and the specifier | **ESCAPES** (P2c) | **ESCAPES** (H8) |
+| bare side-effect `import "<spec>";` | **ESCAPES** (P6) | **ESCAPES** (H9) |
+| `export * from` | **ESCAPES** (C1) | caught double-quoted (H5 escapes single) |
+| `export { x } from` | **ESCAPES** (C2) | caught double-quoted (H10) |
+| `require(<literal>)` | **ESCAPES** (C3) | **ESCAPES** (H3) |
+| `await import(<literal>)` | **ESCAPES** (C4) | **ESCAPES** (H4) |
+| inline ALL-TYPE import | **false positive** (P3) | not applicable (guard 2 is a walled-set count, not a classifier) |
+| mixed `{ type X, y }` | caught (P4) | not applicable |
+| default binding `Grade, { type X }` | caught (P5) | not applicable |
+
+**The measured reading.** The two guards share a CLASS (a text filter inferring
+import intent), share a corrective rule, and share FIVE HOLES EXACTLY: from-wrap,
+tab-separator, bare side-effect import, `require(<literal>)` and
+`await import(<literal>)`. What they do not share is a single hole: guard 1
+additionally misses brace-wrap and both `export ... from` forms and carries a
+false positive; guard 2 additionally misses every single-quoted form, which
+guard 1 handles. **So the row's original framing and round 1's correction are
+each half right, and the row at `a0c1b53` now says so itself.**
+
+**What the asymmetric evidence cost, in one line:** round 1 measured guard 2
+across six constructs and guard 1 across only the three probes the row handed it,
+and the resulting map named a difference that is only half true (guard 2 catches a
+brace-wrap but not a from-wrap) while concealing five holes the guards genuinely
+share - and because round 1's AC-4 bound ONLY guard 2 to that construct set and no
+criterion bound guard 1 to it at all, a fix that joined continuation lines and
+treated an all-braced-`type` import as erased would have passed every round-1
+criterion and every repo gate while shipping guard 1 with the exact hole Ruling U3
+was ordered to close.
+
+**The enumerated cross-product is not built here.** Per Ruling X2 (d), each guard
+x {single-line, brace-wrap, from-wrap, tab} x {single, double quote} x the
+construct list belongs to the test seat. The table above is the TODAY-STATE
+measurement that seat starts from, not its fixture set.
 
 ---
 
 ## 3. The one line this seat owes
 
-**What the original U3 ruling lacked, and what every criterion below has: a
-pass condition that can only be discharged by OBSERVING THE GUARD'S VERDICT
-CHANGE on an input it must reject - red before, green after - rather than by
-describing the mechanism it is built from.** "Replace the regex with a walled
-set" is satisfied the moment a walled set is written; "the guard must report
-this single-quoted import" is satisfied only by running it. Every criterion
-below names a verdict, not a shape.
+**What the original U3 ruling lacked, and what every criterion below has: a pass
+condition that can only be discharged by OBSERVING THE GUARD'S VERDICT CHANGE on
+an input it must reject - red before, green after - rather than by describing the
+mechanism it is built from.** "Replace the regex with a walled set" is satisfied
+the moment a walled set is written; "the guard must report this single-quoted
+import" is satisfied only by running it. Every criterion below names a verdict,
+not a shape.
 
 ---
 
 ## 4. Constraints inherited, not authored here
 
-Stated so the architect and test seat do not re-derive them, and so a checker
-can tell inherited from invented.
+Stated so the architect and test seat do not re-derive them, and so a checker can
+tell inherited from invented.
 
 - **C-1.** `iteration-caps.md:41-43` - "the second attempt **must change kind,
   not strength**. Strengthening the same mechanism is forbidden at the second
-  failure." This is the second measured failure in this family; the row names
-  a third ("a phrase denylist catching ZERO of nine attack constructions").
+  failure." This is the second measured failure in this family; the row names a
+  third ("a phrase denylist catching ZERO of nine attack constructions").
 - **C-2.** `iteration-caps.md:13-16` - the three moves that have ended a chain
   here: relocate, escalate, or replace the assertion with a construction that
-  makes the bad state unrepresentable. The row names the in-repo shapes:
-  a walled set derived from the tree, a transitive import-graph walk
-  (`classTrendsDraft.not-postable.test.ts`, described at `leverage.md:152-162`),
-  or a computed-rather-than-hand-maintained expectation (A22, `7375a21`).
+  makes the bad state unrepresentable. The row names the in-repo shapes: a
+  walled set derived from the tree, a transitive import-graph walk
+  (`classTrendsDraft.not-postable.test.ts:50`, described at
+  `leverage.md:152-162`), or a computed-rather-than-hand-maintained expectation
+  (A22, `7375a21`).
 - **C-3.** `vitest` is node-env and collects only `src/**/*.test.ts`. No
-  component is rendered. No criterion below needs either.
+  component is rendered. There is no API key and the network is blocked. No
+  criterion below needs any of those.
+- **C-4 (Ruling X1, inherited not authored).** Option (b) is EXCLUDED. AC-12
+  states it and gives the measured ground.
 
 ---
 
 ## 5. Acceptance criteria
 
 Each names the **object** under comparison, the **instrument** producing each
-quantity, and the **direction of failure**.
+quantity, and the **direction of failure**. AC-1 to AC-3 bind guard 1; AC-4 to
+AC-6 bind guard 2; AC-7 to AC-12 bind both.
 
-### AC-1 - Guard 1's verdict does not depend on line wrapping
+### AC-1 - Guard 1's verdict does not depend on WHERE the statement wraps, or on which whitespace separates its tokens
 
-- **Object.** The repo-grades client-bundle guard's verdict on a source
-  containing a value import of a banned specifier written across MORE THAN ONE
-  LINE, compared against its verdict on the byte-equivalent single-line form of
-  the same import.
-- **Instrument.** The delivered guard executed -
+- **Object.** Guard 1's verdict on a value import of a banned specifier written
+  at each of four TOKEN-SEPARATION POSITIONS, each compared against its verdict
+  on the single-line, single-space form of the same import: (i) single line,
+  single spaces - the control; (ii) a newline INSIDE the braces; (iii) a newline
+  BETWEEN `from` AND THE SPECIFIER; (iv) a TAB, rather than a space, between
+  `from` and the specifier. **Round 1 said "more than one line". That is the
+  wrong axis and I am naming why: position (iv) is a single line and still
+  escapes, and guard 2 distinguishes (ii) from (iii), so "multi-line" does not
+  partition these verdicts. The axis is WRAP POSITION AND SEPARATOR KIND.**
+- **Instrument.** `node a23-probe.mjs` (Appendix A.1) against the tree before the
+  fix, and the delivered guard executed -
   `npx vitest run src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` -
-  against each form in turn. Not a reading of the filter; reading is what let
-  this ship.
-- **Direction of failure.** The two verdicts DIFFER. Specifically: the guard is
-  GREEN on the multi-line form. A silent pass is the defect, which is why this
-  criterion is discharged only by an observed RED on the multi-line form before
-  the fix (measured today: `flagged=false`, P2) and an observed GREEN after.
+  against fixtures the test seat adds, after. Not a reading of the filter;
+  reading is what let this ship.
+- **Direction of failure.** Any of the four verdicts DIFFERS from the control's.
+  Specifically the guard is GREEN on (ii), (iii) and (iv) - a silent pass, which
+  is the defect. Measured today: P2a, P2b, P2c all `flagged=false` where P1 is
+  `flagged=true`, in both quote styles.
+- **Obligation handed on.** The test seat owns enumerating this axis against the
+  construct list of AC-3 and both quote styles (Ruling X2 (d)).
 
 ### AC-2 - Guard 1 permits an all-type import in every spelling, and permits nothing more
 
-- **Object.** Two verdicts, compared as a pair:
-  (a) the guard's verdict on `import { type X } from "<banned>"` - every binding
-  carrying the inline `type` modifier - against its verdict on
-  `import type { X } from "<banned>"`; these must be the SAME, and both must be
-  "permitted";
-  (b) the guard's verdict on a MIXED import, `import { type X, y } from "<banned>"`,
-  which must be "flagged" - `y` is a value binding and is not erased.
-- **Instrument.** The delivered guard executed over each of the three forms.
-- **Direction of failure.** TWO directions, and the second is the one that
-  matters more. (i) The two spellings in (a) disagree - measured today they do:
-  P3 `flagged=true` where the keyword form is `flagged=false`. (ii) The fix
-  closes (a) by widening what is permitted until (b) is also permitted, which
-  converts a false positive into a false negative and is strictly worse than the
-  defect being closed. A fix that turns (a) green while turning (b) green is a
-  FAILURE of this criterion, not a partial pass.
+- **Object.** Four verdicts, compared as one set:
+  (a) `import { type X } from "<banned>"` - every braced binding carrying the
+  inline `type` modifier - against `import type { X } from "<banned>"`; these
+  must be the SAME, and both must be "permitted";
+  (b) a MIXED import, `import { type X, y } from "<banned>"`, which must be
+  "flagged" - `y` is a value binding and is not erased;
+  (c) a DEFAULT-plus-inline-type import,
+  `import Grade, { type X } from "<banned>"`, which must be "flagged" - the
+  default binding is a value binding even though every BRACED binding carries
+  `type`;
+  (d) a bare side-effect import, `import "<banned>";`, which must be "flagged" -
+  it is erased by nothing and executes the module for its effects.
+- **Instrument.** `node a23-probe.mjs` before the fix; the delivered guard
+  executed over each of the five spellings after.
+- **Direction of failure.** THREE directions, and the last two matter more than
+  the first. (i) The two spellings in (a) disagree - measured today they do: P3
+  `flagged=true` where the keyword form is permitted. (ii) The fix closes (a) by
+  widening what is permitted until (b) is ALSO permitted, converting a false
+  positive into a false negative, which is strictly worse than the defect being
+  closed. (iii) **The fix closes (a) by testing whether every BRACED binding
+  carries `type` - which satisfies (a) and (b) and still lets (c) through, and
+  (c) is `flagged=true` today (P5).** A fix that turns (a) green while turning
+  (b), (c) or (d) green is a FAILURE of this criterion, not a partial pass.
+- **Measured today (RES-A23-3 of round 1, discharged here, not deferred).**
+  P4 mixed `{ type RubricAreaResult, composeOverallComment }` is `flagged=true`;
+  P5 default-plus-inline-type is `flagged=true`; P6 bare side-effect import is
+  `flagged=false` and is therefore also a live miss, carried into AC-3.
+  Clauses (b) and (c) are regression canaries today, not targets; clause (d) is
+  a target.
 
-### AC-3 - Guard 2's verdict does not depend on quote style
+### AC-3 - Guard 1 sees the SAME non-`import`-statement construct set that got `VALUE_IMPORT_PATTERN` withdrawn
+
+**This criterion is new in round 2 (Ruling X2 (a)). Round 1 bound this construct
+set to guard 2 only; nothing in round 1 bound guard 1 to it at all.**
+
+- **Object.** Guard 1's verdict on a guarded file reaching a banned specifier
+  through each construct that is NOT a `import ... from` statement - the four
+  Ruling U3 cited when it withdrew `VALUE_IMPORT_PATTERN`, quoted from
+  `gradingResultsHelpersWiring.test.ts:119-120` ("VALUE_IMPORT_PATTERN was
+  withdrawn (misses re-exports/require/dynamic import)"), plus the fifth the
+  measurement adds: `export * from`, `export { x } from`,
+  `require(<literal>)`, `import(<literal>)`, and the bare side-effect
+  `import "<banned>";`. **Each in BOTH quote styles**, the same obligation AC-6
+  carries for guard 2.
+- **Instrument.** `node a23-probe.mjs` before the fix (C1, C2, C3, C4, P6, each
+  run in both quote styles); the delivered guard executed over each construct
+  after.
+- **Direction of failure.** ANY of the ten leaves the guard GREEN. Measured today
+  **all ten do** - C1, C2, C3, C4 and P6 are `flagged=false` in both quote
+  styles. A guard that a `export * from "@/lib/grade"` walks straight past is not
+  a client-bundle guard; and a fix for AC-1 and AC-2 alone passes every other
+  criterion here while leaving all ten open, which is the specific silent-green
+  Ruling X2 was issued to close.
+- **NARROWED, and I am saying so** - identically to AC-6. `require` and
+  `import()` bind to a **static string literal** specifier only. A
+  runtime-computed specifier (`import(pathVar)`) is caught by no construction
+  available in this repo. RES-A23-1, not a deletion.
+
+### AC-4 - Guard 2's verdict does not depend on quote style
 
 - **Object.** Guard 2's verdict on `src/lib/grade/types.ts` carrying a value
-  import of a server-only module written with SINGLE quotes, compared against
-  its verdict on the same import written with DOUBLE quotes.
-- **Instrument.** The delivered guard executed -
+  import of a server-only module written with SINGLE quotes, compared against its
+  verdict on the same import written with DOUBLE quotes.
+- **Instrument.** `node a23-probe.mjs` before the fix (H1 against H2); the
+  delivered guard executed -
   `npx vitest run src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` -
-  against a copy of the real `types.ts` with each form injected. `types.ts` is
-  read-only to this guard (S14's precedent, `gradingResultsHelpersWiring.test.ts:122`),
-  so the injection is into a copy, never the tree.
+  against a copy of the real `types.ts` with each form injected, after.
+  `types.ts` is read-only to this guard (S14's precedent,
+  `gradingResultsHelpersWiring.test.ts:122`), so the injection is into a copy,
+  never the tree.
 - **Direction of failure.** The single-quoted form is GREEN where the
-  double-quoted form is RED. Measured today: H2 escapes, H1 is caught.
+  double-quoted form is RED. Measured today: H2 `passes=true` (escapes), H1
+  `passes=false` (caught).
 
-### AC-4 - Guard 2 sees the four constructs that got its predecessor withdrawn
+### AC-5 - Guard 2's verdict does not depend on WHERE the statement wraps, or on which whitespace separates its tokens
+
+**This criterion is new in round 2. Round 1 asserted guard 2 was "immune to line
+wrapping"; that is FALSE for one of the two wrap positions and Ruling X2 half B
+settled it by execution.**
+
+- **Object.** Guard 2's verdict on `types.ts` carrying a double-quoted value
+  import of a server-only module at each of the same four token-separation
+  positions AC-1 names: single line and single spaces (the control); a newline
+  inside the braces; a newline between `from` and the specifier; a TAB between
+  `from` and the specifier.
+- **Instrument.** `node a23-probe.mjs` before the fix (H1 as control, against H6,
+  H7, H8); the delivered guard executed against a copy of `types.ts` with each
+  form injected, after.
+- **Direction of failure.** Any verdict DIFFERS from the control's by being
+  GREEN. Measured today the brace-wrap is CAUGHT (H6 `passes=false`) and **both
+  the from-wrap and the tab ESCAPE** (H7, H8 `passes=true`). H6 is the reason the
+  round-1 challenge to the row's blanket claim was warranted; H7 and H8 are the
+  reason it was over-corrected into a blanket claim of its own. This criterion
+  carries both.
+
+### AC-6 - Guard 2 sees the constructs that got its predecessor withdrawn
 
 - **Object.** Guard 2's verdict on `types.ts` reaching another module through
-  each of the four constructs Ruling U3 cited when it withdrew
-  `VALUE_IMPORT_PATTERN` - the ruling's own words, quoted from
-  `gradingResultsHelpersWiring.test.ts:119-120`: "VALUE_IMPORT_PATTERN was
-  withdrawn (misses re-exports/require/dynamic import)". Concretely:
-  `export ... from`, `export * from`, `require(<literal>)`, and
-  `import(<literal>)` - each in BOTH quote styles.
-- **Instrument.** The delivered guard executed against a copy of the real
-  `types.ts` with each construct injected, one at a time.
-- **Direction of failure.** ANY of the eight leaves the guard GREEN. Measured
-  today three of them do (H3, H4, H5); the row's own count is "TWO of the four
-  constructs that got the ORIGINAL regex withdrawn still escape its
-  REPLACEMENT". A replacement that fails on the same construct list as the thing
-  it replaced is the defect this row exists to name.
+  each construct Ruling U3 cited when it withdrew `VALUE_IMPORT_PATTERN` - the
+  ruling's own words, quoted from `gradingResultsHelpersWiring.test.ts:119-120`:
+  "VALUE_IMPORT_PATTERN was withdrawn (misses re-exports/require/dynamic
+  import)". Concretely: `export * from`, `export { x } from`,
+  `require(<literal>)` and `import(<literal>)`, **each in BOTH quote styles**,
+  plus the bare side-effect `import "<spec>";` that the round-2 measurement adds.
+- **Instrument.** `node a23-probe.mjs` before the fix (H3, H4, H5, H9, H10); the
+  delivered guard executed against a copy of the real `types.ts` with each
+  construct injected, one at a time, after.
+- **Direction of failure.** ANY of the ten leaves the guard GREEN. Measured today
+  H3 (`require`), H4 (dynamic `import`), H5 (single-quoted `export *`) and H9
+  (bare side-effect import) escape; H10 (double-quoted `export { x } from`) is
+  caught. The row's own count is "TWO of the four constructs that got the
+  ORIGINAL regex withdrawn still escape its REPLACEMENT". A replacement that
+  fails on the same construct list as the thing it replaced is the defect this
+  row exists to name.
 - **NARROWED, and I am saying so.** The row's sentence is unqualified about
   "dynamic import()". A criterion demanding that a dynamic import with a
   RUNTIME-COMPUTED specifier (`import(pathVar)`) be caught is **not satisfiable
   by any construction available here** - no static instrument in a node-env
   vitest run can resolve it, and I could describe no implementation that passes.
-  So AC-4 binds to constructs whose specifier is a **static string literal**.
-  The computed-specifier case is RES-A23-1, not a deletion.
+  So AC-6, like AC-3, binds to constructs whose specifier is a **static string
+  literal**. The computed-specifier case is RES-A23-1, not a deletion.
 
-### AC-5 - Every criterion above is discharged by an observed colour CHANGE
+### AC-7 - Every criterion above is discharged by an observed colour CHANGE, and the instrument for "before" is named correctly
 
-- **Object.** For each of AC-1 through AC-4, two recorded guard runs: one
-  against the tree as it stands before the fix, one after.
-- **Instrument.** The two `npx vitest run` commands named above, with their
-  output recorded in the shipping report.
+- **Object.** For each of AC-1 through AC-6, two recorded runs: one against the
+  tree as it stands before the fix, one after.
+- **Instrument, CORRECTED in round 2 and this is the correction.** Both guards
+  read FIXED sources - guard 1 from four module-level constants, guard 2 from
+  `readFileSync` of the real `types.ts` - and neither takes a fixture. So
+  **`npx vitest run` on either file is GREEN against the pre-fix tree and CANNOT
+  record any "before" red.** Measured:
+  `npx vitest run src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`
+  reports `Test Files 2 passed (2)` / `Tests 52 passed (52)`. The "before"
+  instrument is therefore **`node a23-probe.mjs` (Appendix A.1)**, whose output
+  is section 2.2. The "after" instrument is the two `npx vitest run` commands,
+  and they become capable of recording a red only under the LANDING ORDER below.
+- **LANDING ORDER, which is what makes this criterion dischargeable at all.**
+  The hazard fixtures are ADDED to the two guard test files FIRST, as their own
+  assertions, and observed RED under `npx vitest run` BEFORE the decision
+  procedure is changed. A fix that lands the new procedure and the new fixtures
+  in one step has discharged nothing, because no red was ever observed inside
+  the suite that will carry the fixtures forward.
 - **Direction of failure.** A criterion whose hazard fixture was NEVER OBSERVED
-  RED. If the fix lands and every fixture is green at the moment it lands, this
-  criterion has failed regardless of what the guard now contains - that is
-  exactly the state Ruling U3 shipped in, and `traps-tests.md:8` already rules
-  "A test is not evidence until you have watched it fail."
+  RED - by the probe before the fix AND by `npx vitest run` after the fixtures
+  land and before the procedure changes. If the fix lands and every fixture is
+  green at the moment it lands, this criterion has failed regardless of what the
+  guard now contains - that is exactly the state Ruling U3 shipped in, and
+  `traps-tests.md:8` already rules "A test is not evidence until you have watched
+  it fail."
 
-### AC-6 - Every adopted fixture states the direction it pins
+### AC-8 - Every adopted fixture states the direction it pins
 
 - **Object.** The label carried by each fixture the fix adopts, against the
-  fixture's CURRENT observed value.
-- **Instrument.** The table in section 6 of this document, re-run by whoever
-  adopts the fixtures, via the two commands above.
+  fixture's CURRENT observed value in section 2.2.
+- **Instrument.** The table in section 6 of this document, re-derived by whoever
+  adopts the fixtures, via `node a23-probe.mjs`.
 - **Direction of failure.** A fixture adopted with its current observed value as
-  its expectation. Two of the three repo-grades fixtures currently observe the
-  WRONG value (P2 and P3), so freezing observed values immortalises two defects
-  as expectations.
+  its expectation. Most of the fixtures in section 6 currently observe the WRONG
+  value, so freezing observed values immortalises the defects as expectations.
 - **A dropped clause, and I am restoring it rather than inheriting the narrow
-  half.** `a22-scope.md:611-618` states the obligation for ALL THREE fixtures -
-  fixture 1 "pins CORRECT behaviour and is a regression canary", fixture 2 "pins
-  the FALSE NEGATIVE and must go RED against today's filter before any fix, as a
-  positive control", fixture 3 "pins the FALSE POSITIVE and must be asserted in
-  the FIXED direction". The BACKLOG ROW carried only the fixture-3 half forward
-  ("the third repo-grades fixture currently pins WRONG behaviour"). Reading the
-  row alone would leave fixture 2 unlabelled, and fixture 2 is the one pinning
-  the false negative this row is named after. This is the two-clause-rule
-  failure `seats.md` already makes this seat's checker ask about.
+  half.** `a22-scope.md:611-618` states the obligation for ALL THREE repo-grades
+  fixtures - fixture 1 "pins CORRECT behaviour and is a regression canary",
+  fixture 2 "pins the FALSE NEGATIVE and must go RED against today's filter
+  before any fix, as a positive control", fixture 3 "pins the FALSE POSITIVE and
+  must be asserted in the FIXED direction". The BACKLOG ROW carried only the
+  fixture-3 half forward ("the third repo-grades fixture currently pins WRONG
+  behaviour"). Reading the row alone would leave fixture 2 unlabelled, and
+  fixture 2 is the one pinning the false negative this row is named after. This
+  is the two-clause-rule failure `seats.md:97-102` already makes this seat's
+  checker ask about.
 
-### AC-7 - The fix changes kind, not strength
+### AC-9 - The fix changes kind, not strength
 
-- **Object.** The delivered guard's decision procedure, classified as either
+- **Object.** Each delivered guard's decision procedure, classified as either
   (i) a predicate over raw source TEXT whose completeness depends on having
   enumerated syntactic forms, or (ii) one of the three shapes at C-2.
 - **Instrument.** The architect's design artifact must NAME which of the three
-  C-2 shapes it took; a checker reads the delivered test for a surviving
-  per-line or per-quote-style text filter on the decision path.
-- **Direction of failure.** The delivered guard is classified (i). A third
+  C-2 shapes each guard took; a checker reads each delivered test for a surviving
+  per-line, per-quote-style or per-separator text filter on the decision path.
+- **Direction of failure.** Either delivered guard is classified (i). A third
   pattern - however much better - is a REPEAT of a class that has now failed
   three times in this tree, and `iteration-caps.md:41-43` forbids it at the
-  second. Naming a shape is not choosing one: which shape, and whether the
-  answer is option (b) deletion, is the architect's call.
+  second. Naming a shape is not choosing one: which shape is the architect's
+  call. **Option (b) is no longer among the choices - see C-4 and AC-12.**
 
-### AC-8 - Both guards, or neither
+### AC-10 - Both guards, or neither
 
 - **Object.** The shipped diff's file set, against the two paths the row names:
   `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` and
   `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`.
-- **Instrument.** `git status --short` at the wave gate, and `git diff --name-only`
-  on the chunk.
+- **Instrument.** `git status --short` at the wave gate, and
+  `git diff --name-only` on the chunk.
 - **Direction of failure.** Exactly one of the two paths is touched. The row's
   words: "Fix them together or neither." Shipping one half leaves a guard the
-  next reader believes in, which is the precise mechanism this row documents.
+  next reader believes in, which is the precise mechanism this row documents -
+  and section 2.3 now shows the two guards share five holes exactly, so half a
+  fix leaves five of them open in a guard nobody will re-measure.
 
-### AC-9 - Nothing currently caught stops being caught
+### AC-11 - Nothing currently caught stops being caught
 
-- **Object.** Guard 1's verdict on a single-line value import (P1, correct
-  today) and guard 2's verdict on a double-quoted value import (H1, correct
-  today), before and after the fix.
-- **Instrument.** The two `npx vitest run` commands, with P1 and H1 as the
-  fixtures.
-- **Direction of failure.** Either goes from RED-on-hazard to GREEN-on-hazard.
-  These two are regression canaries, not targets; a fix that closes the misses
-  by restructuring the guard and loses a working catch is a net loss. This is
-  the failure direction the row warns about when it says a broken guard "does
-  not fail loudly - it passes."
+- **Object.** Five verdicts that are CORRECT today, before and after the fix:
+  guard 1 on a single-line value import (P1, both quote styles), on a mixed
+  `{ type X, y }` import (P4), and on a default-plus-inline-type import (P5);
+  guard 2 on a double-quoted value import (H1), on a brace-wrapped double-quoted
+  import (H6), and on a double-quoted `export { x } from` (H10).
+- **Instrument.** `node a23-probe.mjs` before, and the two `npx vitest run`
+  commands with these as fixtures after.
+- **Direction of failure.** Any goes from RED-on-hazard to GREEN-on-hazard. These
+  are regression canaries, not targets; a fix that closes the misses by
+  restructuring the guard and loses a working catch is a net loss. This is the
+  failure direction the row warns about when it says a broken guard "does not
+  fail loudly - it passes."
 
-### AC-10 - The real tree still passes
+### AC-12 - The real tree still passes, and option (b) is EXCLUDED
 
-- **Object.** The two guard test files' results against the UNMODIFIED tree,
-  before and after the fix.
-- **Instrument.** `npx vitest run src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`,
-  plus the repo gates from `this-repo.md:19-24`: `npx tsc --noEmit` (no output,
-  exit 0), `npm run lint` (4 warnings, 0 errors), `npm test`.
-- **Direction of failure.** The fix turns the real tree RED. This is the
-  satisfiability boundary on the row's option (b) - "delete the classifier and
-  let the barrel ban stand unconditionally in that directory". I MEASURED
-  whether any guarded file legitimately needs a type-only barrel import, as the
-  row instructs: **`repoGradesCellEdits.ts:30` carries
-  `import type { RubricAreaResult, SubmittedFileInfo } from "@/lib/grade"`, and
-  it IS one of the four files the guard asserts over.** An unconditional ban in
-  that directory therefore fails AC-10 unless that import is first moved. Option
-  (b) is not off the table; it is not free, and the row's "MEASURE whether any
-  does before choosing this" is hereby discharged: **one does.**
+- **Object.** (a) The two guard test files' results against the UNMODIFIED tree,
+  before and after the fix. (b) The classification of option (b) - "let the
+  whole-file `BANNED_IMPORT_PATTERNS` sweep stand unconditionally in that
+  directory" - under AC-9's two-way classification.
+- **Instrument.** For (a):
+  `npx vitest run src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`
+  (green today: `Test Files 2 passed (2)` / `Tests 52 passed (52)`), plus the
+  repo gates from `this-repo.md:19-24`: `npx tsc --noEmit` (no output, exit 0),
+  `npm run lint` (`4 problems (0 errors, 4 warnings)`, exit 0), `npm test`
+  (`Test Files 1017 passed` / `Tests 20200 passed`, exit 0). For (b):
+  `node a23-probe.mjs`, whose `OPTION (b)` block runs the unconditional sweep
+  over the same constructs.
+- **Direction of failure.** For (a): the fix turns the real tree RED. For (b):
+  the delivered fix IS option (b).
+- **RULING X1, inherited. OPTION (b) IS EXCLUDED, on two independent measured
+  grounds, and I am recording both rather than leaving it "live but costly" as
+  round 1 did.**
+  1. **It is classification (i) under AC-9, so AC-9 forbids it.** The
+     unconditional sweep is the four regexes at `:259-262`, all of which require
+     the literal token `from` followed by a quote. Measured, `OPTION (b)` block
+     of `a23-probe.mjs`: the sweep is `flagged=false` on the from-wrap (P2b), on
+     the tab separator (P2c), on the bare side-effect import (P6), on
+     `require(<literal>)` (C3) and on `await import(<literal>)` (C4) - **five
+     misses, in both quote styles**. Its completeness depends entirely on which
+     syntactic forms were enumerated, which is the shape the row forbids
+     ("WHAT THIS ROW MUST NOT DO: reach for a better regex").
+  2. **AC-2 independently forbids it.** The sweep is `flagged=true` on the inline
+     ALL-TYPE import (P3), and - measured against the real file, not a fixture -
+     `flagged=true` on `src/app/components/repo-grades/repoGradesCellEdits.ts`
+     itself, because `:30` carries
+     `import type { RubricAreaResult, SubmittedFileInfo } from "@/lib/grade";`
+     and that file IS one of the four in `REPO_GRADES_CLIENT_FILES:265-270`. An
+     unconditional sweep therefore turns the real tree RED on a legitimate
+     type-only import, failing clause (a) of AC-12 and clause (a) of AC-2 at
+     once. **The row's own instruction, "MEASURE whether any does before choosing
+     this", is discharged: one does, and it is named.**
+  - **What round 1 got wrong here, stated plainly.** Round 1 wrote "Option (b) is
+    not off the table; it is not free". That left AC-12 permitting a course AC-2
+    and AC-9 forbade, and the architect is the immediate consumer of that
+    contradiction. The measurement round 1 made was sound; the conclusion it drew
+    from it was not.
 
 ---
 
 ## 6. Fixture direction table - what each pins, and why
 
-Required by the row. "Observed today" is from the commands in section 2.
+Required by the row ("state WHICH DIRECTION each frozen fixture pins"). This
+table states DIRECTIONS for the constructs the criteria name. **It is not the
+test seat's fixture set** - the enumerated cross-product of guard x wrap position
+x quote style x construct is that seat's, per Ruling X2 (d). "Observed today" is
+from `node a23-probe.mjs` (section 2.2).
 
 | # | Fixture | Observed today | What it pins | Expected colour BEFORE the fix | Role |
 |---|---|---|---|---|---|
-| P1 | single-line VALUE import of a banned specifier | flagged | **CORRECT behaviour** | RED on hazard (guard fires) | regression canary (AC-9) |
-| P2 | MULTI-LINE VALUE import of a banned specifier | not flagged | **the FALSE NEGATIVE** | must be observed GREEN-on-hazard, i.e. the guard fails to fire | positive control (AC-1, AC-5) |
-| P3 | inline ALL-TYPE import of a banned specifier | flagged | **the FALSE POSITIVE** | must be asserted in the FIXED direction (not flagged), RED today | positive control (AC-2, AC-5) |
-| P4 | MIXED `{ type X, y }` import of a banned specifier | not measured - see RES-A23-3 | the hole AC-2's naive fix would open | unknown | negative control (AC-2) |
-| H1 | double-quoted server VALUE import into `types.ts` | caught | **CORRECT behaviour** | RED on hazard | regression canary (AC-9) |
-| H2 | SINGLE-QUOTED server VALUE import | escapes | a MISS | GREEN-on-hazard | positive control (AC-3) |
-| H3 | `require(<literal>)` | escapes | a MISS | GREEN-on-hazard | positive control (AC-4) |
-| H4 | dynamic `await import(<literal>)` | escapes | a MISS | GREEN-on-hazard | positive control (AC-4) |
-| H5 | single-quoted `export * from` | escapes | a MISS | GREEN-on-hazard | positive control (AC-4) |
-| H6 | MULTI-LINE double-quoted import into `types.ts` | caught | **CORRECT behaviour - guard 2 has no multi-line hole** | RED on hazard | canary against over-generalising A23 (section 2) |
+| P1 | guard 1, single-line VALUE import, either quote style | flagged | **CORRECT behaviour** | RED on hazard (guard fires) | regression canary (AC-11) |
+| P2a | guard 1, wrap INSIDE the braces | not flagged | **a FALSE NEGATIVE** | GREEN-on-hazard, i.e. the guard fails to fire | positive control (AC-1, AC-7) |
+| P2b | guard 1, wrap between `from` and the specifier | not flagged | **a FALSE NEGATIVE** | GREEN-on-hazard | positive control (AC-1, AC-7) |
+| P2c | guard 1, TAB between `from` and the specifier | not flagged | **a FALSE NEGATIVE on a SINGLE LINE** | GREEN-on-hazard | positive control (AC-1); the fixture that disproves "multi-line" as the axis |
+| P3 | guard 1, inline ALL-TYPE import | flagged | **the FALSE POSITIVE** | must be asserted in the FIXED direction (not flagged), RED today | positive control (AC-2, AC-7) |
+| P4 | guard 1, MIXED `{ type X, y }` | flagged | **CORRECT behaviour** | RED on hazard | regression canary (AC-2 (b), AC-11) |
+| P5 | guard 1, DEFAULT binding `Grade, { type X }` | flagged | **CORRECT behaviour - and the form a naive every-braced-binding fix would open** | RED on hazard | regression canary (AC-2 (c), AC-11) |
+| P6 | guard 1, bare side-effect `import "<banned>";` | not flagged | **a FALSE NEGATIVE** | GREEN-on-hazard | positive control (AC-2 (d), AC-3) |
+| C1 | guard 1, `export * from` | not flagged | a MISS | GREEN-on-hazard | positive control (AC-3) |
+| C2 | guard 1, `export { x } from` | not flagged | a MISS | GREEN-on-hazard | positive control (AC-3) |
+| C3 | guard 1, `require(<literal>)` | not flagged | a MISS | GREEN-on-hazard | positive control (AC-3) |
+| C4 | guard 1, `await import(<literal>)` | not flagged | a MISS | GREEN-on-hazard | positive control (AC-3) |
+| H1 | guard 2, double-quoted server VALUE import | caught | **CORRECT behaviour** | RED on hazard | regression canary (AC-11) |
+| H2 | guard 2, SINGLE-QUOTED server VALUE import | escapes | a MISS | GREEN-on-hazard | positive control (AC-4) |
+| H3 | guard 2, `require(<literal>)` | escapes | a MISS | GREEN-on-hazard | positive control (AC-6) |
+| H4 | guard 2, dynamic `await import(<literal>)` | escapes | a MISS | GREEN-on-hazard | positive control (AC-6) |
+| H5 | guard 2, single-quoted `export * from` | escapes | a MISS | GREEN-on-hazard | positive control (AC-6) |
+| H6 | guard 2, wrap INSIDE the braces, double-quoted | caught | **CORRECT behaviour - guard 2 has no brace-wrap hole** | RED on hazard | regression canary (AC-5, AC-11) |
+| H7 | guard 2, wrap between `from` and the specifier | escapes | **a FALSE NEGATIVE round 1 asserted did not exist** | GREEN-on-hazard | positive control (AC-5) |
+| H8 | guard 2, TAB between `from` and the specifier | escapes | **a FALSE NEGATIVE on a SINGLE LINE** | GREEN-on-hazard | positive control (AC-5) |
+| H9 | guard 2, bare side-effect `import "<spec>";` | escapes | a MISS | GREEN-on-hazard | positive control (AC-6) |
+| H10 | guard 2, double-quoted `export { x } from` | caught | **CORRECT behaviour** | RED on hazard | regression canary (AC-11) |
 
-**Nothing in this table is adopted as-is.** P2, P3, H2, H3, H4 and H5 pin
-defects; they are expectations only after their direction is INVERTED.
+**Nothing in this table is adopted as-is.** Every row whose "Observed today" is
+`not flagged` or `escapes`, plus P3, pins a defect; each is an expectation only
+after its direction is INVERTED.
 
 ---
 
 ## 7. Findings
 
-- **F-1 (stale citation, in the row itself).** `docs/backlog.yml`'s `title`
-  (`:431`) and `instrument` (`:435`) fields both locate guard 1 at
-  `repoGradesFeedbackAndFiles.wiring.test.ts:287-291`. Measured by
-  `sed -n '293,300p'` plus `grep -n`, the filter is at **`:295-297`** in a
-  305-line file (`wc -l`). `a22-scope.md:573-576` already recorded this
-  ("Round 1 cited `:287-291`; that was stale - major M1"). The row's `note`
-  field re-pinned guard 2 after `7375a21` and did not re-pin guard 1. This is
-  the stale citation the row itself warns would be "the tenth" - present in the
-  row. The generated `docs/BACKLOG.md:31` mirrors it. Owner: orchestrator
-  (`backlog.yml` is not mine to write).
+- **F-1 (stale citation, in the row itself) - DISCHARGED, carried for the
+  record.** Round 1 found `docs/backlog.yml`'s `title` and `instrument` fields
+  locating guard 1 at `repoGradesFeedbackAndFiles.wiring.test.ts:287-291` where
+  the measured address is `:295-297`. The orchestrator corrected the row at
+  `a0c1b53`; measured here, `sed -n '429,440p' docs/backlog.yml` shows `:431`
+  and `:435` now carry `:295-297`. **RES-A23-6 of round 1 is STRUCK.**
 - **F-2 (coverage gap, adjacent class, NOT chartered).** `repoGradesPosting.ts:56`
-  value-imports `@/lib/grade/postable`, a specifier `BANNED_IMPORT_PATTERNS:269`
-  bans by prefix, and that file is absent from `REPO_GRADES_CLIENT_FILES:265-270`.
-  Not a bundle hazard today (section 2). This is coverage-by-omission, the class
-  A22 closed in `grading-results/` with a directory sweep, and chartering it here
-  would widen the row. RES-A23-2.
-- **F-3 (third site of the same line-filter idiom).** `Grep` for
+  value-imports `@/lib/grade/postable`, a specifier the prefix pattern at
+  `repoGradesFeedbackAndFiles.wiring.test.ts:260` bans (the constant spans
+  `:258-263`), and that file is absent from `REPO_GRADES_CLIENT_FILES:265-270`.
+  **Round 1 cited this pattern at `:269`; measured, `:269` is
+  `{ label: "useRepoGradesBulkGrade.ts", source: BULK_HOOK_SOURCE },`, inside a
+  different constant. Round 1's own section 2 cited it correctly at `:258-263`;
+  the finding text contradicted it. Corrected here.** Not a bundle hazard today
+  (section 2.1). This is coverage-by-omission, the class A22 closed in
+  `grading-results/` with a directory sweep, and chartering it here would widen
+  the row. RES-A23-2.
+- **F-3 (third site of the same line-filter idiom).** The `Grep` tool for
   `/^\s*import\b/` across `src` returns two sites:
-  `repoGradesFeedbackAndFiles.wiring.test.ts:297` and
-  `snapshot-grading.structure.test.ts:801`. The second is the same mechanism
-  (an import-intent decision from a per-line text filter) guarding Ruling
-  B35-20. It is not currently leaking - `node -e` over
-  `src/app/actions/snapshot-grade.ts` reports 6 import statements, 0 multi-line,
-  and the only mention of `extractRubricCriteria` is a comment at `:73` - and it
-  has a partial backstop at `:806` (a comment-stripped whole-file check for a
-  live call), which an import-without-call re-export would still escape.
-  **A bash `grep -rn` for this pattern returned EMPTY through shell escaping;
-  the `Grep` tool found both. The canary (`grep -c 'from "'` on a known-matching
-  string = 1) is what caught the false absence.** Whether A23 covers a third
-  site is a scope question for the owner, not a defect. RES-A23-4.
-- **F-4 (no live contradiction from A22).** `grep -rn 'CodeRunResult } from "../code-runner"' src`
-  returns 5 hits; exactly one is an assertion -
-  `gradingResultsHelpersWiring.test.ts:131`, the frozen literal A23 will change.
+  `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts:297`
+  and `src/app/components/snapshot-grading/snapshot-grading.structure.test.ts:801`.
+  The second is the same mechanism (an import-intent decision from a per-line
+  text filter) guarding Ruling B35-20. It is not currently leaking - the
+  `a23-scan.mjs` statement regex applied to `src/app/actions/snapshot-grade.ts`
+  alone (`node -e` over that one file, 124 lines) reports 6 import statements
+  and 0 multi-line, and `grep -n "extractRubricCriteria" src/app/actions/snapshot-grade.ts`
+  returns exactly one line, the comment at
+  `:73` - and it has a partial backstop at **`:807-809`** (a comment-stripped
+  whole-file check for a live call, `it(` at `:807`, body `:808-809`; **round 1
+  cited `:806`, which is blank, and cited the file by bare basename - both
+  corrected here**), which an import-without-call re-export would still escape.
+  Whether A23 covers a third site is a scope question for the owner, not a
+  defect. RES-A23-4.
+- **F-4 (no live contradiction from A22).**
+  `grep -rn 'CodeRunResult } from "../code-runner"' src` returns 5 hits; exactly
+  one is an assertion - `gradingResultsHelpersWiring.test.ts:131`, the frozen
+  literal A23 will change. The other four are real imports
+  (`src/lib/grade/engine.ts:8`, `types.ts:1`, `utils.ts:2`, `utils.test.ts:8`).
   A22's AC-3 pinned it as a criterion in `a22-scope.md`, but no SECOND test in
   the tree asserts it, so changing it breaks no landed gate.
+- **F-5 (NEW in round 2; a live `import()` inside a guarded file, adjacent class,
+  NOT chartered).** Measured across the full guarded set - the four files of
+  `REPO_GRADES_CLIENT_FILES:265-270`, the thirteen of guard 2's `CLIENT_FILES`
+  (`gradingResultsHelpersWiring.test.ts:62-80`) and `src/lib/grade/types.ts` -
+  `grep -c "import *(\|require *("` returns non-zero for exactly two files, and
+  only one of them is code: **`grading-results/SubmittedFilesPanel.tsx:25`
+  carries `const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {`**
+  (the other, `repoGradesCellEdits.ts:25`, is comment prose). Its specifier is a
+  static literal, so AC-3's and AC-6's narrowing does not exclude it - but it
+  means the `next/dynamic` + `import()` idiom is LIVE inside a file guard 2
+  sweeps, and guard 2's sweep over `CLIENT_FILES` (`:112-117`) is four regexes
+  all requiring `from`, which no `import()` carries. A `dynamic(() => import("@/lib/grade"))`
+  added to that file today would be flagged by nothing. Adjacent class
+  (coverage of a non-`from` construct in the SWEEP rather than in the two guards
+  the row names), deliberately not folded in. RES-A23-7.
 
 ---
 
@@ -390,12 +657,18 @@ defects; they are expectations only after their direction is INVERTED.
   `src/app/components/grading-results/`, per the row.
 - **No collision with live A21 work.** The A21 implementer holds
   `src/app/actions/`, `src/lib/prompt-announcement-*`, and
-  `src/app/components/canvas-tab/`. `git status --short` at `b90cf03` shows 18
-  paths, all under those three roots plus `docs/css-orphans.md`. Intersection
-  with A23's expected write set: **empty**.
-- **A22 sequencing is discharged.** A22 landed at `7375a21`; `git log -1` confirms
-  the commit. A23 is unblocked.
-- This document wrote exactly one path: `docs/a23-criteria.md`.
+  `src/app/components/canvas-tab/`. **Round 1 reported "18 paths" from a
+  `git status --short` taken at `b90cf03`; that reading is not reproducible
+  post-hoc and I am withdrawing the number rather than restating it.** Measured
+  now at `a0c1b53`, `git status --short` returns one path, `M docs/css-orphans.md`.
+  Intersection with A23's expected write set by exact path: **empty**. The
+  disjointness conclusion holds under both readings; only the count was
+  unverifiable.
+- **A22 sequencing is discharged.** A22 landed at `7375a21`; `git log` confirms
+  the commit, and the row's predicted line shift for guard 2 (`:128-130` filter,
+  `:131` literal) is measured correct in section 2.2.
+- This document wrote exactly one path: `docs/a23-criteria.md`, verified by
+  `git status --short` before and after.
 
 ---
 
@@ -404,34 +677,301 @@ defects; they are expectations only after their direction is INVERTED.
 Every entry carries an owner, an instrument and a step. Any entry missing one of
 the three would be a deletion and I would say so; none is.
 
+**NO RESIDUAL ID CHANGES MEANING BETWEEN ROUNDS, and that constrains the
+numbering here.** Round 1's RES-A23-3 is closed by measurement inside AC-2 and
+round 1's RES-A23-6 is struck (F-1 discharged at `a0c1b53`). Those two ids are
+RETIRED, not reissued - the backlog row at `a0c1b53` already names round 1's
+residuals by number, and reusing a retired number for a different residual is
+the stale-citation class wearing a new hat. So RES-A23-4 and RES-A23-5 keep the
+meanings they had in round 1, and the two residuals round 2 adds take fresh
+numbers, RES-A23-7 and RES-A23-8.
+
 | Id | Residual | Owner | Instrument | Step that will measure it |
 |---|---|---|---|---|
-| RES-A23-1 | AC-4 is narrowed to STATIC-LITERAL specifiers. A dynamic `import(pathVar)` with a runtime-computed specifier is caught by no construction available here. | Test seat, then repo owner if it must be closed | `grep -rn "import(" src/lib/grade/ --include=*.ts` re-run at the fix (0 today), plus a stated non-goal in the delivered test's comment | The test seat's oracle round on A23 |
-| RES-A23-2 | F-2: `repoGradesPosting.ts` carries a banned-specifier VALUE import and is not in the guard's file list. Coverage-by-omission, adjacent class, not chartered by A23. | Repo owner (scope call), then orchestrator as a backlog row | `node <scratchpad>/scan.js src/app/components/repo-grades` re-run, cross-referenced against `REPO_GRADES_CLIENT_FILES` | Escalated at A23's disposal round; a row filed if the owner widens scope |
-| RES-A23-3 | P4, the MIXED `{ type X, y }` fixture, is NOT YET MEASURED against either guard. AC-2 depends on it and I did not execute it. | Test seat | The guard's filter executed over `import { type X, y } from "@/lib/grade";` | The test seat's oracle round, before the implementer is briefed |
-| RES-A23-4 | F-3: `snapshot-grading.structure.test.ts:801` is a third site of the same line-filter idiom, not leaking today. | Repo owner (scope call) | `Grep` for `\^\\s\*import\\b` over `src` (2 sites today) with a matching-string canary - never bash `grep -rn`, which returned a false empty | Escalated with RES-A23-2 at A23's disposal round |
-| RES-A23-5 | Client-bundle safety's only true oracle is `next build`'s compile stage; these guards are proxies for it. This checkout has no `.env`, so the build gate is read as the `Compiled successfully` line, never exit 0 (`this-repo.md:26-40`). | Repo owner | `npm run build`, grepping for `Compiled successfully`; then the Vercel deploy log | A23's push |
-| RES-A23-6 | F-1: the row's own `title` and `instrument` fields cite guard 1 at the stale `:287-291`; measured `:295-297`. | Orchestrator | `grep -n` on `repoGradesFeedbackAndFiles.wiring.test.ts` against `docs/backlog.yml:431,435` | Backlog reconciliation at A23's push |
+| RES-A23-1 | AC-3 and AC-6 are narrowed to STATIC-LITERAL specifiers. A dynamic `import(pathVar)` with a runtime-computed specifier is caught by no construction available here. **Instrument RE-BOUND in round 2: round 1 named `grep -rn "import(" src/lib/grade/ --include=*.ts` and called it "0 today"; executed, that command returns SEVEN, five of them live dynamic imports at `src/lib/grade/engine.ts:403,404,405,473,474`, and it scans a directory no guard asserts over.** The object is a computed specifier inside a GUARDED file. | Test seat, then repo owner if it must be closed | `grep -c "import *(\|require *("` over the 17 guarded files - the four of `REPO_GRADES_CLIENT_FILES:265-270`, the thirteen of `CLIENT_FILES` at `gradingResultsHelpersWiring.test.ts:62-80`, and `src/lib/grade/types.ts` - re-run at the fix. Measured now: two non-zero, one comment prose and one a STATIC-literal `dynamic(() => import(...))` (F-5); **computed specifiers in the guarded set: zero.** Plus a stated non-goal in the delivered test's comment | The test seat's oracle round on A23 |
+| RES-A23-2 | F-2: `repoGradesPosting.ts:56` carries a banned-specifier VALUE import and is not in the guard's file list. Coverage-by-omission, adjacent class, not chartered by A23. | Repo owner (scope call), then orchestrator as a backlog row | `node a23-scan.mjs src/app/components/repo-grades` (Appendix A.2) re-run, cross-referenced against `REPO_GRADES_CLIENT_FILES:265-270` | Escalated at A23's disposal round; a row filed if the owner widens scope |
+| RES-A23-4 | F-3: `snapshot-grading.structure.test.ts:801` is a third site of the same line-filter idiom, not leaking today, partial backstop at `:807-809`. | Repo owner (scope call) | `Grep` tool for `/^\s*import\b/` over `src` (2 sites today) with a matching-string canary - never bash `grep -rn`, which returns a false empty (see RES-A23-8) | Escalated with RES-A23-2 at A23's disposal round |
+| RES-A23-5 | Client-bundle safety's only true oracle is `next build`'s compile stage; these guards are proxies for it. This checkout has no `.env`, so the build gate is read as the `Compiled successfully` line, never exit 0 (`this-repo.md:24,26`). | Repo owner | `npm run build`, grepping for `Compiled successfully`; then the Vercel deploy log | A23's push |
+| RES-A23-7 | F-5: a live `dynamic(() => import("../MonacoFileEditor"))` at `grading-results/SubmittedFilesPanel.tsx:25` sits inside a file guard 2 sweeps with four `from`-requiring regexes (`gradingResultsHelpersWiring.test.ts:112-117`), so a banned specifier reached that way would be flagged by nothing. Adjacent class, not chartered. | Repo owner (scope call), then orchestrator as a backlog row | `grep -rn "import *(\|require *("` over `CLIENT_FILES`, cross-referenced against `BANNED_IMPORT_PATTERNS` at `gradingResultsHelpersWiring.test.ts:89-94` | Escalated with RES-A23-2 at A23's disposal round |
+| RES-A23-8 | **TRAP-CARD CANDIDATE, not only a residual.** A bash `grep -rn '/^\s*import\b/' src --include=*.ts` returns EMPTY through shell escaping while the `Grep` tool returns both sites; the canary is what distinguished false absence from true absence. `traps-search.md:6` already carries the general canary rule and `:110-121` carries the same CLASS for heredocs (backslashes arriving different through bash), but **no `grep`-argument instance is on the card.** Reproduced by two agents. | Orchestrator (`traps-search.md` is not this seat's to write) | The pair, run together: `grep -rn '/^\s*import\b/' src --include=*.ts` (empty) against the `Grep` tool for the same pattern (2 sites), with the canary `grep -rc 'from "' src/lib/grade/types.ts` returning 2 to prove the bash grep works at all | A23's backlog reconciliation, at the push |
 
 **These residuals are not in `docs/BACKLOG.md` yet, and until they are they do
 not exist** (`DEV_LOOP.md:79-84`). `docs/backlog.yml` is the orchestrator's file
 and this seat may not write it; recording them there is owed at A23's
-reconciliation.
+reconciliation. Round 1's residuals were recorded in the row at `a0c1b53` by
+number; the reconciliation must STRIKE RES-A23-3 and RES-A23-6 there (both
+closed, neither reissued), re-bind RES-A23-1's instrument, and add RES-A23-7 and
+RES-A23-8. RES-A23-2, RES-A23-4 and RES-A23-5 are unchanged in meaning.
 
 ---
 
 ## 10. What I could not determine
 
-- **Whether the guard's false negative ever let something through HISTORICALLY.**
-  Section 2 measures the tree at `b90cf03` only. A multi-line banned import that
-  existed and was later removed would leave no trace in a working-tree scan. I
-  did not walk the history, and I am not claiming the guard has never been
-  decorative - only that it is not decorative today.
+- **Whether the guard's false negative ever let something through
+  HISTORICALLY.** Section 2.1 measures the tree at `a0c1b53` only. A multi-line
+  banned import that existed and was later removed would leave no trace in a
+  working-tree scan. I did not walk the history, and I am not claiming the guard
+  has never been decorative - only that it is not decorative today.
 - **Whether `repoGradesPosting.ts` is reachable from a client bundle at all.**
   That is a module-graph question and belongs to the architect. I measured only
   that its banned-specifier import resolves to a leaf whose sole import is
-  type-only, so it is not a hazard by that path.
-- **Which of the three C-2 shapes the fix should take**, and whether option (b)
-  (deletion) survives AC-10 once `repoGradesCellEdits.ts:30` is accounted for.
-  Deliberately not decided here - that is the architect's lane, and AC-7 and
-  AC-10 are written to constrain the choice without making it.
+  type-only.
+- **Which of the three C-2 shapes each fix should take.** Deliberately not
+  decided here - that is the architect's lane, and AC-9 and AC-12 are written to
+  constrain the choice without making it. Option (b) is excluded by Ruling X1;
+  the two shapes the row leaves live are a walled set derived from the tree at
+  test time and a transitive import-graph walk.
+- **Whether guard 1 and guard 2 should converge on ONE construction or stay two.**
+  Section 2.3 shows five holes shared exactly and four not shared, which is an
+  argument in both directions. The architect owns it; AC-10 only requires that
+  whatever is chosen lands for both.
+
+---
+
+## 11. Disposition of round 1's findings
+
+Every finding the checker returned, mapped to one of the four legal disposals
+(`iteration-caps.md:55-72`) or to a ruling. The id column was derived after all
+renumbering.
+
+| Round-1 finding | Disposal | Where it landed |
+|---|---|---|
+| **B1** - guard 1 never bound to the non-`import` construct set; symmetry claim from asymmetric evidence | **Ruling X2**, then revised | **AC-3** (new criterion, guard 1 x five constructs x both quote styles); **AC-1** rewritten to the wrap-position/separator axis; **AC-5** added for guard 2's from-wrap and tab holes; section 2.3 restated as a measured per-guard-per-construct map; the one-line cost statement at the end of section 2.3. Cross-product relocated to the test seat per X2 (d) and named as an obligation in AC-1 and AC-3. |
+| **B2** - AC-10 kept option (b) live while AC-2 and AC-7 forbade it; the architect is the immediate consumer of the contradiction | **Ruling X1**, then revised | **AC-12** states option (b) is EXCLUDED with two independent measured grounds (the sweep's five misses; the sweep reddening the real `repoGradesCellEdits.ts`), **C-4** records it as inherited, **AC-9** closes by naming it removed from the choices. The `repoGradesCellEdits.ts:30` measurement is KEPT and is what makes the exclusion concrete. |
+| **M1** - RES-A23-1's instrument returns 7, not 0, and measures the wrong object | **Revised (instrument re-bound and re-measured)** | **RES-A23-1**: the old command and its true output (7, five live at `engine.ts:403,404,405,473,474`) are recorded as the error; the new instrument scans the 17 GUARDED files and measures zero computed specifiers. The narrowing itself is unchanged - it was honest. |
+| **M2** - `:269` cited as a specifier pattern; it is inside `REPO_GRADES_CLIENT_FILES` | **Revised (citation corrected)** | **F-2** now cites the prefix pattern at `:260` inside `:258-263`, and records what `:269` actually is. Section 2.1 qualification 2 carries the same corrected cites. |
+| **m1** - AC-5's `npx vitest run` instruments are green pre-fix and cannot record the demanded red | **Revised (instrument corrected, landing order added)** | **AC-7**: the "before" instrument is now `node a23-probe.mjs`; the measured green (`2 passed` / `52 passed`) is recorded; a red-first LANDING ORDER is stated that makes the criterion dischargeable inside the suite. The demand is unchanged. |
+| **m2** - section 2's quantities came from a vanished scratchpad script | **Revised (made re-runnable)** | **Appendix A** reproduces both scripts in full; section 2 names them by command. Also corrected in passing: the scan's `dynamic import(` counter is over-broad and its 3 resolve to comment prose. |
+| **m3** - F-3's backstop is `:807-809` not `:806`; file cited by bare basename | **Revised (both corrected)** | **F-3**, with the full path `src/app/components/snapshot-grading/snapshot-grading.structure.test.ts` and `:807-809` measured (`:806` is blank). |
+| **m4** - RES-A23-3 deferred a one-line measurement AC-2 presupposes | **Closed by measurement; residual withdrawn** | **AC-2** now carries P4 (`flagged=true`), P5 (`flagged=true`) and P6 (`flagged=false`) as measured facts, and P4/P5/P6 are rows in section 6. No residual survives. The checker's added form - the DEFAULT value binding - is clause (c) of AC-2 and an explicit failure direction (iii). |
+| **m5** - section 8's "18 paths" unverifiable post-hoc | **Withdrawn (d), enforcer named** | **Section 8** withdraws the number, records the current measurement (1 path at `a0c1b53`), and states that the disjointness conclusion - the thing the number was protecting - holds under both readings. The enforcer is unchanged: `git status --short` at the wave gate, per AC-10. |
+
+---
+
+## 12. Disposition of round 1's criteria
+
+Round 1 shipped AC-1 to AC-10 and RES-A23-1 to RES-A23-6. This table maps every
+one. **The id column was derived LAST, after all renumbering.** Criteria ids are
+positional and were re-derived freely; residual ids were NOT, because the backlog
+row at `a0c1b53` already cites them by number - a withdrawn residual's id is
+retired rather than reissued.
+
+| Round-1 id | Disposition | Round-2 id |
+|---|---|---|
+| AC-1 (guard 1, "more than one line") | **KEPT, axis corrected** - the object is now wrap position and separator kind, which the tab fixture (P2c, single-line, escapes) proves is the real axis | AC-1 |
+| AC-2 (guard 1, type/value pair) | **KEPT, widened by measurement** - clauses (c) default binding and (d) bare side-effect import added; failure direction (iii) added | AC-2 |
+| - (did not exist) | **NEW** - guard 1 bound to the non-`import` construct set, Ruling X2 (a) | AC-3 |
+| AC-3 (guard 2, quote style) | **KEPT unchanged in substance**; instrument split into before (probe) / after (vitest) | AC-4 |
+| - (did not exist) | **NEW** - guard 2 bound to wrap position and separator kind, from Ruling X2 half B (H7, H8 escape) | AC-5 |
+| AC-4 (guard 2, U3 construct set) | **KEPT, widened** - `export { x } from` and the bare side-effect import added; the narrowing note is unchanged and was called honest | AC-6 |
+| AC-5 (observed colour change) | **KEPT, instrument corrected** - m1; red-first landing order added | AC-7 |
+| AC-6 (fixture direction labels) | **KEPT unchanged**, including the restored `a22-scope.md:611-618` fixture-2 clause | AC-8 |
+| AC-7 (kind not strength) | **KEPT, scoped to both guards**, and option (b) removed from its choices per Ruling X1 | AC-9 |
+| AC-8 (both guards or neither) | **KEPT**, with the five-shared-holes measurement added as the reason half a fix is worse than it looks | AC-10 |
+| AC-9 (nothing caught stops being caught) | **KEPT, widened** from two canaries to six, all measured correct today | AC-11 |
+| AC-10 (real tree still passes; option (b)) | **KEPT, conclusion reversed by Ruling X1** - the `repoGradesCellEdits.ts:30` measurement is kept and is now the second of two grounds for exclusion | AC-12 |
+| RES-A23-1 (computed specifier) | **KEPT, instrument re-bound** - M1 | RES-A23-1 |
+| RES-A23-2 (F-2 coverage gap) | **KEPT unchanged** | RES-A23-2 |
+| RES-A23-3 (P4 unmeasured) | **WITHDRAWN (d)** - closed by measurement in AC-2; enforcer it protected is now AC-2 clause (b) plus the P4 row of section 6, both with observed values | - (id RETIRED, not reissued) |
+| RES-A23-4 (F-3 third site) | **KEPT, id unchanged**; `:806` corrected to `:807-809` and the bare basename replaced with the full path | RES-A23-4 |
+| RES-A23-5 (`next build` is the true oracle) | **KEPT, id unchanged**; `this-repo.md:22,26` corrected to `:24,26` | RES-A23-5 |
+| RES-A23-6 (row's stale cite) | **STRUCK** - discharged by the orchestrator at `a0c1b53`; re-measured here and the row now carries `:295-297` | - (id RETIRED, not reissued) |
+| - (did not exist) | **NEW** - F-5, the live `import()` inside a swept file | RES-A23-7 |
+| - (did not exist) | **NEW** - the bash-grep false absence, promoted from a method note inside F-3 to a trap-card candidate with its own owner, instrument and step | RES-A23-8 |
+
+---
+
+## Appendix A - the instruments, in full
+
+Both scripts are self-contained, take no dependency outside `node:fs` and
+`node:path`, and are run from the repo root. They are reproduced here because
+round 1's numbers were sound but not re-runnable, which is a defect in its own
+right (`iteration-caps.md:107-114`, entry gate 1).
+
+**These are MEASUREMENT INSTRUMENTS, not a proposed mechanism and not an
+oracle.** They run the two shipped guards' existing decision procedures against
+synthetic inputs so the today-state in section 2 can be re-derived; they propose
+no construction for the fix (the architect's lane) and they enumerate no fixture
+set (the test seat's lane, Ruling X2 (d)). They are in this document only
+because the quantities in section 2 are this document's own claims. Length
+trade-off, stated rather than hidden: they add roughly 190 lines to a criteria
+document, and the alternative - a one-line command that reproduces nothing -
+is what round 1 shipped.
+
+### A.1 `a23-probe.mjs` - runs both guards' decision procedures verbatim
+
+```js
+// A23 probe. Run from the repo root: node a23-probe.mjs
+// Guard 1: repoGradesFeedbackAndFiles.wiring.test.ts:258-263 + :295-301
+// Guard 2: gradingResultsHelpersWiring.test.ts:128-131
+import { readFileSync } from "node:fs";
+
+const BANNED = [
+  /from ["']@\/lib\/grade["']/,
+  /from ["']@\/lib\/grade\//,
+  /from ["']@\/lib\/supabase\/server["']/,
+  /from ["']next\/headers["']/,
+];
+
+// Guard 1, verbatim from :295-301. true = the guard FLAGS the source.
+const guard1Flags = (source) =>
+  source
+    .split("\n")
+    .filter((line) => /^\s*import\b/.test(line) && !/^\s*import\s+type\b/.test(line))
+    .some((line) => BANNED.some((pattern) => pattern.test(line)));
+
+// Option (b): the whole-file sweep, unconditional.
+const guard1SweepFlags = (source) => BANNED.some((pattern) => pattern.test(source));
+
+// Guard 2, verbatim from :128-131. true = the guard PASSES (raises nothing).
+const FROZEN = ['import type { CodeRunResult } from "../code-runner";'];
+const guard2Passes = (source) => {
+  const fromLines = source
+    .split(/\r?\n/)
+    .filter((line) => line.includes(' from "') && !/^\s*(\*|\/\/)/.test(line.trim()));
+  return JSON.stringify(fromLines) === JSON.stringify(FROZEN);
+};
+
+const TAB = String.fromCharCode(9);
+const g1 = (id, body, want, note) => ({ id, body, want, note });
+const mk = (q) => [
+  g1("P1", `import { composeOverallComment } from ${q}@/lib/grade${q};`, true, "single-line VALUE import"),
+  g1("P2a", `import {\n  composeOverallComment,\n} from ${q}@/lib/grade${q};`, true, "WRAP inside the braces"),
+  g1("P2b", `import { composeOverallComment } from\n  ${q}@/lib/grade${q};`, true, "WRAP between from and the specifier"),
+  g1("P2c", `import { composeOverallComment }${TAB}from${TAB}${q}@/lib/grade${q};`, true, "TAB between from and the specifier"),
+  g1("P3", `import { type RubricAreaResult } from ${q}@/lib/grade${q};`, false, "inline ALL-TYPE import"),
+  g1("P4", `import { type RubricAreaResult, composeOverallComment } from ${q}@/lib/grade${q};`, true, "MIXED inline-type + value binding"),
+  g1("P5", `import Grade, { type RubricAreaResult } from ${q}@/lib/grade${q};`, true, "DEFAULT value binding + inline-type binding"),
+  g1("P6", `import ${q}@/lib/grade${q};`, true, "bare SIDE-EFFECT import"),
+  g1("C1", `export * from ${q}@/lib/grade${q};`, true, "export * from"),
+  g1("C2", `export { composeOverallComment } from ${q}@/lib/grade${q};`, true, "export { x } from"),
+  g1("C3", `const g = require(${q}@/lib/grade${q});`, true, "require(<literal>)"),
+  g1("C4", `const g = await import(${q}@/lib/grade${q});`, true, "await import(<literal>)"),
+];
+
+console.log("=== GUARD 1 (repo-grades line filter) : flagged? want? verdict ===");
+for (const q of ['"', "'"]) {
+  const label = q === '"' ? "DOUBLE" : "SINGLE";
+  for (const p of mk(q)) {
+    const flagged = guard1Flags(p.body);
+    const verdict = flagged === p.want ? "OK" : flagged ? "FAIL(false positive)" : "FAIL(ESCAPES)";
+    console.log(
+      `G1 ${label} ${p.id.padEnd(4)} ${p.note.padEnd(46)} flagged=${String(flagged).padEnd(5)} want=${String(p.want).padEnd(5)} ${verdict}`
+    );
+  }
+}
+
+console.log("\n=== OPTION (b): whole-file BANNED sweep, unconditional ===");
+for (const q of ['"', "'"]) {
+  const label = q === '"' ? "DOUBLE" : "SINGLE";
+  for (const p of mk(q)) {
+    console.log(`SWEEP ${label} ${p.id.padEnd(4)} ${p.note.padEnd(46)} flagged=${guard1SweepFlags(p.body)}`);
+  }
+}
+const realCellEdits = readFileSync("src/app/components/repo-grades/repoGradesCellEdits.ts", "utf8");
+console.log(`SWEEP over the REAL repoGradesCellEdits.ts : flagged=${guard1SweepFlags(realCellEdits)} (a type-only barrel import lives at :30)`);
+
+const typesSource = readFileSync("src/lib/grade/types.ts", "utf8");
+const inject = (line) => `${line}\n${typesSource}`;
+const SERVER = "@/lib/supabase/server";
+const h = [
+  ["H0", typesSource, "unmodified real types.ts"],
+  ["H1", inject(`import { createServiceClient } from "${SERVER}";`), "DOUBLE-quoted server VALUE import"],
+  ["H2", inject(`import { createServiceClient } from '${SERVER}';`), "SINGLE-quoted server VALUE import"],
+  ["H3", inject(`const s = require("${SERVER}");`), "require(<literal>)"],
+  ["H4", inject(`const s = await import("${SERVER}");`), "await import(<literal>)"],
+  ["H5", inject(`export * from '${SERVER}';`), "SINGLE-quoted export * from"],
+  ["H6", inject(`import {\n  createServiceClient,\n} from "${SERVER}";`), "WRAP inside the braces, double-quoted"],
+  ["H7", inject(`import { createServiceClient } from\n  "${SERVER}";`), "WRAP between from and the specifier"],
+  ["H8", inject(`import { createServiceClient }${TAB}from${TAB}"${SERVER}";`), "TAB between from and the specifier"],
+  ["H9", inject(`import "${SERVER}";`), "bare SIDE-EFFECT import"],
+  ["H10", inject(`export { createServiceClient } from "${SERVER}";`), "export { x } from, double-quoted"],
+];
+console.log("\n=== GUARD 2 (types.ts walled-set count) : passes? ===");
+for (const [id, src, note] of h) {
+  const passes = guard2Passes(src);
+  const verdict = id === "H0" ? (passes ? "OK" : "FAIL") : passes ? "ESCAPES" : "caught";
+  console.log(`G2 ${id.padEnd(4)} ${note.padEnd(46)} passes=${String(passes).padEnd(5)} ${verdict}`);
+}
+```
+
+### A.2 `a23-scan.mjs` - multi-line-aware import scanner over a directory
+
+Known limitation, stated rather than discovered later: the
+`dynamic import( occurrences` counter is a bare regex over raw source and counts
+the English phrase "import (" in comments. Disambiguate any non-zero result with
+`grep -rn "import *(" <dir> --include=*.ts --include=*.tsx | grep -v "\.test\."`.
+
+```js
+// A23 scan. Run from the repo root: node a23-scan.mjs <dir>
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+const root = process.argv[2] || "src/app/components/repo-grades";
+const BANNED = [/^@\/lib\/grade$/, /^@\/lib\/grade\//, /^@\/lib\/supabase\/server$/, /^next\/headers$/];
+const walk = (d) =>
+  readdirSync(d).flatMap((n) => {
+    const p = join(d, n);
+    if (statSync(p).isDirectory()) return walk(p);
+    if (!/\.(ts|tsx)$/.test(n)) return [];
+    if (/\.test\.(ts|tsx)$/.test(n) || n.endsWith(".d.ts")) return [];
+    return [p];
+  });
+
+const files = walk(root).sort();
+let total = 0;
+const banned = [];
+const perFile = [];
+for (const f of files) {
+  const src = readFileSync(f, "utf8");
+  const lineOf = (i) => src.slice(0, i).split("\n").length;
+  let n = 0;
+  let multi = 0;
+  const re = /(^|\n)[ \t]*(import\b[\s\S]*?from\s*(['"])([^'"]+)\3)/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    n += 1;
+    const stmt = m[2];
+    const spec = m[4];
+    const start = lineOf(m.index + m[1].length);
+    const end = start + stmt.split("\n").length - 1;
+    if (end > start) multi += 1;
+    if (BANNED.some((b) => b.test(spec))) {
+      const kind = /^import\s+type\b/.test(stmt)
+        ? "TYPE(keyword)"
+        : /^import\s*\{[^}]*\}/.test(stmt) &&
+            stmt
+              .slice(stmt.indexOf("{") + 1, stmt.indexOf("}"))
+              .split(",")
+              .filter((s) => s.trim())
+              .every((s) => /^\s*type\s/.test(s))
+          ? "TYPE(inline-all)"
+          : "VALUE";
+      banned.push([`${f.replace(/\\/g, "/")}:${start}`, spec, end - start + 1, kind]);
+    }
+  }
+  const reqs = (src.match(/\brequire\s*\(/g) || []).length;
+  const dyn = (src.match(/(?<!\.)\bimport\s*\(/g) || []).length;
+  total += n;
+  perFile.push([f.replace(/\\/g, "/"), n, multi, reqs, dyn]);
+}
+
+console.log(`root=${root}`);
+console.log(`files scanned = ${files.length}`);
+console.log(`import statements (from-bearing) = ${total}`);
+console.log(`require( occurrences = ${perFile.reduce((a, r) => a + r[3], 0)}`);
+console.log(`dynamic import( occurrences = ${perFile.reduce((a, r) => a + r[4], 0)}`);
+console.log("banned-specifier hits:");
+for (const b of banned) console.log(`  ${b[0]}  ${b[1]}  lines=${b[2]}  ${b[3]}`);
+const GUARDED = [
+  "RepoGradeCellControl.tsx",
+  "repoGradesCellEdits.ts",
+  "useRepoGradesGradingActions.ts",
+  "useRepoGradesBulkGrade.ts",
+];
+console.log("per-file, the four files in REPO_GRADES_CLIENT_FILES (imports / multi-line):");
+for (const name of GUARDED) {
+  const row = perFile.find((r) => r[0].endsWith("/" + name));
+  console.log(`  ${name.padEnd(32)} ${row ? `${row[1]} / ${row[2]}` : "NOT FOUND"}`);
+}
+```

@@ -1,6 +1,27 @@
 # A16 wave 3 scope: class trends on Repo Grades
 
-Architecture seat, 2026-09-21, written against `434ad5e`. This decides SHAPE for
+Architecture seat, 2026-09-21. Revision 0 was written against `434ad5e` and
+landed at `09c712e`. **Revision 1** (this text) answers the round-1 check
+under rulings W3-1 to W3-5, against HEAD `5dcaba6`. What the check confirmed
+sound is not reopened: the run boundary, the data gap and the collector, the
+reuse boundary, the 32-file census, the import trap, the label's source, and
+the sizes. Revision 1's changes, by ruling:
+
+- **W3-1:** the pins move from "a correct gate is PRESENT" to "nothing else
+  CONTROLS the node". The cohort's null handling moves into the leaf, and the
+  hook calls it unconditionally. Rewrites sections 7.4, 8 and 13.
+- **W3-2:** the "one shared rubric makes area names comparable" premise was
+  false for rubrics that do not parse. Stated in sections 2 and 14, recorded
+  as RES-W3-8, no disclosure line added.
+- **W3-3:** the cap baseline is a pinned commit SHA. Rewrites section 12.
+- **W3-4:** a click that grades nothing no longer clears the previous run's
+  trends. Rewrites sections 7.4, 8 and S-5.
+- **W3-5:** the residuals are written into `docs/backlog.yml` in substance.
+- **RES-W3-7, the label copy, is discharged** here: section 7.3.
+- **Owner confirmed Q1-Q3** verbatim ("1-3 are good calls"): the cohort is
+  the run, the label names the folder, and there is no leverage claim.
+
+This decides SHAPE for
 A16-5 (`docs/a16-plan.md` section 2, row 3, and section 3.5). It is not a build
 brief. Sections 7, 10, 11 and 12 are the build packet. Sections 1-6 and 13-17
 are the argument, written for the checker and the orchestrator.
@@ -123,8 +144,34 @@ were graded one at a time grades only the rest. That matters twice:
   structural. Cells graded one at a time under the `generate` rubric source get
   a rubric generated per call (`github-repos.ts:833`,
   `rubric.trim() || await generateRubric(...)`), so their area names are not
-  comparable. Only a run guarantees one shared rubric. Asked as owner question
-  Q1, non-gating, and this default is what gets built.
+  comparable. Only a run guarantees one shared rubric. **Owner-confirmed (Q1).**
+- **Revision 1 correction (ruling W3-2): one shared rubric TEXT does not
+  guarantee shared area NAMES.** The names line up only when the rubric
+  PARSES. Repo Grades calls `gradeEntries([entry], ...)` once per repo
+  (`github-repos.ts:839`). The engine pins areas to
+  `extractRubricCriteria(rubric)` (`engine.ts:196`), and when that returns
+  nothing, it falls back to the richest RESULT's own areas (`engine.ts:325-337`).
+  With one result per call, that fallback lines up areas within ONE repo, never
+  across the run. Both parsers need a numeric parenthetical on every
+  criterion line:
+  - strict: `(\d+...)` then a colon (`rubric.ts:43`);
+  - widened: the parenthetical ending the line (`rubric.ts:57-100`).
+
+  So several rubrics parse to `[]` and each repo gets model-invented area
+  names:
+  - a prose manual rubric;
+  - a rubric whose criteria carry no points;
+  - a points RANGE like "(18-20 pts)" (the documented limit at
+    `rubric.ts:89-95`).
+
+  The effect is that trends FRAGMENT into many one-of-N areas. Nothing is
+  falsely merged, because `computeClassTrends` merges only names that
+  normalise equal and reports coverage as "N of M" (`class-trends.ts:208`).
+  So the output is honest but thin. This applies to the LLM path only. The
+  embedded path builds its checks from the same rubric text and instructions
+  on every call (`github-repos.ts:813`), so its names repeat. **The cost has
+  not been measured. It is RES-W3-8, and no disclosure line is designed around
+  it (ruling W3-2).**
 - **The completeness wording already handles it.** `class-trends.ts:17-24`
   defines its cohort as "the graded results in hand" and says so in every
   string ("Across the N submissions graded so far", `:242`). The Drafted Grades
@@ -219,7 +266,7 @@ in the session scratchpad, not the repo.
 |---|---|---|---|---|
 | **L-leaf** | `buildRepoRunCohort`, `repoRunTrendsEntry`, `repoRunTrendsLabel` | NEW `repo-grades/classTrendsFolderEntry.ts` | Every DECISION: what the cohort holds, when trends show, what they are labelled | Unit tests BY VALUE (section 11, L-rows) |
 | **L-run** | the collector inside `runBulkGrade`, and its return value | `useRepoGradesBulkGrade.ts` | Accumulating THIS run's `GradeResult`s, and handing them back only after the pool drains | AST pins (A-1, A-2) plus `tsc` |
-| **L-state** | `lastRunCohort` `useState`, cleared at click and set after the run; the course-switch clear; the render-time `trendsEntry` | `useRepoGradesGradingActions.ts` | WHEN the cohort changes. It decides nothing about content | AST pins (A-3 to A-5) plus `tsc` |
+| **L-state** | `lastRunCohort` `useState`, cleared when a run is attempted (not on an empty-plan click) and set UNCONDITIONALLY after it; the course-switch clear; the render-time `trendsEntry` | `useRepoGradesGradingActions.ts` | WHEN the cohort changes. It decides nothing about content, and not even whether a refused run yields a cohort: the leaf decides that (L-0) | AST pins (A-3 to A-5) plus `tsc` |
 | **L-surface** | the gated `<ClassTrendsPanel>` and its label, above the grid | `repo-grades/index.tsx` | That the instructor SEES it, next to the run | AST pins (A-6 to A-8) plus `tsc`. Visibility itself is RES-W3-1 |
 
 **How the user reaches it, click by click:**
@@ -291,20 +338,25 @@ export interface RepoRunCohort {
   readonly courseName: string;              // course?.name at click, "" when null
 }
 
+/** Revision 1 (ruling W3-1): OWNS the null decision. Returns null when
+ *  `results` is null (runBulkGrade refused, so no run happened); otherwise a
+ *  cohort, INCLUDING for an empty array (a run that graded nothing replaces
+ *  the previous run's trends, and repoRunTrendsEntry then shows none). The
+ *  hook calls this UNCONDITIONALLY, so the hook holds no condition over the
+ *  cohort that a mutation could invert. */
 export function buildRepoRunCohort(input: {
-  results: readonly GradeResult[];
+  results: readonly GradeResult[] | null;
   folder: string;
   courseId: string;
   course: { name: string } | null;
-}): RepoRunCohort;
+}): RepoRunCohort | null;
 
 /** null unless: cohort is non-null AND cohort.courseId === liveCourseId AND
  *  hasTrendableResults(entry). The ONE gate for this surface. */
 export function repoRunTrendsEntry(cohort: RepoRunCohort | null, liveCourseId: string): GradingRunEntry | null;
 
-/** The visible line above the panel: names entry.assignmentName and the count
- *  gradedResults(entry.run.results).length. Copy is the UX seat's; the facts
- *  are pinned by L-6. */
+/** The visible line above the panel. The copy is fixed in section 7.3 (the UX
+ *  pass, which discharges RES-W3-7); the facts are pinned by L-6. */
 export function repoRunTrendsLabel(entry: GradingRunEntry): string;
 ```
 
@@ -356,6 +408,49 @@ say which column they belong to, and that is the unlabelled-effect class.
 covered. The label is inside the same gate as the panel, so it can never
 appear without it or disagree with it.
 
+**7.3.1 The label copy: the UX pass, done here per the coordinator's
+instruction. This discharges RES-W3-7.**
+
+```
+Trends for "<folder>" from the last Grade all run, covering the <n> repos it graded.
+Trends for "<folder>" from the last Grade all run, covering the 1 repo it graded.
+```
+
+- `<folder>` is `entry.assignmentName`, and `<n>` is
+  `gradedResults(entry.run.results).length`. The second line is the exact
+  `n === 1` form. There is no zero form, because the gate guarantees at least
+  one graded result with areas.
+- It is rendered as `<p className={pageStyles.fieldHint}>` directly above the
+  panel, with no role and no aria attribute (section 7.4).
+
+Why these words, measured against the surrounding Repo Grades copy:
+
+- **Folder in straight double quotes**, as the view already writes it:
+  `index.tsx:849-851` renders `a "<folder>" folder` with `&quot;`, and the
+  status line reads `<folder>: nothing to grade - ...` (`:751`). In JSX the
+  implementer writes `&quot;` or a template literal, and the unit test
+  reads the returned string (L-6).
+- **"Grade all"** names the control the instructor just pressed. Its label
+  reads "Grade all N repos in <folder>" (`RepoGradesGrid.tsx:352-357`), so the
+  words point back at a visible button rather than introducing a new noun
+  like "bulk run".
+- **"covering the N repos it graded"** carries the one fact that could
+  mislead: the trends describe THAT run, not the whole column. Already-graded
+  cells are skipped (RULE 1c, `repoGradesBulkGrade.ts:115-124`), so the column
+  can hold more grades than the trends cover. "Repos" is the grid's own noun
+  for a row (the button label and the folder hint both say "repos").
+- **Sentence case, one sentence, a period, no exclamation, no emoji.** This
+  matches the `fieldHint` lines at `index.tsx:849-857` and the app's
+  professional, minimal register. The panel's own heading, "Counted trends,
+  per rubric area" (`ClassTrendsPanel.tsx:141`), follows immediately, so the
+  label deliberately does not repeat the word "counted".
+- **No completeness phrase.** It contains none of "the class", "all
+  students", "every student" or "the cohort" (`class-trends.ts:27-32`), so
+  L-6(d) passes.
+- **Plural rule**: `repo` when `n === 1`, `repos` otherwise. That is the
+  view's own rule: `index.tsx:849` uses
+  `repo{displayedRows.length === 1 ? "" : "s"}` (and `:852`, `:855`).
+
 **7.4 The other two files' contract changes:**
 
 - `useRepoGradesBulkGrade.ts` changes in four places:
@@ -363,18 +458,37 @@ appear without it or disagree with it.
     `(plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<readonly GradeResult[] | null>`.
     `null` means "refused, no run happened" (the `:174` guard). The array
     means "this run's results, complete".
-  - A local collector is declared beside `outcomes` (`:181`).
-  - `gradeOneTarget`'s success branch, after both early returns (`:204`,
-    `:216`), pushes `...result.run.results`.
-  - The function returns the collector after `await Promise.all(...)` (`:372`).
+  - **The collector is a `[]` literal declared as a direct statement of
+    `runBulkGrade`'s own body** (ruling W3-1(d)), beside `outcomes` (`:181`):
+    `const <X>: GradeResult[] = [];`. A collector that outlives a run (a
+    `useRef([]).current`, a module-level array, a hook-level `useState`)
+    mixes two folders under one label, so any other declaration form is a
+    defect, not a style choice.
+  - **The push is a DIRECT statement of `gradeOneTarget`'s body** (ruling
+    W3-1(c)). It is not nested in any `if`, loop or callback, and it follows
+    both early-return `if`s (`:204`, `:216`): `<X>.push(...result.run.results);`.
+  - The function returns `<X>` as its last direct statement, after the direct
+    statement `await Promise.all(...)` (`:372`). The refusal at `:174` becomes
+    `if (runningFolder !== null) return null;`.
 - `useRepoGradesGradingActions.ts` changes in five places:
   - `const [lastRunCohort, setLastRunCohort] = useState<RepoRunCohort | null>(null)`.
-  - `setLastRunCohort(null)` inside the existing
+  - `setLastRunCohort(null)` as a direct statement inside the existing
     `if (courseId !== columnPostingResetForCourse)` block.
-  - In `handleGradeColumn`, `setLastRunCohort(null)` becomes the FIRST
-    statement. Then `const <r> = await runBulkGrade(plan, resolved)` replaces
-    `void runBulkGrade(plan, resolved)`. Then
-    `if (<r> !== null) setLastRunCohort(buildRepoRunCohort({ results: <r>, folder, courseId, course }))`.
+  - **`handleGradeColumn` (revision 1, rulings W3-1(a) and W3-4), every new
+    statement a DIRECT statement of the handler body, in this order:**
+    1. the existing plan build (`:748`);
+    2. the existing empty-plan `if` and its `return` (`:749-753`). **It does
+       NOT clear the cohort**: nothing ran, so nothing on screen should change
+       (W3-4);
+    3. `setLastRunCohort(null);`, because a run is about to be attempted;
+    4. the existing column lookup and `const resolved = await resolveRubricForColumn(...)`;
+    5. `const <r> = await runBulkGrade(plan, resolved);` replaces
+       `void runBulkGrade(plan, resolved)`;
+    6. `setLastRunCohort(buildRepoRunCohort({ results: <r>, folder, courseId, course }));`,
+       UNCONDITIONAL, as the last statement.
+
+    The handler contains no condition over the cohort. The only `if` in it is
+    the pre-existing empty-plan return, which precedes every cohort statement.
   - `const trendsEntry = repoRunTrendsEntry(lastRunCohort, courseId)` in the
     hook body.
   - `trendsEntry: GradingRunEntry | null` added to
@@ -386,9 +500,44 @@ appear without it or disagree with it.
   - it renders
     `{trendsEntry && ( <div> <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p> <ClassTrendsPanel entry={trendsEntry} defaultExpanded /> </div> )}`
     after the `postSummary` status region (`:837-841`) and before the folder
-    hint and `<RepoGradesGrid` (`:862`). **No `role`, no `aria-live`.** The
-    view has exactly one live region (`useRepoGradesBulkGrade.ts:89-91`: "Never
-    add a second"), and `repoGradesSliceA.guards.test.ts:150-181` guards it.
+    hint and `<RepoGradesGrid` (`:862`). The `trendsEntry && (...)` binary is
+    the DIRECT expression of a JSX expression container that is a DIRECT
+    child of the top-level fragment `<>` (`:707`), which the component's only
+    `return (` (`:698`) returns. The label `<p>` has **no `role` and no
+    `aria-live`**.
+
+**Revision 1 correction on live regions.** Revision 0 said the view has
+exactly one live region. That is false. The OUTCOME channel is one region:
+`postSummary` at `index.tsx:838`, which the bulk hook's "Never add a second"
+comment (`useRepoGradesBulkGrade.ts:89-91`) and
+`repoGradesSliceA.guards.test.ts:150-181` protect. But the view already
+renders other conditional `role="status"` nodes:
+
+- `index.tsx:814` (the bindings banner);
+- six in `RepoGradesStatusBanners.tsx` (`:94`, `:109`, `:121`, `:133`, `:140`, `:147`);
+- two in `LinkUsernamesPanel.tsx` (`:356`, `:359`).
+
+Counting `postSummary`, that is **10** rendered `role="status"` nodes in the
+view today, all of them conditional. `grep -n 'role="status"'` returns 4, 6
+and 3 hits on the three files; three of those hits are comments
+(`index.tsx:821`, `:900`, `LinkUsernamesPanel.tsx:141`), each opened. Mounting the panel adds two more, each
+user-triggered and transient:
+
+- `ClassTrendsPanel.tsx:164`, shown only while `insight.status === "loading"`
+  after the instructor clicks "Get AI reading";
+- `ClassTrendsDraftPanel.tsx:110`, the "Copied." confirmation after the Copy
+  button.
+
+**Does this need an accessibility ruling? I judge not, and I route the
+question rather than settle it.** Several polite status regions on one page
+are allowed. The failure mode is two announcements RACING. Both new regions
+appear only after a click inside the panel, while `postSummary` changes only
+on a grade or post action, so a collision needs two different user actions
+within one announcement. The same two regions already ship on four other
+mounts (Drafted Grades and the three `GradingResults` hosts) without a ruling.
+Still, this is a judgement about screen-reader behaviour, and nothing here
+renders. It goes to the accessibility pass (DEV_LOOP's design wave 3) as a
+named check, RES-W3-10, not to the owner.
 
 `repoGradesRubricPicker.wiring.test.ts:199` asserts `/runBulkGrade\(plan, resolved\)/`
 inside `handleGradeColumn`, and `const <r> = await runBulkGrade(plan, resolved)`
@@ -399,23 +548,39 @@ condition than listing it.
 
 ## 8. The stale-cohort branches, enumerated by opening the handler and the hook
 
-**The construction is "clear first, set last, one setter".** `setLastRunCohort(null)`
-is the first statement of `handleGradeColumn`, and exactly one non-null set
-exists, after the awaited run. So a branch that leaves early leaves the cohort
-null by construction, and does not depend on each exit remembering to clear.
+**The construction (revision 1): a clear when a run is attempted, an
+UNCONDITIONAL set after it, and the null decision in the leaf.** The handler
+body is: the plan; the pre-existing empty-plan return; `setLastRunCohort(null)`;
+the awaited resolve and run; then
+`setLastRunCohort(buildRepoRunCohort({ results: <r>, ... }))`. Every one of
+those is a direct statement of the handler body. The hook has no `if`, `?:`
+or `&&` over the cohort, so the refused-run case (`<r> === null`) is decided
+by the leaf, whose unit test sees it by value (L-0).
+
+Revision 0's handler had `if (<r> !== null) setLastRunCohort(...)`. The check
+showed that `if (r?.length === 0)` in that position passes both `tsc` and a
+presence pin, and sets the cohort ONLY on empty runs, so the panel never
+renders. That is wave 2's first failure, in a new shape. Moving the decision
+into the leaf removes the node that mutation needed.
+
 The branches are still enumerated, because a construction is a claim until
 someone opens every exit:
 
 | # | Branch | Site | Cohort after | Held by |
 |---|---|---|---|---|
-| 1 | Empty plan: "nothing to grade" | `useRepoGradesGradingActions.ts:749-753` | null (cleared at click, then return) | A-3 order pin, S-5 |
-| 2 | `resolveRubricForColumn` rejects | `:755`. Documented "Never throws" at `useRepoGradesRubricSource.ts:644`; not relied on | null | construction |
-| 3 | Concurrent run refused | `useRepoGradesBulkGrade.ts:174`, returns `null` | null, no set | A-2's refusal row, S-20 |
-| 4 | `runBulkGrade` rejects (server-action transport failure reaching `Promise.all`) | `:372` | null. The set is after the await and never runs | construction |
-| 5 | Run completes, every target failed or empty | per-target branches `:204-208`, `:216-220` | a cohort with no trendable result, so the leaf returns null and no panel shows. The previous run's trends are gone | L-3 cells c3/c5, A-3 |
+| 1 | **Empty plan: "nothing to grade"** (for example, the column just graded, whose button now reads "Nothing to grade in <folder>" and stays enabled) | `useRepoGradesGradingActions.ts:749-753` | **UNCHANGED.** The previous run's trends stay on screen, because nothing ran (ruling W3-4). Revision 0 cleared them, and its S-5 made clearing mandatory | A-3a (the clear FOLLOWS the empty-plan `if`), S-5 (rewritten) |
+| 2 | `resolveRubricForColumn` rejects | `:755`. Documented "Never throws" at `useRepoGradesRubricSource.ts:644`; not relied on | null, cleared before the await; the final set never runs | construction |
+| 3 | Concurrent run refused | `useRepoGradesBulkGrade.ts:174` returns `null`, and `buildRepoRunCohort({ results: null, ... })` returns null | null | L-0, A-2a, S-20 |
+| 4 | `runBulkGrade` rejects (server-action transport failure reaching `Promise.all`) | `:372` | null; the final set never runs. **Pre-existing, not wave 3's to fix, stated so nobody reads it as a wave-3 defect:** `setRunningFolder(null)` and `setProgress(null)` (`:376-377`) run only after `Promise.all` resolves and sit in no `finally`. So on a rejection `runningFolder` stays set. Every column's Grade all button is `disabled={bulkRunning}` (`RepoGradesGrid.tsx:421`), where `bulkRunning = bulkRunningFolder !== null` (`:334`), so all of them stay disabled until the view remounts. Routed as RES-W3-9 | construction |
+| 5 | Run completes, every target failed or empty | per-target branches `:204-208`, `:216-220` | a cohort with no trendable result (`[]`, or only failures), so the leaf's entry is null and no panel shows. The previous run's trends are gone, because a run DID happen | L-0 (empty array gives a cohort, not null), L-3 cells c3/c5 |
 | 6 | Run completes, partial success | `:222-296` | a cohort of the successes only | L-1, L-3 c6 |
 | 7 | **Course switch** | render-phase branch `useRepoGradesGradingActions.ts:195-199`, which runs on the same `courseId` change as `index.tsx:540-542` | null | A-4, S-8 |
 | 8 | **Course switched MID-RUN**: run A started, course B selected, run A completes and sets | after the `:195-199` clear | a cohort stamped `courseId = A`, which the leaf HIDES on B (L-3 c1). Switching back to A re-fires the reset branch and clears it | L-3 c1, S-9 |
+
+**Branch 1 is ruling W3-4's default, and it is also the owner's to overturn.**
+The coordinator is putting it to the owner. If the owner wants the click to
+clear, the only change is swapping steps 2 and 3 of section 7.4, and the
+A-3a order direction with it.
 
 Branch 8 is why the leaf takes the live `courseId`. That is a VALIDITY check,
 not data: the live id never reaches the entry. The signature cannot even
@@ -425,10 +590,12 @@ meta" holds by construction.
 **Unmount between runs is load-bearing, stated because it is easy to miss.**
 `ClassTrendsPanel` keeps `insight` (the Ask-AI reading) in local state
 (`:89`) and does not reset it on a new `entry`. Its only entry-keyed hook is
-`useMemo` at `:91`. The click-time clear makes React commit a render with
-`trendsEntry === null`, which UNMOUNTS the panel. The clear happens
-synchronously at click and the set happens after at least one `await`, so the
-two are separate commits. The next run then mounts a fresh instance.
+`useMemo` at `:91`. The clear at step 3 makes React commit a render with
+`trendsEntry === null`, which UNMOUNTS the panel. The clear runs
+synchronously in the click's task, before the first `await`, and the set runs
+after at least one `await`, so the two are separate commits. An empty-plan
+click (branch 1) neither clears nor sets, so the mounted panel and its
+insight state correctly survive it: they still describe the run on screen. The next run then mounts a fresh instance.
 Without the clear, run 2 would show run 1's AI reading under run 2's counts.
 The recording surface gets the same property from its own three clears.
 
@@ -605,20 +772,50 @@ Run-only gates owned by no wave (plan 9.0), which must be green WITHOUT an edit:
 
 RES-V-1's lesson: wave 2 added 72 lines against a 46-line budget, and nothing
 measured a wave's own addition. So each cap below is a gate row. The object is
-the file. The instrument is `git show HEAD:<f> | wc -l` against
-`@(Get-Content <f>).Count` after the wave. **The gate FAILS if the addition
-exceeds the cap, even under 1000.**
+the file. **The gate FAILS if the addition exceeds the cap, even under 1000.**
+
+**The base is a PINNED COMMIT, not `HEAD` (ruling W3-3, revision 1).**
+Revision 0 used `git show HEAD:<f>`, and HEAD moved twice during this scope's
+own lifetime (`434ad5e` to `09c712e` to `5dcaba6`, per `git log -4`). A
+mid-wave commit of the wave's own files would make the addition read ZERO, so
+the gate could not fail. The instrument is now:
+
+```powershell
+# AT DISPATCH, by the orchestrator, before the implementer starts:
+git rev-parse HEAD | Out-File -Encoding ascii "$S\w3b-base.txt"
+# AT THE GATE:
+$B = (Get-Content "$S\w3b-base.txt").Trim()
+git merge-base --is-ancestor $B HEAD; $?            # must be True: the base is in HEAD's history
+git show "${B}:<f>" | Out-File -Encoding utf8 "$S\base-<name>.txt"   # the base copy; git show fails if it does not exist
+@(Get-Content "$S\base-<name>.txt").Count                        # before-count
+```
+
+The before-count is `git show <B>:<f>`, piped to a file in `$S` and counted
+with `@(Get-Content <that file>).Count`. It is never counted with
+`Measure-Object -Line`, which disagrees by 42 on one file in this repo
+(`traps-spec.md`). The after-count is `@(Get-Content <f>).Count` on the
+working tree, and `wc -l` must agree. For the three NEW paths,
+`git cat-file -e <B>:<f>` must FAIL, and their base is 0.
+
+The gate also fails:
+- if `$S\w3b-base.txt` is missing;
+- if the base is not an ancestor of HEAD;
+- if the base does not equal the SHA the dispatch message recorded.
+
+The "Now" column below was measured at `5dcaba6`, and all five existing files
+are byte-unchanged since `434ad5e` (`git diff --stat 434ad5e 5dcaba6` touches
+only `docs/` and a backlog test). The implementer re-measures at `<B>`.
 
 | File | Now | Estimated addition | Cap | After, at cap |
 |---|---|---|---|---|
 | `index.tsx` | 913 | 2 imports, 1 destructure, 6-8 mount and label, 4-6 hinge comment = 13-17 | **+20** | 933 |
-| `useRepoGradesGradingActions.ts` | 770 | 2 imports, 1 state, 1 reset clear, 3 handler, 1 const, 1 return key, 3 interface, 6-10 comments = 18-22 | **+30** | 800 |
+| `useRepoGradesGradingActions.ts` | 770 | 2 imports, 1 state, 1 reset clear, 3 handler (clear, awaited run, unconditional set), 1 const, 1 return key, 3 interface, 6-10 comments = 18-22 | **+30** | 800 |
 | `useRepoGradesBulkGrade.ts` | 381 | 1 import, 1 collector, 1 push, 1 return, type changes 2, 6-8 comments = 12-14 | **+20** | 401 |
 | `repoGradesFeedbackAndFiles.wiring.test.ts` | 441 | 1 root line plus the two "32"s rewritten in place | **+3** | 444 |
 | `classTrendsDraft.not-postable.test.ts` | 237 | 1 root, 3-4 comment, title rewritten in place | **+8** | 245 |
 | `classTrendsFolderEntry.ts` [NEW] | 0 | 3 functions, 1 interface, header | **<= 120** total | 120 |
-| `classTrendsFolderEntry.test.ts` [NEW] | 0 | L-1 to L-7 | **<= 320** total | 320 |
-| `repoGradesClassTrends.wiring.test.ts` [NEW] | 0 | A-1 to A-8 plus detector canaries plus a small AST helper | **<= 380** total | 380 |
+| `classTrendsFolderEntry.test.ts` [NEW] | 0 | L-0 to L-7 | **<= 340** total | 340 |
+| `repoGradesClassTrends.wiring.test.ts` [NEW] | 0 | A-1 to A-8, the control-path helper, and detector canaries for S-22 to S-26 | **<= 450** total | 450 |
 
 **No extraction is owed.** `index.tsx` ends at 933 at worst, 67 under the
 ceiling. Plan 5.6 flagged it as "wave 3's own squeeze point, inheriting the
@@ -642,42 +839,68 @@ into WS-3, never imported from another `*.test.ts`
 
 | ID | Object | Pass | RED when |
 |---|---|---|---|
+| L-0 | `buildRepoRunCohort`'s null decision (ruling W3-1(a)) | frozen literal cells: `results: null` returns `null`; `results: []` returns a NON-null cohort with `results.length === 0`; `results: [r]` returns a non-null cohort | the leaf inverts the null test (S-28), collapses empty into null (branch 5 would then leave the previous run's trends on screen after a run that graded nothing), or turns null into an empty cohort |
 | L-1 | `buildRepoRunCohort(...).results` | same length as input, and `results[i]` is `toBe` input `[i]` for two DISTINCT result objects with different `totalScore` and `rubricAreas` | any element is rebuilt, dropped, reordered or added |
-| L-2 | `buildRepoRunCohort` meta | on distinctive inputs (folder `"hw3-loops-Zq"`, course name `"Course Xy-7"`, courseId `"c-42"`): `folder === "hw3-loops-Zq"`, `courseName === "Course Xy-7"`, `courseId === "c-42"`; with `course: null`, `courseName === ""` | any two fields transposed, or any value not from its own input key |
+| L-2 | `buildRepoRunCohort` meta | on distinctive inputs (folder `"loops-and-arrays"`, course name `"Course Xy-7"`, courseId `"c-42"`): `folder === "loops-and-arrays"`, `courseName === "Course Xy-7"`, `courseId === "c-42"`; with `course: null`, `courseName === ""` | any two fields transposed, or any value not from its own input key |
 | L-3 | `repoRunTrendsEntry(cohort, liveId) !== null` | **frozen literal truth table**, not computed through `hasTrendableResults` (that would be a tautology): c0 null cohort -> false; c1 course mismatch with trendable -> false; c2 match with one graded result carrying areas -> true; c3 match with only ungraded -> false; c4 match with graded but zero areas -> false; c5 match with empty results -> false; c6 match with one graded-with-areas plus one ungraded -> true | any cell flips. This kills negation of either guard and removal of the course check (S-9, S-10) |
 | L-4 | the non-null entry's fields | `assignmentName === cohort.folder`, `courseName === cohort.courseName`, `canvasUrl === ""`, and `entry.run.results[i]` is `toBe` `cohort.results[i]`, on the distinctive values of L-2 | the folder and the course name transposed inside the leaf (S-11), or results re-mapped |
 | L-5 | the counted output | `computeClassTrends(entry).totalResults` equals the literal graded count of the fixture (1 for c6; 3 for a three-graded fixture) | the leaf lets a fabricated or duplicated result through |
-| L-6 | `repoRunTrendsLabel(entry)` | (a) contains `entry.assignmentName`; (b) contains the literal graded count as a numeral (1 for c6, 3 for the three-graded fixture); (c) for two entries identical except folder A vs B, `label(A).split(A).join(B) === label(B)`, so the folder is the only folder-dependent part; (d) `containsForbiddenCompletenessPhrase(label) === false` | the label drops the folder (S-15), shows a wrong count, reads a value from anywhere but the entry, or claims completeness. **The copy's spelling is not pinned** (`source-text-tests-overspecify`). The UX seat writes the words; the facts are pinned here |
+| L-6 | `repoRunTrendsLabel(entry)` | **Every fixture folder name contains NO digit** (`"loops-and-arrays"`, `"linked-lists"`), because revision 0's `"hw3-loops-Zq"` held a `3` and made (b) pass even with the count omitted. Checks: (a) contains `entry.assignmentName`; (b) contains the graded count as a numeral: `"3"` for the three-graded fixture and `"1"` for c6, each asserted after `split(folder).join("")` removes the folder, so no other text can supply the digit; (c) for two entries identical except folder A vs B, `label(A).split(A).join(B) === label(B)`; (d) `containsForbiddenCompletenessPhrase(label) === false`; (e) the singular form for n = 1 (`/\b1 repo\b/` matches and `/\b1 repos\b/` does not) | the label drops the folder (S-15) or the count (S-29), shows a wrong count, reads a value from anywhere but the entry, misuses the plural, or claims completeness. **Only these facts are pinned, never the full sentence** (`source-text-tests-overspecify`); section 7.3.1 fixes the words, and the implementer matches them |
 | L-7 | the leaf's own source, AST | imports `hasTrendableResults` and `toClassTrendsEntry` from `"../grading-results/classTrendsEntry"`; declares no function or const whose name matches `/trendable/i`; declares no interface or type alias whose name matches `/Meta\b/`; the value-import specifier set is a subset of `{"@/lib/grade/types", "../grading-results/classTrendsEntry"}`; it has no import from `./repoGrades*` | a second predicate (S-19), a second meta type, or a new edge (S-17 is also caught by canary 3) |
 
 ### 13.2 Wiring rows, AST. Instrument: `npx vitest run src/app/components/repo-grades/repoGradesClassTrends.wiring.test.ts`
 
 | ID | Object (file, then region) | Pass | RED when |
 |---|---|---|---|
-| A-1 | `useRepoGradesBulkGrade.ts`: the arrow bound to `gradeOneTarget` | there is an `ExpressionStatement` whose call is `<X>.push(...result.run.results)`: the callee is a `PropertyAccess` named `push`, and its single argument is a `SpreadElement` of `result.run.results`. That statement sits AFTER the `IfStatement` whose condition is `"noSubmission" in result` | the push is deleted (S-1), or its argument is anything but the spread of `result.run.results`. Moving it into either early-return branch is a `tsc` error, because `result.run` does not exist there (S-2) |
-| A-2 | the same file: the arrow bound to `runBulkGrade` | (a) the `IfStatement` whose condition is `runningFolder !== null` returns the `null` keyword; (b) the body's last `ReturnStatement` returns the Identifier `<X>` from A-1 (same name), and it sits after the statement containing `await Promise.all(` | the refusal returns an array (S-20); the collector is returned before the pool drains (S-3); or a different array is returned |
-| A-3 | `useRepoGradesGradingActions.ts`: the arrow bound to `handleGradeColumn` | (a) a `setLastRunCohort(null)` call precedes the first `buildBulkGradePlan(` call; (b) EXACTLY ONE `setLastRunCohort(` call has a non-`null` argument, and it follows the `VariableDeclaration` `<r> = await runBulkGrade(plan, resolved)`; (c) that argument is `buildRepoRunCohort(<ObjectLiteral>)`, where `results` is bound to Identifier `<r>`, and `folder`, `courseId` and `course` are each bound to the same-named Identifier (shorthand or `k: k`), with no other properties | the click-time clear is deleted (S-4) or moved after the empty-plan return (S-5); the set happens before the run; the results come from anything but the awaited run (S-6); or keys are transposed or blanked (S-18). **Negating the non-null check is `tsc`'s kill, not this row's** (S-7): `results: <r>` is `readonly GradeResult[] \| null` inside a negated branch |
-| A-4 | the same file: the `IfStatement` whose condition is `courseId !== columnPostingResetForCourse` | its then-block contains a `setLastRunCohort(null)` call | the course-switch clear is deleted (S-8) |
-| A-5 | the same file: the component-level `VariableDeclaration` `trendsEntry` | the initializer is `repoRunTrendsEntry(lastRunCohort, courseId)`, both arguments bare Identifiers; the returned object literal includes `trendsEntry`; `hasTrendableResults` is referenced NOWHERE in this file | an entry built from `cellEdits` or another live array (S-12); a second gate in the hook |
-| A-6 | `index.tsx`: the JSX tree | there is an `import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel"`, AND a `<ClassTrendsPanel` element whose `entry` initializer is the bare Identifier `trendsEntry` (no `NonNullExpression`) and which carries `defaultExpanded`. **Walking up from that element**, an ancestor `BinaryExpression` with operator `&&` has as its LEFT operand the bare Identifier `trendsEntry`, and a `PrefixUnaryExpression` `!` there is rejected | the tag is deleted (S-13 and the leverage removal test); the mount is ungated via `trendsEntry!` (S-14); or the guard is negated. Negation is also `tsc`'s kill: `entry={trendsEntry}` narrowed to `null` does not type-check (S-16) |
-| A-7 | `index.tsx`: the same `&&` expression's right operand | it contains a `CallExpression` `repoRunTrendsLabel(trendsEntry)` rendered as JSX-expression content; `repoRunTrendsLabel` is imported from `"./classTrendsFolderEntry"`; there is no `role` or `aria-live` attribute on the label's element | **the label is never written** (S-15b): the wave-2 P20 class, one prop over, and closed from the start this time; or a second live region |
-| A-8 | `index.tsx`: source positions | the `&&` expression of A-6 starts before the `<RepoGradesGrid` element and after the `postSummary` status region; `hasTrendableResults` is referenced nowhere in `index.tsx`; the `trendsEntry` binding comes from the `useRepoGradesGradingActions({` call's destructuring pattern | the mount is moved away from the run (under the log panel, for example); a duplicate gate at the mount; or a locally built entry |
+| A-1 | `useRepoGradesBulkGrade.ts`: the arrow bound to `gradeOneTarget` | an `ExpressionStatement` whose call is `<X>.push(...result.run.results)`: the callee is a `PropertyAccessExpression` named `push` on Identifier `<X>`, with a single `SpreadElement` argument of `result.run.results`. **CONTROL-PATH RULE: that statement's PARENT is the arrow's own body `Block`**. It is not inside an `if`, a loop, a callback or a nested block, and it follows both early-return `IfStatement`s (`"error" in result`, `"noSubmission" in result`) among the body's direct statements | the push is deleted (S-1) or nested under any condition (S-25), or its argument is anything but the spread. Moving it into an early-return branch is ALSO a `tsc` error (S-2, kept) |
+| A-2 | the same file: the arrow bound to `runBulkGrade` | (a) its FIRST direct statement is `if (runningFolder !== null) return null;`, where the then-branch's `ReturnStatement` expression is the `null` keyword; (b) among its DIRECT statements is `const <X> = [];`: a `VariableStatement` with `const`, one declarator named `<X>` (the A-1 identifier), an initializer that is an `ArrayLiteralExpression` with zero elements, and an optional type annotation; (c) `<X>` is never the left side of an assignment anywhere in the file; (d) its LAST direct statement is `return <X>;`, preceded among the direct statements by an `ExpressionStatement` whose expression is `await Promise.all(...)` | the refusal returns anything but `null` (S-20); the collector outlives the run (a `useRef([]).current`, a module array or hook state), which mixes two folders under one label (S-26); the collector is reassigned; or it is returned before the pool drains (S-3) |
+| A-3 | `useRepoGradesGradingActions.ts`: the arrow bound to `handleGradeColumn` | **CONTROL-PATH RULE: every statement named here is a DIRECT statement of the handler's body `Block`, and the body contains EXACTLY ONE `IfStatement`**: the pre-existing `plan.targets.length === 0` return, whose then-block contains no `setLastRunCohort`. (a) Exactly one `setLastRunCohort(null)` direct statement, which comes AFTER that `IfStatement` and BEFORE the first direct statement containing `await`; (b) exactly one other `setLastRunCohort(` call in the handler, which is the handler's LAST direct statement. Its sole argument is `buildRepoRunCohort(<ObjectLiteral>)`, and it is not wrapped in a `ConditionalExpression`, a `&&` / `\|\|` / `??` binary or an `if`; (c) the object literal binds `results` to the Identifier `<r>` declared by a preceding DIRECT `const <r> = await runBulkGrade(plan, resolved);`, and binds `folder`, `courseId` and `course` each to the same-named Identifier (shorthand or `k: k`), with no other properties | the attempt-time clear is deleted (S-4) or moved above the empty-plan `if` (S-5, revision 1 direction); the set is wrapped in any condition (S-7, revised, and S-24); the results come from anything but the awaited run (S-6); or keys are transposed or blanked (S-18) |
+| A-4 | the same file: the `IfStatement` whose condition is `courseId !== columnPostingResetForCourse` | a `setLastRunCohort(null)` `ExpressionStatement` whose parent is that `if`'s then-`Block` (control-path rule) | the course-switch clear is deleted (S-8) or nested |
+| A-5 | the same file: the component-level `VariableDeclaration` `trendsEntry` | its `VariableStatement` is a DIRECT statement of the hook function's body; its initializer is `repoRunTrendsEntry(lastRunCohort, courseId)`, both arguments bare Identifiers; the returned object literal includes `trendsEntry`; `hasTrendableResults` is referenced NOWHERE in this file; `setLastRunCohort` is called in exactly three places in the file (A-3a, A-3b, A-4) | an entry built from `cellEdits` or another live array (S-12); a second gate in the hook; a fourth writer of the cohort |
+| A-6 | `index.tsx`: the JSX tree | `import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel"`, and **exactly one** `<ClassTrendsPanel` element in the file, with an `entry` initializer that is the bare Identifier `trendsEntry` (no `NonNullExpression`) and a `defaultExpanded` attribute. **CONTROL-PATH RULE, from that element up to the render root, with every node checked and anything else failing.** The element's ancestors are, in order: the wrapper `JsxElement` (optionally a `ParenthesizedExpression`), then exactly one `BinaryExpression` with operator `&&` whose LEFT operand is the bare Identifier `trendsEntry` and whose RIGHT operand contains the element, then a `JsxExpression` whose `expression` IS that binary, then the top-level `JsxFragment`, then the `ParenthesizedExpression` of a `ReturnStatement` that is a DIRECT statement of the default-exported component function's body. Any other `JsxExpression`, `ConditionalExpression`, `BinaryExpression`, `CallExpression`, `IfStatement` or function on that path fails | the tag is deleted (S-13, the leverage removal test); it is mounted ungated via `trendsEntry!` (S-14); the guard is negated (S-16, also a `tsc` kill, kept); **a correct gate has a negated gate nested inside it** (S-22, which `tsc` does NOT catch, because the variable narrows to `never`); or **a correct gate sits under an unrelated condition** (S-23) |
+| A-7 | `index.tsx`: the label | exactly one `CallExpression` `repoRunTrendsLabel(trendsEntry)` in the file. Its parent is a `JsxExpression`, whose parent is a `<p>` `JsxElement` whose parent is THE SAME wrapper `JsxElement` as A-6's; from there up, the same path as A-6. `repoRunTrendsLabel` is imported from `"./classTrendsFolderEntry"`; the `<p>` carries no `role` and no `aria-*` attribute | **the label is never written** (S-15b, the wave-2 P20 class one prop over, closed from the start); the label is gated separately; or a new live region is added |
+| A-8 | `index.tsx`: source positions and binding | A-6's `JsxExpression` starts after the `postSummary` status region's `JsxExpression` and before the one containing `<RepoGradesGrid`, as siblings in the top-level fragment; `hasTrendableResults` is referenced nowhere in `index.tsx`; `trendsEntry` is bound by the destructuring pattern of the `useRepoGradesGradingActions({` call and by nothing else | the mount is moved away from the run; a duplicate gate at the mount; a locally built entry |
 
-**Why AST and not regex, stated as a measured fact.** Wave 2's
-`classTrendsMountIsGated` regex, `/hasTrendableResults\([^)]*\)\s*&&(...)/`,
-did not see a leading `!` (wave-2 verify N1), and its fix is a
-character-before check that `hasTrendableResults(x) === false &&` would still
-pass. A-6 asks the question structurally: is the left operand of the gating
-`&&` the Identifier itself? Every form of negation (`!x`, `x === null`,
-`x == null`, `!!x ? ... :`) fails that test, because none of them is a bare
-Identifier.
+**Every control-path detector ships with canaries built from the check's own
+mutants** (S-22 to S-26). Each is a fixture string parsed with the same
+helper, and each must return false. The canaries are:
+
+- a correct gate wrapping a negated one;
+- `{model && trendsEntry && (...)}`;
+- `{flag ? (trendsEntry && ...) : null}`;
+- `if (r?.length === 0) setLastRunCohort(...)`;
+- `if (first) X.push(...)`;
+- `const X = useRef<GradeResult[]>([]).current`.
+
+The intended shape must return true.
+
+**Revision 0 got this wrong, and the correction is a change of approach, not
+a stronger pin (ruling W3-1).** Revision 0 said that A-6 asked the question
+structurally and that "every form of negation fails". That was false as
+written. Its detectors asked whether a correct gate was PRESENT somewhere
+above the node. The check built replicas and showed five shapes that pass
+both that detector and `tsc`:
+
+- a negated gate nested INSIDE the correct one, where `trendsEntry` narrows to
+  `never` and `never` is assignable to anything;
+- a correct gate under an unrelated, usually-false condition;
+- `if (r?.length === 0)` around the cohort set, which sets the cohort only on
+  EMPTY runs and brings back wave 2's first failure;
+- a push under a spurious condition;
+- a collector held across runs.
+
+Revision 1 asks the opposite question: **does anything OTHER than the one
+designated gate stand between this node and the root?** That question is
+answered by enumerating the whole path, not by finding one ancestor. For the
+cohort set, the construction removes the condition entirely: the null decision
+lives in the leaf (L-0), where a unit test sees it by value.
 
 ### 13.3 Gate rows (W3B), in addition to plan 9.0's standing snapshot diff
 
 | Instrument | Pass |
 |---|---|
 | plan 9.0's repo-wide `git status --short` snapshot diff, both files in the session scratchpad | every new or changed path is one of WS-1 to WS-8; no path under `.claude/worktrees/`; `docs/css-orphans.md` ignored and not staged |
-| section 12's eight caps | every addition at or under its cap, measured by BOTH counters with the SAME number |
+| section 12's eight caps, against the PINNED base `<B>` from `$S\w3b-base.txt`, never `HEAD` (ruling W3-3) | `<B>` exists, is an ancestor of HEAD and equals the SHA recorded at dispatch; every addition is at or under its cap, measured by BOTH counters with the SAME number |
 | `npx vitest run <WS-2>` and `npx vitest run <WS-3>`, one path per invocation (a multi-path run silently drops a non-matching path, plan 9.2) | green |
 | `npx vitest run <WS-7>` | green, with R-2 at **33** and R-1/R-3/R-4 at 0/0/0 |
 | `npx vitest run <WS-8>` | green with **seven** roots; the `describe` and `it()` titles name all seven |
@@ -699,10 +922,10 @@ through `tr -d '\000'`.
 | S-1 | delete the collector push | A-1 |
 | S-2 | move the push into the `"noSubmission"` branch | `tsc` (`result.run` does not exist on that variant). **Demonstrate it** |
 | S-3 | `return <X>` before `await Promise.all(...)` | A-2b |
-| S-4 | delete the click-time `setLastRunCohort(null)` | A-3a |
-| S-5 | move it below the empty-plan `return` | A-3a (order) |
+| S-4 | delete the attempt-time `setLastRunCohort(null)` | A-3a |
+| S-5 | **Rewritten under ruling W3-4.** Move the clear ABOVE the empty-plan `if`, which was revision 0's behaviour: a "Nothing to grade" click would wipe the trends of the run that just finished | A-3a (order: the clear must FOLLOW the `IfStatement`) |
 | S-6 | `buildRepoRunCohort({ results: [], ... })` | A-3c |
-| S-7 | `if (<r> === null) setLastRunCohort(buildRepoRunCohort({ results: <r>, ... }))` | `tsc`. **Demonstrate it** |
+| S-7 | **Revised, stated rather than silently kept.** Revision 0's mutant `if (<r> === null) setLastRunCohort(buildRepoRunCohort({ results: <r>, ... }))` was a `tsc` kill because `results` did not accept `null`. **Ruling W3-1(a) makes `results` nullable, so this mutant now TYPE-CHECKS, and its `tsc` kill is gone.** It is killed by A-3b (the set must be an unconditional direct statement) and by A-3's one-`if` count. That is a deliberate trade: the condition no longer exists to mutate | A-3b |
 | S-8 | delete the course-switch clear | A-4 |
 | S-9 | the leaf drops its `courseId` comparison | L-3 c1 |
 | S-10 | the leaf returns `hasTrendableResults(entry) ? null : entry` | L-3 c2, c3, c6 |
@@ -718,10 +941,20 @@ through `tr -d '\000'`.
 | S-19 | declare `const isTrendable = ...` in the leaf and gate on it | L-7 |
 | S-20 | the refusal guard returns `[]` | A-2a |
 | S-21 | add `import { callLlm } from "@/lib/llm"` to the leaf | canary 3 (WS-8) |
+| S-22 | inside the correct gate, render `{!trendsEntry && <ClassTrendsPanel entry={trendsEntry} defaultExpanded />}` (the check's replica: passes revision 0's detector AND `tsc`, via `never`) | A-6 control path (an extra `JsxExpression` and `BinaryExpression` between the element and the wrapper) |
+| S-23 | `{model && trendsEntry && (...)}`, or the correct gate inside `{someFlag ? (...) : null}` | A-6 (the gating `&&`'s left operand is not the bare `trendsEntry`, or a `ConditionalExpression` is on the path) |
+| S-24 | wrap the final set in `if (<r>?.length === 0) { ... }` (the check's replica: the cohort is set only on EMPTY runs, so the panel never renders) | A-3 (a second `IfStatement`; the set is no longer a direct statement) |
+| S-25 | wrap the push in `if (first) { ... }` | A-1 control path |
+| S-26 | replace the collector with `const <X> = collectorRef.current;` held across runs by `useRef<GradeResult[]>([])` | A-2b (the initializer is not an empty array literal) |
+| S-28 | the leaf returns `input.results === null ? cohort : null` | L-0 |
+| S-29 | the label omits the count | L-6b, now that the fixture folders hold no digit |
 
-S-2, S-7 and S-16 are killed by `tsc` alone, or by `tsc` alongside one row.
-`tsc` has one caller, so these three run in the verification pass, one at a
-time, and never concurrently with another agent's sabotage.
+S-2 and S-16 keep their `tsc` kills, as the round-1 check confirmed. S-7's
+`tsc` kill is retired by ruling W3-1(a), as the S-7 row says, and A-3b
+replaces it. **S-22 is the case `tsc` provably cannot see**, which is why A-6
+exists at all. `tsc` has one caller, so the `tsc`-killed mutants run in the
+verification pass, one at a time, and never concurrently with another agent's
+sabotage.
 
 ---
 
@@ -734,8 +967,11 @@ today (`DEV_LOOP.md`, "The loop / Criteria").
 
 - **SCALE** is the candidate the surface tempts. A Repo Grades run pins ONE
   rubric across N repos (`establishSharedRubric`,
-  `useRepoGradesBulkGrade.ts:126-142`, gated at `:340-354`), which is what
-  makes the area names comparable across the cohort at all. But that
+  `useRepoGradesBulkGrade.ts:126-142`, gated at `:340-354`). Revision 0 said
+  this "makes the area names comparable across the cohort at all". **That
+  holds only when the rubric parses** (ruling W3-2, section 2, RES-W3-8). On
+  the LLM path with an unparseable rubric, each repo's areas are reconciled
+  only against themselves (`engine.ts:325-337`). Either way, that
   mechanism was earned by U12.50 long before A16, and wave 3 builds nothing
   that holds it. Failure mode B was already run for A16:
   `docs/a16-scope.md` section 11 measured 14 batching files and withdrew SCALE
@@ -753,14 +989,12 @@ observed value changes is A-6: PASS before, FAIL after. Trends still compute,
 but they are unreachable from Repo Grades again, which is the pre-wave-3
 world.
 
-**The three-way call is the owner's, and it has not been made.**
-`docs/a16-scope.md` section 11 wrote "A16 takes ... Accept the cost
-explicitly". That sentence was authored by a SEAT. `grep -ci leverage
-docs/a16-rulings.md` returns **0**, against a canary
-`grep -c '^## RULING' docs/a16-rulings.md` of **24**. I find no owner ruling
-recording the call. **Owner question Q2, non-gating.** My recommendation is to
-accept the cost explicitly, as the scope did, because waves 1-2 already
-shipped on that reading. The build proceeds on it, and Q2 rides alongside.
+**The three-way call is the owner's, and it is now MADE.** Revision 0 found
+that it had been made only by a seat (`docs/a16-scope.md` section 11): `grep
+-ci leverage docs/a16-rulings.md` returned 0 against a canary of 24 `## RULING`
+headings. The owner then confirmed Q2 verbatim ("1-3 are good calls"), as
+recorded in the A16 row at `5dcaba6`. **Wave 3 accepts the cost explicitly:
+it is a reachability and click-cost change with no categorical claim.**
 
 ---
 
@@ -792,47 +1026,73 @@ sections 10-13 was fixed.
 | RES-V-5: `runCohortMeta`'s `it.each` duplicate cell | wave-2 verify section 9 | **Closed elsewhere** | `434ad5e`, `classTrendsRunCohort.test.ts:208` ("THREE cells, not four") |
 | RES-V-7, RES-V-8: the region canaries in `GradingRecordingPanel.wiring.test.ts` | wave-2 verify section 9 | **Handed over. Their step names a wave that does not exist** | "The next wave that writes this test file". W3B does not write it. **Receiver: the orchestrator**, to record them in the backlog |
 
+
+### 15.1 Revision 1's own disposition: revision 0's items, re-derived after renumbering
+
+| Revision 0 item | Disposition | Where now |
+|---|---|---|
+| A-1 (push present after the no-submission `if`) | **Kept and tightened** (W3-1(c)): the push must be a direct statement | A-1 |
+| A-2 (refusal returns `null`; collector returned after the pool) | **Kept and tightened** (W3-1(d)): the collector is a `const` empty-array literal declared directly in `runBulkGrade`, and it is never reassigned | A-2 |
+| A-3 (click-time clear first; one conditional set) | **Replaced** (W3-1(a), W3-4): the clear FOLLOWS the empty-plan `if`, the set is unconditional and last, and the handler has exactly one `if` | A-3 |
+| A-4, A-5, A-8 | **Kept**. A-4 and A-5 gain direct-statement and writer-count clauses | A-4, A-5, A-8 |
+| A-6 (an ancestor `&&` whose left operand is the bare identifier) | **Replaced** (W3-1(b)): the whole path from element to render root is enumerated | A-6 |
+| A-7 | **Kept**, now bound to A-6's wrapper and path | A-7 |
+| L-1 to L-7 | **Kept**. L-2 and L-6 fixtures lose their digits; L-6 gains (e) | L-1 to L-7 |
+| (new) | **Added**: the leaf's null decision | L-0 |
+| S-5 (clear moved below the empty-plan return, killed) | **Inverted** (W3-4): clearing ABOVE it is now the mutant | S-5 |
+| S-7 (a `tsc` kill) | **Kill re-homed**: `tsc` no longer sees it once `results` is nullable; A-3b kills it | S-7 |
+| (new) | **Added**: the check's replicas S-22 to S-26, plus S-28 and S-29 | 13.4 |
+| RES-W3-6 | **Handed over** to row A26, with the checker's by-reading finding cross-referenced | 16 |
+| RES-W3-7 | **Discharged** | 7.3.1 |
+| (new) | **Added**: RES-W3-8 to RES-W3-11 | 16 |
+| Section 12's `git show HEAD:<f>` base | **Replaced** (W3-3) by a pinned SHA | 12 |
+| "the view has exactly one live region" (section 7.4) | **Withdrawn as false**; corrected, and routed as RES-W3-10 | 7.4, 16 |
+| "one shared rubric makes area names comparable" (sections 2, 14) | **Withdrawn as a general claim** (W3-2); true only for a rubric that parses | 2, 14, RES-W3-8 |
+
 ---
 
 ## 16. Residual register
 
 Each entry names an owner, an instrument and the step that will measure it.
-**None of these is in `docs/backlog.yml` yet.** This seat's write set is this
-one document, and that file has concurrent writers. `grep -c "RES-W3\|RES-V"
-docs/backlog.yml` returns 0 (canary: `grep -c "RES-P" docs/backlog.yml`
-returns 1). **Until the orchestrator records them, every row below is a
-deletion,** by DEV_LOOP step 0's own rule.
+**Revision 1 wrote every open entry below into `docs/backlog.yml` IN
+SUBSTANCE**, under ruling W3-5:
+
+- the A16 row's note, for RES-W3-1 to -3, -5, and -8 to -11, and for RES-V-1,
+  -3, -4, -6, -7 and -8;
+- the N13b row's note, for RES-W3-4.
+
+RES-W3-6 already has its own row, A26. RES-W3-7 is discharged in section
+7.3.1. The instrument proving the recording is the pair of `grep` counts in
+section 19.
 
 | ID | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
-| **RES-W3-1** | Nothing renders. Four things are unverified: that the label and panel appear ABOVE the grid after a run; that `defaultExpanded` opens it; that the label is legible and names the right column; and that the panel UNMOUNTS at the next click (section 8's load-bearing unmount) | The repo owner | A real browser with env vars: run "Grade all" on two different columns in turn, and watch the panel close at the second click and reopen with the second folder's name | Owner verification after the W3B push |
+| **RES-W3-1** | Nothing renders, so five Repo Grades behaviours are unverified: (1) the label and panel appear ABOVE the grid, below the status line, after a Grade all run; (2) `defaultExpanded` opens the panel; (3) the label names the folder of the column just graded and the right count; (4) starting a second run UNMOUNTS the first run's panel, discarding its AI reading (section 8); (5) a "Nothing to grade" click leaves the panel in place (W3-4) | The repo owner | A real browser with env vars: grade column A, read the label; click column A's button again ("Nothing to grade in A"), and the panel must stay; grade column B, and the panel must close at the click and reopen labelled B | Owner verification after the W3B push |
 | **RES-W3-2** | Trends vanish on reload. This is CONSISTENT with the grid: `cellEdits` is not persisted either (`index.tsx:180`), so the graded cells vanish too. That is unlike the recording surface, where rows persist and trends do not (plan RES-P-6). No upgrade path short of persisting `cellEdits` | The repo owner | Grade a column, reload, and confirm that cells and trends both reset | Owner verification after the W3B push |
-| **RES-W3-3** | After a run, a one-cell regrade or a hand edit leaves the trends describing the run's CAPTURED results. This follows plan 5.5's "tied to what this run covered" rule, and the same question was left unruled on the recording surface (RES-V-6) | The repo owner, a product decision | A real browser: regrade one cell of a graded column and read the trends | Owner verification after the W3B push; ask it together with RES-V-6 |
-| **RES-W3-4** | `student` on every cohort result is the repo's full name (`github-repos.ts:619`), not the bound roster student. That is invisible today and matters when N13b adds per-student attribution | The N13b scoping seat | `grep -n "student:" src/app/actions/github-repos.ts`, plus N13b's own criteria on which name a Repo Grades attribution shows | N13b's scoping pass, which already follows A16 |
-| **RES-W3-5** | The Ask-AI request carries every graded repo's `submittedFiles` preview content. `ClassTrendsPanel.tsx:101` posts `JSON.stringify({ entry })` whole, while the model uses only areas and `overallComment` (`class-trends-insight.ts:59-69`). The request size against the host's body limit is unmeasured. The same exposure already ships on `GithubGradingPanel` via A16-1. If it overflows, the panel shows its error state, not a crash (`ClassTrendsPanel.tsx:103`, `:118`) | The repo owner | A real browser: the network tab's request size for "Ask AI" after a large-org run | Owner verification after the W3B push. A projection fix belongs to `ClassTrendsPanel.tsx` and serves every mount, so it would be its own row, not wave 3's |
-| **RES-W3-6** | A pre-existing race, found in passing and NOT executed. `runBulkGrade`'s refusal guard reads `runningFolder` from the hook's render closure (`useRepoGradesBulkGrade.ts:168`, `:174`), and `handleGradeColumn` awaits `resolveRubricForColumn` (`useRepoGradesGradingActions.ts:755`) before calling it. The grid disables the buttons only once `runningFolder` is set (`RepoGradesGrid.tsx:421`). So two clicks inside one resolve window can both pass the guard. The trends consequence is benign (last completion wins, correctly labelled). The rate-limit consequence is what `BULK_GRADE_CONCURRENCY` exists to prevent | **The orchestrator**, to file a bug row | A reading claim today. The fix's own test would need the guard extracted to a ref-based or pure check | Its own row's scoping |
-| **RES-W3-7** | The label's copy. The facts are pinned by L-6; its words and whether the count reads naturally are not | The UX seat (A16 wave 3's UX pass, DEV_LOOP design wave 3) | Reading, plus L-6 | The UX pass, before W3B is dispatched |
-| **RES-V-1** | See section 15: 10 lines of headroom on `GradingRecordingPanel.tsx`, with no gate on a wave's own additions | The orchestrator | Plan 5.4's commands | **No step exists until recorded**: before any wave whose set contains that file |
-| **RES-V-3, -4, -6, -7, -8** | The wave-2 verify residuals, none of which is in the backlog (count 0 above). Their steps name waves or files outside W3B | The orchestrator | `docs/a16-wave2-verify.md` section 9, each row's own instrument | **No step exists until recorded** |
+| **RES-W3-3** | After a run, a one-cell regrade or a hand edit leaves the trends describing the run's CAPTURED results, per plan 5.5's "tied to what this run covered" rule. The same question is unruled on the recording surface (RES-V-6) | The repo owner, a product decision | A real browser: regrade one cell of a graded column and read the trends | Owner verification after the W3B push, asked together with RES-V-6 |
+| **RES-W3-4** | `student` on every cohort result is the repo's full name (`github-repos.ts:619`), not the bound roster student. That is invisible today and matters once N13b adds per-student attribution | The N13b scoping seat | `grep -n "student:" src/app/actions/github-repos.ts`, plus N13b's own criterion on which name a Repo Grades attribution shows | N13b's scoping pass, which already follows A16. **Recorded in the N13b row** |
+| **RES-W3-5** | The Ask-AI request carries every graded repo's `submittedFiles` preview content. `ClassTrendsPanel.tsx:101` posts `JSON.stringify({ entry })` whole, while the model reads only areas and `overallComment` (`class-trends-insight.ts:59-69`). The size against the host's request-body limit is unmeasured. The same exposure already ships on `GithubGradingPanel` via A16-1 | The repo owner | A real browser: the network tab's request size for "Get AI reading" after a large-org run | Owner verification after the W3B push. A projection fix would belong to `ClassTrendsPanel.tsx` and serve every mount, so it would be its own row |
+| **RES-W3-6** | The concurrent-run race | Row **A26** | A26's own instrument | A26's scoping. **Cross-reference, recorded rather than fixed:** the round-1 check established the race as REAL BY READING. The buttons disable only on `runningFolder` (`RepoGradesGrid.tsx:334`, `:421`), which `runBulkGrade` sets (`useRepoGradesBulkGrade.ts:178`) only after `handleGradeColumn` has awaited the rubric (`useRepoGradesGradingActions.ts:755`). Only the `assignment`, live-LMS and `export` rubric sources have a real network await in that window; `generate` and `manual` return at once (`useRepoGradesRubricSource.ts:652-655`). Wave 3 does not change this, and its trends consequence is last-completion-wins, correctly labelled |
+| **RES-W3-7** | The label copy | UX pass | Reading, plus L-6 | **DISCHARGED** in section 7.3.1 |
+| **RES-W3-8** | **Trends fragment when the rubric does not parse** (ruling W3-2, section 2). The LLM path calls `gradeEntries` once per repo, and with `extractRubricCriteria` returning `[]` the engine reconciles each result's areas only against themselves (`engine.ts:325-337`). A prose rubric, a rubric without points, or a points range can therefore yield model-invented, repo-specific area names, many one-of-N trends and few merged ones. It is honest but thin. **The cost is unmeasured, and no disclosure is designed** | **The W3B verification seat** measures; the owner decides whether any disclosure is warranted | A unit test in the verification pass, network-blocked as usual. (1) `extractRubricCriteria` returns `[]` for three fixtures: prose, no points, and a range. (2) Two `gradeEntries([entry], ...)` calls with `callLlm` MOCKED, never `fetch`, to return differently worded areas for the same criteria. (3) Both results go through the real `buildRepoRunCohort` and `repoRunTrendsEntry`. (4) Report `computeClassTrends(entry).areas.length` and each area's `resultsWithArea`, next to the same run with a parseable rubric | The W3B verification pass. The finding goes to the owner with the numbers attached |
+| **RES-W3-9** | **Pre-existing, not wave 3's.** A rejected `runBulkGrade` (a server-action transport failure reaching `Promise.all`, `useRepoGradesBulkGrade.ts:372`) never runs `setRunningFolder(null)` or `setProgress(null)` (`:376-377`), because they are in no `finally`. Every column's Grade all button then stays disabled (`RepoGradesGrid.tsx:334`, `:421`) until the view remounts | **The orchestrator**, to file a bug row. It sits beside A26 in the same hook, and is a different defect | A reading today: `sed -n '171,378p' useRepoGradesBulkGrade.ts` shows no `try` or `finally`. The fix's own test must execute the rejection | Its own row's scoping |
+| **RES-W3-10** | **Status regions on one screen.** Revision 0 wrongly claimed one live region. The view renders 10 conditional `role="status"` nodes today (section 7.4), and the panel adds two transient, click-triggered ones (`ClassTrendsPanel.tsx:164`, `ClassTrendsDraftPanel.tsx:110`). I judge no ruling is needed, because announcements collide only across two separate user actions and the same regions ship on four other mounts. That is a screen-reader judgement nothing here can observe | The accessibility seat | Reading, plus the owner's screen reader if the seat asks for one | W3B's accessibility step (DEV_LOOP "Accessibility") |
+| **RES-W3-11** | **Ruling W3-4's default**: a "Nothing to grade" click keeps the previous run's trends. The coordinator made it and is putting it to the owner | The repo owner | The owner's answer | The coordinator's next batched owner question. If overturned, section 8's note names the two-line swap and the A-3a direction flip |
+| **RES-V-1** | 10 lines of headroom on `GradingRecordingPanel.tsx` (990, `@(Get-Content).Count`), and no gate on a wave's own additions | The orchestrator | Plan 5.4's commands | Before dispatch of any wave whose set contains that file. **Recorded in the A16 row** |
+| **RES-V-3, -4, -6, -7, -8** | The wave-2 verify residuals. Each is written in substance into the A16 row, with its owner, its instrument and a step that names an existing trigger | as in `docs/a16-wave2-verify.md` section 9 | as there | **Recorded in the A16 row**; see it for each step |
 
 ---
 
-## 17. Owner questions: batched, non-gating, each with the default being built
+## 17. Owner questions: ANSWERED
 
-- **Q1. Does a Repo Grades trend cover the RUN, or the whole COLUMN?** The
-  default being built is the run. It is the recording surface's owner answer 3,
-  applied here, and only a run guarantees one shared rubric (section 2).
-  Choosing the column instead would read already-graded cells from `cellEdits`,
-  which reintroduces the mapping this design avoids. So it is a real redesign,
-  not a flag.
-- **Q2. The leverage call** (section 14). The default being built is
-  "accept the cost explicitly": click cost and reachability, no categorical
-  claim.
-- **Q3. Should the trends' assignment name be the FOLDER or the mapped Canvas
-  assignment's title?** The default being built is the folder, following the
-  precedent at `GithubGradingPanel.tsx:861`, because the mapping is optional
-  per column and the folder is what the run covered. The title would read
-  better in the student-addressed draft opening (`class-trends-draft.ts:185`).
+The owner confirmed all three verbatim ("1-3 are good calls"), as recorded in
+the A16 row at `5dcaba6`:
+
+- **Q1:** the cohort is the RUN, not the column.
+- **Q2:** no leverage claim; the cost is accepted explicitly.
+- **Q3:** the label names the FOLDER, not the mapped Canvas title.
+
+One new question is the coordinator's to ask, not mine: RES-W3-11.
 
 ---
 
@@ -840,28 +1100,35 @@ deletion,** by DEV_LOOP step 0's own rule.
 
 - **Whether the panel, the label and the unmount behave as read.** Nothing
   renders (RES-W3-1).
-- **Whether `tsc` kills S-2, S-7 and S-16 as argued.** The narrowing argument
-  is sound, and wave-2 verify's N3 is the same shape, killed by TS2345. I did
-  not run `tsc`, because it has one caller. The wave gate demonstrates it.
+- **The five control-path mutants (S-22 to S-26) were not executed by me.**
+  The check executed replicas of them against revision 0's detectors. The
+  revision-1 detectors' kills are claims until the W3B verification runs them.
+  Each detector ships with fixture canaries of exactly those shapes, so the
+  detector's own test proves it discriminates before the real file is read.
+- **`tsc`:** the check demonstrated the kills of S-2 and S-16. S-7's `tsc`
+  kill is retired by ruling W3-1(a), as stated in its row. I did not run
+  `tsc` (one caller).
 - **Whether S-17 turns canary 3 red.** This is read from
   `repoGradesBulkGrade.ts:42`, `repoGradesPosting.ts:64` and
-  `classTrendsDraft.not-postable.test.ts:58`, `:67-70`, `:95-111`. I did not run
-  the mutant, because this seat writes no source file.
-- **The Ask-AI request size for a real org** (RES-W3-5). No data and no network.
+  `classTrendsDraft.not-postable.test.ts:58`, `:67-70`, `:95-111`. The check
+  found the `import type` form safe.
+- **The fragmentation cost** (RES-W3-8) and **the Ask-AI request size**
+  (RES-W3-5). Neither is measured.
 - **Whether `gradeRepoAction` ever returns more than one result per call.** It
-  grades one entry per call (`github-repos.ts:819`, `:839`), so one is expected, and the
-  cell reads only `results[0]` (`useRepoGradesBulkGrade.ts:222`). The collector
-  spreads ALL of them, so a hypothetical second result would enter the trends
-  while the cell shows only the first. I did not trace `gradeEntries` for a
-  multi-result case on a one-entry input.
-- **Whether the owner has ruled on leverage anywhere other than
-  `docs/a16-rulings.md` and the A16 row.** Those are the two places I searched.
+  grades one entry per call (`github-repos.ts:819`, `:839`), so one is
+  expected, and the cell reads only `results[0]`
+  (`useRepoGradesBulkGrade.ts:222`). The collector spreads ALL of them. I did
+  not trace `gradeEntries` for a multi-result case on a one-entry input.
 
 ---
 
 ## 19. Tree state at hand-off
 
-`git status --short` before writing this file returned ` M docs/css-orphans.md`
-only. It was left alone, as instructed. After writing: ` M docs/css-orphans.md`
-and `?? docs/a16-wave3-scope.md`. The scratch probe files are under the
-session scratchpad, not the repo.
+Revision 0 landed at `09c712e`. Revision 1 edits three tracked files:
+
+- this document;
+- `docs/backlog.yml`, the A16 and N13b notes only, under ruling W3-5;
+- `docs/BACKLOG.md`, regenerated by `npm run backlog:render`, never hand-edited.
+
+`docs/css-orphans.md` was left alone. The final `git status --short` and the
+backlog gate results are in this revision's report.

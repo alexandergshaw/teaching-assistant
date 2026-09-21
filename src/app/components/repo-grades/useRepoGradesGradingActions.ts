@@ -293,6 +293,10 @@ export function useRepoGradesGradingActions(
     // the call's spelling. Two call sites that can drift, kept in a
     // particular order to satisfy a text scan, is a worse defect than the
     // one the scan was guarding against.
+    // R-6 (docs/a26-a27-scope.md): the same P3 fix as the bulk path's
+    // gradeOneTarget - a rejected call (transport, never gradeRepoAction's
+    // own body) becomes an ordinary `{ error }` outcome instead of leaving
+    // this cell's `grading: true` set forever with no log entry.
     const result = await gradeRepoAction(
       row.repo,
       instructions,
@@ -302,7 +306,7 @@ export function useRepoGradesGradingActions(
       column.folder,
       useReadmeInstructions,
       runCodeScoring
-    );
+    ).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
       // L1 item 2. A grading failure otherwise leaves only a per-cell error
@@ -770,8 +774,14 @@ export function useRepoGradesGradingActions(
     // whatever the previous run left on screen once this one finishes.
     setLastRunCohort(null);
     const column = columns.find((c) => c.folder === folder) ?? { folder, assignmentId: null };
-    const resolved = await resolveRubricForColumn(column.assignmentId);
-    const runResults = await runBulkGrade(plan, resolved);
+    // docs/a26-a27-scope.md, backlog row A26: the rubric is no longer
+    // resolved HERE, ahead of runBulkGrade - that gap (this await, before the
+    // hook's own lock was ever claimed) was the race. The resolver is now a
+    // thunk runBulkGrade calls itself, after claiming its lock, so a second
+    // click made while this fetch is in flight is refused before it can
+    // start a second fetch at all. AC item 50's own guarantee - the column's
+    // assignmentId reaches the resolver, once per run - is unchanged.
+    const runResults = await runBulkGrade(plan, () => resolveRubricForColumn(column.assignmentId));
     // A16 wave 3: UNCONDITIONAL - buildRepoRunCohort itself owns the null
     // decision (runBulkGrade refused vs. a real, possibly empty, run).
     setLastRunCohort(buildRepoRunCohort({ results: runResults, folder, courseId, course }));

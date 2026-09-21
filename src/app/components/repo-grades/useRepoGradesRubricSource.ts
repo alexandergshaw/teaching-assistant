@@ -338,9 +338,20 @@ export function useRepoGradesRubricSource(params: UseRepoGradesRubricSourceParam
   const [displayResolved, setDisplayResolved] = useState<{ key: string; resolved: ResolvedRubric } | null>(null);
   // In-flight resolveRubricForColumn network calls (assignment/live/export
   // only - generate/manual never touch it). A simple counter, not a per-key
-  // Set: AC item 45 deliberately disables EVERY column's Grade button while
-  // ANY resolve is in flight, page-wide, not just the column that triggered
-  // it - "costs nothing in the steady state" per that item's own text.
+  // Set.
+  //
+  // CORRECTED (docs/a26-a27-scope.md section 2.4): this counter does NOT
+  // disable any Grade button, page-wide or otherwise. `resolving` below
+  // reaches index.tsx as `rubricResolving`, and from there only
+  // RepoGradesControls.tsx's textarea placeholder - neither RepoGradesGrid.tsx
+  // nor RepoGradeCellControl.tsx ever receives it
+  // (`git grep -n "rubricResolving" -- src/app/components/repo-grades/` finds
+  // only those two files). A "Grade all" click during a cold `assignment`
+  // column's rubric fetch is exactly backlog row A26 - the earlier text here
+  // describing a page-wide Grade-button disable would have made a reader
+  // think A26 was already closed. The one-run-at-a-time guard that actually
+  // exists lives in useRepoGradesBulkGrade.ts's own run-lock ref, which now
+  // holds the rubric fetch itself under its lock (see that file's header).
   const [pendingResolves, setPendingResolves] = useState(0);
 
   // ---- Course-switch reset (render-phase compare-and-adjust, matching

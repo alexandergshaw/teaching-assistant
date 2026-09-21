@@ -22,13 +22,18 @@
 // pulling the next index when they finish, keeps at most that many requests
 // in flight without pulling in an external dependency.
 //
-// Why one repo's failure never aborts the run: each worker catches nothing
-// itself (gradeRepoAction never throws - it returns `{ error }` on failure,
-// exactly like handleGradeCell's own success/failure branch), writes the
-// per-cell failure state, records an outcome, and moves on to the next index.
-// That per-target isolation is the whole reason this is a pool over a shared
-// cursor rather than one `Promise.all` that a single rejection could take
-// down.
+// Why one repo's failure never aborts the run: gradeRepoAction's OWN body
+// never throws - it returns `{ error }` on failure, exactly like
+// handleGradeCell's own success/failure branch - but the call across the
+// client/server boundary can still reject in transport (a dropped
+// connection, a platform timeout, a deploy mid-run - see
+// docs/a26-a27-scope.md section 2.1). gradeOneTarget's own `.catch` below
+// (P3, backlog row A27) maps that rejection to the SAME `{ error }` shape, so
+// every worker still writes the per-cell failure state, records an outcome,
+// and moves on to the next index regardless of which layer produced the
+// failure. That per-target isolation is the whole reason this is a pool over
+// a shared cursor rather than one `Promise.all` that a single rejection
+// could take down.
 //
 // NO useEffect here. runBulkGrade only ever runs from a real onClick (a
 // sibling's button in RepoGradesControls.tsx / RepoGradesGrid.tsx) - every
@@ -36,7 +41,7 @@
 // after an awaited gradeRepoAction call resolves, so eslint's
 // react-hooks/set-state-in-effect rule (AGENTS memory:
 // set-state-in-effect-idiom.md) never applies to this file.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { gradeRepoAction } from "@/app/actions";
 import type { LlmProvider } from "@/lib/llm";
 import type { GradeResult } from "@/lib/grade/types";
@@ -49,11 +54,20 @@ import {
   type BulkGradeTarget,
 } from "./repoGradesBulkGrade";
 // Type-only: ResolvedRubric is useRepoGradesRubricSource.ts's own return
-// shape (docs/repo-grades-rubric-picker-acceptance-criteria.md). runBulkGrade
-// below takes ONE already-resolved rubric for the whole run - the caller
-// (useRepoGradesGradingActions.ts's handleGradeColumn) resolves it once, via
-// the SAME shared resolveRubricForColumn a per-cell grade uses, before this
-// hook ever sees it. This file does not import or call the resolver itself.
+// shape (docs/repo-grades-rubric-picker-acceptance-criteria.md).
+//
+// CORRECTED (docs/a26-a27-scope.md, backlog rows A26/A27): runBulkGrade used
+// to take an ALREADY-resolved rubric, meaning the caller
+// (useRepoGradesGradingActions.ts's handleGradeColumn) had to await the
+// SAME shared resolveRubricForColumn a per-cell grade uses BEFORE ever
+// calling runBulkGrade - which put the rubric fetch OUTSIDE this hook's own
+// one-run lock and was exactly how a second click during that fetch could
+// start a second, fully duplicate run (A26). runBulkGrade now takes a
+// `resolveRubric` THUNK instead, and calls it itself, AFTER claiming the
+// lock below - so this file does call the resolver now (indirectly, via the
+// thunk the caller builds from resolveRubricForColumn), just never imports
+// it directly; item 16's guarantee (both grading paths share the one
+// resolver) is unchanged, only WHO calls it and WHEN moved.
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 
 /** AC item 64/76 - the sibling of useRepoGradesGradingActions.ts's own
@@ -143,44 +157,95 @@ export async function establishSharedRubric(
 }
 
 export interface UseRepoGradesBulkGradeResult {
-  /** The folder currently being bulk-graded, or null. Only ONE bulk run at a
-   * time across the whole view. */
+  /** The folder currently being bulk-graded, or null. DISPLAY ONLY - see
+   * `runBulkGrade`'s own comment below for why the actual one-run-at-a-time
+   * decision no longer reads this. Only ONE bulk run at a time across the
+   * whole view. */
   runningFolder: string | null;
   /** "7 of 24" style progress for the running folder, or null. */
   progress: { done: number; total: number } | null;
-  /** AC item 50 - the hook's own `rubric` param is REMOVED; the caller
-   * resolves ONE rubric for the whole run (the same shared resolver a
-   * per-cell grade uses) and hands the result straight in here, once, before
-   * the run starts.
+  /** AC item 50 - the hook's own `rubric` param stays removed; the caller no
+   * longer resolves the rubric before calling in (docs/a26-a27-scope.md,
+   * backlog row A26): it hands in a THUNK instead, built from the SAME
+   * shared resolver a per-cell grade uses
+   * (`() => resolveRubricForColumn(column.assignmentId)`), and this function
+   * calls it itself, after claiming the run lock - see that function's own
+   * comment for why the fetch has to happen under the lock, not before it.
    * A16 wave 3 (W3-1(d)): `null` means refused (no run happened); otherwise
    * this run's own `GradeResult`s, by reference, once the pool drains. */
-  runBulkGrade: (plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<readonly GradeResult[] | null>;
+  runBulkGrade: (plan: BulkGradePlan, resolveRubric: () => Promise<ResolvedRubric>) => Promise<readonly GradeResult[] | null>;
 }
 
 /**
  * Grades every target in `plan` with at most BULK_GRADE_CONCURRENCY requests
  * in flight, then reports once via onOutcomes/onAnnounce. Refuses to start a
- * second run while one is already in progress (see `runningFolder` below) -
- * returns immediately rather than queueing or replacing it, because two
- * concurrent fan-outs would multiply exactly the GitHub- and model-rate-limit
- * pressure BULK_GRADE_CONCURRENCY exists to bound; the instructor can start a
- * second column's run once the first finishes.
+ * second run while one is already in progress - returns immediately rather
+ * than queueing or replacing it, because two concurrent fan-outs would
+ * multiply exactly the GitHub- and model-rate-limit pressure
+ * BULK_GRADE_CONCURRENCY exists to bound; the instructor can start a second
+ * column's run once the first finishes.
+ *
+ * CORRECTED (docs/a26-a27-scope.md, backlog row A26): the refusal used to be
+ * `if (runningFolder !== null) return null;`, reading the `runningFolder`
+ * STATE value this particular render captured - which is exactly the A26
+ * defect. A render's own local `const runningFolder` never changes after
+ * that render happened, no matter what a setter writes later, so a click
+ * from an OLDER render (the common case: the render that was current at
+ * click time is almost always older than "now" by the time an awaited
+ * rubric fetch resolves) could always see the pre-run `null`, regardless of
+ * whether some other click had already started a run in the meantime. The
+ * lock is now a `useRef` instead: a ref's `.current` is read LIVE wherever
+ * the property is accessed, from every render's closure alike (all renders
+ * share the same ref object), so the refusal is a property of the code, not
+ * of which render happened to still be mounted. The rubric fetch is claimed
+ * under this SAME lock, via the `resolveRubric` thunk above - without that,
+ * a second click could still race in during the fetch and, once claimed,
+ * releasing the lock in a `finally` (below) is what keeps a rejecting fetch
+ * or a rejecting grading call from leaving it stuck (backlog row A27).
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
   const { provider, instructions, useReadmeInstructions, runCodeScoring, onCellUpdate, onOutcomes, onAnnounce } = params;
+  const runLockRef = useRef(false);
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const runBulkGrade = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<readonly GradeResult[] | null> => {
+  const runBulkGrade = async (
+    plan: BulkGradePlan,
+    resolveRubric: () => Promise<ResolvedRubric>
+  ): Promise<readonly GradeResult[] | null> => {
     // Guard against a second concurrent run - see this function's own header
-    // comment above for why this is a refusal, not a queue. `null` means
-    // "refused, no run happened" (A16 wave 3, ruling W3-1(d)).
-    if (runningFolder !== null) return null;
+    // comment above for why a live ref read, not captured state, is what
+    // makes this a real refusal rather than a race. `null` means "refused,
+    // no run happened" (A16 wave 3, ruling W3-1(d)).
+    if (runLockRef.current) return null;
+    runLockRef.current = true;
+    setRunningFolder(plan.targets[0]?.folder ?? null);
+    setProgress({ done: 0, total: plan.targets.length });
+    try {
+      return await gradeBulkPlan(plan, await resolveRubric());
+    } finally {
+      // Released on EVERY exit - a rejecting rubric fetch (backlog row A27,
+      // mutant M1 in docs/a26-a27-scope.md section 8) or a rejecting
+      // gradeBulkPlan must never leave the lock, the displayed
+      // `runningFolder`, or `progress` stuck. gradeOneTarget's own `.catch`
+      // below (P3) already turns an ordinary rejected grading call into a
+      // normal failed outcome, so gradeBulkPlan itself is not expected to
+      // reject in practice (see D-5 in docs/a26-a27-scope.md for the one
+      // named, accepted exception) - this `finally` is what makes that
+      // "not expected" a guarantee rather than a hope.
+      runLockRef.current = false;
+      setRunningFolder(null);
+      setProgress(null);
+    }
+  };
 
+  /** The actual worker pool, unchanged from the pre-A26/A27 `runBulkGrade`
+   * body except for reading its inputs off `plan`/`resolved` instead of
+   * closing over them, and no longer holding the lock itself - `runBulkGrade`
+   * above is now the ONE place that claims and releases it, over the rubric
+   * fetch AND this entire pool. */
+  const gradeBulkPlan = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<readonly GradeResult[]> => {
     const targets = plan.targets;
-    const folder = targets[0]?.folder ?? null;
-    setRunningFolder(folder);
-    setProgress({ done: 0, total: targets.length });
 
     const outcomes: BulkGradeOutcome[] = [];
     // A16 wave 3 (W3-1(d)): this run's own GradeResults, by reference - a
@@ -198,6 +263,14 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
      * for why that is not always the instructor's raw `rubric` field. */
     const gradeOneTarget = async (target: BulkGradeTarget, rubricArg: string): Promise<{ rubricUsed: string | null }> => {
       onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
+      // P3 (backlog row A27, docs/a26-a27-scope.md section 6): a rejected
+      // call - transport, not gradeRepoAction's own body, which never throws
+      // - is mapped onto the SAME `{ error }` shape the "error" branch below
+      // already handles, so a rejection becomes an ordinary failed outcome
+      // (cell released, logged, retryable) instead of leaving this worker's
+      // `await` unsettled forever, which used to be what left the whole
+      // run's flag, progress, log and summary stuck (docs/REGRESSION.md,
+      // this entry's own baseline).
       const result = await gradeRepoAction(
         target.repo,
         instructions,
@@ -207,7 +280,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         target.folder,
         useReadmeInstructions,
         runCodeScoring
-      );
+      ).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
 
       if ("error" in result) {
         onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });
@@ -384,8 +457,9 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
 
     onOutcomes(outcomes);
     onAnnounce(bulkGradeSummaryLine(outcomes, plan));
-    setRunningFolder(null);
-    setProgress(null);
+    // The lock, `runningFolder` and `progress` reset is runBulkGrade's own
+    // `finally` now (above) - it has to cover a rejecting rubric fetch too,
+    // which never reaches this function at all, so it cannot live here.
     return runResults;
   };
 

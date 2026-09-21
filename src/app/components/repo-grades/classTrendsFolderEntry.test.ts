@@ -176,8 +176,15 @@ describe("L-6: repoRunTrendsLabel", () => {
     const stripped = repoRunTrendsLabel(label).split("loops-and-arrays").join("");
     expect(stripped).toContain("3");
   });
-  it("(b) singular fixture (c6-shaped, one graded result) contains '1'", () => {
-    const stripped = repoRunTrendsLabel(entryFor("linked-lists", 1))
+  it("(b) singular fixture, a real c6 case (one graded plus one ungraded) contains '1'", () => {
+    // docs/a26-a27-scope.md: this used to call entryFor("linked-lists", 1),
+    // which builds ONE graded result and NO ungraded one - not c6-shaped (c6
+    // is one graded plus one ungraded, per L-3's and L-5's own c6 cases
+    // above). Built directly here so the fixture actually has an ungraded
+    // result alongside the one graded one, matching what it claims to be.
+    const cohort: RepoRunCohort = { results: [gradedResult(), ungradedResult()], folder: "linked-lists", courseId: "c", courseName: "" };
+    const entry = repoRunTrendsEntry(cohort, "c") as GradingRunEntry;
+    const stripped = repoRunTrendsLabel(entry)
       .split("linked-lists")
       .join("");
     expect(stripped).toContain("1");

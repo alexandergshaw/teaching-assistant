@@ -51,7 +51,15 @@ export interface RepoRunCohort {
 
 /** Owns the null decision (ruling W3-1(a)). Returns null when `results` is
  * null - runBulkGrade refused to start a second concurrent run, so no run
- * happened and nothing about the previous run's cohort should change.
+ * happened.
+ *
+ * CORRECTED (docs/a26-a27-scope.md, residual RR-3): this does not mean the
+ * previous run's cohort is left untouched. The caller
+ * (useRepoGradesGradingActions.ts's handleGradeColumn) already calls
+ * `setLastRunCohort(null)` before `runBulkGrade` is ever invoked, so by the
+ * time this function can return null for a refusal, the previous cohort has
+ * already been cleared. Returning null here simply keeps it at null - it
+ * does not preserve or restore anything from before the click.
  * Otherwise returns a cohort, INCLUDING for an empty array: a run that graded
  * nothing (RULE 1c skipped every target, or every target failed) genuinely
  * replaces the previous run's trends, and repoRunTrendsEntry below then shows

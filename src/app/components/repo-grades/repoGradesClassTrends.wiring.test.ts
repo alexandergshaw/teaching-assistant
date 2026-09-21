@@ -192,45 +192,88 @@ describe("A-1: gradeOneTarget's collector push is direct and follows exactly bot
 
 // ---- A-2: useRepoGradesBulkGrade.ts's runBulkGrade ----
 
-describe("A-2: runBulkGrade's refusal, collector declaration, and return", () => {
-  const stmts = directStmts(findFunctionBody(bulkHookFile, "runBulkGrade")!);
-  it("(a) FIRST direct statement is `if (runningFolder !== null) return null;`", () => {
-    const first = stmts[0];
+describe("A-2: runBulkGrade's refusal, gradeBulkPlan's collector declaration and return", () => {
+  const runBulkGradeStmts = directStmts(findFunctionBody(bulkHookFile, "runBulkGrade")!);
+  // AMENDED (docs/a26-a27-scope.md section 7, backlog rows A26/A27): (a) used
+  // to pin `if (runningFolder !== null) return null;` - a stale RENDER-STATE
+  // read (the exact A26 defect: a click from an older render always saw its
+  // own render-time `runningFolder`, never a later click's update). The
+  // fix's guard reads a `useRef`'s `.current` instead, which is a LIVE read
+  // shared by every render's closure. What this enforced before: the refusal
+  // is the FIRST direct statement, and its then-branch returns `null`
+  // (S-20's own intent). What it enforces now: the same position and the
+  // same `null` return, but over a ref condition instead of the old
+  // state-comparison - so a regression BACK to the state-based guard (the
+  // A26 defect returning) is caught, not silently accepted as "still a
+  // guard". (b) and (d) below are retargeted only: the collector and the
+  // final return moved from `runBulkGrade`'s own body into the new
+  // `gradeBulkPlan` (the worker pool, now called by `runBulkGrade` AFTER it
+  // claims its lock) - the collector itself did not change, the function
+  // holding it did.
+  it("(a) FIRST direct statement is `if (<ref>.current) return null;`, where <ref> is bound by a `useRef` call in this file", () => {
+    const first = runBulkGradeStmts[0];
     expect(ts.isIfStatement(first)).toBe(true);
     if (!ts.isIfStatement(first)) return;
     const cond = first.expression;
-    expect(ts.isBinaryExpression(cond) && cond.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken).toBe(true);
-    if (ts.isBinaryExpression(cond)) {
-      expect(isIdent(cond.left, "runningFolder") && isNullLiteral(cond.right)).toBe(true);
+    expect(ts.isPropertyAccessExpression(cond) && cond.name.text === "current").toBe(true);
+    if (ts.isPropertyAccessExpression(cond)) {
+      expect(ts.isIdentifier(cond.expression)).toBe(true);
+      if (ts.isIdentifier(cond.expression)) {
+        const refName = cond.expression.text;
+        let boundByUseRef = false;
+        (function visit(node: Node): void {
+          if (
+            ts.isVariableDeclaration(node) &&
+            isIdent(node.name, refName) &&
+            node.initializer &&
+            ts.isCallExpression(node.initializer) &&
+            isIdent(node.initializer.expression, "useRef")
+          )
+            boundByUseRef = true;
+          ts.forEachChild(node, visit);
+        })(bulkHookFile);
+        expect(boundByUseRef).toBe(true);
+      }
     }
     const ret = ts.isBlock(first.thenStatement) ? first.thenStatement.statements[0] : first.thenStatement;
     expect(ts.isReturnStatement(ret) && isNullLiteral(ret.expression)).toBe(true);
   });
+  it("canary: the OLD stale-render-state guard (`if (runningFolder !== null) return null;`) now FAILS this detector - it IS the A26 defect, not an equivalent spelling of it", () => {
+    const fixture = `const runBulkGrade = async (p, r) => {
+      if (runningFolder !== null) return null;
+      return null;
+    };`;
+    const first = directStmts(findFunctionBody(parseFixture(fixture), "runBulkGrade")!)[0];
+    expect(ts.isIfStatement(first)).toBe(true);
+    if (!ts.isIfStatement(first)) return;
+    const isRefCurrentGuard = ts.isPropertyAccessExpression(first.expression) && first.expression.name.text === "current";
+    expect(isRefCurrentGuard).toBe(false);
+  });
 
   // "runResults" is A-1's own collector name - not re-discovered generically,
   // so this row and A-1 name the same identifier by construction.
-  it("(b) a direct `const runResults: T[] = []` declares the collector", () => {
-    expect(collectorDecl(stmts)).toBeTruthy();
+  const gradeBulkPlanStmts = directStmts(findFunctionBody(bulkHookFile, "gradeBulkPlan")!);
+  it("(b) a direct `const runResults: T[] = []` declares the collector, inside gradeBulkPlan", () => {
+    expect(collectorDecl(gradeBulkPlanStmts)).toBeTruthy();
   });
   it("(c) runResults is referenced EXACTLY 3 times in the file: its declaration, the one push, and the return", () => {
     expect(countIdentRefs(bulkHookFile, "runResults")).toBe(3);
   });
-  it("(d) the LAST direct statement returns runResults, preceded by an awaited Promise.all", () => {
-    const last = stmts[stmts.length - 1];
+  it("(d) the LAST direct statement of gradeBulkPlan returns runResults, preceded by an awaited Promise.all", () => {
+    const last = gradeBulkPlanStmts[gradeBulkPlanStmts.length - 1];
     expect(ts.isReturnStatement(last) && isIdent(last.expression, "runResults")).toBe(true);
-    const hasAwaitedAll = stmts.slice(0, -1).some(
+    const hasAwaitedAll = gradeBulkPlanStmts.slice(0, -1).some(
       (s) => ts.isExpressionStatement(s) && ts.isAwaitExpression(s.expression) && ts.isCallExpression(s.expression.expression) && isPropChain(s.expression.expression.expression, ["Promise", "all"])
     );
     expect(hasAwaitedAll).toBe(true);
   });
   it("canary S-26: a useRef-backed collector fails the SHIPPED collectorDecl predicate", () => {
-    const fixture = `const runBulkGrade = async (p, r) => {
-      if (runningFolder !== null) return null;
+    const fixture = `const gradeBulkPlan = async (p, r) => {
       const runResults = collectorRef.current;
       await Promise.all([]);
       return runResults;
     };`;
-    const s = directStmts(findFunctionBody(parseFixture(fixture), "runBulkGrade")!);
+    const s = directStmts(findFunctionBody(parseFixture(fixture), "gradeBulkPlan")!);
     expect(collectorDecl(s)).toBeUndefined();
   });
   it.each([
@@ -238,8 +281,7 @@ describe("A-2: runBulkGrade's refusal, collector declaration, and return", () =>
     ["F-2: runResults.splice(0) alongside the real push", "runResults.splice(0);"],
     ["F-3: a duplicated push", "runResults.push(...result.run.results);"],
   ])("canary %s raises the reference count above 3", (_label, extra) => {
-    const fixture = `const runBulkGrade = async (p, r) => {
-      if (runningFolder !== null) return null;
+    const fixture = `const gradeBulkPlan = async (p, r) => {
       const runResults = [];
       runResults.push(...result.run.results);
       ${extra}

@@ -193,10 +193,24 @@ describe("AC item 16: both grading-path entry points call the shared resolver, n
     expect(body).toMatch(/resolveRubricForColumn\(column\.assignmentId\)/);
   });
 
-  it('handleGradeColumn resolves the column\'s rubric before starting the bulk run (AC item 50)', () => {
+  // AMENDED (docs/a26-a27-scope.md section 7, backlog row A26): the old text
+  // pinned `runBulkGrade(plan, resolved)` - handleGradeColumn resolving the
+  // rubric ITSELF, before ever calling runBulkGrade. That gap (an await
+  // outside the hook's own one-run lock) was the race: a second click made
+  // while this fetch was in flight had nothing refusing it yet. The rubric
+  // is now resolved AS THE RUN'S OWN FIRST STEP, under runBulkGrade's lock -
+  // handleGradeColumn hands in a thunk instead of an already-resolved value.
+  // AC item 50's substance - the column's assignmentId reaching the resolver,
+  // once per run - is exactly what this still pins: the thunk still calls
+  // `resolveRubricForColumn(column.assignmentId)`, unchanged. Rejected
+  // alternative (docs/a26-a27-scope.md D-2(c)): passing a Promise instead of
+  // a thunk would keep the OLD text matching while inverting its meaning
+  // (the fetch would start before the lock check) - that is gaming the pin,
+  // not fixing the defect it guards.
+  it("handleGradeColumn resolves the column's rubric as the run's first step, under its own lock (AC item 50)", () => {
     const body = extractFunctionBody(gradingActionsSource, "const handleGradeColumn = async");
     expect(body).toMatch(/resolveRubricForColumn\(column\.assignmentId\)/);
-    expect(body).toMatch(/runBulkGrade\(plan, resolved\)/);
+    expect(body).toMatch(/runBulkGrade\(plan, \(\) => resolveRubricForColumn\(column\.assignmentId\)\)/);
   });
 
   it("useRepoGradesGradingActions.ts no longer declares the removed page-level `rubric: string` param", () => {

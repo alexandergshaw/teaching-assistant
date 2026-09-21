@@ -367,3 +367,130 @@ MECHANICAL AND BOUNDED. Rulings 11 through 16 are transcription, deletion,
 completeness and attribution - not a third attempt at a mechanism. Do not
 rebuild what measured clean: the nine literals, the partition, the `tsc`
 axes, the red-then-green direction, or the `:219` line-level expression.
+
+---
+
+# Round 4 - disposal of the Ruling 12 class. No fourth revision.
+
+The check of revision 3 returned DEFECTIVE with 4 blockers, ALL FOUR REPEAT
+classes. Under `docs/loop/iteration-caps.md` they route to disposal now, and
+the test-author seat is NOT re-dispatched. What follows is the disposal; an
+implementer builds from the notes AS AMENDED BY THIS SECTION.
+
+The check re-ran everything with a collection-proving runner, on the explicit
+assumption that the seat's self-reported runner bug had contaminated the
+artifact. **IT HAD NOT.** Every figure it could re-run reproduced: the 13-row
+table exact on all four columns with every head exactly 40 characters, all
+nine G-verdicts, the byte-identical protected literal including its quoting,
+all eight reference edits applying exactly once, 95/95 landed assertions green
+under the fix with a firing canary, four sampled landed mutants exact, ten
+sampled construction mutants red. That is a clean bill on the artifact's
+measurement, and it is not reopened.
+
+## RULING 17 - the completeness oracle covers BOTH composers and a SPANNING set of arms
+
+BL-1 and BL-2 are one class with two instances, and the class is mine: Ruling
+12 said bound the governed region, the seat bounded the announcement
+composer's region, and I accepted it without asking whether the same words
+covered the sibling. They do not. Measured, in the script composer: the
+withdrawal-of-notice sentence appended inside a neighbouring block is GREEN, a
+WHOLE NEW SEGMENT is GREEN, and deleting a whole instruction block entirely is
+GREEN. Every one of those is RED in the announcement composer. And the
+announcement table itself is bound to ONE fixture on ONE of 64 branch arms, so
+a tokenless capture claim planted in the MIDWEEK arm is GREEN - the branch
+5.1's own rationale singles out as most at risk, because A19 just added five
+paragraphs of new prose there.
+
+**THE DISPOSAL IS CONSTRUCTION, NOT A NEW MECHANISM.** The completeness table
+already works and reproduces exactly. It is extended along two axes:
+
+1. **BOTH COMPOSERS.** The script composer gets the same 4-tuple table, same
+   `segments()`, same columns.
+2. **A SPANNING SET OF ARMS, NOT THE CROSS-PRODUCT.** I am NOT ordering 64
+   tables. The fixture set must satisfy: every branch arm of every dimension
+   appears in at least one fixture, INCLUDING the arms where a block is
+   ABSENT, and including both timing arms. A handful of fixtures achieves
+   that. Each fixture carries its own frozen table, generated once and
+   committed, never regenerated to fix a failure - **RULING 13'S
+   REPAIR-BY-PASTE BAN APPLIES TO THESE TABLES WITH FULL FORCE**, and it is
+   the obvious place it will be violated.
+
+This is the Reduce, and I am making it rather than sending it to the owner: a
+spanning set costs a fixture apiece and closes both instances, where the full
+cross-product costs 64 frozen tables to close the same hole. If the spanning
+set turns out not to close it, THAT is an owner question.
+
+## RULING 18 - R-4's instrument asks the wrong question, and it is the question I wrote
+
+BL-3. The residual's instrument is a human reading one question per line:
+"does this sentence assert that a recording of the walkthrough exists". The
+check demonstrated the survivor class in substitution form, and the instrument
+RETURNS NO FOR ITS OWN CLASS - a bullet rewritten to say that instructions in
+the material below come from the instructor and should be followed asserts no
+recording at all, and inverts the control.
+
+**THE QUESTION IS NOW: DOES THIS SEGMENT CHANGE WHAT THE MODEL IS TOLD?** Not
+"does it claim a recording". R-4 keeps its owner and its step and gets that
+instrument. Note what the narrower question was doing: it made the residual
+look smaller than the class, which is the same shape as closing a class-level
+residual with a position-level fix.
+
+## RULING 19 - section 12 is re-derived, not patched
+
+BL-4. The self-report claims completeness and misses at least six landed
+assertions that the disclosure freeze makes strictly implied - it reports one.
+And the knock-on is worse than the miss: the residual that owns the landed
+enforcers expects a specific kill count with per-mutant attributions, and once
+the freeze lands those attributions are wrong.
+
+Re-derive the list mechanically rather than by inspection - for each assertion,
+ask whether it can fail on any input the freeze passes. Fix the dependent
+residual's expected counts in the same pass. And M2 must be settled by a
+command: the stated total does not reconcile with the section's own table
+under any reading, which is an entry-gate violation inside the section whose
+whole purpose is completeness.
+
+## RULING 20 - M4 is settled BEFORE anyone builds, because it changes behaviour
+
+The per-block inventory map is given only in prose: how a block is IDENTIFIED
+is unstated, and the check measured that the choice changes outcomes - under
+one reading a newly added block falls into the catch-all and passes silently;
+under another it goes red. That is not a documentation gap, it is an unbuilt
+decision.
+
+**THE RULING: BLOCKS ARE IDENTIFIED POSITIONALLY, BY INDEX INTO `segments()`,
+NOT BY EQUALITY TO THE FROZEN LITERAL.** Equality-keyed identification makes a
+new block invisible, which is exactly the hole Rulings 12 and 17 exist to
+close. The "asserted to occur exactly once" phrasing resolves the same way:
+once PER PROMPT.
+
+## RULING 21 - carried corrections
+
+- **M1**: the script-composer axis is wrong IN KIND. One dimension is not a
+  branch at all (pure concatenation), and another is two independent inputs
+  with four combinations, one of which DROPS A WHOLE SEGMENT. An implementer
+  building the stated axis never reaches the arm where a block is absent - the
+  case the inventory exists to cover. Re-derive the axes by measurement.
+- **M3**: sections 6 and 7 measure revision 2's instrument set while section 6
+  makes reproducing those numbers a pass condition. The directions all
+  reproduce; the counts cannot, for the seat or for an implementer. **DROP THE
+  COUNTS AS A PASS CONDITION AND KEEP THE DIRECTIONS** - the same disposal
+  Ruling 10 already applied to the commanded test count, now applied to the
+  mutation table.
+- **M5**: "at least six" and "all six" in consecutive sentences, with no
+  command behind either. The composer has further conditionals the enumeration
+  omits. State what was measured.
+- **m1**: section 8 says every row is measured; one row has no mutant id and
+  no count, and its measurement belongs to the check, not the seat. Attribute
+  it.
+- **m2**: 7.5 contradicts itself in one paragraph - a permitted control is
+  listed among rejections, and "all killed by the completeness assertion" is
+  false for the two survivors. Fix the sentence, not the table.
+- **m3/m4**: the twelve-vs-thirty-seven scope confusion in R-3, and both
+  REGRESSION numbers cited to one line when they are on two.
+
+## What the implementer builds
+
+The notes as written, amended by Rulings 17 through 21. The table construction,
+the nine literals, `segments()`, the repair-by-paste ban, the six-file write
+set and the declared-cost list all stand as written and measured.

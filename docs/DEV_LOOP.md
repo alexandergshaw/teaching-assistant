@@ -44,9 +44,11 @@ re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
 |---|---|---|
 | `loop-checker` | opus | The adversarial check over each artifact |
 | `loop-top` | opus | Only where a mistake is inherited by everything downstream and is NOT itself checked: the chunking, and a seam every wave is built against |
+| `loop-ac` | opus | The acceptance-criteria seat - where the owner's words become the thing every later seat is measured against |
+| `loop-plan` | opus | The wave-plan seat - how one scoped item is cut into waves, what each may write, and in what order they land |
 | `loop-architect` | opus | The architecture and design seat - the pass that decides SHAPE: where a seam falls, what is one layer versus two, which object a requirement binds to |
 | `loop-test-author` | opus | Test notes, acceptance-criteria instruments, frozen oracles, sabotage design - the seat that decides WHAT IS MEASURED and HOW IT FAILS |
-| `loop-seat` | sonnet | The remaining authoring seats: plans, verification reports, remediation, root-cause analysis, and the UX/data/security/reliability passes |
+| `loop-seat` | sonnet | The remaining authoring seats: verification reports, remediation, root-cause analysis, and the UX/data/security/reliability passes |
 | `loop-implementer` | sonnet | Code, fixes, tests WRITTEN FROM a test-author's notes, mechanical sweeps |
 
 **Two seats are exceptions to that principle, elevated by the repo owner on

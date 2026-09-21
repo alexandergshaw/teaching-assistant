@@ -245,6 +245,8 @@ Current IDs and first-party API rates, per the `claude-api` skill (cached
 |---|---|---|---|---|
 | `loop-checker` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-top` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-ac` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-plan` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-architect` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-test-author` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-seat` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |

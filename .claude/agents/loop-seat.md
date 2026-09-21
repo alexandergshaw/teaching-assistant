@@ -1,6 +1,6 @@
 ---
 name: loop-seat
-description: A design seat, plan, test-notes, verification, remediation or root-cause author. Use for any step that must AUTHOR an artifact the loop will act on - acceptance criteria, an architecture or UX or data or security or reliability pass, a wave plan, an oracle, a verification report, an RCA. Not for writing production code, and never for checking an artifact it authored.
+description: A verification, remediation or root-cause author, and the UX, data, security, reliability and accessibility passes. NOT acceptance criteria (loop-ac), NOT the wave plan (loop-plan), NOT architecture (loop-architect), NOT test notes or oracles (loop-test-author) - those four are Opus seats. Use for any step that must AUTHOR an artifact the loop will act on - acceptance criteria, an architecture or UX or data or security or reliability pass, a wave plan, an oracle, a verification report, an RCA. Not for writing production code, and never for checking an artifact it authored.
 model: sonnet
 effort: high
 ---

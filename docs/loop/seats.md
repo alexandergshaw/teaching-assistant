@@ -83,40 +83,15 @@ doing - `traps-spec.md:40-41` records one chunk's criteria going from 748
 lines to 268 and getting better once mechanism moved to the architect and
 oracle construction moved to the test seat.
 
-### Three practices the elevated seat established, 2026-09-20
-
-Recorded by the repo owner after the first Opus-tier run of this seat did three
-things earlier seats had not. These are now OBLIGATIONS, not anecdotes. Each one
-answers a failure mode this repo has actually shipped.
-
-**1. PROVE THE RED TESTS ARE SATISFIABLE. Build a reference implementation in an
-isolated tree and get it green there.** A set of failing tests is not a
-specification until something has passed it. Without this, a seat can hand over
-a contradictory or impossible spec and the contradiction surfaces only when an
-implementer is halfway through - or, worse, is resolved by quietly dropping the
-assertion that made it hard. The measured instance: 46 red tests, proven
-satisfiable by a throwaway reference implementation scoring 167/167 green in an
-isolated tree. If a criterion cannot be satisfied by ANY implementation you can
-write, it is not a criterion; fix it before hand-off and say what you changed.
-
-**2. A MUTANT THAT SURVIVES MAY BE A BAD INSTRUMENT, NOT A KILL YOU ARE OWED -
-REBUILD IT AND SAY SO.** The tempting move is to count a surviving mutant as a
-coverage gap and add an assertion until it dies. Sometimes the mutant itself is
-wrong: it mutates the wrong object, or produces a state the type system already
-forbids, or is red in both directions. In the measured instance TWO mutants were
-rebuilt rather than banked as kills. Report rebuilt mutants explicitly - a kill
-count inflated by bad mutants is exactly the "instrument that does not measure
-what it claims" class this seat exists to prevent, wearing a number.
-
-**3. WHEN A GATE BLOCKS A DIRECT IMPORT, DRIVE THE PRODUCTION PATH INSTEAD OF
-WORKING AROUND THE GATE.** In the measured instance a direct import would have
-broken the export sweep; the seat switched to driving `resolveDocumentBlob` -
-the real path production uses - and the test became MORE faithful, not less.
-This is the general rule: a structural gate that blocks your test is usually
-telling you the test was reaching past the seam. The forbidden moves are
-loosening the gate, adding an exception, or importing the internal anyway. Ask
-what the user's own path is and drive that. If you genuinely cannot, say so and
-name the gate rather than filing the exception.
+**Tier note.** This seat is `loop-ac`, on Opus, elevated by the repo owner on
+2026-09-20 together with `loop-plan`. Criteria are where the owner's words
+become the thing every later seat is measured against: a criterion that is
+vague, unsatisfiable or bound to the wrong object is inherited by the
+architect, the test seat and the implementer before any checker sees the
+consequence. (The three test-seat practices recorded on 2026-09-20 briefly
+appeared here by an editing error and now sit under `## Test seat`, where
+they belong - they are about reference implementations and mutants, not
+criteria.)
 
 **Its checker must ask:**
 - Does a rule inherited from an upstream design carry every clause it had
@@ -447,6 +422,41 @@ REMOVED from the feature. Not one a chat could not satisfy - that is
 unfalsifiable. Where no removal test is buildable here - anything whose
 advantage is clicks, latency or attention, since no component is rendered by
 any test in this repo - say so and record a residual with an owner and a step.
+
+### Three practices the elevated seat established, 2026-09-20
+
+Recorded by the repo owner after the first Opus-tier run of this seat did three
+things earlier seats had not. These are now OBLIGATIONS, not anecdotes. Each one
+answers a failure mode this repo has actually shipped.
+
+**1. PROVE THE RED TESTS ARE SATISFIABLE. Build a reference implementation in an
+isolated tree and get it green there.** A set of failing tests is not a
+specification until something has passed it. Without this, a seat can hand over
+a contradictory or impossible spec and the contradiction surfaces only when an
+implementer is halfway through - or, worse, is resolved by quietly dropping the
+assertion that made it hard. The measured instance: 46 red tests, proven
+satisfiable by a throwaway reference implementation scoring 167/167 green in an
+isolated tree. If a criterion cannot be satisfied by ANY implementation you can
+write, it is not a criterion; fix it before hand-off and say what you changed.
+
+**2. A MUTANT THAT SURVIVES MAY BE A BAD INSTRUMENT, NOT A KILL YOU ARE OWED -
+REBUILD IT AND SAY SO.** The tempting move is to count a surviving mutant as a
+coverage gap and add an assertion until it dies. Sometimes the mutant itself is
+wrong: it mutates the wrong object, or produces a state the type system already
+forbids, or is red in both directions. In the measured instance TWO mutants were
+rebuilt rather than banked as kills. Report rebuilt mutants explicitly - a kill
+count inflated by bad mutants is exactly the "instrument that does not measure
+what it claims" class this seat exists to prevent, wearing a number.
+
+**3. WHEN A GATE BLOCKS A DIRECT IMPORT, DRIVE THE PRODUCTION PATH INSTEAD OF
+WORKING AROUND THE GATE.** In the measured instance a direct import would have
+broken the export sweep; the seat switched to driving `resolveDocumentBlob` -
+the real path production uses - and the test became MORE faithful, not less.
+This is the general rule: a structural gate that blocks your test is usually
+telling you the test was reaching past the seam. The forbidden moves are
+loosening the gate, adding an exception, or importing the internal anyway. Ask
+what the user's own path is and drive that. If you genuinely cannot, say so and
+name the gate rather than filing the exception.
 
 **Its checker must ask:**
 - Can each assertion fail? Name the mutation that breaks it.

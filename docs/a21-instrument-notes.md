@@ -37,9 +37,27 @@ minors.
 | `ResolvedTemplate`'s members | `sed -n '69,73p' src/app/components/walkthrough-announcement/announcement-draft-slots.ts` | three |
 | `callLlm` discards `provider` | `sed -n '375,386p' src/lib/llm.ts` | `void provider; return callGemini(req);` |
 | reference implementation, green | `node ../node_modules/vitest/vitest.mjs run` in the sandbox | `Test Files 4 passed (4)` / `Tests 44 passed (44)` |
-| mutants executed | `node mutate.mjs` in the sandbox | 16, incl. one no-op control |
+| mutants executed | `node mutate.mjs` in the sandbox | **17, incl. one no-op control - corrected, see 1a** |
 
 Every `file:line` cited below was opened in this pass.
+
+---
+
+## 1a. Mutant count correction (major M-b)
+
+This file stated 16 mutants twice - here at section 1 and again at section 10
+- and both were wrong. `mutate.mjs` lived only in the archived sandbox
+(section 2), which no longer exists to re-run `grep -c "^    id: " mutate.mjs`
+against. The count is instead verified against this file's own frozen record
+of what ran: counting the sabotage-table rows between the `| # | Mutation |`
+header and the `**Type-gate mutants` boundary in section 9 (`M0` through
+`M13`, before this pass's own `M14`-`M16` additions) gives **17 rows**, one per
+mutant including the `M0` no-op control - matching the section-1 table that
+exists to prevent exactly this miscount. Both the section-1 quantity and
+section 10's "16 mutants" phrase are corrected to 17 in this pass. The commit
+that shipped this file also carried the wrong count in its subject line; that
+is a git-log fact, not something this document can amend, and is named here
+rather than silently left inconsistent with the corrected body.
 
 ---
 
@@ -48,15 +66,30 @@ Every `file:line` cited below was opened in this pass.
 `.claude/agents/loop-test-author.md` practice 1 requires the red tests to be
 proven satisfiable by something before they are a specification. They are.
 
-**Where it ran.** A throwaway tree at `<repo>/.a21ref`, inside the repo so Node
-resolves the repo's own `vitest@4.1.9` and `vitest.setup.ts`, and OUTSIDE `src/`
-so no repo gate collects it (`vitest.config.ts` includes `src/**/*.test.ts`;
-`no-emojis.test.ts` roots are `["src","docs"]`; `file-size-ceiling` and
-`source-bytes` walk `src/`). **`node_modules` was never junctioned or
-symlinked** - the repo's own recorded failure is that junctioning it into a
-throwaway tree and removing the tree EMPTIES the real one. `ls node_modules |
-wc -l` -> 447 after teardown. The tree was archived to the session scratchpad
-(`.../scratchpad/a21ref-final`) and removed; `git status --short` is empty.
+**Where it ran, corrected (major M-a).** A throwaway tree at `<repo>/.a21ref`,
+inside the repo so Node resolves the repo's own `vitest@4.1.9` and
+`vitest.setup.ts`, and OUTSIDE `src/` so the two `src`-rooted gates do not
+collect it: `vitest.config.ts` includes `src/**/*.test.ts` (the `.a21ref` tree
+holds no test file `vitest` would run), and `no-emojis.test.ts`'s roots are
+`["src","docs"]`, neither of which reaches `.a21ref`. **This is NOT true of a
+third gate, and the round-2 claim that "no repo gate collects it" for all three
+was false.** `src/source-bytes.structure.test.ts:37,58` is
+`const ROOT = process.cwd(); const FILES = collect(ROOT);` - it walks the
+**repository root**, not `src/`, and its `SKIP_DIRS` (`:38`:
+`.git, node_modules, .next, .claude, coverage, dist, .vercel`) does not include
+`.a21ref`. So any `npm test` run while `.a21ref` existed in the tree would have
+byte-scanned every text file under it. The method's real constraint is
+narrower than stated: the sandbox is safe from the two `src`-rooted structural
+gates by construction, and safe from `source-bytes` only because no `npm test`
+was run from the real repo root while `.a21ref` was present, and because the
+tree was archived to the scratchpad and removed before any such run - not
+because the gate does not reach it. `file-size-ceiling.structure.test.ts` was
+not re-checked in this correction beyond what round 2 already measured.
+**`node_modules` was never junctioned or symlinked** - the repo's own recorded
+failure is that junctioning it into a throwaway tree and removing the tree
+EMPTIES the real one. `ls node_modules | wc -l` -> 447 after teardown. The tree
+was archived to the session scratchpad (`.../scratchpad/a21ref-final`) and
+removed; `git status --short` is empty.
 
 **Result: 44/44 green across 4 test files**, with a reference implementation of
 eight modules (the type-only seam, the composer, the route leaf, the model-call
@@ -214,8 +247,14 @@ becomes TRUE at that seam, and only there.
   instrument; for the ACTION the spy is the ONLY instrument, and M1b is the
   measured proof.
 - `:650` and `:686-690` are narrowed to: "no code reading `route` can obtain a
-  prompt on the deterministic arm, and the model-call leaf cannot be handed one
-  (TS2345)". The action's own body is covered by AC-10(d), behaviourally.
+  prompt on the deterministic arm, and an UNNARROWED `route` cannot be handed
+  to the model-call leaf (TS2345)" - looser wording than 3.3's own, more
+  precise statement (minor correction, so the two do not read as contradicting
+  each other two paragraphs apart). **A fabricated `{kind:"model", ...}`
+  literal, constructed directly rather than obtained by narrowing `route`,
+  type-checks fine and reaches the leaf** - that is M1b, and it is exactly
+  what makes AC-10(d) load-bearing rather than TS2345. The action's own body is
+  covered by AC-10(d), behaviourally.
 
 ---
 
@@ -348,8 +387,22 @@ Two design facts, both load-bearing:
   `req.courseLabel` pass through unchanged.
 - **Direction:** RED if the resolved template or the outline does not reach the
   request; in particular RED on the always-`none` implementation, which misses
-  10 of the 16 rows (asserted as an in-test control so the table's
-  discriminating power is measured, not assumed).
+  **11**, not 10, of the 16 rows (a REPEAT of major M-b's class - a table cited
+  to prevent a miscount had the miscount). Computed against the frozen table
+  above and `resolveChoice` (`announcement-draft-slots.ts:313-334`): the
+  always-`none`+`EMPTY` implementation mismatches on **template** for the 3
+  `default` rows whose live state is not `neither` (`default`+`neither`
+  already resolves to `none` and matches) plus all 4 `pasted` rows plus all 4
+  `saved` rows (11 template mismatches; the 4 `none` rows match), and separately
+  on **outline** for a 9-row subset (the same 3 `default` rows, plus 2 of the 4
+  `pasted` rows - `pasted`+`recentOnly` and `pasted`+`neither` already resolve
+  to `EMPTY_ANNOUNCEMENT_OUTLINE` and match - plus the 4 `saved` rows). The
+  union of rows with ANY mismatch (template or outline) is **11**: the 3
+  `default` rows, all 4 `pasted` rows, all 4 `saved` rows. Asserted as an
+  in-test control so the table's discriminating power is measured, not assumed,
+  and it MUST be written `toBeGreaterThanOrEqual(11)`, never `toBe(10)` - an
+  implementer copying round 2's now-corrected prose literally would be RED on
+  correct code.
 
 ### 4.4 AC-1(d) - the two call facts, bound to the object that will hold them
 
@@ -430,7 +483,9 @@ it as plaintext", and instruments none of it.
 ### 4.7 RES-4's wording, corrected
 
 Round 2's RES-4 (`:1712-1717`) says AC-1b "covers the routing only as a
-source-text wiring test, which is strictly weaker". **Opened: AC-1(b)
+source-text wiring test, which is" weaker than an executed one (`:1714`,
+minor correction - the phrase is not "strictly weaker" in quotes as this
+section previously paraphrased it). **Opened: AC-1(b)
 (`:1249-1251`) asserts a call to `getMostRecentAnnouncementExemplarAction(` and a
 call to `resolveHubCourseIdForCanvasUrl(` - the FETCH and the IDENTITY JOIN.
 It says nothing about routing at all.** So the CORPUS removal test's routing half
@@ -557,6 +612,119 @@ and `none` differs from both.**
 
 ---
 
+## 6.5 INSTRUMENT 3(c) - disposing blocker B-A, the fabricated `OUTLINE_BLOCK_HEADER`
+
+### 6.5.1 The defect, confirmed by measurement
+
+`grep -rn "EXEMPLAR'S STRUCTURE" src` returns nothing, and `grep -n
+"OUTLINE_BLOCK_HEADER" -r src docs` finds it in exactly one place:
+`docs/a21-scope.md:1377`, inside AC-7(b)'s own marker list. It is not defined,
+exported, or imported anywhere in the target tree.
+
+`renderOutlineBlock` (`src/lib/walkthrough-announcement-prompt.ts:243-262`,
+opened) ends `return lines.join("\n")` on its non-empty arm and returns a plain
+string literal on its empty arm - neither arm returns or references a
+separately named header. The only header text near it is the INLINE,
+UNEXPORTED array-literal string at `:381` ("EXEMPLAR STRUCTURE (outline only -
+reproduce this shape ...)"), which is the exact shape of the floor block at
+`:349-355` that RES-3 already flags as a duplication hazard.
+
+**Measured consequence.** A composer whose outline arm ignores `args.outline`
+and always renders `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)` (mutant
+M14) is credited as caught only by AC-5(d) (the floor-block check, which is
+insensitive to outline content) and AC-7(b) (whose ordering assertion cites
+the fabricated `OUTLINE_BLOCK_HEADER` as its fifth marker). Both credited kills
+run through a symbol absent from the tree, so neither is a real enforcer:
+"instructor picks a saved format, the draft ignores it" has no enforcer at the
+composer as round 2 and this file's earlier sections left it.
+
+### 6.5.2 The ruling, applied: a third minted, frozen block
+
+A21 mints and freezes its own outline-block header, the same construction as
+`promptAnnouncementFloorBlock()` and `promptAnnouncementNoFormatBlock()` (6.2)
+- a third duplicated block, never imported from the walkthrough module:
+
+```ts
+// src/lib/prompt-announcement-prompt.ts - alongside promptAnnouncementFloorBlock
+// and promptAnnouncementNoFormatBlock (6.2). Prepended before renderOutlineBlock's
+// output on the `pasted` and `saved` kinds only - `none` carries no outline at
+// all (4.3) and must never carry this header.
+export function promptAnnouncementOutlineBlockHeader(): string {
+  return "EXEMPLAR OUTLINE (outline only - reproduce this shape, never any wording or dates from the original, EXCEPT the greeting/sign-off/one-item-per-paragraph floor above, which applies regardless of what this shape does or does not show)";
+}
+```
+
+Duplicating (not importing) `walkthrough-announcement-prompt.ts:381`'s inline
+header text is the same accepted duplication as the floor block (6.2): the two
+can drift, and RES-3 is widened below to cover it rather than leaving it to a
+fabricated import.
+
+### 6.5.3 AC-5(f) - NEW. The outline-block header is a frozen literal, and it is AC-7(b)'s real fifth marker
+
+- **Object:** `promptAnnouncementOutlineBlockHeader()`, and the composed
+  `pasted`/`saved`/`none` prompts.
+- **Instrument:** the header's exact bytes typed into the test file - never
+  `readFileSync`, never produced by calling the subject, the same rule as
+  AC-5(d)/(e) (6.2). `expect(promptAnnouncementOutlineBlockHeader()).toBe(FROZEN_OUTLINE_BLOCK_HEADER)`;
+  `expect(composedPasted).toContain(FROZEN_OUTLINE_BLOCK_HEADER)`; the same for
+  `composedSaved`; `expect(composedNone).not.toContain(FROZEN_OUTLINE_BLOCK_HEADER)`
+  - the header belongs only to the two kinds that carry an outline.
+- **Direction:** RED on any byte change to the header; RED if it appears on the
+  `none` kind; RED if it is absent from `pasted` or `saved`.
+- This is `FROZEN_OUTLINE_BLOCK_HEADER` - the real, in-tree replacement for the
+  fabricated `OUTLINE_BLOCK_HEADER` that `docs/a21-scope.md`'s AC-7(b)
+  (`:1376-1377`) and AC-5's per-kind marker-substring Record both cited. Both
+  are corrected in section 13 to depend on THIS constant, never on any upstream
+  symbol.
+- **Honest limit, stated rather than closed:** this proves the header's
+  presence, byte-fixedness, and kind-gating. It does NOT prove the outline arm
+  actually reads `args.outline` when the outline varies - a header can be
+  emitted correctly while the content behind it is wrong, which is exactly
+  mutant M14's shape. Whether AC-5(d) and AC-7(b), now bound to a real
+  constant, in fact go RED on M14 is unmeasured in this disposal round (no
+  reference sandbox exists to re-run it - section 2 records it archived out of
+  the tree) and is left to the implementer's own sabotage pass, which
+  `iteration-caps.md` never caps.
+
+### 6.5.4 RES-3, widened
+
+RES-3 (section 11, carried from `a21-scope.md` section 12) covered only the
+floor block. It now covers all three of A21's own minted, duplicated blocks:
+the floor (`promptAnnouncementFloorBlock`), the `none` block
+(`promptAnnouncementNoFormatBlock`), and the outline-block header
+(`promptAnnouncementOutlineBlockHeader`, this section). Each duplicates prose
+that also exists, worded differently or identically, in
+`walkthrough-announcement-prompt.ts`, and each can drift from its counterpart
+without either enforcer noticing - the reviewer obligation RES-2 already
+carries for the two framings is the same shape and now names four constants,
+not two.
+
+### 6.5.5 Section 12's disclosure, corrected
+
+Section 12's first bullet (this file, "What I could not determine") discloses
+only that `renderOutlineBlock`'s EMPTY arm was transcribed verbatim into the
+reference implementation's stand-ins. It must also disclose that the NON-EMPTY
+arm's caller - the reference implementation's composer - was rewritten to
+invent the `OUTLINE_BLOCK_HEADER` symbol that does not exist upstream, which is
+exactly the fabrication blocker B-A is about. Applied in section 12 below.
+
+### 6.5.6 Note for the record, where AC-5(c') is defined
+
+Recorded per the orchestrator's instruction, at the point AC-5(c') is defined
+(section 6.3): the checker named AC-5(c') the weakest requirement in this
+file - implemented exactly as written, a composer whose outline arm ignores
+its argument (M14) satisfies it, because (c') holds one outline fixed across
+all three kinds and never varies the outline within a single kind. **AC-5(f)'s
+minted header is what gives (c') something real to bind to**: (c') proves
+`pasted` and `saved` are byte-identical at a fixed outline and that `none`
+differs from both; AC-5(f) proves the region carrying the outline is a
+distinct, frozen-anchored block on `pasted`/`saved` and is absent from `none`.
+Neither, alone or together, proves the outline arm reads `args.outline` when
+it varies - that gap is inherited by (c'), not closed by this disposal, and
+is recorded in 6.5.3's honest limit rather than left implicit.
+
+---
+
 ## 7. Blocker B-3 - the per-call nonce, specified
 
 The orchestrator ruled: use a per-call nonce sentinel, because it satisfies
@@ -592,7 +760,24 @@ leaf stays isomorphic.
 This is the part that makes the ruling compatible with AC-6.
 `PromptAnnouncementPromptArgs` gains `readonly briefNonce: string`, and
 **`draftPromptAnnouncementAction` calls `newBriefNonce()` once per request** and
-passes it in. If the composer generated its own, it would stop being a pure
+passes it in.
+
+**Minor, recorded rather than fixed here:** `BRIEF_NONCE_PATTERN` (7.1) is
+exported specifically so a caller CAN validate a nonce, but the field itself is
+typed as a bare `string`, not a branded type carrying that validation. A nonce
+containing `>>>` or a newline would corrupt `briefOpenSentinel`/
+`briefCloseSentinel`'s own delimiter syntax while every assertion in this file
+stays green, because every existing instrument only ever sees nonces produced
+by `newBriefNonce()` itself, which always matches the pattern. Disposal is out
+of scope for this round (not one of the three ruled blockers); recorded as a
+residual for the implementer: either brand `briefNonce` at the type level (a
+tagged type validated once at the only construction site, `newBriefNonce()`),
+or add one assertion that `draftPromptAnnouncementAction` rejects a
+`briefNonce` failing `BRIEF_NONCE_PATTERN` if a caller could ever supply one
+directly - moot if the action is the only caller and always calls
+`newBriefNonce()` itself (AC-6n(iv) now covers that call site).
+
+If the composer generated its own, it would stop being a pure
 function, PREFIX would change between the control call and every corpus row, and
 AC-6 would be RED forever. AC-6's corpus therefore holds one fixed test nonce
 across all rows, and PREFIX/SUFFIX stay byte-invariant.
@@ -652,19 +837,74 @@ measured RED), RED if the brief is emitted outside the two markers.
 
 **AC-6n(iii).** Neither frozen framing contains a freshly generated nonce.
 
+### 7.5a AC-6n(iv) - NEW. The nonce is fresh AT THE CALL SITE, not just in the leaf
+
+Everything above measures `newBriefNonce()` and the composer given nonces the
+TEST ITSELF generates. Nothing measured the call site -
+`draftPromptAnnouncementAction` - which is where a constant, forgeable nonce
+would actually ship. Two mutations were executed and both stayed GREEN at
+44/44 under AC-6n(i)-(iii): **M15** hoists `const HOISTED_NONCE =
+newBriefNonce()` to module scope (one nonce per server process, not per
+request); **M16** has the action pass a hardcoded 32-hex string and never call
+`newBriefNonce`. This is a repeat, one layer down, of the B-1 class this file's
+own section 3 disposes: the instrument was bound to the leaf, not the
+production call site.
+
+**AC-6n(iv). The action generates a fresh nonce per call, measured at the action.**
+
+- **Object:** `draftPromptAnnouncementAction(request)`, called twice in
+  succession - the production path, not `newBriefNonce()` or the composer
+  directly.
+- **Instrument:** the AC-10(d) mocks (`vi.mock("@/lib/llm", ...)` plus
+  `vi.mock("@/lib/supabase/auth")`). Two successive calls to
+  `draftPromptAnnouncementAction` with `provider: "gemini"` (the positive
+  control provider, so `callLlm` is actually invoked both times). Extract the
+  32-hex nonce from each call's captured prompt text:
+  `vi.mocked(callLlm).mock.calls[n][0].contents[0].parts[0].text` - the shape
+  `callLlm(req, provider)` takes (`src/lib/llm.ts:374-377`, opened: `req` is
+  `LlmRequest` with `contents: [{ role, parts: [{ text }] }]`). Locate the
+  nonce inside each captured text via `BRIEF_NONCE_PATTERN`'s hex alphabet
+  (e.g. matching `briefOpenSentinel`'s fixed prefix/suffix around the 32-hex
+  run). Assert: (i) both extracted values match `BRIEF_NONCE_PATTERN`; (ii)
+  the two values DIFFER.
+- **Direction:** RED if the two calls yield the same nonce (a hoisted or
+  otherwise process-scoped generator - M15) or if either extracted value is
+  not a fresh 32-hex draw (a hardcoded constant - M16). Both mutants are its
+  sabotage rows and both are EXPECTED RED under this clause.
+- **Buildable today, checker-confirmed:** the checker executed the two mocks
+  against the reference action and confirmed the mock captures the prompt
+  text verbatim, so `mock.calls[n][0].contents[0].parts[0].text` is a real,
+  inspectable value at the action boundary, not an assumption.
+
 ### 7.6 What the nonce does and does not buy, precisely
+
+**7.6's claim that this half is MEASURED becomes true only with AC-6n(iv) in
+place.** Before it, AC-6n(i)-(iii) measured the generator and the composer
+under test-supplied nonces, and M15/M16 show that says nothing about the
+call site - a constant, forgeable nonce shipped green under every clause that
+existed. With AC-6n(iv), the claim below is accurate:
 
 It buys this: the attacker who authored the text the instructor pasted wrote it
 BEFORE the nonce existed and cannot observe it, so they cannot emit the current
 terminator. The delimiter is unforgeable from inside the payload. That half is
-now MEASURED.
+now MEASURED, including at the call site that actually ships it.
 
 It does not buy model obedience. A model that ignores the delimiters is
 indistinguishable from one that honours them, to every instrument in this repo.
-One residual case is unreachable rather than tested: a brief containing the
-CURRENT call's own close sentinel would break AC-7's `indexOf`-based ordering, and
-it is unreachable only because the nonce is generated after the brief is
-submitted. Stated rather than tested.
+
+**Corrected (minor):** this file previously stated that a brief containing the
+CURRENT call's own close sentinel would break AC-7's `indexOf`-based ordering
+and called that case unreachable. **That is wrong on both counts.** A smuggled
+copy of the current close sentinel sorts BETWEEN the real open marker and the
+real close marker - `indexOf` finds the smuggled occurrence first only because
+it appears earlier in the string, and that position still satisfies
+`open2 < at < close2`; the monotonic-ordering assertion holds regardless. And
+the case is not untested: **AC-6 rows 6-7 plant exactly this** (a brief
+containing the sentinel text) and stay GREEN, caught instead by AC-6n(ii)'s
+"exactly one real terminator" assertion
+(`composed.split(briefCloseSentinel(n2)).length - 1 === 1`), which is the
+instrument this case actually exercises. Nothing here is left unreachable or
+untested by this scenario.
 
 ### 7.7 RES-5, narrowed
 
@@ -707,13 +947,24 @@ cap is not validation.
 everywhere:** at the panel-side leaf and at the action. **NOT in the composer** -
 mutant M6 put it there and AC-6 went RED, as it must.
 
-**AC-21. The cap is applied on the way out of the panel.**
-- Object: `buildPromptDraftRequest(state).promptText`.
-- Instrument: a state whose `promptText.length === CAP + 500` yields
-  `promptText.length === CAP`; a state at `CAP - 1` yields a byte-identical
-  string. Order is cap-then-trim, so the emitted length is never above CAP and
-  the action can never reject its own client's legitimate request.
-- Direction: RED if the constant is exported and never applied.
+**AC-21. The cap is applied on the way out of the panel, cap-then-trim, in that order (minor correction).**
+- **Object:** `buildPromptDraftRequest(state).promptText`.
+- **Instrument:** (i) a state whose `promptText.length === CAP + 500` (no edge
+  whitespace) yields `promptText.length === CAP`; (ii) a state at exactly
+  `CAP - 1` characters, with NO leading or trailing whitespace, yields a
+  byte-identical string - this is the only shape of input the byte-identity
+  claim holds for; (iii) a SEPARATE row at `CAP - 1` characters WITH trailing
+  whitespace (`"x".repeat(CAP - 2) + "  "`) yields a string SHORTER than
+  `CAP - 1`, because the trim is real and load-bearing: it is what keeps
+  AC-22(ii)'s boundary control - exactly `CAP` characters, untrimmed length -
+  from rejecting the leaf's own output on a brief whose edges happen to be
+  whitespace at the cap boundary.
+- **Direction:** RED if the constant is exported and never applied (no cap);
+  RED if trim runs before cap, which would let a post-cap trim re-admit
+  characters past `CAP` on the next edit cycle (cap-then-trim is the only order
+  that keeps the emitted length monotonically `<= CAP`); RED if row (iii)
+  produces a byte-identical `CAP - 1`-length string, which would mean the trim
+  did not run at all.
 
 **AC-22. The live endpoint validates length itself.**
 - Object: `draftPromptAnnouncementAction(request)` under the same mocks as
@@ -728,13 +979,51 @@ mutant M6 put it there and AC-6 went RED, as it must.
 - Measured: mutant M11 removes the check and AC-22(i) goes RED; the boundary
   control in (ii) is what makes that a one-directional kill.
 
-**Residual created here, with all three slots.** Server actions receive
-JSON at runtime and TypeScript is erased, so `request.resolvedTemplate.kind` and
-`request.provider` are unvalidated strings on the wire. AC-22 covers length only.
-*Owner:* the security seat, whose trigger section 14 already fires. *Instrument:*
-the security pass's own wire-validation review over
-`prompt-announcement-draft.ts` and `prompt-announcement-post.ts`. *Step:* wave 2,
-before the implementer writes the actions. Recorded as **RES-10**.
+**Renumbered (blocker B-C).** `docs/backlog.yml` row A21's own recorded note
+already carries an RES-10: "an out-of-scope defect worth its own row if anyone
+wants it: `postWalkthroughAnnouncementAction` passes 4 of the 5 arguments
+`createAnnouncementFromMarkdown` accepts, dropping `delayedPostAt`." Naming this
+residual RES-10 too would collide by id when the orchestrator copies both into
+the backlog at disposal time, silently shadowing the recorded one. **This
+residual is RES-11**, not RES-10.
+
+**Its measurable half, promoted to AC-24.** The security seat's review is not
+the only available instrument - the checker executed the hazard directly at
+the reference action rather than reading for it: `provider: "garbage"` FALLS
+THROUGH TO THE MODEL ARM (`callLlm` called once, `ok: true, templateApplied:
+true` - a fail-open into Gemini for a value outside `LlmProvider`'s three
+members, 1a), and `resolvedTemplate.kind: "house"` throws an uncaught
+`TypeError: KIND_BLOCK[args.resolvedKind] is not a function` from a live
+server action behind `requireUser()`, for a value outside `ResolvedTemplate`'s
+three members. Both are executed facts, not a reading-pass judgment call, and
+this repo has no zod, so a security review has no house idiom to point at for
+either.
+
+**AC-24. An off-union `provider` or `resolvedKind` on the wire is rejected, not
+executed.**
+- **Object:** `draftPromptAnnouncementAction(request)`, the production path,
+  under the same AC-10(d) mocks.
+- **Instrument:** two rows, each constructing `request` with a field whose
+  runtime value is outside its TypeScript union (JSON payloads erase the type,
+  so this is the actual wire shape, not a contrived test double): (i)
+  `provider: "garbage"` (outside `"gemini" | "other" | "embedded"`); (ii)
+  `resolvedTemplate: { kind: "house" }` (outside `"pasted" | "saved" | "none"`).
+- **Direction:** RED if either row reaches the model (`callLlm` called) OR
+  throws instead of returning `{ ok: false, error: string }`. Both are failure
+  modes, not just one: the `provider` hazard fails open into a live model call,
+  and the `resolvedTemplate.kind` hazard crashes the request instead of
+  degrading to an error result.
+- **Measured, not argued:** both mutations above were executed against the
+  reference action and produced exactly the failures this criterion forbids.
+
+**RES-11, narrowed to what AC-24 leaves unmeasured.** *Owner:* the security
+seat, whose trigger section 14 already fires. *Instrument:* that seat's own
+wire-validation review over `prompt-announcement-draft.ts` and
+`prompt-announcement-post.ts`, now scoped to what AC-24 and AC-22 do not
+cover - every other field on the wire payload (`courseLabel`, `promptText`
+beyond its length, `outline`'s shape) - rather than the two hazards this
+disposal already measured. *Step:* wave 2, before the implementer writes the
+actions.
 
 ### 8.3 M-3 - AC-14 rebuilt, because the house idiom defeats it
 
@@ -829,7 +1118,7 @@ sixteen kills and measured none.
 |---|---|---|---|---|
 | M0 | a comment only | GREEN | **GREEN, 44/44** | control - proves the runner can pass |
 | M1a | import `callLlm` into the action, call it with `request.promptText` above the route switch | RED | **RED**: AC-10(d) control + table, AC-10(e), AC-22 boundary | **Yes** |
-| M1b | fabricate a model arm from `request.promptText` and hand it to the model leaf above the switch | RED on (d), GREEN on (e) | **RED on AC-10(d) only** | **Yes - and this is the row that proves (d) is required.** (e) alone does not see it |
+| M1b | fabricate a model arm from `request.promptText` and hand it to the model leaf above the switch | RED on (d), GREEN on (e) | **RED on AC-10(d)** (the load-bearing kill), **and AC-22's boundary control also fires** since M1b reaches the model on every call, not only the ones length-validation lets through (minor, corrected) | **Yes - and this is the row that proves (d) is required.** (e) alone does not see it |
 | M2 | `routePromptAnnouncement` maps `embedded` to the model arm | RED | **RED**: AC-10(d) table + scaffold row | **Yes.** Ruling A's mutation |
 | M3 | `buildPromptDraftRequest` always emits `none` + `EMPTY` | RED | **RED**: AC-18 | **Yes.** Blocker B-2's silent-green |
 | M4 | `applyPromptDraftResult` echoes the resolved template even when `templateApplied` is false | RED | **RED**: AC-20 | **Yes** |
@@ -844,6 +1133,9 @@ sixteen kills and measured none.
 | M12-OLD2 | the isolating form: A21's block PLUS a truncated copy | - | **RED on (e) ONLY. Under round 2's criteria it SURVIVES** | **REBUILT** - see 6.2 |
 | M12-NEW | the whole first sentence with a different tail | RED on (b) | **RED on (b) and (e)** | **Yes** - this is the replacement row |
 | M13 | the action hand-rolls a deterministic draft instead of the shipped scaffold | RED | **RED**: AC-10(d) table + scaffold row | **Yes** |
+| M14 | the composer's outline arm ignores `args.outline` and always renders `renderOutlineBlock(EMPTY_ANNOUNCEMENT_OUTLINE)` | RED | **Checker-measured (round 3), not this pass's sandbox** (archived - section 2): RED only via AC-5(d) and AC-7(b), and prior to this disposal BOTH ran through the fabricated `OUTLINE_BLOCK_HEADER`. 6.5 mints the real constant; whether AC-5(d)/AC-7(b) still fire once bound to it is unmeasured here and left to the implementer's sabotage pass | **Disputed - see 6.5.3's honest limit** |
+| M15 | hoist `const HOISTED_NONCE = newBriefNonce()` to module scope (one nonce per process) | RED | **Checker-measured (round 3): GREEN at 44/44 under round-2's AC-6n(i)-(iii)**, RED under new AC-6n(iv) (7.5a) | **Yes, but only after 7.5a - this is the row that proves (iv) is required** |
+| M16 | the action passes a hardcoded 32-hex string and never calls `newBriefNonce` | RED | **Checker-measured (round 3): GREEN at 44/44 under round-2's AC-6n(i)-(iii)**, RED under new AC-6n(iv) (7.5a) | **Yes, but only after 7.5a** |
 
 **Type-gate mutants, measured with `tsc` on an isolated project (`incremental:
 false`, so no `tsconfig.tsbuildinfo` was written and the one-caller rule on the
@@ -870,10 +1162,10 @@ repo's `tsc` is not touched):**
 
 ## 10. Executable here versus argued
 
-**EXECUTABLE, and executed in this pass** (44 assertions green, 16 mutants,
-3 type-gate probes): AC-5(a)(b)(c')(d)(e), AC-6, AC-6n(i)(ii)(iii), AC-7(a)(b)(c),
-AC-8 rows 1-2, AC-10(b)(c)(d), AC-11, AC-13, AC-14(a)-(e), AC-18, AC-19, AC-20,
-AC-21, AC-22, AC-23.
+**EXECUTABLE, and executed in this pass** (44 assertions green, 17 mutants -
+corrected from 16, see section 1a below - 3 type-gate probes): AC-5(a)(b)(c')(d)(e),
+AC-6, AC-6n(i)(ii)(iii), AC-7(a)(b)(c), AC-8 rows 1-2, AC-10(b)(c)(d), AC-11,
+AC-13, AC-14(a)-(e), AC-18, AC-19, AC-20, AC-21, AC-22, AC-23.
 
 **EXECUTABLE here but NOT executed in this pass** (they need the real tree, and
 the implementer runs them): AC-2, AC-9(a)(b), AC-10(a) - all three are the
@@ -881,7 +1173,9 @@ transitive walker shape at `classTrendsDraft.not-postable.test.ts`, DUPLICATED
 never imported, over derived forbidden sets the round-2 check already
 re-measured; AC-3 and AC-17, which are the shipped structure tests plus the wave
 gate; AC-8 row 3 (`mailto:`); AC-12; AC-15; AC-16; AC-4a's `Exact` assertion
-against the real upstream union.
+against the real upstream union; **AC-5(f) (6.5.3), AC-6n(iv) (7.5a) and AC-24
+(new, disposing B-C below) - all three minted or added in this disposal round,
+none re-run against a sandbox because none exists any more (section 2)**.
 
 **SOURCE-TEXT only, therefore weaker, and labelled as such:** AC-1(a)(b)(c)(d),
 AC-10(e), AC-11's wiring half, AC-14(f).
@@ -919,11 +1213,19 @@ artifact, so the orchestrator must copy them there at disposal time.
   *Step:* every code review of a commit changing any of the four, indefinitely.
 - **RES-4 (corrected, 4.7)** - the two PANEL edges only.
 - **RES-5 (narrowed, 7.7)** - model obedience only.
-- **RES-10 (NEW, 8.2)** - the action's wire payload is unvalidated apart from
-  length. *Owner:* the security seat. *Instrument:* that seat's wire-validation
-  review over the two new action files. *Step:* wave 2, before the actions are
-  written.
-- RES-3, RES-6, RES-7, RES-8, RES-9 carry over unchanged from
+- **RES-11 (NEW, 8.2; renumbered from a colliding RES-10, blocker B-C)** - the
+  action's wire payload is unvalidated apart from length, an off-union
+  `provider` and an off-union `resolvedTemplate.kind` (the latter two now
+  measured by **AC-24**, not left to this residual alone). *Owner:* the
+  security seat. *Instrument:* that seat's wire-validation review over the two
+  new action files, scoped to what AC-22 and AC-24 do not already cover.
+  *Step:* wave 2, before the actions are written. **Not RES-10** -
+  `docs/backlog.yml` row A21 already records an unrelated RES-10 (the
+  `delayedPostAt` drop in `postWalkthroughAnnouncementAction`); reusing that id
+  here would shadow it when the orchestrator reconciles the backlog.
+- **RES-3 (widened, 6.5.4)** - now covers three minted, duplicated blocks (the
+  floor, the `none` block, and the outline-block header), not one.
+- RES-6, RES-7, RES-8, RES-9 carry over unchanged from
   `a21-scope.md` section 12. RES-7 (AC-13 reads a constant the implementation
   also reads) is addressed to this seat: reviewed, and AC-13(b)'s
   two-function relationship is kept as the mitigation. It is not fully closed and
@@ -939,11 +1241,21 @@ artifact, so the orchestrator must copy them there at disposal time.
   reference implementation used shape-faithful stand-ins for
   `announcement-draft-slots.ts`, `walkthrough-announcement-prompt.ts`,
   `embedded/communication.ts` and `llm.ts`, copied from the real files but not
-  the real files. `resolveChoice`, `renderOutlineBlock`'s empty arm,
+  the real files. `resolveChoice`, `renderOutlineBlock`'s EMPTY arm,
   `ResolvedTemplate`, `TemplateChoice`, `LiveDefaults` and `LlmProvider` were
   transcribed verbatim from source I opened; `scaffoldAnnouncement` was NOT (it
   pulls in `./scaffold` and `@/lib/prose`), so AC-10(d)'s scaffold-verbatim row
-  is proven in shape, not against the shipped function.
+  is proven in shape, not against the shipped function. **Disclosure corrected
+  (disposing blocker B-A, 6.5.5): the NON-EMPTY arm's caller was not
+  transcribed either - the reference composer that wraps
+  `renderOutlineBlock(outline)` on the `pasted`/`saved` kinds was REWRITTEN to
+  invent an `OUTLINE_BLOCK_HEADER` symbol that does not exist anywhere in the
+  target tree** (confirmed: `grep -rn "EXEMPLAR'S STRUCTURE" src` and
+  `grep -n "OUTLINE_BLOCK_HEADER" -r src docs` both return nothing outside
+  `docs/a21-scope.md:1377` itself). Section 6.5 mints and freezes a real
+  in-tree replacement, `promptAnnouncementOutlineBlockHeader()` /
+  `FROZEN_OUTLINE_BLOCK_HEADER`, so this fabrication does not reach the
+  implementer.
 - **The real `stripUnpermittedUrls`.** The sandbox used a much simpler URL
   regex. AC-8 is the round-2 criterion the checker already confirmed sound; my
   run proves only that the action's WIRING of it is testable at the action.
@@ -970,7 +1282,7 @@ withdrawn-with-a-replacement; nothing loses its only enforcer.
 | AC-5(c) | `:1337` | WITHDRAWN, replaced by **(c')** (6.3) - the original is unsatisfiable at a fixed outline |
 | AC-5(d) | `:1338-1339` | KEPT, STRENGTHENED: the floor block is a frozen literal (6.2) |
 | AC-6 | `:1346-1364` | KEPT. `briefNonce` added to the args; the sentinel corpus row is now per-nonce (7.2) |
-| AC-7 | `:1366-1393` | KEPT unchanged. 7.3 records why the nonce does not disturb it |
+| AC-7 | `:1366-1393` | AMENDED, not unchanged (major M-d). AC-7(a) is unchanged (7.3). AC-7(b)/(c) (`:1375-1384`) use `BRIEF_OPEN`/`BRIEF_CLOSE` as constants; under 7.1 they become `briefOpenSentinel(nonce)`/`briefCloseSentinel(nonce)`, proven by this file's own reference AC-7 test writing `briefOpenSentinel(FIXED_NONCE)`. AC-7(b)'s fifth marker `OUTLINE_BLOCK_HEADER` (`:1377`) is also corrected to the real `FROZEN_OUTLINE_BLOCK_HEADER` (6.5.3, disposing B-A) |
 | AC-10 | `:1449-1481` | KEPT (a)(b)(c). New **(d)** and **(e)** (3.2, 3.3). The `:1475-1481` rationale paragraph is WITHDRAWN |
 | AC-11 | `:1483-1497` | AMENDED: key union derived from `ResolvedTemplate["kind"]` (5). Its stated interaction at `:1494-1497` becomes **AC-20** (4.6) |
 | AC-13 | `:1513-1526` | KEPT unchanged; RES-7 reviewed and left open (11) |
@@ -985,4 +1297,4 @@ withdrawn-with-a-replacement; nothing loses its only enforcer.
 | RES-4 | `:1712-1717` | CORRECTED (4.7) |
 | RES-5 | `:1718-1730` | NARROWED to model obedience (7.7) |
 | RES-1, RES-2 | `:1690-1705` | AMENDED (8.3, 11) |
-| - | - | **NEW: AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-6n, RES-10** |
+| - | - | **NEW: AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-5(f), AC-6n (now with clause (iv)), RES-11 (renumbered from a colliding RES-10, 8.2/11)** |

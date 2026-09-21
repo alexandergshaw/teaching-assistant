@@ -35,6 +35,24 @@ import { accumulateDroppedFrames } from "../recording/discussion-capture";
 const PANEL_PATH = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx");
 const source = fs.readFileSync(PANEL_PATH, "utf-8");
 
+// stripComments is DUPLICATED from submission-kind-callsites.structure.test.ts
+// rather than imported - this repo forbids importing a helper from another
+// *.test.ts file (it re-runs that file's describe blocks as a side effect).
+// Hoisted to the top of the file (docs/a16-wave2-verify.md RES-V-2 /
+// section 6.1): wave 1's caller guard below used raw `source`, so wrapping
+// the live element in a JSX comment left every one of its tests green and
+// `tsc` clean - the guard must run over the SAME comment-stripped source
+// the wave-2 pins already use.
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
+const STRIPPED_SOURCE = stripComments(source);
+
 describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
   it("calls accumulateDroppedFrames with the live value and a ref-tracked previous value, never the live value alone", () => {
     expect(source).toMatch(/accumulateDroppedFrames\(\s*prevLiveDroppedRef\.current\s*,\s*droppedFrames\s*,/);
@@ -88,7 +106,10 @@ function importsAndRendersGradingCaptureSettings(text: string): boolean {
 
 describe("GradingCaptureSettings is imported AND rendered (W1-G3)", () => {
   it("the panel imports from ./GradingCaptureSettings and renders <GradingCaptureSettings", () => {
-    expect(importsAndRendersGradingCaptureSettings(source)).toBe(true);
+    // Comment-stripped (RES-V-2): raw `source` let a JSX comment wrapping the
+    // live element pass this check, because the render-tag regex still
+    // matched the text sitting inside `{/* ... */}`.
+    expect(importsAndRendersGradingCaptureSettings(STRIPPED_SOURCE)).toBe(true);
   });
 
   it("canary: an import with no render tag is detected as NOT wired - proves the detector cannot pass on a dead import", () => {
@@ -96,8 +117,13 @@ describe("GradingCaptureSettings is imported AND rendered (W1-G3)", () => {
     expect(importsAndRendersGradingCaptureSettings(deadImportOnly)).toBe(false);
   });
 
+  it("canary: a JSX-commented-out element is detected as NOT wired over comment-stripped source (RES-V-2)", () => {
+    const commentedOut = 'import GradingCaptureSettings from "./GradingCaptureSettings";\n{/* <GradingCaptureSettings foo={foo} /> */}\n';
+    expect(importsAndRendersGradingCaptureSettings(stripComments(commentedOut))).toBe(false);
+  });
+
   it("the rendered element binds all ten props to the panel's own identifiers", () => {
-    const match = source.match(/<GradingCaptureSettings\b[\s\S]*?\/>/);
+    const match = STRIPPED_SOURCE.match(/<GradingCaptureSettings\b[\s\S]*?\/>/);
     expect(match, "expected to find the <GradingCaptureSettings .../> element").not.toBeNull();
     const el = match![0];
     expect(el).toMatch(/courseId=\{courseId\}/);
@@ -142,19 +168,6 @@ describe("Remove/Clear-table route through the one composed handler (RES-A9-10)"
 // submission-kind-callsites.structure.test.ts already strips comments for
 // exactly this reason ("comments naming the rule do not count").
 //
-// stripComments is DUPLICATED from submission-kind-callsites.structure.test.ts
-// rather than imported - this repo forbids importing a helper from another
-// *.test.ts file (it re-runs that file's describe blocks as a side effect).
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
-
-const STRIPPED_SOURCE = stripComments(source);
-
 function extractBalanced(text: string, openBraceIndex: number): string {
   let depth = 0;
   for (let i = openBraceIndex; i < text.length; i++) {
@@ -388,6 +401,54 @@ describe("GradingRecordingPanel.tsx's meta argument captures BOTH provenance fie
   });
 });
 
+// ── THE PROVENANCE PIN, BINDING-CORRECT (N4) ──────────────────────────────
+// metaBindingCapturesProvenance above is a MENTION test: it is satisfied by
+// `{ courseName: assessmentId, assignmentName: selectedCourse?.name ?? "" }`
+// just as much as by the correct shape, because it never checks which value
+// lands in which key. That transposition puts the course name into
+// `assignmentName` - reaching student-addressed copy
+// (class-trends-draft.ts:185) and the model prompt (class-trends-insight.ts
+// :154) - and the half-typed assessment label into `courseName`. This binds
+// each property's own value expression.
+
+function metaPropertyValues(metaExpr: string): { courseName: string; assignmentName: string } | null {
+  const match = /courseName:\s*([\s\S]*?),\s*assignmentName:\s*([\s\S]*?)\s*\}$/.exec(metaExpr.trim());
+  if (!match) return null;
+  return { courseName: match[1].trim(), assignmentName: match[2].trim() };
+}
+
+function metaBindingIsNotTransposed(strippedHandlerBody: string): boolean {
+  const metaMatch = /const meta = (\{[\s\S]*?\});/.exec(strippedHandlerBody);
+  if (!metaMatch) return false;
+  const values = metaPropertyValues(metaMatch[1]);
+  if (!values) return false;
+  const courseNameBindsCourse = /\bselectedCourse\b/.test(values.courseName);
+  const courseNameBindsAssessment = /\bassessmentId\b|\bassessmentLabel\b/.test(values.courseName);
+  const assignmentNameBindsAssessment = /\bassessmentId\b|\bassessmentLabel\b/.test(values.assignmentName);
+  const assignmentNameBindsCourse = /\bselectedCourse\b/.test(values.assignmentName);
+  return courseNameBindsCourse && !courseNameBindsAssessment && assignmentNameBindsAssessment && !assignmentNameBindsCourse;
+}
+
+describe("metaPropertyValues / metaBindingIsNotTransposed (canary)", () => {
+  it("returns true on the shipped shape", () => {
+    expect(metaBindingIsNotTransposed('const meta = { courseName: selectedCourse?.name ?? "", assignmentName: assessmentId };')).toBe(
+      true
+    );
+  });
+
+  it("returns false on N4's mutation - the two VALUES transposed, keys unchanged", () => {
+    expect(
+      metaBindingIsNotTransposed('const meta = { courseName: assessmentId, assignmentName: selectedCourse?.name ?? "" };')
+    ).toBe(false);
+  });
+});
+
+describe("GradingRecordingPanel.tsx's meta argument binds each value to its own key, never transposed (N4)", () => {
+  it("courseName's value mentions selectedCourse (never assessmentId/assessmentLabel), and assignmentName's value mentions assessmentId/assessmentLabel (never selectedCourse)", () => {
+    expect(metaBindingIsNotTransposed(HANDLE_GRADE_ALL_BODY)).toBe(true);
+  });
+});
+
 // A whole-file, raw-source ban is RED at HEAD before any wave-2 code exists
 // (pre-existing legitimate gradingRows.rawRows/gradingRows.rows hits) - so
 // this repo's own gate is region-plus-whitelist, never a file-wide ban.
@@ -473,6 +534,15 @@ describe("GradingRecordingPanel.tsx's trends-entry const is whitelisted (B2, rul
 function classTrendsMountIsGated(strippedSource: string): boolean {
   const match = /hasTrendableResults\([^)]*\)\s*&&([\s\S]{0,400})/.exec(strippedSource);
   if (!match) return false;
+  // Negation-aware (docs/a16-wave2-verify.md N1): `!` is not an identifier,
+  // and it sits BEFORE the regex's own match (which starts at
+  // `hasTrendableResults`), so `!hasTrendableResults(...) &&` used to pass
+  // this detector unchanged - the exact inversion that renders the panel
+  // only when there is nothing to show ("Trends (0)" forever) and never
+  // when there is. Reject when the text immediately preceding the match,
+  // modulo whitespace, ends in `!`.
+  const textBeforeMatch = strippedSource.slice(0, match.index);
+  if (/!\s*$/.test(textBeforeMatch)) return false;
   return /<ClassTrendsPanel\b/.test(match[1]);
 }
 
@@ -483,6 +553,14 @@ describe("classTrendsMountIsGated (canary)", () => {
 
   it("reports false when the guard is removed (P18: the exact regression this guards)", () => {
     expect(classTrendsMountIsGated("return <ClassTrendsPanel entry={entry} />;")).toBe(false);
+  });
+
+  it("reports false when the guard is NEGATED (N1: mounts only when there is nothing to show)", () => {
+    expect(classTrendsMountIsGated("return !hasTrendableResults(entry) && (\n  <ClassTrendsPanel entry={entry} />\n);")).toBe(false);
+  });
+
+  it("still reports true when whitespace, not a bang, precedes the guard", () => {
+    expect(classTrendsMountIsGated("return   hasTrendableResults(entry) && (\n  <ClassTrendsPanel entry={entry} />\n);")).toBe(true);
   });
 });
 
@@ -548,6 +626,36 @@ describe("GradingRecordingPanel.tsx's disclosure line exists and is pinned (B-A/
     for (const id of ids) {
       expect(allowed.has(id), `unexpected free identifier: ${id}`).toBe(true);
     }
+  });
+
+  // N2 (docs/a16-wave2-verify.md): `!` is not an identifier, so the
+  // free-identifier whitelist above passes `!cohortLabelSpread(...)`
+  // unchanged - the line would then render on every SINGLE-label run and
+  // stay silent on the multi-label run it exists for. This checks the
+  // guard's own text for a direct negation of the call, which the
+  // identifier scan above cannot see by construction.
+  it("the disclosure guard calls cohortLabelSpread directly, never negated (N2)", () => {
+    const idx = RENDER_BODY.indexOf("cohortLabelSpread(");
+    expect(idx).toBeGreaterThan(-1);
+    const openBraceIndex = RENDER_BODY.lastIndexOf("{", idx);
+    expect(openBraceIndex).toBeGreaterThan(-1);
+    const guardMatch = /^\{([\s\S]*?)&&\s*\(/.exec(RENDER_BODY.slice(openBraceIndex));
+    expect(guardMatch).not.toBeNull();
+    expect(guardMatch![1]).not.toMatch(/!\s*cohortLabelSpread\(/);
+  });
+});
+
+describe("disclosure-guard negation detector (canary)", () => {
+  function guardIsPositive(guardExpr: string): boolean {
+    return !/!\s*cohortLabelSpread\(/.test(guardExpr);
+  }
+
+  it("reports true on the shipped positive guard", () => {
+    expect(guardIsPositive("lastRunCohort && cohortLabelSpread(trendsEntry)")).toBe(true);
+  });
+
+  it("reports false on N2's mutation - the call negated", () => {
+    expect(guardIsPositive("lastRunCohort && !cohortLabelSpread(trendsEntry)")).toBe(false);
   });
 });
 

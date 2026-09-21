@@ -205,8 +205,15 @@ describe("buildRunCohort - never carries userId", () => {
 });
 
 describe("runCohortMeta - THE META PROJECTION", () => {
+  // THREE cells, not four (docs/a16-wave2-verify.md RES-V-5): the prior
+  // fourth cell ("empty capture") was byte-identical to the third
+  // ("rows carry undefined") and its label was wrong regardless - every
+  // cell here hardcodes a non-empty assignmentName, so none of them is the
+  // empty-capture case at all. The genuine empty-capture case is the
+  // separate `it` immediately below, which builds a cohort whose OWN
+  // assignmentName is "". These three cells are honestly distinct inputs:
+  // a label, a different single label, and undefined.
   it.each<[string, RunCohort["rows"]]>([
-    ["empty capture", [{ result: { student: "A", overallComment: "", strengths: "", improvements: "", resubmitNotice: "", rubricAreas: [], totalScore: "", feedback: "", mergedFileCount: 0, submittedFiles: [] } as GradeResult, assessment: undefined }]],
     ["a label", [{ result: { student: "A", overallComment: "", strengths: "", improvements: "", resubmitNotice: "", rubricAreas: [], totalScore: "", feedback: "", mergedFileCount: 0, submittedFiles: [] } as GradeResult, assessment: "Essay 2" }]],
     ["rows carry a different single label", [{ result: { student: "A", overallComment: "", strengths: "", improvements: "", resubmitNotice: "", rubricAreas: [], totalScore: "", feedback: "", mergedFileCount: 0, submittedFiles: [] } as GradeResult, assessment: "Some Other Label" }]],
     ["rows carry undefined", [{ result: { student: "A", overallComment: "", strengths: "", improvements: "", resubmitNotice: "", rubricAreas: [], totalScore: "", feedback: "", mergedFileCount: 0, submittedFiles: [] } as GradeResult, assessment: undefined }]],
@@ -261,6 +268,68 @@ describe("buildRunCohort - never declares a second TRENDABLE predicate or meta t
     const source = readFileSync(new URL("./classTrendsRunCohort.ts", import.meta.url), "utf8");
     expect(/function\s+hasTrendable/i.test(source)).toBe(false);
     expect(/export\s+(?:type\s+)?\{\s*hasTrendableResults\s*\}/.test(source)).toBe(false);
+  });
+});
+
+// ── FOUR LEAF-FIELD SURVIVORS, TRACED (docs/a16-wave2-verify.md section 5.2,
+// N5/N6/N7/N10) - each field a cohort row carries was traced to every real
+// consumer reachable from a Grade-submissions click, rather than assumed
+// live or assumed dead.
+//
+// LIVE: overallComment (N10). Read by src/lib/grade/class-trends-insight.ts
+// at anonymizeGradeResults (`.overallComment` copied per submission) and at
+// renderSubmission (`submission.overallComment` rendered into the model
+// prompt). Blanking it removes prose from the "Ask AI" concept-insight
+// feature's own input. Fixed below with a positive read of a distinctive
+// value.
+//
+// DEAD ON THIS PATH, confirmed by grep rather than assumed: `.strengths`,
+// `.improvements` and `.feedback` never appear in any of the three files
+// that read a GradeResult reachable from this cohort
+// (src/lib/grade/class-trends.ts, src/lib/grade/class-trends-insight.ts,
+// src/lib/grade/class-trends-draft.ts) - class-trends.ts reads only
+// rubricAreas, class-trends-insight.ts reads only rubricAreas and
+// overallComment, and class-trends-draft.ts never touches a raw GradeResult
+// at all (it consumes AreaTrend and ClassTrendsInsightObservation, both
+// already-aggregated). N6 (strengths/improvements swapped) and N7 (feedback
+// blanked) are therefore instrument gaps, not reachable user-visible
+// defects, on the path this feature ships. Same trace clears
+// `ungraded.sourceIndex` (N5): class-trends.ts counts only `ungraded.kind`
+// (`ungradedCounts`, itself read by nothing outside that file per
+// docs/a16-wave2-verify.md section 5), never sourceIndex's value.
+describe("buildRunCohort - overallComment reaches the emitted result (N10: read by class-trends-insight.ts)", () => {
+  it("a ready row's overallComment equals the classifier's overallComment, on a distinctive value", () => {
+    const cohort = buildRunCohort(
+      [readyResult("s1", { overallComment: "A distinctive sentence only this classifier would produce." })],
+      [{ id: "s1", studentName: "Ada Lovelace", assessment: undefined }],
+      { courseName: "", assignmentName: "" }
+    );
+    const result = cohort.rows[0].result;
+    expect(isUngraded(result)).toBe(false);
+    if (isUngraded(result)) throw new Error("expected a graded result");
+    expect(result.overallComment).toBe("A distinctive sentence only this classifier would produce.");
+  });
+});
+
+describe("buildRunCohort - strengths/improvements/feedback/ungraded.sourceIndex are traced, not assumed (N5/N6/N7)", () => {
+  it("no consumer reachable from this cohort reads .strengths, .improvements, .feedback, or ungraded row sourceIndex off a GradeResult", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const root = process.cwd();
+    const consumerFiles = [
+      resolve(root, "src/lib/grade/class-trends.ts"),
+      resolve(root, "src/lib/grade/class-trends-insight.ts"),
+      resolve(root, "src/lib/grade/class-trends-draft.ts"),
+    ];
+    const combined = consumerFiles.map((file) => readFileSync(file, "utf8")).join("\n");
+    // Canary: this scan does fire. overallComment IS read by one of these
+    // files (class-trends-insight.ts), so a clean result on the fields
+    // below is a measured absence, not a scan that never looks at anything.
+    expect(combined).toMatch(/\.overallComment\b/);
+    expect(combined).not.toMatch(/\.strengths\b/);
+    expect(combined).not.toMatch(/\.improvements\b/);
+    expect(combined).not.toMatch(/\.feedback\b/);
+    expect(combined).not.toMatch(/\.sourceIndex\b/);
   });
 });
 

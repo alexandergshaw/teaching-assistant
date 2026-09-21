@@ -445,3 +445,138 @@ the behaviour I want. That is now three rulings of mine corrected by
 measurement on this row - the pathspec gate, the unnamed row source, and this.
 Each was a case of my reasoning about the code instead of running a command
 against it.
+
+---
+
+# Round 5 - disposal. Three blockers, three repeats, and all three are mine.
+
+The check of revision 3 returned DEFECTIVE: 3 blockers, 7 majors, 6 minors.
+Every blocker is a REPEAT class, so none gets another attempt at the same
+mechanism - and every one of them traces to a ruling I wrote. The plan seat is
+NOT re-dispatched for another revision of these mechanisms; the constructions
+are named here.
+
+## RULING 19 - THE MERGE MOVES INTO A PURE LEAF. My instrument could not reach the object.
+
+B1. Ruling 14 named the row source and put its enforcement in the LEAF'S UNIT
+TEST over a fixture. Measured: the panel's capture code IS NEVER EXECUTED BY
+ANY TEST IN THIS REPO - nothing renders, no handler is invoked - so the
+sabotage that captures the pre-grade array at the right moment SURVIVES EVERY
+STATED GATE. The row I ordered constrains the FIXTURE, not the capture. The
+plan even says the mutation is implementation-only while its killing argument
+describes a change to the test.
+
+That is the third instance of my own recurring error this row: placing an
+assertion where it cannot see the thing it protects.
+
+**THE CONSTRUCTION, and it is a change of KIND: the merge becomes a PURE LEAF
+FUNCTION** - it takes this run's results, the identity projection and the meta,
+and returns the cohort. `handleGradeAll` CALLS it. The leaf's own test then
+exercises the real merge rather than a fixture of it, and the pre-grade-array
+sabotage kills because it changes what the leaf is called with. **PLUS a
+source-text pin over the COMMENT-STRIPPED `handleGradeAll` body** asserting the
+call and its arguments. Two instruments, neither of which is the one that
+could not fail.
+
+## RULING 20 - the ban on reading the row array was MINE and it is NARROWED
+
+B2, and it is the fourth silent-green. My boxed rule required the captured rows
+to carry `assessment` and, in the same clause, banned the only source that has
+it - measured: the submissions projection does not carry it, the classifier
+does not return it, the action's results do not include it; it exists only on
+the row. So the rule is UNBUILDABLE AS WRITTEN, and the likely resolution -
+fill it from the one in-scope value - makes every row carry the SAME label, so
+the spread predicate is false on every run and THE DISCLOSURE LINE NEVER
+APPEARS. The mitigation for a hazard the check re-measured as real (the row
+memo filters by COURSE ONLY, so one run genuinely can span two assessments)
+would have shipped dead, green.
+
+**THE NARROWED RULE: the handler MAY read the row array ONCE, INSIDE
+`handleGradeAll`, SOLELY to project the identity fields (`id`, `studentName`,
+`assessment`) for the rows in THIS RUN'S RESULTS.** It is forbidden everywhere
+else and at render time, absolutely. The projection is an argument to the
+Ruling 19 leaf. AND THE CAPTURE GETS A GATE: an assertion that the captured
+rows carry their own per-row assessment values, plus a sabotage that fills them
+all from the single in-scope value and MUST kill.
+
+## RULING 21 - "exactly twice" is withdrawn. It was red on the shipped precedent.
+
+B3. My whitelist clause demanded the render body read the cohort exactly twice.
+The check counted the reads the plan's own constraints FORCE - a null test,
+the reuse-mandated guard, the whitelisted mount which cannot be hoisted, and
+the disclosure line - and got three or four. Worse, it is RED AGAINST THE
+SHIPPED A16-1 PRECEDENT the plan leans on everywhere, which builds the entry
+once as a const and uses it twice, and whose shipped detector is written FOR
+that shape.
+
+**THE COUNT CLAUSE IS WITHDRAWN.** What replaces it is not a weaker count but a
+different kind: the entry may be hoisted to a const, AS THE SHIPPED PRECEDENT
+DOES, and the whitelist applies to THE EXPRESSION ASSIGNED TO THAT CONST -
+whose only free identifiers are the captured cohort and the two imported
+helpers. The one-hop evasion stays closed, because the const's initialiser is
+exactly where the evasion would have to appear. Also fix the formal statement,
+which as written is red on its own worked example.
+
+**AND THE DISCLOSURE LINE IS PINNED TOO.** The check found it unpinned, sitting
+in a region where the live identifiers legitimately appear ten times - the same
+door, one prop over.
+
+## RULING 22 - the gate writes its snapshots OUTSIDE the repo
+
+The snapshot gate WORKS - the check constructed the failing case and confirmed
+it ignores a concurrent agent's pre-existing dirt, which was Ruling 9's whole
+motivation. But its literal commands write their two files INTO THE REPO ROOT,
+where the ignore rules do not cover them, so the second snapshot APPEARS IN ITS
+OWN OUTPUT as an untracked path in no published set. **The gate fails
+deterministically on every wave, on its own artifact** - and a gate that always
+fails is waived exactly like one that never fails.
+
+Write both snapshots to the session scratchpad.
+
+## RULING 23 - the majors, each with its required change
+
+- **The error path never clears the cohort.** The handler returns early on an
+  error and again in `catch`, so after a failed run the panel sits directly
+  under the grading error still reporting the PREVIOUS run's trends. Clear it,
+  and gate it.
+- **STATE THE ROW-STATE MAPPING.** Which row state becomes which ungraded kind
+  is never specified, and the implementer writes both the adapter and its test,
+  so the test will encode whatever the adapter does. Those counts feed a later
+  student-facing disclosure.
+- **WAVE 1 MAY PUBLISH ITS OWN SET.** The published set fixes two placeholder
+  filenames before the scoping pass chooses a target, so under the gate wave 1
+  fails on its own leaf - and the EXISTING leaf in the tree is not in the set at
+  all, so "add to the existing leaf" is silently unavailable. The scoping pass
+  publishes the set; the gate then binds it.
+- **PRICE THE WAVE-1 FLOOR HONESTLY.** The prior extraction's named candidates
+  are exhausted, so the pass starts from zero remaining and a hard 32-line
+  target, with the comment floor forbidding net comment removal - which also
+  forbids MOVING a commented block, the likelier extraction in a file that is
+  31 percent comments. The plan tells the pass only the weaker half. STATE THE
+  CONTINGENCY if the pass reports fewer than 32 extractable lines, because
+  wave 2's budget plus margin leaves zero slack.
+- **The no-second-predicate row drops its own qualifier** and is therefore red
+  on the mandated export list, which includes a predicate.
+
+## RULING 24 - minors
+
+The occurrence count is 7 lines / 10 occurrences, not 8 - the plan's own pasted
+output shows 7, and MY round-4 correction repeated the wrong number, which is
+the second time I have carried a miscount into a document that overrides
+everything downstream. Cite the region by MARKER, never by a raw line number
+applied to comment-stripped text - wave 1 is guaranteed to move it. The
+comment-stripping helper is module-local and this repo forbids cross-test-file
+imports, so it must be DUPLICATED, and the plan cites it as precedent without
+saying so. The canary-describe shape appears six or seven times, not four. And
+the ref mirror of the row array gives a text-detector-proof route to the same
+bad capture - Ruling 19's leaf closes it, but say so.
+
+## What is NOT reopened
+
+The check verified and I will not have re-measured: every line citation listed
+in its "verified exact" paragraph, the comment count, the panel's length, the
+snapshot gate's mechanism, the import-and-reference canary shape, the positive
+identity row and its sabotage (which it names as the CORRECT shape, the one
+the row-source sabotage lacks), and the empty-label routing. It also CLEARED
+two fields I would otherwise have chased: both are inert on this path, proven
+by a canaried grep across all four consumers.

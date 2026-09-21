@@ -578,6 +578,39 @@ describe("A18 AC-3: the privacy disclosure's first sentence drops \"record\"; th
 });
 
 // ---------------------------------------------------------------------------
+// docs/a18-test-notes.md 5.9: a hedge denylist is the unbounded denylist the
+// caps forbid. Freeze the whole disclosure whole instead - this row changed
+// exactly one word in it (the fact regexes above stay, for the readable
+// diff on a mismatch; equality is what actually discriminates a hedge).
+// ---------------------------------------------------------------------------
+
+describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, applied to this block)", () => {
+  const fieldsetSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
+    "utf-8"
+  );
+
+  const fieldsetCloseIdx = fieldsetSource.lastIndexOf("</fieldset>");
+  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
+  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
+  const normalized = raw.replace(/\s+/g, " ").trim();
+
+  const FROZEN_DISCLOSURE =
+    "Frames from your screen are sent to a third-party AI provider to be read while you capture. " +
+    "Share a single window rather than your whole screen, and close any gradebook, inbox, or student submission first.";
+
+  it("both anchors resolve", () => {
+    expect(pOpenIdx).toBeGreaterThan(-1);
+    expect(pCloseIdx).toBeGreaterThan(-1);
+  });
+
+  it("the whole disclosure, whitespace-normalized, is byte-equal to the frozen literal", () => {
+    expect(normalized).toBe(FROZEN_DISCLOSURE);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A18 AC-4: the protected video-script wording (a recording the instructor
 // makes ELSEWHERE, to read a script aloud while re-recording) must survive
 // untouched. The two-line source comment is pinned as two independent

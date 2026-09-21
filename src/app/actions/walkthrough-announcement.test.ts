@@ -612,4 +612,12 @@ describe("A18 AC-2: the empty-input error strings stop saying \"record a walkthr
     }
     expect(count).toBe(2);
   });
+
+  // P5 (docs/a18-test-notes.md 5.9, Ruling 4 m3): the script action's own
+  // "re-records" comment (:533-534) is PROTECTED future re-recording
+  // material, not a defect locus - a comment-level guard, same cheap class
+  // as the landed AC-6.
+  it("P5: the re-records comment describing the future re-recording step is untouched", () => {
+    expect(source).toContain("the instructor reads it, edits it, and re-records");
+  });
 });

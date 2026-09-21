@@ -43,6 +43,9 @@ have to open a file to disprove.
 
 ## What your artifact must contain
 
+- A verification report quotes the wrapper's per-argument lines
+  (`npm run test:paths <p1> <p2> ...`) for any check spanning two or more test
+  files, never a raw multi-path `vitest`/`npm test` command.
 - Every quantity, with the command that produced it.
 - Every pass condition naming three things: the object under comparison, the
   instrument producing each quantity in it, and the direction of failure.

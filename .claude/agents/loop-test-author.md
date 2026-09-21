@@ -118,6 +118,9 @@ name the gate rather than filing the exception.
 
 ## What your artifact must contain
 
+- Any instrument that names two or more test files is spelled with
+  `npm run test:paths <p1> <p2> ...`, never a raw multi-path `vitest`/`npm test`
+  command - that form silently drops any argument it does not match.
 - Numbered requirements, each with its verify row (object, instrument,
   direction) and its sabotage.
 - Frozen oracles stated as CONSTRUCTIONS - say exactly how the set is built and

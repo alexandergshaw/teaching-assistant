@@ -79,6 +79,9 @@ Read these as your own failure modes, all measured in this repo:
   independently gateable.
 - The disjointness computation, both senses, pasted.
 - The gate for each wave, naming the exact commands and what a pass looks like.
+  Any gate or instrument naming two or more test files is spelled with
+  `npm run test:paths <p1> <p2> ...`, never a raw multi-path `vitest`/`npm test`
+  command - that form silently drops any argument it does not match.
 - Any line-shift obligation it creates, with the delta and the owner.
 - A residual register: owner, instrument, and the step that will measure it.
   Missing any of the three it is a deletion; call it that.

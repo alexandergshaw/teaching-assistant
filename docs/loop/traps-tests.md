@@ -75,3 +75,31 @@ otherwise.
 yields `undefined`.** Splitting a file and reaching back up for a shared
 constant type-checks, passes tsc, and produces `undefined` at runtime. Push the
 constant down into the leaf.
+
+**A multi-path vitest filter silently drops any argument it does not match,
+whenever another argument matches.** vitest's own filter is a union with no
+per-filter accounting: a missing path, a typo, an existing non-test file, or a
+real but test-less directory sitting next to one real match still exits 0 -
+under `npx vitest run`, bare `npx vitest`, `--run`, `npm test`, `npm test --`,
+and `npm run test --`, in both shells (docs/l14-scope.md, section 1). Use
+`npm run test:paths <p1> <p2> ...` for two or more paths instead
+(docs/loop/this-repo.md, "Running a named set of test files"); it fails unless
+every argument is credited at least one executed, passing file. Through
+`npm run test:paths`, the wrapper's own flag-refusal rule almost never fires,
+because npm swallows an unrecognised flag before the wrapper ever sees it
+(measured on `-t` and `--reporter`, in both shells - see the next entry for
+`npm`'s handling of `--`). Safety there holds for two other reasons instead: a
+flag's displaced VALUE arrives as a plain positional and fails the wrapper's
+existence check, and a flag npm swallows whole only makes the run BROADER,
+never narrower. The direct `node ... cli.ts` form still refuses a flag
+outright. Do not claim the wrapper refuses flags through `npm run`.
+
+**An optional-value flag can consume the next positional argument, including a
+test file, and overwrite it.** `vitest list --filesOnly --json` followed by a
+real test file consumed that file as `--json`'s (optional) output path and
+overwrote it with two bytes, deleting 302 lines of a real test file in this
+repo during this very trap's own measurement (docs/l14-scope.md, section 1.6).
+The fix in `src/tools/vitest-paths/`: every flag passed to vitest is in joined
+`--flag=value` form, never a bare flag followed by a separate value token, and
+its JSON report path is built under the OS temp directory, never inside the
+repository.

@@ -70,6 +70,10 @@ This repo has paid for each of these. Read them as your own failure modes:
 
 ## What your artifact must contain
 
+- Any criterion or instrument that names two or more test files is spelled
+  with `npm run test:paths <p1> <p2> ...`, never a raw multi-path
+  `vitest`/`npm test` command - that form silently drops any argument it does
+  not match.
 - Numbered criteria, each with its three parts, traceable to the owner's words.
 - The leverage line, claimed or explicitly fired-and-declined.
 - If you restructured a prior version: a disposition table mapping every prior

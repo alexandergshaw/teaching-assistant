@@ -23,6 +23,23 @@ Run them from **PowerShell**. All four are repo-root commands.
 | Tests | `npm test` | 63.6s | `Test Files 1017 passed (1017)` / `Tests 20200 passed (20200)`, exit 0 |
 | Build | `npm run build` | 66.6s | `(check-mark) Compiled successfully in 16.5s`, then **exit 1**. See below. |
 
+### Running a named set of test files
+
+`npx vitest run <p1> <p2> ...` silently DROPS any argument that matches no
+executed file whenever at least one other argument matches - vitest's own
+multi-filter is a union with no per-filter accounting, so a missing path, a
+typo, a stale filename, or a real but test-less directory next to one real
+match still exits 0 (docs/l14-scope.md, section 1). This is true of every
+spelling that reaches vitest: `npx vitest run`, bare `npx vitest`, `--run`,
+`npm test`, `npm test --`, and `npm run test --`, in both shells.
+
+For two or more paths, use `npm run test:paths <p1> <p2> ...` instead - it
+runs one vitest process and fails unless EVERY argument is credited at least
+one executed file with at least one passing assertion, printing a
+`COVERED`/`NOT COVERED` line per argument. A single path may still use
+`npx vitest run <path>` directly, since there is nothing for it to silently
+drop.
+
 ### The build gate does not exit 0, and must not be expected to
 
 `npm run build` compiles, then fails in the prerender tail:

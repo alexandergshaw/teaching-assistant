@@ -33,7 +33,10 @@ authoring.
 4. **The silent-green failure.** Name the specific way this could be built, pass
    lint, tsc, `next build`, vitest and every structure test, and still be
    useless or actively wrong. Remember that vitest here is node-env and renders
-   no component, so nothing tests markup, focus or keyboard behaviour.
+   no component, so nothing tests markup, focus or keyboard behaviour. Ask
+   explicitly whether any gate or instrument in the artifact runs two or more
+   test paths without `npm run test:paths` - a raw multi-path `vitest`/`npm test`
+   command silently drops any argument it does not match and still exits 0.
 5. **The feature-already-exists case.** Argue the strongest version of it. If it
    is strong, say so plainly - it reframes the whole build.
 6. **The weakest requirement:** which single clause is most likely to be

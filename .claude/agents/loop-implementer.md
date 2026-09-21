@@ -29,6 +29,11 @@ re-deriving it.
 - **Do not run `npx tsc --noEmit`.** `tsconfig.json` is incremental and
   concurrent runs race on `tsconfig.tsbuildinfo`. Exactly one caller runs tsc,
   and it is not you. `npm test` is safe to run concurrently.
+- **Two or more test paths run only through `npm run test:paths <p1> <p2> ...`**,
+  never a raw `npx vitest run`/`npm test` with two or more paths - that form
+  silently drops any argument it does not match (docs/loop/this-repo.md,
+  "Running a named set of test files"). If your brief spells a raw multi-path
+  gate, run it through the wrapper instead and say so in your report.
 
 ## House rules that fail loudly if you miss them
 

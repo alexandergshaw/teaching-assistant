@@ -57,5 +57,8 @@ Effort expectation: maximum.
 
 - Measure; never recall. Every quantity names its command.
 - Grep before asserting anything exists.
+- Any gate or seam contract naming two or more test files is spelled with
+  `npm run test:paths <p1> <p2> ...`, never a raw multi-path `vitest`/`npm test`
+  command - that form silently drops any argument it does not match.
 - Do not spawn subagents; return the finished artifact yourself.
 - State plainly what you could not determine.

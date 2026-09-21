@@ -151,7 +151,10 @@ deletion, the test is not a removal test.
 **Worked instance, found already shipped with no removal test.** REGRESSION
 423 / commit c988963's whole advantage is GUARANTEED: layer C
 (`src/lib/grade/class-trends-draft.ts`) makes no model call. Its guard,
-`src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts:50`,
+`src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts`
+(the list is at `:58`, the walker at `:119` - re-measured 2026-09-20 after
+this card's stale `:50` cite, which is mid-comment, was inherited verbatim by
+a criteria document and passed to a checker as the named precedent),
 originally listed `FORBIDDEN_PATH_PREFIXES = ["app/actions", "lib/canvas",
 "lib/lms-generation"]` - omitting `lib/llm` and `lib/gemini`. Re-introducing a
 model call into `class-trends-draft.ts` left every gate green, including this

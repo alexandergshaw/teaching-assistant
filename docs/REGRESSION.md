@@ -44257,3 +44257,164 @@ GUARD NOTES, each earned by a sabotage that was silent before it:
   Sabotaging either leaves the other green - verified both directions.
 - editSnapshotRowField in SnapshotResultCard is DEAD CODE, called by nothing.
   The live edit path is the panel calling editAssessmentField directly.
+
+## 433. Area baseline - class trends on the LMS grading surfaces and the grading-recording panel, before A16-3 and A16-5
+
+Written BEFORE hand-off for A16 wave 1 onward (`docs/a16-plan.md` revision 4,
+section 3.2, "WAVE 0 IS THE REGRESSION BASELINE"), per `docs/DEV_LOOP.md`'s
+Baseline paragraph. This entry records what the code DOES today, read out of
+the source. It is an oracle, not a requirement: A16-3 (the grading-recording
+mount) and A16-5 (Repo Grades) are filed to ADD a trends panel to two surfaces
+that render none today; if either wave changes a line below that it was not
+filed to change, that is a regression.
+
+**Read at `2bfc3cc`** (`git rev-parse --short HEAD`). `git status --short`
+returns exactly ` M docs/css-orphans.md` - dirty from outside this loop per
+the standing exemption, untouched here. Nothing below was executed; this
+repo's vitest is node-env and renders no component
+(`docs/loop/this-repo.md`), so every claim about a rendered panel, a gated
+mount or a "Trends (0)" button is a READING claim, not a run one.
+
+### The coverage check
+
+`grep -a` is mandatory on this file - it carries a raw NUL byte and plain
+`grep` reports a false clean pass. Measured at 44259 lines
+(`@(Get-Content docs/REGRESSION.md).Count`, cross-checked `wc -l` = same)
+before this entry was appended:
+
+```
+grep -an "class trends" docs/REGRESSION.md | wc -l    # 0
+grep -an "class-trends" docs/REGRESSION.md | wc -l     # 20
+```
+
+The zero is load-bearing and paired with its own canary per the hand-off's
+instruction: an instrument that finds nothing looks exactly like a clean
+result, so the hyphenated form is confirmed to hit (20) before the unhyphenated
+form's 0 is trusted. All 20 existing mentions use the hyphenated spelling this
+entry also uses.
+
+### Where the class-trends panel renders today, re-measured (not copied from the plan)
+
+`GradingResults.tsx` is the ONLY component with a `ClassTrendsPanel` mount that
+is gated and adapter-built; `DraftedGradesTab.tsx` mounts the same component
+directly, ungated, as its own precedent. Re-derived with
+`grep -rn "GradingResults" --include=*.tsx --include=*.ts src/app/components`
+filtered to non-test files, and confirmed by opening each hit:
+
+| Surface | Renders `<GradingResults>` at | Gate before reaching it |
+|---|---|---|
+| `GradingTab.tsx` (classic zip/canvas + livefeed passthrough) | `:427` | `source !== "livefeed" && run && run.results.length > 0` |
+| `LiveFeedPanel.tsx` | `:430` | `activeRun && activeRun.results.length > 0` |
+| `GithubGradingPanel.tsx` | `:852` | `run.results.length > 0` |
+
+`@(Get-Content src/app/components/GradingResults.tsx).Count` = 892 (`wc -l`
+agrees). Inside it, the trends mount is an IIFE at lines 581-597
+(`sed -n '578,597p' ... | cat -n`), which:
+
+1. builds `const classTrendsEntry = toClassTrendsEntry(run, { courseName: "",
+   assignmentName, canvasUrl })` at `:589`,
+2. gates the render on `hasTrendableResults(classTrendsEntry)` at `:591`, and
+3. renders `<ClassTrendsPanel entry={classTrendsEntry} defaultExpanded />` at
+   `:593` only when that gate is true - "so a run with nothing graded yet
+   renders nothing at all, never a Trends (0) button" (the block's own
+   comment, `:587-588`).
+
+`GradingResults.tsx:19-20` imports `ClassTrendsPanel` from
+`./drafted-grades/ClassTrendsPanel` and `{ hasTrendableResults,
+toClassTrendsEntry }` from `./grading-results/classTrendsEntry`.
+
+**The `DraftedGradesTab.tsx` site is the precedent, not a fourth caller of the
+adapter.** It mounts `<ClassTrendsPanel entry={entry} />` directly at `:627`,
+inside a group header, with no `hasTrendableResults` gate visible at that call
+site and no `classTrendsEntry.ts` import - `entry` there is already a
+`GradingRunEntry` built elsewhere in that file's own draft-grouping logic, not
+through `toClassTrendsEntry`. It is missing `defaultExpanded`, unlike the
+`GradingResults.tsx` mount.
+
+### That the grading-recording panel imports nothing from `grading-results/` and mounts no trends panel today
+
+```
+grep -rn "grading-results" src/app/components/grading-recording/    # no matches, exit 1
+```
+
+Canary that the instrument fires on this directory at all:
+
+```
+grep -rn "@/lib/grade" src/app/components/grading-recording/*.ts
+# hits in copy-feedback.test.ts, grading-feedback-prompt.test.ts,
+# grading-feedback-prompt.ts, grading-row-serialization.ts, grading-row.ts,
+# grading-rows.ts (x2), grading-submission-merge.ts, useGradingRows.ts
+```
+
+The absence of any `grading-results` hit is real, not an instrument miss.
+`@(Get-Content src/app/components/grading-recording/GradingRecordingPanel.tsx).Count`
+= 966 (`wc -l` agrees, matching `docs/a16-plan.md` section 5.1's own figure),
+and no `ClassTrendsPanel`, `classTrendsEntry` or `hasTrendableResults`
+identifier appears anywhere under that directory today.
+
+### The shipped contract of `classTrendsEntry.ts`, since wave 2 will import both symbols
+
+`@(Get-Content src/app/components/grading-results/classTrendsEntry.ts).Count`
+= 54 (`wc -l` agrees). It exports exactly two functions and one interface
+today (`grep -n "export function\|export interface"` returns three hits,
+`:35`, `:44`, `:52`):
+
+```
+export interface ClassTrendsEntryMeta {
+  courseName: string;
+  assignmentName: string;
+  canvasUrl: string;
+}
+
+export function toClassTrendsEntry(run: GradingRun, meta: ClassTrendsEntryMeta): GradingRunEntry {
+  return { ...meta, run };
+}
+
+export function hasTrendableResults(entry: GradingRunEntry): boolean {
+  return entry.run.results.some((r) => !r.ungraded && r.rubricAreas.length > 0);
+}
+```
+
+`toClassTrendsEntry` returns `{ ...meta, run }` - `run` carried by reference
+(`entry.run === run`, per the file's own header comment at `:5-13`), no
+filtering, reordering or per-result rewrite. `hasTrendableResults` is true only
+when at least one result is both graded (`!r.ungraded`) and carries at least
+one rubric area (`r.rubricAreas.length > 0`); an all-ungraded or
+all-zero-rubric-area run renders nothing. The file's only non-local import is
+`import type { GradingRun, GradingRunEntry } from "@/lib/grade/types"` (`:31`),
+type-only, through the narrow `@/lib/grade/types` path rather than the
+`@/lib/grade` barrel.
+
+### How assignmentName/courseName/canvasUrl reach the panel on the GithubGradingPanel path - the precedent wave 2 copies
+
+- assignmentName is captured INSIDE the grade handler, not read from a live
+  control at render time: `setLastGradedFolder(gradingFolder)` at `:398` runs
+  during the same handler that produces the run, and the prop passed at
+  `GithubGradingPanel.tsx:861` is
+  `assignmentName={lastGradedFolder ? normalizeGradingFolder(lastGradedFolder) : ""}`,
+  commented (`:855-860`) as "these results always show what THIS run actually
+  covered, even if the folder box is edited afterward for the next run."
+- canvasUrl is hardcoded `""` at the call site, `GithubGradingPanel.tsx:854`
+  (`canvasUrl=""`) - there is no Canvas assignment on this path.
+- courseName is not a prop of `GradingResults` at all. `grep -n "courseName"
+  src/app/components/GradingResults.tsx` returns exactly one hit, `:589`,
+  where it is hardcoded `""` inline inside the trends-mount IIFE itself, for
+  every caller including `GithubGradingPanel.tsx` - no caller has ever
+  threaded a course name to this component. `GradingResultsProps` (`:107-`)
+  has no `courseName` field; `grep -n "GradingResultsProps"
+  src/app/components/GradingResults.tsx` returns `:107` and `:179` only.
+
+For contrast, the other two callers' assignmentName sources, re-measured:
+`GradingTab.tsx:437` passes `assignmentName=""` (no source of truth on that
+path, per its own comment at `:430-436`); `LiveFeedPanel.tsx:437` passes
+`assignmentName={row.title}`, read live from the row rather than captured at
+grade time.
+
+### Not baselined here
+
+The internals of `ClassTrendsPanel` itself, `computeClassTrends`, and the
+Repo Grades folder-entry surface A16-5 will add an adapter for - the plan's
+wave 0 section names only the class-trends mount sites, the grading-recording
+absence, and the `classTrendsEntry.ts` contract, all covered above. Nothing
+else in `docs/a16-plan.md`'s wave 0 section names an additional baseline
+target.

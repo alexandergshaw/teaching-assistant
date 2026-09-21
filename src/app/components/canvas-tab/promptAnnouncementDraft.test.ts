@@ -148,11 +148,31 @@ describe("AC-21: the cap is applied cap-then-trim, in that order", () => {
     expect(req.promptText).toBe(exact);
   });
 
-  it("(iii) a value with trailing whitespace at the cap boundary is trimmed shorter, proving trim runs after cap", () => {
+  it("(iii) a value with trailing whitespace at the cap boundary is trimmed shorter (does NOT by itself distinguish cap-then-trim from trim-then-cap - see row (iv); both orders produce the identical result here, since the whole string already fits within the cap)", () => {
     const state = baseUiState({ kind: "none" }, { pastedOutline: null, mostRecent: null });
     const withTrailingWs = "x".repeat(PROMPT_ANNOUNCEMENT_MAX_CHARS - 2) + "  ";
     const req = buildPromptDraftRequest({ ...state, promptText: withTrailingWs });
     expect(req.promptText.length).toBeLessThan(PROMPT_ANNOUNCEMENT_MAX_CHARS - 1);
+  });
+
+  it("(iv) the discriminating row: whitespace landing exactly at the cap CUT POINT of an over-cap string tells cap-then-trim apart from trim-then-cap", () => {
+    // The string is far longer than the cap, so it is never trimmed as a
+    // whole by a leading/trailing trim - only the boundary the cap itself
+    // introduces can expose which operation ran first. Position CAP-1 (the
+    // last character kept by slice(0, CAP)) is a space; everything after
+    // it is more non-whitespace text.
+    const state = baseUiState({ kind: "none" }, { pastedOutline: null, mostRecent: null });
+    const overCapWithSpaceAtCutPoint =
+      "x".repeat(PROMPT_ANNOUNCEMENT_MAX_CHARS - 1) + " " + "more text that runs well past the cap boundary";
+    const req = buildPromptDraftRequest({ ...state, promptText: overCapWithSpaceAtCutPoint });
+
+    // cap-then-trim (shipped): slice(0, CAP) keeps "x"*(CAP-1) + " ", then
+    // .trim() removes the trailing space -> length CAP-1, no trailing space.
+    // trim-then-cap (the wrong order): trimming the full string first is a
+    // no-op (it has no leading/trailing whitespace at all), so the cap then
+    // cuts to "x"*(CAP-1) + " " -> length CAP, WITH a trailing space.
+    expect(req.promptText.length).toBe(PROMPT_ANNOUNCEMENT_MAX_CHARS - 1);
+    expect(req.promptText.endsWith(" ")).toBe(false);
   });
 });
 

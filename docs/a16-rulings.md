@@ -282,3 +282,140 @@ steps. Its objection was narrower and is Ruling 8: BL-1 was routed NOWHERE, and
 it is not a reading claim at all but a traceable source-level fact that can be
 instrumented today by asserting on the field's PROVENANCE rather than on the
 adapter's call expression.
+
+---
+
+# Round 3 - rulings on the check of plan revision 2
+
+DEFECTIVE: 3 blockers, 4 majors, 4 minors. One blocker is a REPEAT and is
+disposed by construction below; one is a design decision I make here; ONE IS
+MINE - Ruling 9 produced a gate that cannot fail.
+
+Revision 2's measurement is excellent and the check could not break it: it
+re-executed every load-bearing quantity and found exactly ONE wrong (the
+apply-loop range). The intersections, both canaries, the symbol re-citations,
+the six-marker modal measurement and the A18 re-derivation all reproduce. The
+Ruling 10 import is verified SAFE - the only non-local edge is `import type`,
+which the runtime-import-graph walker erases outright, and the check also
+tested the hazard nobody asked about (a sibling directory's consumer census is
+non-recursive, so a new importer cannot move it). None of that is reopened.
+
+## RULING 14 - THE COHORT'S ROWS. My rulings named three fields and never named the fourth.
+
+B1, and it is the third silent-green on this row. Ruling 5 named the three
+meta fields and Ruling 8 fixed `assignmentName` - AND NOBODY EVER NAMED
+`rows`, which is the field that decides whether the panel appears at all.
+
+The boxed rule says the rows are captured inside the handler. It never says
+WHICH rows, and two of the plan's own sabotages positively endorse the
+pre-grade array, objecting only to the timing of the read. Measured, that
+array cannot be anything else: it is a memo over React state, the row updater
+returns a NEW row that lands on a later render, and the rubric-areas field is
+documented as empty on a row never successfully graded and never persisted.
+
+So on a first run every captured row carries a pending state and no rubric
+areas, the shipped gate predicate returns false, and **THE PANEL NEVER
+RENDERS. A16-3 SHIPS DEAD** - with the leaf's own unit tests perfectly green,
+because they run over an implementer-authored fixture. The corroborating tell
+is in the gate itself: its mapping row enumerates row states that only exist
+BEFORE grading, which is evidence the plan expected the stale array.
+
+**THE CONSTRUCTION, since this class gets no further attempt at the
+mechanism:** the rule names the row source as THIS RUN'S CLASSIFIED RESULTS
+MERGED ONTO THEIR ROWS, buildable inside the apply loop. And the gate gets a
+row NO FIXTURE CAN SATISFY VACUOUSLY: assert the captured cohort carries at
+least one row with non-empty rubric areas, plus a sabotage that captures the
+pre-grade array at the top of the handler and MUST kill.
+
+## RULING 15 - the detector region is the comment-stripped render body minus the handler
+
+B2, NEW, and the plan walked into it while citing the file that solves it.
+
+Both provenance pins read RAW SOURCE, and the plan MANDATES a 10-14 line hinge
+comment at the capture and a 6-8 line one at the mount - comments whose
+SUBJECT is the very identifiers the pins look for. Consequences measured:
+
+- The POSITIVE pin is satisfied by the mandated comment alone, so the sabotage
+  that deletes the identifier from the call does NOT kill. A tautology, and
+  this repo has recorded that shape twice.
+- The NEGATIVE pin goes RED ON A CORRECT IMPLEMENTATION, because the mount's
+  mandated comment names what it forbids. The plan even documents what an
+  implementer does next: finds it red and LOOSENS IT rather than fixing it.
+- And the negative pin is evadable one hop: a render-body `const` one line
+  above the mount is outside the pinned expression, so "never read from a live
+  control at render time" - the load-bearing half of Ruling 8 - is not
+  detectable at all.
+
+**THE REGION IS: the comment-stripped render body, EXCLUDING the handler's
+body.** That region is computable, and once wave 2 lands it contains ZERO
+legitimate occurrences of the three identifiers. The repo's own detectors
+already strip comments and SAY SO in the file the plan cites by symbol -
+"comments naming the rule do not count, and are stripped before this check
+runs". Carry the lesson, not just the citation. Broad-and-noisy over the whole
+file was correctly rejected; the middle was available and unbuilt.
+
+## RULING 16 - RULING 9 WAS WRONG. The gate must be a snapshot diff.
+
+B3, and it is mine. I scoped the wave gate to the wave's own paths to fix a
+real false-failure under concurrency, and I disarmed it: `git status --short
+-- <the wave's paths>` CAN ONLY PRINT PATHS IN THE PATHSPEC, so "every path
+printed is in the wave's set" is true BY CONSTRUCTION. There is no input on
+which it fails. The check proved it by running the form and getting silence -
+silence it would produce whether or not the file had been edited.
+
+That is worse than the problem it solved, because this gate's recorded purpose
+in this project is that implementer subagents can silently exceed their brief
+and misreport. And it quietly deleted the only instrument for four other
+stated pass conditions - every "green WITHOUT being edited" clause, and the
+membership rule itself, whose whole point is that run-only files are not
+written. A wave that edits a structural gate to make itself green now passes
+both the gate and the suite.
+
+**THE GATE IS A SNAPSHOT DIFF, and the alternative I offered is withdrawn:
+capture `git status --short` REPO-WIDE immediately before dispatch, run it
+repo-wide again after, and FAIL ON ANY PATH THAT IS NEW OR CHANGED AND NOT IN
+THE WAVE'S PUBLISHED SET.** That keeps out-of-set detection while ignoring
+whatever a concurrent wave was already touching, which is the whole of Ruling
+9's motivation. The two forms were never equivalent and I should not have
+written them as alternatives.
+
+## RULING 17 - majors, each with a required change
+
+- **M1**: wave 1 can pass its gate BY DELETING 32 COMMENT LINES. The only
+  condition is a line count plus an unchanged suite, and the plan measured this
+  file at 298 comment lines. Nothing asserts the new leaf exists, is imported
+  or is called. Add the gate row: the panel imports from the leaf and
+  references its exports, AND the comment-line count did not fall.
+- **M2**: wave 1 is the least specified wave and the only one with no scoping
+  pass, while wave 3 - less risky - gets one. The plan concedes the extraction
+  target is an architecture decision and then dispatches it as a build wave.
+  This repo's recorded failure is exactly here. NAME THE TARGET OR GIVE WAVE 1
+  ITS OWN SCOPING PASS.
+- **M3**: `student: row.studentName` is called a requirement and has no gate
+  row, while its negative twin gets a dedicated one. The type forces A value,
+  not the RIGHT one - an adapter emitting an empty string passes everything
+  and silently breaks N13b later. Add the positive assertion.
+- **M4**: the empty-label outcome is THE DEFAULT PATH, not an edge case - the
+  readiness check gates on the rubric and the row count, so the assessment box
+  is optional. Revision 2 says that failure "disappears", which is true only
+  of its permanence. The common case renders the exact strings Ruling 8 used
+  to DESCRIBE the silent-green, and it is unrouted. Route it.
+
+## RULING 18 - minors
+
+Pick one on the re-export contradiction (5.4 says re-exported through the leaf,
+5.5 says exports reduce to three, and the gate goes red if the leaf exports its
+own predicate - an implementer following 5.4 trips it). The apply loop is
+`:581-586`; the cited range excludes both the apply call and the closing brace,
+and it is cited BY LINE in a plan whose own section forbids that - the third
+off-by-one on this row. RES-P-2 describes itself as already done while its own
+instrument returns zero, and no wave's set contains the backlog file, so only
+the orchestrator step can perform it - that is mine, and it is noted. Add the
+unlisted consumer-census test to the run-only list; harmless, but unchecked.
+
+## Scope of the next pass
+
+MECHANICAL AND BOUNDED, like A18's round 3. Rulings 14 through 18 are a named
+row source plus its non-vacuous assertion, a computable detector region, a
+snapshot-diff gate, four gate rows and a handful of citations. NOT a third
+attempt at any mechanism. Do not rebuild anything listed as reproducing above.

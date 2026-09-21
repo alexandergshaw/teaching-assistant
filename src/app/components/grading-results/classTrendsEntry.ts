@@ -24,11 +24,12 @@
 // import of that barrel is a client-bundle hazard (see GradingResults.tsx's
 // own header comment on gradingResultsHelpers.ts for the shipped incident).
 //
-// NOTE FOR FUTURE EDITORS: the client-bundle guard in
-// gradingResultsHelpersWiring.test.ts matches RAW SOURCE, comments included.
-// Do not write the word "from" immediately before the quoted barrel
-// specifier anywhere in this file - name the barrel without that preceding
-// word, as this comment does.
+// NOTE FOR FUTURE EDITORS (corrected by A23): the client-bundle guard in
+// gradingResultsHelpersWiring.test.ts is a transitive runtime-import-graph
+// walk with edge extraction by the TypeScript parser - it reads the AST, not
+// raw source, so a banned specifier appearing in a comment (like this one)
+// does not reach it. Still: name the barrel without a preceding "from"
+// anywhere in this file's own prose, for a human reader's sake.
 import type { GradingRun, GradingRunEntry } from "@/lib/grade/types";
 
 export interface ClassTrendsEntryMeta {

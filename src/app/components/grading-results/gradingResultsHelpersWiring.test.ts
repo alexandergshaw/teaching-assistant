@@ -10,6 +10,7 @@
 // the file it was moved out of (import.meta.url resolves identically here).
 
 import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { composeOverallCommentLocal } from "./gradingResultsHelpers";
@@ -17,6 +18,17 @@ import { composeOverallCommentLocal } from "./gradingResultsHelpers";
 // composeOverallCommentLocal's own doc comment in gradingResultsHelpers.ts
 // for why the file under test does NOT import this itself.
 import { composeOverallComment } from "@/lib/grade";
+import { directoryRoots, scanRuntimeEdges, walkRuntimeGraph } from "@/lib/module-graph/runtime-import-graph";
+import {
+  ALLOWED_ASSET_EXTENSIONS,
+  ALLOWED_BARE_SPECIFIERS,
+  BROWSER_SAFE_MODULES,
+  FORBIDDEN_BARE_SPECIFIERS,
+  FORBIDDEN_PATH_PREFIXES,
+} from "@/lib/module-graph/client-boundary-policy";
+
+const SRC = join(process.cwd(), "src");
+const GRADING_RESULTS_DIR = join(SRC, "app", "components", "grading-results");
 
 describe("composeOverallCommentLocal stays byte-identical to composeOverallComment", () => {
   // gradingResultsHelpers.ts deliberately does NOT import composeOverallComment
@@ -45,20 +57,31 @@ describe("composeOverallCommentLocal stays byte-identical to composeOverallComme
   });
 });
 
-describe("grading-results client files stay client-bundle-safe", () => {
-  // Regression guard for the exact bug this feature shipped once: this
-  // directory's gradingResultsHelpers.ts imported composeOverallComment from
-  // "@/lib/grade" as a VALUE import. That barrel transitively imports
-  // server-only code (grade.ts -> grade/rubric.ts -> research/rubric-bank.ts
-  // -> research/db.ts -> src/lib/supabase/server.ts, which imports
-  // next/headers) - `next build` failed to compile any Pages Router entry
-  // point reachable from GradingResults.tsx, while `npx tsc --noEmit`,
-  // `npx eslint`, and `npx vitest run` all stayed green on the break. Modeled
-  // on src/lib/workflows/course-schedule-docx.test.ts:28-50 and
-  // src/lib/workflows/registry/steps.weekly-announcement-schedule.test.ts:57-70,
-  // both of which record the identical lesson: only `next build` catches
-  // this class of defect, so a source-reading guard test is the only thing
-  // that keeps it caught on every routine run.
+describe("grading-results client files stay client-bundle-safe (A23: transitive runtime-import-graph walk)", () => {
+  // A23 replaces the walled-set line count and the raw-source
+  // BANNED_IMPORT_PATTERNS sweep with a TRANSITIVE RUNTIME-IMPORT-GRAPH WALK
+  // from this directory's own tree-derived root set, under a capability
+  // predicate on the RESOLVED path - never a text pattern inferring import
+  // intent from a line's spelling. types.ts is a NAMED ROOT of this walk
+  // (Ruling Z3): it is judged by its own reachability, not by a name-based
+  // exemption, closing the exact hole a type-only narrowing of its two real
+  // runtime edges would otherwise have left invisible to every other gate.
+  //
+  // ONE shared options object (Ruling W3/R-5e): every walkRuntimeGraph call
+  // in this file takes this SAME identifier.
+  const OPTIONS = {
+    srcRoot: SRC,
+    forbiddenPathPrefixes: FORBIDDEN_PATH_PREFIXES,
+    browserSafeModules: BROWSER_SAFE_MODULES,
+    forbiddenBareSpecifiers: FORBIDDEN_BARE_SPECIFIERS,
+    allowedBareSpecifiers: ALLOWED_BARE_SPECIFIERS,
+    allowedAssetExtensions: ALLOWED_ASSET_EXTENSIONS,
+    treatUseServerAsWall: true,
+  };
+
+  // CLIENT_FILES is the COMPARISON ONLY (O-C) - never the walk's roots. The
+  // walk's real roots are directoryRoots(dir) plus GradingResults.tsx and
+  // types.ts (Ruling Z3), below.
   const CLIENT_FILES = [
     "./gradingResultsHelpers.ts",
     "./RowFeedbackBoxes.tsx",
@@ -79,56 +102,65 @@ describe("grading-results client files stay client-bundle-safe", () => {
     "../GradingResults.tsx",
   ];
 
-  // A22: this scan reads RAW SOURCE - comments included, nothing stripped.
-  // A banned specifier appearing only in a comment reds the file. The
-  // accepted mitigation is prose discipline in the scanned files, not
-  // comment stripping (RES-A22-1, docs/a22-scope.md section 3.4).
+  it("R-2: directoryRoots(dir)'s ./ half matches the CLIENT_FILES literal's ./ half", () => {
+    const derived = directoryRoots(GRADING_RESULTS_DIR)
+      .map((abs) => `./${abs.slice(GRADING_RESULTS_DIR.length + 1)}`)
+      .sort();
+    const literal = CLIENT_FILES.filter((p) => p.startsWith("./")).slice().sort();
+    expect(derived).toEqual(literal);
+  });
 
-  // Ruling R part 2: narrowed to exempt "@/lib/grade/types" only - a
-  // near-miss like "@/lib/grade/typesFoo" is still banned.
-  const BANNED_IMPORT_PATTERNS: RegExp[] = [
-    /from ["']@\/lib\/grade["']/,
-    /from ["']@\/lib\/grade\/(?!types["'])/,
-    /from ["']@\/lib\/supabase\/server["']/,
-    /from ["']next\/headers["']/,
-  ];
-
-  it("canary: the ban patterns fire on known-bad imports, spare the react import, and spare Ruling R's exemption (both quote styles)", () => {
-    const knownBad = [
-      'import { composeOverallComment } from "@/lib/grade";',
-      "import { composeOverallComment } from '@/lib/grade';",
-      'import { generateRubric } from "@/lib/grade/rubric";',
-      "import { generateRubric } from '@/lib/grade/rubric';",
-      'import { createServiceClient } from "@/lib/supabase/server";',
-      'import { headers } from "next/headers";',
+  it("R-2: the walk's full root array contains ../GradingResults.tsx and src/lib/grade/types.ts by name (Ruling Z3)", () => {
+    const roots = [
+      ...directoryRoots(GRADING_RESULTS_DIR),
+      join(GRADING_RESULTS_DIR, "..", "GradingResults.tsx"),
+      join(SRC, "lib", "grade", "types.ts"),
     ];
-    const fires = (fixture: string) => BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test(fixture));
-    for (const fixture of knownBad) expect(fires(fixture)).toBe(true);
-    expect(fires('import { useState } from "react";')).toBe(false);
-    expect(fires('import type { X } from "@/lib/grade/types";')).toBe(false);
-    expect(fires("import type { X } from '@/lib/grade/types';")).toBe(false);
+    expect(roots).toContain(join(GRADING_RESULTS_DIR, "..", "GradingResults.tsx"));
+    expect(roots).toContain(join(SRC, "lib", "grade", "types.ts"));
   });
 
-  it.each(CLIENT_FILES)("%s never imports the banned modules", (relativePath) => {
-    const source = readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
-    for (const pattern of BANNED_IMPORT_PATTERNS) {
-      expect(source).not.toMatch(pattern);
+  it("R-1/R-3/R-4: the grading-results closure carries zero violations, zero unallowed, zero unresolvable specifiers", () => {
+    const roots = [
+      ...directoryRoots(GRADING_RESULTS_DIR),
+      join(GRADING_RESULTS_DIR, "..", "GradingResults.tsx"),
+      join(SRC, "lib", "grade", "types.ts"),
+    ];
+    const result = walkRuntimeGraph(roots, OPTIONS);
+    expect(result.violations).toEqual([]);
+    expect(result.unallowed).toEqual([]);
+    expect(result.unresolvable).toEqual([]);
+  });
+
+  it("R-5: a PLANTED POSITIVE proves this walk actually discriminates (the barrel this row exists to ban)", () => {
+    const grade = join(SRC, "lib", "grade.ts");
+    const canary = walkRuntimeGraph([grade], OPTIONS);
+    expect(canary.violations.length).toBeGreaterThan(0); // R-5a
+    expect(canary.unallowed.length).toBeGreaterThan(0); // R-5b
+    expect(canary.violations.some((v) => v.resolved?.includes("lib/supabase/server"))).toBe(true); // R-5c
+  });
+
+  it("R-5e: both walkRuntimeGraph calls above take the SAME shared options identifier", () => {
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    const calls = [...source.matchAll(/walkRuntimeGraph\(\s*[^,]+,\s*([A-Za-z_$][\w$]*)\s*\)/g)];
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    const names = new Set(calls.map((m) => m[1]));
+    expect(names.size).toBe(1);
+    expect(names.has("OPTIONS")).toBe(true);
+  });
+
+  it("canary: scanRuntimeEdges finds a real edge for a known-bad value import, and none for a type-only one", () => {
+    const knownBad: Array<[string, string]> = [
+      ['import { composeOverallComment } from "@/lib/grade";', "@/lib/grade"],
+      ["import { composeOverallComment } from '@/lib/grade';", "@/lib/grade"],
+      ['import { generateRubric } from "@/lib/grade/rubric";', "@/lib/grade/rubric"],
+      ['import { createServiceClient } from "@/lib/supabase/server";', "@/lib/supabase/server"],
+      ['import { headers } from "next/headers";', "next/headers"],
+    ];
+    for (const [fixture, specifier] of knownBad) {
+      expect(scanRuntimeEdges(fixture, "fixture.ts").edges.map((e) => e.specifier)).toContain(specifier);
     }
-  });
-
-  // Ruling U3: VALUE_IMPORT_PATTERN was withdrawn (misses re-exports/require/
-  // dynamic import). Replaced by a walled-set count: types.ts must carry
-  // exactly one `from "` occurrence, and it must be the known type-only
-  // import. types.ts is read-only here (S14's precedent).
-  it('types.ts carries exactly one `from "` occurrence, and it is the known type-only import (Ruling U3)', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("../../../lib/grade/types.ts", import.meta.url)),
-      "utf8"
-    );
-    const fromLines = source
-      .split(/\r?\n/)
-      .filter((line) => line.includes(' from "') && !/^\s*(\*|\/\/)/.test(line.trim()));
-    expect(fromLines).toEqual(['import type { CodeRunResult } from "../code-runner";']);
+    expect(scanRuntimeEdges('import type { X } from "@/lib/grade/types";', "fixture.ts").edges).toEqual([]);
   });
 
   // Ruling R part 4: a completeness sweep so a future file cannot escape

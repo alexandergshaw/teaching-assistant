@@ -19,10 +19,21 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { directoryRoots, scanRuntimeEdges, walkRuntimeGraph } from "@/lib/module-graph/runtime-import-graph";
+import {
+  ALLOWED_ASSET_EXTENSIONS,
+  ALLOWED_BARE_SPECIFIERS,
+  BROWSER_SAFE_MODULES,
+  FORBIDDEN_BARE_SPECIFIERS,
+  FORBIDDEN_PATH_PREFIXES,
+} from "@/lib/module-graph/client-boundary-policy";
 
 function read(relativePath: string): string {
   return readFileSync(join(process.cwd(), relativePath), "utf8");
 }
+
+const SRC = join(process.cwd(), "src");
+const REPO_GRADES_DIR = join(SRC, "app", "components", "repo-grades");
 
 const CELL_CONTROL_SOURCE = read("src/app/components/repo-grades/RepoGradeCellControl.tsx");
 const GRID_SOURCE = read("src/app/components/repo-grades/RepoGradesGrid.tsx");
@@ -244,62 +255,137 @@ describe("both grading paths set the new feedback/file fields alongside the exis
 });
 
 // ---------------------------------------------------------------------------
-// Client-bundle safety - the exact class of defect REGRESSION entry 355
+// Client-bundle safety - A23. The exact class of defect REGRESSION entry 355
 // shipped with once already (a client module value-importing @/lib/grade,
-// caught by nothing but next build's compile stage). The repo-grades files
-// touched by this feature now also value-import a grading-results module
-// (gradingResultsHelpers.ts / RowFeedbackBoxes.tsx / FeedbackExpandModal.tsx /
-// SubmittedFilesPanel.tsx) - all four already proven safe by
-// gradingResultsHelpers.test.ts's own "client files stay client-bundle-safe"
-// guard, but THIS file's own imports of THEM must not reach the barrel
-// either.
+// caught by nothing but next build's compile stage) is now caught by a
+// TRANSITIVE RUNTIME-IMPORT-GRAPH WALK from this directory's own root set,
+// under a capability predicate on the RESOLVED path - never by a text
+// pattern inferring import intent from a line's spelling. A module is
+// banned because it REACHES a server-only capability, not because its name
+// matched a list (docs/a23-architecture.md, docs/a23-test-notes.md).
+//
+// ONE shared options object (Ruling W3/R-5e): every walkRuntimeGraph call in
+// this file takes this SAME identifier, so a real walk that quietly drops a
+// field cannot diverge from the canary that proves the walk discriminates.
 // ---------------------------------------------------------------------------
 
-const BANNED_IMPORT_PATTERNS: RegExp[] = [
-  /from ["']@\/lib\/grade["']/,
-  /from ["']@\/lib\/grade\//,
-  /from ["']@\/lib\/supabase\/server["']/,
-  /from ["']next\/headers["']/,
-];
+const OPTIONS = {
+  srcRoot: SRC,
+  forbiddenPathPrefixes: FORBIDDEN_PATH_PREFIXES,
+  browserSafeModules: BROWSER_SAFE_MODULES,
+  forbiddenBareSpecifiers: FORBIDDEN_BARE_SPECIFIERS,
+  allowedBareSpecifiers: ALLOWED_BARE_SPECIFIERS,
+  allowedAssetExtensions: ALLOWED_ASSET_EXTENSIONS,
+  treatUseServerAsWall: true,
+};
 
-const REPO_GRADES_CLIENT_FILES: Array<{ label: string; source: string }> = [
-  { label: "RepoGradeCellControl.tsx", source: CELL_CONTROL_SOURCE },
-  { label: "repoGradesCellEdits.ts", source: CELL_EDITS_SOURCE },
-  { label: "useRepoGradesGradingActions.ts", source: HOOK_SOURCE },
-  { label: "useRepoGradesBulkGrade.ts", source: BULK_HOOK_SOURCE },
-];
+// R-2: the derived root set against a HAND-FROZEN literal, never a second
+// readdirSync - a directoryRoots-vs-readdirSync comparison is circular and
+// discharges nothing (both go to zero together). 32 non-test, non-.d.ts
+// .ts/.tsx basenames of this directory.
+const FROZEN_REPO_GRADES_ROOTS = [
+  "LinkUsernamesPanel.tsx",
+  "LinkUsernamesRosterSection.tsx",
+  "RepoBindingControl.tsx",
+  "RepoGradeCellControl.tsx",
+  "RepoGradesControls.tsx",
+  "RepoGradesGrid.tsx",
+  "RepoGradesLogPanel.tsx",
+  "RepoGradesStatusBanners.tsx",
+  "index.tsx",
+  "linkRepoUsernames.ts",
+  "repoGradePostScore.ts",
+  "repoGradeScoreDisplay.ts",
+  "repoGradeStudentName.ts",
+  "repoGradeTreeLink.ts",
+  "repoGradesAssignmentMapping.ts",
+  "repoGradesAssignmentSources.ts",
+  "repoGradesBindingConfirm.ts",
+  "repoGradesBulkGrade.ts",
+  "repoGradesCellEdits.ts",
+  "repoGradesCoursePicker.ts",
+  "repoGradesFolderSelection.ts",
+  "repoGradesLog.ts",
+  "repoGradesPosting.ts",
+  "repoGradesRows.ts",
+  "repoGradesRubricCache.ts",
+  "repoGradesRubricSource.ts",
+  "repoGradesUiState.ts",
+  "rosterUsernameOverlay.ts",
+  "useRepoGradesBulkGrade.ts",
+  "useRepoGradesData.ts",
+  "useRepoGradesGradingActions.ts",
+  "useRepoGradesRubricSource.ts",
+].sort();
 
-describe("canary: the ban patterns actually fire on a known-bad import string", () => {
-  it("fires on each banned specifier and not on an ordinary import", () => {
-    const knownBad = [
-      'import { composeOverallComment } from "@/lib/grade";',
-      'import { generateRubric } from "@/lib/grade/rubric";',
-      'import { createServiceClient } from "@/lib/supabase/server";',
-      'import { headers } from "next/headers";',
-    ];
-    for (const fixture of knownBad) {
-      expect(BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test(fixture))).toBe(true);
-    }
-    expect(BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test('import { useState } from "react";'))).toBe(false);
+describe("R-2: the derived repo-grades root set matches the hand-frozen list", () => {
+  it("directoryRoots(repo-grades) names exactly the 32 frozen basenames", () => {
+    const derived = directoryRoots(REPO_GRADES_DIR)
+      .map((abs) => abs.slice(REPO_GRADES_DIR.length + 1))
+      .sort();
+    expect(derived).toEqual(FROZEN_REPO_GRADES_ROOTS);
   });
 });
 
-describe("repo-grades files touched by this feature stay client-bundle-safe: only TYPE-ONLY imports of @/lib/grade, never a value import", () => {
-  it.each(REPO_GRADES_CLIENT_FILES)(
-    "$label never value-imports @/lib/grade (or a submodule), @/lib/supabase/server, or next/headers",
-    ({ source }) => {
-      // A `import type { ... } from "@/lib/grade"` line is safe (erased at
-      // build) - this codebase's own established precedent for this exact
-      // module (repoGradesCellEdits.ts's own header comment on RubricAreaResult/
-      // SubmittedFileInfo). Only a VALUE import (no leading `type`) is banned.
-      const valueImportLines = source
-        .split("\n")
-        .filter((line) => /^\s*import\b/.test(line) && !/^\s*import\s+type\b/.test(line));
-      for (const line of valueImportLines) {
-        for (const pattern of BANNED_IMPORT_PATTERNS) {
-          expect(line).not.toMatch(pattern);
-        }
-      }
+describe("R-1/R-3/R-4: the repo-grades closure carries zero violations, zero unallowed, zero unresolvable specifiers", () => {
+  const roots = directoryRoots(REPO_GRADES_DIR);
+  const result = walkRuntimeGraph(roots, OPTIONS);
+
+  it("zero violations - no file reaches a server-only leaf", () => {
+    expect(result.violations).toEqual([]);
+  });
+  it("zero unallowed - every literal bare specifier reached is a walked module, an allowed asset, or on the allow list", () => {
+    expect(result.unallowed).toEqual([]);
+  });
+  it("zero unresolvable - no computed (non-literal) specifier is silently dropped", () => {
+    expect(result.unresolvable).toEqual([]);
+  });
+});
+
+describe("R-5: a PLANTED POSITIVE proves this walk actually discriminates", () => {
+  const grade = join(SRC, "lib", "grade.ts");
+  const canary = walkRuntimeGraph([grade], OPTIONS);
+
+  it("R-5a: violations.length > 0 on the barrel this row exists to ban", () => {
+    expect(canary.violations.length).toBeGreaterThan(0);
+  });
+  it("R-5b: unallowed.length > 0 - the pre-Z1 hole this design closes", () => {
+    expect(canary.unallowed.length).toBeGreaterThan(0);
+  });
+  it("R-5c: the trail names the hazard (contains lib/supabase/server, not a pinned path form)", () => {
+    expect(canary.violations.some((v) => v.resolved?.includes("lib/supabase/server"))).toBe(true);
+  });
+});
+
+describe("R-5e: both walkRuntimeGraph calls in this file take the SAME shared options identifier", () => {
+  it("at least two calls, every second argument is a bare Identifier, all the same name", () => {
+    const source = read("src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts");
+    const calls = [...source.matchAll(/walkRuntimeGraph\(\s*[^,]+,\s*([A-Za-z_$][\w$]*)\s*\)/g)];
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    const names = new Set(calls.map((m) => m[1]));
+    expect(names.size).toBe(1);
+    expect(names.has("OPTIONS")).toBe(true);
+  });
+  it("OPTIONS' every field is the named import from client-boundary-policy.ts", () => {
+    expect(OPTIONS.forbiddenPathPrefixes).toEqual(FORBIDDEN_PATH_PREFIXES);
+    expect(OPTIONS.browserSafeModules).toEqual(BROWSER_SAFE_MODULES);
+    expect(OPTIONS.forbiddenBareSpecifiers).toEqual(FORBIDDEN_BARE_SPECIFIERS);
+    expect(OPTIONS.allowedBareSpecifiers).toEqual(ALLOWED_BARE_SPECIFIERS);
+    expect(OPTIONS.allowedAssetExtensions).toEqual(ALLOWED_ASSET_EXTENSIONS);
+  });
+});
+
+describe("canary: scanRuntimeEdges actually discriminates a value import from a type-only one", () => {
+  it("finds a real edge for each known-bad value import, by its own specifier", () => {
+    const knownBad: Array<[string, string]> = [
+      ['import { composeOverallComment } from "@/lib/grade";', "@/lib/grade"],
+      ['import { generateRubric } from "@/lib/grade/rubric";', "@/lib/grade/rubric"],
+      ['import { createServiceClient } from "@/lib/supabase/server";', "@/lib/supabase/server"],
+      ['import { headers } from "next/headers";', "next/headers"],
+    ];
+    for (const [fixture, specifier] of knownBad) {
+      expect(scanRuntimeEdges(fixture, "fixture.ts").edges.map((e) => e.specifier)).toContain(specifier);
     }
-  );
+    expect(scanRuntimeEdges('import type { X } from "@/lib/grade";', "fixture.ts").edges).toEqual([]);
+  });
 });

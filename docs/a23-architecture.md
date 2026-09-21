@@ -542,13 +542,39 @@ defect that a trailing slash creates and whose own live value is
 - directory-level prefixes, no slash, which is the idiom `"lib/supabase"`
 now follows.
 
-**MINOR m-3: `isForbiddenPath` is reused verbatim, and its bare
-`relToSrc.startsWith(prefix)` has no segment boundary.** `"lib/supabase"`
-would also match a hypothetical future `src/lib/supabase-foo.ts`, which is not
-inside the forbidden directory at all - fail-CLOSED (a false positive, not a
-hole), and **zero occurrences today** (`ls src/lib/ | grep '^supabase'`
-returns only `supabase/`, no sibling starting with that prefix). Worth one
-line when the leaf is written: `relToSrc === prefix || relToSrc.startsWith(prefix + "/")`.
+**MINOR m-3 - WITHDRAWN 2026-09-21 BY ORCHESTRATOR RULING. DO NOT APPLY THE
+FIX IT PRESCRIBED.** The note below observed that `isForbiddenPath`'s bare
+`relToSrc.startsWith(prefix)` has no segment boundary, called that
+fail-closed with zero occurrences today, and prescribed
+`relToSrc === prefix || relToSrc.startsWith(prefix + "/")` as a one-line fix.
+
+**That prescription is wrong, and the ruling that carried it was mine.** The
+no-boundary form is not an oversight being tolerated - it is THE REPO'S
+DOCUMENTED IDIOM, stated as a contract in the precedent this design mines
+five times (`classTrendsDraft.not-postable.test.ts:64-66`): "the resolved
+import target's own path, **character-by-character prefix matched, never
+segment-by-segment**". It exists so a SIBLING FILE is caught. Adding the
+boundary converts a fail-closed guard to a fail-OPEN one.
+
+Measured on the test seat's own configuration, and the two forms are NOT
+nested - each misses what the other catches:
+
+| Form | violations | nodes | `canvas.ts` caught | inside `lib/canvas/` caught |
+|---|---|---|---|---|
+| WITH `/` boundary | 15 | 45 | no | yes |
+| NO boundary (repo idiom) | 3 | 44 | yes | no |
+
+Real siblings exist for FOUR of that walker's five prefixes - `src/app/actions.ts`,
+`src/lib/canvas.ts`, `src/lib/llm.ts`, `src/lib/gemini.ts` - and the precedent's
+own header records the defect in the opposite direction: a prefix WITH a
+trailing slash MISSED `src/app/actions.ts`.
+
+**THE RULING: match the repo idiom. Character-by-character, no boundary.** The
+standing rule m-3 violated is "never ship a loosened guard without the feature
+it was loosened for" - and I loosened it on the strength of a ZERO COUNT. A
+zero count is a reason to leave a guard alone, never a reason to weaken it:
+the occurrence it would have caught has simply not been written yet, which is
+exactly who a guard is for. The test seat's R-8 inverts accordingly.
 
 #### The hole Z1 closed: a literal specifier with NO HOME in the returned shape
 

@@ -419,3 +419,29 @@ MECHANICAL AND BOUNDED, like A18's round 3. Rulings 14 through 18 are a named
 row source plus its non-vacuous assertion, a computable detector region, a
 snapshot-diff gate, four gate rows and a handful of citations. NOT a third
 attempt at any mechanism. Do not rebuild anything listed as reproducing above.
+
+---
+
+# Round 4 - a correction to Ruling 15, measured by the seat
+
+Ruling 15 asserted that the comment-stripped render body, excluding the
+handler, "contains ZERO legitimate occurrences of the three identifiers once
+wave 2 lands". THE SEAT MEASURED IT AND I WAS WRONG: there are EIGHT - two
+`value={courseId}`, `value={assessmentLabel}`, an `assessmentId === ""` test,
+and three declaration-control props. Only `selectedCourse` is genuinely absent
+from the region, with a canary showing three whole-file hits.
+
+So a BAN over that region would be RED AT HEAD for two of the three
+identifiers - which is the same defect one level up, and exactly what Ruling
+15 was written to stop. The region stands; the ASSERTION SHAPE CHANGES FROM A
+BAN TO A WHITELIST: the mount expression must match a single expression whose
+only free identifier is the captured cohort, plus a no-shadow clause. That is
+not comment-satisfiable, not red on a correct implementation, and it closes
+the one-hop evasion, because a render-body `const` cannot reach the mount
+without failing the match.
+
+The seat reported the conflict and adopted neither value silently, which is
+the behaviour I want. That is now three rulings of mine corrected by
+measurement on this row - the pathspec gate, the unnamed row source, and this.
+Each was a case of my reasoning about the code instead of running a command
+against it.

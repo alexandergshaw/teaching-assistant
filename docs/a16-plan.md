@@ -1,12 +1,15 @@
 # A16 wave plan: what is left, cut into waves
 
-Seat: WAVE PLAN, **revision 2** (the cap). Authored 2026-09-21, revising
-revision 1 against `docs/a16-rulings.md` rounds 1 and 2, which win where they
-and this file conflict.
+Seat: WAVE PLAN, **revision 3** - a bounded, mechanical pass under
+`docs/a16-rulings.md` round 3 (rulings 14-18). Not a third attempt at any
+mechanism: each ruling named its construction and this revision builds it.
+Rounds 1-3 of that file win where they and this one conflict, except where this
+file reports a measured conflict and adopts neither value (5.5.1).
 
 **Tree state at authoring.** `git rev-parse --short HEAD` returns **`bd94c60`**
-on `main`. `git status --short` returns exactly one path, `M docs/css-orphans.md`,
-which I did not stage, revert or touch. `git worktree list` shows the stale
+on `main`. `git status --short` returns `M docs/css-orphans.md` and
+`M docs/a16-plan.md` (this file). I did not stage or revert the first, and I did
+not touch `docs/a18-*`, which a concurrent agent holds. `git worktree list` shows the stale
 second worktree at `.claude/worktrees/friendly-meninsky-8032bc`, detached at
 `8bc9c64`: **`Glob` returns that copy FIRST**, so every wave gate runs in THIS
 checkout. I edited only this file.
@@ -27,6 +30,22 @@ with a canary. Nothing here is recalled.
 ---
 
 ## 0. Disposition
+
+### 0.0 Round 3
+
+| Finding | Disposition | Where |
+|---|---|---|
+| **B1** - the boxed rule named three meta fields and never named `rows`; two sabotages positively endorsed the pre-grade array, so A16-3 would ship dead with the leaf's unit tests green | **CONSTRUCTED, per ruling 14.** The rule now names the row source as this run's classified results merged onto their rows, built inside the apply loop; 9.3 gains a non-vacuous assertion and P13 must kill | **5.5**, 9.3 |
+| **B2** - both provenance pins read RAW source while the plan mandated hinge comments naming the pinned identifiers: the positive pin was a tautology, the negative pin went red on a correct implementation, and it was evadable one hop | **CONSTRUCTED, per ruling 15**, with one measured conflict reported rather than adopted | **5.5.1**, 9.3 |
+| **B3** - ruling 9's path-scoped gate can only print paths in its own pathspec, so its pass condition was true by construction | **REPLACED, per ruling 16**, by a repo-wide snapshot diff. The "equivalently, a pre-wave snapshot" alternative is withdrawn | **9.0** |
+| **M1** - wave 1 could pass by deleting 32 comment lines; nothing asserted the leaf exists, is imported or is called | **THREE GATE ROWS ADDED** | 9.2 |
+| **M2** - wave 1 was the least specified wave and the only one with no scoping pass | **WAVE 1 GETS ITS OWN SCOPING PASS**, symmetrical with wave 3 | 2, 5.6 |
+| **M3** - `student: row.studentName` was a requirement with no gate row while its negative twin had one | **POSITIVE GATE ROW ADDED**, plus sabotage P14 | 9.3 |
+| **M4** - the empty-label outcome is the DEFAULT path, not an edge case, and was unrouted | **ROUTED**, and the readiness measurement that proves it is pasted | 5.5.2, RES-P-13 |
+| **m** - re-export contradiction between 5.4, 5.5 and 9.3 | **RESOLVED**: no re-export. The panel imports the two shipped symbols directly | 5.4, 5.5 |
+| **m** - the apply loop cited `:578-584` | **FIXED**: `:581-586`, measured. Third off-by-one on this row, and cited by line in a plan whose section 7 forbids that - so it is now cited by SYMBOL | 5.4 |
+| **m** - RES-P-2 described itself as done while its instrument returns zero | **NOTED AS THE ORCHESTRATOR'S OUT-OF-BAND STEP**, since no wave's set contains the backlog file | RES-P-2 |
+| **m** - the consumer-census test was unlisted | **ADDED to the run-only list** | 3.0 |
 
 ### 0.1 Round 2
 
@@ -137,8 +156,8 @@ on four surfaces with the suite green, so it is no longer a prediction.
 | # | Wave | What it does | Exports | Caller, IN THE SAME WAVE | Independently gateable? |
 |---|---|---|---|---|---|
 | **0** | Baseline | `docs/REGRESSION.md` entry **433** | nothing | n/a | **Yes** - docs only |
-| **1** | A16-3a, panel headroom | Pure-assembly extraction out of `GradingRecordingPanel.tsx` to **<= 934** lines. No behaviour change | pure functions in a new `grading-recording/` leaf | `GradingRecordingPanel.tsx`, edited in this wave to call them | **Yes** - a line count plus an unchanged suite |
-| **2** | A16-3b, the run cohort and the mount | `lastRunCohort` (rows + `courseName` + `assignmentName`) set once inside `handleGradeAll`; the cohort leaf; the disclosure line; the gated `<ClassTrendsPanel>` mount | `toRunCohortEntry`, `runCohortMeta`, `cohortLabelSpread`. **No new predicate and no new meta type** - ruling 10 | `GradingRecordingPanel.tsx`, edited in this wave | **Yes** |
+| **1** | A16-3a, panel headroom | Pure-assembly extraction out of `GradingRecordingPanel.tsx` to **<= 934** lines. No behaviour change. **Preceded by its own scoping pass** - ruling 17 M2, section 5.6 | pure functions in a new `grading-recording/` leaf | `GradingRecordingPanel.tsx`, edited in this wave to import AND reference them - gated at 9.2 | **Yes** - a line count, an unchanged comment count, a proven caller, and an unchanged suite |
+| **2** | A16-3b, the run cohort and the mount | `lastRunCohort` (**rows = this run's classified results merged onto their rows** + `courseName` + `assignmentName`) set once inside `handleGradeAll`; the cohort leaf; the disclosure line; the gated `<ClassTrendsPanel>` mount | `toRunCohortEntry`, `runCohortMeta`, `cohortLabelSpread`. **No new predicate, no new meta type and no re-export** - rulings 10 and 18 | `GradingRecordingPanel.tsx`, edited in this wave | **Yes** |
 | **3** | A16-5, Repo Grades | Per-folder adapter and mount | a folder-entry adapter leaf | `repo-grades/index.tsx` or `RepoGradesGrid.tsx`, edited in this wave | **Yes**, after its own scoping |
 | - | **A16-4** | **NOT A WAVE. Disposed to row A24** - section 6 | - | - | n/a |
 
@@ -164,7 +183,17 @@ is a gate command and is out, however whole-repo it is.
 |---|---|---|
 | **Certain edits** | In the set | the panel, the new leaves, the wiring test carrying the new assertions |
 | **Conditional edits** - this wave's own change can force an edit here | In the set. A conditional edit is still a write, and concurrency does not care about the condition | wave 1's source-text tests that read the panel; `buttonVariant.test.ts`'s per-file pin on the panel |
-| **Run-only gates** - the wave runs them, and a red means the wave did something it said it would not | Out of every set; listed under gate commands | `file-size-ceiling.structure.test.ts`, `source-bytes.structure.test.ts`, `no-emojis.test.ts`, `modalAdoption.wiring.test.ts`, the CSS-orphan walker |
+| **Run-only gates** - the wave runs them, and a red means the wave did something it said it would not | Out of every set; listed under gate commands | `file-size-ceiling.structure.test.ts`, `source-bytes.structure.test.ts`, `no-emojis.test.ts`, `modalAdoption.wiring.test.ts`, `grading-results/gradingResultsHelpersWiring.test.ts`, the CSS-orphan walker |
+
+**The consumer census, added per ruling 18 - harmless but previously unchecked.**
+`gradingResultsHelpersWiring.test.ts`'s `it(` at `:219` pins `CLIENT_FILES` to
+"EXACTLY this directory's non-test `.ts`/`.tsx` files, plus exactly its parent's
+non-local consumers", and `classTrendsEntry.ts` is a listed entry at `:108`.
+Wave 2 imports that file from `grading-recording/`. It cannot move the census:
+both `readdirSync` calls are **non-recursive** - `dir` at `:221`
+(`grading-results/`) and `parentDir` at `:237` (`components/`) - so a new
+importer inside a sibling directory is never enumerated. The check verified this
+independently. Run-only, and named so the next pass does not rediscover it.
 
 **Why the original's reading could not stand.** It put the three whole-repo
 structural gates in every A16 wave's set while reading A18's set as edits only.
@@ -430,7 +459,9 @@ prompt modules, which ruling 11 forbids.
 **Standing consent applies where it applies.** Wave 1 and wave 3 are disjoint in
 both senses, as is A18 against any A16 wave. Cap is 2-3; wave 1 plus A18 is 2,
 and idle sequencing costs the queue. **That authorisation is what makes 9.0's
-path-scoped gate mandatory rather than tidy** - see ruling 9.
+snapshot-diff gate mandatory rather than tidy** - a concurrent sibling's dirty
+paths must not fail this wave, which is exactly what 9.0's before/after diff
+ignores while still detecting an out-of-set write.
 
 **Re-run all six intersections immediately before each dispatch**, and re-derive
 A18's set from `docs/a18-ac.md` as overridden by every round of
@@ -504,10 +535,10 @@ Edit points re-measured today
 | Addition | Where, today | Lines |
 |---|---|---|
 | `import ClassTrendsPanel` | top | 1 |
-| `import { toClassTrendsEntry, hasTrendableResults, type ClassTrendsEntryMeta }` from the shipped leaf, re-exported through the cohort leaf | top | 1 |
+| `import { hasTrendableResults }` **directly from `grading-results/classTrendsEntry`** - ruling 18: the cohort leaf does NOT re-export it, because 9.3 goes red if that leaf exports a predicate and an implementer following a re-export instruction would trip its own gate | top | 1 |
 | `import { toRunCohortEntry, cohortLabelSpread }` and the cohort type | top | 1 |
 | `const [lastRunCohort, setLastRunCohort] = useState<...>(null)` | beside `logGradingRuns` at `:199` | 1 |
-| Capture rows + `courseName` + `assignmentName` once inside the handler | `handleGradeAll` `:538`; `submissions` `:551-556`; apply loop `:578-584` | 5-8 |
+| Accumulate the merged cohort rows inside the apply loop and set the snapshot once after it | `handleGradeAll`; the `submissions` build; **the `for (const r of result.results)` loop, whose `for` and closing brace are `:581-586` measured by `sed -n '575,592p' \| cat -n`** - revision 2 said `:578-584`, which excluded both the `gradingRows.applyGradingResult(` call and the brace. Cited here by SYMBOL, per section 7's own rule | 5-8 |
 | Hinge comment: why the cohort AND both meta strings are captured at run time, citing `GithubGradingPanel.tsx:398/:861` | same place | 10-14 |
 | Gated mount plus the disclosure line | above `<GradingTable>` at `:938` | 8-12 |
 | Hinge comment at the mount | same | 6-8 |
@@ -560,11 +591,17 @@ into `<GradingResults>`, with the comment at `:855-860` saying it is the folder
 box above has since been edited". A16-1 solved this exact problem on a sibling
 surface and revision 1 did not cite it.
 
-> **THE RULE, stated once. Every field on `lastRunCohort` - the rows,
+> **THE RULE, stated once. Every field on `lastRunCohort` - `rows`,
 > `courseName` and `assignmentName` - is CAPTURED INSIDE `handleGradeAll`, on
 > the branch that reaches the apply loop, and is NEVER read from a live control
-> or a row field at render time.**
+> or from a live row array at render time.**
 >
+> - **`rows` <- THIS RUN'S CLASSIFIED RESULTS MERGED ONTO THEIR ROWS**, one per
+>   iteration of the `for (const r of result.results)` loop: `r.id` plus the
+>   identity fields already on the submission (`studentName`) and the row
+>   (`assessment`), merged with the `classified` value that iteration just
+>   computed - its `state`, its `rubricAreas`, and the four `GradeResultBase`
+>   strings. **NEVER `gradingRows.rawRows`, in whole or by id, at any time.**
 > - `courseName` <- `selectedCourse?.name ?? ""` at capture. Precedent in this
 >   same file: `currentGradingLog` already does exactly this at `:612`.
 > - `assignmentName` <- `assessmentId` (which is `assessmentLabel.trim()`) at
@@ -578,6 +615,34 @@ surface and revision 1 did not cite it.
 > - `row.assessment` is used for **ONE** thing and it is not the heading: the
 >   disclosure predicate `cohortLabelSpread`, true when the captured rows carry
 >   **more than one distinct `assessment` value, counting `undefined` as one**.
+
+**WHY THE `rows` CLAUSE EXISTS, and it is the third silent-green on this row
+(ruling 14).** Revisions 1 and 2 said the rows were captured inside the handler
+and never said WHICH rows, and sabotages P3 and P4 both positively endorsed
+`gradingRows.rawRows`, objecting only to the timing of the read. Measured, that
+array cannot serve:
+
+- It is a memo over React state - `scopedRawRows` at `useGradingRows.ts:487-489`,
+  over `rawRows` from `useAssessmentRowStore` at `:317`.
+- The updater returns a NEW row that lands on a later render:
+  `gradingRows.applyGradingResult(r.id, classified)` inside the loop does not
+  mutate the array the handler already holds.
+- `rubricAreas` is documented at **`grading-row.ts:224`** as written only by
+  `applyGradingResultToRow` and **never persisted** (`toWire` does not enumerate
+  the key), so on a row never successfully graded it is `[]`.
+
+So capturing `rawRows` at any point in the handler yields, on a first run, rows
+that are all pre-grade with `rubricAreas: []`. `hasTrendableResults` -
+`some((r) => !r.ungraded && r.rubricAreas.length > 0)` - returns **false**, and
+**the panel never renders. A16-3 would ship dead**, with the leaf's unit tests
+green because they run over an implementer-authored fixture. The corroborating
+tell was in revision 2's own gate: its mapping row enumerates `"pending"` and
+`"grading"`, states that only exist BEFORE grading.
+
+The construction above is buildable with no new read: `submissions` already
+carries `id` and `studentName`, `classified` is computed in the loop, and
+`result.results` is the run's own output. 9.3's non-vacuous row and sabotage P13
+are what make it checkable rather than stated.
 
 **Why the asymmetry revision 1 created is gone.** It snapshotted `courseName` from
 a live control at run time and derived `assignmentName` from row data. Both now
@@ -613,7 +678,123 @@ So wave 2's own exports reduce to three: `toRunCohortEntry(cohort)` (builds the
 run and calls `toClassTrendsEntry`), `runCohortMeta(cohort): ClassTrendsEntryMeta`
 (a pure projection of the captured fields), and `cohortLabelSpread(cohort)`.
 
-### 5.6 Two constraints on HOW wave 1 extracts
+### 5.5.1 The detector region (ruling 15), with one measured conflict reported
+
+Revision 2's two provenance pins read RAW source while 5.4 mandates a 10-14 line
+hinge comment at the capture and a 6-8 line one at the mount - comments whose
+subject is the very identifiers the pins look for. Three measured consequences,
+all accepted:
+
+1. The POSITIVE pin was satisfiable **by the comment alone**, so P8 did not kill.
+   A tautology.
+2. The NEGATIVE pin went RED **on a correct implementation**, because the mount's
+   mandated comment names what it forbids - and this plan's own 9.3 documents
+   what happens next: the implementer finds it red and loosens it.
+3. The NEGATIVE pin was evadable one hop: a render-body `const` one line above
+   the mount is outside the pinned expression.
+
+**THE REGION, adopted from ruling 15 and computable:**
+
+| Pin | Region | How it is computed |
+|---|---|---|
+| POSITIVE (capture) | the **comment-stripped body of `handleGradeAll`** | from the `const handleGradeAll = useCallback(async () => {` binding to its `}, [...]);`, after stripping comments |
+| NEGATIVE (render) | the **comment-stripped render body, which EXCLUDES every handler body** | from the component's single top-level `return (` to end of file. Measured: `grep -n "^  return (" <panel>` returns exactly **`642`**, and every handler including `handleGradeAll` is declared above it |
+
+Comment-stripping is the repo's own answer and the precedent is in the file this
+plan already cites by symbol: `submission-kind-callsites.structure.test.ts` has
+`stripComments` at **`:32`**, applied at **`:60`**, and its `it(` at **`:103`**
+says so in its own title - "comments naming the rule do not count, and are
+stripped before this check runs". Carry the lesson, not just the citation.
+
+**THE MEASURED CONFLICT, reported rather than adopted.** Ruling 15 states that
+once wave 2 lands, the region "contains ZERO legitimate occurrences of the three
+identifiers". **That is false for two of the three**, measured on the render
+body today:
+
+```bash
+awk 'NR>=642' src/app/components/grading-recording/GradingRecordingPanel.tsx \
+  | grep -nE "assessmentLabel|assessmentId|selectedCourse|courseId"
+# 728:  value={courseId}            749:  {courseId && !selectedRosterText && (
+# 769:  value={assessmentLabel}     778:  {assessmentId === "" && (
+# 787:  courseId={courseId}         788:  assessmentId={assessmentId}   789:  assessmentLabel={assessmentLabel}
+```
+
+Eight legitimate occurrences: the Course control's own value, the Autocomplete's
+own value, the empty-label hint, and the declaration controls' props. Only
+`selectedCourse` is genuinely absent - `awk 'NR>=642' ... | grep -c "selectedCourse"`
+returns **0** while the whole-file canary returns **3**, so the instrument fires
+and that one zero is real. A ban over the region would therefore be RED at HEAD
+for `assessmentLabel`, `assessmentId` and `courseId` - the same
+red-on-a-correct-implementation defect, moved up one level.
+
+**So the region is adopted and the ASSERTION SHAPE is changed from a ban to a
+whitelist, which the region makes possible and which closes all three
+consequences plus the one-hop evasion:**
+
+- **NEGATIVE pin, restated.** In the comment-stripped render body, the
+  `<ClassTrendsPanel` tag's `entry={...}` attribute value must match a single
+  expression whose only free identifier is `lastRunCohort` - i.e.
+  `entry={toRunCohortEntry(lastRunCohort)}` and nothing else. A whitelist on one
+  expression cannot be satisfied by a comment (stripped), cannot be red on a
+  correct implementation (the mandated comment is gone before matching), and
+  **closes the one-hop evasion**, because a render-body `const x = assessmentLabel`
+  cannot appear inside `entry={...}` - any binding other than the cohort
+  expression fails the match.
+- **Plus a no-shadow clause**: in the same region, the only reads of
+  `lastRunCohort` are the guard and that attribute. Two occurrences, asserted as
+  a count, so a render-body rebinding of the cohort from anything else is
+  detectable.
+- **POSITIVE pin, restated.** In the comment-stripped `handleGradeAll` body, the
+  `setLastRunCohort(` argument mentions `assessmentId` and `selectedCourse`.
+  Stripping is what makes P8 kill.
+
+### 5.5.2 The empty-label path is the DEFAULT, not an edge case (ruling 17 M4)
+
+Revision 2 said failure (a) was "bounded, not eliminated" and routed the typo
+case. It did not route the far more common one, and the readiness check settles
+which that is:
+
+```bash
+grep -rn "export function checkGradingReadiness" -A 4 src/app/components/grading-recording/grading-dispatch.ts
+# :28  export function checkGradingReadiness(rubricText: string, rowCount: number): GradingReadiness {
+# :29    if (rowCount === 0) return { ok: false, reason: NO_SUBMISSIONS_TO_GRADE_MESSAGE };
+# :30    if (!rubricText.trim()) return { ok: false, reason: MISSING_RUBRIC_MESSAGE };
+# :31    return { ok: true, reason: null };
+```
+
+**It gates on the rubric and the row count and nothing else. The assessment box
+is optional**, so an instructor who never touches it grades successfully and
+`assignmentId` is `""`. Under 5.5 that captures `assignmentName: ""`, and the
+panel then renders "A note on this assignment" (`class-trends-draft.ts:185`) and
+the prompt reads "(untitled assignment)" (`class-trends-insight.ts:154`) - the
+exact strings ruling 8 used to DESCRIBE the silent-green.
+
+**What 5.5 actually fixed was the PERMANENCE, not the outcome.** Revision 2's
+"that failure disappears" was true only of the legacy-row trap: no stale row can
+now force `""` on a run whose box IS filled. The common case still renders the
+fallback, by design, because inventing a name would be worse. That is a product
+consequence on the default path, not an edge case, and it is routed as
+**RES-P-13** rather than described. It is also not merely a reading claim: the
+adapter's output for an empty capture is unit-testable, and 9.3's META
+PROJECTION row already enumerates the `""` cell.
+
+### 5.6 Wave 1's scoping pass, and two constraints on HOW it extracts
+
+**Wave 1 is dispatched only after its own scoping pass, exactly as wave 3 is
+(ruling 17 M2).** Revision 2 conceded that the extraction target is an
+architecture decision and then dispatched it as a build wave - this repo's
+recorded failure precisely - while giving the scoping pass to the *less* risky
+wave. That asymmetry is removed rather than argued away, and I am not naming a
+target I said was not mine to name.
+
+**What that scoping pass is handed**, so it does not start from zero: the target
+(`<= 934`, at least 32 lines removed from 966), the two constraints below, the
+gate rows at 9.2 that forbid reaching the target by deleting comments, and
+`docs/a8r-scope.md` section 7's own enumeration of extractable blocks in this
+same file - whose step 1 and step 2 candidates were measured there and whose step
+2 landed. **That enumeration is a FLOOR, not a decision**: it was written against
+the 995-line version and two of its candidates have already been taken, so the
+pass re-derives against the 966-line tree and reports what it missed.
 
 - **Move pure assembly. Do not move a hook.** `this-repo.md` section 1's
   `preserve-manual-memoization` account; A8-R wave 0 obeyed it and passed.
@@ -723,38 +904,40 @@ N13b after wave 3.
 
 ## 9. The gate for each wave
 
-### 9.0 The standing gate - PATH-SCOPED (ruling 9)
+### 9.0 The standing gate - a REPO-WIDE SNAPSHOT DIFF (ruling 16)
 
-Ruling 3 exempted one filename; ruling 9 names the class - a whole-repo gate
-combined with concurrency authorised by the same document. Revision 1 copied the
-narrow exemption while independently authorising wave 1 beside A18 in 4.2, and a
-concurrent sibling dirties paths in no wave's set and in no exemption, so **every
-A16 wave gate would have failed** and pushed the implementer toward exactly the
-cleanup ruling 3 existed to prevent. At the moment of the check,
-`git status --short` printed a concurrent A18 agent's live work.
+**Ruling 9's path-scoped form is withdrawn, and so is the "equivalently, a
+pre-wave snapshot" alternative revision 2 offered beside it - they were never
+equivalent.** `git status --short -- <the wave's paths>` can only print paths in
+its own pathspec, so "every path printed is in the wave's set" is true BY
+CONSTRUCTION: there is no input on which it fails. Worse than the false-failure
+it solved, because this gate's recorded purpose here is that implementer
+subagents can silently exceed their brief and misreport - and it silently deleted
+the only instrument for every "green WITHOUT being edited" clause in 9.3 and for
+the membership rule in 3.0, whose whole point is that run-only files are not
+written. Under it, a wave that edits a structural gate to make itself green
+passes both the gate and the suite.
 
 ```powershell
-git status --short -- <every path in this wave's published set>
+# immediately BEFORE dispatch, repo-wide, saved:
+git status --short                      > before.txt
+# after the wave reports, repo-wide:
+git status --short                      > after.txt
 ```
 
-**Pass: every path printed is in this wave's published set.** Equivalently, a
-diff against a pre-wave snapshot. Verified here, with a canary proving the
-scoping is real and not merely silent:
-
-```bash
-git status --short -- docs/a16-plan.md docs/css-orphans.md   # prints " M docs/css-orphans.md"
-git status --short -- src/lib/no-emojis.test.ts              # prints nothing
-```
-
-The first shows the scoped form still reports a dirty path it is asked about; the
-second shows it excludes one it is not. A form that printed nothing in both cases
-would be a gate that never fires.
-
-**`docs/css-orphans.md` stays exempt as a belt**, no longer load-bearing: it has
-been dirty all session from outside the loop. **Do not stage it, do not revert
-it, do not mention it in a report except to say it was left alone.**
+**Pass: every path that is NEW in `after.txt`, or whose status CHANGED from
+`before.txt`, is in this wave's published set.** Paths already dirty in
+`before.txt` and unchanged are ignored - that is the whole of ruling 9's
+motivation (a concurrent sibling's live work must not fail this wave), kept
+without disarming the gate. The diff is what detects an out-of-set write, which
+the pathspec form could not.
 
 No path may be under `.claude/worktrees/`. A report is not evidence.
+
+**`docs/css-orphans.md` stays exempt as a belt** and is expected in `before.txt`
+anyway: it has been dirty all session from outside the loop. **Do not stage it,
+do not revert it, do not mention it in a report except to say it was left
+alone.** Likewise `docs/a18-*`, which a concurrent agent holds.
 
 Forbidden in every brief, by name: **`git add -A`** (one swept an implementer's
 unverified mid-flight work onto main here) and **`git stash`** (one reverted every
@@ -783,13 +966,16 @@ scan and never paste a gate's own output into a doc.
 | `grep -an "^## " docs/REGRESSION.md \| tail -1` before and after | before names 432, after names **433** |
 | `npx vitest run src/lib/no-emojis.test.ts` | green - the rule covers `docs/` |
 | `npx vitest run src/source-bytes.structure.test.ts` | green - `Write`/`Edit` materialise a `\uXXXX` escape as the literal byte |
-| `git status --short -- docs/REGRESSION.md` | that path only |
+| the 9.0 snapshot diff | `docs/REGRESSION.md` is the only new-or-changed path |
 
 ### 9.2 Wave 1 - A16-3a, panel headroom
 
 | Instrument | Pass |
 |---|---|
 | `@(Get-Content <panel>).Count` **and** `wc -l <panel>` | both **<= 934**, and both the SAME number. A disagreement means one tool is wrong and the count is not a fact yet |
+| **THE COMMENT-COUNT FLOOR (ruling 17 M1)**: `grep -c "^\s*\(//\|/\*\|\*\|{/\*\)" <panel>` before and after | the after-count is **not lower** than the before-count, which is **298** today. Without this row the wave passes `<= 934` **by deleting 32 comment lines** - the file has 298 of them and the extraction would be entirely fictitious |
+| **THE CALLER EXISTS (ruling 17 M1)**: a source-text assertion in `GradingRecordingPanel.wiring.test.ts` | the panel **imports from the new leaf AND references at least one of its exports**. Nothing in revision 2 asserted the leaf existed, was imported, or was called - a wave that created an orphan leaf and shrank the panel some other way passed every stated condition. Detector plus canary: prove it returns false on a dead import |
+| `npx vitest run <the new leaf's test>` | green, and the leaf's exports are exercised - an extraction whose destination has no test is a refactor nobody checked |
 | `npx vitest run src/file-size-ceiling.structure.test.ts` | green, without editing `ALLOWED_OVERAGE` |
 | `npx vitest run src/app/components/ui/buttonVariant.test.ts` | green. If `FROZEN_PRIMARY_SITES:157` must move, it moves in the same commit with the reason |
 | one `npx vitest run` **per path** over the six source-text tests of 3.3 | green. `AddKnowledgePages.test.ts` asserts JSX gate ORDER and is the one an extraction is most likely to move. **Single path per invocation** - a multi-path run silently drops a path that matches nothing and exits 0 |
@@ -809,14 +995,17 @@ paraphrase drift was BL-2.
 | Instrument | Pass |
 |---|---|
 | `npx vitest run .../classTrendsRunCohort.test.ts` | the per-row mapping over an **enumerated product** of the four `AssessmentRowState` members (`"pending" \| "grading" \| "ready" \| "failed"` - four, not three) x {areas, no areas} |
+| **same file - THE NON-VACUOUS COHORT ROW (ruling 14)** | the captured cohort carries **at least one row with non-empty `rubricAreas`**, and `hasTrendableResults(toRunCohortEntry(cohort))` is **true**, on a fixture built by running the real `classifyGradingResult` over a real success result - never a hand-written row. **No fixture can satisfy this vacuously**: a cohort built from the pre-grade array has `rubricAreas: []` on every row (`grading-row.ts:224`) and fails. This is the row whose absence would have shipped A16-3 dead |
 | same file | `Object.keys(emitted)` does not contain `userId`, and `JSON.stringify(emitted)` does not contain `"userId"`. `GradedResult.userId` is optional, so `tsc` permits an adapter that emits it - this is the only runtime enforcer |
+| **same file - THE POSITIVE IDENTITY ROW (ruling 17 M3)** | every emitted result's `student` **equals the cohort row's `studentName`**, on a fixture whose `studentName` is a distinctive non-empty value. Revision 2 called this a requirement and gave it no gate row while its negative twin had a dedicated one - but the type forces A value, not the RIGHT one, so an adapter emitting `""` passed everything and silently broke N13b's per-student attribution later. Sabotage P14 |
 | same file | `computeClassTrends(toRunCohortEntry(cohort)).totalResults` equals the count of `"ready"` rows. An inflated N reaches `buildAreaSummary` and a sentence addressed to STUDENTS |
 | **same file - THE META PROJECTION** | `runCohortMeta(cohort)` returns `{ courseName: cohort.courseName, assignmentName: cohort.assignmentName, canvasUrl: "" }` and reads **no row field**. Enumerated over {cohort.assignmentName is `""`; is a label; rows carry a DIFFERENT single label; rows carry `undefined`}: the returned `assignmentName` equals `cohort.assignmentName` in **all four** cells. **This is the cell revision 1 got wrong, and the row that makes the rule checkable rather than stated** |
 | **same file - THE DISCLOSURE PREDICATE** | `cohortLabelSpread(cohort)` is true exactly when the captured rows carry more than one distinct `assessment` value, **counting `undefined` as one**. Enumerated over {all one label; label + `undefined`; two labels; all `undefined`}: true in cells 2 and 3, false in 1 and 4 |
-| same file | wave 2 declares **no second trendable predicate and no second meta type**. `hasTrendableResults` and `ClassTrendsEntryMeta` are imported from `grading-results/classTrendsEntry.ts`. RED if the leaf exports a predicate of its own (ruling 10) |
-| `npx vitest run .../GradingRecordingPanel.wiring.test.ts` - **THE PROVENANCE PIN, POSITIVE HALF** | the `setLastRunCohort(` expression inside `handleGradeAll` **MUST mention** `assessmentId` (or `assessmentLabel`) **and** `selectedCourse`. This is the half revision 1 inverted: its detectors banned `assessmentLabel` outright and would have made the precedented solution FAIL. A run-time capture is REQUIRED, not forbidden |
-| **same file - THE PROVENANCE PIN, NEGATIVE HALF** | the adapter/mount call expression, **scoped to that expression only**, mentions **none** of `assessmentLabel`, `assessmentId`, `selectedCourse`, `courseId`, `courses`, `gradingRows.rows`, `gradingRows.rawRows`, `filterText`, `sort`. Together with the positive half this forbids a render-time read while permitting the capture |
-| same file | a whole-file form of either detector is **RED at HEAD before any wave-2 code exists** - `grep -n "gradingRows\.\(rawRows\|rows\)" <panel>` returns pre-existing legitimate hits - so an implementer who writes the file-wide form finds it red and loosens it rather than fixing it. **The detectors MUST be narrow** |
+| same file | wave 2 declares **no second trendable predicate, no second meta type and no re-export of either** (rulings 10 and 18). The panel imports `hasTrendableResults` directly from `grading-results/classTrendsEntry`. RED if the cohort leaf exports or re-exports a predicate |
+| `npx vitest run .../GradingRecordingPanel.wiring.test.ts` - **THE PROVENANCE PIN, POSITIVE HALF** | over the **COMMENT-STRIPPED body of `handleGradeAll`** (5.5.1): the `setLastRunCohort(` argument **MUST mention** `assessmentId` (or `assessmentLabel`) **and** `selectedCourse`. A run-time capture is REQUIRED, not forbidden - revision 1's detectors banned `assessmentLabel` outright and would have made the precedented solution fail. **Stripping is what makes P8 kill**: against raw source the mandated 10-14 line hinge comment satisfies this row on its own, which is the tautology shape this repo has recorded twice |
+| **same file - THE PROVENANCE PIN, NEGATIVE HALF, as a WHITELIST** | over the **COMMENT-STRIPPED render body** (from the component's single top-level `return (`, measured at **`:642`** by `grep -n "^  return ("`, to end of file - a region that excludes every handler body): the `<ClassTrendsPanel` tag's `entry={...}` value matches **exactly one expression whose only free identifier is `lastRunCohort`**. Not a ban over the region - 5.5.1 measures eight LEGITIMATE occurrences of `assessmentLabel`/`assessmentId`/`courseId` there (the controls' own values, the empty-label hint, the declaration-controls props), so a ban would be red at HEAD |
+| **same file - THE NO-SHADOW CLAUSE** | in the same comment-stripped region, `lastRunCohort` is read **exactly twice** - the guard and that attribute - asserted as a count. This is what closes the one-hop evasion a narrow expression pin cannot: a render-body `const x = assessmentLabel` above the mount is outside any expression scope, but it cannot reach `entry={...}` without failing the whitelist, and it cannot rebind the cohort without moving this count |
+| same file | a whole-file, raw-source form of either pin is **RED at HEAD before any wave-2 code exists** - `grep -n "gradingRows\.\(rawRows\|rows\)" <panel>` returns pre-existing legitimate hits - so an implementer who writes it finds it red and loosens it rather than fixing it. **Region plus whitelist, never a file-wide ban** |
 | same file | the panel imports AND renders `<ClassTrendsPanel` above `<GradingTable>`. **Detector plus canary**: prove it returns false on a dead import and on a local reimplementation, in the shape `gradingResultsExtraction.wiring.test.ts` already uses four times |
 | `npx vitest run .../classTrendsDraft.not-postable.test.ts` | green with the cohort leaf as a **sixth** root at `:213-223` **and the `it()` title at `:209-210` updated to name it**. Explicit `{ timeout: 30000 }` on any new walk, per `:211` |
 | `npx vitest run .../grading-rows.test.ts` and `.../submission-kind-callsites.structure.test.ts` | **green WITHOUT being edited.** `SET_A_MATCHER`/`SET_B_MATCHER`'s exact lists and the `ta-rec-grade-*` set must not move. A red means wave 2 added a persisted key or named a submission-kind identifier, both of which it said it would not |
@@ -828,8 +1017,10 @@ attacks, so the clause, the unit test and the mutation cannot drift apart.
 |---|---|---|---|
 | P1 | Delete the `<ClassTrendsPanel .../>` tag | the mount | the mount assertion. Also the leverage removal test |
 | P2 | Remove the `hasTrendableResults(...)` guard | the gate | the guard assertion. Without it the panel renders a Button reading `Trends (0)` |
-| P3 | Capture the cohort rows from `gradingRows.rawRows` at render instead of in the handler | rule, rows clause | the negative provenance pin |
-| P4 | Resolve the cohort against `gradingRows.rawRows` by id at render | rule, rows clause | the negative provenance pin. Proves the detector is narrow enough to discriminate, since the file-wide form is red at HEAD anyway |
+| P3 | Capture the cohort rows from `gradingRows.rawRows` at render instead of in the handler | rule, `rows` clause | the negative whitelist pin |
+| P4 | Resolve the cohort against `gradingRows.rawRows` by id at render | rule, `rows` clause | the negative whitelist pin |
+| **P13** | **Capture `gradingRows.rawRows` at the TOP of `handleGradeAll`** - inside the handler, correct timing, wrong rows. This is what revisions 1 and 2 endorsed, and it is the mutation whose survival would have shipped A16-3 dead | rule, `rows` clause | **the NON-VACUOUS COHORT ROW.** Every captured row is pre-grade with `rubricAreas: []`, so `hasTrendableResults` is false and the assertion fails. **It must kill, and it is the one sabotage that certifies ruling 14 is closed rather than reworded** - both provenance pins pass under this mutation, because the read is in the handler |
+| **P14** | Emit `student: ""` instead of `row.studentName` | rule, identity | **the POSITIVE IDENTITY ROW.** `tsc` permits it, every other row passes, and N13b's attribution breaks silently later |
 | P5 | Emit every cohort row as a `GradedResult` | the mapping | the `totalResults` assertion |
 | **P6** | `assignmentName={assessmentLabel}` at the MOUNT | rule, `assignmentName` clause | **the negative provenance pin.** The door revision 1 closed |
 | **P7** | Derive `assignmentName` from the rows' `assessment` values - revision 1's own rule | rule, `assignmentName` clause | **the META PROJECTION row, cell 3 (rows carry a different single label) and cell 4 (rows carry `undefined`).** Under revision 1's rule this mutation was the specification, which is why it did not kill; under 5.5 it does |
@@ -880,7 +1071,7 @@ entry missing any of the three is a deletion and would be called that.
 | ID | Residual | Owner | Instrument | Step that will measure it |
 |---|---|---|---|---|
 | **RES-P-1** | `docs/backlog.yml:352` reads `state: 'planned'` but still carries `owns: []` and `verify: null`, and its note records neither landing (`6ecc226`, `e9670d1`) nor the stale panel citations | The orchestrator, at the next push | `git log --oneline \| grep -i a16` against the row's own text | The push that closes wave 2 |
-| **RES-P-2** | `ModuleDeckCapturePanel.wiring.test.ts:215` cites `GradingRecordingPanel.tsx:493-510` as "the run log control"; that range is the auto-drain effect's comment block. Already wrong at HEAD. **Disposed as a REDUCTION per ruling 12** - the object is a stale comment in a file A16 never touches, and revision 1's owner ("the next chunk that writes `module-deck-capture/`") returns ZERO from the backlog | **The orchestrator**, recorded in the A16 backlog row so it survives this plan | `grep -c "module-deck-capture" docs/backlog.yml` - **returns 0 today**, canary `grep -c "A24" docs/backlog.yml` returns 1 on the same file, so the instrument fires | **The next A16 wave gate** |
+| **RES-P-2** | `ModuleDeckCapturePanel.wiring.test.ts:215` cites `GradingRecordingPanel.tsx:493-510` as "the run log control"; that range is the auto-drain effect's comment block. Already wrong at HEAD. **Disposed as a REDUCTION per ruling 12** - the object is a stale comment in a file A16 never touches, and revision 1's owner ("the next chunk that writes `module-deck-capture/`") returns ZERO from the backlog | **The orchestrator, and this is an OUT-OF-BAND step, not a wave's** (ruling 18) | `grep -c "module-deck-capture" docs/backlog.yml` - **still returns 0**, canary `grep -c "A24" docs/backlog.yml` returns 1 on the same file, so the instrument fires | **The orchestrator's own edit to the A16 backlog row.** Revision 2 wrote this row as though it were already done; it is not, and no wave can do it - `docs/backlog.yml` is in no published set, so under 9.0's snapshot diff a wave that wrote it would FAIL its own gate. Naming the orchestrator is therefore not a formality, it is the only actor who can perform it |
 | **RES-P-3** | A16-4 is disposed, not planned. Snapshot grading has no run boundary (section 6) | **Row A24, `docs/backlog.yml:440`** | A24's own `instrument` field, which carries the canary-paired grep | **A24's scoping pass**, scheduled by the backlog like any row |
 | **RES-P-4** | Whether wave 1's extraction trips React Compiler's `preserve-manual-memoization` is unverified. `this-repo.md` section 1 records it on the sibling panel | Wave 1's implementer | `npm run lint` against the count measured on the pre-change tree in the same wave | Wave 1's gate (9.2). Workaround if it fires: keep the ref and its effect in the panel, pass the ref into the leaf |
 | **RES-P-5** | **Wave 3's published set is a FLOOR**, derived without opening all 27 hits | Wave 3's scoping pass | Re-derive by what a grading surface puts ON SCREEN - a per-student score column, a rubric-area breakdown, a "Grade" button - not only by type name; report what this missed | Wave 3's scoping, before dispatch |
@@ -890,6 +1081,7 @@ entry missing any of the three is a deletion and would be called that.
 | **RES-P-9** | **A16-1 and A16-2 shipped with NO `docs/REGRESSION.md` baseline.** Newest entry is 432 (A11's); there is no A16 entry | The baseline seat, in wave 0 | `grep -a` with the **hyphenated** `class-trends`; read the tail for the next number rather than inferring it from `grep -ac "^## "`, which does not agree with the numbering | **Wave 0**, before wave 1 is dispatched |
 | **RES-P-10** | **A8-R's wave 2 landed inside `db747cc`**, a commit whose message describes only a docs relocation for A18. The work is present and correct; the bookkeeping is wrong. Named so the next pass does not read the log, conclude A8-R wave 2 is outstanding, and hold `grading-recording/` against A16-3 for nothing | The orchestrator | `git show --stat db747cc` against `docs/a8r-scope.md` section 11's wave 2 list | Before wave 1 is dispatched - it is the fact that FREES `grading-recording/` |
 | **RES-P-12** | **5.5 bounds failure (a) rather than eliminating it**: a typo in the assessment box at the moment of the click ships into the panel heading, the student-facing draft opening (`class-trends-draft.ts:185`) and the model prompt (`class-trends-insight.ts:154`). Frozen at the click, so it cannot mutate mid-keystroke, and identical to the behaviour `GithubGradingPanel.tsx:861` already ships. Whether an instructor notices is not checkable here | The repo owner | Type a partial label, click Grade All, read the panel heading and the composed draft | An owner observation after wave 2's push |
+| **RES-P-13** | **THE EMPTY-LABEL PATH IS THE DEFAULT, not an edge case** (5.5.2). `checkGradingReadiness` (`grading-dispatch.ts:28-31`) gates on the rubric and the row count only, so the assessment box is optional and the common run captures `assignmentName: ""` - rendering "A note on this assignment" (`class-trends-draft.ts:185`) and "(untitled assignment)" (`class-trends-insight.ts:154`), the exact strings ruling 8 used to describe the silent-green. 5.5 fixed the PERMANENCE of that outcome, not the outcome. Whether the fallback copy is acceptable as the default, or the box should become required for a run that will produce trends, is a product judgement | The repo owner | Grade a batch without touching the assessment box, read the panel heading and the composed draft; then repeat with the box filled | An owner observation after wave 2's push. **The adapter half is not a reading claim and is already gated**: 9.3's META PROJECTION row enumerates the `""` cell |
 
 **Closed this round, not carried:** RES-P-11 (the github-store read line). Ruling
 13 settles it in this plan's favour - `:354` / `:356` / `:357`, the ruling's
@@ -938,6 +1130,22 @@ falsified in the same commit (3.6); RES-P-2 owned by a chunk that does not exist
 `modalAdoption` argued from one branch of a five-way OR; the Set A/B and
 `readdirSync` ranges; eight minors collapsed into one row.
 
+**Revision 2:** the boxed rule named three meta fields and never named `rows`,
+while P3 and P4 positively endorsed `gradingRows.rawRows` - which is a memo over
+React state carrying `rubricAreas: []` on every ungraded row, so A16-3 would have
+shipped dead with green unit tests (5.5, ruling 14); both provenance pins read
+raw source while 5.4 mandated hinge comments naming the pinned identifiers,
+making the positive pin a tautology, the negative pin red on a correct
+implementation, and the whole thing evadable by one render-body `const` (5.5.1,
+ruling 15); the path-scoped gate copied from ruling 9, whose pass condition is
+true by construction (9.0, ruling 16); wave 1 passable by deleting 32 comment
+lines with nothing asserting the leaf had a caller (9.2); wave 1 dispatched as a
+build wave after conceding its target was an architecture decision (5.6);
+`student: row.studentName` a requirement with no gate row (9.3); the empty-label
+default path unrouted (5.5.2); the apply loop cited `:578-584`, excluding both
+the apply call and the brace; a re-export instruction that would have tripped the
+wave's own gate; and the consumer census unlisted.
+
 ### 11.3 Confirmed correct, so no later round "fixes" them back
 
 - `ALLOWED_OVERAGE` is at `src/file-size-ceiling.structure.test.ts:64`, not `:68`.
@@ -960,9 +1168,19 @@ falsified in the same commit (3.6); RES-P-2 owned by a chunk that does not exist
   figure in 9.2 is the orchestrator's measurement of 2026-09-21, attributed there,
   and `tsc` has exactly one caller. Wave 0's implementer measures the real suite
   baseline.
-- **Wave 1's extraction target is not named.** What to extract is an architecture
-  decision. This plan owns the pass condition (<= 934 by both tools, a 32-line
-  removal already demonstrated on this file) and the two constraints on how (5.6).
+- **Wave 1's extraction target is still not named, and that is now routed rather
+  than conceded.** What to extract is an architecture decision, so wave 1 has its
+  own scoping pass (5.6, ruling 17 M2). This plan owns the pass condition
+  (<= 934 by both tools with the comment count not falling, a proven caller, a
+  32-line removal already demonstrated on this file) and the two constraints on
+  how.
+- **Whether ruling 15's region contains zero legitimate occurrences of the three
+  identifiers.** It does not - I measured eight, and 5.5.1 reports the conflict
+  and adopts neither the ruling's claim nor a ban built on it. The region itself
+  IS adopted; only the assertion shape changed, from a ban to a whitelist. If the
+  next round believes the eight occurrences should have moved, that is a
+  different change (extracting the assessment fieldset) and belongs to wave 1's
+  scoping pass, not to a detector.
 - **Wave 3's surface is not enumerated.** 3.5 is a floor and says so.
 - **Whether `repo-grades` can produce a `GradingRun` without inventing one.**
   `RepoGradeCellEdit.rubricAreas` exists and `runBulkGrade` is a real batch over

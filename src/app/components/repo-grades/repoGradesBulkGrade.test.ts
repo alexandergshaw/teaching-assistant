@@ -7,9 +7,17 @@
 // wording pass should be free to reword without breaking this suite.
 
 import { describe, it, expect } from "vitest";
-import { buildBulkGradePlan, bulkGradeSummaryLine, BULK_GRADE_CONCURRENCY, type BulkGradeOutcome } from "./repoGradesBulkGrade";
+import {
+  buildBulkGradePlan,
+  bulkGradeSummaryLine,
+  bulkGradeOutcomeFromRun,
+  BULK_GRADE_CONCURRENCY,
+  type BulkGradeOutcome,
+  type BulkGradeTarget,
+} from "./repoGradesBulkGrade";
 import type { RepoGradeRow, RepoGradeCell } from "./repoGradesRows";
 import type { RepoBindingSuggestion } from "@/lib/repo-student-bindings";
+import { GRADING_FAILURE_PREFIX, type GradeResult } from "@/lib/grade/types";
 
 // A binding deliberately in the "unbound" state with every field filled with
 // an obviously-wrong sentinel value that would fail loudly (e.g. show up in
@@ -228,5 +236,137 @@ describe("bulkGradeSummaryLine", () => {
 describe("BULK_GRADE_CONCURRENCY", () => {
   it("is 3", () => {
     expect(BULK_GRADE_CONCURRENCY).toBe(3);
+  });
+});
+
+// T-2 (docs/a28-scope.md section 8.1, R-6): bulkGradeOutcomeFromRun by value,
+// over the contract's four rules (7a-7d). This is the classifier
+// useRepoGradesBulkGrade.ts's call site now delegates to instead of stamping
+// every success-shaped return "graded" unconditionally (A28).
+describe("bulkGradeOutcomeFromRun", () => {
+  const TARGET: BulkGradeTarget = { repo: "org/a", folder: "week-1" };
+
+  function gradedRow(overrides: Partial<GradeResult> = {}): GradeResult {
+    return {
+      student: "org/a",
+      overallComment: "",
+      strengths: "",
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: [],
+      totalScore: "18/20",
+      feedback: "",
+      mergedFileCount: 1,
+      submittedFiles: [],
+      ...overrides,
+    };
+  }
+
+  function gradingFailedRow(message = `${GRADING_FAILURE_PREFIX}model error`): GradeResult {
+    return {
+      student: "org/a",
+      overallComment: "",
+      strengths: "",
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: [],
+      totalScore: "",
+      feedback: "",
+      mergedFileCount: 0,
+      submittedFiles: [],
+      ungraded: { kind: "grading-failed", sourceIndex: 0, student: "org/a", message },
+    };
+  }
+
+  function notAttemptedRow(message = "not attempted"): GradeResult {
+    return {
+      student: "org/a",
+      overallComment: message,
+      strengths: message,
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: [],
+      totalScore: "",
+      feedback: "",
+      mergedFileCount: 0,
+      submittedFiles: [],
+      ungraded: { kind: "not-attempted", sourceIndex: 0, student: "org/a", stoppedBy: "run-deadline", message },
+    };
+  }
+
+  it("(a) empty results: failed, empty score, the 'no result' detail, joined with successDetail when non-empty", () => {
+    expect(bulkGradeOutcomeFromRun(TARGET, [], "")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "failed",
+      score: "",
+      detail: "Grading returned no result for this folder.",
+    });
+    expect(bulkGradeOutcomeFromRun(TARGET, [], "instructions came from README.md")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "failed",
+      score: "",
+      detail: "Grading returned no result for this folder. | instructions came from README.md",
+    });
+  });
+
+  it("(b) a grading-failed row: failed, ungraded.message as detail, joined with successDetail (MU-5 guard: never dropped)", () => {
+    const failedRow = gradingFailedRow();
+    expect(bulkGradeOutcomeFromRun(TARGET, [failedRow], "")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "failed",
+      score: "",
+      detail: failedRow.ungraded!.message,
+    });
+    expect(bulkGradeOutcomeFromRun(TARGET, [failedRow], "instructions came from README.md")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "failed",
+      score: "",
+      detail: `${failedRow.ungraded!.message} | instructions came from README.md`,
+    });
+  });
+
+  it("(b) a not-attempted row is treated the same as a grading-failed row", () => {
+    const notAttempted = notAttemptedRow();
+    expect(bulkGradeOutcomeFromRun(TARGET, [notAttempted], "")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "failed",
+      score: "",
+      detail: notAttempted.ungraded!.message,
+    });
+  });
+
+  it("(c) a graded row: graded, score copied from totalScore, detail is successDetail as-is", () => {
+    const graded = gradedRow({ totalScore: "18/20" });
+    expect(bulkGradeOutcomeFromRun(TARGET, [graded], "instructions came from README.md")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "graded",
+      score: "18/20",
+      detail: "instructions came from README.md",
+    });
+  });
+
+  it("(d) repo and folder always come from target, never from the result", () => {
+    const graded = gradedRow({ student: "someone-else" });
+    const outcome = bulkGradeOutcomeFromRun({ repo: "org/z", folder: "week-9" }, [graded], "");
+    expect(outcome.repo).toBe("org/z");
+    expect(outcome.folder).toBe("week-9");
+  });
+
+  it("MU-6 guard: reads results[0], never results.at(-1) - a graded first result beside a failed second result stays graded", () => {
+    const first = gradedRow({ totalScore: "9" });
+    const second = gradingFailedRow("should never be read");
+    expect(bulkGradeOutcomeFromRun(TARGET, [first, second], "")).toEqual({
+      repo: "org/a",
+      folder: "week-1",
+      status: "graded",
+      score: "9",
+      detail: "",
+    });
   });
 });

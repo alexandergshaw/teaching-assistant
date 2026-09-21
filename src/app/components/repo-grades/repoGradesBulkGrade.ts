@@ -40,6 +40,7 @@
 
 import type { RepoGradeRow } from "./repoGradesRows";
 import { scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
+import { isUngraded, type GradeResult } from "@/lib/grade/types";
 
 export interface BulkGradeTarget {
   repo: string;
@@ -149,6 +150,11 @@ export interface BulkGradeOutcome {
   // in it. Its own status, never "failed" (nothing went wrong) and never
   // "graded" (no score was produced) - see repoGradesLog.ts's
   // "grade-no-submission" kind, which this maps to one-for-one.
+  // "failed" (A28, docs/a28-scope.md): also covers a success-shaped
+  // gradeRepoAction return whose run's first result is itself ungraded (a
+  // model call that failed inside grading, or ran out of budget) - see
+  // bulkGradeOutcomeFromRun below, the one place that classification is
+  // made.
   status: "graded" | "failed" | "no-submission";
   /** The score exactly as produced, e.g. "18/20"; "" for a failure or a
    * no-submission outcome. */
@@ -182,4 +188,46 @@ export function bulkGradeSummaryLine(outcomes: readonly BulkGradeOutcome[], plan
     return parts.length > 0 ? `Nothing was graded - ${parts.join(", ")}.` : "Nothing was graded.";
   }
   return `Bulk grading finished: ${parts.join(", ")}.`;
+}
+
+/**
+ * The ONE decision that turns a success-shaped gradeRepoAction return into a
+ * BulkGradeOutcome (A28, docs/a28-scope.md section 7). "graded" iff the
+ * run's first result exists and is not ungraded (types.ts isUngraded - never
+ * a totalScore or prose test). gradeRepoAction's own body never throws - a
+ * model failure inside grading (engine.ts) still comes back as a normal,
+ * success-shaped return whose run's first result carries `ungraded` (a
+ * "grading-failed" or "not-attempted" row). Before this function existed,
+ * useRepoGradesBulkGrade.ts's call site stamped every such return
+ * `status: "graded"` unconditionally, which is exactly the defect this
+ * closes. This has to live here rather than inside bulkGradeSummaryLine
+ * above: that function's own input, BulkGradeOutcome, has no field that
+ * could carry the distinction - the outcome must already be classified by
+ * the time it gets there.
+ */
+export function bulkGradeOutcomeFromRun(
+  target: BulkGradeTarget,
+  results: readonly GradeResult[],
+  successDetail: string,
+): BulkGradeOutcome {
+  const first = results[0];
+  if (first === undefined) {
+    return {
+      repo: target.repo,
+      folder: target.folder,
+      status: "failed",
+      score: "",
+      detail: ["Grading returned no result for this folder.", successDetail].filter((part) => part !== "").join(" | "),
+    };
+  }
+  if (isUngraded(first)) {
+    return {
+      repo: target.repo,
+      folder: target.folder,
+      status: "failed",
+      score: "",
+      detail: [first.ungraded.message, successDetail].filter((part) => part !== "").join(" | "),
+    };
+  }
+  return { repo: target.repo, folder: target.folder, status: "graded", score: first.totalScore, detail: successDetail };
 }

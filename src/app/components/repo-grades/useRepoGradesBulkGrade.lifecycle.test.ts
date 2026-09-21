@@ -74,6 +74,8 @@ import type { RepoGradeLogEntry } from "./repoGradesLog";
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 import type { RepoBindingSuggestion } from "@/lib/repo-student-bindings";
 import type { Course } from "@/lib/supabase/courses.types";
+import { repoRunTrendsLabel } from "./classTrendsFolderEntry";
+import { GRADING_FAILURE_PREFIX, type GradeResult, type GradingRunEntry } from "@/lib/grade/types";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
   let resolve!: (v: T) => void;
@@ -151,6 +153,57 @@ function successResult(repo: string) {
   };
 }
 
+/** A28 (docs/a28-scope.md section 8.1, T-1): a success-shaped gradeRepoAction
+ * return whose run's first result is itself ungraded - the "model call fails
+ * but the result still comes back success-shaped" case the status line used
+ * to stamp "graded". Typed `GradeResult` so tsc holds its shape to the union
+ * (the scope's own requirement), never built through a cast. */
+function modelFailedResult(repo: string, effectiveRubric = "the instructor's picked rubric") {
+  const failedRow: GradeResult = {
+    student: repo,
+    overallComment: "",
+    strengths: "",
+    improvements: "",
+    resubmitNotice: "",
+    rubricAreas: [],
+    totalScore: "",
+    feedback: "",
+    mergedFileCount: 0,
+    submittedFiles: [],
+    ungraded: {
+      kind: "grading-failed",
+      sourceIndex: 0,
+      student: repo,
+      message: `${GRADING_FAILURE_PREFIX}model call failed for ${repo}`,
+    },
+  };
+  return {
+    run: { results: [failedRow] },
+    rubric: effectiveRubric,
+    fullName: repo,
+    readmePath: "README.md",
+    readmeMissing: false,
+  };
+}
+
+/** gradeRepoAction's own `{ error }` shape (a returned failure, never a
+ * rejection - see this file's header comment). */
+function errorResult(repo: string) {
+  return { error: `${repo}: simulated grading error` };
+}
+
+/** gradeRepoAction's own `{ noSubmission: true }` shape (FIX 2). */
+function noSubmissionResult(repo: string) {
+  return { noSubmission: true as const, reason: `${repo}: nothing was submitted` };
+}
+
+/** A graded result that carries no rubric areas - M8's second case in
+ * docs/a28-scope.md section 2: a real grade, just with nothing to chart. */
+function zeroAreaResult(repo: string): ReturnType<typeof successResult> {
+  const base = successResult(repo);
+  return { ...base, run: { results: [{ ...base.run.results[0], rubricAreas: [] }] } };
+}
+
 describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingActions, driven via handleGradeColumn/handleGradeCell", () => {
   let cellEditsState: RepoGradeCellEditsByRepo;
   let recordLogCalls: RepoGradeLogEntry[];
@@ -215,6 +268,14 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
   function useTestRender() {
     h0.begin();
     return useRepoGradesGradingActions(makeParams());
+  }
+
+  /** Same as useTestRender, but with the params overridable - A28's T-1
+   * needs its own `rows` (different repo counts per case, section 2's M5 has
+   * seven) rather than the fixed TARGET_REPOS/ROWS above. */
+  function useTestRenderWith(overrides: Partial<UseRepoGradesGradingActionsParams>) {
+    h0.begin();
+    return useRepoGradesGradingActions(makeParams(overrides));
   }
 
   /** Makes every gradeRepoAction call hang until explicitly released - needed
@@ -391,5 +452,182 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
     expect(edit?.grading).toBe(false);
     expect(edit?.gradeError).toBeTruthy();
     expect(recordLogCalls.some((e) => e.kind === "grade-failed" && e.repo === "org/a")).toBe(true);
+  });
+
+  // T-1 (docs/a28-scope.md section 8.1, A28): the agreement table. Drives the
+  // real handler (handleGradeColumn) across the scope's M1-M8 cases and
+  // compares the TWO VALUES the view actually renders from - the argument
+  // setPostSummary receives (index.tsx:845) and repoRunTrendsLabel applied to
+  // a fresh render's trendsEntry (index.tsx:855) - never two numbers computed
+  // inside this test. R-2 also pins each status line as a frozen literal
+  // (taken from docs/a28-scope.md section 2.3's "after the change" column):
+  // R-1 alone cannot tell "2 graded, 1 failed" apart from "2 graded, 1 had
+  // nothing submitted" when both report a graded count of 2 (MU-3).
+  describe("T-1: A28 agreement table - status line vs trends label, driven via handleGradeColumn", () => {
+    const M1_M4_M6_REPOS = ["org/a", "org/b", "org/c"];
+    const M5_REPOS = ["org/a", "org/b", "org/c", "org/d", "org/e", "org/f", "org/g"];
+    const M8_REPOS = ["org/a", "org/b"];
+    const M7_RUBRIC_OVERRIDES: Partial<ResolvedRubric> = { text: "", source: "generate", identity: "" };
+    const M7_ESTABLISHED_RUBRIC = "auto-generated rubric from org/a";
+
+    function statusGradedCount(line: string): number {
+      if (line.startsWith("Nothing was graded")) return 0;
+      const m = line.match(/(\d+) graded/);
+      return m ? Number(m[1]) : 0;
+    }
+
+    function labelGradedCount(entry: GradingRunEntry | null): number | null {
+      if (entry === null) return null;
+      const label = repoRunTrendsLabel(entry);
+      const m = label.match(/covering the (\d+) repos? it graded/);
+      return m ? Number(m[1]) : null;
+    }
+
+    // NOTE: the render calls below are inlined into each `it`/`it.each`
+    // callback rather than factored into a shared async helper - eslint's
+    // react-hooks/rules-of-hooks (correctly) refuses to let a "hook" call
+    // (useTestRenderWith) happen inside any OTHER function, named or not,
+    // once that function is `async` (a hook can never itself be async, and a
+    // plain non-"use"-named function calling one fails the "must be a
+    // component or hook" check instead) - only the test callback passed
+    // directly to `it`/`it.each` is exempt, matching every existing test
+    // above in this file. `setUpCase` below is a plain SYNC helper (no hook
+    // call) that only builds the rows and arms the mock.
+    function setUpCase(repos: string[], impl: (repo: string) => unknown): RepoGradeRow[] {
+      const rows = repos.map(row);
+      gradeRepoActionMock.mockImplementation(async (repo: string) => impl(repo));
+      return rows;
+    }
+
+    const implM1 = (repo: string) => successResult(repo);
+    const implM2 = (repo: string) => (repo === "org/b" ? errorResult(repo) : successResult(repo));
+    const implM3 = (repo: string) => {
+      if (repo === "org/b") throw new Error("Failed to fetch");
+      return successResult(repo);
+    };
+    const implM4 = (repo: string) => (repo === "org/b" ? modelFailedResult(repo) : successResult(repo));
+    const implM5 = (repo: string) => {
+      switch (repo) {
+        case "org/a":
+          return successResult(repo);
+        case "org/b":
+          return errorResult(repo);
+        case "org/c":
+          throw new Error("Failed to fetch");
+        case "org/d":
+          return modelFailedResult(repo);
+        case "org/e":
+          return noSubmissionResult(repo);
+        case "org/f":
+          return zeroAreaResult(repo);
+        case "org/g":
+          return successResult(repo);
+        default:
+          throw new Error(`unexpected repo ${repo}`);
+      }
+    };
+    const implM6 = (repo: string) => modelFailedResult(repo);
+    const implM7 = (repo: string) => (repo === "org/a" ? modelFailedResult(repo, M7_ESTABLISHED_RUBRIC) : successResult(repo));
+    const implM8 = (repo: string) => (repo === "org/b" ? zeroAreaResult(repo) : successResult(repo));
+
+    const CASES: Array<{
+      name: string;
+      repos: string[];
+      impl: (repo: string) => unknown;
+      rubricOverrides?: Partial<ResolvedRubric>;
+      expectedStatus: string;
+    }> = [
+      { name: "M1 (all succeed)", repos: M1_M4_M6_REPOS, impl: implM1, expectedStatus: "Bulk grading finished: 3 graded." },
+      { name: "M2 (one { error } return)", repos: M1_M4_M6_REPOS, impl: implM2, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
+      { name: "M3 (one rejected call)", repos: M1_M4_M6_REPOS, impl: implM3, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
+      { name: "M4 (one model-failed, success-shaped result)", repos: M1_M4_M6_REPOS, impl: implM4, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
+      {
+        name: "M5 (mixed: ok, error, reject, model-fail, no-submission, zero-area, ok)",
+        repos: M5_REPOS,
+        impl: implM5,
+        expectedStatus: "Bulk grading finished: 3 graded, 3 failed, 1 had nothing submitted.",
+      },
+      { name: "M6 (every model call fails)", repos: M1_M4_M6_REPOS, impl: implM6, expectedStatus: "Nothing was graded - 3 failed." },
+      {
+        name: "M7 (blank rubric; the prologue's first attempt model-fails)",
+        repos: M1_M4_M6_REPOS,
+        impl: implM7,
+        rubricOverrides: M7_RUBRIC_OVERRIDES,
+        expectedStatus: "Bulk grading finished: 2 graded, 1 failed.",
+      },
+      { name: "M8 (one graded with zero rubric areas)", repos: M8_REPOS, impl: implM8, expectedStatus: "Bulk grading finished: 2 graded." },
+    ];
+
+    it.each(CASES)(
+      "$name: the status line and the trends label agree, matching the frozen literal",
+      async ({ repos, impl, rubricOverrides, expectedStatus }) => {
+        const rows = setUpCase(repos, impl);
+        const render = useTestRenderWith({ rows, columns: COLUMNS });
+        const p = render.handleGradeColumn("week-1");
+        expect(rubricDeferreds.length).toBe(1);
+        rubricDeferreds[0].resolve(resolvedRubric(rubricOverrides));
+        await p;
+        const after = useTestRenderWith({ rows, columns: COLUMNS });
+        const statusLine = announceCalls.at(-1) as string;
+        const trendsEntry = after.trendsEntry;
+
+        // R-2: the frozen literal oracle - catches MU-3, which R-1 alone
+        // would let through (a "2 graded, 1 had nothing submitted" line has
+        // the same graded count as "2 graded, 1 failed").
+        expect(statusLine).toBe(expectedStatus);
+
+        const statusCount = statusGradedCount(statusLine);
+        const labelCount = labelGradedCount(trendsEntry);
+        if (statusLine.startsWith("Nothing was graded")) {
+          // R-3 (RULE 5): a run that graded nothing must show no trends label.
+          expect(trendsEntry).toBeNull();
+          expect(labelCount).toBeNull();
+        } else {
+          // R-1: the two rendered counts must agree whenever there is a label.
+          expect(trendsEntry).not.toBeNull();
+          expect(labelCount).toBe(statusCount);
+        }
+      }
+    );
+
+    it("R-4: M7 - a model-failed first attempt still establishes the shared rubric for the rest of the run", async () => {
+      const rows = setUpCase(M1_M4_M6_REPOS, implM7);
+      const render = useTestRenderWith({ rows, columns: COLUMNS });
+      const p = render.handleGradeColumn("week-1");
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric(M7_RUBRIC_OVERRIDES));
+      await p;
+
+      expect(gradeRepoActionMock.mock.calls.length).toBe(3);
+      const callsByRepo = new Map(gradeRepoActionMock.mock.calls.map((args) => [args[0] as string, args]));
+      expect(callsByRepo.get("org/b")?.[2]).toBe(M7_ESTABLISHED_RUBRIC);
+      expect(callsByRepo.get("org/c")?.[2]).toBe(M7_ESTABLISHED_RUBRIC);
+    });
+
+    it("R-5: M4 - the model-failed repo is logged grade-failed, with a GRADING_FAILURE_PREFIX detail", async () => {
+      const rows = setUpCase(M1_M4_M6_REPOS, implM4);
+      const render = useTestRenderWith({ rows, columns: COLUMNS });
+      const p = render.handleGradeColumn("week-1");
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const entry = recordLogCalls.find((e) => e.repo === "org/b");
+      expect(entry?.kind).toBe("grade-failed");
+      expect(entry?.detail.startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
+    });
+
+    it("R-7: M4 - the model-failed repo's cell still shows no error line and no score (RR-1, out of this row's scope)", async () => {
+      const rows = setUpCase(M1_M4_M6_REPOS, implM4);
+      const render = useTestRenderWith({ rows, columns: COLUMNS });
+      const p = render.handleGradeColumn("week-1");
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const edit = cellEditsState["org/b"]?.["week-1"];
+      expect(edit?.gradeError).toBeNull();
+      expect(edit?.score ?? "").toBe("");
+    });
   });
 });

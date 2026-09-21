@@ -10,8 +10,15 @@
 // already calls it per cell (see that function's header comment for why
 // `rubricAreas`/`generatedScore` are set only by a grading call, never by a
 // hand-edit) so a bulk-graded cell and a one-off-graded cell are
-// indistinguishable to every downstream consumer (posting, the activity log,
-// repoGradeScoreWasEdited).
+// indistinguishable to most downstream consumers (posting,
+// repoGradeScoreWasEdited). CORRECTED (A28, docs/a28-scope.md): this used to
+// say "indistinguishable ... including the activity log", which stopped
+// being true once bulkGradeOutcomeFromRun (repoGradesBulkGrade.ts) started
+// classifying a model-failed repo as "failed" here. Until backlog row RR-1
+// gives the per-cell path (handleGradeCell,
+// useRepoGradesGradingActions.ts's handleGradeCell) the same classification,
+// the SAME model failure logs `grade-failed` from this bulk path and
+// `grade-succeeded` from the per-cell path.
 //
 // Why a worker pool and not Promise.all(plan.targets.map(...)): fanning out
 // every target at once would multiply the GitHub-ingest and model rate-limit
@@ -48,6 +55,7 @@ import type { GradeResult } from "@/lib/grade/types";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 import {
   bulkGradeSummaryLine,
+  bulkGradeOutcomeFromRun,
   BULK_GRADE_CONCURRENCY,
   type BulkGradeOutcome,
   type BulkGradePlan,
@@ -373,7 +381,12 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
       const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
       const detail = [readmeNote, rubricNote, feedbackNote].filter((part) => part !== "").join(" | ");
-      outcomes.push({ repo: target.repo, folder: target.folder, status: "graded", score, detail });
+      // A28 (docs/a28-scope.md section 6.1): a success-shaped `result` can
+      // still carry a model failure in `result.run.results[0].ungraded` -
+      // bulkGradeOutcomeFromRun is the one place that turns this return into
+      // an outcome, so that case is classified "failed" instead of the
+      // literal "graded" this line used to write unconditionally.
+      outcomes.push(bulkGradeOutcomeFromRun(target, result.run.results, detail));
       // A16 wave 3: pushes onto the run's trends collector above. A direct
       // statement, following both early-return branches - never nested.
       runResults.push(...result.run.results);

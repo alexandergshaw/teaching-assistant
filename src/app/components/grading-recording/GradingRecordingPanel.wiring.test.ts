@@ -132,3 +132,446 @@ describe("Remove/Clear-table route through the one composed handler (RES-A9-10)"
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// A16-3 (docs/a16-plan.md 5.5/5.5.1/9.3, rulings 14/19/20/21): the run
+// cohort a Grade submissions click captures, and the gated trends mount it
+// feeds. Every source-text pin below runs over COMMENT-STRIPPED source
+// (docs/a16-rulings.md Ruling 15) - the panel's own mandated hinge comments
+// name the very identifiers these pins look for, and this repo's own
+// submission-kind-callsites.structure.test.ts already strips comments for
+// exactly this reason ("comments naming the rule do not count").
+//
+// stripComments is DUPLICATED from submission-kind-callsites.structure.test.ts
+// rather than imported - this repo forbids importing a helper from another
+// *.test.ts file (it re-runs that file's describe blocks as a side effect).
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
+const STRIPPED_SOURCE = stripComments(source);
+
+function extractBalanced(text: string, openBraceIndex: number): string {
+  let depth = 0;
+  for (let i = openBraceIndex; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth--;
+      if (depth === 0) return text.slice(openBraceIndex, i + 1);
+    }
+  }
+  return text.slice(openBraceIndex);
+}
+
+/** The comment-stripped body of handleGradeAll - the POSITIVE region
+ *  (ruling 15). Located by the literal binding text, then balanced by
+ *  brace count so nested blocks (if/for/try) do not truncate it early. */
+function handleGradeAllBody(strippedSource: string): string {
+  const marker = "const handleGradeAll = useCallback(async () => {";
+  const idx = strippedSource.indexOf(marker);
+  if (idx === -1) return "";
+  return extractBalanced(strippedSource, idx + marker.length - 1);
+}
+
+/** The comment-stripped render body, EXCLUDING every handler body - the
+ *  NEGATIVE region (ruling 15). Located by the `return (` MARKER, never a
+ *  raw line number (ruling 24): comment-stripping and wave 1's own
+ *  extraction both shift line numbers, but this marker survives both. */
+function renderBody(strippedSource: string): string {
+  const match = /^  return \(/m.exec(strippedSource);
+  return match ? strippedSource.slice(match.index) : "";
+}
+
+const HANDLE_GRADE_ALL_BODY = handleGradeAllBody(STRIPPED_SOURCE);
+const RENDER_BODY = renderBody(STRIPPED_SOURCE);
+
+describe("region helpers (canary)", () => {
+  it("handleGradeAllBody finds a real, non-empty region on the panel", () => {
+    expect(HANDLE_GRADE_ALL_BODY.length).toBeGreaterThan(0);
+    expect(HANDLE_GRADE_ALL_BODY).toMatch(/checkGradingReadiness/);
+  });
+
+  it("renderBody finds a real, non-empty region on the panel", () => {
+    expect(RENDER_BODY.length).toBeGreaterThan(0);
+    expect(RENDER_BODY).toMatch(/GradingTable/);
+  });
+
+  it("renderBody EXCLUDES handleGradeAll's own body (a fixture proves the split)", () => {
+    const fixture = [
+      "const handleGradeAll = useCallback(async () => {",
+      "  const assessmentLabel = 'leaked';",
+      "}, []);",
+      "  return (",
+      "    <div />",
+      "  );",
+    ].join("\n");
+    expect(renderBody(fixture)).not.toMatch(/assessmentLabel/);
+  });
+});
+
+// ── THE LEAF IS CALLED (B1, ruling 17 M1/M3 shape) - TWO REGIONS ──────────
+
+function importsBuildRunCohort(strippedWholeSource: string): boolean {
+  return /import\s*\{[^}]*\bbuildRunCohort\b[^}]*\}\s*from\s*["']\.\/classTrendsRunCohort["']/.test(strippedWholeSource);
+}
+
+function callsBuildRunCohort(strippedHandlerBody: string): boolean {
+  return /\bbuildRunCohort\(/.test(strippedHandlerBody);
+}
+
+describe("importsBuildRunCohort / callsBuildRunCohort (canary)", () => {
+  it("reports true on the shipped import-and-call shape", () => {
+    expect(importsBuildRunCohort('import { buildRunCohort } from "./classTrendsRunCohort";')).toBe(true);
+    expect(callsBuildRunCohort("buildRunCohort(result.results, identity, meta)")).toBe(true);
+  });
+
+  it("reports false on a dead import (P17-adjacent: imported but the merge is inlined)", () => {
+    expect(callsBuildRunCohort("const cohort = { rows: [] };")).toBe(false);
+  });
+
+  it("reports false on a local reimplementation never imported from ./classTrendsRunCohort", () => {
+    expect(importsBuildRunCohort("function buildRunCohort() { return null; }")).toBe(false);
+  });
+});
+
+describe("GradingRecordingPanel.tsx calls buildRunCohort (B1, closes P17)", () => {
+  it("imports buildRunCohort from ./classTrendsRunCohort", () => {
+    expect(importsBuildRunCohort(STRIPPED_SOURCE)).toBe(true);
+  });
+
+  it("calls buildRunCohort( inside handleGradeAll's own body - not merely imported", () => {
+    expect(callsBuildRunCohort(HANDLE_GRADE_ALL_BODY)).toBe(true);
+  });
+});
+
+// ── THE FIRST ARGUMENT IS THIS RUN'S RESULTS (B1, closes P13) ─────────────
+
+function buildRunCohortFirstArgument(strippedHandlerBody: string): string | null {
+  const match = /buildRunCohort\(\s*([^,]+),/.exec(strippedHandlerBody);
+  return match ? match[1].trim() : null;
+}
+
+describe("buildRunCohortFirstArgument (canary)", () => {
+  it("returns 'result.results' on the correct shape", () => {
+    expect(buildRunCohortFirstArgument("buildRunCohort(result.results, identity, meta)")).toBe("result.results");
+  });
+
+  it("returns the pre-grade row array's name on P13's mutation - never confused with the correct shape", () => {
+    expect(buildRunCohortFirstArgument("buildRunCohort(gradingRows.rawRows, identity, meta)")).toBe("gradingRows.rawRows");
+    expect(buildRunCohortFirstArgument("buildRunCohort(gradingRows.rows, identity, meta)")).toBe("gradingRows.rows");
+  });
+});
+
+describe("GradingRecordingPanel.tsx's buildRunCohort call passes THIS RUN'S results (B1, closes P13)", () => {
+  it("the first argument is result.results, never gradingRows.rawRows or gradingRows.rows", () => {
+    const firstArg = buildRunCohortFirstArgument(HANDLE_GRADE_ALL_BODY);
+    expect(firstArg).toBe("result.results");
+    expect(firstArg).not.toBe("gradingRows.rawRows");
+    expect(firstArg).not.toBe("gradingRows.rows");
+  });
+});
+
+// ── THE PROJECTION NAMES assessment (B1, closes P15) ──────────────────────
+
+function identityProjectsRowAssessment(strippedHandlerBody: string): boolean {
+  const match = /const identity = [\s\S]*?\bassessment:\s*([^,}\n]+)[,}]/.exec(strippedHandlerBody);
+  if (!match) return false;
+  return match[1].trim() === "r.assessment";
+}
+
+describe("identityProjectsRowAssessment (canary)", () => {
+  it("returns true when the identity projection's assessment property reads r.assessment", () => {
+    expect(identityProjectsRowAssessment("const identity = gradingRows.rawRows.map((r) => ({ id: r.id, assessment: r.assessment }));")).toBe(
+      true
+    );
+  });
+
+  it("returns false on P15's mutation - filling every row from the single in-scope value", () => {
+    expect(identityProjectsRowAssessment("const identity = gradingRows.rawRows.map((r) => ({ id: r.id, assessment: assessmentId }));")).toBe(
+      false
+    );
+  });
+});
+
+describe("GradingRecordingPanel.tsx's identity projection names r.assessment (B1, closes P15)", () => {
+  it("the per-row assessment property reads r.assessment, never assessmentId or assessmentLabel", () => {
+    expect(identityProjectsRowAssessment(HANDLE_GRADE_ALL_BODY)).toBe(true);
+    const match = /const identity = [\s\S]*?\bassessment:\s*([^,}\n]+)[,}]/.exec(HANDLE_GRADE_ALL_BODY);
+    expect(match).not.toBeNull();
+    expect(match![1].trim()).not.toBe("assessmentId");
+    expect(match![1].trim()).not.toBe("assessmentLabel");
+  });
+});
+
+// ── THE CLEAR IS IN EVERY NON-SUCCESS BRANCH (B1, closes P16) ─────────────
+
+function readinessRefusalBody(strippedHandlerBody: string): string | null {
+  const match = /if \(!readiness\.ok\) \{([\s\S]*?)\n(\s*)\}/.exec(strippedHandlerBody);
+  return match ? match[1] : null;
+}
+
+function errorResultBranchBody(strippedHandlerBody: string): string | null {
+  const match = /if \("error" in result\) \{([\s\S]*?)\n(\s*)\}/.exec(strippedHandlerBody);
+  return match ? match[1] : null;
+}
+
+function catchBranchBody(strippedHandlerBody: string): string | null {
+  const match = /\} catch \([^)]*\) \{([\s\S]*?)\n(\s*)\} finally/.exec(strippedHandlerBody);
+  return match ? match[1] : null;
+}
+
+describe("branch-body helpers (canary)", () => {
+  it("find each of the three non-success branches on the real panel", () => {
+    expect(readinessRefusalBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
+    expect(errorResultBranchBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
+    expect(catchBranchBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
+  });
+});
+
+describe("GradingRecordingPanel.tsx clears the cohort in all three non-success branches (B1, closes P16)", () => {
+  it("the readiness refusal (which returns BEFORE the run starts) clears lastRunCohort", () => {
+    const body = readinessRefusalBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+
+  it("the \"error\" in result branch clears lastRunCohort", () => {
+    const body = errorResultBranchBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+
+  it("the catch branch clears lastRunCohort", () => {
+    const body = catchBranchBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+});
+
+// ── THE PROVENANCE PIN, POSITIVE HALF, RE-TARGETED (M2) ───────────────────
+
+function metaBindingCapturesProvenance(strippedHandlerBody: string): boolean {
+  const metaMatch = /const meta = (\{[\s\S]*?\});/.exec(strippedHandlerBody);
+  if (!metaMatch) return false;
+  const metaExpr = metaMatch[1];
+  const mentionsAssessment = /\bassessmentId\b|\bassessmentLabel\b/.test(metaExpr);
+  const mentionsCourse = /\bselectedCourse\b/.test(metaExpr);
+  const passedToCall = /buildRunCohort\([^;]*\bmeta\b[^;]*\)/.test(strippedHandlerBody);
+  return mentionsAssessment && mentionsCourse && passedToCall;
+}
+
+describe("metaBindingCapturesProvenance (canary)", () => {
+  it("returns true on the shipped hoisted-const shape", () => {
+    expect(
+      metaBindingCapturesProvenance(
+        'const meta = { courseName: selectedCourse?.name ?? "", assignmentName: assessmentId };\nbuildRunCohort(result.results, identity, meta);'
+      )
+    ).toBe(true);
+  });
+
+  it("returns false on P8's mutation - dropping assessmentId from the captured meta", () => {
+    expect(
+      metaBindingCapturesProvenance(
+        'const meta = { courseName: selectedCourse?.name ?? "", assignmentName: "" };\nbuildRunCohort(result.results, identity, meta);'
+      )
+    ).toBe(false);
+  });
+});
+
+describe("GradingRecordingPanel.tsx's meta argument captures BOTH provenance fields (POSITIVE pin, M2)", () => {
+  it("the hoisted const meta mentions assessmentId/assessmentLabel and selectedCourse, and is passed to buildRunCohort", () => {
+    expect(metaBindingCapturesProvenance(HANDLE_GRADE_ALL_BODY)).toBe(true);
+  });
+});
+
+// A whole-file, raw-source ban is RED at HEAD before any wave-2 code exists
+// (pre-existing legitimate gradingRows.rawRows/gradingRows.rows hits) - so
+// this repo's own gate is region-plus-whitelist, never a file-wide ban.
+describe("a file-wide raw-source ban would be RED at HEAD (why this file uses regions instead)", () => {
+  it("gradingRows.(rawRows|rows) has pre-existing legitimate hits outside the handler", () => {
+    expect(/gradingRows\.(rawRows|rows)/.test(source)).toBe(true);
+  });
+});
+
+// ── THE WHITELIST, QUOTED VERBATIM FROM 5.5.1 (B2, ruling 21) ─────────────
+// "there is exactly one `const <name> = <expr>;` binding the trends entry,
+// and `<expr>`'s only free identifiers are `lastRunCohort` and the imported
+// helpers (`toRunCohortEntry`, `runCohortMeta`). The mount's `entry={...}`
+// is that `<name>`."
+
+const TRENDS_ENTRY_ALLOWED_IDENTIFIERS = new Set(["lastRunCohort", "toRunCohortEntry", "runCohortMeta", "null"]);
+
+function findConstBindingsCalling(strippedBody: string, calleeName: string): Array<{ name: string; expr: string }> {
+  const found: Array<{ name: string; expr: string }> = [];
+  const regex = /const\s+(\w+)\s*=\s*([^;]+);/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(strippedBody))) {
+    if (new RegExp(`\\b${calleeName}\\(`).test(match[2])) {
+      found.push({ name: match[1], expr: match[2] });
+    }
+  }
+  return found;
+}
+
+function freeIdentifiers(expr: string): string[] {
+  return expr.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
+}
+
+describe("findConstBindingsCalling / freeIdentifiers (canary)", () => {
+  it("finds exactly one binding on the shipped shape, with only whitelisted free identifiers", () => {
+    const fixture = "const trendsEntry = lastRunCohort ? toRunCohortEntry(lastRunCohort) : null;";
+    const found = findConstBindingsCalling(fixture, "toRunCohortEntry");
+    expect(found).toHaveLength(1);
+    expect(freeIdentifiers(found[0].expr).every((id) => TRENDS_ENTRY_ALLOWED_IDENTIFIERS.has(id))).toBe(true);
+  });
+
+  it("fails the whitelist on a one-hop evasion that reads a live control instead", () => {
+    const fixture = "const trendsEntry = lastRunCohort ? toRunCohortEntry(lastRunCohort) : null;\nconst leaked = assessmentLabel;";
+    // The leaked const does not call toRunCohortEntry, so it is invisible to
+    // this detector by construction - proving the whitelist is scoped to
+    // THE TRENDS-ENTRY CONST'S OWN INITIALISER, never the whole render body.
+    const found = findConstBindingsCalling(fixture, "toRunCohortEntry");
+    expect(found).toHaveLength(1);
+    expect(found[0].expr).not.toMatch(/assessmentLabel/);
+  });
+});
+
+describe("GradingRecordingPanel.tsx's trends-entry const is whitelisted (B2, ruling 21)", () => {
+  it("there is exactly one const binding a toRunCohortEntry(...) expression in the render body", () => {
+    const found = findConstBindingsCalling(RENDER_BODY, "toRunCohortEntry");
+    expect(found).toHaveLength(1);
+  });
+
+  it("that expression's only free identifiers are lastRunCohort and the imported helpers", () => {
+    const [binding] = findConstBindingsCalling(RENDER_BODY, "toRunCohortEntry");
+    expect(binding).toBeDefined();
+    const ids = freeIdentifiers(binding.expr);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(TRENDS_ENTRY_ALLOWED_IDENTIFIERS.has(id), `unexpected free identifier: ${id}`).toBe(true);
+    }
+  });
+
+  it("the mount's entry={...} prop is that same const's name", () => {
+    const [binding] = findConstBindingsCalling(RENDER_BODY, "toRunCohortEntry");
+    expect(binding).toBeDefined();
+    const tagMatch = /<ClassTrendsPanel\b[^>]*>/.exec(RENDER_BODY);
+    expect(tagMatch).not.toBeNull();
+    expect(tagMatch![0]).toMatch(new RegExp(`entry=\\{${binding.name}\\}`));
+  });
+});
+
+// ── THE MOUNT IS GATED (M3) - reusing the shipped classTrendsMountIsGated ──
+// shape from gradingResultsExtraction.wiring.test.ts:277-281, DUPLICATED
+// (that function is module-local, not exported - see this repo's own rule
+// against importing across *.test.ts files).
+
+function classTrendsMountIsGated(strippedSource: string): boolean {
+  const match = /hasTrendableResults\([^)]*\)\s*&&([\s\S]{0,400})/.exec(strippedSource);
+  if (!match) return false;
+  return /<ClassTrendsPanel\b/.test(match[1]);
+}
+
+describe("classTrendsMountIsGated (canary)", () => {
+  it("reports true when the tag follows hasTrendableResults(...) && within the same expression", () => {
+    expect(classTrendsMountIsGated("return hasTrendableResults(entry) && (\n  <ClassTrendsPanel entry={entry} />\n);")).toBe(true);
+  });
+
+  it("reports false when the guard is removed (P18: the exact regression this guards)", () => {
+    expect(classTrendsMountIsGated("return <ClassTrendsPanel entry={entry} />;")).toBe(false);
+  });
+});
+
+describe("GradingRecordingPanel.tsx's ClassTrendsPanel mount is gated by hasTrendableResults (M3, closes P18)", () => {
+  it("the tag is not reachable unless hasTrendableResults(...) is true, over the comment-stripped source", () => {
+    expect(classTrendsMountIsGated(STRIPPED_SOURCE)).toBe(true);
+  });
+});
+
+// ── ClassTrendsPanel is imported AND rendered, above <GradingTable> ───────
+
+function importsAndRendersClassTrendsPanel(strippedSource: string): boolean {
+  const importPattern = /import\s+ClassTrendsPanel\s+from\s*["']\.\.\/drafted-grades\/ClassTrendsPanel["']/;
+  const renderPattern = /<ClassTrendsPanel\b/;
+  return importPattern.test(strippedSource) && renderPattern.test(strippedSource);
+}
+
+describe("importsAndRendersClassTrendsPanel (canary)", () => {
+  it("reports false when imported but never rendered (dead import)", () => {
+    expect(importsAndRendersClassTrendsPanel('import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel";')).toBe(false);
+  });
+
+  it("reports false when rendered but not imported from that path (a local reimplementation)", () => {
+    expect(importsAndRendersClassTrendsPanel("function ClassTrendsPanel() { return null; }\nconst x = <ClassTrendsPanel />;")).toBe(false);
+  });
+});
+
+describe("GradingRecordingPanel.tsx imports and renders ClassTrendsPanel, above GradingTable", () => {
+  it("imports it from ../drafted-grades/ClassTrendsPanel and renders it", () => {
+    expect(importsAndRendersClassTrendsPanel(STRIPPED_SOURCE)).toBe(true);
+  });
+
+  it("the mount appears before <GradingTable in source order", () => {
+    const mountIndex = STRIPPED_SOURCE.indexOf("<ClassTrendsPanel");
+    const tableIndex = STRIPPED_SOURCE.indexOf("<GradingTable");
+    expect(mountIndex).toBeGreaterThan(-1);
+    expect(tableIndex).toBeGreaterThan(-1);
+    expect(mountIndex).toBeLessThan(tableIndex);
+  });
+});
+
+// ── THE DISCLOSURE LINE EXISTS (B-A, closes P20) ──────────────────────────
+
+describe("GradingRecordingPanel.tsx's disclosure line exists and is pinned (B-A/ruling 21, closes P20)", () => {
+  it("the render body references cohortLabelSpread at all - deleting the line entirely must fail this", () => {
+    expect(RENDER_BODY).toMatch(/cohortLabelSpread\(/);
+  });
+
+  it("the disclosure guard's only free identifiers are the trends-entry const, lastRunCohort, and cohortLabelSpread", () => {
+    const idx = RENDER_BODY.indexOf("cohortLabelSpread(");
+    expect(idx).toBeGreaterThan(-1);
+    // The guard is everything between the nearest preceding "{" and the
+    // "&& (" that opens the rendered JSX - never the whole surrounding
+    // block, which would also catch className={...} JSX attribute braces.
+    const openBraceIndex = RENDER_BODY.lastIndexOf("{", idx);
+    expect(openBraceIndex).toBeGreaterThan(-1);
+    const guardMatch = /^\{([\s\S]*?)&&\s*\(/.exec(RENDER_BODY.slice(openBraceIndex));
+    expect(guardMatch).not.toBeNull();
+    const [binding] = findConstBindingsCalling(RENDER_BODY, "toRunCohortEntry");
+    const allowed = new Set([...TRENDS_ENTRY_ALLOWED_IDENTIFIERS, binding?.name ?? "trendsEntry", "cohortLabelSpread"]);
+    const ids = freeIdentifiers(guardMatch![1]);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(allowed.has(id), `unexpected free identifier: ${id}`).toBe(true);
+    }
+  });
+});
+
+// ── THE INHERITED CALLER ROW IS NOT ENOUGH - names BOTH required symbols ──
+
+describe("GradingRecordingPanel.tsx references BOTH toRunCohortEntry and cohortLabelSpread, not just one", () => {
+  it("references toRunCohortEntry (the whitelist's initialiser)", () => {
+    expect(STRIPPED_SOURCE).toMatch(/\btoRunCohortEntry\(/);
+  });
+
+  it("references cohortLabelSpread (the disclosure line)", () => {
+    expect(STRIPPED_SOURCE).toMatch(/\bcohortLabelSpread\(/);
+  });
+});
+
+// ── no second TRENDABLE predicate, no second meta type, no re-export ─────
+
+describe("GradingRecordingPanel.tsx imports hasTrendableResults directly, never re-exported through the cohort leaf", () => {
+  it("imports hasTrendableResults from ../grading-results/classTrendsEntry, not from ./classTrendsRunCohort", () => {
+    expect(STRIPPED_SOURCE).toMatch(
+      /import\s*\{[^}]*\bhasTrendableResults\b[^}]*\}\s*from\s*["']\.\.\/grading-results\/classTrendsEntry["']/
+    );
+    expect(/import\s*\{[^}]*\bhasTrendableResults\b[^}]*\}\s*from\s*["']\.\/classTrendsRunCohort["']/.test(STRIPPED_SOURCE)).toBe(
+      false
+    );
+  });
+});

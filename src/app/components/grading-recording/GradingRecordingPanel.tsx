@@ -131,6 +131,16 @@ import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
 import { checkGradingReadiness } from "./grading-dispatch";
 import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { classifyGradingResult } from "./grading-rows";
+// A16-3 (docs/a16-plan.md 5.5/9.3, rulings 10/19): the SAME ClassTrendsPanel
+// GradingResults.tsx already mounts for the LMS grading surfaces, reached
+// here from a run over THIS table instead of a navigated-to destination.
+// hasTrendableResults is imported directly from grading-results/
+// classTrendsEntry - never re-exported through classTrendsRunCohort.ts
+// below, and never redeclared - so both surfaces share exactly one gate
+// predicate (ruling 10).
+import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel";
+import { hasTrendableResults } from "../grading-results/classTrendsEntry";
+import { buildRunCohort, toRunCohortEntry, cohortLabelSpread, type RunCohort } from "./classTrendsRunCohort";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule - this
 // surface is the newest and most in need of it (it reads names off a screen,
 // merges readings, skips unnamed submissions, drops frames, and grades; every
@@ -207,6 +217,11 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const [logBatches, setLogBatches] = useState<GradingRecordingLogBatch[]>([]);
   const [logEncodeNotices, setLogEncodeNotices] = useState<GradingRecordingLogEncodeNotice[]>([]);
   const [logGradingRuns, setLogGradingRuns] = useState<GradingRecordingLogGradingRun[]>([]);
+  // A16-3: the run cohort THIS RUN produced, captured inside handleGradeAll
+  // and never re-derived from gradingRows.rawRows/rows - see that handler's
+  // own hinge comment for why. null before any run and after any run that
+  // did not complete.
+  const [lastRunCohort, setLastRunCohort] = useState<RunCohort | null>(null);
   // useDiscussionCapture.ts's frameEncodeNotice is live, MOST-RECENT-only
   // state (reset to null on every start()) - collected here as its own
   // append-only event stream so a session that hit it more than once still
@@ -553,6 +568,10 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       // event ("why didn't grading run") - logged here rather than silently
       // leaving no trace of the click at all.
       setLogGradingRuns((prev) => [...prev, blockedGradingRun(new Date().toISOString(), gradingRows.totalCount, readiness.reason ?? "")]);
+      // A16-3 (docs/a16-plan.md 9.3, ruling 23): this refusal returns BEFORE
+      // any run starts - without this, the trends panel would sit under a
+      // fresh grading error while still reporting the PREVIOUS run's cohort.
+      setLastRunCohort(null);
       return;
     }
     setGradeError(null);
@@ -564,6 +583,13 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         submissionText: r.submissionText,
         submissionKind: r.submissionKind,
       }));
+      // A16-3 (docs/a16-plan.md 5.5, ruling 20): the ONE read this feature
+      // adds - solely to project id/studentName/assessment for the rows in
+      // THIS run, so buildRunCohort below can attribute each result to the
+      // row it graded. Never assessmentId/assessmentLabel here - that is
+      // the single in-scope value, and using it would make every row carry
+      // the same label, silently killing the disclosure line further down.
+      const identity = gradingRows.rawRows.map((r) => ({ id: r.id, studentName: r.studentName, assessment: r.assessment }));
       const result = await gradeCapturedSubmissionsAction(
         submissions,
         rubricText.trim(),
@@ -576,6 +602,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           ...prev,
           erroredGradingRun(new Date().toISOString(), submissions.length, result.error),
         ]);
+        setLastRunCohort(null);
         return;
       }
       // BLOCKER 3: classifyGradingResult (grading-rows.ts) is the one place
@@ -598,6 +625,20 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         ...prev,
         completedGradingRun(new Date().toISOString(), submissions.length, graded, failed),
       ]);
+      // A16-3 (docs/a16-plan.md 5.5, ruling 19): the cohort THIS run
+      // produced, captured now rather than re-derived later from
+      // gradingRows.rawRows/rows (a live memo over React state - see
+      // buildRunCohort's own header for why that array cannot be captured
+      // directly). courseName/assignmentName are snapshotted at this exact
+      // click the same way GithubGradingPanel.tsx:398/:861 snapshots
+      // lastGradedFolder into its own assignmentName - tied to what THIS
+      // run covered even if the course/assessment controls above have since
+      // changed. buildRunCohort is a pure leaf (ruling 19) so its own unit
+      // test exercises the real merge; this handler only supplies the
+      // arguments, and result.results (this run's own results) is the
+      // first one - never gradingRows.rawRows/rows.
+      const meta = { courseName: selectedCourse?.name ?? "", assignmentName: assessmentId };
+      setLastRunCohort(buildRunCohort(result.results, identity, meta));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not grade these submissions.";
       setGradeError(message);
@@ -605,10 +646,11 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         ...prev,
         erroredGradingRun(new Date().toISOString(), gradingRows.totalCount, message),
       ]);
+      setLastRunCohort(null);
     } finally {
       setGradingBusy(false);
     }
-  }, [rubricText, gradingRows, knowledgeContext, provider]);
+  }, [rubricText, gradingRows, knowledgeContext, provider, selectedCourse, assessmentId]);
 
   // docs/DEV_LOOP.md's downloadable-log rule: assembled fresh on every
   // render (cheap - a handful of array spreads over state that only grows on
@@ -887,6 +929,36 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           submission{gradingRows.totalCount === 1 ? "" : "s"} so far.
         </p>
       )}
+      {/* A16-3 (docs/a16-plan.md 5.5/9.3, ruling 21): the SAME
+          ClassTrendsPanel GradingResults.tsx already mounts for the LMS
+          grading surfaces - a run over THIS table becomes an OUTPUT of the
+          run instead of a navigated-to destination. trendsEntry is hoisted
+          once, mirroring GradingResults.tsx's own shipped const, so the
+          gate below and the mount read the one build. Gated on
+          hasTrendableResults so a run with nothing graded yet renders
+          nothing, never a "Trends (0)" button. */}
+      {(() => {
+        const trendsEntry = lastRunCohort ? toRunCohortEntry(lastRunCohort) : null;
+        return (
+          trendsEntry &&
+          hasTrendableResults(trendsEntry) && (
+            <div className={styles.field}>
+              <ClassTrendsPanel entry={trendsEntry} defaultExpanded />
+              {/* A16-3 (docs/a16-plan.md 5.5.2/9.3, ruling 20): disclosed,
+                  never prevented - this table is course-scoped but not
+                  assessment-scoped (D22b/D23e above), so one Grade
+                  submissions click genuinely can cover more than one
+                  assessment label. */}
+              {lastRunCohort && cohortLabelSpread(lastRunCohort) && (
+                <p className={styles.fieldHint}>
+                  This run graded submissions from more than one assessment label - the trends above combine them.
+                </p>
+              )}
+            </div>
+          )
+        );
+      })()}
+
       <GradingTable
         rows={gradingRows.rows}
         totalCount={gradingRows.totalCount}

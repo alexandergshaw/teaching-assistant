@@ -25,11 +25,12 @@ const SNAPSHOT_GRADING_DIR = path.resolve(process.cwd(), "src/app/components/sna
 // ---------------------------------------------------------------------------
 // WAVE 5, A7c: "the snap path calls no server action" from wave 4 extends to
 // "the read/grade actions are called ONLY from a click handler, never a
-// useEffect". GradingRecordingPanel.tsx:517-529 is the shape this must never
-// copy (restated citation - round 2 named :475-487, which is inside
-// runExtraction's own useCallback, not the auto-drain effect itself; the
+// useEffect". GradingRecordingPanel.tsx:532-544 is the shape this must never
+// copy (restated citation - wave 2 (docs/a16-plan.md 9.3) shifted this
+// effect again by +4 (three new imports plus one new useState above it);
+// re-measured post-wave-2 by `sed -n '505,545p' <panel> | cat -n'. The
 // real auto-drain effect that fires runExtraction the moment pendingFrames
-// crosses a threshold, with no button in the path, is :517-529): a useEffect
+// crosses a threshold, with no button in the path, is :532-544): a useEffect
 // that fires a server action, or (per BLOCKER 1) a dispatch ref that leads
 // to one, the moment some piece of state crosses a threshold. This file
 // isolates every useEffect/useLayoutEffect/useInsertionEffect BLOCK
@@ -243,7 +244,7 @@ describe("no auto-drain effect (A7c): the read/grade/OCR actions are reachable O
         const found = invocationsReachableSynchronously(extractCallbackBody(effectCall), FORBIDDEN_DISPATCH_NAMES);
         expect(
           found,
-          `${file} makes ${found.join(", ")} reachable synchronously at effect commit - the GradingRecordingPanel.tsx:517-529 shape`
+          `${file} makes ${found.join(", ")} reachable synchronously at effect commit - the GradingRecordingPanel.tsx:532-544 shape`
         ).toEqual([]);
       }
     }

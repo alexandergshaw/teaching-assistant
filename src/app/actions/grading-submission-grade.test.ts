@@ -24,7 +24,7 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { requireOwner } from "@/lib/supabase/auth";
-import { callLlm } from "@/lib/llm";
+import { callLlm, type LlmResult } from "@/lib/llm";
 import { gradeCapturedSubmissionsAction } from "./grading-submission-grade";
 import { SUBMISSION_KIND_PROMPT_LABELS } from "@/lib/grade/submission-kind";
 import { UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
@@ -45,7 +45,13 @@ const OWNER = { id: "owner-1", email: "owner@example.com" };
 // literal was accepted silently at every `vi.mocked(callLlm).mockResolvedValueOnce(...)`
 // call site. Every test in this file exercised a fixture shape production
 // can never emit; this fixes the fixture to match reality, not the assertions.
-function gradeResponse(overallComment: string, improvements: string, score: string) {
+// A31/A34 RCA (docs/type-gate-rca-2026-09-23.md): the repair above removed the
+// illegal `status`/`body` from the fixture, but left the return type INFERRED -
+// so re-adding them would compile silently again, and the whole point of the
+// repair was that nothing caught them the first time. The annotation is the
+// instrument: with it, an excess or missing property on the success branch is
+// a compile error rather than a comment asking the next reader to be careful.
+function gradeResponse(overallComment: string, improvements: string, score: string): LlmResult {
   return {
     ok: true as const,
     text: JSON.stringify({

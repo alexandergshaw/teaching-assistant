@@ -26,9 +26,21 @@ re-deriving it.
   stash reverts their files.
 - **Never edit under `.claude/worktrees/`.** `Glob` returns that copy first; an
   edit there passes every gate and changes nothing real.
-- **Do not run `npx tsc --noEmit`.** `tsconfig.json` is incremental and
-  concurrent runs race on `tsconfig.tsbuildinfo`. Exactly one caller runs tsc,
-  and it is not you. `npm test` is safe to run concurrently.
+- **Typecheck with `npx tsc --noEmit --incremental false`, before you report.**
+  Never the bare `npx tsc --noEmit` - `tsconfig.json` sets `"incremental": true`,
+  so that form writes `tsconfig.tsbuildinfo` and concurrent runs race on it.
+  The `--incremental false` form neither reads nor writes that file (measured
+  2026-09-23: the file's checksum was byte-identical across a run), so it is
+  safe beside other agents. **Never pass tsc a file argument** - file args make
+  tsc ignore `tsconfig.json` entirely, so it invents module-resolution errors
+  and MISSES the real ones. `npm test` is safe to run concurrently.
+  WHY THIS CHANGED: five builds in a row shipped a defect the typecheck caught
+  and the suite could not, because the runner ERASES types without reading them
+  (docs/type-gate-rca-2026-09-23.md). A green suite says the code ran, nothing
+  more. It will not catch everything - a fixture built through `as <DomainType>`,
+  or returned from a helper with an inferred return type, switches the check off
+  at the point it would have fired. ANNOTATE FIXTURE HELPERS' RETURN TYPES and
+  do not cast to a domain type to make a fixture compile.
 - **Two or more test paths run only through `npm run test:paths <p1> <p2> ...`**,
   never a raw `npx vitest run`/`npm test` with two or more paths - that form
   silently drops any argument it does not match (docs/loop/this-repo.md,

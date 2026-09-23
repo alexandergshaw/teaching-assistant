@@ -57,6 +57,16 @@ build defeated all three.
    is disposed of WITHIN a round. What is withdrawn is the idea that a third
    round exists to apply them wholesale.
 
+   **The owner's answer ENDS the activity** (tightened 2026-09-23). It does not
+   authorise a round three by another name. Shape the question so every possible
+   answer terminates: the artifact then ships as it stands with the answer
+   applied, and whatever is still unresolved becomes a residual with an owner and
+   an instrument. Applying an accepted decision is transcription, not a round,
+   and it must not reopen anything the decision did not touch - if it seems to,
+   the question was the wrong one. A later activity on the same item (a plan
+   consuming a scope, an implementation consuming a plan) is a NEW activity with
+   its own two rounds; only a third round of the SAME activity is forbidden.
+
    Why the owner set it: round 1 finds real defects, round 2 finds real defects
    and starts surfacing questions the loop cannot answer from the code - which
    is exactly when a human has context the agents do not. Round 2 is also where

@@ -166,3 +166,35 @@ What this settles, and the trap that comes with it:
   or invalid, read by the consequence copy, all three labels and the post
   decision - so a past-dated pick cannot say "scheduled" while publishing
   immediately and irrevocably to every student.
+
+## DECISION 6 - A39: the per-item call is a Route Handler at maxDuration = 60
+
+The question was what the unconfigured Server Action duration ceiling actually is
+on this Hobby deployment, with the recommendation to stop depending on the answer.
+**The owner chose: switch the per-item call to a Route Handler at
+`maxDuration = 60`.**
+
+What this settles:
+
+- The ceiling becomes DECLARED rather than discovered. The architecture's own
+  citation (`course-intel/ask/route.ts:47-50`) already says a Server Action has
+  no declarable ceiling, and records three routes that moved off Server Actions
+  for exactly this - so this follows an in-repo precedent rather than inventing
+  one.
+- The client pool STAYS. Section 4.1's table treated "Route Handler with
+  maxDuration" and "client pool" as exclusive and they are not: the pool is what
+  resets the clock per call, the route handler is what gives each call a
+  confirmed ceiling. The combination was always the only candidate with both.
+- 60s is the Hobby hard cap, so `maxDuration = 60` is the ceiling, not a choice
+  within a range. One item must complete inside it; the design says what happens
+  when one does not, and that is now a per-item failure the pool can report
+  rather than a whole run dying mid-loop.
+- Everything a Server Action gave for free must be re-established explicitly in
+  the handler: the auth guard, the identity, and the input validation. A route
+  handler is reachable by anything that can reach the origin, so this is the
+  security consequence of the decision and not a detail. `requireUser()` or its
+  equivalent belongs in the handler, and the action-guard coverage test that
+  pins the guarded surface list is in the write set.
+
+What this does NOT settle: whether the Server Action form is preserved for any
+other caller. If something else depends on it, that is a separate answer.

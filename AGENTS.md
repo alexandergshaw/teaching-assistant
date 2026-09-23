@@ -45,6 +45,28 @@ Concretely: artifact, check, revision, check. That is round 1 and round 2. If
 the round-2 check returns defective, DO NOT dispatch a revision 3 and DO NOT
 dispatch a round-3 check. Stop the rounds, state what is unresolved, and ask.
 
+**THE ANSWER ENDS THE ACTIVITY. It does not feed another round.** Tightened by
+the owner on 2026-09-23, because without this the rule degrades into a slower
+revision cycle with a human inside it - ask, revise, check, ask again - which
+costs more than the three rounds it was meant to prevent.
+
+So the question put to the owner must be shaped so that EVERY answer terminates
+the activity. Not "which of these should the next revision explore", but "this
+activity produces X or Y; which do you want". When the answer arrives, the
+activity is DONE: the artifact ships as it stands, with the answer applied and
+everything still unresolved recorded as residuals with owners and instruments.
+
+A revision that applies a decision already accepted is not a round - it is
+transcription, and it must not reopen anything the decision did not touch. If
+applying the answer seems to require re-deciding something else, that is the
+signal the question was the wrong one; say so and ask the terminating question
+instead of starting the cycle again.
+
+The next ACTIVITY on the same item - a wave plan consuming a finished scope, an
+implementation consuming a finished plan - is a new activity with its own two
+rounds. What is forbidden is a third round of the SAME activity, however it is
+labelled.
+
 **What to send the owner.** Not "it failed again". One message carrying:
 
 - the specific question or fork that two rounds did not settle, in the owner's

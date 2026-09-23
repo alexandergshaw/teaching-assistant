@@ -57,7 +57,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // Frozen literal (see header comment above for why `.length` is not an
 // acceptable substitute). Bump this by hand, in the same commit, the next
 // time a row is legitimately added to or removed from docs/backlog.yml.
-const EXPECTED_ROW_COUNT = 53;
+// 53 -> 55: A40 and A41 filed 2026-09-23, the two defects the A39
+// interaction census found in passing (docs/a39-census.md section 5.2 /
+// RES-A39-3, and section 4 P7 / RES-A39-4).
+const EXPECTED_ROW_COUNT = 55;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

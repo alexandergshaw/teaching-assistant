@@ -44542,3 +44542,342 @@ adapter A16-5 will add (`classTrendsFolderEntry.ts`) - those are the surface
 being built, not today's behaviour. `RepoGradesGrid.tsx`'s "Grade all" button
 and its `onGradeColumn(column.folder)` call are unchanged by wave 3 and are
 not re-measured here.
+
+## 435. A20's auto-download on stop, as shipped - one call, two surfaces, two stop paths
+
+Written AFTER A20 shipped rather than before hand-off, because A20 shipped with
+no baseline at all: `13cef3b` (feature), `36aaad3` (aria fix) and `bab26ad`
+(the Wave 3 UX pass doc) all landed, and the coverage check below finds nothing
+about any of them in this file. This entry records what the code DOES at HEAD,
+read out of the source. It is an oracle, not a requirement: a later change that
+moves a line below and was not filed to move it is a regression.
+
+**Read at `a26ad5a`** (`git rev-parse --short HEAD`). `git status --short`
+returns exactly ` M docs/a29-architecture-small.md` and ` M docs/css-orphans.md`,
+both held by other work in flight and untouched here; this entry's own write set
+is `docs/REGRESSION.md` alone. While this entry was being written HEAD advanced
+to `914a46f`, a docs-only commit from a concurrent seat - every citation below
+still holds, measured by `git diff --name-only a26ad5a 914a46f -- src`, which
+returns nothing. Nothing below was executed against a browser.
+This repo's vitest is node-env and renders no component
+(`docs/loop/this-repo.md` section 2), so every statement about what the
+instructor SEES is a READING claim from JSX source, never an observation of a
+rendered screen.
+
+### The coverage check
+
+`grep -a` is the default on this file (`docs/loop/this-repo.md` section 4: the
+NUL byte that once made plain `grep` treat it as binary is gone, measured
+2026-09-15, but `-a` costs nothing and one reintroduced NUL would make every
+later search here silently false-negative). Measured before this entry was
+appended:
+
+```
+grep -an "A20\|auto-download\|autoDownload" docs/REGRESSION.md   # 2 lines: :4611, :8499
+grep -ac "" docs/REGRESSION.md                                   # 44544
+```
+
+The canary is load-bearing: a search that finds almost nothing looks exactly
+like a clean pass, so the 44544 confirms the file was read at all before the two
+hits are trusted. Both hits are PARTIAL coverage of a DIFFERENT feature:
+
+| Line | Owning entry (heading line from `grep -an "^## "`) | What it is actually about |
+|---|---|---|
+| `:4611` | `## 97. The lecture zip actually reaches the instructor` (`:4602`) | `assembleLectureFiles` auto-downloading the workflow lecture zip |
+| `:8499` | `## 155. Course Kickoff / Course Refresh's terminal zip was missing most of what the run actually produced` (`:8405`) | the workflow registry's other auto-downloading steps |
+
+Neither names a recording capture surface, `useDiscussionCapture.ts`, or either
+`ta-rec-*-auto-download` key. A20's shipped behaviour had no baseline, and this
+entry does not supersede 97 or 155 - it covers what they never touched.
+
+### One download call, serving both capture surfaces
+
+`useMessageReplies.ts:39` imports `useDiscussionCapture` from
+`../recording/useDiscussionCapture` and calls it at `:269`. The message-replies
+surface is therefore not a second implementation: there is exactly ONE place in
+the tree where a capture's recording is pushed to disk -
+
+```
+src/app/components/recording/useDiscussionCapture.ts:513
+```
+
+inside `recorder.onstop` (assigned at `:497`), which exists at all only when
+`opts.saveVideo` is true (`:490` - with "Also save the screen recording" off no
+`MediaRecorder` is constructed, so there is no blob and no download):
+
+```
+if (opts.autoDownload) {
+  triggerFileDownload(
+    blob,
+    `${opts.downloadFileNameBase ?? "recording"}.${videoExtensionFromMimeType(resolvedMimeType)}`
+  );
+}
+```
+
+`grep -n "triggerFileDownload" src/app/components/recording/useDiscussionCapture.ts`
+returns exactly 2 lines - the import at `:36` and this one call at `:513`. There
+is no retry, no second attempt, and no re-arm on a later gesture.
+
+`triggerFileDownload` is `src/app/components/course-planning/utils.ts:19-28`: it
+mints its own object URL from the blob, creates an `<a>`, sets `href` and
+`download`, appends it to `document.body`, calls `a.click()`, removes the node
+and revokes the URL - all synchronously inside one call - and returns `void`.
+
+**Exactly two things differ between the two surfaces:**
+
+| | Discussion replies | Message replies |
+|---|---|---|
+| filename stem, passed as `downloadFileNameBase` at the `start(...)` call | `"discussion-capture"` (`useDiscussionReplies.ts:631`) | `"message-replies-capture"` (`useMessageReplies.ts:613`) |
+| panel that renders the post-stop result | `DiscussionRepliesPanel.tsx` | `MessageRepliesPanel.tsx` |
+
+**What does NOT differ:** the hook, the call site, the blob, the
+`opts.autoDownload` guard, the extension function, the post-stop markup shape,
+and the moment the option is captured. `opts` is the object handed to `start()`,
+and `recorder.onstop` closes over that same object (`:497`). Each orchestrator
+passes `autoDownloadRef.current` (`useDiscussionReplies.ts:630`,
+`useMessageReplies.ts:612`) - a `useRef` mirroring the persisted checkbox, kept
+current by a one-line effect (`useDiscussionReplies.ts:304-307`,
+`useMessageReplies.ts:336-339`). So the value that reaches the download is the
+checkbox state at the moment Start was pressed, not at the moment Stop is.
+
+### The two ways a capture stops, and both reach the same teardown
+
+This is the half `docs/a20-scope.md` Section 8 missed and
+`docs/a20-owner-check.md` Section 1.5 found. Both paths converge on
+`teardown()` (`useDiscussionCapture.ts:330`), which stops every track at `:339`
+and then calls `recorderRef.current.stop()` at `:353-355`.
+
+1. **The app's own Stop button.** `DiscussionRepliesPanel.tsx:703-710` is the
+   `Button`, `onClick={handleStartStop}` at `:707`, labelled `"Stop capture"`
+   while capturing (`:709`); message side `MessageRepliesPanel.tsx:327-334`,
+   handler at `:331`. The handler reaches the orchestrator's `stop()`
+   (`useDiscussionReplies.ts:641-644`, `useMessageReplies.ts:620-625`, the
+   latter additionally firing `void runMatchPass(...)` at `:624`, which is not
+   in the download's path), which calls `captureRef.current.stop()` ->
+   `useDiscussionCapture.ts:542-544`, `teardownRef.current()`.
+2. **The browser's own sharing bar.** `useDiscussionCapture.ts:451`:
+   ```
+   track.addEventListener("ended", () => teardownRef.current(), { once: true });
+   ```
+   The same teardown, the same `recorder.stop()`, the same `onstop`, the same
+   `triggerFileDownload` - **with no page click anywhere in the path.**
+
+`MediaRecorder.stop()` does not run `onstop` synchronously, so on BOTH paths the
+download fires in a later task, after any click's call stack has unwound. The
+difference between the two is therefore not WHEN the download runs but whether a
+user gesture preceded it at all.
+
+**Both panels advertise the sharing-bar path in copy, in identical words:**
+
+- `DiscussionRepliesPanel.tsx:712` - `You can also stop from your browser&apos;s sharing bar.`
+- `MessageRepliesPanel.tsx:336` - the same sentence.
+
+(`grep -rn "sharing bar" src --include=*.tsx --include=*.ts` returns 7 lines: the
+two above, one comment at `useDiscussionCapture.ts:350`, and four other capture
+surfaces - `GradingRecordingPanel.tsx:877`, `LegibilityProbeModal.tsx:327`,
+`ModuleDeckCapturePanel.tsx:778`, `WalkthroughAnnouncementPanel.tsx:818`. Those
+four are not part of this behaviour: `grep -rn "saveVideo: false" src
+--include=*.tsx --include=*.ts | grep -v "\.test\."` shows each of them starting
+its capture with `saveVideo: false` - `GradingRecordingPanel.tsx:557`,
+`LegibilityProbeModal.tsx:168`, `ModuleDeckCapturePanel.tsx:455`,
+`WalkthroughAnnouncementPanel.tsx:515` - so no blob and no download exists there
+to auto-deliver.)
+
+### The post-stop UI contract, and the ordering invariant underneath it
+
+Each panel renders TWO structurally separate blocks after a capture stops.
+
+**(a) The manual link, gated only on `recordingUrl`** -
+`DiscussionRepliesPanel.tsx:777-783` and `MessageRepliesPanel.tsx:369-375`, an
+`<a href={recordingUrl} download={...}>` labelled
+`` `Download recording (${(recordingBytes / 1048576).toFixed(1)} MB)` ``
+(`:780` / `:372`). Note the instrument trap in that label: anything under about
+50 KB displays as `0.0 MB`, which is not the same as empty.
+
+**(b) The auto-download line, gated on `lastSessionAutoDownload && recordingBytes > 0`** -
+`DiscussionRepliesPanel.tsx:791-795` and `MessageRepliesPanel.tsx:378-382`,
+reading `This should already be in your Downloads folder - if it isn&apos;t
+there, use the link above.`
+
+**(b) is bound to the STOPPED SESSION's own request, not to the live checkbox.**
+`lastSessionAutoDownload` is hook state declared on `UseDiscussionCaptureReturn`
+at `useDiscussionCapture.ts:69`, held at `:121`, returned at `:571`, reset to
+`false` at the top of every new session (`:446`) and by `clearRecording()`
+(`:192`), and set exactly once, at `:506`, from `opts.autoDownload === true` -
+the same closed-over `opts`, inside the same mounted branch. It reaches the
+panels as `lastSessionAutoDownload: capture.lastSessionAutoDownload`
+(`useDiscussionReplies.ts:846`, `useMessageReplies.ts:737`) and is destructured
+at `DiscussionRepliesPanel.tsx:141` / `MessageRepliesPanel.tsx:100`. Ticking the
+box after a stop therefore cannot retroactively make the panel claim a download
+happened, and unticking it cannot erase that it did.
+
+**THE ORDERING INVARIANT - state it as an invariant, because a future change
+could silently invert it and stay green.** Inside `if (mountedRef.current) {`
+(`:501`) the statements run in this order:
+
+```
+:502   recordingUrlRef.current = url;
+:503   setRecordingUrl(url);
+:504   setRecordingBytes(blob.size);
+:505   setRecordingMimeType(resolvedMimeType);
+:506   setLastSessionAutoDownload(opts.autoDownload === true);
+:512-517   if (opts.autoDownload) { triggerFileDownload(blob, `...`); }
+```
+
+The manual link's only gate, `recordingUrl`, is satisfied BEFORE the download is
+attempted. That ordering is the entire fallback: whatever the browser does with
+`a.click()` - honour it, refuse it, or throw - the link is already rendered and
+the recording is still one click away, so nothing is lost. The `else` branch
+(`:518-520`) revokes the URL instead, because the component is gone and there is
+nothing to receive a file; the download never runs there.
+
+Two facts make the inversion cheap to ship by accident:
+
+- **Nothing executing asserts the order.**
+  `grep -rn "setRecordingUrl" src --include=*.test.ts` returns **0** lines
+  (canary on the same file set: `grep -rn "triggerFileDownload" src
+  --include=*.test.ts` returns **14**, so the instrument does fire). Moving
+  `triggerFileDownload` above `setRecordingUrl`, or behind an early return,
+  keeps every assertion in `useDiscussionCapture.wiring.test.ts` green - they
+  pin that the call occurs exactly once, inside the mounted branch, guarded by
+  `opts.autoDownload`, never its position relative to the state setters.
+- **A throw inside `onstop` reaches no user.** The `try`/`catch` at `:491`/`:524`
+  wraps only the recorder's construction and `recorder.start()`; `onstop`
+  executes in a later task, outside that scope, so an exception there does not
+  reach `setRecordingError` and the panel shows nothing.
+
+### The extension rule - one function, both names, deliberately
+
+`videoExtensionFromMimeType` (`discussion-capture.ts:433-440`) returns
+`"mp4" | "webm" | "mkv" | "mov" | "ogv"`:
+
+```
+matroska -> mkv ; quicktime -> mov ; ogg -> ogv ; webm -> webm ; mp4 -> mp4 ; else webm
+```
+
+The container-specific branches deliberately precede the generic `mp4` check, so
+`video/x-matroska;codecs=avc1,mp4a.40.2` maps to `mkv` and not to `mp4` on the
+`mp4a` substring (pinned by a fixture at `discussion-capture.test.ts:474`).
+
+**Both names for one recording come from that one function**, which is the rule,
+not a coincidence:
+
+- the auto-download filename, `useDiscussionCapture.ts:515`, on
+  `resolvedMimeType`;
+- the manual link's `download` attribute - `DiscussionRepliesPanel.tsx:779` and
+  `MessageRepliesPanel.tsx:371`, each
+  `videoExtensionFromMimeType(recordingMimeType ?? "")`.
+
+`docs/a20-scope.md` Section 6 (Trap 3, RULING Y2) is the ruling behind it:
+letting the two diverge would put TWO names on ONE recording - a
+Safari-negotiated `video/mp4` blob auto-downloaded as `.mp4` and manually linked
+as `.webm` - one of which does not open, which is strictly worse than today's
+consistently-wrong single name. Both paths ship together or neither does, and
+that is enforced by construction (the same exported function over the same
+stored value) rather than by two assertions that could each pass while the other
+regressed.
+
+`recordingMimeType` is set at `:505` from `resolvedMimeType`, itself
+`recorder.mimeType || mimeType || "video/webm"` (`:498`). The negotiation list
+`RECORDER_MIME_TYPES` (`:92`, measured by `grep -n -A6 "^const
+RECORDER_MIME_TYPES"`) holds 3 entries, all webm -
+`["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]` - and
+`pickRecorderMimeType()` returns `""` when none is supported (`:94-100`), leaving
+the browser to pick its own container. So a non-webm extension is reachable only
+through `recorder.mimeType`, and only on a browser supporting none of the three.
+
+### The controls that feed it
+
+- Discussion: `ta-rec-disc-auto-download`, read at
+  `discussion-persisted-controls.ts:154`, written at `:158`.
+- Message: `STORAGE_KEY_AUTO_DOWNLOAD = "ta-rec-msg-auto-download"`
+  (`useMessagePersistedControls.ts:39`).
+- Both settings components render one checkbox labelled
+  `"Download automatically when recording stops"`
+  (`DiscussionCaptureSettings.tsx:154`, `MessageCaptureSettings.tsx:266`), bound
+  `checked={autoDownload}` / `onChange={(e) => setAutoDownload(e.target.checked)}`
+  (`:148-149` / `:260-261`), `disabled={!saveVideo}` (`:150` / `:262`), with
+  `slotProps={{ input: { "aria-describedby": AUTO_DOWNLOAD_HINT_ID } }}`
+  (`:151` / `:263`) pointing at a hint paragraph whose text switches on
+  `saveVideo` (`:156-160` / `:268-272`): `"Applies to the next capture."` when
+  on, and `Turn on "Also save the screen recording" first - there is nothing to
+  download otherwise.` when off. Routing the description through
+  `slotProps.input` is what `36aaad3` fixed. READING CLAIM: no component renders
+  under any test here, so "the description actually reaches the input" is
+  asserted from source text only (`DiscussionCaptureSettings.wiring.test.ts:45`),
+  never from a rendered accessibility tree.
+
+### What executes over this behaviour today
+
+Per `docs/loop/this-repo.md` section 1, two or more paths go through the
+wrapper, because `npx vitest run a b` silently drops an argument that matches no
+executed file. Exit code read from a file, not a pipe: **`0`**.
+
+```
+npm run test:paths -- src/app/components/recording/useDiscussionCapture.wiring.test.ts src/app/components/recording/DiscussionCaptureSettings.wiring.test.ts src/app/components/recording/discussion-capture.test.ts src/app/components/recording/recording-split.structure.test.ts src/app/components/recording/useDiscussionReplies.wiring.test.ts src/app/components/message-replies/MessageCaptureSettings.wiring.test.ts src/app/components/message-replies/useMessagePersistedControls.wiring.test.ts src/app/components/message-replies/useMessageReplies.wiring.test.ts src/app/components/message-replies/message-replies.structure.test.ts src/app/components/message-replies/MessageRepliesPanel.wiring.test.ts
+```
+
+`Test Files  10 passed (10)` / `Tests  186 passed (186)`, and the wrapper's own
+per-argument lines, so no path was silently dropped:
+
+```
+COVERED src/app/components/recording/useDiscussionCapture.wiring.test.ts files=1 passed=9
+COVERED src/app/components/recording/DiscussionCaptureSettings.wiring.test.ts files=1 passed=3
+COVERED src/app/components/recording/discussion-capture.test.ts files=1 passed=48
+COVERED src/app/components/recording/recording-split.structure.test.ts files=1 passed=53
+COVERED src/app/components/recording/useDiscussionReplies.wiring.test.ts files=1 passed=11
+COVERED src/app/components/message-replies/MessageCaptureSettings.wiring.test.ts files=1 passed=14
+COVERED src/app/components/message-replies/useMessagePersistedControls.wiring.test.ts files=1 passed=4
+COVERED src/app/components/message-replies/useMessageReplies.wiring.test.ts files=1 passed=19
+COVERED src/app/components/message-replies/message-replies.structure.test.ts files=1 passed=10
+COVERED src/app/components/message-replies/MessageRepliesPanel.wiring.test.ts files=1 passed=15
+```
+
+Every one of those is a SOURCE-TEXT test - `readFileSync` plus string or regex
+assertions. None of them runs `start()`, constructs a `MediaRecorder`, produces
+a blob, or calls `triggerFileDownload`. A green run here means the wiring is
+spelled correctly in the source, and nothing more.
+
+### What is NOT observable in this environment, stated plainly
+
+A baseline that implies coverage it does not have is worse than none, so:
+
+- **No component is rendered by any test in this repo** (`docs/loop/this-repo.md`
+  section 2: vitest is node-env, `include: ["src/**/*.test.ts"]`, no jsdom, no
+  testing-library). Every claim above about what the instructor sees - the two
+  post-stop blocks, the disabled checkbox, the hint paragraph, the
+  `aria-describedby` - is read from JSX source.
+- **A browser's refusal of a programmatic download is undetectable in JS as this
+  is written.** `triggerFileDownload` returns `void` (`utils.ts:19-28`),
+  `a.click()` on an anchor produces no success signal and no completion event,
+  and the call's result is never examined:
+  `grep -rn "= triggerFileDownload\|await triggerFileDownload" src --include=*.ts
+  --include=*.tsx` returns **0** lines (canary: plain `triggerFileDownload` over
+  the same file set returns 14 in test files alone). There is no `try`/`catch`
+  around the call either. The app cannot ever learn whether the file arrived.
+- **Whether any real browser honours it** - from the Stop button, from the
+  sharing bar, or on a second download in the same tab - is not answerable here
+  at all. No dev server, no `.env`, no `getDisplayMedia` picker, no network.
+  `docs/a20-owner-check.md` is the runnable procedure for that, and its Section 9
+  holds residuals OC1-OC5.
+- **The copy at `DiscussionRepliesPanel.tsx:793` / `MessageRepliesPanel.tsx:380`
+  asserts success** ("This should already be in your Downloads folder"), rescued
+  only by its trailing clause. Whether that sentence is true on a normal run is
+  exactly what nothing here can measure.
+- **Whether the two new persisted checkboxes survive a page reload.** Both are
+  localStorage-seeded `useState` initializers with no mount effect
+  (`discussion-persisted-controls.ts:153-155`,
+  `useMessagePersistedControls.ts:115`), a shape that has previously failed in
+  this repo. Not proven either way here.
+
+### Residual register for this entry
+
+Each names an owner, an instrument, and the step that will measure it. An entry
+missing one of the three would be a deletion, so it is not listed.
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL435-1 | That the ordering invariant (`setRecordingUrl` before `triggerFileDownload`) has any executing enforcer - measured, it has none | The next chunk touching `useDiscussionCapture.ts` | A source-text assertion in `useDiscussionCapture.wiring.test.ts` slicing between `if (mountedRef.current) {` and `} else {` and comparing the index of `setRecordingUrl(url)` against the index of `triggerFileDownload(` | That chunk's test wave, with the sabotage being "swap the two statements and prove RED" |
+| BL435-2 | Whether a real browser writes the file, on either stop path or on a second download in one tab | Repo owner | A real browser: the Downloads folder, `chrome://downloads`, and the `lastSessionAutoDownload` line as the discriminator | `docs/a20-owner-check.md` Section 0, cases 1-4 |
+| BL435-3 | Whether the auto-download checkboxes rehydrate after a reload | Repo owner | A real browser reload with `ta-rec-disc-auto-download` / `ta-rec-msg-auto-download` already set to `"1"` | `docs/a20-scope.md` Section 9, residual R3 - deliberately side-stepped by the owner check rather than answered |
+| BL435-4 | Whether a non-webm container is ever negotiated in practice, which is the only way the mkv/mov/ogv branches of `videoExtensionFromMimeType` are reached outside a unit fixture | Repo owner | The extension on the file that actually lands, plus `recorder.mimeType` in DevTools | Any owner-check capture run on a non-Chromium browser; not in the minimum set |

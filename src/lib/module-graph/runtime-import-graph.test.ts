@@ -2,7 +2,8 @@
 // docs/a23-test-notes.md is the source of every fixture, requirement and
 // frozen number here. Nothing here is imported by another *.test.ts, and
 // this file imports nothing from another *.test.ts (traps-tests.md:46-50).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 import {
@@ -18,6 +19,16 @@ import {
   FORBIDDEN_BARE_SPECIFIERS,
   FORBIDDEN_PATH_PREFIXES,
 } from "./client-boundary-policy";
+
+// L15: this file walks a real directory tree / reads many real files.
+// vitest's 5000ms default testTimeout treats that as slow-but-fine when
+// run alone, and as a false timeout under concurrent `npm test` load from
+// sibling agents (measured: the slowest single top-level it() here runs
+// well under 1s alone). Raised to the repo's existing slow-test
+// convention of 30_000, already used by canvas-client-boundary.
+// transitive.test.ts and runtime-import-graph.test.ts - this changes
+// nothing about what any test asserts.
+vi.setConfig({ testTimeout: 30_000 });
 
 const SRC = join(process.cwd(), "src");
 

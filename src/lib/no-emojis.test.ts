@@ -26,9 +26,20 @@
 // on known-bad AND known-good fixtures before the real filesystem scan is
 // trusted, then the real scan.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
 import fs from "fs";
 import path from "path";
+
+// L15: this file walks a real directory tree / reads many real files.
+// vitest's 5000ms default testTimeout treats that as slow-but-fine when
+// run alone, and as a false timeout under concurrent `npm test` load from
+// sibling agents (measured: the slowest single top-level it() here runs
+// well under 1s alone). Raised to the repo's existing slow-test
+// convention of 30_000, already used by canvas-client-boundary.
+// transitive.test.ts and runtime-import-graph.test.ts - this changes
+// nothing about what any test asserts.
+vi.setConfig({ testTimeout: 30_000 });
 
 interface EmojiViolation {
   line: number;

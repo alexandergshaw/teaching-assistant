@@ -852,6 +852,11 @@ export default function GithubGradingPanel() {
             <GradingResults
               run={run}
               canvasUrl=""
+              // A36: this surface has no Canvas URL of its own (canvasUrl is
+              // always "" above), which collided with GradingTab.tsx's
+              // "canvas" surface whenever ITS canvasUrl was also still empty
+              // - see gradingResultsEditsKey in gradingResultsHelpers.ts.
+              editsSurface="github"
               // A16-1 (docs/a16-scope.md section 4.3): the grading folder
               // this RUN actually covered (lastGradedFolder, captured at
               // grade time - :775 already describes it the same way, tied

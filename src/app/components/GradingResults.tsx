@@ -111,6 +111,17 @@ export type GradingResultsProps = {
   run: GradingRun;
   /** Canvas assignment/discussion URL grades post back to. */
   canvasUrl: string;
+  /** A36: which mount is rendering this (e.g. "canvas" for the classic
+   * zip/canvas flow and LiveFeedPanel.tsx, which intentionally share
+   * GradingTab's own canvasUrl state and are mutually exclusive in the UI;
+   * "github" for GithubGradingPanel.tsx). Used only to scope the persisted
+   * edits key (gradingResultsEditsKey in gradingResultsHelpers.ts) for the
+   * case where canvasUrl is empty - without it, two different surfaces with
+   * an empty canvasUrl produced the exact same storage key, so one surface's
+   * stored edit could be returned to the other for a same-named student.
+   * Required (not optional) so tsc forces every call site to answer
+   * explicitly, matching assignmentName's own posture above. */
+  editsSurface: string;
   /** A16-1 (docs/a16-scope.md section 4.3): the name shown in the trends
    * panel's per-assignment copy (e.g. "A note on {assignmentName}..."). No
    * source-of-truth name exists for the classic zip/canvas flow (verified:
@@ -170,6 +181,7 @@ export interface GradingResultsHandle {
 const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(function GradingResults({
   run,
   canvasUrl,
+  editsSurface,
   assignmentName,
   copiedKey,
   onCopy,
@@ -187,7 +199,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // against the current run by loadGradingResultsEdits (never trusts stored
   // data - see its own doc comment in gradingResultsHelpers.ts).
   const [edits, setEdits] = useState<Record<string, RowEdit>>(() =>
-    correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run))
+    correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run, editsSurface))
   );
   const [prevRun, setPrevRun] = useState(run);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
@@ -207,7 +219,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // the seeded map for a student the new run doesn't have.
   if (run !== prevRun) {
     setPrevRun(run);
-    setEdits(correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run)));
+    setEdits(correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run, editsSurface)));
     setPostStatus({});
     setPostSummary("");
     setExpandedBox(null);
@@ -221,8 +233,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // three feedback boxes) - best-effort, see persistGradingResultsEdits's own
   // doc comment for why a write failure is swallowed rather than thrown.
   useEffect(() => {
-    persistGradingResultsEdits(canvasUrl, edits);
-  }, [canvasUrl, edits]);
+    persistGradingResultsEdits(canvasUrl, edits, editsSurface);
+  }, [canvasUrl, edits, editsSurface]);
 
   // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a row must not
   // keep reading "Posted to Canvas" once the number that was posted has

@@ -431,6 +431,12 @@ export default function LiveFeedPanel({
               ref={resultsHandle}
               run={activeRun}
               canvasUrl={canvasUrl}
+              // A36: shares GradingTab.tsx's classic-flow "canvas" edits
+              // surface - see that call site's own comment. This panel and
+              // that one are mutually exclusive in the UI and intentionally
+              // share GradingTab's canvasUrl state, so sharing the edits
+              // surface too is not a new collision.
+              editsSurface="canvas"
               // A16-1 (docs/a16-scope.md section 4.3): row.title is already
               // in scope at this mount and is rendered as the assignment
               // name elsewhere on this same detail pane (":376"/":424").

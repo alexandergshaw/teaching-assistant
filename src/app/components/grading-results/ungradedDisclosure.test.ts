@@ -538,7 +538,8 @@ describe("GradingResults.tsx source-text wiring", () => {
 
   it("AC-6/S12: BOTH loadGradingResultsEdits call sites are wrapped in correctUngradedSeeds", () => {
     const source = stripComments(readComponentSource());
-    const matches = source.match(/correctUngradedSeeds\(run, loadGradingResultsEdits\(canvasUrl, run\)\)/g) ?? [];
+    const matches =
+      source.match(/correctUngradedSeeds\(run, loadGradingResultsEdits\(canvasUrl, run, editsSurface\)\)/g) ?? [];
     expect(matches.length).toBe(2);
   });
 

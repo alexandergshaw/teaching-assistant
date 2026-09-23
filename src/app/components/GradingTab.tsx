@@ -427,6 +427,14 @@ export default function GradingTab({
         <GradingResults
           run={run}
           canvasUrl={canvasUrl}
+          // A36: this mount and LiveFeedPanel.tsx's own GradingResults mount
+          // intentionally share GradingTab's `canvasUrl` state and are
+          // mutually exclusive in the UI (`source !== "livefeed"` above), so
+          // they share one edits-storage surface ("canvas") - distinct from
+          // GithubGradingPanel.tsx's "github", which otherwise collided with
+          // this one whenever canvasUrl was empty (see gradingResultsEditsKey
+          // in gradingResultsHelpers.ts).
+          editsSurface="canvas"
           // A16-1 (docs/a16-scope.md section 4.3): no assignment name source
           // of truth exists on this classic zip/canvas path - GradingTabProps
           // carries none, and gradingTarget is livefeed-only (gated out by

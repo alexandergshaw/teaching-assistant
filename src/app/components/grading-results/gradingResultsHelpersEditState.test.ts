@@ -112,15 +112,42 @@ describe("applyFeedbackFieldEdit", () => {
 
 describe("gradingResultsEditsKey", () => {
   it("scopes the key to the assignment's canvasUrl", () => {
-    expect(gradingResultsEditsKey("https://canvas.example.edu/courses/1/assignments/2")).toBe(
+    // A36: the surface argument is deliberately inert when canvasUrl is
+    // non-empty - a real assignment already discriminates, so the key stays
+    // byte-identical to what it was before A36 and nothing stored under it is
+    // stranded. Passing either surface here must give the same string.
+    expect(gradingResultsEditsKey("https://canvas.example.edu/courses/1/assignments/2", "canvas")).toBe(
+      "ta-grading-results-edits:https://canvas.example.edu/courses/1/assignments/2"
+    );
+    expect(gradingResultsEditsKey("https://canvas.example.edu/courses/1/assignments/2", "github")).toBe(
       "ta-grading-results-edits:https://canvas.example.edu/courses/1/assignments/2"
     );
   });
 
   it("produces different keys for different assignments (the leak this key exists to prevent)", () => {
-    const keyA = gradingResultsEditsKey("https://canvas.example.edu/courses/1/assignments/2");
-    const keyB = gradingResultsEditsKey("https://canvas.example.edu/courses/9/assignments/9");
+    const keyA = gradingResultsEditsKey("https://canvas.example.edu/courses/1/assignments/2", "canvas");
+    const keyB = gradingResultsEditsKey("https://canvas.example.edu/courses/9/assignments/9", "canvas");
     expect(keyA).not.toBe(keyB);
+  });
+
+  // A36: the zip/Live Feed path (GradingTab.tsx, LiveFeedPanel.tsx - both
+  // pass GradingTab's own canvasUrl state, which is "" until a Canvas URL is
+  // typed) and the GitHub panel (GithubGradingPanel.tsx, which always passes
+  // the literal "") both call this with an empty canvasUrl. Without a real
+  // discriminator both produced the exact same key, so a stored edit from
+  // one surface was returned to the other for any student with a matching
+  // name. `surface` is that discriminator.
+  it("A36: produces different keys for different surfaces when canvasUrl is empty", () => {
+    const zipKey = gradingResultsEditsKey("", "canvas");
+    const githubKey = gradingResultsEditsKey("", "github");
+    expect(zipKey).not.toBe(githubKey);
+  });
+
+  it("A36: leaves the key unchanged for a real (non-empty) canvasUrl regardless of surface - " +
+    "already-stored edits under the pre-A36 key must not be stranded", () => {
+    const url = "https://canvas.example.edu/courses/1/assignments/2";
+    expect(gradingResultsEditsKey(url, "canvas")).toBe(`ta-grading-results-edits:${url}`);
+    expect(gradingResultsEditsKey(url, "github")).toBe(`ta-grading-results-edits:${url}`);
   });
 });
 
@@ -279,17 +306,17 @@ describe("localStorage-backed persistence (loadGradingResultsEdits / persistGrad
 
   it("returns the seeded map when window is undefined (SSR)", () => {
     (globalThis as { window?: unknown }).window = undefined;
-    expect(loadGradingResultsEdits("https://canvas.example.edu/a/1", run)).toEqual(seedEdits(run));
+    expect(loadGradingResultsEdits("https://canvas.example.edu/a/1", run, "canvas")).toEqual(seedEdits(run));
   });
 
   it("round-trips a persisted edit under the assignment-scoped key", () => {
     const canvasUrl = "https://canvas.example.edu/courses/1/assignments/2";
     const seeded = seedEdits(run);
     const edited = applyFeedbackFieldEdit(seeded["Alice Smith"], "strengths", "Outstanding work.");
-    persistGradingResultsEdits(canvasUrl, { ...seeded, "Alice Smith": edited });
+    persistGradingResultsEdits(canvasUrl, { ...seeded, "Alice Smith": edited }, "canvas");
 
-    expect(fakeStorage.getItem(gradingResultsEditsKey(canvasUrl))).not.toBeNull();
-    const restored = loadGradingResultsEdits(canvasUrl, run);
+    expect(fakeStorage.getItem(gradingResultsEditsKey(canvasUrl, "canvas"))).not.toBeNull();
+    const restored = loadGradingResultsEdits(canvasUrl, run, "canvas");
     expect(restored["Alice Smith"].strengths).toBe("Outstanding work.");
   });
 
@@ -298,14 +325,49 @@ describe("localStorage-backed persistence (loadGradingResultsEdits / persistGrad
     const urlB = "https://canvas.example.edu/courses/9/assignments/9";
     const seeded = seedEdits(run);
     const edited = applyFeedbackFieldEdit(seeded["Alice Smith"], "strengths", "Only for assignment A.");
-    persistGradingResultsEdits(urlA, { ...seeded, "Alice Smith": edited });
+    persistGradingResultsEdits(urlA, { ...seeded, "Alice Smith": edited }, "canvas");
 
-    const restoredB = loadGradingResultsEdits(urlB, run);
+    const restoredB = loadGradingResultsEdits(urlB, run, "canvas");
     expect(restoredB["Alice Smith"].strengths).toBe("Great job."); // seeded, not leaked from A
   });
 
   it("swallows a write failure (quota, private browsing) instead of throwing", () => {
     fakeStorage.throwOnSet = true;
-    expect(() => persistGradingResultsEdits("https://canvas.example.edu/a/1", seedEdits(run))).not.toThrow();
+    expect(() => persistGradingResultsEdits("https://canvas.example.edu/a/1", seedEdits(run), "canvas")).not.toThrow();
+  });
+
+  // A36 (the row this fix ships): before the surface discriminator existed,
+  // the zip/Live Feed path and the GitHub panel both persisted under the
+  // exact same key whenever canvasUrl was empty ("" until a Canvas URL is
+  // typed on the zip path; always "" on the GitHub path). RED (pre-fix):
+  // an edit stored by the "github" surface was returned to the "canvas"
+  // surface for a same-named student, and vice versa.
+  it("A36: an edit stored by one surface is NOT returned to a different surface for a same-named student, when canvasUrl is empty on both", () => {
+    const seeded = seedEdits(run);
+    const editedOnGithub = applyFeedbackFieldEdit(seeded["Alice Smith"], "strengths", "Stored from the GitHub panel.");
+    persistGradingResultsEdits("", { ...seeded, "Alice Smith": editedOnGithub }, "github");
+
+    const restoredOnCanvasSurface = loadGradingResultsEdits("", run, "canvas");
+    expect(restoredOnCanvasSurface["Alice Smith"].strengths).toBe("Great job."); // seeded, not leaked from GitHub
+  });
+
+  it("A36: the reverse direction also does not leak (canvas surface's edit does not reach the github surface)", () => {
+    const seeded = seedEdits(run);
+    const editedOnCanvas = applyFeedbackFieldEdit(seeded["Alice Smith"], "strengths", "Stored from the zip path.");
+    persistGradingResultsEdits("", { ...seeded, "Alice Smith": editedOnCanvas }, "canvas");
+
+    const restoredOnGithubSurface = loadGradingResultsEdits("", run, "github");
+    expect(restoredOnGithubSurface["Alice Smith"].strengths).toBe("Great job."); // seeded, not leaked from the zip path
+  });
+
+  it("A36: an edit stored under the pre-fix shared empty-string key is still readable as a fallback (not stranded) by whichever surface reads first", () => {
+    const seeded = seedEdits(run);
+    const legacyEdited = applyFeedbackFieldEdit(seeded["Alice Smith"], "strengths", "Stored before the A36 fix shipped.");
+    // Simulates data written by the OLD code (pre-surface-discriminator),
+    // i.e. directly under the bare key, bypassing gradingResultsEditsKey.
+    fakeStorage.setItem("ta-grading-results-edits:", JSON.stringify({ ...seeded, "Alice Smith": legacyEdited }));
+
+    const restored = loadGradingResultsEdits("", run, "canvas");
+    expect(restored["Alice Smith"].strengths).toBe("Stored before the A36 fix shipped.");
   });
 });

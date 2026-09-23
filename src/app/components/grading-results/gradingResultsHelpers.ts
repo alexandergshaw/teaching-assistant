@@ -535,9 +535,36 @@ export function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>)
 // scoped to the assignment: an unscoped key would leak one assignment's
 // feedback onto a different assignment's identically-named student the next
 // time that student's name appears under a different course/assignment.
-export function gradingResultsEditsKey(canvasUrl: string): string {
-  return `ta-grading-results-edits:${canvasUrl}`;
+//
+// A36: `canvasUrl` alone is not always a real discriminator. Three mounts
+// call this - GradingTab.tsx's own classic zip/canvas flow and
+// LiveFeedPanel.tsx both pass GradingTab's shared `canvasUrl` state (empty
+// until a Canvas URL is typed), and GithubGradingPanel.tsx always passes the
+// literal "" (GitHub grading has no Canvas URL of its own). Whenever
+// canvasUrl is empty, two DIFFERENT surfaces were producing the exact same
+// key, so a stored edit from one leaked onto the other for any student whose
+// name matched. `surface` disambiguates that case ("canvas" for the
+// GradingTab/LiveFeedPanel pair, which intentionally share state and are
+// mutually exclusive in the UI; "github" for GithubGradingPanel).
+//
+// Deliberately does NOT fold `surface` into the key for a non-empty
+// canvasUrl: that shape (`ta-grading-results-edits:${canvasUrl}`) already
+// uniquely identifies a real assignment and is never produced by more than
+// one surface (GithubGradingPanel's canvasUrl is always ""), so changing it
+// would strand every instructor's already-stored edits for no reason. Only
+// the previously-colliding empty-canvasUrl case gets the new shape - see
+// loadGradingResultsEdits's legacy-key fallback for what happens to edits
+// already stored under the old shared empty key.
+export function gradingResultsEditsKey(canvasUrl: string, surface: string): string {
+  return canvasUrl ? `ta-grading-results-edits:${canvasUrl}` : `ta-grading-results-edits::${surface}`;
 }
+
+// The bare key every surface shared before A36, for the empty-canvasUrl case
+// only (a non-empty canvasUrl's key never changed - see above). Read-only:
+// loadGradingResultsEdits falls back to it so an instructor's edits already
+// stored here are not stranded by the surface split, but nothing ever writes
+// to it again, so a surface's own scoped key takes over on its first save.
+const LEGACY_EMPTY_CANVAS_URL_EDITS_KEY = "ta-grading-results-edits:";
 
 function isAreaEditValue(value: unknown): value is AreaEdit {
   return !!value && typeof value === "object" && typeof (value as { score?: unknown }).score === "string";
@@ -611,10 +638,20 @@ export function loadPersistedEdits(raw: string | null, run: GradingRun): Record<
  * current run (loadPersistedEdits above) - the seeded map (never null/throw)
  * when nothing is stored, `window` is unavailable (SSR), or localStorage
  * itself throws (private browsing). */
-export function loadGradingResultsEdits(canvasUrl: string, run: GradingRun): Record<string, RowEdit> {
+export function loadGradingResultsEdits(canvasUrl: string, run: GradingRun, surface: string): Record<string, RowEdit> {
   if (typeof window === "undefined") return seedEdits(run);
   try {
-    return loadPersistedEdits(localStorage.getItem(gradingResultsEditsKey(canvasUrl)), run);
+    const raw = localStorage.getItem(gradingResultsEditsKey(canvasUrl, surface));
+    // A36: nothing yet under this surface's own key - for the empty-canvasUrl
+    // case only, fall back to the bare key every surface shared before the
+    // discriminator existed, so edits stored under the old scheme are not
+    // stranded. Read-only: never re-written here, so once a surface saves its
+    // own edit it stops reading this fallback (persistGradingResultsEdits
+    // below always writes to the new scoped key).
+    if (raw === null && !canvasUrl) {
+      return loadPersistedEdits(localStorage.getItem(LEGACY_EMPTY_CANVAS_URL_EDITS_KEY), run);
+    }
+    return loadPersistedEdits(raw, run);
   } catch {
     return seedEdits(run);
   }
@@ -623,10 +660,10 @@ export function loadGradingResultsEdits(canvasUrl: string, run: GradingRun): Rec
 /** Writes this assignment's edits. Best-effort: a throw (quota, private
  * browsing) loses persistence for this one write and nothing else, matching
  * persistRepoGradesUiState's posture in repoGradesUiState.ts. */
-export function persistGradingResultsEdits(canvasUrl: string, edits: Record<string, RowEdit>): void {
+export function persistGradingResultsEdits(canvasUrl: string, edits: Record<string, RowEdit>, surface: string): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(gradingResultsEditsKey(canvasUrl), JSON.stringify(edits));
+    localStorage.setItem(gradingResultsEditsKey(canvasUrl, surface), JSON.stringify(edits));
   } catch {
     // best-effort persistence only, matching persistRepoGradesUiState above.
   }

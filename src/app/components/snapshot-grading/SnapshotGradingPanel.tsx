@@ -58,6 +58,7 @@ import { snapshotRowCodec } from "./snapshot-row-serialization";
 import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
 import SnapshotCaptureBar from "./SnapshotCaptureBar";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import SnapshotShotTray from "./SnapshotShotTray";
 import SnapshotRoleSuggestions from "./SnapshotRoleSuggestions";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
@@ -728,6 +729,24 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         and manage the tray below. Grade directly from the tray whenever you are ready - Read first
         only if you want to review or edit a transcription before grading.
       </p>
+
+      {/* RES-N15-4 / WCAG 2.2 SC 2.5.7: click-to-browse alternative to the
+          drop target above - same handleFiles/handleZipFile onDrop calls,
+          RubricInputModal.tsx's component="label" + role={undefined} recipe. */}
+      <Button component="label" role={undefined} tabIndex={-1} className={controls.uploadLabel}
+        variant="outlined" size="small" sx={{ alignSelf: "flex-start", textTransform: "none" }}>
+        Choose files
+        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,.zip,application/zip" multiple style={visuallyHidden}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            const images = picked.filter((f) => f.type.startsWith("image/"));
+            const zips = picked.filter((f) => !f.type.startsWith("image/") && f.name.toLowerCase().endsWith(".zip"));
+            if (images.length > 0) void handleFiles(images, "drop");
+            for (const zip of zips) void handleZipFile(zip);
+            e.target.value = "";
+          }}
+        />
+      </Button>
 
       <p ref={liveRegionRef} role="status" aria-live="polite" className={panelStyles.visuallyHidden} />
 

@@ -820,3 +820,44 @@ describe("snapshot-grade.ts no longer imports or calls extractRubricCriteria (Ru
     expect(stripped).not.toMatch(/extractRubricCriteria\(/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// RES-N15-4 (docs/n15-rubric-picture-scope.md:913-920): this directory's
+// image intake was drag-only, with no single-pointer alternative - WCAG 2.2
+// SC 2.5.7 Level AA. The fix is a click-to-browse <input type="file"> that
+// routes through the SAME handleFiles/handleZipFile the drop handler already
+// calls (never a second intake path). Nothing renders under vitest here, so
+// this only checks the fact and the wiring, never the exact label prose.
+// ---------------------------------------------------------------------------
+
+describe("RES-N15-4: SnapshotGradingPanel ships a click-to-browse file input wired to the SAME intake functions as drop", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const stripped = stripComments(panelSource);
+
+  it('declares an <input type="file"> - the instrument RES-N15-4 measured as absent (exit 1)', () => {
+    expect(stripped).toMatch(/<input[\s\S]{0,400}type="file"/);
+  });
+
+  it("that input's own onChange body calls handleFiles( and handleZipFile( - the same functions onDrop calls, not a second intake path", () => {
+    const inputStart = stripped.indexOf("<input");
+    const fileTypeIdx = stripped.indexOf('type="file"', inputStart);
+    expect(inputStart, "expected to find an <input tag").toBeGreaterThan(-1);
+    expect(fileTypeIdx, 'expected that <input to carry type="file"').toBeGreaterThan(inputStart);
+    const onChangeStart = stripped.indexOf("onChange={", fileTypeIdx);
+    const inputEnd = stripped.indexOf("/>", fileTypeIdx);
+    expect(onChangeStart, "expected to find the file input's own onChange").toBeGreaterThan(-1);
+    expect(inputEnd, "expected to find the file input's own self-close").toBeGreaterThan(fileTypeIdx);
+    const onChangeBody = stripped.slice(onChangeStart, inputEnd);
+    expect(onChangeBody).toMatch(/handleFiles\(/);
+    expect(onChangeBody).toMatch(/handleZipFile\(/);
+  });
+
+  it("the browse control is a real, natively-focusable control (component=\"label\" with role={undefined}, the RubricInputModal.tsx recipe) - not a pointer-only div", () => {
+    const labelIdx = stripped.indexOf('component="label"');
+    expect(labelIdx, 'expected a component="label" Button (RubricInputModal.tsx precedent)').toBeGreaterThan(-1);
+    const roleIdx = stripped.indexOf("role={undefined}", labelIdx);
+    expect(roleIdx, "expected role={undefined} directly on that same Button").toBeGreaterThan(labelIdx);
+    expect(roleIdx - labelIdx).toBeLessThan(120);
+  });
+});

@@ -198,3 +198,100 @@ What this settles:
 
 What this does NOT settle: whether the Server Action form is preserved for any
 other caller. If something else depends on it, that is a separate answer.
+
+## DECISIONS 7-12 - the owner took every recommendation, 2026-09-23
+
+Six questions were put with recommendations and the owner answered "go with
+recommended answers". Recorded individually rather than as one line, because
+each carries a different consequence and a later reader needs to know what was
+chosen, not that a batch was approved.
+
+### DECISION 7 - A39's extraction is .tsx components, with NO oracle
+
+The deadlock: the wave plan required the extracted leaf be plain `.ts` so it
+could carry a real oracle, while RULING 33's arithmetic - the only shape that
+gets a 989-line panel under its ceiling - requires JSX components, which must be
+`.tsx`, which nothing here renders. **Chosen: (a), `.tsx` components.**
+
+What this accepts, stated plainly so nobody later mistakes it for coverage:
+**the moved markup has no executing oracle.** The instruments that remain are
+the ceiling number itself (a real measurement), source-text structure assertions
+(which catch relocation but not correctness), and an owner check in a browser.
+This matches what the three shipped siblings in that directory already do, so it
+is the established shape here rather than a new compromise.
+
+What was refused, and why, because the reasoning binds future items: option (c),
+shipping without the extraction, was refused on this project's own grounds - a
+ceiling with exceptions stops being measured. Option (b) bought a stronger
+instrument with an item that does not ship.
+
+**This unblocks wave 3a-i, and therefore A24**, which RULING 32 gated on the
+same extraction.
+
+### DECISION 8 - A39's wave 4 stays inside A39
+
+Not split into its own row. It is the incremental-delivery wave and the item's
+value depends on it; a separate row would let the visible half ship while the
+half that answers the owner's actual complaint waits.
+
+### DECISION 9 - two new ta- keys ship with no exact-set canary
+
+Accepted as DECISION 3's own consequence rather than smuggled in. **The
+transition rule is part of this decision and is not optional:** when a SIXTH key
+lands in that directory, the exact-set canary is written then, covering all of
+them. Without that clause this is a permanent hole rather than a deferral, and
+the residual that carries it (RES-A39A-11) must state the trigger in those
+terms.
+
+### DECISION 10 - on-device lingering is accepted
+
+A stored rubric persists on the instructor's own device. Accepted. The rubric is
+the instructor's own material on the instructor's own machine, and it is the
+same class of data the app already persists there under other keys.
+
+### DECISION 11 - A3 is redesigned around PROVENANCE
+
+Recall is dropped as the goal. The row as filed rested on the app remembering an
+answer, and the research falsified that as an advantage - a chat persists across
+sessions too. What a chat cannot do is say WHICH facts produced a given answer.
+
+So A3 becomes: store what produced an answer, and show that. **The retrieval
+interaction is part of the deliverable, not a follow-up**, because the measured
+precedent costs a tab switch plus an expand click plus an unscoped scan - more
+expensive than simply re-asking. A stored thing that costs more to reach than to
+recreate is worse than not storing it. The row is re-scoped from this premise;
+its existing scope was written against the old one.
+
+### DECISION 12 - A4 re-points the three chips
+
+Option (b). The three chips are re-pointed at questions that actually need the
+course's recorded facts, so the grounding sentence becomes TRUE rather than
+becoming weaker. Its stated blocker has cleared - A1 landed, and the seven fact
+families are emitted.
+
+Not chosen: (a) softening the copy, which keeps a surface that under-uses what
+the app knows; (c) dropping the chips, the only one-way door.
+
+### DECISION 13 - A23 leaves the twelve modules freely importable
+
+No re-ban by name. By the criterion the row is chartered against - client-bundle
+safety - nothing is lost, since all twelve walk to zero violations, and one rule
+re-derived from the tree on every test run survives better than two. Re-banning
+would have failed four live, currently-clean value imports.
+
+**What this accepts:** the walk answers "does this reach the server?", never
+"should a component reach into grading internals?". That LAYERING boundary is
+now unenforced, deliberately. If it is wanted later it is a new rule with its
+own justification, not a restoration.
+
+This was A23's last open item, so the row is closed by it.
+
+### DECISION 14 - L3 means the FALLBACK EXPRESSIONS
+
+Reading (b): the entry is correct and only the sentence "None were ever defined"
+wants tightening to say so. **This one had no recommendation attached when it
+was asked** - I noted it as lowest-stakes and offered no preference - so I am
+recording that I chose the reading the entry's own phrasing supports: it is the
+one list item written as a phrase, "--field-border fallbacks", where the other
+twelve are bare token names. If that inference is wrong, the correction is one
+sentence.

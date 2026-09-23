@@ -122,7 +122,7 @@ criteria.)
   name-based version.
 - Does every numeric floor or cap get checked against every other numeric
   floor or cap that bounds the same quantity elsewhere in the tree? A privacy
-  floor of 5 was set against a grading cap that defaults to 5 (`gemini.ts:25`,
+  floor of 5 was set against a grading cap this card said also defaults to 5 - MEASURED 2026-09-23, IT IS 40 (`gemini.ts:32`), so the coincidence the argument rested on never existed (`gemini.ts:32`,
   applied at `grade/engine.ts:126`), so the analysed set holds exactly five for
   every class of five or more - the floor's guarantee is satisfied only at its
   own boundary, forever, and naming the colliding knob as a design precedent is

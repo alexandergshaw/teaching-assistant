@@ -65,18 +65,52 @@ function renderKindSection(kind: BacklogKind, items: BacklogItem[]): string {
     lines.push("_None._", "");
     return lines.join("\n");
   }
-  lines.push("| area | id | state | title | owns | verify | blocked_by | instrument | from | note |");
-  lines.push("|---|---|---|---|---|---|---|---|---|---|");
+  lines.push("| area | id | state | title | owns | verify | blocked_by | instrument | from | note | question |");
+  lines.push("|---|---|---|---|---|---|---|---|---|---|---|");
   const sorted = [...items].sort(compareRows);
   for (const item of sorted) {
+    const question = item.question ?? null;
     lines.push(
       `| ${escapeCell(areaLabel(item.area))} | ${escapeCell(item.id)} | ${escapeCell(item.state)} | ${escapeCell(item.title)} | ` +
         `${cellList(item.owns)} | ${item.verify === null ? "-" : escapeCell(item.verify)} | ${cellList(item.blocked_by)} | ` +
         `${item.instrument === "" ? "-" : escapeCell(item.instrument)} | ${item.from === "" ? "-" : escapeCell(item.from)} | ` +
-        `${item.note === "" ? "-" : escapeCell(item.note)} |`
+        `${item.note === "" ? "-" : escapeCell(item.note)} | ${question === null || question.trim() === "" ? "-" : escapeCell(question)} |`
     );
   }
   lines.push("");
+  return lines.join("\n");
+}
+
+function hasQuestion(item: BacklogItem): boolean {
+  return (item.question ?? "").trim().length > 0;
+}
+
+/**
+ * A question waiting on (or answered by) the owner, surfaced at the TOP of
+ * the document rather than left to be found in one row of a 55-row table -
+ * the owner asked for this 2026-09-23 precisely because a question buried at
+ * the bottom of a long document is the same as no question. Sorted by id so
+ * the section is deterministic regardless of the input array's order, same
+ * as every other section here.
+ */
+function renderOpenQuestions(items: BacklogItem[]): string {
+  const withQuestions = items.filter(hasQuestion);
+  const lines: string[] = ["## Open Questions", ""];
+  if (withQuestions.length === 0) {
+    lines.push("_None._", "");
+    return lines.join("\n");
+  }
+  lines.push(
+    "A question here is either waiting on the owner, or has already been",
+    "answered and is recorded so a later round does not relitigate it - each",
+    "row also carries its `question` in its own table cell below, under its",
+    "kind section.",
+    ""
+  );
+  const sorted = [...withQuestions].sort((a, b) => a.id.localeCompare(b.id));
+  for (const item of sorted) {
+    lines.push(`### ${item.id}: ${escapeCell(item.title)}`, "", escapeCell((item.question ?? "").trim()), "");
+  }
   return lines.join("\n");
 }
 
@@ -109,5 +143,5 @@ export function renderBacklogMarkdown(items: BacklogItem[]): string {
       items.filter((i) => i.kind === kind)
     )
   );
-  return `${[...header, ...sections].join("\n").replace(/\n+$/, "")}\n`;
+  return `${[...header, renderOpenQuestions(items), ...sections].join("\n").replace(/\n+$/, "")}\n`;
 }

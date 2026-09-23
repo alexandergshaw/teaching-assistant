@@ -67,6 +67,21 @@ export interface BacklogItem {
   from: string;
   /** Free-text queue note that does not fit any other field (a "why blocked" / "trigger" / "state" column from the pre-migration markdown). Empty string when none. */
   note: string;
+  /**
+   * A question waiting on the owner, in the owner's own terms - or, once
+   * answered, the resolved question with its answer recorded (see
+   * yaml-codec.ts's parse/serialize handling: absent or `null` both mean
+   * "no question", so the ~55 rows filed before this field existed parse
+   * unchanged). Added 2026-09-23 per the owner's request so a question lives
+   * beside the row it belongs to instead of only in a chat transcript.
+   * AGENTS.md, "Two rounds, then ask", is also the reason a row in `owner`
+   * state should never carry an empty one - see
+   * yaml-codec.ts's `ownerRowsMissingQuestion` / `assertOwnerRowsHaveQuestion`.
+   * Optional (`?`) rather than required so every existing BacklogItem
+   * literal across this codebase - test fixtures this task's write set does
+   * not include - keeps compiling without being touched.
+   */
+  question?: string | null;
 }
 
 export const BACKLOG_STATES: readonly BacklogState[] = [

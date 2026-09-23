@@ -17,6 +17,7 @@
     "backlog:touch-dispatch": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts touch-dispatch",
     "backlog:round-bump": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts round-bump",
     "backlog:round-status": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts round-status",
+    "backlog:questions": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts questions",
     "test:paths": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/vitest-paths/cli.ts"
   },
   "dependencies": {

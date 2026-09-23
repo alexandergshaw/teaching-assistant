@@ -15,6 +15,7 @@ function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
     instrument: "",
     from: "",
     note: "",
+    question: null,
     ...overrides,
   };
 }
@@ -125,5 +126,56 @@ describe("renderBacklogMarkdown", () => {
     // scan, on the literal template strings this function owns.
     const markdown = renderBacklogMarkdown([item({ id: "A1" })]);
     expect(/[\u{1F300}-\u{1FAFF}]/u.test(markdown)).toBe(false);
+  });
+
+  describe("Open Questions section", () => {
+    it("puts an 'Open Questions' section before the Bugs/Features/Chores sections when a row carries a question", () => {
+      const markdown = renderBacklogMarkdown([item({ id: "A29", question: "Which fork?" })]);
+      const openIndex = markdown.indexOf("## Open Questions");
+      const bugsIndex = markdown.indexOf("## Bugs");
+      expect(openIndex).toBeGreaterThan(-1);
+      expect(bugsIndex).toBeGreaterThan(openIndex);
+    });
+
+    it("lists a question under its own row's id and title", () => {
+      const markdown = renderBacklogMarkdown([item({ id: "A29", title: "Bulk email students", question: "Fan-out or one send?" })]);
+      const section = markdown.slice(markdown.indexOf("## Open Questions"), markdown.indexOf("## Bugs"));
+      expect(section).toContain("A29");
+      expect(section).toContain("Bulk email students");
+      expect(section).toContain("Fan-out or one send?");
+    });
+
+    it("marks the Open Questions section explicitly empty when no row carries a question", () => {
+      const markdown = renderBacklogMarkdown([item({ id: "A1", question: null })]);
+      const section = markdown.slice(markdown.indexOf("## Open Questions"), markdown.indexOf("## Bugs"));
+      expect(section).toContain("_None._");
+    });
+
+    it("treats a blank (whitespace-only) question the same as no question", () => {
+      const markdown = renderBacklogMarkdown([item({ id: "A1", question: "   " })]);
+      const section = markdown.slice(markdown.indexOf("## Open Questions"), markdown.indexOf("## Bugs"));
+      expect(section).toContain("_None._");
+    });
+
+    it("is deterministic across input order, sorted by id", () => {
+      const a = item({ id: "B2", question: "second" });
+      const b = item({ id: "A1", question: "first" });
+      const forward = renderBacklogMarkdown([a, b]);
+      const reversed = renderBacklogMarkdown([b, a]);
+      expect(forward).toBe(reversed);
+      const section = forward.slice(forward.indexOf("## Open Questions"), forward.indexOf("## Bugs"));
+      expect(section.indexOf("A1")).toBeLessThan(section.indexOf("B2"));
+    });
+  });
+
+  it("also shows the question on the row's own table line, alongside the dedicated section", () => {
+    const markdown = renderBacklogMarkdown([item({ id: "A29", question: "Which fork?" })]);
+    expect(markdown).toContain("| area | id | state | title | owns | verify | blocked_by | instrument | from | note | question |");
+    expect(markdown).toMatch(/\| A29 \|.*\| Which fork\? \|/);
+  });
+
+  it("shows '-' in the row's question cell when there is no question", () => {
+    const markdown = renderBacklogMarkdown([item({ id: "A1", question: null })]);
+    expect(markdown).toMatch(/\| A1 \|.*\| - \|\s*$/m);
   });
 });

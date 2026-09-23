@@ -2,7 +2,7 @@
 // "the scripts are built and gated FIRST... nothing depends on the hook").
 // Run via the npm scripts in package.json (backlog:render,
 // backlog:check-generated, backlog:next, backlog:wave, backlog:round-bump,
-// backlog:round-status), or directly with:
+// backlog:round-status, backlog:questions), or directly with:
 //   node --experimental-strip-types --experimental-default-type=module \
 //     --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts \
 //     src/tools/backlog/cli.ts <command>
@@ -209,6 +209,23 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
     return { exitCode: 3, output: `empty: ${result.reason}` };
   }
 
+  // Read-only by construction, on purpose: no dep here can write anything,
+  // and the branch never calls readWorkCommits, readDispatchMarkerState, or
+  // any touch*/write* dep. A diagnostic that mutates state it reports on is
+  // a defect this repo hit today (see stop-guard's --dry-run comment above)
+  // and this command exists so the owner can ask for open questions directly
+  // without that risk.
+  if (command === "questions") {
+    const items = parseBacklogYaml(deps.readYaml());
+    const dupError = requireDuplicateFree(items);
+    if (dupError) return { exitCode: 1, output: dupError };
+    const withQuestions = items.filter((i) => (i.question ?? "").trim().length > 0);
+    if (withQuestions.length === 0) return { exitCode: 0, output: "no open questions" };
+    const sorted = [...withQuestions].sort((a, b) => a.id.localeCompare(b.id));
+    const lines = sorted.map((i) => `${i.id}: ${i.title}\n  ${(i.question ?? "").trim()}`);
+    return { exitCode: 0, output: lines.join("\n\n") };
+  }
+
   if (command === "wave") {
     const items = parseBacklogYaml(deps.readYaml());
     const dupError = requireDuplicateFree(items);
@@ -266,7 +283,7 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
 
   return {
     exitCode: 64,
-    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard, touch-dispatch, round-bump, round-status.`,
+    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard, touch-dispatch, round-bump, round-status, questions.`,
   };
 }
 

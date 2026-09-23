@@ -105,6 +105,8 @@ export function serializeBacklogYaml(items: BacklogItem[]): string {
     lines.push(`  instrument: ${escapeScalar(item.instrument)}`);
     lines.push(`  from: ${escapeScalar(item.from)}`);
     lines.push(`  note: ${escapeScalar(item.note)}`);
+    const question = item.question ?? null;
+    lines.push(`  question: ${question === null ? "null" : escapeScalar(question)}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -157,6 +159,17 @@ export function parseBacklogYaml(text: string): BacklogItem[] {
     if (verifyRaw === undefined) throw new Error(`yaml-codec: item ${id} is missing required field "verify"`);
     const verify = verifyRaw === "null" ? null : unescapeScalar(verifyRaw);
 
+    // `question` is deliberately NOT required, unlike every other field
+    // above: it was added 2026-09-23, long after docs/backlog.yml's ~55
+    // existing rows were filed, and a required field would force a
+    // hand-edit of every one of them just to keep parsing. A row written
+    // before this field existed has no "question:" line at all - that is
+    // "absent", not malformed, and means the same thing as an explicit
+    // `null`.
+    const questionRaw = fields.get("question");
+    const question: string | null =
+      questionRaw === undefined ? null : questionRaw === "null" ? null : unescapeScalar(questionRaw);
+
     const stateRaw = get("state");
     if (!isBacklogState(stateRaw)) {
       throw new Error(`yaml-codec: item ${id} has an unknown state "${stateRaw}"`);
@@ -184,7 +197,45 @@ export function parseBacklogYaml(text: string): BacklogItem[] {
       instrument: get("instrument"),
       from: get("from"),
       note: get("note"),
+      question,
     });
   }
   return items;
+}
+
+/**
+ * Every id in state `owner` whose `question` is absent, `null`, or blank.
+ * Exported for a caller to report or gate on, per that caller's own
+ * judgment - see `assertOwnerRowsHaveQuestion` for the throwing form.
+ */
+export function ownerRowsMissingQuestion(items: BacklogItem[]): string[] {
+  return items
+    .filter((item) => item.state === "owner" && (item.question ?? "").trim().length === 0)
+    .map((item) => item.id);
+}
+
+/**
+ * Structural invariant, deliberately NOT wired into `parseBacklogYaml`
+ * itself (unlike `state`/`kind`/`area`'s inline throws just above): as of
+ * this field's introduction, docs/backlog.yml already carries three rows in
+ * `owner` state filed before `question` existed - L3, A4, and A23 - and this
+ * task was explicitly told to report any such row rather than invent a
+ * question for it. Wiring this assertion into the parse path used by
+ * `render`, `check-generated`, and backlog-file.structure.test.ts would
+ * throw on the real committed file today and break every one of those
+ * gates. A caller that wants this enforced (a future CLI command, or a test
+ * scoped to rows that DO carry the field) calls it explicitly.
+ *
+ * Rationale for the invariant itself, from AGENTS.md's "Two rounds, then
+ * ask": "the owner-only section is not a parking lot... an item parked as
+ * owner-blocked without a written question is a queue that has quietly
+ * stopped while looking full."
+ */
+export function assertOwnerRowsHaveQuestion(items: BacklogItem[]): void {
+  const missing = ownerRowsMissingQuestion(items);
+  if (missing.length > 0) {
+    throw new Error(
+      `yaml-codec: row(s) in state "owner" must carry a non-empty question (AGENTS.md, "Two rounds, then ask"): ${missing.join(", ")}`
+    );
+  }
 }

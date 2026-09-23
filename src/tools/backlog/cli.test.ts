@@ -16,6 +16,7 @@ const scopedItem: BacklogItem = {
   instrument: "",
   from: "",
   note: "",
+  question: null,
 };
 const unscopedItem: BacklogItem = { ...scopedItem, id: "N1", state: "unscoped", owns: [], verify: null };
 
@@ -80,6 +81,61 @@ describe("cli dispatch", () => {
     const result = dispatch(["bogus"], deps([]));
     expect(result.exitCode).toBe(64);
     expect(result.output).toMatch(/render, check-generated, next, wave/);
+    expect(result.output).toContain("questions");
+  });
+
+  describe("questions", () => {
+    const withQuestion = { ...scopedItem, id: "A29", question: "Which fork?" };
+    const answered = { ...scopedItem, id: "A38", question: "ANSWERED: confirm above N." };
+
+    it("exits 0 and prints nothing-open when no row carries a question", () => {
+      const result = dispatch(["questions"], deps([scopedItem]));
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toMatch(/no open questions/);
+    });
+
+    it("exits 0 and prints each row's id, title, and question", () => {
+      const result = dispatch(["questions"], deps([withQuestion]));
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("A29");
+      expect(result.output).toContain("Do the thing");
+      expect(result.output).toContain("Which fork?");
+    });
+
+    it("lists more than one row, sorted by id", () => {
+      const result = dispatch(["questions"], deps([answered, withQuestion]));
+      expect(result.exitCode).toBe(0);
+      expect(result.output.indexOf("A29")).toBeLessThan(result.output.indexOf("A38"));
+    });
+
+    it("ignores a row whose question is blank (whitespace-only)", () => {
+      const blank = { ...scopedItem, question: "   " };
+      const result = dispatch(["questions"], deps([blank]));
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toMatch(/no open questions/);
+    });
+
+    it("refuses to proceed when the yaml has duplicate ids, same as render/next", () => {
+      const dup = { ...scopedItem, id: "A1" };
+      const result = dispatch(["questions"], deps([scopedItem, dup]));
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toMatch(/duplicate/);
+    });
+
+    // READ-ONLY BY CONSTRUCTION: a diagnostic that mutates state it reports
+    // on is a defect this repo hit today (stop-guard's --dry-run). Prove
+    // `questions` never reaches for any write-capable dep at all.
+    it("never calls any touch/write dependency", () => {
+      let touched = false;
+      const d = {
+        ...deps([withQuestion]),
+        touchStopMarker: () => { touched = true; },
+        touchDispatchMarker: () => { touched = true; },
+        writeRoundLedgerState: () => { touched = true; },
+      };
+      dispatch(["questions"], d);
+      expect(touched).toBe(false);
+    });
   });
 
   describe("touch-dispatch", () => {

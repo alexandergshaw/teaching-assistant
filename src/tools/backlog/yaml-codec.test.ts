@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { parseBacklogYaml, serializeBacklogYaml } from "./yaml-codec";
+import {
+  parseBacklogYaml,
+  serializeBacklogYaml,
+  ownerRowsMissingQuestion,
+  assertOwnerRowsHaveQuestion,
+} from "./yaml-codec";
 import type { BacklogItem } from "./types";
 
 function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
@@ -15,6 +20,7 @@ function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
     instrument: "manual check",
     from: "abc1234",
     note: "",
+    question: null,
     ...overrides,
   };
 }
@@ -109,5 +115,63 @@ describe("yaml-codec round trip", () => {
   it("throws when a required field is missing", () => {
     const raw = "- id: 'V1'\n  state: 'owner'\n  kind: 'chore'\n  area: 'loop-and-docs-maintenance'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n";
     expect(() => parseBacklogYaml(raw)).toThrow();
+  });
+
+  describe("question field", () => {
+    it("round-trips a question containing apostrophes, a colon, and a file:line citation", () => {
+      const items = [
+        item({
+          id: "A29",
+          question:
+            "ANSWERED 2026-09-23: whether to measure the single-recipient Canvas behaviour first, or design a named refusal and ship without knowing - it's a fork Ruling 17 also touches, cited at src/lib/canvas/inbox.ts:384. The owner's call: the named refusal.",
+        }),
+      ];
+      const text = serializeBacklogYaml(items);
+      expect(parseBacklogYaml(text)).toEqual(items);
+    });
+
+    it("round-trips null (no question) explicitly", () => {
+      const items = [item({ question: null })];
+      const text = serializeBacklogYaml(items);
+      expect(parseBacklogYaml(text)).toEqual(items);
+      expect(text).toContain("question: null");
+    });
+
+    it("parses a legacy row with no question: line at all as question: null (backward compatible)", () => {
+      const raw =
+        "- id: 'V1'\n  state: 'verification'\n  kind: 'chore'\n  area: 'loop-and-docs-maintenance'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n  note: ''\n";
+      const [parsed] = parseBacklogYaml(raw);
+      expect(parsed.question).toBeNull();
+    });
+
+    it("serializes a non-null question with the same single-quote escaping as every other scalar", () => {
+      const items = [item({ question: "the owner's own words" })];
+      const text = serializeBacklogYaml(items);
+      expect(text).toContain("question: 'the owner''s own words'");
+    });
+  });
+
+  describe("ownerRowsMissingQuestion / assertOwnerRowsHaveQuestion", () => {
+    it("flags an owner-state row with no question", () => {
+      const items = [item({ id: "L3", state: "owner", question: null })];
+      expect(ownerRowsMissingQuestion(items)).toEqual(["L3"]);
+      expect(() => assertOwnerRowsHaveQuestion(items)).toThrow(/L3/);
+    });
+
+    it("flags an owner-state row whose question is blank, not just absent", () => {
+      const items = [item({ id: "L3", state: "owner", question: "   " })];
+      expect(ownerRowsMissingQuestion(items)).toEqual(["L3"]);
+    });
+
+    it("does not flag an owner-state row that carries a non-empty question", () => {
+      const items = [item({ id: "A29", state: "owner", question: "Which fork?" })];
+      expect(ownerRowsMissingQuestion(items)).toEqual([]);
+      expect(() => assertOwnerRowsHaveQuestion(items)).not.toThrow();
+    });
+
+    it("never flags a non-owner row regardless of its question", () => {
+      const items = [item({ id: "A1", state: "actionable", question: null })];
+      expect(ownerRowsMissingQuestion(items)).toEqual([]);
+    });
   });
 });

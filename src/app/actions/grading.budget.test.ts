@@ -25,6 +25,13 @@ vi.mock("@/lib/grade", async () => {
   return {
     ...actual,
     extractStudentEntries: vi.fn(),
+    // A39 wave 1 (docs/a39-waves.md section 7.3, W1-4): the non-zip/"single"
+    // path routes through gradeEntries instead of gradeSubmissions, so it
+    // needs the same mock treatment gradeSubmissions would - never a real
+    // LLM call (network is blocked under vitest here regardless).
+    gradeEntries: vi.fn(),
+    synthesizeFullCreditChecklist: vi.fn(),
+    generateSampleAnswer: vi.fn(),
   };
 });
 
@@ -50,7 +57,7 @@ vi.mock("@/lib/research/rubric-bank", () => ({
 }));
 
 import { requireOwner } from "@/lib/supabase/auth";
-import { extractStudentEntries } from "@/lib/grade";
+import { extractStudentEntries, gradeEntries, synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded } from "@/lib/embedded-grader";
 import { gradeAction } from "./grading";
 import {
@@ -66,6 +73,25 @@ function zipFile(sizeBytes: number, name = "submissions.zip"): File {
   // keeps the fixture cheap regardless of the requested size.
   const buf = new Uint8Array(sizeBytes);
   return new File([buf], name, { type: "application/zip" });
+}
+
+// A single non-zip upload (docs/a39-waves.md section 7.3, W1-4): content does
+// not matter for the over-budget case, refused before any byte is read.
+function singleFile(sizeBytes: number, name = "notes.txt"): File {
+  // A plain text extension so buildSingleFileEntry only has to decode the
+  // buffer as UTF-8 (no real document/zip structure needed) - the point of
+  // this fixture is the budget boundary, not text extraction.
+  const buf = new Uint8Array(sizeBytes).fill(65);
+  return new File([buf], name, { type: "text/plain" });
+}
+
+function geminiFormData(file: File): FormData {
+  const fd = new FormData();
+  fd.set("studentSubmissions", file);
+  fd.set("provider", "gemini");
+  fd.set("rubric", "1. Correctness (10 pts)");
+  fd.set("assignmentInstructions", "Write a function that adds two numbers.");
+  return fd;
 }
 
 function baseFormData(file: File): FormData {
@@ -126,5 +152,51 @@ describe("gradeAction - zip wire budget (N15-rubric-picture-scope section 4.4)",
     expect(maxOk).toBe(2752512);
     expect(checkFileWireBudget(maxOk, "The student submissions zip").ok).toBe(true);
     expect(checkFileWireBudget(maxOk + 1, "The student submissions zip").ok).toBe(false);
+  });
+});
+
+// A39 wave 1 (docs/a39-waves.md section 7.3, W1-4): the wire budget must
+// apply to a single non-zip upload exactly as it does to a zip - "one
+// submission needs no zip" must not also mean "one submission needs no
+// budget". Pass condition: a single upload over budget is refused before
+// gradeEntries is ever called, with a refusal that names the thing being
+// refused as the submission FILE, not "the student submissions zip".
+describe("gradeAction - single-file (non-zip) upload wire budget (A39 wave 1, W1-4)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
+    vi.mocked(gradeEntries).mockResolvedValue({
+      results: [{ student: "essay", totalScore: "8/10", rubricAreas: [] }],
+      rubricAreaNames: [],
+      fullCreditChecklist: [],
+    } as never);
+    vi.mocked(synthesizeFullCreditChecklist).mockResolvedValue([] as never);
+    vi.mocked(generateSampleAnswer).mockResolvedValue("" as never);
+  });
+
+  it("refuses a single non-zip upload over the wire budget, naming the submission file (not the zip), before touching the grading engine", async () => {
+    const oversized = maxFileBytesForWireBudget(UPLOAD_WIRE_BUDGET_BYTES) + 1;
+    const formData = geminiFormData(singleFile(oversized));
+
+    const result = await gradeAction({ run: null, error: null }, formData);
+
+    expect(result.run).toBeNull();
+    expect(result.error).toEqual(expect.stringContaining("too large to upload"));
+    expect(result.error).toEqual(expect.stringContaining("That submission file"));
+    expect(result.error).not.toEqual(expect.stringContaining("student submissions zip"));
+    expect(gradeEntries).not.toHaveBeenCalled();
+  });
+
+  it("still grades a single non-zip upload under the wire budget, through gradeEntries rather than gradeSubmissions", async () => {
+    const underBudget = maxFileBytesForWireBudget(UPLOAD_WIRE_BUDGET_BYTES) - 1;
+    const formData = geminiFormData(singleFile(underBudget));
+
+    const result = await gradeAction({ run: null, error: null }, formData);
+
+    expect(result.error).toBeNull();
+    expect(result.run).not.toBeNull();
+    expect(gradeEntries).toHaveBeenCalledTimes(1);
+    const [entries] = vi.mocked(gradeEntries).mock.calls[0];
+    expect(entries).toHaveLength(1);
   });
 });

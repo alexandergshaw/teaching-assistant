@@ -17,6 +17,7 @@ import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
 import { gradingApiToRun } from "./grading-run-mapping";
 import { checkFileWireBudget } from "@/lib/upload-budget";
+import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import {
   parseCourseIdFromCanvasUrl,
   parseSingleAssignmentId,
@@ -822,15 +823,23 @@ export async function gradeAction(
       return { run: null, error: "Please upload a student submissions zip file." };
     }
 
+    // A39 wave 1: a non-zip upload (single-file-entry.ts) grades directly
+    // below instead of requiring an archive - classified by extension only,
+    // never by sniffing the bytes.
+    const uploadKind = classifyGradingUpload(file.name);
+
     // This form's body shares the platform's request-body cap with every other
     // field on it (see src/lib/upload-budget.ts's header comment), and nothing
     // upstream of this action enforces that cap - a request over the platform
     // limit is rejected before this function ever runs, so this check exists
-    // only to give an over-budget zip a named refusal on the request sizes
+    // only to give an over-budget upload a named refusal on the request sizes
     // that DO reach here rather than an opaque failure once they don't.
-    const zipBudgetCheck = checkFileWireBudget(file.size, "The student submissions zip");
+    const zipBudgetCheck = checkFileWireBudget(
+      file.size,
+      uploadKind === "single" ? "That submission file" : "The student submissions zip"
+    );
     if (!zipBudgetCheck.ok) {
-      return { run: null, error: zipBudgetCheck.error ?? "That zip file is too large to upload." };
+      return { run: null, error: zipBudgetCheck.error ?? "That file is too large to upload." };
     }
 
     // Deterministic Grading API path (provider toggle = "other").
@@ -877,6 +886,21 @@ export async function gradeAction(
       ? rubric
       : await generateRubric(assignmentInstructions, provider);
     const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
+
+    // A39 wave 1: a single non-zip upload grades via gradeEntries (the same
+    // per-entry path gradeOneSubmissionAction uses) instead of gradeSubmissions.
+    if (uploadKind === "single") {
+      const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()));
+      if (!entry) {
+        return { run: null, error: "Could not read that submission file. Upload a zip archive instead." };
+      }
+      const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
+        gradeEntries([entry], assignmentInstructions, effectiveRubric, provider, null, gradingRunOptions),
+        synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
+        generateSampleAnswer(assignmentInstructions, effectiveRubric, provider),
+      ]);
+      return { run: { ...run, fullCreditChecklist, sampleAnswer }, error: null, generatedRubric };
+    }
 
     const zipBuffer = await file.arrayBuffer();
     const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([

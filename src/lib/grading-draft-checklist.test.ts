@@ -37,6 +37,29 @@ function makeEntry(overrides: Partial<GradingRunEntry> = {}): GradingRunEntry {
   };
 }
 
+function makeNotAttemptedResult(student: string, sourceIndex: number) {
+  const message = "Not graded: this run reached its submission limit before this submission.";
+  return {
+    student,
+    overallComment: message,
+    strengths: message,
+    improvements: "",
+    resubmitNotice: "",
+    rubricAreas: [],
+    totalScore: "",
+    feedback: message,
+    mergedFileCount: 0,
+    submittedFiles: [],
+    ungraded: {
+      kind: "not-attempted" as const,
+      stoppedBy: "submission-count-bound" as const,
+      sourceIndex,
+      student,
+      message,
+    },
+  };
+}
+
 describe("buildAssignmentChecklistSections", () => {
   it("returns exactly one section per assignment even when several students share it", () => {
     const payload: GradingDraftPayload = {
@@ -106,6 +129,29 @@ describe("buildAssignmentChecklistSections", () => {
     expect(sections[1].runIndex).toBe(1);
     expect(sections[0].assignmentName).toBe("Homework 1");
     expect(sections[1].assignmentName).toBe("Homework 2");
+  });
+
+  // A35: studentCount must count graded students, not run.results.length -
+  // that array now includes never-attempted rows a bound or a deadline
+  // dropped (the post-N13a invariant), so counting the array overstates how
+  // many students the draft actually holds a grade for.
+  it("excludes never-attempted rows from studentCount", () => {
+    const payload: GradingDraftPayload = {
+      runs: [
+        makeEntry({
+          run: {
+            results: [makeResult("Alice"), makeNotAttemptedResult("Bob", 1)],
+            rubricAreaNames: ["Correctness"],
+            fullCreditChecklist: [],
+          },
+        }),
+      ],
+    };
+
+    const [section] = buildAssignmentChecklistSections(payload);
+    // RED today: this reads 2 - results.length, including Bob's
+    // never-attempted row. It must report 1, the graded count.
+    expect(section.studentCount).toBe(1);
   });
 
   it("carries the sample answer through when present", () => {

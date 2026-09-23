@@ -13,6 +13,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import type { GradingRunEntry } from "@/lib/grade";
+import { gradedResults, ungradedResults } from "@/lib/grade/types";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import {
   buildGradingReviewRows,
@@ -503,8 +504,15 @@ export const gradingRunSteps: StepDefinition[] = [
             pointsPossible: row.pointsPossible,
           });
 
+          // A35: never gradeResult.run.results.length - that array also
+          // carries never-attempted rows a bound or a deadline dropped, which
+          // this line must not claim as graded.
+          const gradedSubmissionCount = gradedResults(gradeResult.run.results).length;
+          const notGradedSubmissionCount = ungradedResults(gradeResult.run.results).length;
           lines.push(
-            `${row.courseName} - ${row.assignmentName}: graded ${gradeResult.run.results.length} submission(s)`
+            `${row.courseName} - ${row.assignmentName}: graded ${gradedSubmissionCount} submission(s)${
+              notGradedSubmissionCount > 0 ? `, ${notGradedSubmissionCount} not graded` : ""
+            }`
           );
         } catch (err) {
           lines.push(
@@ -550,8 +558,15 @@ export const gradingRunSteps: StepDefinition[] = [
                 run: gradeResult.run,
                 offline: true,
               });
+              // A35: never gradeResult.run.results.length - that array also
+              // carries never-attempted rows a bound or a deadline dropped,
+              // which this line must not claim as graded.
+              const gradedSubmissionCount = gradedResults(gradeResult.run.results).length;
+              const notGradedSubmissionCount = ungradedResults(gradeResult.run.results).length;
               lines.push(
-                `${offlineRow.courseName}: graded ${gradeResult.run.results.length} submission(s)`
+                `${offlineRow.courseName}: graded ${gradedSubmissionCount} submission(s)${
+                  notGradedSubmissionCount > 0 ? `, ${notGradedSubmissionCount} not graded` : ""
+                }`
               );
             }
 

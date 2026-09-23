@@ -17,6 +17,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
+import { gradedResults, ungradedResults } from "@/lib/grade/types";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import {
   buildGradingReviewRows,
@@ -289,8 +290,15 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
             pointsPossible: row.pointsPossible,
           });
 
+          // A35: never gradeResult.run.results.length - that array also
+          // carries never-attempted rows a bound or a deadline dropped, which
+          // this line must not claim as graded.
+          const gradedCount = gradedResults(gradeResult.run.results).length;
+          const notGradedCount = ungradedResults(gradeResult.run.results).length;
           lines.push(
-            `${row.courseName} - ${row.assignmentName}: graded ${gradeResult.run.results.length} submission(s)`
+            `${row.courseName} - ${row.assignmentName}: graded ${gradedCount} submission(s)${
+              notGradedCount > 0 ? `, ${notGradedCount} not graded` : ""
+            }`
           );
         } catch (err) {
           lines.push(

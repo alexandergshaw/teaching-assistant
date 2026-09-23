@@ -12,7 +12,7 @@ import {
   buildMoodleGradebookCsv,
 } from "@/lib/gradebook-csv";
 import type { GradingRunEntry } from "@/lib/grade";
-import { isUngraded } from "@/lib/grade/types";
+import { isUngraded, gradedResults, ungradedResults } from "@/lib/grade/types";
 import {
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
@@ -223,7 +223,16 @@ export const gradingCartridgeSteps: StepDefinition[] = [
           };
           runs.push(entry);
           gradedCount++;
-          lines.push(`${drop.name}: graded (${gradeResult.run.results.length} students)`);
+          // A35: never gradeResult.run.results.length - that array also
+          // carries never-attempted rows a bound or a deadline dropped, which
+          // this line must not claim as graded.
+          const gradedStudentCount = gradedResults(gradeResult.run.results).length;
+          const notGradedCount = ungradedResults(gradeResult.run.results).length;
+          lines.push(
+            `${drop.name}: graded (${gradedStudentCount} students${
+              notGradedCount > 0 ? `, ${notGradedCount} not graded` : ""
+            })`
+          );
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : "Unknown error";
           lines.push(`${drop.name}: ${errorMsg}`);

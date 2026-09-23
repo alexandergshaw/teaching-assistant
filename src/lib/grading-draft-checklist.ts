@@ -1,5 +1,6 @@
 import type { GradingDraftPayload } from "./grading-drafts";
 import type { GradingRunEntry } from "./grade";
+import { gradedResults } from "./grade/types";
 
 // Pure helpers behind the drafted-grades page's per-assignment full-credit
 // checklist panel. Kept plain (no server actions, no DOM) so the invariants
@@ -17,8 +18,11 @@ export interface AssignmentChecklistSection {
   runIndex: number;
   courseName: string;
   assignmentName: string;
-  /** How many students share this assignment in the draft - informational
-   * only; never used to decide how many times the checklist renders. */
+  /** How many students this assignment has a GRADED row for in the draft -
+   * informational only; never used to decide how many times the checklist
+   * renders. A35: never `entry.run.results.length` - that array also carries
+   * never-attempted rows a bound or a deadline dropped, which never got the
+   * work this count is supposed to describe. */
   studentCount: number;
   checklist: string[];
   sampleAnswer?: string;
@@ -47,7 +51,7 @@ export function buildAssignmentChecklistSections(
     runIndex,
     courseName: entry.courseName,
     assignmentName: entry.assignmentName,
-    studentCount: entry.run.results.length,
+    studentCount: gradedResults(entry.run.results).length,
     checklist: entry.run.fullCreditChecklist,
     sampleAnswer: entry.run.sampleAnswer,
     needsDerivation: !hasRenderableChecklist(entry.run.fullCreditChecklist),

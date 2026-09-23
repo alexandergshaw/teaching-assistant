@@ -171,6 +171,30 @@ export interface GradingFailedOutcome {
 
 export type UngradedOutcome = NotAttemptedOutcome | GradingFailedOutcome;
 
+/**
+ * A31 (docs/a31-scope.md): the copy has ONE author, this module, and THREE
+ * consumers - the engine (which emits the run-deadline member verbatim and
+ * appends a count sentence to the submission-count-bound member, since the
+ * engine alone holds the number that run used), the grading-results leaf
+ * (ungradedDisclosure.ts, which re-exports this record under its existing
+ * name, UNGRADED_DISCLOSURE_COPY), and DraftedGradesTab.tsx (which reads it
+ * directly, by value, to correct an already-persisted row's DISPLAY at
+ * render, without rewriting anything stored). No import is added to this
+ * file to hold these two literals, so every consumer already permitted to
+ * import types.ts may still import it.
+ *
+ * Both sentences assert only what the code guarantees at the moment the row
+ * is built - docs/a31-scope.md section 5.1 records why an actionable-sounding
+ * replacement is false on at least one caller or one reachable state (the
+ * submission bound is read from the environment per run, and the deadline
+ * stop is wall-clock), and why nothing more can safely be said once that
+ * option is removed.
+ */
+export const UNGRADED_NOT_ATTEMPTED_MESSAGES: Record<NotAttemptedOutcome["stoppedBy"], string> = {
+  "submission-count-bound": "Not graded: this run reached its submission limit before this submission.",
+  "run-deadline": "Not graded: this run's time budget ran out before this submission was started.",
+};
+
 /** The one place any consumer asks the question. Never `!r.totalScore`,
  *  never a prefix test on prose. */
 export function isUngraded(result: GradeResult): result is UngradedResult {

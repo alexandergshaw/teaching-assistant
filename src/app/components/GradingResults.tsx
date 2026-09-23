@@ -57,10 +57,12 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // server-only barrel.
 import { checkRowPostability } from "../../lib/grade/postable";
 // A12/A13 (docs/a12-a13-scope.md): classifyRow gives a count-bound/deadline-
-// stopped or rescued row a distinct, correct disclosure instead of the
-// engine's own "Re-run to grade the rest" sentence landing verbatim in the
-// What Went Well box; correctUngradedSeeds is the wiring that reaches the
-// live `edits` map at both places it is (re)seeded from a run, below.
+// stopped or rescued row a distinct, correct disclosure. A31 (docs/a31-
+// scope.md) removed the engine's own retired "Re-run to grade the rest"
+// sentence, so this comment no longer describes a sentence any current run
+// can emit; correctUngradedSeeds is the wiring that reaches the live
+// `edits` map at both places it is (re)seeded from a run, below - now
+// correcting any of the retired strings a persisted edit may still carry.
 import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grading-results/ungradedDisclosure";
 // RES-5 (docs/a12-a13-scope.md, Ruling U1): the `data-ungraded-state`
 // attribute above is machine-readable only. This gives a non-postable row a

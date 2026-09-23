@@ -9,6 +9,7 @@ import { runSubmittedCode, type CodeRunResult } from "../code-runner";
 import {
   RESUBMIT_NOTICE,
   GRADING_FAILURE_PREFIX,
+  UNGRADED_NOT_ATTEMPTED_MESSAGES,
   composeOverallComment,
   type GradeResult,
   type GradedResult,
@@ -304,7 +305,7 @@ async function gradeStudentEntries(
         sourceIndex: i,
         student: entry.student,
         canvasUserId: entry.userId,
-        message: "Not graded: the grading run's time budget ran out before this submission could be started. Re-run to grade it.",
+        message: UNGRADED_NOT_ATTEMPTED_MESSAGES["run-deadline"],
       })
     );
   }
@@ -317,7 +318,13 @@ async function gradeStudentEntries(
         sourceIndex: i,
         student: entry.student,
         canvasUserId: entry.userId,
-        message: `Not graded: this run is limited to ${maxSubmissions} submissions. Re-run to grade the rest.`,
+        // A31-R2: the engine, and only the engine, appends this sentence,
+        // because it is the only layer that holds the number (docs/a31-
+        // scope.md 5.2) - a past-tense statement about the run that
+        // happened, reading the same value the run used, appended rather
+        // than interpolated so the shared sentence stays a literal a human
+        // reviews once.
+        message: `${UNGRADED_NOT_ATTEMPTED_MESSAGES["submission-count-bound"]} This run's limit was ${maxSubmissions} submissions.`,
       })
     );
   }

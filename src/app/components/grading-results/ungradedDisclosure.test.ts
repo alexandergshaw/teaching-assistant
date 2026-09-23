@@ -86,13 +86,18 @@ function makeUngradedRow(outcome: NotAttemptedOutcome | GradingFailedOutcome): G
   } as GradeRow;
 }
 
+// A31 (docs/a31-scope.md 5.2/8.2 A31-R2): the engine emits the shared
+// UNGRADED_NOT_ATTEMPTED_MESSAGES sentence verbatim on the run-deadline tail,
+// and appends the count sentence (the only layer that holds the number) on
+// the submission-count-bound tail. Transcribed from engine.ts's tails, not
+// invented.
 const countBoundOutcome: NotAttemptedOutcome = {
   kind: "not-attempted",
   stoppedBy: "submission-count-bound",
   sourceIndex: 5,
   student: "Grace Hopper",
   canvasUserId: 101,
-  message: "Not graded: this run is limited to 40 submissions. Re-run to grade the rest.",
+  message: "Not graded: this run reached its submission limit before this submission. This run's limit was 40 submissions.",
 };
 
 const deadlineOutcome: NotAttemptedOutcome = {
@@ -101,8 +106,7 @@ const deadlineOutcome: NotAttemptedOutcome = {
   sourceIndex: 6,
   student: "Alan Turing",
   canvasUserId: 102,
-  message:
-    "Not graded: the grading run's time budget ran out before this submission could be started. Re-run to grade it.",
+  message: "Not graded: this run's time budget ran out before this submission was started.",
 };
 
 const gradingFailedOutcome: GradingFailedOutcome = {
@@ -198,14 +202,21 @@ describe("classifyRow - AC-2: a rescued ungraded row", () => {
 
 // ── AC-3a: no "Re-run" substring in the frozen copy ─────────────────────────
 
-describe("UNGRADED_DISCLOSURE_COPY - AC-3a", () => {
-  it("no member contains the substring Re-run", () => {
+// A31 P2 (docs/a31-scope.md, Ruling 4): asserts over the VALUES of the
+// exported record, never a grep of a file - after A31-R3 ungradedDisclosure.ts
+// only re-exports this record, and A31-R4 fills that same file with the
+// retired strings a correction path must still recognise, so a text grep of
+// the file would print lines on correct code forever.
+describe("UNGRADED_DISCLOSURE_COPY - AC-3a/A31 P2", () => {
+  it("no member contains Re-run, queue, or Retry", () => {
     for (const value of Object.values(UNGRADED_DISCLOSURE_COPY)) {
       expect(value.includes("Re-run")).toBe(false);
+      expect(value.includes("queue")).toBe(false);
+      expect(value.includes("Retry")).toBe(false);
     }
   });
 
-  it("S4's control: a copy containing the banned substring would fail this assertion", () => {
+  it("S4's control: a copy containing a banned substring would fail this assertion", () => {
     const sabotaged = `${UNGRADED_DISCLOSURE_COPY["submission-count-bound"]} Re-run to grade the rest.`;
     expect(sabotaged.includes("Re-run")).toBe(true);
   });
@@ -218,13 +229,16 @@ describe("classifyRow - AC-3b: the frozen set of every returned RowDisclosure st
   // the leaf's own constant here would make this assertion a tautology (a
   // sabotaged copy would still equal "itself"), exactly the failure mode
   // AC-3a's S4 sabotage exposed against an earlier draft of this test.
+  // A31-R5 (Ruling 5): re-transcribed by hand after the engine's wording
+  // changed - the cheap repair (importing UNGRADED_DISCLOSURE_COPY here)
+  // is the tautology this test's own comment above already forbids.
   const FROZEN_LITERALS = [
     "",
     REFUSED_REASON,
     "The tool did not grade this submission, but a score has been entered for it by hand. This row cannot be posted from this table with the others - review and post it separately.",
     gradingFailedOutcome.message,
-    "Not graded: this run stopped before reaching this submission because of the run's submission limit. Grading again without changing the queue will grade the same students again, not this one - remove the students who already have a grade from the queue first.",
-    "Not graded: this run's time budget ran out before this submission could be started. Grading again without changing the queue will start from the same point again, not this one - remove the students who already have a grade from the queue first.",
+    "Not graded: this run reached its submission limit before this submission.",
+    "Not graded: this run's time budget ran out before this submission was started.",
   ];
 
   it("collects exactly this set across the enumerated product of inputs, both directions", () => {
@@ -358,6 +372,53 @@ describe("correctUngradedFeedbackSeed - AC-6", () => {
     const row = makeGradedRow();
     const edit = makeEdit({ total: "8/10", overall: row.overallComment, strengths: row.strengths });
     expect(correctUngradedFeedbackSeed(row, edit)).toBe(edit);
+  });
+});
+
+// ── A31-R4/P4: a persisted edit written before this change is still
+// corrected ──────────────────────────────────────────────────────────────
+// Four strings this app has emitted for a not-attempted row before this
+// change, hand-transcribed (not imported from the source's own retired
+// list) so this test cannot be satisfied by a sabotaged or absent list.
+describe("correctUngradedFeedbackSeed - A31-R4/P4: retired strings still correct", () => {
+  const RETIRED_MESSAGES = {
+    "submission-count-bound-v1":
+      "Not graded: this run is limited to 40 submissions. Re-run to grade the rest.",
+    "run-deadline-v1":
+      "Not graded: the grading run's time budget ran out before this submission could be started. Re-run to grade it.",
+    "submission-count-bound-v2":
+      "Not graded: this run stopped before reaching this submission because of the run's submission limit. Grading again without changing the queue will grade the same students again, not this one - remove the students who already have a grade from the queue first.",
+    "run-deadline-v2":
+      "Not graded: this run's time budget ran out before this submission could be started. Grading again without changing the queue will start from the same point again, not this one - remove the students who already have a grade from the queue first.",
+  } as const;
+
+  it.each([
+    ["submission-count-bound-v1", countBoundOutcome, "submission-count-bound"] as const,
+    ["run-deadline-v1", deadlineOutcome, "run-deadline"] as const,
+    ["submission-count-bound-v2", countBoundOutcome, "submission-count-bound"] as const,
+    ["run-deadline-v2", deadlineOutcome, "run-deadline"] as const,
+  ])("a stored %s edit is corrected to the current member", (retiredKey, outcome, stoppedBy) => {
+    const row = makeUngradedRow(outcome);
+    const edit = makeEdit({ strengths: RETIRED_MESSAGES[retiredKey] });
+    const corrected = correctUngradedFeedbackSeed(row, edit);
+    expect(corrected.strengths).toBe(UNGRADED_DISCLOSURE_COPY[stoppedBy]);
+    expect(corrected.strengths).not.toBe(RETIRED_MESSAGES[retiredKey]);
+  });
+
+  it("a substring match: an edit containing the app's own retired phrase, but not equal to any listed literal, is still corrected", () => {
+    const row = makeUngradedRow(countBoundOutcome);
+    const edit = makeEdit({
+      strengths: "Not graded: this run is limited to 7 submissions. Re-run to grade the rest.",
+    });
+    const corrected = correctUngradedFeedbackSeed(row, edit);
+    expect(corrected.strengths).toBe(UNGRADED_DISCLOSURE_COPY["submission-count-bound"]);
+  });
+
+  it("S-substring's control: unrelated typed text is left alone", () => {
+    const row = makeUngradedRow(countBoundOutcome);
+    const edit = makeEdit({ strengths: "I reviewed this by hand and it looks fine." });
+    const corrected = correctUngradedFeedbackSeed(row, edit);
+    expect(corrected).toBe(edit);
   });
 });
 

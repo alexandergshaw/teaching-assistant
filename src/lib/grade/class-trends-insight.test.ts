@@ -5,6 +5,7 @@ import {
   buildClassTrendsInsightPrompt,
   hasSubmissionsToAnalyze,
   parseClassTrendsInsightResponse,
+  selectSubmissionsToAnalyze,
 } from "./class-trends-insight";
 import type { GradeResult, GradingRunEntry } from "./types";
 
@@ -171,6 +172,83 @@ describe("class-trends-insight: hasSubmissionsToAnalyze - an empty run produces 
     const entry: Pick<GradingRunEntry, "run"> = {
       run: {
         results: [makeResult({ student: "Priya Natarajan" })],
+        rubricAreaNames: [],
+        fullCreditChecklist: [],
+      },
+    };
+    expect(hasSubmissionsToAnalyze(entry)).toBe(true);
+  });
+});
+
+// A31-R7 (docs/a31-scope.md 8.2, Ruling 2): a run where every row is
+// not-attempted must not still call the model with N copies of a not-graded
+// notice. hasSubmissionsToAnalyze counts GRADED rows, and the route's one
+// call site is replaced by a single exported selector so the composition
+// (filter, then anonymize) is itself unit-testable without a route test.
+describe("class-trends-insight: A31-R7 - not-attempted rows are excluded from analysis", () => {
+  function makeNotAttemptedResult(student: string): GradeResult {
+    const message = "Not graded: this run reached its submission limit before this submission.";
+    return {
+      student,
+      overallComment: message,
+      strengths: message,
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: [],
+      totalScore: "",
+      feedback: message,
+      mergedFileCount: 0,
+      submittedFiles: [],
+      ungraded: {
+        kind: "not-attempted",
+        stoppedBy: "submission-count-bound",
+        sourceIndex: 0,
+        student,
+        message,
+      },
+    };
+  }
+
+  it("hasSubmissionsToAnalyze is false when every row is not-attempted", () => {
+    const entry: Pick<GradingRunEntry, "run"> = {
+      run: {
+        results: [makeNotAttemptedResult("Alice"), makeNotAttemptedResult("Bob")],
+        rubricAreaNames: [],
+        fullCreditChecklist: [],
+      },
+    };
+    expect(hasSubmissionsToAnalyze(entry)).toBe(false);
+  });
+
+  it("selectSubmissionsToAnalyze returns an empty array when every row is not-attempted", () => {
+    const entry: Pick<GradingRunEntry, "run"> = {
+      run: {
+        results: [makeNotAttemptedResult("Alice"), makeNotAttemptedResult("Bob")],
+        rubricAreaNames: [],
+        fullCreditChecklist: [],
+      },
+    };
+    expect(selectSubmissionsToAnalyze(entry)).toEqual([]);
+  });
+
+  it("selectSubmissionsToAnalyze keeps only graded rows, renumbering slots from the kept set", () => {
+    const graded = makeResult({ student: "Priya Natarajan" });
+    const entry: Pick<GradingRunEntry, "run"> = {
+      run: {
+        results: [makeNotAttemptedResult("Alice"), graded],
+        rubricAreaNames: [],
+        fullCreditChecklist: [],
+      },
+    };
+    const selected = selectSubmissionsToAnalyze(entry);
+    expect(selected).toHaveLength(1);
+    expect(selected[0].slot).toBe(1);
+  });
+
+  it("hasSubmissionsToAnalyze is true when at least one row is graded, even alongside not-attempted rows", () => {
+    const entry: Pick<GradingRunEntry, "run"> = {
+      run: {
+        results: [makeNotAttemptedResult("Alice"), makeResult({ student: "Priya Natarajan" })],
         rubricAreaNames: [],
         fullCreditChecklist: [],
       },

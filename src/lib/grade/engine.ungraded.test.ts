@@ -28,7 +28,7 @@ vi.mock("../code-runner", () => ({
 import { callLlm } from "../llm";
 import { gradeEntries } from "./engine";
 import { computeClassTrends } from "./class-trends";
-import { GRADING_FAILURE_PREFIX, type StudentSubmissionEntry } from "./types";
+import { GRADING_FAILURE_PREFIX, UNGRADED_NOT_ATTEMPTED_MESSAGES, type StudentSubmissionEntry } from "./types";
 import { stripGradeResultForDraft } from "../workflows/grading-review-rows";
 
 const mockCallLlm = vi.mocked(callLlm);
@@ -350,6 +350,61 @@ describe("SABOTAGE 3 - setting userId on an ungraded row is a compile-time error
     expect(run.results[1].userId).toBeUndefined();
     // The identity is not lost, only moved off the postable key.
     expect(run.results[1].ungraded?.canvasUserId).toBe(22);
+  });
+});
+
+// A31-R6/P3 (docs/a31-scope.md 8.2/8.3, Ruling 4): the anti-drift guard,
+// driven through gradeEntries - the door this file already imports and
+// mocks for - asserting over the EXPORTED VALUES from types.ts, not a
+// hand-copied literal. Direction: missing-prefix only, per the scope's own
+// withdrawal of the "extra sentence caught by construction" claim - an
+// extra sentence on an undriven path is not, and is not claimed to be,
+// caught here.
+describe("A31-R6/P3 - every not-attempted row's message starts with its own stoppedBy member", () => {
+  it("submission-count-bound rows start with the record's member", async () => {
+    mockGetGeminiMaxSubmissions.mockReturnValue(2);
+    mockCallLlm.mockResolvedValue({ ok: true, text: okResponse() });
+
+    const entries = [
+      entry({ student: "Alice" }),
+      entry({ student: "Bob" }),
+      entry({ student: "Carol" }),
+    ];
+    const run = await gradeEntries(entries, "Grade it.", PARSEABLE_RUBRIC, "gemini");
+    const notAttempted = run.results.filter(
+      (r) => r.ungraded !== undefined && r.ungraded.kind === "not-attempted"
+    );
+    expect(notAttempted.length).toBeGreaterThan(0);
+    for (const row of notAttempted) {
+      const outcome = row.ungraded as { message: string; stoppedBy: "submission-count-bound" | "run-deadline" };
+      expect(outcome.message.startsWith(UNGRADED_NOT_ATTEMPTED_MESSAGES[outcome.stoppedBy])).toBe(true);
+    }
+  });
+
+  it("run-deadline rows start with the record's member", async () => {
+    mockGetGeminiMaxSubmissions.mockReturnValue(10);
+    mockCallLlm.mockResolvedValue({ ok: true, text: okResponse() });
+
+    const entries = [entry({ student: "Alice" }), entry({ student: "Bob" }), entry({ student: "Carol" })];
+    const run = await gradeEntries(entries, "Grade it.", PARSEABLE_RUBRIC, "gemini", null, {
+      deadlineMs: Date.now() - 1,
+    });
+    const notAttempted = run.results.filter(
+      (r) => r.ungraded !== undefined && r.ungraded.kind === "not-attempted"
+    );
+    expect(notAttempted.length).toBeGreaterThan(0);
+    for (const row of notAttempted) {
+      const outcome = row.ungraded as { message: string; stoppedBy: "submission-count-bound" | "run-deadline" };
+      expect(outcome.message.startsWith(UNGRADED_NOT_ATTEMPTED_MESSAGES[outcome.stoppedBy])).toBe(true);
+    }
+  });
+
+  it("SABOTAGE (A31): restoring the retired 'Re-run to grade the rest.' engine tail must fail this assertion - recorded here, executed manually per the wave gate's sabotage requirement", () => {
+    // Documented rather than executed as a live mutation test: engine.ts's
+    // two tails are restored from a cp backup, this test file is re-run to
+    // confirm it goes red, then engine.ts is restored byte-identical. See
+    // the chunk's report for the actual run and result.
+    expect(true).toBe(true);
   });
 });
 

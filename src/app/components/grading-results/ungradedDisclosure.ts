@@ -21,7 +21,7 @@
 // "grading-results client files stay client-bundle-safe") bans the alias
 // prefix outright, even for a safe submodule, and postable.ts's own header
 // says it imports nothing outside its own directory's types.
-import { isUngraded, type NotAttemptedOutcome } from "@/lib/grade/types";
+import { isUngraded, UNGRADED_NOT_ATTEMPTED_MESSAGES, type NotAttemptedOutcome } from "@/lib/grade/types";
 import { checkRowPostability } from "../../../lib/grade/postable";
 import {
   applyFeedbackFieldEdit,
@@ -33,21 +33,31 @@ import {
 
 type StoppedBy = NotAttemptedOutcome["stoppedBy"];
 
-// AC-3a: no member may contain the substring "Re-run" - re-derived from
-// `grep -n "Re-run" src/lib/grade/engine.ts` (":307" and ":320", both
-// banned) rather than one quoted phrase, so a future engine sentence
-// containing "Re-run" anywhere still trips this set. AC-3c ties
-// correctUngradedFeedbackSeed's replacement text to these SAME two members
-// by construction, not by a second, independently authored copy. Neither
-// literal states the run's specific count or deadline (N7: no typed channel
-// carries one into classifyRow's signature, and a per-run number would
-// defeat the frozen-literal shape a human can review once).
-export const UNGRADED_DISCLOSURE_COPY: Record<StoppedBy, string> = {
-  "submission-count-bound":
-    "Not graded: this run stopped before reaching this submission because of the run's submission limit. Grading again without changing the queue will grade the same students again, not this one - remove the students who already have a grade from the queue first.",
-  "run-deadline":
-    "Not graded: this run's time budget ran out before this submission could be started. Grading again without changing the queue will start from the same point again, not this one - remove the students who already have a grade from the queue first.",
-};
+// A31-R1/R3 (docs/a31-scope.md 8.1/8.2): the copy has one author now,
+// src/lib/grade/types.ts, and this binding is a re-export under this leaf's
+// existing name so its own consumers (below, ungradedRowLabel.ts, the tests)
+// do not move. The previous "remove the students who already have a grade
+// from the queue first" clause is DELETED - SIBLING 1 measured it false on
+// two of the three grading surfaces (no queue exists on the zip or Canvas
+// path). Neither member states the run's specific count or deadline (N7: no
+// typed channel carries one into classifyRow's signature, and a per-run
+// number would defeat the frozen-literal shape a human can review once) -
+// the engine alone appends the count, to its own copy of this same member.
+export const UNGRADED_DISCLOSURE_COPY: Record<StoppedBy, string> = UNGRADED_NOT_ATTEMPTED_MESSAGES;
+
+// A31-R4 (docs/a31-scope.md 8.2): four strings this app has emitted for a
+// not-attempted row before this change, transcribed verbatim. Correcting the
+// engine's wording strands any of these permanently in a persisted or
+// freshly-seeded edit otherwise - localStorage key
+// ta-grading-results-edits:${canvasUrl} is SHARED between the zip and GitHub
+// surfaces (both pass an empty canvasUrl), so a stale seed written by either
+// one crosses to the other, keyed by bare student name.
+const RETIRED_NOT_ATTEMPTED_MESSAGES: readonly string[] = [
+  "Not graded: this run is limited to 40 submissions. Re-run to grade the rest.",
+  "Not graded: the grading run's time budget ran out before this submission could be started. Re-run to grade it.",
+  "Not graded: this run stopped before reaching this submission because of the run's submission limit. Grading again without changing the queue will grade the same students again, not this one - remove the students who already have a grade from the queue first.",
+  "Not graded: this run's time budget ran out before this submission could be started. Grading again without changing the queue will start from the same point again, not this one - remove the students who already have a grade from the queue first.",
+];
 
 // AC-2: a rescued row (the tool produced no grade, but the instructor has
 // since typed a real score into the total field) is neither an ordinary
@@ -151,7 +161,16 @@ export function correctUngradedFeedbackSeed(result: GradeRow, edit: RowEdit): Ro
   const isCorrectableStrengths =
     edit.strengths === engineMessage ||
     edit.strengths === UNGRADED_DISCLOSURE_COPY["submission-count-bound"] ||
-    edit.strengths === UNGRADED_DISCLOSURE_COPY["run-deadline"];
+    edit.strengths === UNGRADED_DISCLOSURE_COPY["run-deadline"] ||
+    RETIRED_NOT_ATTEMPTED_MESSAGES.includes(edit.strengths) ||
+    // A31-R4: GRADE_MAX_SUBMISSIONS has held more than one value over this
+    // app's history, so no fixed equality list can cover every count-bound
+    // string it ever emitted. This substring can only ever have matched the
+    // app's own retired wording (A31-R2 removes every "Re-run to grade"
+    // emission going forward), so the one way it can false-positive is an
+    // instructor's own typed text containing this exact phrase - stated
+    // here as the trade, not discovered later.
+    edit.strengths.includes("Re-run to grade");
   if (!isCorrectableStrengths) return edit;
   return applyFeedbackFieldEdit(edit, "strengths", notAttemptedMessage(result.ungraded.stoppedBy));
 }

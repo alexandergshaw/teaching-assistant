@@ -4,10 +4,10 @@ import { requireUser } from "@/lib/supabase/auth";
 import { callLlm, describeLlmFailure, normalizeProvider } from "@/lib/llm";
 import { withDeadline } from "@/lib/course-intel/fetch";
 import {
-  anonymizeGradeResults,
   buildClassTrendsInsightPrompt,
   hasSubmissionsToAnalyze,
   parseClassTrendsInsightResponse,
+  selectSubmissionsToAnalyze,
   type ClassTrendsInsightObservation,
 } from "@/lib/grade/class-trends-insight";
 import type { GradingRunEntry } from "@/lib/grade/types";
@@ -120,12 +120,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Requirement 1: anonymized BEFORE the prompt is built. This route never
-  // reads GradeResult.student itself - anonymizeGradeResults is the only
-  // function that touches it, and its return type carries no field capable
-  // of holding a name.
+  // reads GradeResult.student itself - anonymizeGradeResults (composed inside
+  // selectSubmissionsToAnalyze) is the only function that touches it, and its
+  // return type carries no field capable of holding a name.
+  //
+  // A31-R7 (docs/a31-scope.md 8.2): selectSubmissionsToAnalyze, not
+  // anonymizeGradeResults directly - it keeps only graded rows, so a run
+  // where every row is not-attempted (checked above by hasSubmissionsToAnalyze,
+  // which counts the same graded set) never hands the model a not-graded
+  // notice as though it were a student's overall comment.
   let promptText: string;
   try {
-    const submissions = anonymizeGradeResults(entry.run.results);
+    const submissions = selectSubmissionsToAnalyze(entry);
     promptText = buildClassTrendsInsightPrompt({
       assignmentName: entry.assignmentName,
       submissions,

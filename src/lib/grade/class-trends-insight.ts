@@ -1,5 +1,5 @@
 import { containsForbiddenCompletenessPhrase } from "./class-trends";
-import type { GradeResult, GradingRunEntry } from "./types";
+import { gradedResults, type GradeResult, type GradingRunEntry } from "./types";
 
 /**
  * Layer B of backlog N9/N10 (see the architect pass, revision 1, plus
@@ -157,11 +157,30 @@ export function buildClassTrendsInsightPrompt(input: ClassTrendsInsightPromptInp
   ].join("\n");
 }
 
-/** True when there is nothing worth sending to the model at all - an empty
- * run produces no call (see the test list), and the route checks this before
- * spending any of its work budget. */
+/** True when there is nothing worth sending to the model at all. A31-R7
+ * (docs/a31-scope.md 8.2, Ruling 2): counts GRADED rows, not rows - a run
+ * where every row is not-attempted has nothing for a model to read a
+ * concept-level pattern out of, and previously still called the model N
+ * times, each time handing it a not-graded notice as though it were a
+ * student's overall comment. The route checks this before spending any of
+ * its work budget. */
 export function hasSubmissionsToAnalyze(entry: Pick<GradingRunEntry, "run">): boolean {
-  return entry.run.results.length > 0;
+  return gradedResults(entry.run.results).length > 0;
+}
+
+/**
+ * A31-R7: the one place the "graded rows only" filter and the anonymiser are
+ * composed, so the rule is unit-testable without a route test (this repo has
+ * none for this route - see this module's own header). The route calls this
+ * instead of anonymizeGradeResults directly; anonymizeGradeResults itself is
+ * left unchanged so its existing three-slot contract
+ * (class-trends-insight.test.ts) and its "only function that touches
+ * .student" doc stay true. Renumbering slots from the kept set is safe:
+ * slots are prompt-internal labels only (see renderSubmission below), and
+ * parseClassTrendsInsightResponse never maps a slot back to a row.
+ */
+export function selectSubmissionsToAnalyze(entry: Pick<GradingRunEntry, "run">): AnonymizedSubmission[] {
+  return anonymizeGradeResults(gradedResults(entry.run.results));
 }
 
 // ---------------------------------------------------------------------------

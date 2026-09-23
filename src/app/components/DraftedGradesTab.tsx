@@ -6,6 +6,14 @@ import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingGradingDrafts, deleteGradingDraft, type GradingDraft, type GradingDraftPayload } from "@/lib/grading-drafts";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
+// A31-R8 (docs/a31-scope.md 8.2, Ruling 3): the second editable comment
+// field's render path. Value-imported from @/lib/grade/types, never the
+// @/lib/grade barrel (this file's own comment below on
+// repoGradeScoreDisplay explains the barrel's client-bundle risk) - and this
+// keeps DraftedGradesTab outside grading-results/'s CLIENT_FILES consumer
+// set entirely (gradingResultsHelpersWiring.test.ts), so no guard file
+// changes for this correction.
+import { isUngraded, UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import { updateGradingDraftPayloadAction, postGradingDraftAction, pullSubmissionAction } from "../actions";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
@@ -58,6 +66,26 @@ type CommentEditState = {
 } | null;
 
 const COLLAPSED_DRAFTS_KEY = "ta-drafts-collapsed";
+
+// A31-R8 (docs/a31-scope.md 8.2, Ruling 3): a not-attempted row's overall
+// comment is corrected at RENDER, from the row's own `stoppedBy`
+// discriminator - never by rewriting a stored draft's `overallComment`.
+// Correcting from the discriminator (rather than comparing the stored text
+// against a list of retired strings, as ungradedDisclosure.ts's
+// correctUngradedFeedbackSeed does for the review table's edit state) is
+// what lets this same function correct a draft persisted before this change:
+// `r.ungraded.stoppedBy` was set by the engine at grading time and never
+// changes, even though the message text it used to carry has. Explicitly
+// NOT IN REMIT: migrating the `overallComment` already stored in a
+// `grading_drafts` row - that would rewrite text an instructor may have
+// edited by hand, a bigger and more dangerous change than this row is
+// chartered for.
+function displayOverallComment(result: GradeResult): string {
+  if (isUngraded(result) && result.ungraded.kind === "not-attempted") {
+    return UNGRADED_NOT_ATTEMPTED_MESSAGES[result.ungraded.stoppedBy];
+  }
+  return result.overallComment;
+}
 
 export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
@@ -188,7 +216,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       entry.run.results.forEach((r, resultIdx) => {
         seed[`${draft.id}:${runIdx}:${resultIdx}`] = {
           totalScore: r.totalScore,
-          overallComment: r.overallComment,
+          overallComment: displayOverallComment(r),
         };
       });
     });
@@ -645,7 +673,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                               size="small"
                                               value={edits[expandKey]?.totalScore ?? result.totalScore}
                                               onChange={(e) =>
-                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), totalScore: e.target.value } }))
+                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: displayOverallComment(result) }), totalScore: e.target.value } }))
                                               }
                                               sx={{ width: 74 }}
                                               slotProps={{
@@ -666,15 +694,15 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                             <TextField
                                               size="small"
                                               fullWidth
-                                              value={edits[expandKey]?.overallComment ?? result.overallComment}
+                                              value={edits[expandKey]?.overallComment ?? displayOverallComment(result)}
                                               onChange={(e) =>
-                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), overallComment: e.target.value } }))
+                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: displayOverallComment(result) }), overallComment: e.target.value } }))
                                               }
                                               slotProps={{ htmlInput: { style: { padding: "var(--space-1) var(--space-1)" } } }}
                                             />
                                           ) : (
-                                            <span className={local.comment} title={result.overallComment}>
-                                              {result.overallComment || ""}
+                                            <span className={local.comment} title={displayOverallComment(result)}>
+                                              {displayOverallComment(result) || ""}
                                             </span>
                                           )}
                                         </td>

@@ -1,11 +1,28 @@
-# A39: the wave plan
+# A39: the wave plan - REVISION 2, TERMINAL
 
-Consumes, in order: `docs/a39-architecture.md` **revision 2** (commit 1a9021f -
-FINAL, its activity is closed, nothing below re-argues it), `docs/a39-rulings.md`
-(6ccacf4), `docs/a39-check.md`, `docs/owner-decisions-2026-09-23.md` DECISION 3
-and DECISION 6 (7c5a75b), `docs/a24-a39-sequencing.md` RULING 32/33/34,
-`docs/g4-scope.md` Wave A (a229bf7), and the loop cards `AGENTS.md`,
-`docs/DEV_LOOP.md`, `docs/loop/this-repo.md`, `docs/loop/iteration-caps.md`,
+**This is revision 2 and there is no revision 3** (`AGENTS.md`, "Two rounds,
+then ask"). It is written under `docs/a39-waves-rulings.md` (e7cabc4), which
+ruled on `docs/a39-waves-check.md`'s round-1 findings. Everything the rulings
+recorded as HELD is carried unchanged and is NOT re-argued below: all four of
+revision 1's corrections, every gate argument being a `.test.ts` path, the
+absence of any raw multi-path `vitest`, the 26 line counts on both counters, the
+13 residuals' five fields, RES-A39A-3's honest supersession, roughly 30
+citations, and the one-commit decision for wave 4c.
+
+**One thing in this document is NOT dispatchable and says so in place: wave
+3a-i** (section 6). RULING 37 escalated its shape to the owner as a terminating
+question. Section 6 is written so that it can be executed under **any** of the
+three answers, with the branch-specific deltas isolated in 6.7 and the arithmetic
+for each consequence measured. No branch is adopted here.
+
+Consumes, in order: `docs/a39-waves-rulings.md` (e7cabc4),
+`docs/a39-waves-check.md`, `docs/a39-architecture.md` **revision 2** (commit
+1a9021f - FINAL, its activity is closed, nothing below re-argues it),
+`docs/a39-rulings.md` (6ccacf4), `docs/a39-check.md`,
+`docs/owner-decisions-2026-09-23.md` DECISION 3 and DECISION 6 (7c5a75b),
+`docs/a24-a39-sequencing.md` RULING 32/33/34, `docs/g4-scope.md` Wave A
+(a229bf7), and the loop cards `AGENTS.md`, `docs/DEV_LOOP.md`,
+`docs/loop/this-repo.md`, `docs/loop/iteration-caps.md`,
 `docs/loop/parallel-disjointness.md`.
 
 **This document's write set is exactly `docs/a39-waves.md`.** Nothing else was
@@ -353,10 +370,51 @@ awk 'NR>=345&&NR<=362' ...structure.test.ts   -> the onSubmit-anchored test, :35
 
 | Shift | Who it lands on | Delta | Who re-pins |
 |---|---|---|---|
-| Wave 3a-i shrinks `SnapshotGradingPanel.tsx` from 989 to <= 940, so every line in the extracted region and below moves by the extracted amount | 56 line-pinned citations into that file across `docs/*.md` (`grep -rnoE "SnapshotGradingPanel\.tsx:[0-9]+(-[0-9]+)?" docs --include=*.md \| wc -l` -> 56; canary `SnapshotGradingPanelZZZ\.tsx:[0-9]+` exits 1). **12 of them point at line 703 or above** (`... \| sed 's/.*://' \| sort -n \| awk '$1>=703' \| wc -l` -> 12) and are the ones a JSX-tail extraction moves | not yet known; the wave measures it | **Wave 3a-i's implementer records the delta in its own commit message and re-pins NOTHING in `docs/`.** Those are historical design documents; RULING 34 already rules the next brief is written from the post-extraction tree, never from them. What it MUST re-pin is the two in-source citations below |
+| Wave 3a-i shrinks `SnapshotGradingPanel.tsx` (target per the branch chosen in 6.7), so every line in the extracted region and below moves by the extracted amount | **64** line-pinned citations into that file across `docs/*.md`, of which **13** point at line 703 or above - see the corrected derivation under this table | not yet known; the wave measures it | **Wave 3a-i's implementer records the delta in its own commit message and re-pins NOTHING in `docs/`.** Those are historical design documents; RULING 34 already rules the next brief is written from the post-extraction tree, never from them. What it MUST re-pin is the two in-source citations below |
 | `src/app/components/snapshot-grading/snapshot-keys.ts:21` cites `SnapshotGradingPanel.tsx:73-80`; `:158` cites `SnapshotGradingPanel.tsx:550` | measured: panel `:73` is now `import panelStyles from "./SnapshotGrading.module.css";` and `:550` is `if (!items) return;` | already stale | **NOBODY, and this is a ruling.** Both comments say "moved verbatim from" / "matching ... original lookup verbatim" - they are PROVENANCE citations to a file state that no longer exists, not live pins. **No wave re-pins them to a new number**, because the line they describe is not in that file at all any more. Recorded so a later pass does not "fix" them into a false pin |
 | Wave 3a-ii shrinks `GradingRecordingPanel.tsx`, moving whatever sits below the extraction | `src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts:39` and `:258` cite `GradingRecordingPanel.tsx:532-544` as the anti-pattern shape. Opened: `awk 'NR>=530&&NR<=546' src/app/components/grading-recording/GradingRecordingPanel.tsx` is exactly the `useEffect` + async-IIFE + `cancelled` block. The citation is ACCURATE today | 0 if the extraction stays below `:544`; otherwise the extraction's own delta | **Wave 3a-ii's implementer.** It is a COMMENT, so it cannot go red - which is exactly the silent-staleness class. Wave 3a-ii either leaves `:532-544` in place (preferred) or re-pins both comments in the same commit. Pass condition **W3a-ii-3** |
-| Wave 1 edits `src/app/actions/grading.ts` around `:821-838` | 75 line-pinned citations into `GradingRecordingPanel.tsx` across `docs/*.md` are unaffected; `grading.ts` citations across `docs/*.md` are already stale per 2.1 | +20 estimated | **Wave 1's implementer** states the resulting count in its commit message. It re-pins nothing in `docs/` for the reason above |
+| Wave 1 edits `src/app/actions/grading.ts` around `:821-838` | **79** line-pinned citations into `GradingRecordingPanel.tsx` across `docs/*.md` are unaffected; `grading.ts` citations across `docs/*.md` are already stale per 2.1 | +20 estimated | **Wave 1's implementer** states the resulting count in its commit message. It re-pins nothing in `docs/` for the reason above |
+
+#### 2.3.1 The citation counts, RE-DERIVED - revision 1's `awk` idiom was a string comparison
+
+Revision 1 pasted `... | sed 's/.*://' | sort -n | awk '$1>=703' | wc -l -> 12`.
+**That command does not produce 12.** `awk` compares `$1` against the string
+`"703"` whenever `$1` is not a numeric-looking value, and a RANGE citation such
+as `73-80` is not numeric-looking, so `"73-80" > "703"` is true on the third
+character. Measured at HEAD `e7cabc4`, working tree:
+
+```
+grep -rnoE "SnapshotGradingPanel\.tsx:[0-9]+(-[0-9]+)?" docs --include=*.md | wc -l
+  -> 64
+grep -rnoE "SnapshotGradingPanelZZZ\.tsx:[0-9]+" docs --include=*.md     # canary, exit 1
+
+# revision 1's command, re-run verbatim
+grep -rhoE "SnapshotGradingPanel\.tsx:[0-9]+(-[0-9]+)?" docs --include=*.md \
+  | sed 's/.*://' | sort -n | awk '$1>=703' | wc -l
+  -> 17
+# the values it wrongly admits, pasted (sort -u):
+#   703  707-723  73-80  765-775  800-804  930  930-931  930-932  931  948  949
+#   -> "73-80" is the false admission; it occurs 4 times, hence 17 - 4 = 13
+
+# the CORRECTED command: take each range's START, then force numeric
+grep -rhoE "SnapshotGradingPanel\.tsx:[0-9]+(-[0-9]+)?" docs --include=*.md \
+  | sed 's/.*://' | sed 's/-.*//' | awk '$1+0>=703' | wc -l
+  -> 13
+
+grep -rnoE "GradingRecordingPanel\.tsx:[0-9]+(-[0-9]+)?" docs --include=*.md | wc -l
+  -> 79
+```
+
+**These three counts are a SNAPSHOT, not an invariant, and the brief says so.**
+Revision 1 measured 56 / 12 / 75 at `1a9021f`; three A39 documents have been
+written since (`docs/a39-waves.md`, `docs/a39-waves-check.md`,
+`docs/a39-waves-rulings.md`), and this revision changes the count again. The
+BINDING part is unchanged and does not depend on the number: **no wave re-pins
+any of them, and every downstream brief is written from the post-extraction
+tree** (RULING 34). The count is carried only so that RES-W-9's direction of
+failure - a brief written FROM one of those citations - stays legible. **The
+broken `awk '$1>=703'` idiom appeared twice in revision 1 and is replaced at
+both sites; it must not be copied into a wave brief.**
 
 ---
 
@@ -425,11 +483,53 @@ cat src/lib/grade.ts                                      # 19 lines, pure re-ex
 ```
 
 Wave 4b adds one export (`reconcileRun`). Additive; no existing importer
-changes. Three test files pin the string `"@/lib/grade"` as a runtime-graph
-fixture (`gradingResultsHelpersWiring.test.ts:216`,
-`repoGradesFeedbackAndFiles.wiring.test.ts:445,:453`) - fixture strings, not
-affected by a new export. `src/lib/module-graph/runtime-import-graph.test.ts`
-IS affected (a new barrel edge) and is in wave 4's set.
+changes.
+
+**CORRECTED, and it changes wave 4b's write set.** Revision 1 said "three test
+files pin the string `"@/lib/grade"` as a runtime-graph fixture" and then named
+two files, and characterised both only by their INERT fixture strings. Measured,
+those two files do something else as well, and it is not inert:
+
+```
+grep -rn 'join(SRC, "lib", "grade.ts")' src --include="*.test.ts"
+  -> src/app/components/grading-results/gradingResultsHelpersWiring.test.ts:154
+     src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts:367
+     src/lib/module-graph/runtime-import-graph.test.ts:572
+grep -rn 'join(SRC, "lib", "gradeZZZ.ts")' src --include="*.test.ts"   # canary, exit 1
+```
+
+All three WALK the real `src/lib/grade.ts` runtime import graph as a **planted
+positive**. Opened:
+
+- `gradingResultsHelpersWiring.test.ts:153-159` - "R-5: a PLANTED POSITIVE proves
+  this walk actually discriminates (the barrel this row exists to ban)":
+  `canary.violations.length` > 0, `canary.unallowed.length` > 0, and
+  `canary.violations.some((v) => v.resolved?.includes("lib/supabase/server"))`.
+- `repoGradesFeedbackAndFiles.wiring.test.ts:366-378` - the same three
+  assertions, as R-5a / R-5b / R-5c.
+- `runtime-import-graph.test.ts:571-580` - R-15, the computed path form over the
+  same grade-barrel canary walk.
+
+**The conclusion survives and only the evidence changes**: `reconcileRun` is a
+PURE leaf importing only `./types` and `./rubric`, so a re-export of it cannot
+REMOVE the barrel's reach into `lib/supabase/server`, and all three planted
+positives stay green. But the two files ARE readers of the file wave 4b edits,
+so they belong in wave 4b's write set and in its gate. Both are added in 8.4.2.
+
+The wider derivation, with its false positives discarded by opening each hit:
+
+```
+grep -rl "grade\.ts" src --include="*.test.ts" | sort
+  -> src/app/actions/snapshot-parse-rubric.test.ts                       (discarded: :10 names snapshot-grade.ts)
+     src/app/components/grading-recording/submission-kind-callsites.structure.test.ts (discarded: grading-submission-grade.ts)
+     src/app/components/grading-results/gradingResultsHelpersWiring.test.ts          (KEPT)
+     src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts        (KEPT)
+     src/app/components/snapshot-grading/p11-containment-snapshot.test.ts (discarded: snapshot-grade.ts)
+     src/app/components/snapshot-grading/snapshot-grading.structure.test.ts (discarded: snapshot-grade.ts, :377,:803-804)
+     src/lib/grade/grade-result-doors.wiring.test.ts                     (KEPT as owned read-only: :127 names "grade.ts's own barrel" in a COMMENT)
+     src/lib/module-graph/runtime-import-graph.test.ts                   (KEPT)
+grep -rl "gradeZZZ\.ts" src --include="*.test.ts"                        # canary, exit 1
+```
 
 ### 3.4 The `test:paths` wrapper, verified working before any gate below cites it
 
@@ -532,6 +632,70 @@ mechanical wave; `docs/loop/parallel-disjointness.md` section 6's last failure
 mode is parallelising because you can, and here it buys minutes and reopens a
 risk class.
 
+### 4.4 DISPOSITION of every architecture pass condition - the table revision 1 owed
+
+This plan restructured wave 3 into 3a-i / 3a-ii / 3b and wave 4 into 4a / 4b /
+4c. `docs/loop/iteration-caps.md` entry gate 3 requires a disposition table for
+exactly that, and revision 1 shipped none - which is how **W4-7**, the ONLY
+measurement behind A39's whole leverage claim, went missing without anybody
+having to decide to drop it. Derived, not recalled:
+
+```
+comm -23 <(grep -oE "\*\*W[0-9a-z-]+-[0-9]+[a-z]?" docs/a39-architecture.md | sort -u | tr -d '*') \
+         <(grep -oE "W[0-9a-z-]+-[0-9]+[a-z]?\b" docs/a39-waves.md | sort -u)
+  -> W2-6
+     W4-7
+grep -coE "\*\*W[0-9a-z-]+-[0-9]+[a-z]?" docs/a39-architecture.md    # canary: 38 bold ids, the instrument fires
+```
+
+Two were missing at revision 1. **Both are restored below.** Every one of the
+architecture's 29 ids now has a row, and the four ids this plan ADDED are listed
+after it.
+
+| Architecture id | Disposition in this plan | Carried by |
+|---|---|---|
+| W1-1 `.docx` never classifies as zip | KEPT verbatim | wave 1, 7.3 |
+| W1-2 single entry, no `groupSubmissionsByStudent` | KEPT verbatim | wave 1, 7.3 |
+| W1-3 owner-only cold count | KEPT, routed to RES-W-6 | wave 1, 7.3 |
+| W2-1 rubric memory returns nothing before a file name | KEPT verbatim | wave 2, 8.2 |
+| W2-2 scope keying | KEPT verbatim | wave 2, 8.2 |
+| W2-3 removal test for claim 1 | KEPT verbatim | wave 2, 8.2 |
+| W2-4 run-level sentinel through both rebuilders + `tsc` half | KEPT verbatim | wave 2, 8.2 |
+| W2-5 import graph did not widen | KEPT verbatim | wave 2, 8.2 |
+| **W2-6** multi-path gate over the four keys and both parsers | **ABSORBED, and now stated as absorbed.** Its five paths (`rubric-memory.test.ts`, `rubricProvenance.test.ts`, `grade-result-allowlist-coverage.test.ts`, `github-grading-run-store.test.ts`, `grading-drafts.test.ts`) are all arguments of wave 2's gate in 8.2, which is a superset. **Absorption is only legitimate because `npm run test:paths` prints `COVERED` per argument**, so each of the five is individually accounted for and a silently-dropped path exits 1. Under a raw multi-path `vitest run` the absorption would be a deletion | wave 2's gate, 8.2 |
+| W2-7 three presence-then-comparison clauses | KEPT verbatim | wave 2, 8.2 |
+| W2-8 the `Rubric used` spelling | KEPT verbatim | wave 2, 8.2 |
+| W3-1 extraction first, post-3b gate | KEPT, and the post-3b bound is **RE-DERIVED** in 8.3 because 3b's real addition is larger than the architecture's estimate | waves 3a-i / 3a-ii / 3b |
+| W3-2 policy grep | KEPT, **and its command is FIXED** (it could not match) and its PASS re-derived from what the corrected command returns - 8.3 | wave 3b, 8.3 |
+| W3-3 the new-key canaries bind | KEPT verbatim | wave 3b, 8.3 |
+| W3-4 lint baseline | KEPT verbatim | wave 3b, 8.3 |
+| W4-1 the engine-test FLOOR | KEPT, and explicitly named a floor | wave 4b, 8.4.2 |
+| W4-2 / W4-2b the frozen oracle and idempotence | KEPT verbatim | wave 4a, 8.4.1 |
+| W4-3 removal test for claim 2 | KEPT verbatim | wave 4c |
+| W4-4 no regeneration in the seam | KEPT verbatim | wave 4c, S2 |
+| W4-5 ordering | KEPT verbatim | wave 4c |
+| W4-6 cancellation costs nothing already paid, and adds no `run-deadline` writer | KEPT as to the accumulator clauses; **the source-text clause is SPLIT into W4-6a and W4-6b and both commands are FIXED** - the pasted one could not match, and corrected it was red on today's tree against a remembered writer set. 8.4.3, step S4 | wave 4c, S4 |
+| **W4-7** owner-only wall-clock elapsed, before and after | **RESTORED VERBATIM as an owner-verification pass condition.** It is the only measurement of A39's leverage claim, and revision 1 carried the residual it points at (RES-A39A-4 via RES-W-12) while dropping the condition itself - which is exactly how a leverage claim becomes unmeasured. Stated in 8.4.5 alongside the structurally identical W1-3 and W5-2 | wave 4c, **8.4.5** |
+| W4-8 stop control placement | KEPT verbatim | wave 4c, S5 |
+| W4-9 press twice | KEPT as to object and direction; **its SEAM MOVES** so the instrument can reach it (RULING 39) - 8.4.3, step S4 | wave 4c, S4 |
+| W4-10 the Route Handler guard | KEPT, **and its negative control is rebuilt** from one fixture to three (RULING 41) - 8.4.3, step S1 | wave 4c, S1 |
+| W4-11 concurrency floor | KEPT verbatim, named a pure-predicate claim | wave 4c, RES-W-11 |
+| W5-1 predicate by identity | KEPT verbatim | wave 5, 8.5 |
+| W5-2 owner-only | KEPT, routed to RES-W-6 | wave 5, 8.5 |
+| W5-3 provenance on the Live Feed surface | KEPT verbatim | wave 5, 8.5 |
+
+**Conditions this plan ADDS, each with the reason it did not exist upstream:**
+
+| New id | Why it exists | Where |
+|---|---|---|
+| W1-4 | `a9d9771` put a wire-budget refusal in the exact block wave 1 edits, after the architecture measured (3.1) | 7.3 |
+| W3a-i-1/2/3, W3a-ii-1/2/3 | The architecture treated the extraction as one commit; this plan splits it, and a split needs its own watched failures and the line-shift obligation (2.3) | 6.4, 8.1 |
+| **W3-5** | **RES-A39A-15's STEP says "in wave 3, as a read-only check over the two panels it writes" and revision 1 carried no such check** (8.3) | 8.3 |
+| W4-6a / W4-6b | W4-6's single grep conflated two different objects, and neither was measurable through the pattern as written | 8.4.3 S4 |
+| W4-9b / W4-9c | The `.tsx` half of W4-9's object, and the react-hook budget the shipped harness imposes | 8.4.3 S4 |
+| W4-12 | The per-item byte cap, asserted rather than declared | 8.4.3 S3 |
+| W4-13 | `docs/g4-scope.md` Wave A's wall-clock deadline, by inclusion | 8.4.3 S2b |
+
 ---
 
 ## 5. Gates: the standing form, and what a pass looks like
@@ -544,9 +708,53 @@ PATH from PowerShell.
 | Typecheck | `npx tsc --noEmit --incremental false` | **No output at all**, exit 0. Any output is a failure. `--incremental false` is required here: `tsconfig.json` sets `"incremental": true` and every run writes `tsconfig.tsbuildinfo` at the repo root, which two concurrent agents race on (`docs/loop/this-repo.md:135-141`). **Exactly one caller per window** - named per slot in 4.3 |
 | Lint | `npm run lint` | `4 problems (0 errors, 4 warnings)`, exit 0. A fifth warning or any error is a regression introduced by the wave (`docs/loop/this-repo.md:82-87`) |
 | Named tests | `npm run test:paths -- <p1> <p2> ...` | `COVERED <path> files=N passed=M` for **every** argument, exit 0. A `NOT COVERED` line is a failure even when the suite is green |
+| **Full suite** | **`npm test`** | **`Test Files N passed (N)` with ZERO failed, exit 0.** See 5.1 - this gate was missing from revision 1 entirely and it is the only thing that ranges over readers no wave enumerated |
 | One test | `npx vitest run <one path>` | exit 0. Legitimate for a single path only (`docs/loop/this-repo.md:44-45`) |
-| Ceiling | `@(Get-Content <file>).Count` (PowerShell) AND `wc -l < <file>` (Bash) | both agree, and both at or under the wave's stated bound |
+| Ceiling | `@(Get-Content <file>).Count` (PowerShell) AND `wc -l < <file>` (Bash) | both agree, and both at or under the wave's stated bound. The repo-wide test compares `lineCount > limit` (`src/file-size-ceiling.structure.test.ts:138`, opened), so **1000 exactly PASSES and 1001 is RED** - a bound stated as "at 1000" is not a bound |
 | Tree | `git status --short` in the MAIN checkout | exactly the wave's assignment, nothing else. `.claude/worktrees` holds a copy Glob returns FIRST (`docs/loop/this-repo.md:246-253`); a report is not evidence |
+
+### 5.1 The full-suite gate, and why an enumerated `test:paths` list is not enough
+
+Revision 1 had no `npm test` gate anywhere
+(`grep -n "npm test" docs/a39-waves.md` returned nothing, exit 1, against a
+canary of 10 lines for `npm run test:paths`). Every wave's coverage was a
+hand-enumerated list, against `docs/loop/traps-spec.md`'s rule that **the
+orchestrator's enumeration is a FLOOR, never the set**. It leaked immediately:
+wave 4b edits `src/lib/grade.ts` and two of that file's three real source-text
+readers were in no wave at all (3.3).
+
+**`npm test` is a gate on EVERY wave**, run after the wave's `test:paths` gate
+and before the tree check. Measured today, at HEAD `e7cabc4` with
+`M docs/css-orphans.md` in the tree, exit code read from a file:
+
+```powershell
+npm test 2>&1 | Select-Object -Last 25 | Out-File -Encoding utf8 $out
+"EXIT=$LASTEXITCODE" | Out-File -Encoding utf8 -Append $out
+```
+```
+ Test Files  1111 passed (1111)
+      Tests  22454 passed (22454)
+   Duration  107.40s
+EXIT=0
+```
+
+**Three things a wave must know before it reads that output.**
+
+1. **`docs/loop/this-repo.md:27` records `Test Files 1017 passed (1017)` /
+   `Tests 20200 passed (20200)` / 63.6s.** Measured here: **1111 / 22454 /
+   107.40s.** The card is stale by +94 files, +2254 tests and +44s. **This plan
+   does not write `docs/loop/this-repo.md`** and does not correct it; the delta
+   is recorded as **RES-W-16** with an owner. A wave that expects 1017 and sees
+   1111 must not read that as a defect.
+2. **The PASS is "zero failed", never a pinned file count.** Every wave here
+   creates test files, so the count RISES by design. Pinning it would make each
+   wave's gate red for the reason the wave exists.
+3. **The run's stderr is not clean and that is not this repo's failure.** This
+   run emitted `fatal: invalid gitfile format:
+   C:/Users/alexa/AppData/Local/Temp/shipped-uncited-test-OSCQPH/.git` and two
+   `LF will be replaced by CRLF` warnings, from a concurrent sibling's temporary
+   worktree - not from vitest. **Read the `Test Files` line and the exit code
+   from a file; do not grade the gate on stderr being empty.**
 
 **`npm run lint` is a gate on wave 3a-i, 3a-ii and 3b** - every wave that
 touches `SnapshotGradingPanel.tsx` or removes hooks from either panel.
@@ -576,6 +784,27 @@ collect new files automatically: `src/file-size-ceiling.structure.test.ts`,
 
 **GOAL: headroom only. No feature line lands in this commit.**
 
+> ### NOT DISPATCHABLE UNTIL RULING 37'S QUESTION IS ANSWERED
+>
+> `docs/a39-waves-rulings.md` RULING 37 escalated this wave's SHAPE to the owner
+> as a terminating question, because it collides a CLOSED architecture's
+> `.ts`-only rule against the orchestrator's own RULING 33 arithmetic, which was
+> measured over JSX component boundaries that must be `.tsx`. **A `.ts` file
+> cannot hold JSX; a `.tsx` component has no oracle, because nothing renders
+> under vitest here.** The rulings file states three answers - (a) `.tsx`
+> components with no oracle, (b) `.ts` leaves with oracles, (c) ship the feature
+> without the extraction - with a recommendation of (a).
+>
+> **This plan adopts NO branch.** Sections 6.1 through 6.6 are the parts that are
+> IDENTICAL under all three answers and are briefable today. **Section 6.7 is the
+> branch table**: what the write set, the target, the watched failures and the
+> gate become under each answer, and what each answer costs wave 3b. An
+> implementer is dispatched against 6.1-6.6 PLUS exactly one column of 6.7, and
+> not before.
+>
+> **The consequence that makes this urgent:** RULING 32 gates A24 on this same
+> commit, so an unanswered question blocks two backlog rows, not one.
+
 ### 6.1 Write set, derived
 
 ```
@@ -595,8 +824,8 @@ Canary, same instrument, same call:
 | Path | Role |
 |---|---|
 | `src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` | **edit.** The file that shrinks, and **THE CALLER** of every new leaf |
-| `src/app/components/snapshot-grading/<new leaf>.ts` (1-2 files) | **new.** Plain `.ts`, never `.tsx` - nothing renders under vitest, so logic in a `.tsx` cannot be tested at all. Shipped example in this directory: `useSnapshotKeyboardShortcuts.ts` |
-| `src/app/components/snapshot-grading/<new leaf>.test.ts` | **new.** The leaf's own oracle |
+| `src/app/components/snapshot-grading/<new leaf>` (1-2 files) | **new.** **The EXTENSION is the open question - see 6.7 and do not assume one.** Under branch (b) it is `.ts` (shipped example in this directory: `useSnapshotKeyboardShortcuts.ts`); under branch (a) it is `.tsx` (shipped examples in this directory: `SnapshotShotTray.tsx`, `ConfirmedRubricAreasEditor.tsx`, `SnapshotCaptureBar.tsx`); under branch (c) no leaf is created at all. **Line budget under (a) and (b): `-le 300` per leaf**, both counters, stated because revision 1 gave every new file in this plan no bound at all and the only backstop was the repo-wide 1000 |
+| `src/app/components/snapshot-grading/<new leaf>.test.ts` | **new UNDER BRANCH (b) ONLY.** The leaf's own oracle. Under (a) no such file can exist - `vitest.config.ts` collects `src/**/*.test.ts` in a node environment and renders nothing, so a `.tsx` component has no oracle to go red. Under (c) there is no leaf. **Line budget `-le 300`** |
 | `src/app/components/snapshot-grading/snapshot-grading.structure.test.ts` | **edit if and only if** the extraction crosses one of its anchors - see 6.3 |
 | `src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts` | **owned.** Reads the panel as source (`:54`: `path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx")`) |
 | `src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts` | **owned** |
@@ -617,23 +846,30 @@ Hooks region `:84-702` (619 lines), JSX tail `:703-989` (287 lines).
 
 | Bound | Value | Where it comes from |
 |---|---|---|
-| Gate at 3a-i | **`-le 940`**, both counters | `docs/a39-architecture.md` 5.3. Kept |
+| Gate at 3a-i | **`-le 940`**, both counters, **under branches (a) and (b)** | `docs/a39-architecture.md` 5.3. Kept |
 | Net lines to move | **49** | 989 - 940 |
-| Gate after 3b | **`-le 955`** | architecture 5.3, with 3b's +14 estimate |
-| Headroom to the repo ceiling after 3b | 45 | 1000 - 955 |
+| Gate after 3b | **`-le 958`, re-derived** | 940 + 3b's real addition - see 8.3, which re-prices it. The architecture's `-le 955` came from a +14 estimate that does not include W3-5's `maxRows` caps |
+| Headroom to the repo ceiling after 3b | 42 | 1000 - 958 |
 
-**THE SHAPE FINDING, and it is the thing to brief.** RULING 33 measured,
-against the 970 tree, that FIVE separate components land the panel at **931-938**
-while TWO GROUPED components land at **913-918**, because each extraction
-boundary costs its own call site and at this headroom the call sites are the
-budget. The panel is now 989. Adding 837f2e3's measured +19 to those outcomes
-gives **950-957** for the five-component shape and **932-937** for the grouped
-shape.
+**THE SHAPE ARITHMETIC, and it is branch-dependent - do not brief it as settled.**
+RULING 33 measured, against the 970 tree, that FIVE separate components land the
+panel at **931-938** while TWO GROUPED components land at **913-918**, because
+each extraction boundary costs its own call site and at this headroom the call
+sites are the budget. The panel is now 989. Adding 837f2e3's measured +19 to
+those outcomes gives **950-957** for the five-component shape and **932-937** for
+the grouped shape.
 
-**That is arithmetic on a prior measurement of a DIFFERENT extraction's
-candidates, not a new measurement, and the wave re-derives it.** But the
-direction is unambiguous and it is what a brief must carry: **at 989 the
-many-small-components shape cannot reach 940.** The constraint is fewer, larger
+**Those figures price JSX COMPONENT call sites**
+(`docs/a24-a39-sequencing.md:37-40`: `<SnapshotShotTray>` 8 lines,
+`<ConfirmedRubricAreasEditor>` 9, `<SnapshotCaptureBar>` 15), **so they apply to
+branch (a) and to branch (a) only.** A hook leaf's call site is one destructuring
+line, not 8-15, so the same arithmetic cannot be transferred to branch (b)
+without re-measuring - and no such measurement exists in any A39 document. That
+is precisely the collision RULING 37 escalated, and 6.7 carries the consequence
+for each branch instead of resolving it.
+
+**What IS unambiguous under (a) and must be briefed there:** at 989 the
+many-small-components shape cannot reach 940. The constraint is fewer, larger
 components - the opposite of what an extraction pass instinctively does.
 
 The 940 target and 3b's +14 are both provisional. `docs/a39-architecture.md`
@@ -666,21 +902,39 @@ shifted by 837f2e3 (2.2):
    reason the leaf must stay in this directory rather than moving to
    `src/lib/`.
 
+   **Canary safety does NOT depend on the extension, and this is measured, not
+   assumed** - so it is not an argument for either branch of 6.7. Opened,
+   `snapshot-grading.structure.test.ts:178` is
+   `const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));`,
+   and `:180-182` asserts `nonTestFiles.length` is greater than 3 - a real
+   presence assertion, so a scan over an empty or renamed directory fails rather
+   than passing vacuously. **A `.tsx` leaf in this directory is inside the
+   haystack exactly as a `.ts` one is.** Recorded so nobody reaches for canary
+   safety as a reason to pick branch (b).
+
 ### 6.4 Watched failures - what this wave must see fail before it is done
 
 | id | The failure, watched | How |
 |---|---|---|
 | **W3a-i-1** | The ceiling gate RED at 989 | Run `npx vitest run src/file-size-ceiling.structure.test.ts` BEFORE the extraction and confirm the panel is NOT named (it is at 989, under 1000, so this gate is green today). **This one is a control, not a failure**: it establishes that the gate is not already red for an unrelated reason. Then run the new leaf's own test before the leaf exists and watch `NOT COVERED` |
-| **W3a-i-2** | The extraction is not merely a move | The new leaf's own test must fail against an empty leaf file. Write the test first, run `npx vitest run src/app/components/snapshot-grading/<new leaf>.test.ts`, watch it go RED, then move the code |
+| **W3a-i-2** | The extraction is not merely a move. **BRANCH (b) ONLY** | The new leaf's own test must fail against an empty leaf file. Write the test first, run `npx vitest run src/app/components/snapshot-grading/<new leaf>.test.ts`, watch it go RED, then move the code. **Under branch (a) this condition is WITHDRAWN and 6.7 names the enforcer it protected** |
 | **W3a-i-3** | **`npm run lint` is the one that bites.** Watch for the React Compiler `preserve-manual-memoization` error on a callback the wave did not touch | Run `npm run lint` after the move. If a fifth warning or any error appears naming a callback outside the moved code, apply the shipped workaround (`docs/loop/this-repo.md:100-104`): keep the ref and its effect in the panel, pass the ref into the leaf as a parameter. **Do NOT silence the rule** |
 
 ### 6.5 Gate
 
 ```powershell
-npm run test:paths -- src/app/components/snapshot-grading/snapshot-grading.structure.test.ts src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts src/loop-docs.structure.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts src/app/components/snapshot-grading/<new leaf>.test.ts
+npm run test:paths -- src/app/components/snapshot-grading/snapshot-grading.structure.test.ts src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts src/loop-docs.structure.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
 ```
-`<new leaf>.test.ts` is `[created by this wave]`.
+
+**Under branch (b) ONLY**, that command gains one more argument,
+`src/app/components/snapshot-grading/<new leaf>.test.ts`, marked
+`[created by this wave]`. **Under branch (a) it must NOT be appended**: no such
+file can exist, and `test:paths` exits 1 on `PRE-CHECK FAILED / does not exist
+on disk` for a path that is not on disk - measured by the round-1 check running
+wave 5's gate as written.
+
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 npm run lint
 @(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count
@@ -690,9 +944,11 @@ git status --short
 wc -l < src/app/components/snapshot-grading/SnapshotGradingPanel.tsx
 ```
 
-**PASS:** every `test:paths` argument prints `COVERED`, exit 0; `tsc` prints
-nothing; lint prints `4 problems (0 errors, 4 warnings)`; both counters agree
-and both are `<= 940`; `git status --short` shows only this wave's paths.
+**PASS:** every `test:paths` argument prints `COVERED`, exit 0; `npm test` shows
+zero failed and exits 0 (5.1); `tsc` prints nothing; lint prints
+`4 problems (0 errors, 4 warnings)`; both counters agree and both are `<= 940`
+under branches (a) and (b); `git status --short` shows only this wave's paths.
+**Under branch (c) this whole section does not run** - see 6.7.
 
 ### 6.6 The A24 release
 
@@ -706,6 +962,38 @@ addition, and state the new target with the command that produced it. RULING
 33's corollary binds the re-derivation too: re-cost the SHAPE, not just the
 number, and if this wave already grouped the same region A24 may need no
 extraction at all.
+
+### 6.7 THE BRANCH TABLE - what 6.1-6.6 become under each of RULING 37's answers
+
+**Nothing here picks a branch.** Each column is what an implementer is handed
+IN ADDITION to 6.1-6.6, once the answer arrives. The rows are the only things
+that differ; everything not in this table is identical under all three answers.
+
+| | **(a) `.tsx` components, no oracle** | **(b) `.ts` leaves with oracles** | **(c) no extraction** |
+|---|---|---|---|
+| **New leaf extension** | `.tsx`, 1-2 files, `-le 300` each | `.ts`, 1-2 files, `-le 300` each | none |
+| **New leaf test** | **none is possible.** `vitest.config.ts` collects `src/**/*.test.ts` in a node environment; nothing renders | `<new leaf>.test.ts`, `-le 300`, `[created by this wave]` | none |
+| **W3a-i-2** | **WITHDRAWN.** Enforcer it protected: **NOTHING.** No `.tsx` file in this repo has a unit test, so withdrawing it removes no executing assertion - it removes an assertion that was never constructible. Stated explicitly because `iteration-caps.md` calls an undeclared withdrawal a deletion | **KEPT verbatim** as written in 6.4 | **WITHDRAWN**, same enforcer: nothing |
+| **What replaces the oracle** | The three instruments that remain, and the brief says these are ALL of them: (1) the ceiling gate on both counters; (2) `snapshot-grading.structure.test.ts`'s existing anchors, which the extraction must leave green - notably `:351-362`'s `onSubmit={(text) => {` index, which goes RED rather than vacuous because `:354` asserts `toBeGreaterThan(-1)`; (3) `npm run lint` at 4/0 | The leaf's own oracle, plus all three of (a)'s | n/a |
+| **Target** | `-le 940`, reachable per RULING 33's grouped figure of **932-937** (989-tree arithmetic, 6.2) | `-le 940`, **reachability UNKNOWN.** RULING 33's figures priced JSX call sites and do not transfer. The wave ENUMERATES the hooks region FIRST - `:84-702`, 619 lines - and re-derives its own target BEFORE moving a line | no target; the panel stays at 989 |
+| **If the target is unreachable** | Not expected; if it happens, it is RES-W-5's direction of failure and the wave stops and reports | **A FINDING REPORTED TO RULING 32, not a shape change.** The wave does NOT silently switch to `.tsx` to hit the number - that would resolve the owner's question by implementation. It stops, states the enumerated candidate regions and their line counts, and hands the number back | n/a |
+| **Gate** | 6.5 exactly as printed, with NO appended leaf-test argument | 6.5 plus the leaf test argument | 6.5 does not run |
+| **Cost to wave 3b, MEASURED** | none. 940 + 3b's addition is inside 8.3's re-derived `-le 958` | none if 940 is reached; if it is not, 3b inherits the shortfall line for line | **3b's Snapshot half CANNOT LAND.** `989 + 14 = 1003`, and `src/file-size-ceiling.structure.test.ts:138` fails on `lineCount > 1000`, so 1003 is RED with no `ALLOWED_OVERAGE` entry - and section 1 rules that no wave here proposes one. `GradingRecordingPanel.tsx` at `990 + 10 = 1000` passes by exactly zero lines, which is not headroom, it is a coincidence |
+| **Cost to A24 (RULING 32)** | A24 re-derives against the post-extraction tree, and may need no extraction of its own if this wave already grouped the region | same, but A24 waits on the enumeration result first | **A24 is not unblocked at all.** RULING 32's premise was that the extraction lands first; under (c) there is no extraction, so A24's own target must be re-costed against 989 from scratch |
+
+**Two things bind under ALL THREE branches and are not negotiable by the answer:**
+
+1. **`npm run lint` is a gate and the React Compiler workaround is the shipped
+   one.** `docs/loop/this-repo.md:89-104` records that moving a ref cache out of
+   this exact panel typechecked, passed 311 tests, and then failed lint with two
+   new errors naming `handleNextStudentConfirm` - a callback touching none of the
+   moved code. The rule is `preserve-manual-memoization`. Keep the ref and its
+   effect declared in the panel and pass the ref into the new leaf as a
+   parameter. **Do not silence the rule.** This is a property of moving code out
+   of a React component and is indifferent to the extension of the destination.
+2. **The wave measures with BOTH counters and re-derives before moving a line**
+   (RES-W-5). The two counters disagree by 15 to 138 across 13 files in this repo
+   (RULING 36), so a single-counter number is not a measurement.
 
 ---
 
@@ -749,6 +1037,15 @@ Canary: `grep -rl "GradingTabZZZ.tsx" src --include="*.test.ts"` -> exit 1.
 |---|---|---|---|---|
 | `src/app/actions/grading.ts` | **917** | +20 | 937 | **`-le 945`, re-derived at the wave against the real file** |
 | `src/app/components/GradingTab.tsx` | 476 | +12 | 488 | `-le 520` |
+| `src/lib/grade/single-file-entry.ts` | **new, 0** | a pure classifier plus one builder, reusing six existing helpers | ~120 | **`-le 200`** |
+| `src/lib/grade/single-file-entry.test.ts` | **new, 0** | W1-1's six-extension table plus W1-2 | ~150 | **`-le 300`** |
+
+**Every new file in this plan now carries a bound.** Revision 1 gave none of
+them one, which left the repo-wide 1000 as the only backstop - and 1000 is a
+ceiling for a file that GREW into it, not a budget for a file being born. The
+numbers above and in 8.1, 8.2, 8.4.2 and 8.4.4 are budgets a wave may spend, not
+predictions; a wave that needs more states the measured reason in its commit
+message rather than silently exceeding one.
 
 ### 7.3 Watched failures
 
@@ -772,15 +1069,19 @@ npm run test:paths -- src/lib/grade/single-file-entry.test.ts src/app/actions/gr
 ```
 `src/lib/grade/single-file-entry.test.ts` is `[created by this wave]`.
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 @(Get-Content src/app/actions/grading.ts).Count
 @(Get-Content src/app/components/GradingTab.tsx).Count
+@(Get-Content src/lib/grade/single-file-entry.ts).Count
+@(Get-Content src/lib/grade/single-file-entry.test.ts).Count
 git status --short
 ```
 
-**PASS:** eleven `COVERED` lines, exit 0; `tsc` silent; `grading.ts` `<= 945`
-and `GradingTab.tsx` `<= 520` on both counters; `git status --short` matches the
-list in 7.1 exactly.
+**PASS:** eleven `COVERED` lines, exit 0; `npm test` zero failed, exit 0 (5.1);
+`tsc` silent; `grading.ts` `<= 945`, `GradingTab.tsx` `<= 520`, and both new
+files `<= 200` / `<= 300` on both counters; `git status --short` matches the list
+in 7.1 exactly.
 
 ---
 
@@ -802,9 +1103,22 @@ and THE CALLER** of the new leaves) and 1-2 new `.ts` leaves with their tests.
 
 **Ceiling:** `@(Get-Content).Count` -> **990**, `wc -l` -> 990. `return (` at
 `:694` (`grep -n "^  return ("`), so roughly 600 lines of hooks precede ~296
-lines of JSX. Gate `-le 940` at 3a-ii (50 lines to move); `-le 955` after 3b.
-The same grouped-not-scattered constraint from 6.2 applies: each boundary costs
-its own call site.
+lines of JSX. Gate `-le 940` at 3a-ii (50 lines to move); **`-le 950` after 3b**
+(940 + 3b's +10 for this panel; see 8.3, which re-prices the Snapshot side only).
+New leaves and their tests carry the same `-le 300` budget as 6.1's.
+
+**RULING 37's branch question binds this wave TOO, and it is not separately
+escalated.** 8.1's own text inherits 6.2's grouped-not-scattered constraint and
+6.1's shape rule, so the identical `.ts`-versus-`.tsx` collision exists here.
+**Wave 3a-ii is dispatched on whichever branch the owner's answer to RULING 37
+selects, applied unchanged**, with one measured difference recorded so nobody
+re-litigates it: this panel's hooks region is ~600 lines against the Snapshot
+panel's 619, and RULING 33's arithmetic was never run against this file at all -
+so under branch (b) the "reachability UNKNOWN" row of 6.7 applies here a fortiori,
+and under branch (a) there is no pre-existing per-component measurement to lean
+on either. **Either way this wave enumerates its own candidate regions and
+re-derives its own target before moving a line**, exactly as RES-W-5 obliges
+3a-i.
 
 **Watched failures:**
 
@@ -827,18 +1141,59 @@ its own call site.
 ```powershell
 npm run test:paths -- src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts src/app/components/grading-recording/GradingRecordingPanel.assessment.test.ts src/app/components/grading-recording/GradingAssessmentDeclarationControls.test.ts src/app/components/grading-recording/grading-recording-log.test.ts src/app/components/grading-recording/grading-rows.test.ts src/app/components/grading-recording/markLate.wiring.test.ts src/app/components/grading-recording/submission-kind-callsites.structure.test.ts src/app/actions/grading-submission-grade.test.ts src/app/components/module-deck-capture/ModuleDeckCapturePanel.wiring.test.ts src/app/components/module-deck-capture/module-deck-dispatch.test.ts src/app/components/recording/AddKnowledgePages.test.ts src/app/components/recording/discussion-capture.test.ts src/app/components/recording/discussion-knowledge-context.test.ts src/app/components/recording/runLogRow.test.ts src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts src/app/components/ui/buttonVariant.test.ts src/lib/recording-launch.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
 ```
-plus the new leaf's own test `[created by this wave]`.
+plus, **under branch (b) only**, the new leaf's own test `[created by this wave]`
+- and under branch (a) NOT appended, for the reason 6.5 gives.
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 npm run lint
 @(Get-Content src/app/components/grading-recording/GradingRecordingPanel.tsx).Count
 git status --short
 ```
+```
+wc -l < src/app/components/grading-recording/GradingRecordingPanel.tsx
+```
+
+**PASS:** every argument `COVERED`, exit 0; `npm test` zero failed, exit 0;
+`tsc` silent; lint at `4 problems (0 errors, 4 warnings)`; both counters agree
+and both `<= 940`; new leaves and their tests `<= 300`; `git status --short`
+shows only this wave's paths.
 
 ### 8.2 Wave 2 - the rubric is remembered on A and H, and the run records its version
 
-**Write set.** The architecture's section 8 list, adopted with three additions
-this pass derived and one removal it already ruled.
+**Write set. STATED AS PATHS IN THIS DOCUMENT, not delegated.** Revision 1 said
+"the architecture's section 8 list, adopted with three additions" and left the
+paths of the two files wave 2 must CREATE appearing nowhere in this plan - their
+only trace was the JSX literal `<RubricProvenance` inside W2-7 and one test path
+in the gate. That contradicts this plan's own statement of purpose ("what each
+may write") and its own 0.3 finding, which forbids writing a wave 3b brief from
+the architecture's reader list because that list is now stale by one. A brief
+cannot be stale in a direction nobody looked.
+
+**The files wave 2 CREATES, each with a bound:**
+
+| Path | Role | Budget, both counters |
+|---|---|---|
+| `src/lib/grade/rubric-memory.ts` | **new.** `loadRubricMemory` / `saveRubricMemory` / `describeRubricOrigin`. Called by `GradingTab.tsx` (path A) and `CartridgeDropPanel.tsx` (path H), same commit | `-le 250` |
+| `src/lib/grade/rubric-memory.test.ts` | **new.** W2-1, W2-2 | `-le 350` |
+| `src/lib/research/rubric-fingerprint.ts` | **new.** `rubricFingerprint`, MOVED out of `rubric-bank.ts`, which re-exports it so `rubric-bank.ts:70`'s own upsert is unchanged. The move is what W2-5 exists for: importing `rubric-bank.ts` into `engine.ts` would widen the engine's runtime closure to a Supabase client | `-le 120` |
+| `src/lib/grade/rubricProvenance.ts` | **new.** `describeRunRubricProvenance`, reading `run.rubricUsed` / `run.rubricFingerprint`. Called by `RubricProvenance.tsx` | `-le 150` |
+| `src/lib/grade/rubricProvenance.test.ts` | **new.** W2-3 | `-le 300` |
+| `src/app/components/grading-results/RubricProvenance.tsx` | **new.** The leaf. Mounted by `GradingTab.tsx` above the `<GradingResults` mount at `:427`, same commit; wave 5 adds `LiveFeedPanel.tsx` as a second mount | `-le 150` |
+| `src/app/components/grading-results/rubricProvenanceLeaf.test.ts` | **new.** W2-8, the spelling half. **It reads the `.tsx` as SOURCE TEXT** - it does not render it, and the brief says so, because nothing renders here | `-le 200` |
+
+`src/lib/research/rubric-fingerprint.ts` and
+`src/app/components/grading-results/RubricProvenance.tsx` are the two paths
+`docs/a39-architecture.md:1913,1928` names and revision 1 omitted.
+
+**W2-6 IS THIS WAVE'S GATE, absorbed and now stated so** (4.4). The architecture's
+W2-6 is a `test:paths` run over `rubric-memory.test.ts`, `rubricProvenance.test.ts`,
+`grade-result-allowlist-coverage.test.ts`, `github-grading-run-store.test.ts` and
+`grading-drafts.test.ts`. All five are arguments of the gate below. The
+absorption is legitimate ONLY because `npm run test:paths` prints a `COVERED`
+line per argument and exits 1 on any `NOT COVERED`, so each of the five is still
+individually accounted for; under a raw multi-path `vitest run` the same
+absorption would be a silent deletion (`docs/loop/this-repo.md:30-45`).
 
 Derivation for the two persistence modules and the type:
 
@@ -962,11 +1317,12 @@ npm run test:paths -- src/lib/grade/rubric-memory.test.ts src/lib/grade/rubricPr
 `rubric-memory.test.ts`, `rubricProvenance.test.ts` and
 `rubricProvenanceLeaf.test.ts` are `[created by this wave]`.
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 git status --short
 ```
 plus `@(Get-Content <file>).Count` and `wc -l < <file>` for the eight files in
-the ceiling table.
+the ceiling table **and for the seven new files in the write-set table above**.
 
 **`npx tsc --noEmit --incremental false` is not optional on this wave.** It is
 half of W2-4's direction of failure, and the only thing that catches a
@@ -1002,12 +1358,133 @@ declares the constant; the panel actually CALLS the store with that constant,
 comment-stripped; the store passes its key parameter through to both
 `localStorage.getItem` and `localStorage.setItem`.
 
+**CEILING - all FIVE bounds, three of which revision 1 dropped.** The
+architecture set five for wave 3 (`docs/a39-architecture.md:1503-1505`) and
+revision 1's gate block counted only two panels. Both counters, measured today:
+
+| File | Measured now | 3b's addition | Est. after | Gate |
+|---|---|---|---|---|
+| `src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` | **989** (both) | +14 feature, **+2 for W3-5's two `maxRows` caps** | 940 + 16 = 956 | **`-le 958`, RE-DERIVED** (the architecture's 955 came from +14 alone) |
+| `src/app/components/grading-recording/GradingRecordingPanel.tsx` | **990** (both) | +10 feature; W3-5 adds nothing here (it has zero `multiline` fields - see W3-5) | 940 + 10 = 950 | **`-le 950`, RE-DERIVED** and tighter than the architecture's 955 |
+| `src/app/components/grading-recording/RubricInputModal.tsx` | **375** (both) | -7 deleted policy, +12 replacement | 380 | **`-le 420`.** Architecture's bound, KEPT - it reproduces |
+| `src/app/components/grading-recording/grading-rows.test.ts` | **733** (both) | +1 key in the 7-key `toEqual` at `:679-687`, plus ONE A4d-shaped block modelled on `snapshot-grading.structure.test.ts:141-174` (34 lines) | ~769 | **`-le 790`.** Architecture's bound, KEPT - it survives the re-pricing with 21 lines of slack |
+| `src/app/components/snapshot-grading/snapshot-grading.structure.test.ts` | **863** (both) | **+2 keys in the exact set, plus TWO A4d-shaped blocks at 34 lines each = ~+70**, plus the rewritten test NAME at `:195` (net 0) | ~933 | **`-le 940`, RE-DERIVED. The architecture's `-le 890` is RED before the wave starts.** See below |
+
+**Why `-le 890` had to be re-derived, stated rather than quietly widened.** The
+architecture estimated `822 + 26 = 848` against a bound of 890. That file is
+**863 today** - `837f2e3` appended 41 lines to it (2.2: its only hunk there is
+`@@ -820,3 +820,44 @@`, a pure append, which is also why every citation below
+820 is intact). And 8.3's own instruction is that each new key gets "a block
+modelled on `snapshot-grading.structure.test.ts:141-174`" - a **34-line**
+template - for TWO keys. `863 + 68 = 931`, not 848. The architecture's +26 was
+not an estimate of this work; it was an estimate of a smaller one against a
+smaller file. **A bound of 890 would go red at the wave's second A4d block, and
+a bound of 1000 would catch nothing between 890 and 1000** - which is how a
+ceiling gate stops being a measurement. `-le 940` is 7 lines above the estimate
+and leaves 60 to the repo ceiling. **The wave re-measures before it estimates**
+(RES-W-7's discipline, applied to a test file).
+
 **Watched failures:**
 
 - **W3-1** - both panels over their bound. Watched by running the ceiling gate
   after the first feature line and before the wave's own arithmetic, at 989 and
   990 pre-extraction, to confirm the gate is the thing stopping the feature.
-- **W3-2** - `grep -rn "persists it\|not persisted\|out of localStorage" src/app/components/grading-recording src/app/components/snapshot-grading` returns a surviving line still telling a reader the rubric is deliberately not stored. **This grep is RED on today's code** (the comments are at `RubricInputModal.tsx:28-34`, `SnapshotGradingPanel.tsx:144-148` and `snapshot-grading.structure.test.ts:124-133` plus the test NAME at `:195`), which is exactly the watched failure - run it first, see the hits, then delete and replace.
+- **W3-2 - THE POLICY GREP, WITH A WORKING PATTERN AND A PASS RE-DERIVED FROM
+  WHAT IT ACTUALLY RETURNS.** Revision 1's gate form put `|` in a pattern with
+  neither `-E` nor BRE `\|`, so GNU grep searched for a literal pipe character,
+  returned nothing and exited 1 - **which made wave 3b's gate PASS today, before
+  anything was deleted.** Measured, both forms and a pattern-validity canary:
+
+  ```
+  # revision 1's GATE form, verbatim
+  grep -rn "persists it|not persisted|out of localStorage" src/app/components/grading-recording src/app/components/snapshot-grading
+    -> no output, EXIT=1
+
+  # THE CORRECTED FORM - this is the gate
+  grep -rnE "persists it|not persisted|out of localStorage" src/app/components/grading-recording src/app/components/snapshot-grading
+    -> 6 lines, EXIT=0
+
+  # PATTERN-VALIDITY CANARY, same instrument, same call: proves the ALTERNATION
+  # is being parsed, not merely that the files were read
+  grep -rnE "persists itZZZ|not persistedZZZ|out of localStorageZZZ" src/app/components/grading-recording src/app/components/snapshot-grading
+    -> no output, EXIT=1
+  ```
+
+  **The six lines today, pasted, each with its disposition** - because three of
+  them are NOT about the rubric and must not be deleted:
+
+  | Line | Text | Disposition |
+  |---|---|---|
+  | `RubricInputModal.tsx:29` | `// and NOTHING here persists it - no localStorage, no persisted-control key of` | **DELETED and replaced** (the policy) |
+  | `snapshot-grading.structure.test.ts:132` | `// still keeps out of localStorage for the same sensitivity reason as before.` | **DELETED and replaced** (the policy, in the U10 comment block `:124-133`) |
+  | `snapshot-grading.structure.test.ts:195` | the exact-set test NAME, `"... U10 keeps shot bytes and rubric/assignment text out of localStorage"` | **REWRITTEN**, and it may still match: it must keep the shot-bytes clause and lose the rubric clause |
+  | `snapshot-row-serialization.ts:92` | `// (useAssessmentRowStore.ts) is a useState, not persisted, so the` | **LEGITIMATE, SURVIVES.** Its subject is `persistError`, not the rubric |
+  | `snapshot-row.ts:136` | `* gap where persistError (a useState, not persisted) would otherwise` | **LEGITIMATE, SURVIVES.** Same subject |
+  | `snapshot-shot.ts:209` | `* and persists it that way (Ruling R1-B) - strictly worse than the defect` | **LEGITIMATE, SURVIVES.** Its subject is shot bytes, which 3b does NOT start persisting |
+
+  **PASS, re-derived from the measurement and NOT from the remembered
+  sentence:** the corrected grep returns **exactly four lines** -
+  `snapshot-row-serialization.ts:92`, `snapshot-row.ts:136`,
+  `snapshot-shot.ts:209`, and the REWRITTEN `snapshot-grading.structure.test.ts`
+  test name. **RED if `RubricInputModal.tsx:29` or the U10 comment survives; RED
+  if the rewritten test name still claims rubric text is kept out of
+  localStorage; RED if any of the three legitimate lines is gone**, because
+  deleting a true comment about `persistError` or about shot bytes is a
+  different defect wearing this gate's clothes. **A pass condition of "no line"
+  would have been false: three of the six are supposed to be there.**
+
+  **WATCHED:** run the corrected form first, see all six, then delete and
+  replace. The watched failure and the gate now use the SAME command; revision
+  1's two halves used different ones and disagreed with each other.
+
+  **The narrow companion, for the claim the broad grep cannot make.** The broad
+  pattern cannot distinguish "the rubric is not persisted" from "`persistError`
+  is not persisted", which is why its PASS is an enumerated set rather than
+  zero. The sharp claim gets its own command with its own canary:
+
+  ```
+  grep -rniE "rubric.{0,80}(not persisted|out of localStorage)|nothing here persists it" \
+    src/app/components/grading-recording src/app/components/snapshot-grading
+    -> src/app/components/grading-recording/RubricInputModal.tsx:29
+       src/app/components/snapshot-grading/snapshot-grading.structure.test.ts:195
+       EXIT=0                                      (the watched presence, today)
+
+  grep -rniE "rubricZZZ.{0,80}(not persisted|out of localStorage)|nothing here persists itZZZ" \
+    src/app/components/grading-recording src/app/components/snapshot-grading
+    -> no output, EXIT=1                           (canary: BOTH alternation branches exercised)
+  ```
+
+  **PASS: no output, exit 1 - and the wave must have WATCHED the same command
+  return those two lines before the deletion**, which is what proves the pattern
+  fires. An absence with no watched presence is the defect class RULING 38
+  exists to close.
+
+  **One trap in that pattern, found by running it rather than by reading it, and
+  it is the FOURTH instrument defect of this exact shape on this item.** The
+  first draft of this command used `[^\n]{0,80}` for "any 80 characters". In an
+  ERE bracket expression `\n` is not a newline - it is the two characters
+  backslash and `n` - **so `[^\n]` excludes the LETTER `n`**, and the pattern
+  silently missed `:195` because the intervening text contains "assignment".
+  Demonstrated:
+
+  ```
+  printf 'rubric assignment out of localStorage\n' | grep -cE "rubric[^\n]{0,80}out of localStorage"  -> 0
+  printf 'rubric assignment out of localStorage\n' | grep -cE "rubric.{0,80}out of localStorage"      -> 1
+  ```
+
+  `grep` is line-based, so `.` is already "any character except newline" and
+  `[^\n]` buys nothing while costing a letter. **Use `.`; do not write `[^\n]`
+  in a grep gate in this repo.**
+
+  **The one way this gate can go wrong, stated with its escape.** If the
+  rewritten `:195` test name places the word "rubric" within 80 characters before
+  an "out of localStorage" clause - for example by naming the NEW rubric key in
+  the same breath as the surviving shot-bytes limit - the narrow gate stays red
+  for a legitimate reason. **The wave does NOT widen the pattern to make that
+  green.** It either words the name so the two clauses are apart, or it reports
+  that it could not, drops this companion, and relies on the enumerated-set form
+  above. Tuning the command until it agrees with the sentence is the thing
+  RULING 38 forbids.
 - **W3-3** - a new key present in a panel's source and absent from its
   directory's expected set. **Watched by adding the key literal to the panel
   and running `npx vitest run src/app/components/snapshot-grading/snapshot-grading.structure.test.ts`
@@ -1016,6 +1493,73 @@ comment-stripped; the store passes its key parameter through to both
   is added to an expected set while its A4d-shaped block cannot find the
   panel's call or `rubric-memory.ts`'s `getItem`/`setItem` pair.
 - **W3-4** - `npm run lint` at a fifth warning or any error.
+- **W3-5 - RES-A39A-15's OWED CHECK, which lands in THIS wave and which revision
+  1 did not carry.** `docs/a39-architecture.md:2369`'s STEP column reads, of
+  RES-A39A-15: "**in wave 3, as a read-only check over the two panels it
+  writes**; elsewhere, at the next chunk touching that file." Revision 1's wave
+  3b had W3-1 through W3-4 and none of them was that check - an owed instrument
+  with a named step inside this plan's own wave, carried by no wave. That is
+  what `iteration-caps.md` calls a deletion.
+
+  **OBJECT:** for each of the two panels wave 3b writes, the index of every
+  `multiline` prop against the index of that file's primary action control, and
+  whether each such field carries a `maxRows` in its own tag.
+  **INSTRUMENT:** the architecture's own -
+  `grep -n "multiline" <file>` against `grep -n "maxRows" <file>`, plus the
+  index of the file's primary action control.
+  **DIRECTION OF FAILURE:** an action control whose index in source is greater
+  than that of an UNCAPPED `multiline` field.
+
+  **Measured today, and one panel is RED while the other is not applicable:**
+
+  ```
+  grep -n "multiline" src/app/components/grading-recording/GradingRecordingPanel.tsx   -> no output, EXIT=1
+  grep -n "maxRows"   src/app/components/grading-recording/GradingRecordingPanel.tsx   -> no output, EXIT=1
+  grep -n "multiline" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx     -> 809, 844, 935
+  grep -n "maxRows"   src/app/components/snapshot-grading/SnapshotGradingPanel.tsx     -> no output, EXIT=1
+  grep -n "minRows"   src/app/components/snapshot-grading/SnapshotGradingPanel.tsx     -> 810, 845, 936
+  grep -rn "maxRows" src --include=*.tsx | head -5        # canary: AiChatWindow.tsx:567,
+                                                          # CopilotChatPanel.tsx:123,
+                                                          # ModuleDeckSettings.tsx:129 - the prop
+                                                          # exists in this codebase, so the two
+                                                          # empty results above are facts, not a
+                                                          # broken instrument
+  ```
+
+  - **`GradingRecordingPanel.tsx`: NOT APPLICABLE, and the brief must say that
+    word rather than "pass".** It has ZERO `multiline` fields, so the check is
+    vacuously clean for a reason unrelated to the claim. A green report here
+    would be the same shape as the gate RULING 38 just fixed.
+  - **`SnapshotGradingPanel.tsx`: RED TODAY, before the wave starts.** Its
+    primary action control is the Grade button at `:871-873`
+    (`<Button variant="contained" onClick={() => void handleGrade()}`, opened at
+    `awk 'NR>=866&&NR<=880'`). Two uncapped `multiline` fields sit ABOVE it:
+    `:805-814` ("Assignment instructions (optional ...)", `multiline` at `:809`,
+    `minRows={2}` at `:810`, no `maxRows`) and `:841-849` ("Instructions for
+    grading (optional)", `multiline` at `:844`, `minRows={2}` at `:845`, no
+    `maxRows`). `871 > 844 > 809`, which is the stated direction of failure.
+
+  **RULED: wave 3b CAPS both, and this is not scope creep - it is the same
+  contradiction the architecture already removed once.** RES-A39A-15's own text
+  records that revision 1 "scoped its own fix out with 'in scope only if that
+  wave already writes it' while wave 2 DID write the file - that contradiction
+  is removed". Wave 3b DOES write `SnapshotGradingPanel.tsx`. Leaving it as a
+  report would recreate the identical contradiction one wave later. The cost is
+  **+2 lines**, which is why 8.3's ceiling table re-derives that panel's post-3b
+  bound to `-le 958` rather than inheriting 955.
+
+  **`:935` is OUT OF SCOPE and named so nobody tidies it in.** It is the
+  transcription field inside the region below the action control
+  (`935 > 871`), so it does not satisfy the stated direction of failure.
+  Capping it is neither required nor forbidden; if the wave does it anyway, that
+  is +1 more line and the wave says so in its commit message.
+
+  **WATCHED:** run the two `grep -n` commands and the action-control index
+  BEFORE the caps, record `809 / 844 / 871` with no `maxRows`, apply the caps,
+  re-run, and confirm every `multiline` index below `871` now has a `maxRows`
+  inside the same tag. **RED if a `maxRows` is added to the file but not inside
+  the tag of the field it is meant to cap** - the file-level presence of the
+  string proves nothing, which is the same lesson as W2-7 clause 1.
 
 **A replacement, not a deletion.** Each removed comment gets one naming
 `docs/owner-decisions-2026-09-23.md` DECISION 3, the key, the canary that now
@@ -1031,17 +1575,44 @@ rather than an exception inside it.
 npm run test:paths -- src/app/components/grading-recording/grading-rows.test.ts src/app/components/snapshot-grading/snapshot-grading.structure.test.ts src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts src/app/components/grading-recording/rubric-input.test.ts src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts src/app/components/grading-recording/GradingRecordingPanel.assessment.test.ts src/app/components/grading-recording/GradingAssessmentDeclarationControls.test.ts src/app/components/grading-recording/grading-recording-log.test.ts src/app/components/grading-recording/markLate.wiring.test.ts src/app/components/grading-recording/submission-kind-callsites.structure.test.ts src/app/actions/grading-submission-grade.test.ts src/app/actions/syllabus-upload.rubric-reuse.test.ts src/lib/syllabus-upload-source.test.ts src/app/components/ui/buttonVariant.test.ts src/app/components/ui/modalAdoption.wiring.test.ts src/app/components/module-deck-capture/ModuleDeckCapturePanel.wiring.test.ts src/app/components/module-deck-capture/module-deck-dispatch.test.ts src/app/components/recording/AddKnowledgePages.test.ts src/app/components/recording/discussion-capture.test.ts src/app/components/recording/discussion-knowledge-context.test.ts src/app/components/recording/runLogRow.test.ts src/lib/recording-launch.test.ts src/loop-docs.structure.test.ts src/lib/grade/rubric-memory.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
 ```
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 npm run lint
-grep -rn "persists it|not persisted|out of localStorage" src/app/components/grading-recording src/app/components/snapshot-grading
 @(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count
 @(Get-Content src/app/components/grading-recording/GradingRecordingPanel.tsx).Count
+@(Get-Content src/app/components/grading-recording/RubricInputModal.tsx).Count
+@(Get-Content src/app/components/grading-recording/grading-rows.test.ts).Count
+@(Get-Content src/app/components/snapshot-grading/snapshot-grading.structure.test.ts).Count
 git status --short
 ```
 
-**PASS:** every argument `COVERED`, exit 0; `tsc` silent; lint at 4/0; the W3-2
-grep returns **no line claiming the rubric is deliberately not stored**; both
-panels `<= 955` on both counters.
+The two W3-2 greps and the W3-5 greps are run from **Bash**, because `grep` with
+`-E` is not the PowerShell `Select-String` this repo forbids hand-rolling and is
+not on PATH from PowerShell:
+
+```
+grep -rnE "persists it|not persisted|out of localStorage" src/app/components/grading-recording src/app/components/snapshot-grading
+grep -rnE "persists itZZZ|not persistedZZZ|out of localStorageZZZ" src/app/components/grading-recording src/app/components/snapshot-grading
+grep -rniE "rubric.{0,80}(not persisted|out of localStorage)|nothing here persists it" src/app/components/grading-recording src/app/components/snapshot-grading
+grep -rniE "rubricZZZ.{0,80}(not persisted|out of localStorage)|nothing here persists itZZZ" src/app/components/grading-recording src/app/components/snapshot-grading
+grep -n "multiline" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx
+grep -n "maxRows"   src/app/components/snapshot-grading/SnapshotGradingPanel.tsx
+wc -l < src/app/components/snapshot-grading/SnapshotGradingPanel.tsx
+wc -l < src/app/components/grading-recording/GradingRecordingPanel.tsx
+wc -l < src/app/components/grading-recording/RubricInputModal.tsx
+wc -l < src/app/components/grading-recording/grading-rows.test.ts
+wc -l < src/app/components/snapshot-grading/snapshot-grading.structure.test.ts
+```
+
+**PASS:** every `test:paths` argument `COVERED`, exit 0; `npm test` zero failed,
+exit 0; `tsc` silent; lint at `4 problems (0 errors, 4 warnings)`; the broad
+W3-2 grep returns **exactly the four enumerated survivors** and its ZZZ canary
+exits 1; the narrow W3-2 companion returns **nothing and exits 1**, having been
+watched returning two lines first; every `multiline` index below `871` in
+`SnapshotGradingPanel.tsx` carries a `maxRows` in its own tag (W3-5); and all
+FIVE ceiling bounds hold on both counters - `SnapshotGradingPanel.tsx <= 958`,
+`GradingRecordingPanel.tsx <= 950`, `RubricInputModal.tsx <= 420`,
+`grading-rows.test.ts <= 790`, `snapshot-grading.structure.test.ts <= 940`.
 
 ### 8.4 Wave 4 - the run delivers row 1 while row 7 is still running
 
@@ -1049,7 +1620,11 @@ Three commits, in this order. The order is not cosmetic.
 
 #### 8.4.1 Commit 4a - the frozen oracle, captured from TODAY's implementation
 
-**Write set:** `src/lib/grade/reconcile.test.ts` (**new, test-only**).
+**Write set:** `src/lib/grade/reconcile.test.ts` (**new, test-only**,
+**`-le 400`** on both counters - a frozen literal of one run's `results` plus
+`rubricAreaNames` is the bulk of it, and a literal that needs more than 400
+lines is a fixture the wave should narrow rather than a budget it should
+raise).
 
 Run today's `gradeStudentEntries` over a fixture whose rubric parses to NO
 criteria and whose rows disagree on area names - the `engine.ts:337-344` branch
@@ -1073,11 +1648,43 @@ projection that 4b lands.
 #### 8.4.2 Commit 4b - reconciliation becomes a projection
 
 **Write set:** `src/lib/grade/reconcile.ts` (**new**, PURE `reconcileRun`,
-imports only `./types` and `./rubric`), `src/lib/grade/engine.ts` (**edit, THE
-CALLER** - `:332-393` becomes a call; **must SHRINK**), `src/lib/grade.ts`
-(**edit**, barrel export), plus the owned readers: `engine.test.ts`,
-`engine.ungraded.test.ts`, `ungradedDisclosure.test.ts`, `code-runner.test.ts`,
-`grouping-zip-parents.wiring.test.ts`, `runtime-import-graph.test.ts`.
+imports only `./types` and `./rubric`, **`-le 250`**),
+`src/lib/grade/engine.ts` (**edit, THE CALLER** - `:332-393` becomes a call;
+**must SHRINK**), `src/lib/grade.ts` (**edit**, barrel export), plus the owned
+readers.
+
+**The owned readers, derived rather than recalled** - revision 1 carried one of
+`src/lib/grade.ts`'s three real readers and characterised the other two wrongly
+(3.3). Both instruments, with canaries:
+
+```
+grep -rl "grade/engine.ts" src --include="*.test.ts" | sort
+  -> src/app/components/grading-results/ungradedDisclosure.test.ts
+     src/lib/code-runner.test.ts
+     src/lib/grade/grouping-zip-parents.wiring.test.ts
+grep -rn 'join(SRC, "lib", "grade.ts")' src --include="*.test.ts"
+  -> src/app/components/grading-results/gradingResultsHelpersWiring.test.ts:154
+     src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts:367
+     src/lib/module-graph/runtime-import-graph.test.ts:572
+grep -rn 'join(SRC, "lib", "gradeZZZ.ts")' src --include="*.test.ts"   # canary, exit 1
+grep -rl "grade/engineZZZ.ts" src --include="*.test.ts"                # canary, exit 1
+```
+
+| Path | Role |
+|---|---|
+| `src/lib/grade/engine.test.ts`, `src/lib/grade/engine.ungraded.test.ts` | **owned.** Import-based readers of `engine.ts` in the same directory - not found by the source-text instrument, which is why the second instrument exists |
+| `src/app/components/grading-results/ungradedDisclosure.test.ts`, `src/lib/code-runner.test.ts`, `src/lib/grade/grouping-zip-parents.wiring.test.ts` | **owned.** Source-text readers of `grade/engine.ts` |
+| `src/lib/module-graph/runtime-import-graph.test.ts` | **owned.** `:572` walks the barrel; it also sees the new `./reconcile` edge |
+| **`src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`** | **owned. ADDED THIS REVISION.** `:153-159` is "R-5: a PLANTED POSITIVE proves this walk actually discriminates (the barrel this row exists to ban)", asserting `violations.length > 0`, `unallowed.length > 0` and a trail containing `lib/supabase/server`. **Direction of failure: RED if wave 4b's re-export somehow REMOVED the barrel's supabase reach**, which would silently disarm this canary in two other files |
+| **`src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts`** | **owned. ADDED THIS REVISION.** `:366-378`, the same three assertions as R-5a/R-5b/R-5c |
+| `src/lib/grade/grade-result-doors.wiring.test.ts` | **owned, read-only. ADDED THIS REVISION.** `:127` names "grade.ts's own barrel" in a COMMENT. It is in the gate as a floor, not because a defect is expected |
+
+**Why the conclusion still holds.** `reconcileRun` is PURE and imports only
+`./types` and `./rubric`, so a re-export of it cannot remove the barrel's reach
+into `lib/supabase/server` and all three planted positives stay green. **The
+finding was never that they would break - it was that two of the three files
+were in no wave at all, and with no full-suite gate nothing else would have
+noticed.** 5.1 closes the general case; this table closes this one.
 
 **The invariant:** `gradeStudentEntries` returns byte-identical results before
 and after. It is reached by `gradeSubmissions` (`:403`), `gradeEntries`
@@ -1098,12 +1705,20 @@ ORDER. That is W4-2's job, over the 4a oracle.
 
 **Gate:**
 ```powershell
-npm run test:paths -- src/lib/grade/reconcile.test.ts src/lib/grade/engine.test.ts src/lib/grade/engine.ungraded.test.ts src/app/components/grading-results/ungradedDisclosure.test.ts src/lib/code-runner.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/lib/module-graph/runtime-import-graph.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+npm run test:paths -- src/lib/grade/reconcile.test.ts src/lib/grade/engine.test.ts src/lib/grade/engine.ungraded.test.ts src/app/components/grading-results/ungradedDisclosure.test.ts src/lib/code-runner.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/lib/module-graph/runtime-import-graph.test.ts src/app/components/grading-results/gradingResultsHelpersWiring.test.ts src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts src/lib/grade/grade-result-doors.wiring.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+npm test
 npx tsc --noEmit --incremental false
 @(Get-Content src/lib/grade/engine.ts).Count
+@(Get-Content src/lib/grade/reconcile.ts).Count
+@(Get-Content src/lib/grade/reconcile.test.ts).Count
+git status --short
 ```
-PASS: all `COVERED`, exit 0; `tsc` silent; `engine.ts` count **must not rise**
-above 504 and should land near 459.
+```
+wc -l < src/lib/grade/engine.ts
+```
+PASS: all thirteen `COVERED`, exit 0; `npm test` zero failed, exit 0; `tsc`
+silent; `engine.ts` count **must not rise** above 504 and should land near 459,
+on both counters; `reconcile.ts <= 250` and `reconcile.test.ts <= 400`.
 
 #### 8.4.3 Commit 4c - the transport, the pool and the seam
 
@@ -1160,23 +1775,74 @@ Also measured, and it is why the guard is `requireUser` and not `requireOwner`:
 that `requireOwner()` is "a bare `return requireUser()` alias ... that admits
 ANY active account". A comment claiming an owner check would be false.
 
-**S1 lands BEFORE the handler body, as a test against a fixture string.**
+**S1 lands BEFORE the handler body, as a test against the route's source text.**
 `src/app/api/grade-run-item/route.test.ts` asserts three
-presence-then-comparison pairs over the route's own source text:
+**presence-then-comparison pairs**. Revision 1 called all three that and only
+the first one was; two were bare substring presences, and a bare substring is
+satisfied by the COMMENT that explains the check. All three are rewritten so that
+each has a real comparison:
 
-1. `requireUser(` is present, AND its index is less than the index of the first
-   `gradeEntries(`;
-2. a `content-type` check is present;
-3. `export const maxDuration = 60` is present.
+1. **AUTH ORDER.** `idxGuard = src.indexOf("requireUser(")` is `>= 0`, AND
+   `idxGrade = src.indexOf("gradeEntries(")` is `>= 0`, AND
+   `idxGuard < idxGrade`.
+2. **CSRF FLOOR, BEFORE THE BODY IS PARSED.**
+   `idxCt = src.indexOf('req.headers.get("content-type")')` is `>= 0`, AND
+   `idxJson = src.indexOf("req.json(")` is `>= 0`, AND `idxCt < idxJson`, AND
+   `idxCt < idxGrade`. **The anchor is the CALL EXPRESSION, not the bare string
+   `content-type`**, so a comment that merely mentions the header does not
+   satisfy it. The precedent is uniform: `parse-calendar/route.ts:14`,
+   `prose/route.ts:20` and `research/route.ts:30` are each byte-identical -
+   `const contentType = req.headers.get("content-type") ?? "";` - and
+   `class-trends-insight/route.ts` orders it the same way, with
+   `await requireUser();` at `:97` and `body = (await req.json())` at `:104`.
+3. **THE SOFT BUDGET IS UNDER THE HARD CAP.**
+   `src.match(/export const maxDuration = (\d+)/)` is non-null, AND
+   `src.match(/TOTAL_BUDGET_MS = ([\d_]+)/)` is non-null, AND the second value
+   (underscores stripped, parsed) is **strictly less** than the first times
+   1000. This is the clause that matters: `maxDuration = 60` alone declares
+   where the platform kills the function, and `class-trends-insight/route.ts:36-51`
+   is explicit that the kill "cannot be intercepted from in here, so it produces
+   no response at all, not a worded error". A presence check on `maxDuration`
+   proves nothing about whether the handler stops itself first.
 
-**THE WATCHED FAILURE, and it is what makes this a step and not a line.** The
-same three checks run in the same file against a **fixture string with the
-guard removed**, and are expected to FAIL. Run S1's test before the handler
-exists: the three real checks are RED (the file is absent or empty) and the
-canary is GREEN (it fires). Only then write the handler. **A guard instrument
-that cannot fail is the defect this step exists to prevent**, and this repo has
-shipped that exact shape before (RULING 28's "a check whose assertion cannot
-fail").
+**THE NEGATIVE CONTROL: THREE FIXTURES, ONE PER CHECK.** Revision 1 used a
+single fixture with the guard removed. Measured against the three checks above,
+that fixture fails check 1 and **PASSES checks 2 and 3 unchanged** - so two of
+the three assertions would ship with no proof they can fail, which is the exact
+"a check whose assertion cannot fail" class RULING 28 names and which this step
+cites RULING 28 to prevent. And because `action-guard-coverage.test.ts:123`
+skips every non-`"use server"` file, this canary is the ONLY thing standing
+behind the handler's guard - so a narrow control here is not a small defect.
+
+| Fixture | The one mutation | Must FAIL | Must still PASS |
+|---|---|---|---|
+| **F1** | `await requireUser();` deleted from the body | check 1 | checks 2 and 3 |
+| **F2** | the `req.headers.get("content-type")` read deleted | check 2 | checks 1 and 3 |
+| **F3** | `TOTAL_BUDGET_MS` set to `60_000` - equal to `maxDuration * 1000`, not below it | check 3 | checks 1 and 2 |
+
+**The "must still PASS" column is the half that makes these controls and not
+noise.** A fixture that fails everything proves only that the test file runs. A
+fixture that fails EXACTLY ONE check proves that check is the thing discriminating.
+
+**A fourth fixture, F1b, for the ordering half of check 1**, because deleting
+the guard tests presence and not order: `await requireUser();` MOVED to after the
+first `gradeEntries(` call. It must fail check 1 and pass 2 and 3. Without it,
+check 1's comparison clause is unproven and a handler that authenticates after
+it has already spent a model call goes green.
+
+**THE WATCHED FAILURE.** Run S1's test before the handler exists: all four real
+checks are RED (the file is absent), and all four fixture assertions are GREEN
+(they fire against strings, not against the tree). Only then write the handler.
+
+**Do NOT comment-strip the route source for these assertions.** `docs/backlog.yml`
+A42 (`f18994e`) records that this repo's 64 independently duplicated comment
+strippers eat source from a MIME wildcard - a literal such as `image/*` opens a
+block comment that runs to the next unrelated `*/`, and an assertion anchored
+past that point silently matches a different element. A route that validates
+content types is precisely a file likely to hold a MIME literal. The call-expression
+anchors above make stripping unnecessary: a comment would have to contain
+`req.headers.get("content-type")` verbatim to false-positive, and F2 is the
+control that would catch it if one did.
 
 The handler's guard lines, each with its in-repo precedent, all opened:
 
@@ -1358,7 +2024,14 @@ and `prepareGradingRunAction`'s mode decision. Instrument:
 1. `routeGradingRun` returns `"whole-run"` for a picked file whose WIRE size
    exceeds the budget, and `"incremental"` for one below it;
 2. `prepareGradingRunAction` returns `{ mode: "whole-run", reason }` when ANY
-   single extracted entry exceeds the budget;
+   single extracted entry exceeds the budget - **and its CONSUMER is asserted in
+   the same wave, not merely its producer.** The lifecycle test stubs
+   `prepareGradingRunAction` to return `{ mode: "whole-run", reason }` and
+   asserts the injected `submitWholeRun` stub is called exactly once and the
+   pool is never started (zero item `fetch`es). **Without this half, clause 2
+   asserts a return value nothing reads**, which is the shape S5 and RULING 40
+   exist to close. WATCHED: against a `startReview` that ignores the returned
+   mode, the pool starts and `submitWholeRun` is never called;
 3. the budget constant is compared against `UPLOAD_WIRE_BUDGET_BYTES` (branch A)
    or asserted to be strictly below `VERCEL_BODY_LIMIT_BYTES` (branch B), by
    IMPORTING the constant, never by a copied number.
@@ -1412,16 +2085,99 @@ hook**, and it already tests exactly this case. Opened and verified:
 **Copy that file, never import from it** - `no-cross-test-file-imports`:
 importing a helper from another `*.test.ts` re-runs its `describe` blocks.
 
-**OBJECT:** the TOTAL number of dispatches - `prepareGradingRunAction` calls
-PLUS item `fetch`es PLUS `formAction` calls - after `handleStartReview` is
-invoked TWICE with no tick between.
+**THE SEAM MOVES SO THE INSTRUMENT CAN REACH ITS OBJECT (RULING 39). This is
+the choice, stated: the handler moves behind a `.ts` seam.**
+
+Revision 1 put the object - `handleStartReview` and a counted `formAction` -
+inside `GradingTab.tsx`, **and nothing in this repo renders a `.tsx`.** A test in
+`useIncrementalGradingRun.lifecycle.test.ts` could neither invoke
+`handleStartReview` nor observe a `formAction` call, so the only satisfiable
+reading was to count pool dispatches inside the hook - leaving the double spend
+that deleting `action={formAction}` exists to close measured by nothing, with the
+gate green. The shipped precedent works for the opposite reason: `handleGradeColumn`
+is RETURNED BY A `.ts` HOOK (`useRepoGradesBulkGrade.lifecycle.test.ts:70` imports
+`useRepoGradesGradingActions` from `./useRepoGradesGradingActions`, and
+`ls src/app/components/repo-grades/ | grep -i gradingactions` -> `useRepoGradesGradingActions.ts`),
+which is what lets `:329`'s "A26b: a second click from the SAME render" exist.
+
+**So `useIncrementalGradingRun.ts` RETURNS `startReview`, and `GradingTab.tsx`'s
+`onSubmit` becomes a three-line wrapper that owns no decision.** The hook's
+contract:
+
+```
+useIncrementalGradingRun({ selectedProvider, submitWholeRun })
+  -> { startReview(fd), cancel(), incrementalRunning, ... }
+```
+
+`startReview(fd)`, in order, and every branch inside the `.ts` file:
+
+1. claims `startLockRef` (a `useRef(false)`) **before doing anything else**; if
+   already claimed, it returns immediately;
+2. calls `routeGradingRun(fd, selectedProvider, pickedFileSize)` - PURE and
+   SYNCHRONOUS;
+3. on `"whole-run"` it calls the INJECTED `submitWholeRun(fd)`, releases, returns;
+4. on `"incremental"` it awaits `prepareGradingRunAction(fd)`;
+5. **if that returns `{ mode: "whole-run", reason }` it calls the SAME injected
+   `submitWholeRun(fd)`, releases, returns** - this is RULING 40's named consumer;
+6. otherwise it starts the pool over the returned tickets.
+
+`GradingTab.tsx` supplies `submitWholeRun` and nothing else:
+
+```
+const submitWholeRun = (fd: FormData) => { startTransition(() => { formAction(fd); }); };
+```
+
+**This is what makes W4-9 constructible**, because in the lifecycle harness
+`submitWholeRun` and `prepareGradingRunAction` are both stubs the test owns, and
+`startReview` is a returned function the test calls twice from one render.
+
+**OBJECT:** the TOTAL number of dispatches - `prepareGradingRunAction` stub calls
+PLUS item `fetch` calls PLUS `submitWholeRun` stub calls - after `startReview` is
+invoked TWICE from the SAME render with no tick between.
 **INSTRUMENT:**
 `npx vitest run src/app/components/grading/useIncrementalGradingRun.lifecycle.test.ts`.
 **DIRECTION OF FAILURE: RED if the total is anything other than 1.**
 **Not an assertion that a flag is set.**
 **WATCHED:** delete the `startLockRef` check, run, **watch the total become 2**,
-restore. Only one agent may sabotage-verify on the tree at a time
+restore **from a `cp` backup, never with `git checkout --`**, which on an
+uncommitted file reverts to the index and destroys the chunk's work. Only one
+agent may sabotage-verify on the tree at a time
 (`docs/loop/parallel-disjointness.md` section 5), which section 9.3 schedules.
+
+**W4-9b - the `.tsx` half, which the hook cannot observe and which is therefore
+a SOURCE-TEXT condition, not a claim borrowed from W4-9.** OBJECT: the source of
+`GradingTab.tsx`. INSTRUMENT: `autoGradeTransition.wiring.test.ts` (already in
+this wave's set). As a presence-then-comparison set: `<form` is present; the
+opening `<form ...>` tag span contains `onSubmit={`; that same span contains **no
+`action=`**; and `preventDefault()` is present in the file. Measured today,
+`GradingTab.tsx:228` is `<form className={styles.form} action={formAction}>`
+(`grep -n "formAction\|<form" src/app/components/GradingTab.tsx` -> `:29` the
+prop type, `:52` the destructure, `:148` the one call, `:228` the form).
+**WATCHED:** write W4-9b first and run it against today's unchanged file; it must
+go RED on the `action=` clause and GREEN on the `<form` presence clause, which
+proves the tag span is being found rather than the whole assertion failing for
+want of an anchor.
+
+**W4-9c - the react budget, because the shipped harness is not a general one.**
+`useRepoGradesBulkGrade.lifecycle.test.ts:58-60` is
+`vi.mock("react", () => ({ useState: h0.useState, useRef: h0.useRef, default: { useState: h0.useState, useRef: h0.useRef } }))` -
+it supplies **exactly two hooks**. `useRepoGradesBulkGrade.ts:51` is
+`import { useRef, useState } from "react";` and `:45` says "NO useEffect here",
+which is why that hook can be driven at all. **`useIncrementalGradingRun.ts` adds
+cancellation and must stay inside the same two-hook budget.** OBJECT: that file's
+`from "react"` import list. INSTRUMENT: a source-text clause in the lifecycle test
+itself. DIRECTION OF FAILURE: RED if the import names anything other than
+`useRef` and `useState` - because a `useCallback`, `useEffect` or `useMemo` makes
+the harness THROW rather than fail, and a thrown harness is not a red gate, it is
+an unread one. The `cancelledRef` is a `useRef` and costs nothing against this
+budget.
+
+**WHAT REMAINS UNMEASURABLE HERE, and it is routed to the owner rather than
+covered by a green gate.** W4-9 measures two invocations of a `.ts` function;
+W4-9b measures that the form no longer carries a second dispatch path in source.
+**Neither is two real presses of a real button in a real browser.** Nothing here
+renders, so that claim has no in-repo instrument and this plan does not pretend
+one. It is **RES-W-14**, with an owner, an instrument and a step.
 
 **Cancellation.** A `cancelledRef` checked by `runWorker` at the top of each
 iteration, **before it claims the next index**. It stops further spend (each
@@ -1433,15 +2189,98 @@ started."`, run-level, **not editable and not persisted**, and true on every
 reachable state by that mechanism; and it never leaves the lock held, released
 in the same `finally` `useRepoGradesBulkGrade.ts:234-247` uses.
 
-**A pending submission produces NO ROW AT ALL** (RULING 30). W4-6's clause
-proves it rather than watching for it:
+**A pending submission produces NO ROW AT ALL** (RULING 30). W4-6's source-text
+clause proves it rather than watching for it - **but revision 1's command could
+not match, and corrected it was RED on today's tree against a writer set that was
+remembered rather than measured.** Both defects are fixed here, and the single
+clause is SPLIT into two, because it was asking two different questions through
+one pattern.
+
+**First, what revision 1 printed, and what it does:**
 
 ```
+# revision 1's form, verbatim, at :1440 and again in the 4c gate at :1524
 grep -rn "runDeadlineMs|\"run-deadline\"" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> no output, PIPELINE_EXIT=1
 ```
-RED if it returns a writer outside `steps.grading-cartridge.ts`,
-`steps.grading-draft-flow.ts`, `steps.grading-run.ts` and the engine's own two
-sites. **This grep ranges over the WHOLE of `src/`** - section 9.3.
+
+No `-E`, no BRE `\|`, so grep searched for a literal pipe character. **The gate
+could not fail.**
+
+**Corrected with `-E`, it is red before an implementer writes a line:**
+
+```
+grep -rnE "runDeadlineMs|\"run-deadline\"" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> 29 lines across 11 files, PIPELINE_EXIT=0
+grep -rlE "runDeadlineMs|\"run-deadline\"" src --include=*.ts --include=*.tsx | grep -v "\.test\." | wc -l
+  -> 11
+grep -rnE "runDeadlineMsZZZ|\"run-deadlineZZZ\"" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> no output, PIPELINE_EXIT=1                    # pattern-validity canary
+```
+
+The 11 files: `app/actions/grading.ts` (4 lines),
+`app/api/cron/run-schedules/route.ts` (6), `grading-results/ungradedDisclosure.ts`
+(4), `lib/grade/engine.ts` (2), `lib/grade/types.ts` (3),
+`lib/orphan-upload-sweep.ts` (1), `lib/release-runner.ts` (3),
+`lib/workflow-trigger-runner.ts` (2), `steps.grading-cartridge.ts` (1),
+`steps.grading-draft-flow.ts` (1), `steps.grading-run.ts` (2).
+
+**The stated PASS - "only the five known writers" - is false against that, and
+the sentence is what changes, not the command.** Six of those files are nothing
+to do with A31's writer question: `ungradedDisclosure.ts` and `types.ts` are the
+mechanism's READERS and its copy table; `orphan-upload-sweep.ts`,
+`release-runner.ts` and `run-schedules/route.ts` are a DIFFERENT deadline whose
+comments merely mention `runDeadlineMs`; `workflow-trigger-runner.ts` computes
+its own. **One pattern was being asked two questions.** Split:
+
+**W4-6a - the ROW WRITER.** This is RULING 30's actual claim: no site constructs
+an ungraded row stamped `run-deadline`. Measured:
+
+```
+grep -rnE 'stoppedBy: *"run-deadline"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> src/lib/grade/engine.ts:304        (exactly ONE line, PIPELINE_EXIT=0)
+
+# canary, same call: the pattern IS an alternation and IS being parsed
+grep -rnE 'stoppedBy: *"run-deadlineZZZ"|stoppedBy: *"submission-count-bound"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> src/lib/grade/engine.ts:317
+     src/lib/grade/types.ts:142         (PIPELINE_EXIT=0 - the instrument fires)
+```
+
+**PASS: exactly one line, `src/lib/grade/engine.ts:304`. RED on a second.**
+
+**W4-6b - the DEADLINE INPUT**, which is the fifth-writer watch `docs/backlog.yml`
+A31 owns. Measured:
+
+```
+grep -rnE '"runDeadlineMs"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> src/app/actions/grading.ts:728                                  (the READ)
+     src/lib/workflows/registry/steps.grading-cartridge.ts:105       (a write)
+     src/lib/workflows/registry/steps.grading-draft-flow.ts:266      (a write)
+     src/lib/workflows/registry/steps.grading-run.ts:479             (a write)
+     src/lib/workflows/registry/steps.grading-run.ts:547             (a write)
+     PIPELINE_EXIT=0
+grep -rnE '"runDeadlineMsZZZ"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+  -> no output, PIPELINE_EXIT=1                                      # canary
+```
+
+**PASS: exactly those five lines - one read in `grading.ts` and four writes
+across three workflow step files. RED on a sixth.** Revision 1's "five known
+writers" was nearly this set, but it named the engine's two sites as members of
+it, which conflated the row writer (W4-6a) with the form field (W4-6b). They are
+different objects in different files and they now have different commands.
+
+**The broad 29-line form is retained as an INFORMATIONAL baseline only**, run
+before and after, with its count and file list pasted above. It is not a PASS
+condition: it is too broad to state one honestly, and a count that moves because
+a sibling edited a comment about a different deadline is not a signal. **Both
+narrow greps range over the whole of `src/`** and that crossing is named in both
+briefs - section 9.3.
+
+**Wave 4c adds NEITHER.** Its cancellation path produces no row for an
+un-started item (RULING 30) and it does not touch the `runDeadlineMs` form
+field. Both greps must return the pasted sets unchanged at the wave's gate, and
+**the wave must have run both BEFORE it starts**, so that a difference at the
+gate is attributable to the wave rather than to the tree.
 
 ---
 
@@ -1455,22 +2294,66 @@ Verified open today (`awk 'NR>=226&&NR<=242'`, `awk 'NR>=341&&NR<=358'`,
 - `:347` is `disabled={pending || (source === "canvas" && !canvasRetrieved)}`.
 - `formAction` and `pending` are PROPS, from `page.tsx:63`'s `useActionState`.
 
-The seam, exactly:
+The seam, exactly - **and note that the DECISIONS have moved into the `.ts` hook
+(S4) and what remains in this `.tsx` file is wiring only**:
 
 1. **`action={formAction}` is DELETED from the `<form>` at `:228`.** This is the
    single line that closes the double-spend; nothing else in this step works
-   without it.
-2. The form gains `onSubmit={handleStartReview}`, whose first statement is
-   `event.preventDefault()`.
-3. `handleStartReview` reads a `startLockRef` (`useRef(false)`) **before doing
-   anything else**; if claimed, it returns.
-4. It builds `const fd = new FormData(event.currentTarget)` - reachable now
-   precisely because the dispatch is ours.
-5. It calls `routeGradingRun(fd, selectedProvider, pickedFileSize)`, PURE and
-   SYNCHRONOUS, returning `"incremental" | "whole-run"`.
-6. On `"whole-run"` it calls `formAction(fd)` inside a `startTransition`. On
-   `"incremental"` it calls `prepareGradingRunAction(fd)` and starts the pool.
-7. `disabled={pending || incrementalRunning || (source === "canvas" && !canvasRetrieved)}`.
+   without it. Asserted by **W4-9b**.
+2. The form gains
+   `onSubmit={(event) => { event.preventDefault(); void startReview(new FormData(event.currentTarget)); }}`.
+   `new FormData(event.currentTarget)` is reachable now precisely because the
+   dispatch is ours.
+3. `startReview` comes from `useIncrementalGradingRun` (S4). **The `startLockRef`
+   claim, the `routeGradingRun` call and BOTH whole-run branches live inside that
+   `.ts` hook**, where W4-9 can count them.
+4. **`submitWholeRun` is declared here and is the ONLY `formAction(` call this
+   step adds:**
+   `const submitWholeRun = (fd: FormData) => { startTransition(() => { formAction(fd); }); };`
+   It is passed into the hook.
+5. `disabled={pending || incrementalRunning || (source === "canvas" && !canvasRetrieved)}`.
+
+**RULING 40 - `prepareGradingRunAction`'s `mode: "whole-run"` return, ITS NAMED
+CONSUMER, AND WHY THAT DOES NOT BREAK A5.**
+
+Revision 1 asserted a server-side whole-run decision in W4-12 clause 2 and never
+said what the client does with it. Two of the four states
+`docs/a39-architecture.md:1357-1363` routes to whole-run - any single entry over
+budget, and a run that yields zero tickets - are knowable ONLY after the action
+has run server-side and opened the archive (`:1115-1119`). So the return is not
+decorative: without a consumer, a run containing one oversized submission starts
+the pool anyway, which is the precise failure W4-12's own direction-of-failure
+paragraph exists to make impossible. **An export whose caller is in no wave is
+this repo's most repeated structural failure, and a return BRANCH is an export.**
+
+**THE CONSUMER, NAMED:** `useIncrementalGradingRun.ts`'s `startReview`, step 5
+of its contract in S4. On `{ mode: "whole-run", reason }` it calls the injected
+`submitWholeRun(fd)` - **the same injected function the client-side synchronous
+route already calls.**
+
+**That is also what keeps A5 at exactly two.** `/formAction\(/` counts
+occurrences in `GradingTab.tsx`'s source:
+
+| Occurrence | Where | Inside a `startTransition(` span? |
+|---|---|---|
+| `:148` | `handleAutoGrade`, unchanged by this wave | yes, today |
+| the one inside `submitWholeRun` | new in this step | yes, by construction |
+
+**BOTH whole-run routes - the client-side synchronous one and the server-decided
+one - go through `submitWholeRun`, so there is ONE call site for two routes and
+the count is two, not three.** Revision 1's A5 replacement pinned it to exactly
+two and a third fallback would have broken it; the shared helper is what makes
+the pin and the consumer compatible rather than a choice between them. **Any
+brief that writes a second `formAction(fd)` for the server-decided branch turns
+A5 red, and that is the intended behaviour, not a bug in A5.**
+
+Measured today, so the wave knows what "two" is counted against:
+`grep -n "formAction\|<form" src/app/components/GradingTab.tsx` returns `:29`
+(the prop type, `formAction: (payload: FormData) => void;` - no `(` immediately
+after the identifier, so `/formAction\(/` does not match it), `:52` (the
+destructure), `:148` (the ONE matching call) and `:228` (the form attribute, no
+paren). **Exactly one match today**, which is what
+`autoGradeTransition.wiring.test.ts:159-162` asserts.
 
 **A5 CHANGES IN THIS COMMIT, and the reason is recorded in the test file in the
 same commit.** Measured today: `autoGradeTransition.wiring.test.ts:159-162` is
@@ -1482,7 +2365,8 @@ it("A5: formAction( is called exactly once in the whole file, and it is the tran
 });
 ```
 
-`/formAction\(/` will now match **twice**: `:148` and step 6's fallback.
+`/formAction\(/` will now match **twice**: `:148` and the one inside
+`submitWholeRun` (step 4 above).
 **A5 becomes: every `formAction(` occurrence lies strictly inside a
 `startTransition(` paren span, and there are exactly two.** That is strictly
 stronger than a bare count - it constrains WHERE each call is, not just how
@@ -1490,6 +2374,11 @@ many there are. **WATCHED: change the test first, run it against the unchanged
 `GradingTab.tsx`, and confirm it still passes on one call inside a transition;
 then add the second call OUTSIDE a transition and watch it go RED; then move it
 inside.**
+
+**The count is two under BOTH whole-run routes** because both go through
+`submitWholeRun`. A brief that gives the server-decided branch its own
+`formAction(fd)` makes it three and turns A5 red - which is the pin doing its
+job, not a conflict between A5 and RULING 40.
 
 **A6 and A7 are NOT touched.** A6 (`:164-190`) requires SOME occurrence of
 `source !== "livefeed"` whose innermost enclosing brace span is a live
@@ -1507,26 +2396,70 @@ if the stop literal is spelled anything other than `Stop grading`.
 
 #### 8.4.4 Wave 4c ceiling and gate
 
+**Edited files:**
+
 | File | Before | Est. delta | Gate |
 |---|---|---|---|
 | `src/app/components/GradingTab.tsx` | 524 after wave 2 | +45 | `-le 620` |
-| `src/app/actions.ts` | 77 | +1 | - |
-| `src/lib/grade.ts` | 19 | +2 (4b) | - |
+| `src/app/actions.ts` | 77 (both counters) | +1 | `-le 90` |
+| `src/lib/grade.ts` | 19 (both counters) | +2 (4b) | `-le 30` |
+
+**THE NINE NEW FILES, each with a bound. Revision 1 gave them none**, so the only
+backstop was the repo-wide 1000 - and 1000 is the ceiling a file grows INTO, not
+a budget a file is born with. This is the wave where it bites, because 4.1 rules
+4c is ONE commit and cannot be split (the handler's only caller is the pool, so
+splitting ships a live model-spending POST with no surface). **Per-file budgets
+are the mitigation for that reviewability cost; a split is not available.**
+
+| New file | Bound, both counters | The measured basis |
+|---|---|---|
+| `src/app/api/grade-run-item/route.ts` | **`-le 260`** | `src/app/api/class-trends-insight/route.ts` is **187** (both counters) and is the line-for-line model; this handler adds the S1 validation block and the S2b `raceWithTimeout` wrapper |
+| `src/app/api/grade-run-item/route.test.ts` | **`-le 400`** | four negative fixtures (F1, F1b, F2, F3) plus W4-10 and W4-13 |
+| `src/app/actions/grading-incremental.ts` | **`-le 250`** | a `"use server"` module holding `prepareGradingRunAction` only |
+| `src/app/actions/grading-incremental.test.ts` | **`-le 350`** | W4-4, W4-12 clause 2 |
+| `src/app/components/grading/incrementalRunPlan.ts` | **`-le 300`** | four pure functions and two constants |
+| `src/app/components/grading/incrementalRunPlan.test.ts` | **`-le 450`** | W4-3, W4-5, W4-11, W4-12 clauses 1 and 3 |
+| `src/app/components/grading/useIncrementalGradingRun.ts` | **`-le 560`** | **the one that needs saying.** It is a PORT of `useRepoGradesBulkGrade.ts`, measured at **489** on both counters, and it then ADDS cancellation and the `startReview` seam of S4. 560 is 489 + ~70 and leaves 440 to the repo ceiling. **If the port lands above 560 the wave states the measured reason in its commit message; it does not raise the number silently** |
+| `src/app/components/grading/useIncrementalGradingRun.lifecycle.test.ts` | **`-le 760`** | its precedent `useRepoGradesBulkGrade.lifecycle.test.ts` is **706** on both counters, and this one adds W4-9b, W4-9c and W4-12 clause 2's consumer half |
+| `src/lib/grade/reconcile.ts` / `.test.ts` (wave 4b) | `-le 250` / `-le 400` | stated in 8.4.2 |
+
+`src/file-size-ceiling.structure.test.ts:41` is `const LIMIT = 1000;` and `:138`
+compares `lineCount > limit`, so a new file at 1001 is the FIRST value that goes
+red. **Nothing between a wave's own bound and 1000 would be caught by the
+repo-wide gate**, which is the whole reason these bounds exist. **No wave in this
+plan proposes an `ALLOWED_OVERAGE` entry.**
 
 ```powershell
 npm run test:paths -- src/app/api/grade-run-item/route.test.ts src/app/actions/grading-incremental.test.ts src/app/components/grading/incrementalRunPlan.test.ts src/app/components/grading/useIncrementalGradingRun.lifecycle.test.ts src/app/actions/action-guard-coverage.test.ts src/lib/use-server-exports.test.ts src/app/components/autoGradeTransition.wiring.test.ts src/lib/module-graph/runtime-import-graph.test.ts src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts src/app/components/grading-results/gradingResultsExtraction.wiring.test.ts src/app/components/grading-results/gradingResultsHelpersEditState.test.ts src/lib/grade/reconcile.test.ts src/lib/grade/engine.test.ts src/lib/grade/engine.ungraded.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
 ```
 The first four are `[created by this wave]`.
 ```powershell
+npm test
 npx tsc --noEmit --incremental false
 @(Get-Content src/app/components/GradingTab.tsx).Count
 git status --short
-grep -rn "runDeadlineMs|\"run-deadline\"" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+```
+plus `@(Get-Content <file>).Count` AND `wc -l < <file>` for the nine new files
+in the table above. The W4-6 greps are run from Bash, both before the wave starts
+and at the gate:
+
+```
+grep -rnE 'stoppedBy: *"run-deadline"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rnE 'stoppedBy: *"run-deadlineZZZ"|stoppedBy: *"submission-count-bound"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rnE '"runDeadlineMs"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rnE '"runDeadlineMsZZZ"' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rnE "runDeadlineMs|\"run-deadline\"" src --include=*.ts --include=*.tsx | grep -v "\.test\." | wc -l
+wc -l < src/app/components/GradingTab.tsx
 ```
 
-**PASS:** every argument `COVERED`, exit 0; `tsc` silent; `GradingTab.tsx`
-`<= 620` on both counters; the `run-deadline` grep returns only the five known
-writers.
+**PASS:** every `test:paths` argument `COVERED`, exit 0; `npm test` zero failed,
+exit 0; `tsc` silent; `GradingTab.tsx` `<= 620` and all nine new files at or
+under their stated bounds, on both counters; **W4-6a returns exactly
+`src/lib/grade/engine.ts:304` and its canary returns two lines; W4-6b returns
+exactly the five enumerated lines and its canary exits 1**; the broad
+informational grep returns the same count it returned before the wave started
+(**29** at this pass's HEAD) or, if it differs, the wave attributes the
+difference to a named sibling before proceeding.
 
 **`npm run build` is NOT a gate here and must not be `&&`-chained.** It compiles
 and then fails in the prerender tail because there is no `.env`
@@ -1536,6 +2469,39 @@ running once on 4c because `next build` is the ONLY gate that catches a
 `"use server"` file exporting a non-async binding - which
 `src/app/actions/grading-incremental.ts` is, and which
 `src/lib/use-server-exports.test.ts` covers only partially.
+
+#### 8.4.5 W4-7 - the owner-verification pass condition revision 1 dropped
+
+**RESTORED VERBATIM from `docs/a39-architecture.md:2143-2145`**, where its own
+disposition table at `:2251` marks it KEPT VERBATIM. Revision 1 carried the
+residual it points at (RES-A39A-4, via RES-W-12) and dropped the condition
+itself, while carrying the structurally identical owner-only W1-3 and W5-2 -
+inconsistent, and the one it dropped is **the only measurement of whether A39
+worked at all.**
+
+> **W4-7, owner-only.** OBJECT: wall-clock elapsed from Start Review to the
+> first readable row, before and after. INSTRUMENT: the owner, with real keys,
+> against a clock. **No API key exists here.** RES-A39A-4.
+
+**Why it cannot be built in this checkout, stated rather than assumed.** The
+claim is about elapsed time to a rendered row. Nothing renders under vitest
+(`docs/loop/this-repo.md` sections 2 and 6) and `vitest.setup.ts` throws on any
+real `fetch`, so there is no way to produce either a row or a real model latency
+here. **A green suite on this wave says nothing about W4-7**, and no gate in
+8.4.4 should be read as covering it.
+
+**Its five fields, so it is a pass condition and not a hope:**
+
+| Field | Value |
+|---|---|
+| **OWNER** | repo owner |
+| **INSTRUMENT** | one real grading run of at least five submissions on the default provider, timed from the Start Review press to the first row a reader could act on, run once on the pre-4c build and once after |
+| **OBJECT** | elapsed milliseconds to the first readable row, before and after |
+| **DIRECTION OF FAILURE** | **the after value not lower than the before value** - the feature's entire premise is that row 1 arrives while row 7 is still running, and an unchanged time to first row means the pool was built and the wait was not moved |
+| **STEP** | the owner verification pass after wave 4, in the SAME sitting as RES-A39A-4's timing run, RES-W-11's throttle count and RES-W-12's budget check - one run answers all four, and splitting them costs four runs |
+
+**Carried in the register as RES-W-12's companion**; W4-7 is the condition,
+RES-A39A-4 is the residual, and neither substitutes for the other.
 
 ### 8.5 Wave 5 - the credential has a route, and the receipt reaches Live Feed
 
@@ -1570,13 +2536,31 @@ repo-wide gates (owned, read-only).
 - **W5-2, owner-only** - whether the link appears and is keyboard reachable.
   Nothing renders. RES-W-6.
 
+**New files, with bounds:** `src/lib/canvas-credential-cta.ts` **`-le 120`**
+(a predicate and a constant), `src/lib/canvas-credential-cta.test.ts`
+**`-le 200`**.
+
 **Gate:**
 ```powershell
 npm run test:paths -- src/lib/canvas-credential-cta.test.ts src/app/components/autoGradeTransition.wiring.test.ts src/app/components/grading-results/gradingResultsExtraction.wiring.test.ts src/app/components/grading-results/gradingResultsHelpersEditState.test.ts src/file-size-ceiling.structure.test.ts src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+npm test
 npx tsc --noEmit --incremental false
 @(Get-Content src/app/components/LiveFeedPanel.tsx).Count
+@(Get-Content src/app/components/GradingTab.tsx).Count
 git status --short
 ```
+```
+wc -l < src/app/components/LiveFeedPanel.tsx
+```
+**`src/lib/canvas-credential-cta.test.ts` is `[created by this wave]`** - the
+marker section 3.4 requires and revision 1 omitted here. Run as written against
+today's tree the gate exits 1 with `PRE-CHECK FAILED / does not exist on disk`,
+which is correct behaviour for an EXIT gate and is harmless once the file
+exists; the marker is what stops a reader treating that exit 1 as a defect.
+
+**PASS:** every argument `COVERED`, exit 0; `npm test` zero failed, exit 0;
+`tsc` silent; `LiveFeedPanel.tsx <= 760` and `GradingTab.tsx <= 620` on both
+counters; both new files at or under their bounds.
 
 ---
 
@@ -1695,6 +2679,28 @@ src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
 - **3b + 4** (slot 4) - `w3b vs w4` empty. This re-derives the architecture's
   own claim on today's tree.
 
+**Both licences survive this revision's write-set corrections, checked and not
+assumed.** Wave 4b gained three paths in 8.4.2
+(`gradingResultsHelpersWiring.test.ts`, `repoGradesFeedbackAndFiles.wiring.test.ts`,
+`grade-result-doors.wiring.test.ts`) and wave 2 gained seven explicit new-file
+paths in 8.2. None of the three appears in w3b's 27 paths (9.2's pasted lists),
+and wave 2 is not in either licensed pair. **`w3b vs w4` is still EMPTY and
+`w1 vs w3ai` is still EMPTY.** A write-set correction that is not re-intersected
+is how a licence outlives the set it was computed over.
+
+**HOW THE SEQUENCING INSIDE A CONCURRENT SLOT IS ACTUALLY ENFORCED, because
+"gates run sequentially" is an instruction to an orchestrator and not to either
+agent.** Slots 1 and 4 name a single `tsc` owner and a sabotage ordering, and
+neither concurrent agent can observe the other. **The mechanism is that these are
+ORCHESTRATOR obligations, discharged by the orchestrator and written into neither
+brief:**
+
+| Obligation | Who discharges it | How |
+|---|---|---|
+| Exactly one `npx tsc --noEmit` caller per window | **the orchestrator** | Each brief's gate block runs `tsc` with `--incremental false`, which removes the `tsconfig.tsbuildinfo` race entirely; the "one owner" rule is the belt to that brace, and the orchestrator holds it by not dispatching the second wave's gate until the first has returned |
+| No two agents sabotage-verify at once | **the orchestrator** | Each brief states that its sabotage window must be reported as started and finished; the orchestrator does not dispatch the sibling's gate inside that window. **Each brief carries the RULE ("report the window"), not the SCHEDULE ("wait for the other agent"), because a brief that names a sibling makes an agent try to observe one** |
+| Restore after sabotage | **each implementer** | `cp` backup, never `git checkout --` on an uncommitted file, which reverts to the index and destroys the chunk's work |
+
 **Every non-empty pair is sequenced**, per 4.2. The one-file pairs `w2/w3aii`
 and `w2/w3b` are discussed in 4.3; `w3ai/w3aii` sharing
 `snapshot-autofire.structure.test.ts` is why the two extraction halves are
@@ -1708,11 +2714,122 @@ Each wave's set is its edits plus the output of
 for n in <every file that wave edits>; do echo "### $n"; grep -rl "$n" src --include="*.test.ts" | sort; echo; done
 ```
 
-pasted in sections 6.1, 7.1, 8.1, 8.2. The instrument is **source-text** reader
-discovery, which is the right one for this repo's 68 `*.wiring.test.ts` and 17
-`*.structure.test.ts` files - they assert by `readFileSync`. It does **NOT**
-find import-based readers, which is why three additions were derived separately
-in 8.2 by a second instrument:
+pasted in sections 6.1, 7.1, 8.1, 8.2 - **and, as of this revision, for waves 3b,
+4 and 5 as well.** Revision 1 named those three sets by reference and never ran
+the instrument over them, which meant the disjointness output in 9.1 - the only
+thing granting the two concurrency licences - was computed over sets a reader
+could not check. **The licences were independently re-derived by the round-1
+check and both hold; what was missing was the evidence, so here it is.**
+
+**Wave 3b's edits and their readers:**
+
+```
+for n in "RubricInputModal.tsx" "GradingRecordingPanel.tsx" "SnapshotGradingPanel.tsx"; do
+  echo "### $n"; grep -rl "$n" src --include="*.test.ts" | sort; echo; done
+grep -rl "RubricInputModalZZZ.tsx" src --include="*.test.ts"      # canary, exit 1
+```
+```
+### RubricInputModal.tsx
+src/app/actions/syllabus-upload.rubric-reuse.test.ts
+src/app/components/grading-recording/rubric-input.test.ts
+src/app/components/snapshot-grading/snapshot-grading.structure.test.ts
+src/app/components/ui/buttonVariant.test.ts
+src/app/components/ui/modalAdoption.wiring.test.ts
+src/lib/syllabus-upload-source.test.ts                             (SIX - 0.3's finding reproduces)
+
+### GradingRecordingPanel.tsx
+src/app/actions/grading-submission-grade.test.ts
+src/app/components/grading-recording/GradingAssessmentDeclarationControls.test.ts
+src/app/components/grading-recording/GradingRecordingPanel.assessment.test.ts
+src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts
+src/app/components/grading-recording/grading-recording-log.test.ts
+src/app/components/grading-recording/grading-rows.test.ts
+src/app/components/grading-recording/markLate.wiring.test.ts
+src/app/components/grading-recording/submission-kind-callsites.structure.test.ts
+src/app/components/module-deck-capture/ModuleDeckCapturePanel.wiring.test.ts
+src/app/components/module-deck-capture/module-deck-dispatch.test.ts
+src/app/components/recording/AddKnowledgePages.test.ts
+src/app/components/recording/discussion-capture.test.ts
+src/app/components/recording/discussion-knowledge-context.test.ts
+src/app/components/recording/runLogRow.test.ts
+src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts
+src/app/components/ui/buttonVariant.test.ts
+src/lib/recording-launch.test.ts                                   (SEVENTEEN)
+
+### SnapshotGradingPanel.tsx
+src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts
+src/app/components/snapshot-grading/snapshot-grading.structure.test.ts
+src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts
+src/loop-docs.structure.test.ts                                    (FOUR)
+```
+
+**Wave 4's and wave 5's edits and their readers:**
+
+```
+for n in "grade/engine.ts" "grade.ts" "GradingTab.tsx" "app/actions.ts" "LiveFeedPanel.tsx"; do
+  echo "### $n"; grep -rl "$n" src --include="*.test.ts" | sort; echo; done
+grep -rl "LiveFeedPanelZZZ.tsx" src --include="*.test.ts"          # canary, exit 1
+```
+```
+### grade/engine.ts
+src/app/components/grading-results/ungradedDisclosure.test.ts
+src/lib/code-runner.test.ts
+src/lib/grade/grouping-zip-parents.wiring.test.ts
+
+### grade.ts        (raw; false positives on snapshot-grade.ts / grading-submission-grade.ts
+                     discarded by opening each hit - see 3.3 for the discard table)
+src/app/actions/snapshot-parse-rubric.test.ts                      (discarded)
+src/app/components/grading-recording/submission-kind-callsites.structure.test.ts (discarded)
+src/app/components/grading-results/gradingResultsHelpersWiring.test.ts           (KEPT)
+src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts         (KEPT)
+src/app/components/snapshot-grading/p11-containment-snapshot.test.ts             (discarded)
+src/app/components/snapshot-grading/snapshot-grading.structure.test.ts           (discarded)
+src/lib/grade/grade-result-doors.wiring.test.ts                    (KEPT, comment only)
+src/lib/module-graph/runtime-import-graph.test.ts                  (KEPT)
+
+### GradingTab.tsx
+src/app/components/autoGradeTransition.wiring.test.ts
+src/app/components/grading-results/gradingResultsExtraction.wiring.test.ts
+src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
+
+### app/actions.ts
+src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
+src/lib/module-graph/runtime-import-graph.test.ts
+
+### LiveFeedPanel.tsx
+src/app/components/autoGradeTransition.wiring.test.ts
+src/app/components/grading-results/gradingResultsExtraction.wiring.test.ts
+src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
+```
+
+**Consequence for 9.1's two licences, checked against these sets rather than
+asserted.**
+
+- **`w3b` vs `w4` - the slot-4 licence.** `w3b` is the three panels plus the
+  modal plus the 17 + 4 + 6 reader paths above; `w4` is `grade/engine.ts`,
+  `grade.ts`, `GradingTab.tsx`, `app/actions.ts`, their readers above, and 4c's
+  nine new files. **The two `grade.ts` readers this revision ADDS to wave 4b**
+  (`gradingResultsHelpersWiring.test.ts`,
+  `repoGradesFeedbackAndFiles.wiring.test.ts`) **appear in neither of w3b's
+  three reader lists**, so the intersection is still EMPTY and the licence
+  survives the correction. This is the check the round-1 check performed
+  independently; it is pasted here because a reader cannot verify an
+  intersection against a set that was never printed.
+- **`w1` vs `w3ai`.** `w3ai` is `SnapshotGradingPanel.tsx` plus the four paths
+  above plus the new leaf; `w1` is `single-file-entry.{ts,test.ts}`,
+  `actions/grading.ts`, `GradingTab.tsx` and their readers. No shared path.
+  EMPTY.
+
+**`9.2`'s own closing rule is what this section was breaking:** a derivation that
+cannot range over the set it claims is an enumeration in a command's clothes -
+and a set stated by reference, with no command ever run over it, is the purest
+form of that.
+
+The instrument is **source-text** reader discovery, which is the right one for
+this repo's 68 `*.wiring.test.ts` and 17 `*.structure.test.ts` files - they assert
+by `readFileSync`. It does **NOT** find import-based readers, which is why three
+additions were derived separately in 8.2, two more in 8.4.2, and a second
+instrument is named here:
 
 ```
 grep -rnE 'from "(@/lib/grade|\.\./grade|\./grade)"' src --include=*.ts --include=*.tsx | sort
@@ -1741,12 +2858,23 @@ canaries' haystacks. Wave 4 designs against `engine.ts`'s reconciliation, the
 `GradingTab.tsx` dispatch, the `src/lib/grade.ts` barrel and the Route Handler
 precedents. **Does either establish a fact the other designs against?** No - with
 one crossing that is NOT visible in any file list and is therefore stated:
-**W4-6's grep ranges over the whole of `src/`.** A concurrent sibling that
-introduced the literal `"run-deadline"` or `runDeadlineMs` anywhere under
-`src/` would turn wave 4's gate red. **3b introduces neither**, verified by
-inspection of its write set (it adds `ta-snap-*` / `ta-rec-grade-*` key
-literals, a `rubric-memory` call and replacement comments). **INDEPENDENT, with
-that crossing named in both briefs.**
+**W4-6a's and W4-6b's greps range over the whole of `src/`.** A concurrent
+sibling that introduced `stoppedBy: "run-deadline"` or the form field
+`"runDeadlineMs"` anywhere under `src/` would turn wave 4's gate red.
+**3b introduces neither**, verified by inspection of its write set (it adds
+`ta-snap-*` / `ta-rec-grade-*` key literals, a `rubric-memory` call, two
+`maxRows` props and replacement comments). **INDEPENDENT, with that crossing
+named in both briefs.**
+
+**The crossing is SMALLER than revision 1's, and that is a consequence of
+RULING 38's split rather than a coincidence.** The broad
+`runDeadlineMs|"run-deadline"` pattern matched 29 lines across 11 files
+including comments about an unrelated deadline, so almost any sibling editing
+`release-runner.ts`, `orphan-upload-sweep.ts` or `run-schedules/route.ts` could
+have moved it. The two narrow patterns match a construction site and a form-field
+name, which almost nothing else in this repo writes. **A gate that is red for a
+reason unrelated to the claim is not just uninformative under concurrency - it is
+a false crossing that makes two independent waves look coupled.**
 
 **Shared resources that no file list shows** (`docs/loop/parallel-disjointness.md`
 section 5), each binding on every concurrent slot:
@@ -1761,7 +2889,8 @@ section 5), each binding on every concurrent slot:
 | `src/file-size-ceiling.structure.test.ts` | Walks all of `src/`. A sibling that grows any file past 1000 turns THIS wave's gate red. Read the failure message before assuming it is yours |
 | `src/lib/no-emojis.test.ts` | `roots = ["src", "docs"]` at `:254` - **it scans `docs/` too**, so a doc-only wave shares it with every code wave. It also owns the ONE authorized exception (`CHECKLIST_DONE_PREFIX`). **Never hand-roll an emoji scan**: `grep -P` is broken here and exits 0 without checking (`docs/loop/this-repo.md:210-216`) |
 | `src/source-bytes.structure.test.ts` | Walks source for BOM and control bytes. A single materialised NUL makes a file grep as binary and silently drop out of every source-text test while passing tsc, eslint, vitest and the build |
-| W4-6's `run-deadline` grep | Ranges over all of `src/`. Named above |
+| W4-6a's and W4-6b's greps | Range over all of `src/`. Named above. **Also: revision 1's single broad pattern is retained as an informational baseline whose 29-line count a sibling CAN move; it is explicitly not a PASS condition, for that reason** |
+| **`npm test`** | Walks all of `src/` (5.1: 1111 files, 22454 tests, 107.4s measured here). **A sibling's red test turns THIS wave's gate red.** Read the failing file's path before assuming it is yours - the same rule as the ceiling test's, and the reason this gate is worth more than it costs is that it is the only thing ranging over readers no wave enumerated. Its stderr also carries a concurrent sibling's git noise (5.1, point 3) |
 | `docs/BACKLOG.md` | A file like any other. If a wave's brief lets it write there, the orchestrator may not, in that window |
 
 **Cap check:** no slot exceeds 2 items. Cap is 2-3.
@@ -1784,15 +2913,47 @@ that buries the answer is how it recurs.
 | `describeRunRubricProvenance` | 2 | `RubricProvenance.tsx` | **YES** |
 | `RubricProvenance` | 2 | `GradingTab.tsx`, above the `<GradingResults` mount at `:427` | **YES.** Wave 5 adds `LiveFeedPanel.tsx` as a second mount |
 | `GradingRun.rubricUsed` / `.rubricFingerprint` | 2 | `engine.ts` writes; `coerceGradingRun` and `parseGradingRun` carry forward; `describeRunRubricProvenance` reads | **YES** |
-| `reconcileRun` | 4b | `engine.ts:332-393` becomes the call; `src/lib/grade.ts` re-exports | **YES** |
-| `prepareGradingRunAction` | 4c | `GradingTab.tsx`'s `handleStartReview` | **YES** |
+| `reconcileRun` | 4b | `engine.ts:332-393` becomes the call - **and `engine.ts` imports the LEAF (`./reconcile`) directly, not the barrel.** See the note below | **YES** |
+| **The `src/lib/grade.ts` BARREL re-export of `reconcileRun`** | 4b | **NOTHING, in any wave.** See the note below | **NO - and it is either justified or deleted** |
+| `prepareGradingRunAction`, including its `mode: "whole-run"` return branch | 4c | `GradingTab.tsx`'s form calls `startReview`, which is `useIncrementalGradingRun.ts`'s. **`startReview` consumes BOTH shapes of the return**: the ticket list starts the pool, and `{ mode: "whole-run", reason }` calls the injected `submitWholeRun` (S5, RULING 40) | **YES, both branches** |
 | `POST /api/grade-run-item` | 4c | `useIncrementalGradingRun.ts`'s pool - **the only caller** | **YES, and it cannot be otherwise** (4.1) |
 | `buildRunItemRequests`, `mergeArrivedResults`, `routeGradingRun`, `classifyItemFailure`, `INCREMENTAL_CONCURRENCY`, `ITEM_REQUEST_BYTE_BUDGET` | 4c | `useIncrementalGradingRun.ts` and `GradingTab.tsx` | **YES** |
 | `useIncrementalGradingRun` | 4c | `GradingTab.tsx` | **YES** |
 | `isCanvasCredentialRequired`, `CANVAS_CREDENTIAL_CTA_HREF` | 5 | `GradingTab.tsx`, `LiveFeedPanel.tsx` | **YES** |
 
 **No type-only-module exception is claimed.** Every row above is a runtime
-export with a runtime caller in its own wave.
+export with a runtime caller in its own wave - **with one exception, which is
+named here rather than left for a reader to notice.**
+
+### 10.1 The one export in this plan whose caller is in NO wave
+
+`src/lib/grade.ts` is a 19-line barrel of pure re-exports with 52 importers
+(3.3). Wave 4b adds `reconcileRun` to it. **But `engine.ts` - the caller section
+10 names - imports the leaf directly** (`./reconcile`), because that is what
+keeps 4b's runtime-import-graph story intact and what makes `reconcile.ts`'s
+"imports only `./types` and `./rubric`" claim checkable. **So the barrel line
+itself has no importer in any of the six waves.**
+
+That is a smaller version of the class this whole section exists to police, and
+this plan does not get to wave its own rule. The disposition, ruled:
+
+**RULED: the barrel line is KEPT, and here is what makes it different from a
+dead export rather than an exception to the rule.** `src/lib/grade.ts` is not a
+module with behaviour; it is this repo's declared public surface for
+`src/lib/grade/`, and 52 importers reach the package through it. A new leaf that
+is reachable only by deep path is the thing the barrel exists to prevent, and
+`grade-result-doors.wiring.test.ts:127` already names "grade.ts's own barrel" as
+a door in that argument. **The cost of keeping it is two lines and one new edge
+in a graph three tests already walk; the cost of omitting it is a leaf that the
+next chunk imports by deep path because the barrel did not offer it.**
+
+**What makes this honest rather than a loophole:** the line is not claimed to be
+COVERED by anything. `runtime-import-graph.test.ts:572` sees the new edge, which
+proves the line parses and resolves - it does not prove anybody wanted it.
+**If the reviewer prefers the strict reading, the remedy is one line: delete the
+barrel export.** Nothing in waves 1-5 breaks, because no wave imports it.
+**Carried as RES-W-15** with an owner and a step, so the decision is recorded
+rather than inherited.
 
 ---
 
@@ -1801,6 +2962,19 @@ export with a runtime caller in its own wave.
 `docs/a39-architecture.md` section 12 leaves four. **None blocks this plan.**
 Each is a gate on exactly one wave, with what that wave does under each answer.
 The recommendations are the architecture's; they are repeated, not re-argued.
+
+**There is a FIFTH open question and it is NOT in this table, because it is the
+only one that BLOCKS a wave.** `docs/a39-waves-rulings.md` RULING 37 escalated
+wave 3a-i's extraction SHAPE - `.tsx` components that reach the ceiling but have
+no oracle, versus `.ts` leaves that carry an oracle but for which no arithmetic
+exists - with a recommendation of (a). **This plan adopts no branch**, structures
+wave 3a-i so it executes under any of the three answers (6.7), and marks 3a-i not
+dispatchable until the answer arrives. Every other wave proceeds. RULING 32 gates
+A24 on the same commit, so the answer unblocks two backlog rows.
+
+**This is revision 2 and it is terminal.** Nothing below is deferred to a next
+round; what could not be settled here is either an owner question shaped so every
+answer ends the activity, or a residual in section 12 with all five fields.
 
 | Q | Gates which wave | (A) | (B) | Recommendation | What the wave does if unanswered at dispatch |
 |---|---|---|---|---|---|
@@ -1816,6 +2990,14 @@ The recommendations are the architecture's; they are repeated, not re-argued.
 Every entry names an **OWNER**, an **INSTRUMENT**, an **OBJECT**, a **DIRECTION
 OF FAILURE** and a **STEP**. **Missing any of the five it is a deletion, and I
 would call it that.** None below is.
+
+**Seventeen entries in revision 2, up from thirteen.** The four added
+(RES-W-14 through RES-W-17) are each the honest remainder of a ruling this
+revision applied rather than a new concern: what W4-9's moved seam still cannot
+measure, the barrel line nothing imports, the stale full-suite figure in a card
+this plan may not write, and the one uncapped field W3-5 deliberately does not
+reach. **A ruling applied without recording what it did not reach is how the
+next round inherits a silence.**
 
 Entries prefixed `RES-W-` are this plan's own. Entries the architecture's
 section 11 already carries are NOT restated here; they stand as written, except
@@ -1841,6 +3023,10 @@ the wave that disposes of it** - not deferred to "whoever lands the next chunk".
 | **RES-W-10** | **`snapshot-autofire.structure.test.ts:39,:258` cite `GradingRecordingPanel.tsx:532-544` in a COMMENT, so a 3a-ii extraction can make it false with every gate green** | wave 3a-ii's implementer | `grep -n "GradingRecordingPanel.tsx:" src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts` plus `awk 'NR>=530&&NR<=546' src/app/components/grading-recording/GradingRecordingPanel.tsx` on the post-extraction tree | whether the cited range still holds the `useEffect` + async-IIFE + `cancelled` block | **the cited range describing something else after the extraction, with no test red** | wave 3a-ii, in the same commit: either leave `:532-544` in place (preferred) or re-pin both comments. Pass condition W3a-ii-3 |
 | **RES-W-11** | **`INCREMENTAL_CONCURRENCY = 3` with no inter-request spacer is evidence-backed, not proven.** The engine's 1200ms sleep (`gemini.ts:67`) never fires for a single-element call (`engine.ts:277`), and path E has run at 3 with no spacing since A26 - but `vitest.setup.ts` throws on any real fetch, so no 429 can be produced here. Carries RES-A39A-18 | **repo owner**, on a real run; then the chunk that owns `gemini.ts` | one real run of 40 on the default provider, with the run's status line read | the count of items failing with a provider-throttle message in one run | **more than one throttle failure in a single run**, which is the signal the bound is wrong for this provider | the owner verification pass after wave 4, together with RES-A39A-4's timing run. W4-11 is the in-repo floor and is a PURE-PREDICATE claim, named as one |
 | **RES-W-12** | **Whether `TOTAL_BUDGET_MS = 50_000` is generous enough for a real Gemini grading call.** No API key, no network. Two in-repo precedents disagree by 4 seconds (`class-trends-insight/route.ts:47` = 50_000; `ask/route.ts:145` = 54_000) and this plan ruled for the first because it is the file the architecture named as the model. Carries g4 R4 | **repo owner**, live key required | one real timed grading run of at least five submissions, with the per-item elapsed read | elapsed ms for one item's model call against the budget | **an item timing out under the soft budget that would have completed under the 60s hard cap** - the over-eager-guard defect class, applied to time | the owner verification pass after wave 4, together with RES-A39A-4. **Raising the constant above 54_000 requires re-reading `ask/route.ts:59`'s note that 60 is both the cap and the highest value that builds** |
+| **RES-W-14** | **Two real presses of the real Start Review button cannot be observed in this checkout.** W4-9 counts two invocations of a `.ts` function through a mocked-React harness; W4-9b asserts in SOURCE TEXT that the `<form>` no longer carries `action={formAction}`. **Neither is a browser.** Nothing renders under vitest, so the end-to-end claim - one press, one run; two fast presses, still one run - has no in-repo instrument, and this plan does not let the two green conditions above be read as one | **repo owner**, in a real browser | press Start Review twice as fast as possible on a run of at least three submissions, then read the resulting run's row count and the model-call count in the provider console if one is available | the number of grading runs started by two fast presses | **two runs started, or one run whose items are graded twice** - the double spend `action={formAction}`'s deletion exists to close, which would be invisible to every gate in 8.4.4 | the owner verification pass after wave 4, in the SAME sitting as W4-7, RES-A39A-4, RES-W-11 and RES-W-12. **One run answers five things; splitting them costs five runs** |
+| **RES-W-15** | **`src/lib/grade.ts`'s barrel re-export of `reconcileRun` has no importer in any of the six waves** (10.1). `engine.ts` imports the leaf directly. The line is KEPT on the argument that the barrel is the package's declared surface for 52 importers, not on the argument that something calls it - and that distinction is recorded rather than blurred | **wave 4b's implementer** states the decision in the commit message; the reviewer may overrule it with a one-line deletion | `grep -rnE 'from "(@/lib/grade\|\.\./grade\|\./grade)"' src --include=*.ts --include=*.tsx \| grep -c reconcile`, run after any later chunk | whether anything ever imports `reconcileRun` through the barrel | **no importer through the barrel by the time the next chunk touching `src/lib/grade/` lands** - at which point the line is dead weight and is deleted, not defended | at wave 4b, and re-read by the next chunk whose write set includes `src/lib/grade.ts` |
+| **RES-W-16** | **`docs/loop/this-repo.md:27` records the full suite at `Test Files 1017 passed (1017)` / `Tests 20200 passed (20200)` / 63.6s. Measured here at HEAD `e7cabc4`: 1111 / 22454 / 107.40s, EXIT=0** (5.1). The card is stale by +94 files, +2254 tests and +44 seconds. **This plan's write set is `docs/a39-waves.md` only and it does not correct the card** | **whoever next edits `docs/loop/this-repo.md`**, or the loop-card maintenance chunk | `npm test`, with the last 25 lines and `$LASTEXITCODE` written to a file and read from it, never from a pipe | the full suite's file count, test count and duration | **a wave reading 1017 in the card, seeing 1111, and treating the difference as a defect it caused** - or, worse, a wave budgeting 63.6s for a gate that takes 107 | at the next edit of `docs/loop/this-repo.md`. **No wave here waits on it**; 5.1 carries the corrected figures and the rule that the PASS is "zero failed", never a pinned count |
+| **RES-W-17** | **`SnapshotGradingPanel.tsx:935`'s transcription field is `multiline` with `minRows={4}` and no `maxRows`**, and it is BELOW the panel's primary action control at `:871`, so it does not satisfy RES-A39A-15's stated direction of failure and W3-5 does not require it to be capped (8.3). It remains an auto-growing field | the chunk that next writes `SnapshotGradingPanel.tsx` after wave 3b | `grep -n "multiline" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` against `grep -n "maxRows"` on the post-3b tree | that one field's growth bound | **a control moving ABOVE `:935` in a later wave**, which converts it from out-of-scope into the exact defect RES-A39A-15 describes, with no test red - it is a JSX prop's absence, and nothing asserts an absence | re-read by any wave that reorders that panel's JSX tail; **explicitly NOT wave 3b's work**, so that a later pass does not read W3-5's green as covering it |
 | **RES-W-13** | **`action-guard-coverage.test.ts` cannot see a Route Handler** (`:123` skips every non-`"use server"` file). `find src/app/api -name "route.ts" \| wc -l` -> **20**, of which 12 call no guard. W4-10 binds the ONE handler this plan adds; nothing binds the rest. Carries RES-A39A-17 | the chunk that next adds a route handler, or a security chunk | a structural test walking `src/app/api/**/route.ts` asserting each exported `POST`/`GET` calls a guard, with a 12-entry allowlist that may only SHRINK - the ratchet shape `action-guard-coverage.test.ts:41-47` already describes for actions | the set of unguarded route handlers | **a thirteenth unguarded route handler**, or any handler that spends a model call with no guard | before or alongside any later chunk that adds a route handler. **NOT inside wave 4c**, which would be hand-rolling a repo-wide ratchet inside a feature wave |
 
 ---
@@ -1862,3 +3048,36 @@ LC_ALL=C grep -c '[^ -~\t]' docs/REGRESSION.md      # canary, must be non-zero
 ```
 
 Recorded values are in this pass's hand-off.
+
+**This revision's write set is EXACTLY `docs/a39-waves.md`.** It did not open
+`docs/a39-waves-check.md`, `docs/a39-waves-rulings.md`, any other `docs/a*.md`,
+`docs/backlog.yml`, `docs/BACKLOG.md`, `src/tools/backlog/*` or anything under
+`src/` for writing. `docs/css-orphans.md` was already modified at session start,
+by another agent, and this pass did not touch it. Proof is the `git status
+--short` in the hand-off.
+
+**The full suite was RUN once during this pass** to establish 5.1's baseline
+(`npm test`, 1111 / 22454 / EXIT=0). That is a read-only measurement and it is
+the only command in this pass that touched anything outside `docs/`.
+
+### 13.1 Instrument defects found and fixed in this revision, as a class
+
+Four commands in revision 1 or in this revision's own first draft returned
+nothing, or the wrong thing, for a reason unrelated to the claim they supported.
+They are listed together because the class matters more than any one of them:
+
+| The command | What was wrong | Where |
+|---|---|---|
+| `grep -rn "persists it\|not persisted\|..."` written with a BARE `\|` | no `-E`, no BRE escape: grep searched for a literal pipe and exited 1, so wave 3b's gate PASSED before anything was deleted | 8.3, W3-2 |
+| the same bare-pipe bug in W4-6, twice (`:1440` and the 4c gate) | same, and corrected with `-E` the PASS sentence was FALSE against 29 lines in 11 files | 8.4.3, S4 |
+| `awk '$1>=703'` | a STRING comparison: `"73-80" > "703"` is true on the third character, so the count was 17 and not the 12 that was pasted | 2.3.1 |
+| `[^\n]{0,80}` in an ERE bracket expression - **found in this revision's own first draft** | `\n` inside `[...]` is backslash-and-`n`, so the class excludes the LETTER `n` and the pattern silently missed a line containing "assignment" | 8.3, W3-2's narrow companion |
+
+**The common shape is a command that returns nothing, or the wrong set, for a
+reason unrelated to the claim.** Every absence claim in this revision is
+therefore paired with a canary that proves **the pattern is valid and the
+alternation is being parsed**, not merely that the file was read - which is a
+strictly stronger control than revision 1's canaries, three of which would have
+fired happily over a broken pattern. Where an alternation is asserted, the canary
+exercises **both branches**, because a canary that only ever tests one branch
+proves half a pattern.

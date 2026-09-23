@@ -24,7 +24,7 @@ Run them from **PowerShell**. All four are repo-root commands.
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit` | 10.2s | **No output at all**, exit 0. Any output is a failure. |
 | Lint | `npm run lint` | 104.9s | `(cross-mark) 4 problems (0 errors, 4 warnings)`, exit 0 |
-| Tests | `npm test` | 63.6s | `Test Files 1017 passed (1017)` / `Tests 20200 passed (20200)`, exit 0 |
+| Tests | `npm test` | 107.4s | `Test Files 1111 passed (1111)` / `Tests 22454 passed (22454)`, exit 0. Re-measured 2026-09-23; the card said 1017/20200/63.6s, so treat these as a snapshot that drifts upward and re-measure rather than quoting them. |
 | Build | `npm run build` | 66.6s | `(check-mark) Compiled successfully in 16.5s`, then **exit 1**. See below. |
 
 ### Running a named set of test files

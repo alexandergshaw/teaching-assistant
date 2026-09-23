@@ -16,6 +16,7 @@ import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGrad
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
 import { gradingApiToRun } from "./grading-run-mapping";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 import {
   parseCourseIdFromCanvasUrl,
   parseSingleAssignmentId,
@@ -819,6 +820,17 @@ export async function gradeAction(
 
     if (!file || file.size === 0) {
       return { run: null, error: "Please upload a student submissions zip file." };
+    }
+
+    // This form's body shares the platform's request-body cap with every other
+    // field on it (see src/lib/upload-budget.ts's header comment), and nothing
+    // upstream of this action enforces that cap - a request over the platform
+    // limit is rejected before this function ever runs, so this check exists
+    // only to give an over-budget zip a named refusal on the request sizes
+    // that DO reach here rather than an opaque failure once they don't.
+    const zipBudgetCheck = checkFileWireBudget(file.size, "The student submissions zip");
+    if (!zipBudgetCheck.ok) {
+      return { run: null, error: zipBudgetCheck.error ?? "That zip file is too large to upload." };
     }
 
     // Deterministic Grading API path (provider toggle = "other").

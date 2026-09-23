@@ -3,9 +3,13 @@
 Every number here was produced by the command shown next to it, in this
 checkout, on 2026-09-13. Re-measure rather than trusting the number if the tree
 has moved on. **A measurement without its command is a rumour** - that rule
-exists because two line-counting tools in this repo disagree by 42 on a single
-file (see below), so "the file is 922 lines" is not a fact until you know which
-tool said it.
+exists because two line-counting tools in this repo disagree - by 42 on the file
+below, and RE-MEASURED 2026-09-23 ACROSS 13 FILES, by anywhere from 15 to 138,
+with the two structure tests diverging by 111 and 138. So 42 is the smallest
+recorded gap and not the worst case; do not quote it as a bound. `wc -l` and
+`@(Get-Content).Count` agreed on all 13. "The file is 922 lines" is not a fact
+until you know which tool said it, and a gap you have not measured on THIS file
+is not 42.
 
 Platform: Windows 10, `win32`. Two shells are available and they are NOT
 interchangeable - see "Shell and PATH" below.
@@ -158,7 +162,8 @@ These are the ones that catch a change that "should not have broken anything":
 ```powershell
 $f="src/app/components/grading-recording/GradingRecordingPanel.tsx"
 @(Get-Content $f).Count            # 964   <- the mandated measurement
-(Get-Content $f | Measure-Object -Line).Lines   # 922   <- 42 lower, wrong
+(Get-Content $f | Measure-Object -Line).Lines   # 922   <- 42 lower, wrong here;
+                                                #        15 to 138 lower elsewhere
 ```
 
 `wc -l < $f` from the Bash tool also gives 964. `src/lib/count-lines.ts` is the

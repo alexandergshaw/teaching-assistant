@@ -148,6 +148,23 @@ and "restore from backup", which leaves production code holding a deliberate
 defect while its tests expect the fix. That check is right and must stay - it
 is only the IDLING AFTERWARDS that is the violation.
 
+**SHAPE 4 - THE CONTROL-WRITING TURN, 2026-09-23.** The turn that ended with
+no work running was the turn that wrote a root-cause analysis and tightened
+the implementer brief. Improving the loop is the one kind of work that feels
+like it earns a pause - the queue is not moving because you are fixing how the
+queue moves. It does not earn one. The turn also closed by listing three
+questions as "still with you", which reads as a handoff rather than an idle,
+and that is the tell: A LIST OF OPEN QUESTIONS IS NOT WORK RUNNING. A question
+you are waiting on is not permission to stop; it is a reason to dispatch
+something that does not depend on the answer.
+
+THE COUNT SO FAR: this rule has now failed SIX times and been tightened five,
+which is the evidence that prose alone does not hold it. As of 2026-09-23 the
+Stop hook carries a STALL DETECTOR: it blocks when no subagent was dispatched
+during the turn that is ending, and its block message names the escape for the
+one legitimate stop (every remaining item owner-blocked). The prose below
+stays because it explains WHY; the detector is what enforces it.
+
 **THE CONTROL, tightened to close both.** The test above asks whether work is
 running. Both failures answered "no" honestly and ended the turn anyway,
 because the turn had an obvious non-backlog purpose. So the test now has a

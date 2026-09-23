@@ -242,8 +242,15 @@ describe("ModalShell actually emits aria-modal=\"true\" (the fact the snapshot p
   const modalShellPath = path.resolve(process.cwd(), "src/app/components/ui/ModalShell.tsx");
   const modalShellSource = fs.readFileSync(modalShellPath, "utf-8");
 
-  it('ModalShell.tsx contains aria-modal="true"', () => {
-    expect(modalShellSource).toContain('aria-modal="true"');
+  // L9: a bare toContain('aria-modal="true"') is satisfied by the doc comment
+  // a few lines above the real prop ("role=\"dialog\", aria-modal=\"true\"
+  // and the accessible name all move onto the CONTENT element"), so deleting
+  // the actual JSX attribute left this test green. Require the attribute
+  // directly adjacent to role="dialog" with only whitespace between them -
+  // the comment's prose separates the two with a comma and a space, which
+  // this pattern does not allow, so only the real markup can satisfy it.
+  it('ModalShell.tsx puts aria-modal="true" immediately after role="dialog" in the actual markup, not just in a comment', () => {
+    expect(modalShellSource).toMatch(/role="dialog"\s*aria-modal="true"/);
   });
 });
 

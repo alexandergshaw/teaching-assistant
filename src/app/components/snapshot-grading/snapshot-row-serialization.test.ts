@@ -47,6 +47,7 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     imageFallbackNote: undefined,
     evidenceDropped: false,
     strengthsNotice: "",
+    cohortKey: "a1b2c3d4",
     ...overrides,
   };
 }
@@ -89,6 +90,7 @@ describe("snapshotRowCodec.toWire", () => {
       imageFallbackNote: undefined,
       evidenceDropped: false,
       strengthsNotice: "",
+      cohortKey: "a1b2c3d4",
     });
     expect(Object.keys(result).sort()).toEqual(
       [
@@ -109,6 +111,7 @@ describe("snapshotRowCodec.toWire", () => {
         "imageFallbackNote",
         "evidenceDropped",
         "strengthsNotice",
+        "cohortKey",
       ].sort()
     );
   });
@@ -186,6 +189,7 @@ describe("snapshotRowCodec.fromWire - happy path (non-load-bearing continuity ch
       imageFallbackNote: undefined,
       evidenceDropped: false,
       strengthsNotice: "",
+      cohortKey: "a1b2c3d4",
     };
     expect(snapshotRowCodec.fromWire(wire)).toEqual(makeFullRow());
   });
@@ -364,6 +368,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
       imageFallbackNote: "f",
       evidenceDropped: false,
       strengthsNotice: "n",
+      cohortKey: "k",
     }) as unknown as Record<string, unknown>;
     const excluded = new Set([
       "id",
@@ -388,6 +393,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
       "instructionLikeContentQuote",
       "imageFallbackNote",
       "strengthsNotice",
+      "cohortKey",
     ].sort();
     expect(actualKeysToDegrade).toEqual(tableCoveredFields);
   });
@@ -401,6 +407,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
     ["instructionLikeContentQuote", 42, undefined],
     ["imageFallbackNote", 42, undefined],
     ["strengthsNotice", 42, ""],
+    ["cohortKey", 42, undefined],
   ])("degrades %s to its safe default when given a non-string value", (field, badValue, expected) => {
     const raw: Record<string, unknown> = { id: "x", [field]: badValue };
     const result = snapshotRowCodec.fromWire(raw) as unknown as Record<string, unknown>;

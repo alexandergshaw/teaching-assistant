@@ -875,3 +875,65 @@ describe("RES-N15-4: SnapshotGradingPanel ships a click-to-browse file input wir
     expect(roleIdx - labelIdx).toBeLessThan(120);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A24 (docs/a24-scope.md; DECISION 4, docs/owner-decisions-2026-09-23.md):
+// the class-trends mount and its cohort-spread disclosure. Section 5's
+// removal test, stated as a pass condition: object = the anchored slice of
+// SnapshotGradingPanel.tsx bounded by the disclosure paragraph's own opening
+// text and its closing </p>; instrument = fs.readFileSync plus paired
+// String.indexOf anchors, both asserted to resolve before the slice is
+// asserted on (the same idiom this file already runs at :263-264, :322-323,
+// :352-353, :364-365); direction of failure = RED when the slice does not
+// reference the spread predicate, and RED when either anchor fails to
+// resolve.
+//
+// This is ALSO A24-2's reachability proof: buildSnapshotClassTrendsEntry and
+// snapshotCohortSpread (classTrendsSnapshotEntry.ts) have no caller until
+// this wave - a leaf shipped with no caller has passed every gate in this
+// repo before (walkthrough-announcement.structure.test.ts's own G2 block
+// exists for exactly that reason).
+// ---------------------------------------------------------------------------
+
+describe("A24: SnapshotGradingPanel actually mounts ClassTrendsPanel via the snapshot cohort entry - an import alone proves nothing", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+
+  it("imports ClassTrendsPanel, hasTrendableResults, and the snapshot cohort leaf's two exports", () => {
+    expect(panelSource).toMatch(/import ClassTrendsPanel from "\.\.\/drafted-grades\/ClassTrendsPanel";/);
+    expect(panelSource).toMatch(
+      /import\s*\{\s*buildSnapshotClassTrendsEntry,\s*snapshotCohortSpread\s*\}\s*from\s*"\.\/classTrendsSnapshotEntry";/
+    );
+  });
+
+  it("actually renders <ClassTrendsPanel - the import alone proves nothing (A4d/N14 idiom)", () => {
+    expect(panelSource).toMatch(/<ClassTrendsPanel\b/);
+  });
+});
+
+describe("A24: the cohort-spread disclosure paragraph, anchored-slice, names no assignment", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+
+  const start = panelSource.indexOf(
+    "This table includes screenshot-graded assessments from more than one assignment"
+  );
+  const end = panelSource.indexOf("</p>", start);
+
+  it("finds the disclosure paragraph by its own anchors - a check over -1 proves nothing", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it("the disclosure paragraph is gated on snapshotCohortSpread(sessionRows) - deleting that gate must turn this assertion red, not merely change unobserved behaviour", () => {
+    const gateStart = panelSource.indexOf("{snapshotCohortSpread(sessionRows) && (", 0);
+    expect(gateStart).toBeGreaterThan(-1);
+    expect(start).toBeGreaterThan(gateStart);
+    expect(start - gateStart).toBeLessThan(400);
+  });
+
+  it("the disclosure sentence names no specific assignment (DECISION 4: the digest, never a label)", () => {
+    const sentence = panelSource.slice(start, end);
+    expect(sentence).not.toMatch(/\{.*assignmentName/);
+  });
+});

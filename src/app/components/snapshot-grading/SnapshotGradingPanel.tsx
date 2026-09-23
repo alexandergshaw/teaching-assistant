@@ -58,6 +58,9 @@ import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
+import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel";
+import { hasTrendableResults } from "../grading-results/classTrendsEntry";
+import { buildSnapshotClassTrendsEntry, snapshotCohortSpread } from "./classTrendsSnapshotEntry";
 import { useSnapshotGrade } from "./useSnapshotGrade";
 import { useSnapshotAutoGrade } from "./useSnapshotAutoGrade";
 import { useSnapshotKeyboardShortcuts } from "./useSnapshotKeyboardShortcuts";
@@ -696,6 +699,16 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const grouped = groupShotsByRole(shots);
   const roleCounts = Object.fromEntries(Object.entries(grouped).map(([role, shots]) => [role, shots.length])) as Record<SnapshotRole, number>;
 
+  // A24: no useMemo here, matching `grouped`/`roleCounts` above - a plain
+  // recompute on every render, not a manually-memoized hook extracted from
+  // this file (this-repo.md's own recorded React Compiler
+  // preserve-manual-memoization hazard on hook removal from this panel).
+  const snapshotTrendsEntry = buildSnapshotClassTrendsEntry(sessionRows, {
+    courseName: "",
+    assignmentName: "Screenshot-graded assessments",
+    canvasUrl: "",
+  });
+
   return (
     <div
       ref={rootRef}
@@ -852,6 +865,22 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
               shots={shots}
             />
           ))}
+        </div>
+      )}
+
+      {/* A24 (docs/a24-scope.md; DECISION 4): the persisted table never
+          shrinks, so an instructor who graded two different assignments into
+          it sees one blended trends panel unless told so. The disclosure
+          names NO assignment - it says only that more than one is present. */}
+      {hasTrendableResults(snapshotTrendsEntry) && (
+        <div>
+          {snapshotCohortSpread(sessionRows) && (
+            <p className={styles.fieldHint}>
+              This table includes screenshot-graded assessments from more than one assignment - the trends below
+              combine them.
+            </p>
+          )}
+          <ClassTrendsPanel entry={snapshotTrendsEntry} defaultExpanded />
         </div>
       )}
 

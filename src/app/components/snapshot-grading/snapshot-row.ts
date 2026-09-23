@@ -149,6 +149,17 @@ export interface SnapshotAssessmentRow extends AssessmentRowCore {
    *  whitespace, so the box's persistent emptiness is explained rather than
    *  looking like a stuck instructor-editable field nobody ever touched. */
   strengthsNotice: string;
+  /** A24 (docs/a24-scope.md section 3; DECISION 4,
+   *  docs/owner-decisions-2026-09-23.md): a non-reversible digest of the
+   *  assignment text this grade was produced against
+   *  (snapshotCohortKey.ts's computeAssignmentCohortKey), captured ONCE at
+   *  grade time by useSnapshotGrade.ts - never the raw assignmentText
+   *  itself (U10). Optional because a row persisted before this field
+   *  existed carries none; `snapshotCohortSpread`
+   *  (classTrendsSnapshotEntry.ts) normalizes a missing value to "" and
+   *  treats it as its own distinct cohort, never as "unknown - ignore this
+   *  row". */
+  cohortKey?: string;
 }
 
 export type NoPostableSnapshotRow = NoPostableIdentity<SnapshotAssessmentRow>;

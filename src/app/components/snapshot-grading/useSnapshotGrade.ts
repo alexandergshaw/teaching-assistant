@@ -29,6 +29,7 @@ import {
   type ShotReadEntry,
   type ConfirmedRubricArea,
 } from "./snapshot-row";
+import { computeAssignmentCohortKey } from "./snapshotCohortKey";
 import { SNAPSHOT_ROLES, buildIdByGlobalIndex, type SnapshotShot, type SnapshotRole } from "./snapshot-shot";
 
 export interface UseSnapshotGradeParams {
@@ -268,6 +269,12 @@ export function useSnapshotGrade(
           instructionLikeContentQuote: result.answer.instructionLikeContentQuote,
           imageFallbackNote: result.imageFallbackNote,
           evidenceDropped: false, // a fresh grade always carries full evidence in memory
+          // A24 (docs/a24-scope.md section 3; DECISION 4): captured HERE, at
+          // grade time, from the same assignmentText already in lexical scope
+          // for this call - never re-derived later from a row that no longer
+          // has the text in scope. Never the raw text itself (U10) - only its
+          // non-reversible digest.
+          cohortKey: computeAssignmentCohortKey(assignmentText),
         };
         commitSessionRows(upsertSnapshotRow(sessionRowsRef.current, merged));
 

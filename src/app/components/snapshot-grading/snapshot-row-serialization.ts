@@ -34,10 +34,10 @@ function isSnapshotRole(v: unknown): v is SnapshotRole {
 // ---------------------------------------------------------------------------
 // toWire: enumerates every field explicitly - the nine AssessmentRowCore/
 // feedback fields (id, studentName, state, error, userEdited, totalScore,
-// strengths, improvements, overallComment) plus eight snapshot-specific
+// strengths, improvements, overallComment) plus nine snapshot-specific
 // fields (shotReports, rubricAreas, missingRoles, instructionLikeContent,
 // instructionLikeContentQuote, imageFallbackNote, evidenceDropped,
-// strengthsNotice). NEVER
+// strengthsNotice, cohortKey - A24). NEVER
 // spreads `...row` - a spread is exactly the gap that would let a future
 // field (an identity field, most plausibly) leak into storage silently.
 // This is the same discipline grading-row-serialization.ts's toWire runs,
@@ -111,6 +111,11 @@ function toWire(
     // above rather than userEdited's deliberate over-claiming exception - a
     // corrupt/missing value here means "no notice", never a fabricated one.
     strengthsNotice: r.strengthsNotice,
+    // A24 (docs/a24-scope.md section 3): written directly, exactly like
+    // instructionLikeContentQuote/imageFallbackNote above - an unset (legacy)
+    // row writes `undefined`, which JSON.stringify drops from storage
+    // entirely rather than persisting a fabricated cohort value.
+    cohortKey: r.cohortKey,
   };
 }
 
@@ -224,6 +229,10 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
   // a corrupt/missing value degrades to "no notice" rather than fabricating
   // one that was never actually set.
   const strengthsNotice = typeof r.strengthsNotice === "string" ? r.strengthsNotice : "";
+  // A24: same degrade-to-undefined rule as instructionLikeContentQuote/
+  // imageFallbackNote above - a legacy row (no field at all) and a corrupt
+  // value both read back as "no cohort recorded", never a fabricated digest.
+  const cohortKey = typeof r.cohortKey === "string" ? r.cohortKey : undefined;
 
   return {
     id,
@@ -243,6 +252,7 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
     imageFallbackNote,
     evidenceDropped,
     strengthsNotice,
+    cohortKey,
   } as unknown as NoPostableIdentity<SnapshotAssessmentRow>;
 }
 

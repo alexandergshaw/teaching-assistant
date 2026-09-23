@@ -265,6 +265,33 @@ describe("backlog A11: useSnapshotGrade.ts no longer hardcodes strengths and del
   });
 });
 
+// ---------------------------------------------------------------------------
+// A24 (docs/a24-scope.md section 3; DECISION 4, docs/owner-decisions-2026-09-
+// 23.md): R-A24-3 has no enforcer anywhere else - this is that enforcer. It
+// pins the merged row's cohortKey to the derivation function, never to a raw
+// or truncated assignmentText literal, and pins it INSIDE the merged object
+// literal (not merely "called somewhere in this file").
+// ---------------------------------------------------------------------------
+
+describe("A24/R-A24-3: the merged row's cohortKey is the digest function's output, never raw assignmentText", () => {
+  it("imports computeAssignmentCohortKey from ./snapshotCohortKey", () => {
+    expect(hookSource).toMatch(/import\s*\{\s*computeAssignmentCohortKey\s*\}\s*from\s*"\.\/snapshotCohortKey";/);
+  });
+
+  it("the merged row literal sets cohortKey: computeAssignmentCohortKey(assignmentText) - the anchored-slice idiom this file already runs above", () => {
+    const mergedIdx = stripped.indexOf("const merged: SnapshotAssessmentRow = {");
+    expect(mergedIdx).toBeGreaterThan(-1);
+    const mergedEnd = stripped.indexOf("};", mergedIdx);
+    expect(mergedEnd).toBeGreaterThan(mergedIdx);
+    const mergedBody = stripped.slice(mergedIdx, mergedEnd);
+    expect(mergedBody).toMatch(/cohortKey:\s*computeAssignmentCohortKey\(\s*assignmentText\s*\)/);
+  });
+
+  it("carries no raw assignmentText literal assigned directly to cohortKey (U10: never the pasted text itself)", () => {
+    expect(stripped).not.toMatch(/cohortKey:\s*assignmentText\s*[,}]/);
+  });
+});
+
 describe("R1-E: the transcript lookup is matched by shot.id, not by read-time position alone", () => {
   it("builds an id-keyed transcript map from shotReads before deriving the index-keyed one verifySnapshotCitations reads", () => {
     const idMapIdx = stripped.indexOf("const transcriptsByShotId = new Map<string, string>();");

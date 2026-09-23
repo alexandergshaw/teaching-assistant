@@ -31,6 +31,9 @@ import { findDuplicateIds } from "./ids";
 import { shippedButUncited, formatShippedUncitedReason } from "./shipped-uncited";
 import { readRecentWorkCommits } from "./git-commits";
 import type { RecentWorkCommits } from "./git-commits";
+import { decideDispatchGuard } from "./dispatch-guard";
+import { readDispatchMarkerState, touchStopMarker, touchDispatchMarker } from "./dispatch-markers";
+import type { DispatchMarkerState } from "./dispatch-markers";
 
 export interface Dispatched {
   exitCode: number;
@@ -47,6 +50,18 @@ export interface CliDeps {
    * `realDeps()` below is the only place that wires the real git read in.
    */
   readWorkCommits?: () => RecentWorkCommits;
+  /**
+   * Optional so every command besides `stop-guard`/`touch-dispatch` (and
+   * every existing caller of `dispatch`) is unaffected. When omitted,
+   * `stop-guard` treats it as "nothing to compare" (dispatch-guard.ts's own
+   * first-run allow) rather than reaching for the real filesystem -
+   * `realDeps()` below is the only place that wires the real marker reads in.
+   */
+  readDispatchMarkerState?: () => DispatchMarkerState;
+  /** Best-effort; see dispatch-markers.ts's touchStopMarker. Omitted means no-op. */
+  touchStopMarker?: () => void;
+  /** Best-effort; see dispatch-markers.ts's touchDispatchMarker. Omitted means no-op. */
+  touchDispatchMarker?: () => void;
 }
 
 function requireDuplicateFree(items: BacklogItem[]): string | null {
@@ -73,6 +88,17 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
     return { exitCode: result.ok ? 0 : 1, output: result.message };
   }
 
+  // Touches the DISPATCH marker (dispatch-markers.ts) that the stop-guard's
+  // dispatch check below reasons over. Not gated on the backlog file at all
+  // (unlike every other command) - a session must be able to record a
+  // dispatch even when the yaml has a duplicate-id error blocking everything
+  // else, since fixing that error is itself the kind of work the guard wants
+  // recorded.
+  if (command === "touch-dispatch") {
+    deps.touchDispatchMarker?.();
+    return { exitCode: 0, output: "dispatch marker touched" };
+  }
+
   // The Stop guard (src/tools/backlog/stop-guard.ts). Exit 2 with the reason
   // on stderr is the shape a blocking hook uses; exit 0 allows the stop.
   //
@@ -89,6 +115,29 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
 
     const stopHookActive = argv.includes("--stop-hook-active");
     const overrideRequested = argv.includes("--override");
+
+    // The DISPATCH guard (src/tools/backlog/dispatch-guard.ts): blocks when
+    // no subagent was dispatched since the previous stop. Reuses this
+    // command's own two escapes (decideDispatchGuard bakes both in, exactly
+    // like decideStopGuard). The stop marker is touched UNCONDITIONALLY,
+    // every time this command runs - including on an allow, an override, or
+    // a stopHookActive retry - because it marks "a stop happened here" for
+    // the NEXT comparison, not "a stop was blocked here".
+    const markerState = deps.readDispatchMarkerState?.() ?? {
+      dispatch: { kind: "absent" as const },
+      lastStop: { kind: "absent" as const },
+      warning: null,
+    };
+    const dispatchDecision = decideDispatchGuard({
+      dispatch: markerState.dispatch,
+      lastStop: markerState.lastStop,
+      stopHookActive,
+      overrideRequested,
+    });
+    deps.touchStopMarker?.();
+    if (dispatchDecision.decision === "block") {
+      return { exitCode: 2, output: dispatchDecision.reason };
+    }
 
     // The SHIPPED-BUT-UNCITED check (src/tools/backlog/shipped-uncited.ts).
     // Reuses this command's own two escapes rather than adding new ones:
@@ -154,7 +203,7 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
 
   return {
     exitCode: 64,
-    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard.`,
+    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard, touch-dispatch.`,
   };
 }
 
@@ -164,6 +213,9 @@ function realDeps(): CliDeps {
     readYaml: () => readFileSync(resolve(root, "docs/backlog.yml"), "utf-8"),
     readMarkdown: () => readFileSync(resolve(root, "docs/BACKLOG.md"), "utf-8"),
     readWorkCommits: () => readRecentWorkCommits(root),
+    readDispatchMarkerState: () => readDispatchMarkerState(root),
+    touchStopMarker: () => touchStopMarker(root),
+    touchDispatchMarker: () => touchDispatchMarker(root),
   };
 }
 

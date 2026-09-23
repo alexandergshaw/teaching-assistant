@@ -82,6 +82,29 @@ describe("cli dispatch", () => {
     expect(result.output).toMatch(/render, check-generated, next, wave/);
   });
 
+  describe("touch-dispatch", () => {
+    it("exits 0 and calls the injected touch function", () => {
+      let touched = false;
+      const result = dispatch(["touch-dispatch"], { ...deps([]), touchDispatchMarker: () => { touched = true; } });
+      expect(result.exitCode).toBe(0);
+      expect(touched).toBe(true);
+    });
+
+    it("exits 0 even when no touch function is wired (best-effort, never throws)", () => {
+      const result = dispatch(["touch-dispatch"], deps([]));
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("does not touch the backlog yaml/markdown at all - runs even with a duplicate-id backlog", () => {
+      const dup = { ...scopedItem, id: "A1" };
+      const d = deps([scopedItem, dup]);
+      // Sabotage the reader so a call to it would fail the test loudly.
+      const brokenDeps = { ...d, readYaml: () => { throw new Error("touch-dispatch must not read the backlog"); } };
+      const result = dispatch(["touch-dispatch"], brokenDeps);
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
   // Duplicate ids (Ruling BA-4) must block every selector, not just be a
   // theoretical property of ids.ts - this proves the CLI actually checks
   // before render/next/wave trust the parsed list.
@@ -164,6 +187,93 @@ describe("cli dispatch", () => {
       const result = dispatch(["stop-guard"], depsWithCommits([uncitedItem], []));
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("no actionable item; 1 item(s) are unscoped");
+    });
+  });
+
+  describe("stop-guard dispatch check", () => {
+    const noItems = () => deps([]);
+    const ABSENT = { kind: "absent" as const };
+    const present = (mtimeMs: number) => ({ kind: "present" as const, mtimeMs });
+
+    function depsWithMarkers(dispatch_: typeof ABSENT | ReturnType<typeof present>, lastStop: typeof ABSENT | ReturnType<typeof present>) {
+      return {
+        ...noItems(),
+        readDispatchMarkerState: () => ({ dispatch: dispatch_, lastStop, warning: null }),
+        touchStopMarker: () => {},
+      };
+    }
+
+    // MUTANT: drop the dispatch-guard call (or its block branch) from the
+    // stop-guard command entirely. This is the row this whole check exists
+    // for - a stop with nothing dispatched since the previous stop.
+    it("blocks when no dispatch was recorded since the previous stop (dispatch older than stop)", () => {
+      const result = dispatch(["stop-guard"], depsWithMarkers(present(1000), present(2000)));
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("NO SUBAGENT WAS DISPATCHED");
+      expect(result.output).toContain("npm run backlog:touch-dispatch");
+    });
+
+    // THE REGRESSION: a stop marker exists (a stop has happened before) and
+    // the dispatch marker was never written at all. The bug this replaces
+    // treated an absent dispatch marker as "first run" regardless of the
+    // stop marker's own state, so this never blocked.
+    it("blocks when the stop marker is present and the dispatch marker was never recorded", () => {
+      const result = dispatch(["stop-guard"], depsWithMarkers(ABSENT, present(2000)));
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("NO SUBAGENT WAS DISPATCHED");
+    });
+
+    it("does not block when a dispatch was recorded after the previous stop", () => {
+      const result = dispatch(["stop-guard"], depsWithMarkers(present(3000), present(2000)));
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("does not block on first run when neither marker exists", () => {
+      const result = dispatch(["stop-guard"], depsWithMarkers(ABSENT, ABSENT));
+      expect(result.exitCode).toBe(0);
+    });
+
+    // MUTANT: ignore stopHookActive for this check specifically.
+    it("does not block a second time in the same turn (--stop-hook-active)", () => {
+      const result = dispatch(["stop-guard", "--stop-hook-active"], depsWithMarkers(ABSENT, present(2000)));
+      expect(result.exitCode).toBe(0);
+    });
+
+    // MUTANT: ignore --override for this check specifically.
+    it("does not block on an explicit override", () => {
+      const result = dispatch(["stop-guard", "--override"], depsWithMarkers(ABSENT, present(2000)));
+      expect(result.exitCode).toBe(0);
+    });
+
+    // MUTANT: never call touchStopMarker (or only call it on the allow path).
+    // The stop marker must be written every time this command runs.
+    it("touches the stop marker even when the dispatch check blocks", () => {
+      let touched = false;
+      const result = dispatch(["stop-guard"], {
+        ...noItems(),
+        readDispatchMarkerState: () => ({ dispatch: ABSENT, lastStop: present(2000), warning: null }),
+        touchStopMarker: () => { touched = true; },
+      });
+      expect(result.exitCode).toBe(2);
+      expect(touched).toBe(true);
+    });
+
+    it("touches the stop marker on an override even though the dispatch check would otherwise block", () => {
+      let touched = false;
+      const result = dispatch(["stop-guard", "--override"], {
+        ...noItems(),
+        readDispatchMarkerState: () => ({ dispatch: ABSENT, lastStop: present(2000), warning: null }),
+        touchStopMarker: () => { touched = true; },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(touched).toBe(true);
+    });
+
+    // Fail-open: when the dep is not wired at all, the check must be
+    // silently skipped and the command must fall through unchanged.
+    it("falls through to the existing empty-queue message when readDispatchMarkerState is not provided", () => {
+      const result = dispatch(["stop-guard"], noItems());
+      expect(result.exitCode).toBe(0);
     });
   });
 });

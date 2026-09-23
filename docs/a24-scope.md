@@ -1,502 +1,768 @@
-# A24 scope: trends on snapshot grading
+# A24 scope: trends on snapshot grading (round 2)
 
-Row A24 (`docs/backlog.yml`, `- id: 'A24'`, lines 440-450). Owner ask, routed
-out of A16: "this thing needs to live alongside each of the grading tools in
-the tools tab. when i run a tool over a series of assignments, that run
-should generate trends." A16 built this for the recording-based grading tool
-("grading"). This row is the second grading tool in the strip, "snapgrade"
-(screenshot grading, `SnapshotGradingPanel.tsx`).
+Row A24 (`docs/backlog.yml`, `- id: 'A24'`). Owner ask, routed out of A16:
+"this thing needs to live alongside each of the grading tools in the tools
+tab. when i run a tool over a series of assignments, that run should generate
+trends." A16 built this for the recording-based grading tool. This row is the
+second grading tool in the strip, "snapgrade" (`SnapshotGradingPanel.tsx`).
 
-Every citation below was opened this pass. Every count names the command that
-produced it. This is a scope document only - no source file was edited to
-produce it (`git status --short` at the end proves the write set).
+**This is round 2 of two.** `docs/a24-a32-check.md` returned NOT BUILDABLE on
+round 1 with four blockers. Every one of its findings was re-measured here
+before being acted on; two of its own citations are corrected below. Under the
+owner's "Two rounds, then ask" rule (`AGENTS.md`), the one thing this pass
+cannot settle from the code is stated as a QUESTION with a recommendation in
+section 6, and the wave plan is buildable around the recommended answer.
+
+Every quantity names the command that produced it. No file under `src/` was
+edited to produce this document; `git status --short` at the end proves the
+write set. Nothing here renders a component, so every claim about what paints
+on screen is a reading claim (`docs/loop/this-repo.md` section 6).
 
 ---
 
-## 1. What exists today
+## 0. Disposition of round 1
 
-**The trends computation and the panel UI are fully built and already reused
-four times over** - none of this needs to be written for A24:
+Round 1's requirements, one row each. "Withdrawn" names the measurement that
+withdrew it and any enforcer it was protecting.
 
-- `src/lib/grade/class-trends.ts` (`computeClassTrends`), `class-trends-insight.ts`,
-  `class-trends-draft.ts` - the trend engine, unchanged since A16.
-- `src/app/components/drafted-grades/ClassTrendsPanel.tsx` - the shared panel.
-  `entry={...} defaultExpanded` is its whole call contract (`GradingRecordingPanel.tsx:946`,
-  `GradingResults.tsx:607`).
-- `src/app/components/grading-results/classTrendsEntry.ts` - `toClassTrendsEntry`
-  (builds a `GradingRunEntry` from a `GradingRun` + `{courseName, assignmentName,
-  canvasUrl}` meta) and `hasTrendableResults` (the mount gate: true when at
-  least one graded result carries a rubric area, `classTrendsEntry.ts:52-54`).
-  Measured reuse: `grep -rln "hasTrendableResults" src --include=*.tsx --include=*.ts | grep -v test`
-  returns 5 files - `classTrendsRunCohort.ts`, `GradingRecordingPanel.tsx`,
-  `classTrendsEntry.ts` itself, `GradingResults.tsx`, `classTrendsFolderEntry.ts`.
-  Four distinct call sites already share this exact adapter; a fifth (snapshot
-  grading) adds nothing new to the trend engine itself - by `leverage.md`'s
-  failure-mode-B test, the trend mechanism is now close to platform
-  infrastructure for grading surfaces, not something A24 earns.
+| Round-1 requirement | Disposition |
+|---|---|
+| S2: "U10 keeps assignment text out of localStorage" is a rule "this repo already tests for", and it blocks writing `assignmentText` into a persisted row | **WITHDRAWN.** Measured false, section 2. Enforcer it claimed: none exists. The convention survives as R-A24-3, restated with the correct direction of failure. |
+| S2: the disclosure predicate "cannot be built from any data the surface stores today without (a) a new per-row identity marker WITH ITS OWN PERSISTED KEY, or (b) no disclosure at all" | **WITHDRAWN.** A per-row field rides inside the existing `ta-snap-table` envelope and adds no `ta-snap-*` literal (section 2). The two-branch fork is replaced by one narrower question, section 6. |
+| S4: "Any new persisted control this feature adds ... needs a `ta-snap-*` key and MUST add that literal to this exact array in the same commit" | **KEPT, NARROWED to R-A24-8.** True for a new instructor-facing control. False for a per-row field. Round 1 applied the control price to both. |
+| S4: the `ta-snap-*` set at `snapshot-grading.structure.test.ts:195-201` is an exact-set assertion of four key names | **KEPT.** Re-verified verbatim, section 2. |
+| S1: "fully built and already reused four times over" / S5: "five call sites" / "five of five grading-adjacent surfaces" | **WITHDRAWN.** Measured: 3 production call sites, section 1. |
+| S1: "`entry={...} defaultExpanded` is its whole call contract" | **WITHDRAWN.** Measured: 4 mounts, one without `defaultExpanded`. Becomes a wave-3 decision, section 5. |
+| S3/S6 wave 0: extract `STORAGE_KEY_TABLE` + the `useAssessmentRowStore` call into a `useSnapshotSessionRows.ts`, mirroring `useGradingRows.ts:171,317` | **WITHDRAWN.** Two assertions pin both to the panel's OWN source (section 3). Replaced by a constraint plus a numeric target, section 7 wave 0. |
+| S6: wave 0 exit criterion "comfortably under 1000 with room for wave 2" | **WITHDRAWN.** Replaced by a number: 928 or below, derived in section 3. |
+| S6: both wave gate commands (`npm run test:paths -- <production source paths>`) | **WITHDRAWN.** Both exit 1 as written (section 7). Replaced by gates naming test files, each run green this pass. |
+| S3: the 1000-line ceiling applies with no ratchet and no recording-split coverage | **KEPT.** Re-verified, section 3. |
+| S2: `GradeResult` field mapping and the `rubricAreas` conversion gap | **KEPT** as R-A24-1. |
+| S3: React Compiler `preserve-manual-memoization` hazard on hook removal from this panel | **KEPT**, and now load-bearing: it is one of the two reasons wave 0 prefers a JSX extraction over a hook extraction. |
+| R-A24-1 (rubric-area `comment` mapping) | **KEPT**, id unchanged. |
+| R-A24-2 (the identity/disclosure fork) | **HANDED OVER to the repo owner** as the section 6 question, with a recommendation. Obligation: answer "name them or not". Everything else is buildable on the recommended answer. |
+| R-A24-3 (U10 compliance of a new field) | **KEPT**, id unchanged, direction of failure corrected: there is no enforcer, so the failure is silent by construction rather than "silently, since no existing test scans for it" competing with section 2's opposite claim. |
+| R-A24-4 (REGRESSION.md baseline) | **KEPT**, id unchanged, re-measured. |
+| R-A24-5 (every UI claim is a reading claim) | **KEPT**, id unchanged. |
+| R-A24-6 (repo-grades is out of scope) | **WITHDRAWN as a residual.** It self-declared "Owner: none needed. Instrument: none. Step: n/a", which by `iteration-caps.md` is not a residual. Retained as a plain scope-boundary sentence, section 1. No enforcer protected it. |
+| S1: `classTrendsRunCohort.ts` is 182 lines | **WITHDRAWN.** 181 by all three counters, section 3. |
+| S1: `SnapshotGradingPanelProps` at `:75-77`; mount at `RecordingTab.tsx:867` | **WITHDRAWN as written, claim KEPT.** Declaration is `:79-81`; mount path is `src/app/components/RecordingTab.tsx:867`. |
+| S1: "no clearing action anywhere in the file ... not reproduced in full here" | **WITHDRAWN as written, narrower claim KEPT and now evidenced**, section 1. |
 
-**The precedent for a non-LMS, click-triggered surface is
-`src/app/components/grading-recording/classTrendsRunCohort.ts`** (182 lines,
-`wc -l`), built by A16 wave 2/3 for the recording tool, and it is the
-template the architect should work from:
+New in this round: R-A24-7 (the serialization key-set instrument round 1 and
+the check both missed) and R-A24-8 (the narrowed key rule).
 
-- `buildRunCohort(results, identity, meta)` (`classTrendsRunCohort.ts:98-152`)
-  merges a run's raw results onto a per-row identity projection captured AT
-  THE CLICK (never re-derived from the live row array - see the file's own
-  header, `:12-18`, on why: `rubricAreas` is empty on the pre-grade row memo
-  until a grade lands).
-- `toRunCohortEntry(cohort)` (`:157-164`) wraps `toClassTrendsEntry`.
-- `cohortLabelSpread(cohort)` (`:178-181`) is the disclosure predicate: true
-  when the captured rows carry more than one distinct per-row `assessment`
-  label (a `Set`, counting `undefined` as its own distinct value).
-- The call site, `GradingRecordingPanel.tsx:924-956`: `lastRunCohort` state
-  (`:224`) is captured once per `handleGradeAll` run (`:641`) and reset to
-  `null` at the start of the next run and on error (`:574`, `:605`, `:649`).
-  The panel builds `trendsEntry` once, gates the mount on
-  `hasTrendableResults`, and - **the part this row exists to answer** -
-  renders a disclosure line, never a block, when `cohortLabelSpread` is true
-  (`:950-955`): *"This run graded submissions from more than one assessment
-  label - the trends above combine them."*
+---
 
-**`SnapshotGradingPanel.tsx` has none of this, and re-verifying the row's own
-instrument confirms it is still true today.** Absence check, run this pass:
+## 1. What exists today, re-measured
+
+**The trend engine and panel are built and reused, but by three call sites,
+not four or five.**
+
+```
+grep -rln "hasTrendableResults" src --include=*.tsx --include=*.ts | grep -v test   -> 5 files
+grep -rln "hasTrendableResultsXYZNOPE" src --include=*.tsx --include=*.ts           -> exit 1 (canary)
+grep -rn  "hasTrendableResults" src --include=*.tsx --include=*.ts | grep -v "\.test\."
+```
+
+Opening each of the five files the first grep named:
+
+| File | What it is |
+|---|---|
+| `src/app/components/grading-results/classTrendsEntry.ts:52` | the definition |
+| `src/app/components/grading-recording/GradingRecordingPanel.tsx:944` | production call site |
+| `src/app/components/GradingResults.tsx:605` | production call site |
+| `src/app/components/repo-grades/classTrendsFolderEntry.ts:95` | production call site |
+| `src/app/components/grading-recording/classTrendsRunCohort.ts:17,35` | COMMENTS ONLY. `:35` reads "`hasTrendableResults` is not imported here at" |
+
+**Three production call sites.** A file-count grep was read as a call-site
+count in round 1; `leverage.md`'s failure-mode-B is a counting procedure, so
+the corrected denominator is stated here rather than inherited.
+
+**`ClassTrendsPanel` has four mounts, and its call contract is not what round
+1 said.**
+
+```
+grep -rn "<ClassTrendsPanel" src --include=*.tsx --include=*.ts | grep -v "\.test\."
+grep -rn "<ClassTrendsPanelXYZNOPE" src --include=*.tsx   -> exit 1 (canary)
+```
+
+- `src/app/components/DraftedGradesTab.tsx:655` - `entry={entry}`, **no `defaultExpanded`**
+- `src/app/components/grading-recording/GradingRecordingPanel.tsx:946` - `entry={trendsEntry} defaultExpanded`
+- `src/app/components/GradingResults.tsx:607` - `entry={classTrendsEntry} defaultExpanded`
+- `src/app/components/repo-grades/index.tsx:856` - `entry={trendsEntry} defaultExpanded`
+
+Three of four pass `defaultExpanded`; Drafted Grades deliberately omits it.
+Whether a screenshot-grading session's blended trends open expanded is
+therefore a real choice wave 3 must make, not a copied default (section 5).
+
+**The A16 precedent, verified line by line.**
+`classTrendsRunCohort.ts` is **181** lines (`@(Get-Content).Count` = 181,
+`wc -l` = 181, `Measure-Object -Line` = 167). `buildRunCohort` at `:98-152`
+merges raw results onto a per-row identity projection captured at the click;
+`toRunCohortEntry` at `:157-164`; `runCohortMeta` at `:169-171`;
+`cohortLabelSpread` at `:178-181` is
+`new Set(cohort.rows.map((r) => r.assessment)).size > 1`. The disclosure
+renders at `GradingRecordingPanel.tsx:950-956`: "This run graded submissions
+from more than one assessment label - the trends above combine them."
+
+**The snapshot surface has no course or assessment identity, re-verified.**
 `grep -n "assessmentId\|courseScope\|assessmentLabel" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`
-returns nothing (exit code 1, checked directly - not piped through `head`).
-Canary that the grep engine actually fires on this file:
-`grep -c "useState" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`
-returns **21**. A16's own row-A24 instrument (`docs/backlog.yml:446`) recorded
-the same absence with the same canary count (21) on 2026-09-21; unchanged.
+returns nothing, exit 1, not piped through `head`. Canary on the same file:
+`grep -c "useState"` returns **21**. `SnapshotGradingPanelProps` is
+`{ active: boolean }` at `:79-81`, sole use at `:83`
+(`grep -c "SnapshotGradingPanelProps"` returns 2), and the one mount is
+`src/app/components/RecordingTab.tsx:867`,
+`<SnapshotGradingPanel active={active && recView === "snapgrade"} />`.
 
-**New finding this pass, beyond what A16's instrument measured: the gap is
-structural, not just a missing field.** `SnapshotGradingPanelProps` is
-`{ active: boolean }` only (`SnapshotGradingPanel.tsx:75-77`), and its one
-mount site, `RecordingTab.tsx:867`, passes only `active`. Canary:
-`grep -c "SnapshotGradingPanelProps" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`
-returns 2 (declaration + use), proving the file and the grep both fire.
-Absence check: `grep -rn "courseId\|selectedCourse\|useGradingCourses" src/app/components/snapshot-grading/*.ts src/app/components/snapshot-grading/*.tsx`
-returns nothing (exit 1). Contrast with the tool A16 already shipped trends
-for: `GradingRecordingPanel.tsx:112,269,286,317` fetches Canvas courses with
-its own `useGradingCourses(active)` hook and derives `selectedCourse` and
-`assessmentId` from a real course/assessment picker
-(`GradingAssessmentDeclarationControls.tsx`, mounted at `GradingRecordingPanel.tsx:780-783`).
-Snapshot grading is, by design, a paste-a-screenshot tool with no Canvas link
-back at all (`SnapshotGradingPanel.tsx:4-6`: "A0-2's no-write-back ceiling
-still holds: nothing here ever posts a grade anywhere") - it was never given
-a course/assignment selector to remove.
+**The persisted table never shrinks, which is the fact that makes this row
+worth doing.** `commitSessionRows` has exactly three production call sites
+(`grep -rn "commitSessionRows(" src/app/components/snapshot-grading/*.ts src/app/components/snapshot-grading/*.tsx | grep -v "\.test\."`):
+`SnapshotGradingPanel.tsx:685` and `:694` (both edits) and
+`useSnapshotGrade.ts:272` (the grade commit). None removes a row. Canary on
+the same shape: `grep -rn "removeAssessmentRowXYZNOPE" src/app/components/snapshot-grading/`
+exits 1.
 
-**The persisted session is real and already disclosed as cross-session, but
-never as cross-assignment.** `SnapshotGradingPanel.tsx:930-931` (re-measured
-this pass - A24's instrument cited `:931` for the same string, one line off
-from where the block now starts at `:928`; the sentence itself is unchanged):
-*"Completed assessments (n) - some may be from an earlier session, restored
-on reload."* `sessionRows` is the full persisted table (`useAssessmentRowStore`
-call, `SnapshotGradingPanel.tsx:214-222`), one flat array with no grouping,
-no run boundary, and no clearing action anywhere in the file (`grep -n "clear"
-src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` returns nothing
-production-relevant - not reproduced in full here since it is not load-bearing
-to this scope, but checked).
+Round 1 wrote "no clearing action anywhere in the file ... returns nothing
+production-relevant" and suppressed its own output. The full output, since an
+absence claim in this repo may not hide its evidence -
+`grep -in "clear" src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`
+returns **14** lines, including live production code at `:406`
+(`clearPerStudentShots()`), `:420` (`clearPendingAutoGrade()`), and `:773`
+(`confirmLabel="Confirm - clear this student's shots"`). **The narrow claim is
+the true one and it is the one that matters: nothing clears the
+completed-assessments TABLE.** "Next student" clears shots, not rows - the
+panel says so itself at `:421` ("Cleared this student's shots. Assignment and
+rubric shots are kept.").
 
-**Conclusion for section 1: reframe as partly reachability, partly a real
-gap - not a clean instance of either.** The trends *engine and panel* are
-100% reachable-not-built-yet, exactly like A16's opening finding. But unlike
-A16, the *identity data the panel's heading and disclosure line need* does
-not exist on this surface at all, and building it is not pure wiring - see
-section 2.
+The disclosure the surface already carries is at
+`SnapshotGradingPanel.tsx:930-932`, and it is TWO sentences, not one:
 
----
+> Completed assessments ({sessionRows.length}) - some may be from an earlier
+> session, restored on reload. Reloading clears the shots; completed
+> assessments are kept.
 
-## 2. The data the feature needs, and whether it is there
+The second sentence is the one round 1 omitted and it is directly load-bearing:
+the table survives everything the instructor can do except clearing site data,
+so "how many assignments are in this table" is unbounded, not "one or two".
 
-`toClassTrendsEntry(run, meta)` needs `meta: {courseName, assignmentName,
-canvasUrl}` (`classTrendsEntry.ts:35-39`). `computeClassTrends` (called at
-`ClassTrendsPanel.tsx:91`) only reads `entry.run` - `grep -n "courseName\|entry\."
-src/app/components/drafted-grades/ClassTrendsPanel.tsx` shows `courseName`
-never appears past the type import and `assignmentName` is read once, at
-`:206`, passed to a child heading. **Both fields are cosmetic labels, not
-functional gates** - this lowers the bar for what A24 must supply for them,
-but does not remove the harder problem below.
-
-**`GradeResult` construction is mechanical and has a precedent to copy.**
-`GradeResultBase` (`src/lib/grade/types.ts:212-236`) needs `student,
-overallComment, strengths, improvements, resubmitNotice, rubricAreas,
-totalScore, feedback, mergedFileCount, submittedFiles`.
-`SnapshotAssessmentRow` (`snapshot-row.ts:122-152`, extending
-`AssessmentRowCore extends AssessmentFeedback`,
-`assessment-row.ts:64-69,84-96`) already carries `totalScore, strengths,
-improvements, overallComment, studentName, state, error` directly. Missing
-from the row and needing defaults exactly as `classTrendsRunCohort.ts:126,138-139`
-already does for the recording surface: `resubmitNotice: ""`,
-`mergedFileCount: 0`, `submittedFiles: []`. `rubricAreas` needs a real
-conversion, not a default:
-`RubricAreaResult { area, score, comment }` (`types.ts:39-43`) vs
-`SnapshotRubricAreaEvidence { area, score, quote, shotIndex, source, verified,
-... }` (`snapshot-row.ts:89-100`) - there is no `comment` field on the
-snapshot shape. **This is a real design decision, not a mechanical mapping**:
-whether `comment` becomes `""`, the evidence `quote`, or something else
-changes what the trends' per-area commentary reads like. Leave this to the
-architect pass; do not default it here.
-
-**The identity fields (`courseName`/`assignmentName`) and the disclosure
-predicate are where the real gap is, and it is a privacy constraint, not
-just a missing UI control.** The obvious cheap move - snapshot the live
-`assignmentText` onto each row at grade time, the same way
-`classTrendsRunCohort.ts` snapshots `courseName`/`assessment` at the click -
-is blocked by an existing, tested, deliberate rule: **U10 keeps rubric and
-assignment TEXT out of `localStorage` entirely**, and `sessionRows` IS
-persisted to `localStorage` (`ta-snap-table`, see section 4). Citations:
-`useSnapshotShots.ts:13` ("U10: rubric/assignment TEXT is deliberately never
-persisted here"), `SnapshotGradingPanel.tsx:144,157,259`, and the canary test
-itself names it explicitly -
-`snapshot-grading.structure.test.ts:195` ("U10 keeps shot bytes and
-rubric/assignment text out of localStorage"). Writing a raw or truncated copy
-of `assignmentText` into a persisted `SnapshotAssessmentRow` field would
-violate a rule this repo already tests for. A content-free proxy (a hash, or
-an instructor-typed short label persisted separately from the pasted text)
-would not violate it, but that is a new control with its own key and its own
-canary bump (section 4) - not free.
-
-**Net for section 2: `courseName`/`assignmentName` for the panel heading can
-be satisfied cheaply (a fixed string like "Screenshot grading", or an
-instructor-typed short label) since nothing reads them functionally. The
-disclosure predicate (`cohortLabelSpread`'s equivalent) cannot be built from
-any data the surface stores today without either (a) a new, U10-compliant,
-per-row identity marker with its own persisted key, or (b) treating the
-whole persisted session as one undifferentiated cohort with NO disclosure -
-which is strictly worse than what A16 shipped for the sibling tool, not just
-different.** This is the fork the architect pass must resolve; section 5
-argues it is load-bearing for whether the feature is worth shipping as
-scoped.
+**Scope boundary, stated so a reader does not wonder whether it was missed:**
+`src/app/components/repo-grades/classTrendsFolderEntry.ts` has its own trends
+adapter and is untouched by this row. This is a boundary sentence, not a
+residual - it has no owner, instrument or step by construction.
 
 ---
 
-## 3. The surface: line budget
+## 2. The privacy premise round 1 was built on is false
 
-Both counters, both commands, run this pass:
+Round 1's section 2 said the cheap move "is blocked by an existing, tested,
+deliberate rule", citing `snapshot-grading.structure.test.ts:195`. Opened this
+pass, `:195-201`:
 
 ```
+it("finds exactly the expected ta-snap-* key set (... U10 keeps shot bytes and
+    rubric/assignment text out of localStorage)", () => {
+  expect(distinctKeys).toEqual([
+    "ta-snap-armed-role",
+    "ta-snap-auto-grade-armed",
+    "ta-snap-grading-instructions",
+    "ta-snap-table",
+  ]);
+});
+```
+
+`distinctKeys` is built at `:188-189` from
+`combinedSource.match(/(?<![a-zA-Z])ta-snap-[a-z-]*[a-z]/g)`. **The assertion
+is an exact set of KEY NAMES. The U10 sentence is inside the `it()` description
+string and is asserted nowhere.**
+
+Census of the whole test file:
+
+```
+grep -n "U10\|assignmentText\|rubricText" src/app/components/snapshot-grading/snapshot-grading.structure.test.ts
+  -> 2 lines: :131 (a comment) and :195 (the it() description). Zero assertions.
+grep -c "expect" <same file>   -> 122   (canary: the instrument fires on this file)
+```
+
+**U10 is a convention, documented in five places and enforced nowhere.**
+The five: `useSnapshotShots.ts:13`, `SnapshotGradingPanel.tsx:143-147` (the
+`assignmentText`/`rubricText` useState pair's own comment), `:152-157`,
+`SnapshotRubricCaptureReview.tsx:29`, `useSnapshotRubricCapture.ts:47`.
+
+Two consequences, and the second is the dangerous one:
+
+1. Writing `assignmentText` into a row persisted under the EXISTING
+   `ta-snap-table` key adds no new `ta-snap-*` literal, so this canary stays
+   green. The expensive branch round 1 recommended was priced against a wall
+   that is not there.
+2. **Nothing stops an implementer taking the cheap-and-wrong version.** An
+   implementer who stores raw assignment text on the row ships it green
+   through tsc, lint, the build's compile line and all 20,200 tests. That is
+   the real hazard on this row and it is the inverse of the one round 1
+   described. It is R-A24-3, and section 4 gives it an instrument.
+
+**One guard that does exist, and does NOT block this.**
+`snapshot-row-serialization.ts:57` types `toWire`'s parameter as
+`NoPostableIdentity<SnapshotAssessmentRow>`. Opened
+`src/app/components/assessment-shared/assessment-row.ts:47-58`:
+`ForbiddenIdentityKeys` is `userId | user_id | canvasUserId | sisUserId |
+loginId | canvasSubmissionId | submissionId | enrollmentId | studentId`. It is
+a STUDENT-identity guard, compile-enforced with a type-only fixture at
+`no-postable-identity.types.ts`. An assignment-cohort field is not among the
+forbidden keys, so this guard neither blocks nor helps here. Stated because it
+is the obvious objection to a new row field and it does not hold.
+
+---
+
+## 3. What a per-row cohort field actually costs
+
+Round 1 priced a per-row marker as needing "its own persisted key" and a
+canary bump. It needs neither. It does need two things round 1 and the round-1
+check BOTH missed.
+
+**(i) The row codec enumerates fields, so a new field must be added by hand in
+two places.** `snapshot-row-serialization.ts:57-114` (`toWire`) and `:124-246`
+(`fromWire`) each list every field explicitly. The file's own header at
+`:34-55` says why, and also states the hazard: the `row as unknown as
+SnapshotAssessmentRow` cast at `:60` means **tsc will NOT flag a field added to
+the type and forgotten in the codec**. So a cohort field added to
+`SnapshotAssessmentRow` and not added to `toWire`/`fromWire` silently fails to
+survive a reload, with every gate green.
+
+**(ii) There IS an enforcing instrument for that, and it is an exact key set.**
+`snapshot-row-serialization.test.ts:93-113`:
+
+```
+expect(Object.keys(result).sort()).toEqual([ ...17 field names... ].sort());
+```
+
+and a second exact set at `:379-392` (`actualKeysToDegrade` against
+`tableCoveredFields`). Adding an 18th field turns the first red and, depending
+on whether the field is in the degrade-excluded set, the second too. Canary
+that this file's instrument fires: `grep -c "expect"` returns **49**; the file
+is 476 lines by `@(Get-Content).Count`, 441 by `Measure-Object -Line`.
+
+**This is good news, not a cost to avoid.** It is the one place in this
+directory where a forgotten cohort field fails loudly. The requirement is that
+`snapshot-row-serialization.test.ts` is in the write set of whichever wave adds
+the field (R-A24-7), not that the field is avoided.
+
+**(iii) The data is already in scope at the commit point.**
+`grep -rn "assignmentText" src/app/components/snapshot-grading/ | grep -v "\.test\."`
+shows `useSnapshotGrade.ts:37` (the params type), `:84` (destructured),
+`:230` (`pastedTextCorpus`), `:241` (`hasAssignmentText`), `:290` (the
+dependency array). The row is built at `:262-271` and committed at `:272`,
+`commitSessionRows(upsertSnapshotRow(sessionRowsRef.current, merged))` - the
+exact analogue of `GradingRecordingPanel.tsx:641`. `assignmentText` is in
+lexical scope at line 272. Opened and read; not inferred.
+
+**(iv) The predicate needs distinctness, not text.** `cohortLabelSpread`
+(`classTrendsRunCohort.ts:178-181`) is a `Set` size comparison. A
+non-reversible digest of `assignmentText.trim()` supplies exactly that,
+stores no assignment text, needs no instructor-facing control, needs no
+`ta-snap-*` key, and does not move the canary at `:195-201`.
+
+**Honest qualification, which the owner should see before section 6's
+question:** a digest is not unconditionally non-reversible. An attacker who
+already holds a candidate assignment text can confirm a match against a stored
+digest. That is weaker than storing nothing and stronger than storing text. It
+is a design judgement to record (R-A24-3), not a rule this repo tests.
+
+### Line budget, both counters, this pass
+
+```powershell
 $f="src/app/components/snapshot-grading/SnapshotGradingPanel.tsx"
-@(Get-Content $f).Count            # 970  <- mandated measurement
-(Get-Content $f | Measure-Object -Line).Lines   # 908  <- 62 lower, wrong
+@(Get-Content $f).Count                        # 970   <- the mandated instrument
+(Get-Content $f | Measure-Object -Line).Lines  # 908   <- 62 lower, wrong
 ```
 
-`wc -l src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` (Bash
-tool) also gives **970**, agreeing with the mandated PowerShell measurement
-and confirming the disagreement is real here too (62 lines apart on this
-file, not the 42 `this-repo.md` cites for a different file -
-`GradingRecordingPanel.tsx`, measured the same way this pass at 990 vs 947,
-a 43-line gap, which is itself different from `this-repo.md`'s stale
-964/922 pair - that card is dated 2026-09-13 and the file has grown since).
-**Use `@(Get-Content <file>).Count`. Never `Measure-Object -Line`.**
+`wc -l` (Bash tool) also gives **970**. The two instruments disagree by 62 on
+this file, not the 42 `this-repo.md` cites for a different file.
 
-`grep -n "LIMIT\|SnapshotGradingPanel\|ALLOWED_OVERAGE"
-src/file-size-ceiling.structure.test.ts` shows `LIMIT = 1000` (`:41`) and no
-`SnapshotGradingPanel.tsx` entry in `ALLOWED_OVERAGE` (`:75-90`, four entries,
-all `*.test.ts` files, none in `snapshot-grading/`). The recording-split
-exclusion does not cover this file either:
-`isCoveredByRecordingSplitCheck` (`file-size-ceiling.structure.test.ts:56-62`)
-only excludes `src/app/components/recording/<file with no further slash>`
-plus two named files; `SnapshotGradingPanel.tsx` lives under
-`src/app/components/snapshot-grading/`, a different directory, so it is
-checked by the strict repo-wide 1000-line gate with no ratchet.
+`LIMIT = 1000` at `src/file-size-ceiling.structure.test.ts:41`.
+`grep -n "SnapshotGradingPanel" src/file-size-ceiling.structure.test.ts` exits
+**1**; canary on the same file, `grep -c "ALLOWED_OVERAGE"`, returns **2**. So
+no ratchet entry exists. `isCoveredByRecordingSplitCheck` (`:56-63`) with
+`COVERED_BY_RECORDING_SPLIT_CHECK` (`:51-54`) covers only
+`src/app/components/recording/<direct child>` plus `RecordingTab.tsx` and
+`TabShell.tsx`; this file is in a different directory. **30 lines of headroom,
+strictly enforced.**
 
-**970/1000 leaves 30 lines of headroom.** A16 wave 2's own comparable
-addition to the sibling surface - the cohort state, the capture at the click,
-the gated mount, and the disclosure line, all inside `GradingRecordingPanel.tsx`
-- is recorded in the A16 backlog note (`docs/backlog.yml:362`, the "wave 2"
-field, inherited figure not re-measured by me since that wave already landed)
-as "72 against a 46-line budget." 72 lines is more than double this file's 30
-lines of headroom. **Per the row's own instructions: an extraction precedes
-the feature here; do not propose an `ALLOWED_OVERAGE` entry.**
+### The number wave 0 must hit
 
-**Extraction candidate, not mandated, for the architect to accept or
-reject:** the `useAssessmentRowStore` call and its surrounding session-table
-state currently sit inline in the panel (`SnapshotGradingPanel.tsx:214-222`),
-unlike the sibling grading-recording surface, which already extracted the
-identical pattern into its own hook -
-`src/app/components/grading-recording/useGradingRows.ts:171,317` wraps
-`useAssessmentRowStore<GradingRow>(...)` and exposes `rawRows, rowsRef,
-commitRows, persistError`. A `useSnapshotSessionRows.ts`-shaped extraction
-mirroring that precedent is a plausible way to find headroom without
-inventing a new split pattern, but it is a design choice (what exactly moves,
-what stays for lint reasons - see the extraction hazard below) that belongs
-to the architect wave, not this scope document.
-
-**One extraction hazard already measured in this repo, on this exact file,
-worth citing so the architect does not rediscover it the hard way:**
-`this-repo.md:85-100` records that an earlier extraction out of
-`SnapshotGradingPanel.tsx` (N14 wave 1, moving a ref-freshness cache) passed
-tsc and all tests, then failed lint with 2 new
-`preserve-manual-memoization` errors on `handleNextStudentConfirm` - a
-callback nowhere near the moved code. The rule is React Compiler reacting to
-the whole component's hook count/shape, not `exhaustive-deps`. Any wave that
-removes hooks from this panel should expect to re-run lint, not just tsc and
-vitest, before calling the wave green.
-
----
-
-## 4. Persistence of any new control
-
-The directory's persisted-key convention is `ta-snap-*`, and it has its own
-exact-set canary, unlike the sibling `grading-recording` surface's separate
-`ta-rec-*` canary embedded in `recording-split.structure.test.ts`. Citation:
-`src/app/components/snapshot-grading/snapshot-grading.structure.test.ts:176-202`,
-describe block "directory-wide ta-snap-* key exact-set canary (this
-directory has no canary anywhere else)". It scans every non-test `.ts`/`.tsx`
-file in `src/app/components/snapshot-grading/` for the pattern
-`/(?<![a-zA-Z])ta-snap-[a-z-]*[a-z]/g` and asserts the distinct set equals
-exactly:
+A16's comparable addition to the sibling surface, re-measured rather than
+inherited:
 
 ```
-ta-snap-armed-role
-ta-snap-auto-grade-armed
-ta-snap-grading-instructions
-ta-snap-table
+git show --numstat --format="" cbe84e2   ->  73  1  .../GradingRecordingPanel.tsx
+git show cbe84e2^:src/app/components/grading-recording/GradingRecordingPanel.tsx | wc -l   -> 918
+git show  cbe84e2:src/app/components/grading-recording/GradingRecordingPanel.tsx | wc -l   -> 990
 ```
 
-(`:196-201`, `keys` built at `:188`, dedup+sort at `:189`.)
+Net **+72** against the 46 lines A16 budgeted - a 1.57x overrun, which is the
+only measured estimate-overrun factor this repo has and is used again in
+section 7.
 
-**Any new persisted control this feature adds - a per-session assignment
-label, a "start new run" marker, an instructor-declared course name, or
-anything else reachable from section 2's fork - needs a `ta-snap-*` key and
-MUST add that literal string to this exact array in the same commit**, or
-the wave fails this canary. There is no other canary anywhere else in the
-repo that would catch a new key here (the file's own describe-block title
-says so, and it is accurate: `grep -rn "ta-snap" src --include=*.test.ts |
-grep -v "snapshot-grading/"` returns nothing this pass).
-
-If the architect chooses the "whole session is the cohort, no new identity
-field" reading from section 2, **no new key is needed and this canary does
-not move** - worth stating explicitly, since it is the one wave-plan branch
-that changes nothing here.
+**Wave 0's exit criterion: `@(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count`
+must return 928 or lower.** 1000 - 72 = 928 leaves the measured A16 addition
+exactly zero margin; any number below 928 leaves that much margin for the next
+feature. The extraction is genuinely required: 30 lines of headroom against a
+measured 72.
 
 ---
 
-## 5. The leverage question, answered concretely
+## 4. Persistence and the key canary, narrowed correctly
 
-**A24 earns nothing new from the trend engine itself.** Section 1 already
-showed the mechanism (SCALE - "the same rubric held constant, run N times" -
-and GUARANTEED - layer C makes no model call, per `leverage.md`'s taxonomy)
-is shared by five call sites before this row starts. By `leverage.md`'s own
-failure-mode-B test ("grep each candidate class's mechanism against every
-comparable module... if the count clusters near all of them, the class is
-inherited"), five of five grading-adjacent surfaces having it makes it
-platform, not something A24 built.
+The directory's key canary is `snapshot-grading.structure.test.ts:176-202`
+(describe at `:176`, exact set at `:195-201`), and it is the only gate anywhere
+in this repo that can see a key added here:
+`grep -rn "ta-snap" src --include=*.test.ts | grep -v "snapshot-grading/"`
+returns nothing, exit 1.
 
-**What A24 could add, if it ships the honest version, is a narrower,
-real thing: LIVE-LOOP plus a disclosed cohort boundary on a surface that
-currently gives the instructor no signal at all about whether they are
-looking at one assignment's worth of trends or three.** That is checkable
-against the as-built diff exactly the way `leverage.md`'s removal test
-demands: delete `cohortLabelSpread`'s snapshot-grading equivalent, and the
-assertion that changes is whether an instructor who graded assignment A
-Monday and assignment B Tuesday, in the same persisted session, sees a
-warning before trusting a blended trends panel.
+Two rules, because round 1 collapsed them into one and mispriced the feature:
 
-**But section 2 already showed that predicate cannot be built for free.**
-If the architect picks the "whole persisted session is the cohort, no
-identity field, no disclosure" reading, the feature ships *decorative* by
-this row's own leverage standard: `hasTrendableResults` would gate a panel
-that silently averages together however many unrelated assignments happen to
-be sitting in `ta-snap-table` at the time, with less honesty than what A16
-already shipped for the sibling tool (which discloses, per
-`GradingRecordingPanel.tsx:950-955`, precisely because the owner's row A24
-note - `docs/backlog.yml:450` - says mixing is "disclosable on one surface"
-only if it is "disclosable on the other," never blindly accepted on either.
-**Shipping trends on snapshot grading with no disclosure mechanism is not a
-smaller version of A16's feature - it is a regression relative to the bar
-A16 set**, and the honest answer, if the identity-field cost is rejected, is
-closer to "not much" than to a real leverage claim.
-
-**Recommended disposal, for the architect to accept, reduce, or reject per
-`leverage.md`'s own three-way call (never defaulted by an agent):** the
-identity-field addition (a single instructor-typed, U10-compliant, non-text
-label - e.g. an assignment nickname, not the pasted assignment text itself -
-persisted under a new `ta-snap-*` key, captured onto each row at grade time,
-and compared with `Set` the same way `cohortLabelSpread` does) is the
-smallest change that lets this feature clear its own leverage bar. It is a
-real, scoped addition - not "redesign the whole tool" - but it is not free
-either, and it is exactly the sort of judgment call `leverage.md`'s negative
-example (`AskAiModal.tsx`) says must be made explicitly, not silently
-assumed.
+- **A new instructor-facing persisted CONTROL** (a typed label, a "start new
+  run" marker, a declared course name) needs a `ta-snap-*` key AND that literal
+  added to the array at `:196-201` in the same commit, or the wave fails.
+  It also needs a mount effect, not a `localStorage`-seeded `useState`
+  initializer - see `SnapshotGradingPanel.tsx:159-164`'s own comment, which
+  records that a seeded initializer never shows its restored value and React
+  only warns on the hydration mismatch.
+- **A new FIELD on `SnapshotAssessmentRow`** rides inside the existing
+  `ta-snap-table` envelope. It adds no `ta-snap-*` literal, so this canary does
+  not move. Its enforcing instrument is
+  `snapshot-row-serialization.test.ts:93-113` and `:379-392` instead
+  (section 3).
 
 ---
 
-## 6. Wave plan
+## 5. Leverage, re-answered on the corrected count
 
-**Wave 0 - extraction (precedes the feature, per section 3).** Shrink
-`SnapshotGradingPanel.tsx` below its current 970/1000 to create headroom for
-wave 2's addition. Candidate: extract the `useAssessmentRowStore` call and
-its directly-associated state (`STORAGE_KEY_TABLE`, the two persistence
-messages, `sessionRows`/`sessionRowsRef`/`commitSessionRows`/`sessionPersistError`)
-into a new hook mirroring `useGradingRows.ts`'s shipped pattern - final shape
-decided by the architect pass, not fixed here.
-- Write set: `src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`
-  (the caller - MUST be in this wave's list, since it is the only file that
-  invokes the new hook), a new `useSnapshotSessionRows.ts`-shaped file (or
-  whatever name the architect picks), and that new file's own test.
-- Gate: `npx tsc --noEmit`, `npm run lint` (watch for the
-  `preserve-manual-memoization` hazard named in section 3), and
-  `npm run test:paths -- src/app/components/snapshot-grading/SnapshotGradingPanel.tsx <new-test-file>`.
-  Re-measure `@(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count`
-  after, and confirm it is comfortably under 1000 with room for wave 2.
+**The trend mechanism is inherited, not earned.** SCALE and GUARANTEED
+(`leverage.md`'s taxonomy) are already carried by three production call sites
+and four mounts before this row starts. By failure-mode-B, a mechanism free to
+every comparable surface describes the platform. A24 adds zero trend
+mechanism.
 
-**Wave 1 - the architect's fork resolution (design only, no code).** Produce
-a short design note (not this document) settling section 2's fork: new
-identity field + disclosure, or whole-session-as-cohort with an explicit,
-owner-visible decision to ship without disclosure. This wave's output is a
-decision record, not a file-list wave.
+**What A24 can earn is narrower and real: LIVE-LOOP plus a disclosed cohort
+boundary.** The surface's persisted table never shrinks (section 1), so an
+instructor who graded assignment A on Monday and assignment B on Tuesday sees
+one blended trends panel with nothing telling them so. The removal test, stated
+the way `leverage.md` requires - name the deletion, then name the assertion
+whose observed value changes:
 
-**Wave 2 - the adapter leaf.** A new pure file,
-`src/app/components/snapshot-grading/classTrendsSnapshotEntry.ts` (name
-illustrative), mirroring `classTrendsRunCohort.ts`'s shape: a function that
-converts `SnapshotAssessmentRow[]` (plus whatever identity fields wave 1
-decided on) into a `GradingRunEntry`, and - if wave 1 kept disclosure - a
-label-spread predicate over the chosen identity field. Reuses
-`toClassTrendsEntry`/`hasTrendableResults` from `classTrendsEntry.ts`
-verbatim, never a second copy (the same rule `classTrendsRunCohort.ts:34-38`
-states for its own surface).
-- Write set: the new adapter file, its own test file
-  (`classTrendsRunCohort.test.ts` is 353 lines and is the size precedent to
-  budget against, `wc -l src/app/components/grading-recording/classTrendsRunCohort.test.ts`).
-  Nothing else - this wave must not touch `SnapshotGradingPanel.tsx`, so it
-  can run disjoint from wave 3 only if wave 3 is sequenced after it, since
-  wave 3 is the file that calls this wave's export.
+> **Deletion:** the `cohortSpread` call that gates the disclosure line in
+> `SnapshotGradingPanel.tsx`'s JSX.
+> **Assertion whose value changes:** a source-text assertion in
+> `snapshot-grading.structure.test.ts` that the disclosure paragraph's own
+> anchored slice references the spread predicate. With the call deleted, the
+> start anchor still resolves and the slice no longer contains the predicate
+> name, so the assertion's observed value changes from true to false.
 
-**Wave 3 - the mount, in `SnapshotGradingPanel.tsx` (post wave-0
-extraction).** Import the new adapter, capture the cohort at grade time (in
-`useSnapshotGrade.ts`'s `handleGrade`, `useSnapshotGrade.ts:262-282`, the one
-place a grade result is committed via `commitSessionRows(upsertSnapshotRow(...))`
-at `:272` - the natural analogue of `GradingRecordingPanel.tsx:641`'s
-`setLastRunCohort`), mount `ClassTrendsPanel` gated on
-`hasTrendableResults`, and render the disclosure line if wave 1 kept one.
-- Write set (**must include the calling file - the rule this repo has been
-  bitten by repeatedly, per `AGENTS.md`'s wave-dispatch note and
-  `docs/loop/DEV_LOOP.md`'s "every wave includes the file that CALLS each
-  new export"**): `SnapshotGradingPanel.tsx` (the mount site and the JSX),
-  `useSnapshotGrade.ts` (the capture site, if the cohort is captured inside
-  the hook rather than the panel - architect's call), and any new
-  `ta-snap-*` persisted key's producer file if wave 1 added one.
-  `snapshot-grading.structure.test.ts` MUST be in this wave's list too if a
-  new key is added - the canary in section 4 will not update itself.
-- Gate: `npx tsc --noEmit`, `npm run lint`,
-  `npm run test:paths -- src/app/components/snapshot-grading/SnapshotGradingPanel.tsx src/app/components/snapshot-grading/useSnapshotGrade.ts src/app/components/snapshot-grading/snapshot-grading.structure.test.ts <new adapter test>`,
-  and a final `@(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count`
-  check against 1000.
+Stated as a pass condition: **object** = the anchored slice of
+`SnapshotGradingPanel.tsx` bounded by the disclosure paragraph's own opening
+text and its closing tag; **instrument** = `fs.readFileSync` plus
+`String.indexOf` in `snapshot-grading.structure.test.ts`, the anchored-slice
+idiom that file already runs at `:263-264`, `:322-323`, `:352-353` and
+`:364-365` (each pairs a start `indexOf` with an end `indexOf`, asserts both
+anchors resolved, then asserts on the slice); **direction of failure** = RED
+when the slice does not reference the spread predicate, and RED when either
+anchor fails to resolve.
 
-**Sequencing.** Wave 0 before wave 2/3 (headroom must exist before the
-feature grows the file). Wave 1 before wave 2 (the adapter's shape depends on
-the fork). Wave 2 before wave 3 (wave 3 calls wave 2's export). Wave 0 and
-wave 2 are file-disjoint and could in principle run concurrently, but wave 2
-cannot be usefully designed until wave 1 settles the fork, so there is no
-real concurrency to claim here - sequence linearly.
+**If the disclosure is dropped, A24 ships decorative by its own standard** -
+`hasTrendableResults` gating a panel that silently averages however many
+assignments are sitting in `ta-snap-table`, with less honesty than the sibling
+tool. That is a regression against the bar A16 set, not a smaller version of
+it.
+
+**Wave 3 also inherits an unstated choice**: three of four `ClassTrendsPanel`
+mounts pass `defaultExpanded`, Drafted Grades deliberately does not
+(`ClassTrendsPanel.tsx:78,81-86`). On a surface whose whole problem is that
+cohort membership is invisible, opening expanded shows the blend immediately
+and opening collapsed hides it behind a click. Wave 3 must choose and say why;
+it is not a copied default.
+
+**A weak default to refuse explicitly.** Round 1 offered "a fixed string like
+'Screenshot grading'" for the panel heading. `assignmentName` is read exactly
+once, at `ClassTrendsPanel.tsx:206`, and passed to a child heading; `courseName`
+is never read past the type import. Implemented as written, the panel renders
+a heading reading "Screenshot grading" over trends that average three
+assignments - literally true and informationally empty on the one surface whose
+problem is exactly that. **Requirement: the heading must carry the same
+information the disclosure line carries, or the disclosure line must sit above
+the fold of the panel.** Which one is wave 3's call; shipping neither is not.
 
 ---
 
-## 7. Residual register
+## 6. THE QUESTION FOR THE OWNER
 
-- **R-A24-1: the `comment` field gap on rubric-area conversion (section 2).**
-  Object: `RubricAreaResult.comment` when converting from
-  `SnapshotRubricAreaEvidence` (which has `quote`, not `comment`). Owner:
-  the architect pass (wave 1). Instrument: a design note deciding the
-  mapping, checked by the wave-2 adapter's own unit test asserting the
-  chosen value. Direction of failure: if left undecided, an implementer
-  defaults it silently (likely to `""`) and the trends panel's per-area
-  commentary reads as blank for every snapshot-graded entry - a decision
-  made by omission. Step: resolved in wave 1, verified in wave 2's test.
+Two rounds have not settled one thing, and it is a product call, not a
+measurement. Per `AGENTS.md` "Two rounds, then ask", it goes to the owner
+rather than into a third round. Everything else in this document is buildable
+on the recommended answer.
 
-- **R-A24-2: the identity-field / disclosure fork itself (sections 2, 5).**
-  Object: whether `cohortLabelSpread`'s equivalent can be computed at all
-  for snapshot grading. Owner: the architect pass (wave 1), with the
-  three-way leverage call (`leverage.md`) escalated to the product owner if
-  the architect judges the added-control cost not worth it. Instrument: the
-  wave-1 design note plus, if a new field ships, the wave-2/3 unit and
-  canary tests. Direction of failure: shipping wave 3 without resolving this
-  ships either dead UI (an unreachable disclosure branch) or a silently
-  undisclosed cross-assignment blend - both are findings this row exists to
-  prevent, not defects to discover post-ship. Step: before wave 2 starts.
+> **When screenshot grading has graded more than one assignment into the same
+> persisted table, should the trends panel be able to NAME the assignments, or
+> is "more than one assignment" enough?**
 
-- **R-A24-3: U10 compliance of any new field (section 2, 4).** Object:
-  whatever new persisted value wave 1 chooses for identity. Owner: the
-  wave-2/3 implementer. Instrument:
-  `snapshot-grading.structure.test.ts`'s existing U10-adjacent assertions
-  plus a new one if the architect wants it enforced by name (none exists
-  yet for a hypothetical new field, since the field does not exist yet).
-  Direction of failure: a new field that stores raw or truncated
-  `assignmentText`/`rubricText` reintroduces exactly the content-sensitivity
-  exposure U10 was written to prevent, silently, since no existing test
-  scans for it. Step: wave 1's design note states explicitly what the new
-  field's value derivation is (hash, instructor-typed label, or similar) and
-  why it does not carry assignment content; checked by the loop-checker on
-  that design note before wave 2 starts.
+**What each option costs, measured.**
 
-- **R-A24-4: REGRESSION.md baseline.** Object: current snapshot-grading
-  session behavior (the "Completed assessments (n)... restored on reload"
-  text and what it implies) is not yet recorded.
-  `grep -ac "snapshot.grading.*trend\|snapgrade.*trend\|A24" docs/REGRESSION.md`
-  returns **0** this pass. Owner: the baseline seat, per `DEV_LOOP.md`'s
-  "Baseline" step, before wave 3's hand-off. Instrument: a new
-  `docs/REGRESSION.md` entry describing today's no-run-boundary behavior,
-  written before wave 3 lands so the diff has something to regress against.
-  Direction of failure: without it, a later regression pass has no recorded
-  "before" to compare wave 3's "after" to, and a real behavior change (e.g.
-  the disclosure line appearing) cannot be distinguished from a regression.
+| | Digest (recommended) | Instructor-typed label |
+|---|---|---|
+| New instructor control | none | one textbox in a panel with 30 lines of headroom |
+| New `ta-snap-*` key | none | one, plus the canary bump at `snapshot-grading.structure.test.ts:196-201` in the same commit, plus a mount effect (section 4) |
+| New row field | one, via `toWire`/`fromWire` + the two exact key sets at `snapshot-row-serialization.test.ts:93-113,379-392` | the same, plus the control above |
+| Assignment text stored | none | none (the instructor types a nickname) |
+| What the line can say | "more than one assignment" | "Homework 3 and Quiz 1" |
+| Extra panel lines beyond the digest branch | 0 | the control's JSX plus persistence wiring. The only persisted-textbox precedent in this panel is `INSTRUCTOR_INSTRUCTIONS_KEY`: the restore effect at `SnapshotGradingPanel.tsx:165-181` and the write handler at `:182-193` are **29 lines of wiring** before the TextField itself, and the panel has 30 lines of headroom today |
+
+**Recommendation: the digest.** It clears the leverage bar in section 5 (the
+removal test is identical under both), it stores nothing sensitive, it does not
+move the key canary, and it does not ask a 970/1000 panel for a new control.
+Round 1 recommended the label branch and priced it as the minimum; it is the
+expensive branch.
+
+**What it costs to be wrong.** If the owner wants naming, the label branch
+needs a second extraction from the panel (the control does not fit in 30 lines
+and wave 0's 928 target was sized for the feature, not for the feature plus a
+textbox), plus the canary bump, plus the mount effect. That is roughly one
+extra wave. Nothing built for the digest branch is wasted: the row field, the
+adapter leaf, the spread predicate and the mount are identical; only the
+field's VALUE changes from a digest to a typed string.
+
+**Until the owner answers, build the digest.** Section 7 is written against it,
+and section 7's wave 1 is where a different answer is absorbed.
+
+---
+
+## 7. Wave plan
+
+Every gate below was RUN this pass and its exit code read from a file, not a
+pipe. Round 1's gates passed production source paths to `npm run test:paths`,
+which credits arguments against executed TEST files. Measured:
+
+```
+npm run test:paths -- src/app/components/snapshot-grading/SnapshotGradingPanel.tsx \
+                      src/app/components/snapshot-grading/snapshot-grading.structure.test.ts
+```
+
+```
+NOT COVERED src/app/components/snapshot-grading/SnapshotGradingPanel.tsx files=0 passed=0
+COVERED src/app/components/snapshot-grading/snapshot-grading.structure.test.ts files=1 passed=62
+```
+
+Exit code, read from a file: **1**. No test file in that directory can ever
+credit that argument. **The tempting fix - dropping the wrapper for a raw
+`npx vitest run <paths>` - is forbidden**: raw multi-path vitest silently drops
+unmatched arguments and exits 0 (`this-repo.md` section 1). The fix is to name
+test files.
+
+The test files that read this panel's source, measured:
+
+```
+grep -rln "SnapshotGradingPanel.tsx" src --include=*.test.ts
+  -> snapshot-autofire.structure.test.ts, snapshot-grading.structure.test.ts,
+     snapshot-role-setrole-callsites.structure.test.ts, src/loop-docs.structure.test.ts
+canary: grep -rln "SnapshotGradingPanelXYZNOPE.tsx" src --include=*.test.ts  -> exit 1
+```
+
+(`src/loop-docs.structure.test.ts` reads `docs/loop/this-repo.md`, not the
+panel; it is excluded from the gates below deliberately.)
+
+### Wave 0 - extraction. Numeric target, and a constraint round 1 did not have.
+
+**Goal:** `@(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count`
+returns **928 or lower** (derivation in section 3). Currently 970.
+
+**THE CONSTRAINT, and it is what round 1's candidate violated.**
+`snapshot-grading.structure.test.ts`'s describe block "A4d" at `:151` reads
+`SnapshotGradingPanel.tsx`'s OWN source (`panelPath` `:152`, `panelSource`
+`:153`) and asserts:
+
+- `:157-159` - `expect(panelSource).toMatch(/const STORAGE_KEY_TABLE = "ta-snap-table";/)`
+- `:161-166` - `expect(stripComments(panelSource)).toMatch(/useAssessmentRowStore<SnapshotAssessmentRow>\(\s*STORAGE_KEY_TABLE,\s*snapshotRowCodec/)`
+
+Both currently satisfied at `SnapshotGradingPanel.tsx:209`
+(`const STORAGE_KEY_TABLE = "ta-snap-table";`) and `:219`
+(`} = useAssessmentRowStore<SnapshotAssessmentRow>(STORAGE_KEY_TABLE, snapshotRowCodec, {`). The
+block's own header at `:141-149` says why it exists: without it, deleting the
+`useAssessmentRowStore` call would stop persistence silently with every other
+gate green.
+
+**So: `STORAGE_KEY_TABLE`'s declaration and the `useAssessmentRowStore(...)`
+call STAY in `SnapshotGradingPanel.tsx`.** Round 1 ordered exactly those two
+out, citing `useGradingRows.ts:171,317` as the precedent to mirror - that
+precedent is what this test forbids for this directory. Re-pointing the two
+assertions at a new hook file is possible but weakens the one instrument that
+catches persistence silently stopping, and is not recommended without the
+architect saying so in writing.
+
+**Two further constraints on what may move:**
+
+- **Prefer a JSX extraction to a hook extraction.** `this-repo.md:85-100`
+  records that moving a ref-freshness cache out of THIS FILE passed tsc and all
+  tests and then failed `npm run lint` with 2 React Compiler
+  `preserve-manual-memoization` errors on `handleNextStudentConfirm`, a
+  callback nowhere near the moved code. Any wave removing hooks from this panel
+  must re-run lint, not just tsc and vitest.
+- The extraction target is the architect's, subject to the above. Candidates
+  visible in the render tree, each range opened and its closing `)}` confirmed
+  this pass, none mandated: the pinned-rubric-areas block (`:881-907`, 27
+  lines), the completed-assessments block (`:928-945`, 18 lines), and the two
+  modal blocks (`:947-957`, 11 lines; `:959-967`, 9 lines). None of the four
+  alone reaches 42 lines, so wave 0 needs more than one, or a different target.
+
+**Write set:** `src/app/components/snapshot-grading/SnapshotGradingPanel.tsx`,
+the new extracted file, and that new file's own test.
+
+**Gate (run this pass, exit 0):**
+
+```
+npx tsc --noEmit
+npm run lint
+npm run test:paths -- src/app/components/snapshot-grading/snapshot-grading.structure.test.ts \
+                      src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts \
+                      src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts \
+                      <the new file's own test>
+```
+
+Measured without the new test argument, this pass:
+`COVERED ... snapshot-grading.structure.test.ts files=1 passed=62`,
+`COVERED ... snapshot-autofire.structure.test.ts files=1 passed=17`,
+`COVERED ... snapshot-role-setrole-callsites.structure.test.ts files=1 passed=5`,
+exit code read from a file: **0**.
+
+**Exit condition.** Object: `SnapshotGradingPanel.tsx`'s line count.
+Instrument: `@(Get-Content <path>).Count` in PowerShell, never
+`Measure-Object -Line` (62 lower on this file). Direction of failure: FAIL if
+the returned number is greater than 928.
+
+### Wave 1 - absorb the owner's answer. Design only, no code.
+
+If the owner answered "digest", this wave is a one-paragraph confirmation and
+the mapping decision in R-A24-1. If the owner answered "name them", this wave
+re-cuts waves 2 and 3 for the label branch (new key, canary bump, mount effect,
+and a re-sized wave 0 target). Output is a decision record, not a file list.
+
+### Wave 2 - the leaves. Pure, unit-testable, no React.
+
+Two new files under `src/app/components/snapshot-grading/`, names
+illustrative:
+
+- `snapshotCohortKey.ts` - one exported pure function turning
+  `assignmentText` into the stored cohort marker. It must be a plain `.ts`
+  leaf: vitest here is node-env and renders nothing, so logic inline in a
+  `.tsx` cannot be tested at all (`this-repo.md` section 2).
+- `classTrendsSnapshotEntry.ts` - converts `SnapshotAssessmentRow[]` into a
+  `GradingRunEntry` and exposes the spread predicate. It must REUSE
+  `toClassTrendsEntry`/`hasTrendableResults` from
+  `grading-results/classTrendsEntry.ts`, never a second copy - the same rule
+  `classTrendsRunCohort.ts:34-38` states for its own surface. Size precedent:
+  `classTrendsRunCohort.ts` is 181 lines and its test is 353
+  (`@(Get-Content).Count` on both).
+
+The row field itself lands here too, because the codec and its instrument are
+in this wave's write set.
+
+**Write set:** the two new files and their tests,
+`src/app/components/snapshot-grading/snapshot-row.ts` (the field on the type),
+`src/app/components/snapshot-grading/snapshot-row-serialization.ts`
+(`toWire` AND `fromWire`), and
+`src/app/components/snapshot-grading/snapshot-row-serialization.test.ts` (the
+two exact key sets at `:93-113` and `:379-392` - R-A24-7).
+
+**Gate (run this pass without the two new test files, exit 0):**
+
+```
+npx tsc --noEmit
+npm run test:paths -- src/app/components/snapshot-grading/snapshot-row-serialization.test.ts \
+                      src/app/components/snapshot-grading/snapshot-row.test.ts \
+                      src/app/components/snapshot-grading/useSnapshotGrade.wiring.test.ts \
+                      src/app/components/snapshot-grading/snapshot-grading.structure.test.ts \
+                      <the two new leaf tests>
+```
+
+Measured without the two new arguments: `COVERED` on all four
+(60 / 66 / 22 / 62 passing), exit code read from a file: **0**.
+
+**Sabotage requirement, not optional.** Because `toWire`'s cast at
+`snapshot-row-serialization.ts:60` means tsc will not catch a field added to
+the type and forgotten in the codec, the implementer must prove the instrument
+fires: delete the new field from `toWire` alone and confirm
+`snapshot-row-serialization.test.ts` goes red. Restore from a `cp` backup, not
+`git checkout --` (which reverts to the index and destroys uncommitted work in
+the same file).
+
+### Wave 3 - the capture and the mount.
+
+Capture the cohort marker at `useSnapshotGrade.ts:262-272`, inside the `merged`
+object built at `:262` and committed at `:272` - `assignmentText` is already in
+scope there (section 3). Mount `ClassTrendsPanel` gated on
+`hasTrendableResults`, decide `defaultExpanded` explicitly (section 5), render
+the disclosure line, and satisfy section 5's heading requirement.
+
+**Write set:** `src/app/components/snapshot-grading/useSnapshotGrade.ts` (the
+capture), `src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` (the
+mount and the JSX), and
+`src/app/components/snapshot-grading/snapshot-grading.structure.test.ts` (the
+new anchored-slice assertion from section 5's removal test). The calling file
+is in the list by construction - this repo has shipped a wave whose export had
+no caller more than once.
+
+**Gate:**
+
+```
+npx tsc --noEmit
+npm run lint
+npm run test:paths -- src/app/components/snapshot-grading/snapshot-grading.structure.test.ts \
+                      src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts \
+                      src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts \
+                      src/app/components/snapshot-grading/useSnapshotGrade.wiring.test.ts \
+                      <the two new leaf tests>
+```
+
+Then re-measure the panel:
+`@(Get-Content src/app/components/snapshot-grading/SnapshotGradingPanel.tsx).Count`
+must return 1000 or lower, and the wave must report the number, not "under the
+limit".
+
+**Sequencing.** Wave 0 before wave 3 (headroom before growth). Wave 1 before
+wave 2 (the field's value shape depends on the answer). Wave 2 before wave 3
+(wave 3 calls wave 2's exports). Wave 0 and wave 2 are file-disjoint and could
+run concurrently AFTER wave 1 answers; before that there is no real concurrency
+to claim.
+
+---
+
+## 8. Residual register
+
+Each entry names an object, an owner, an instrument, a direction of failure and
+the step that will measure it. An entry missing any of those is a deletion and
+is not listed as a residual.
+
+- **R-A24-1: the rubric-area `comment` gap.** Object:
+  `RubricAreaResult.comment` (`src/lib/grade/types.ts:39-43`) when converting
+  from `SnapshotRubricAreaEvidence` (`snapshot-row.ts:89-100`), which carries
+  `quote` and has no `comment` field. Owner: the wave-1 architect pass.
+  Instrument: the wave-2 adapter's own unit test, asserting the chosen value
+  for a fixture row. Direction of failure: FAIL if the adapter emits a value
+  the design note did not choose - in particular, a silent `""`, which renders
+  every snapshot-graded area's commentary blank. Step: decided in wave 1,
+  measured by the wave-2 test.
+
+- **R-A24-2: the naming question.** Object: whether the disclosure line can
+  name the assignments. Owner: **the repo owner** (section 6). Instrument: the
+  owner's answer; there is no code measurement, which is why it is a question
+  and not a round. Direction of failure: if unanswered, wave 2 builds the
+  digest branch on the recommendation in section 6, and a later "name them"
+  answer costs one extra wave, not a rebuild. Step: asked now, alongside other
+  running work; absorbed in wave 1.
+
+- **R-A24-3: U10 has no enforcer.** Object: whether any new persisted value on
+  this surface carries assignment or rubric content. Owner: the wave-2
+  implementer, checked by the loop-checker on wave 1's design note. Instrument:
+  **there is none today** - measured in section 2, 2 grep hits and 0
+  assertions against a 122-`expect` canary. The wave-2 design note must state
+  the field's exact derivation, and wave 2 must add a source-text assertion in
+  `snapshot-grading.structure.test.ts` pinning the cohort field's value to that
+  derivation (the file already runs the anchored-slice idiom at `:263-264`,
+  `:322-323`, `:352-353`, `:364-365`). Direction of
+  failure: without that new assertion, a field storing raw or truncated
+  `assignmentText` ships green through every gate this repo has. Step: wave 1
+  states the derivation; wave 2 lands the assertion.
+
+- **R-A24-4: REGRESSION.md has no baseline for this area.** Object: today's
+  behaviour - the two-sentence completed-assessments disclosure at
+  `SnapshotGradingPanel.tsx:930-932`, and the fact that the table never
+  shrinks. Owner: the baseline seat, per `DEV_LOOP.md`'s Baseline step.
+  Instrument: `grep -ac "snapshot.grading.*trend\|snapgrade.*trend\|A24" docs/REGRESSION.md`
+  returns **0** this pass, exit 1; canary `grep -ac "^## "` on the same file
+  returns **389**. Direction of failure: without an entry, a later regression
+  pass cannot distinguish the disclosure line appearing from a regression.
   Step: before wave 3's implementer starts.
 
-- **R-A24-5: every UI/keyboard/rendering claim in this document is a
-  reading claim, not an executed one.** Object: the JSX structure, the
-  disclosure line's actual rendered text, and the mount gating described in
-  sections 1, 3, and 6. Owner: the repo owner, in a real browser, after
-  wave 3 ships (nothing in this repo renders a component -
-  `docs/loop/this-repo.md` section 2 and section 6). Instrument: a manual
-  check against the deployed app. Direction of failure: a source-text
-  reading can be correct about what the code says and still wrong about what
-  actually paints, focuses, or announces to a screen reader. Step: the next
-  owner verification pass after wave 3 ships.
+- **R-A24-5: every UI claim here is a reading claim.** Object: the JSX
+  structure, the disclosure line's rendered text, the expanded/collapsed
+  default, and the mount gating. Owner: the repo owner, in a real browser,
+  after wave 3 ships. Instrument: manual check against the deployed app - no
+  component renders under vitest (`this-repo.md` sections 2 and 6). Direction
+  of failure: a source reading can be right about what the code says and wrong
+  about what paints, focuses or announces. Step: the next owner verification
+  pass after wave 3.
 
-- **R-A24-6: Repo Grades and other grading surfaces are out of this row's
-  scope.** Object: `src/app/components/repo-grades/classTrendsFolderEntry.ts`
-  already has its own trends adapter (found in section 1's reuse count) and
-  is unaffected by anything here. Owner: none needed - this is a scope
-  boundary statement, not a debt. Instrument: none. Direction of failure:
-  n/a. Step: n/a. (Included per the register's own discipline: stating a
-  boundary explicitly rather than leaving a reader to wonder whether it was
-  missed.)
+- **R-A24-7: the row codec's exact key sets.** Object:
+  `snapshot-row-serialization.test.ts:93-113` and `:379-392`. Owner: the wave-2
+  implementer. Instrument: those two assertions, plus the sabotage step in wave
+  2 proving they fire. Direction of failure: a cohort field added to
+  `SnapshotAssessmentRow` and forgotten in `toWire`/`fromWire` does not survive
+  a reload, and the cast at `snapshot-row-serialization.ts:60` means tsc says
+  nothing. Step: wave 2's gate plus its sabotage pass.
+
+- **R-A24-8: the narrowed key rule.** Object: any NEW instructor-facing
+  persisted control this feature adds (only reachable if the owner answers
+  "name them"). Owner: whichever wave adds it. Instrument: the exact-set
+  assertion at `snapshot-grading.structure.test.ts:195-201`, plus the mount
+  effect precedent at `SnapshotGradingPanel.tsx:159-164`. Direction of failure:
+  a key added without bumping the array turns the canary red (loud, good); a
+  `localStorage`-seeded `useState` initializer without a mount effect restores
+  nothing visible and React only warns on the hydration mismatch (silent, bad).
+  Step: the wave that adds the control, if any.
 
 ---
 
-## Disposition table
+## 9. What this pass could not determine
 
-This is a new scope document, not a restructuring of a prior one - `docs/a24-scope.md`
-did not exist before this pass (`?? docs/a24-scope.md` would be new in
-`git status --short`, confirmed below). No prior requirements to disposition.
+- Whether the digest's confirmable-match weakness (section 3) matters for this
+  owner's threat model. That is a judgement, not a measurement, and it rides
+  with the section 6 question.
+- Anything about rendered output: markup, focus order, the expanded default's
+  actual appearance, or what a screen reader announces. No component renders
+  under vitest here.
+- Whether the architect's chosen wave-0 extraction will trip the React
+  Compiler lint rule. `this-repo.md:85-100` records it happening on this exact
+  file; whether it recurs depends on what moves, and only `npm run lint` after
+  the move can say.
 
 ---
 
 ## Verification
 
-`npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts`
-was run this pass (not piped for the exit code):
-
 ```
-npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts > <out> 2>&1; echo $? > <exit-file>
+npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
 ```
 
-Output tail: `Test Files 2 passed (2)`, `Tests 21 passed (21)`,
-`COVERED src/lib/no-emojis.test.ts files=1 passed=18`,
-`COVERED src/source-bytes.structure.test.ts files=1 passed=3`. Exit code read
-from `<exit-file>` (not the pipe): **0**.
-
-`git status --short`, run after the test above, proving the write set:
+Output tail:
 
 ```
- M docs/a29-architecture-small.md
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+COVERED src/lib/no-emojis.test.ts files=1 passed=18
+COVERED src/source-bytes.structure.test.ts files=1 passed=3
+```
+
+Exit code, written to a file and then read from that file rather than from a
+pipe (`... > <out> 2>&1; echo $? > <exit-file>; cat <exit-file>`): **0**.
+
+Both documents were also byte-scanned directly for non-ASCII content before
+that run (a Python read of the raw bytes, counting every byte above 127):
+**0 non-ASCII bytes in each**. Three U+2713 characters in a sibling document
+turned the emoji gate red for every concurrent agent earlier today, which is
+why this is measured rather than assumed.
+
+`git status --short`, run immediately after the gate above and after both
+files were written:
+
+```
+ M docs/BACKLOG.md
+ M docs/a24-scope.md
+ M docs/a32-scope.md
+ M docs/backlog.yml
  M docs/css-orphans.md
-?? docs/a24-scope.md
-?? docs/a39-research.md
+ M src/tools/backlog/yaml-codec.test.ts
+ M src/tools/backlog/yaml-codec.ts
 ```
 
-Only `docs/a24-scope.md` is this row's write set, matching the brief exactly.
-The other three entries belong to concurrent agents working other rows this
-pass (A29, A39) and the pre-existing `docs/css-orphans.md` modification
-(present in this session's starting `gitStatus` snapshot, not touched here) -
-none edited by this scope pass.
+This pass's write set is exactly `docs/a24-scope.md` and `docs/a32-scope.md`.
+The other five entries belong to concurrent agents working other rows; none
+was opened for writing here, and no file under `src/` was modified to produce
+any measurement in this document.

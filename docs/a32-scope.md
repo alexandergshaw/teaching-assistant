@@ -1,18 +1,57 @@
-# A32 scope: walkthrough-announcement scheduling
+# A32 scope: walkthrough-announcement scheduling (round 2)
 
-Row: `docs/backlog.yml`, `- id: 'A32'` (measured `grep -n "id: 'A32'" -A 40 docs/backlog.yml`, line 506). State at
-scoping time: `unscoped`, `owns: []`, `verify: null`. No prior `docs/a32-*.md` exists (`find docs -iname "*a32*"`
-returns only this file after it is written), so there is nothing to restructure and no disposition table is owed -
-this is a first pass, not a revision.
+Row A32 (`docs/backlog.yml`, `- id: 'A32'`). The gap: the walkthrough
+surface's announcement action drops the `delayedPostAt` argument the library
+already supports, so an instructor cannot schedule a walkthrough announcement.
 
-Everything below was opened this pass, 2026-09-23, from the repo root. Every quantity names the command that
-produced it.
+**This is round 2 of two.** `docs/a24-a32-check.md` returned NOT BUILDABLE on
+round 1 with one blocker and four majors. Every finding was re-measured here
+before being acted on; three of the check's own claims are corrected below,
+two of them materially. Under `AGENTS.md`'s "Two rounds, then ask", the one
+thing this pass cannot settle from the code is stated as a QUESTION with a
+recommendation in section 7, and the wave plan is buildable around the
+recommended answer.
+
+Every quantity names the command that produced it. No file under `src/` was
+edited. Nothing renders under vitest here, so every claim about what paints is
+a reading claim (`docs/loop/this-repo.md` section 6).
 
 ---
 
-## 1. The exact gap, re-measured (do not inherit the row's number unchecked)
+## 0. Disposition of round 1
 
-**The library, opened directly:** `src/lib/canvas/announcements.ts:420-427`
+| Round-1 requirement | Disposition |
+|---|---|
+| S1: `createAnnouncementFromMarkdown` has six parameters; the walkthrough call passes four; `delayedPostAt` and `image` are the two dropped | **KEPT.** Re-verified verbatim, section 1. |
+| S2: two production call sites of `createAnnouncementFromMarkdown`; the sibling `prompt-announcement-post.ts:27` passes five | **KEPT.** Re-verified with canary, section 2. |
+| S2: `SCHEDULING_TIME_ZONES` is a name collision belonging to call-booking, not a precedent | **KEPT.** Re-verified, section 2. |
+| S3: the render path splits across `WalkthroughAnnouncementPanel.tsx`, `AnnouncementDraftSlot.tsx` and `useAnnouncementDraftSlots.ts`, and the slot file is in the write set | **KEPT**, and it is the strongest thing round 1 did. |
+| S3: the consequence copy at `AnnouncementDraftSlot.tsx:221-229` becomes false under scheduling and must be in scope | **KEPT and PROMOTED.** It is now requirement REQ-A32-1, section 5, with a construction and an instrument rather than a prop suggestion. |
+| S5: "**replicate the sibling's client-side guard exactly**" including its `willSchedule` label derivation (`announcements-panel.tsx:296,507-513`) | **WITHDRAWN.** The sibling derives the label from string length and the post decision from `when.getTime() > Date.now()`. Copying that onto an arm-then-confirm consequence sentence makes the app state the opposite of what it is about to do. Replaced by REQ-A32-1. Enforcer it protected: none. |
+| S3: "this file's header comment (`:6-15`) already records IT as having spent its one available JSX extraction" | **WITHDRAWN.** The header records that about `ModuleDeckCapturePanel.tsx` (843 lines by `@(Get-Content).Count`), not about the walkthrough panel. Section 3. |
+| S3: "an extraction is required in this chunk **regardless of which branch**" | **REDUCED.** Established by arithmetic for Branches A and B; NOT established for Branch C. Restated honestly in section 3. |
+| S6: the persistence question, left open for Wave 0 | **DECIDED: Branch A, do not persist.** Section 6. The check ruled it and this pass adopts the ruling, with one correction to its supporting measurement. |
+| S6: `walkthrough-announcement.structure.test.ts:117-122` is "an **exact-set** assertion, not a floor" | **WITHDRAWN.** It is `expect(distinctKeys.size).toBe(5)` at `:123` - a COUNT. The five key names live only in the `it()` description. Section 6. |
+| S3: "`grep -n "visibleAt"` returns **five** lines (`:82,241,242,296,469,480`)" | **WITHDRAWN.** `grep -c "visibleAt"` returns **6**; canary returns 0, exit 1. The six line numbers round 1 listed were right; the word "five" was wrong. Section 6. |
+| S3: "none of them `localStorage`" as the basis for "the sibling does not persist" | **KEPT, RESTATED.** The claim about `visibleAt` is correct. But the FILE does use `localStorage`, at `announcements-panel.tsx:56` and `:176`, for `COURSE_URL_KEY`. Section 6 states it the narrow way, because the check's own reason 3 ("zero `localStorage`") reads as a claim about the file and is false about the file. |
+| S4: `image` is DEFERRED with an owner, instrument and step | **KEPT** as residual 1. |
+| S5: the timezone conversion must happen client-side via `new Date(value).toISOString()`; the assumption is unverifiable here | **KEPT** as residual 2 and as REQ-A32-2. |
+| S5: a malformed date surfaces through the existing wrapper at `WalkthroughAnnouncementPanel.tsx:650` with no new copy needed | **KEPT.** Re-verified. |
+| S8: Wave 1's write set includes `walkthrough-announcement.test.ts` because `:566-571` asserts exactly four arguments | **KEPT.** Re-verified at `:565-571`, section 8. |
+| S8: no wave names a gate command | **WITHDRAWN.** Every wave now names one, each run this pass with its exit code read from a file. Section 8. |
+| S8: Wave 0 is told to produce "a concrete extraction plan" with no constraint and no number | **WITHDRAWN.** Replaced by two named constraints and a number, section 8. |
+| S3's Branch C: "new reducer action ... mirroring the existing `edit` action at `:240`" | **WITHDRAWN as the nearest precedent.** The nearest precedent is `choose-timing` (`useAnnouncementDraftSlots.ts:238`, action type at `announcement-draft-slots.ts:364`, reducer case at `:408`), which is a per-slot CHOICE control, not a text edit. Section 3. |
+
+New in this round: REQ-A32-1 (the single-predicate requirement and its
+instrument), REQ-A32-2 (the conversion), REQ-A32-3 (the extraction
+constraint), the per-slot naming collision in section 3, and the correction to
+the check's "no test reads `AnnouncementDraftSlot.tsx`" in section 5.
+
+---
+
+## 1. The gap, re-measured
+
+`src/lib/canvas/announcements.ts:420-427`:
 
 ```
 export async function createAnnouncementFromMarkdown(
@@ -25,463 +64,723 @@ export async function createAnnouncementFromMarkdown(
 ): Promise<CanvasAnnouncement>
 ```
 
-Six parameters, no defaults (two are optional/nullable, not defaulted). `delayedPostAt` is consumed at
-`:436-442`: if truthy, it is re-parsed with `new Date(...)`, a `NaN` result throws `"Could not read the scheduled
-visibility time."`, and a valid date is sent to Canvas as `delayed_post_at` via `.toISOString()`. `image` is
-consumed at `:434` through `buildAnnouncementBodyHtmlFromMarkdown(markdownBody, image)` (`:405-409`), which appends
-an `<img>` tag when `image` is supplied.
+`delayedPostAt` is consumed at `:436-442`: re-parsed with `new Date(...)`, a
+`NaN` throws "Could not read the scheduled visibility time.", and a valid date
+goes to Canvas as `delayed_post_at` via `.toISOString()` at `:441`.
 
-**The call, opened directly:** `src/app/actions/walkthrough-announcement.ts:603`
+`src/app/actions/walkthrough-announcement.ts:603`:
 
 ```
 const announcement = await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym);
 ```
 
-Four positional arguments: `courseUrl, title, markdownBody, acronym` (the fourth maps to the library's `code`
-parameter). `delayedPostAt` and `image` are both omitted, so they take their default (`undefined`) inside the
-callee.
-
-**Verdict: the row's claim is correct as re-measured.** Four of six parameters are passed; `delayedPostAt` and
-`image` are the two dropped, and both do exactly what the row says: `delayedPostAt` is the only path to
-`delayed_post_at`, and `image` is the only path to the appended `<img>` tag. I did not inherit this from the row -
-I opened both signatures myself and counted.
+Four positional arguments. **A32 is one omitted argument at one line.**
 
 ---
 
-## 2. Census of every caller, with the sibling that already schedules
+## 2. Caller census, corrected
 
-Command: `grep -rn "createAnnouncementFromMarkdown" src --include=*.ts --include=*.tsx | grep -v "\.test\."`
-
-```
-src/app/actions/prompt-announcement-post.ts:10   (comment)
-src/app/actions/prompt-announcement-post.ts:15   import
-src/app/actions/prompt-announcement-post.ts:27   call site
-src/app/actions/walkthrough-announcement.ts:56   import
-src/app/actions/walkthrough-announcement.ts:590  (comment)
-src/app/actions/walkthrough-announcement.ts:603  call site
-src/lib/canvas/announcements.ts:420              declaration
-src/lib/canvas.ts:76                             barrel re-export
-```
-
-**Two production call sites, exactly as the row's instrument states.** Absence canary, run before trusting the
-above as complete: `grep -rn "createAnnouncementFromMarkdownXYZNOPE" src --include=*.ts --include=*.tsx` exits 1
-with no output, proving the pattern above is not silently matching zero lines. Neither grep was piped through
-`head`.
-
-**The sibling that already schedules:** `src/app/actions/prompt-announcement-post.ts:18-32`
+Round 1 censused `createAnnouncementFromMarkdown` correctly and then, in
+section 7, counted "three Canvas-announcement-posting surfaces, two already
+scheduling" without measuring it. Both greps re-run this pass, neither piped
+through `head`:
 
 ```
-export async function postPromptAnnouncementAction(
-  courseUrl: string,
-  title: string,
-  markdownBody: string,
-  acronym?: string,
-  delayedPostAt?: string
-): Promise<{ announcement: CanvasAnnouncement } | { error: string }> {
-  try {
-    await requireUser();
-    const announcement = await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym, delayedPostAt);
-    return { announcement };
-  ...
+grep -rn "createAnnouncementFromMarkdown" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rn "createAnnouncementFromMarkdownXYZNOPE" src --include=*.ts --include=*.tsx   -> exit 1 (canary)
+grep -rn "createAnnouncementAction" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+grep -rn "createAnnouncementActionXYZNOPE" src --include=*.ts --include=*.tsx         -> exit 1 (canary)
 ```
 
-Five of six arguments - only `image` is dropped here. The file's own header comment (`:10-12`) already names this
-exact contrast: *"Reuses `createAnnouncementFromMarkdown` unchanged, including its `delayedPostAt` fifth parameter -
-unlike `postWalkthroughAnnouncementAction` ..., which drops it."* This action's sole caller is
-`src/app/components/canvas-tab/announcements-panel.tsx:259` (`grep -n "postPromptAnnouncementAction("
-src/app/components/canvas-tab/announcements-panel.tsx`).
+**Seven production call sites across the two posting entry points**, each
+opened to see whether it forwards a schedule value:
 
-**The sibling's own UI is the precedent to copy**, `src/app/components/canvas-tab/announcements-panel.tsx:462-489`:
-a single MUI `TextField` with `type="datetime-local"`, `slotProps.htmlInput.min` pinned to `toDatetimeLocalValue(new
-Date())` (blocks picking a past time in the browser's own date-picker widget), a hint line, and a "Clear" button
-that appears only when a value is set. The state (`visibleAt`, declared `:82`) is validated and converted to
-`delayedPostAt` in `handlePost` (`:234-292`, the conversion at `:237-251`):
+| Call site | Entry point | Forwards a schedule value? |
+|---|---|---|
+| `src/app/components/canvas-tab/announcements-panel.tsx:259` | `postPromptAnnouncementAction` -> `createAnnouncementFromMarkdown` | **yes** (`delayedPostAt`) |
+| `src/app/components/canvas-tab/announcements-panel.tsx:266` | `createAnnouncementAction` | **yes** (`delayedPostAt`) |
+| `src/lib/workflows/registry/steps.announcements.ts:532` | `createAnnouncementAction` | **yes** (`postAt`) |
+| `src/app/components/recording/useTakeAnnouncement.ts:762` | `createAnnouncementAction` | no - passes `undefined` explicitly, to reach the 6th `image` argument |
+| `src/app/actions/lms-generation-writers.ts:64` | `createAnnouncementAction` | no - four args |
+| `src/app/actions/messaging.ts:293` | `createAnnouncementAction` | no - four args |
+| `src/app/actions/walkthrough-announcement.ts:603` | `createAnnouncementFromMarkdown` | **no - this row** |
 
-```
-let delayedPostAt: string | undefined;
-let scheduledLabel = "";
-if (visibleAt) {
-  const when = new Date(visibleAt);
-  if (Number.isNaN(when.getTime())) {
-    setPostNote({ kind: "error", text: "Enter a valid date and time for when students can see this." });
-    return;
-  }
-  if (when.getTime() > Date.now()) {
-    delayedPostAt = when.toISOString();
-    scheduledLabel = when.toLocaleString();
-  }
-}
-```
+(`prompt-announcement-post.ts:27` is the action body behind the first row, not
+an eighth site. `canvas-inbox.ts:284` is the declaration.)
 
-A past or present `visibleAt` is **not an error** - it silently falls through to an immediate post
-(`delayedPostAt` stays `undefined`). Only a malformed string is refused, client-side, before the server action is
-even called. The button label and success copy branch on `willSchedule = visibleAt.trim().length > 0` (`:296`,
-button text `:507-513`, success text `:280-282`).
+**The finding round 1 missed, and it is the one that matters for section 7:**
+`steps.announcements.ts:532` is a workflow step. It declares `postAt` as a
+step input (`:506`), branches its own progress copy on it (`:531`) and its own
+summary label on it (`:538`). **A scheduled Canvas announcement already fires
+from an UNATTENDED path in this app.** Round 1's section 7 argued the
+INTEGRATION shape here ("this app fires INTO Canvas once, and Canvas executes
+unattended afterward") is one `leverage.md`'s taxonomy does not describe
+exactly. That shape already ships, one directory over.
 
-**A second, unrelated "scheduling" surface exists and must not be confused with this one.**
-`src/app/components/canvas-tab/utils.ts:26-36` defines `SCHEDULING_TIME_ZONES`, and its only consumer
-(`grep -rn "SCHEDULING_TIME_ZONES" src --include=*.ts --include=*.tsx`) is
-`src/app/components/canvas-tab/inbox-panel.tsx:610-625`, inside a "Schedule a call with a student" calendar-booking
-modal (`ModalShell label=... "Schedule a call"`, `:580`). That is a meeting-booking timezone override, unrelated to
-`delayed_post_at` announcement visibility. I opened it because the name collision is real and a future reader
-searching "scheduling" in this directory will hit it; it is not a precedent for A32 and contributes nothing to the
-design below.
+**The name collision, re-verified and still correctly excluded.**
+`src/app/components/canvas-tab/utils.ts:26-36` defines `SCHEDULING_TIME_ZONES`;
+`grep -rn "SCHEDULING_TIME_ZONES" src --include=*.ts --include=*.tsx` shows its
+only consumer is `inbox-panel.tsx:620`, inside a "Schedule a call with a
+student" booking modal. Unrelated to `delayed_post_at`. Not a precedent.
+
+**A reuse finding round 1 did not make.** `toDatetimeLocalValue` is EXPORTED
+(`src/app/components/canvas-tab/utils.ts:46`) and `utils.ts` has **zero
+imports** (`grep -c "^import" src/app/components/canvas-tab/utils.ts` returns
+0) - a pure leaf with no server-only dependency. It has exactly one consumer
+today (`announcements-panel.tsx:48,473`). The walkthrough surface should
+import it, not copy it.
+
+**And a trap that copying would spring.** `utils.ts:1` declares
+`COURSE_URL_KEY = "ta-canvas-course-url"`. The walkthrough directory's key
+canary (section 6) matches `/(?<![a-zA-Z])ta-[a-z-]*[a-z]/g` over RAW source
+including comments, so copying that file, or even writing a comment in the
+walkthrough directory that mentions any `ta-` literal, turns the canary red.
+Import; do not copy, and do not name a `ta-` key in a comment there.
 
 ---
 
-## 3. What the surface would need
+## 3. The surface, the branches, and what the extraction claim really rests on
 
-**Reachability check, done before proposing anything:** `WalkthroughAnnouncementPanel.tsx` (985 lines, below) is
-the file that imports and calls `postWalkthroughAnnouncementAction`
-(`src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx:65,647`). But the actual per-draft
-Post button, its confirm/arm state, and its user-facing copy do **not** render in that file - they render in
-`AnnouncementDraftSlot.tsx`, a separate component the panel maps its `slots` array into
-(`WalkthroughAnnouncementPanel.tsx:899-912`). The panel supplies a `postDraft` callback
-(`WalkthroughAnnouncementPanel.tsx:644-657`) with a fixed two-argument shape, `(title, message) => Promise<{course}
-| {error}>`, whose type is declared in `useAnnouncementDraftSlots.ts:148-151` and invoked at that file's `:332`.
-This three-file split is the reason "which component renders the draft controls" does not have a one-file answer,
-and it is why the write set in section 8 below is four files deep on the UI side alone.
+### The render path
 
-**A correctness requirement the row does not mention, found by opening the render path:**
-`AnnouncementDraftSlot.tsx:221-229` hardcodes the confirm-arm consequence text:
+`WalkthroughAnnouncementPanel.tsx` imports and calls
+`postWalkthroughAnnouncementAction` (`:65,647`), but the per-draft Post button,
+its arm/confirm state and its copy render in `AnnouncementDraftSlot.tsx`, which
+the panel maps its `slots` array into at `:899-912`. The panel supplies
+`postDraft` (`:644-657`, deps `[selectedCourse]` at `:656`) with a fixed
+two-argument shape declared at `useAnnouncementDraftSlots.ts:148-151` and
+invoked at `:332`.
 
-```
-Posting publishes this announcement to every student in {courseName ?? "the course"} immediately -
-Canvas has no unpublished state for an announcement - and this app cannot recall or delete it afterward.
-```
+### Line budget, both counters
 
-and the button labels at `:238-244` are `idleLabel="Post to Canvas"` / `loadingLabel="Posting…"` with no scheduled
-variant. If A32 ships scheduling without touching this component, the app will tell an instructor their post is
-immediate and irrevocable at the exact moment it is neither - a false statement the feature itself would
-introduce, not one it inherits. This must be in scope, not deferred: the copy needs a scheduled branch (mirroring
-`willSchedule` / `scheduledLabel` in the sibling, `announcements-panel.tsx:296,507-513`), which means
-`AnnouncementDraftSlot.tsx` needs a new prop (a `scheduledLabel: string | null` or similar) threaded from wherever
-the schedule value ends up living (see the design fork below).
-
-**The design fork the architect must resolve - not decided here, but priced here:**
-
-The walkthrough panel drafts and posts **multiple independent slots** (`slots.map`, `WalkthroughAnnouncementPanel.
-tsx:899`), unlike the sibling's single-draft form. Whether the scheduled time is one panel-level field applied to
-whichever slot is posted next, or a per-slot field, is a real shape decision with different costs:
-
-| Branch | Where state lives | Est. lines added to `WalkthroughAnnouncementPanel.tsx` (985/1000) | Est. lines added elsewhere | Persistence question |
-|---|---|---|---|---|
-| A. Global field, unpersisted (mirrors sibling exactly) | New `useState` in the panel | ~45-55 (1 state line + ~26-line JSX block copying `announcements-panel.tsx:462-489` + ~10-15 lines of validation/conversion inside `postDraft` + a few lines threading a label prop into the `slots.map` call) | `AnnouncementDraftSlot.tsx` +10-15 (new prop, conditional copy/labels); `useAnnouncementDraftSlots.ts` +0 (postDraft's exposed 2-arg shape is unchanged - the panel's closure captures the new state) | Sibling precedent is to NOT persist (`visibleAt` has no `STORAGE_KEY_*`, confirmed by absence below) |
-| B. Global field, persisted under a new `ta-` key | Same as A plus a `STORAGE_KEY_VISIBLE` const + init + effect | A's total **+11** (mirrors the `STORAGE_KEY_MODULE` pattern, `WalkthroughAnnouncementPanel.tsx:182-192`, 11 lines) | Same as A, plus the structure-test canary bump in section 6 | Diverges from the sibling; needs an explicit reason if chosen |
-| C. Per-slot field | New reducer action + slot field in `useAnnouncementDraftSlots.ts`; control renders inside `AnnouncementDraftSlot.tsx` itself | ~5-10 (thin wiring only - no JSX block added to the panel itself) | `useAnnouncementDraftSlots.ts` +20-30 (new action type + reducer case, mirroring the existing `edit` action at `:240`); `AnnouncementDraftSlot.tsx` +35-40 (its own JSX control plus the conditional copy) | Sidesteps the persistence question entirely - a per-slot value on a dynamically added/removed slot has no natural singleton key |
-
-**Absence check backing the "sibling does not persist" claim:** `grep -n "visibleAt" src/app/components/canvas-tab/
-announcements-panel.tsx` returns five lines (`:82,241,242,296,469,480` - state declaration, two reads inside
-`handlePost`, the `willSchedule` derivation, and the two JSX usages), none of them `localStorage`. Canary:
-`grep -n "visibleAtXYZNOPE" src/app/components/canvas-tab/announcements-panel.tsx` exits 1.
-
-**The line-count consequence, measured with both instruments this repo disagrees on:**
-
-```
-PowerShell: $f="src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx"
-  @(Get-Content $f).Count                       -> 985   (the mandated instrument)
-  (Get-Content $f | Measure-Object -Line).Lines  -> 918   (67 lower - NOT the 42 this-repo.md cites for a
-                                                            different file; do not inherit that figure)
-Bash:  wc -l "<same path>"                       -> 985   (agrees with the mandated instrument)
+```powershell
+$g="src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx"
+@(Get-Content $g).Count                        # 985   <- the mandated instrument
+(Get-Content $g | Measure-Object -Line).Lines  # 918   <- 67 lower, wrong
 ```
 
-`src/file-size-ceiling.structure.test.ts` sets `LIMIT = 1000` at `:41` and this path is not present in its
-`ALLOWED_OVERAGE` ratchet map (`grep -n "WalkthroughAnnouncementPanel" src/file-size-ceiling.structure.test.ts`
-returns nothing - the plain 1000-line limit applies, not a grandfathered one). Nor is it covered by the
-recording-directory check (`COVERED_BY_RECORDING_SPLIT_CHECK`, same file `:51-54`, lists only `RecordingTab.tsx`
-and `TabShell.tsx`). **At 985/1000 by the mandated instrument, only 15 lines of headroom exist.** Branch A/B both
-exceed the ceiling (985+50=1035, 985+61=1046); Branch C's own thin-wiring estimate (985+5 to 985+10 = 990-995)
-leaves 5-10 lines of margin, which is not enough for anything else this file will need in the same wave (updating
-`postDraft`'s call to include the new argument, for instance) and is fragile on its own terms - this file's header
-comment (`:6-15`) already records it as having spent its "one available JSX extraction" once before, and
-`docs/loop/this-repo.md` records a sibling panel (`SnapshotGradingPanel.tsx`) failing lint on an untouched callback
-purely from React Compiler reacting to a changed hook shape after an extraction.
+`wc -l` also gives **985**. The gap is 67 on this file, not the 42
+`this-repo.md` cites for a different file. `LIMIT = 1000` at
+`src/file-size-ceiling.structure.test.ts:41`; `grep -n
+"WalkthroughAnnouncementPanel" src/file-size-ceiling.structure.test.ts` exits
+**1** with canary `grep -c "ALLOWED_OVERAGE"` returning **2**, so no ratchet
+entry; `COVERED_BY_RECORDING_SPLIT_CHECK` (`:51-54`) does not name it.
+**15 lines of headroom, strictly enforced.**
 
-**Conclusion for this section: an extraction from `WalkthroughAnnouncementPanel.tsx` is required in this chunk
-regardless of which branch the architect picks**, because even the cheapest branch leaves single-digit headroom on
-a file that has already needed rescuing once. This is a Wave 1 (architect) decision, not something to invent here.
+### What round 1's extraction argument actually cited
+
+Round 1: "this file's header comment (`:6-15`) already records **it** as having
+spent its 'one available JSX extraction' once before." Opened
+`WalkthroughAnnouncementPanel.tsx:1-20`. Lines 6-9 read, in substance: a
+SIBLING to `ModuleDeckCapturePanel.tsx`, "see that document's WHERE IT LIVES
+section for the measured reason (that panel was already within ~150 lines of
+this repo's 1000-line ceiling, with its one available JSX extraction already
+spent)."
+
+**That is about `ModuleDeckCapturePanel.tsx`**, which measures **843** by
+`@(Get-Content).Count` today. The header says nothing about the walkthrough
+panel's own extraction budget. So the "regardless of branch" conclusion must
+stand on arithmetic alone, and it does not stand for all three:
+
+| Branch | Panel lines added (estimate) | 985 + estimate | Over 1000? |
+|---|---|---|---|
+| A. one panel-level field, unpersisted | ~48-58 (1 state line + the 28-line control block measured at `announcements-panel.tsx:462-489` + ~10-15 lines of conversion inside `postDraft` + threading a prop into `slots.map`) | 1033-1043 | **yes** |
+| B. A, persisted under a new `ta-` key | A + 11 | 1044-1054 | **yes** |
+| C. per-slot field | ~5-10 (thin wiring only; the control renders in `AnnouncementDraftSlot.tsx`) | 990-995 | **no** |
+
+**Honest restatement: an extraction is REQUIRED by arithmetic for Branches A
+and B, and is NOT required by arithmetic for Branch C.** For C it is required
+only under a margin policy, which is a choice, not a measurement. Section 8
+states the policy and its number explicitly so the architect can move it.
+
+The one calibration figure this repo has for such estimates: A16 wave 2
+budgeted 46 lines and landed 72 (`git show cbe84e2^:.../GradingRecordingPanel.tsx | wc -l`
+-> 918; `git show cbe84e2:... | wc -l` -> 990), a **1.57x overrun**. Applied to
+Branch C's worst case that is 16 lines, giving 1001 - which is over the wall
+by one. **So Branch C's margin is not real either once the only measured
+overrun factor in this repo is applied.** An extraction is warranted under
+every branch; what changed is that the justification is now arithmetic plus a
+named calibration factor, not a misattributed sentence.
+
+### The per-slot branch has a precedent round 1 did not find, and a hazard nobody found
+
+`AnnouncementDraftSlot.tsx` **already renders a per-slot control called
+"Timing"** - `label="Timing"` at `:117`, `value={slot.timing}` at `:119`,
+`onChange` dispatching `onChooseTiming` at `:120`, options at `:33-36`:
+`{value: "beginning-of-week", label: "Beginning of week"}` and
+`{value: "midweek", label: "Midweek check-in"}`. `AnnouncementTiming` is
+declared at `src/lib/walkthrough-announcement-prompt.ts:64`. It is a CONTENT
+framing choice that shapes the drafted text; it has nothing to do with Canvas
+visibility.
+
+Two consequences:
+
+1. **Branch C has a ready template.** The action type is at
+   `announcement-draft-slots.ts:364`, the reducer case at `:408`, the hook
+   callback at `useAnnouncementDraftSlots.ts:238`, the staleness mirror at
+   `AnnouncementDraftSlot.tsx:89-90`, and a structure test already pins the
+   control to the rendered row (`walkthrough-announcement.structure.test.ts:745-763`,
+   the anchored-slice idiom on `label="Timing"`). Round 1 named `edit` (`:240`)
+   as the precedent; `choose-timing` is the closer one by a wide margin.
+2. **Branch C puts a second "when" control in the same row as a select
+   literally labelled "Timing".** That is a copy hazard the UX seat must
+   resolve, not a blocker - but the new control must NOT be called "Timing",
+   "Schedule" or anything an instructor could confuse with the drafting
+   choice. The sibling's own label is the safe one to reuse: "Visible to
+   students (optional)" (`announcements-panel.tsx:463`).
+
+There is also a product argument for per-slot that round 1 did not make: this
+panel exists to draft SEVERAL announcements with different content timings
+("Beginning of week", "Midweek check-in"). A single panel-level visibility
+field applied to whichever slot is posted next is semantically wrong on a
+surface designed to produce announcements meant for different moments. That is
+the substance of section 7's question.
 
 ---
 
-## 4. The image parameter's disposition: DEFERRED, not covered by A32
+## 4. The image parameter: DEFERRED, unchanged from round 1
 
-**A32 should scope `delayedPostAt` only and explicitly defer `image`.** Reasoning, measured rather than assumed:
+`AnnouncementBodyImage` (`announcements.ts:283-286`) is never constructed by
+either `createAnnouncementFromMarkdown` caller. It is NOT dead app-wide:
+`createAnnouncementAction` (`canvas-inbox.ts:284-307`) resolves an image via
+`resolveAnnouncementImage` (`announcement-image-upload.ts:138`), and
+`useTakeAnnouncement.ts:762` is the one caller that builds and passes one -
+confirmed this pass: it passes `undefined` in the 5th position specifically to
+reach `image` in the 6th.
 
-- `AnnouncementBodyImage` (`announcements.ts:283-286`) is the type both `createAnnouncementFromMarkdown` and
-  `createAnnouncement` (the plain-text sibling, `:329-336`) accept as their `image` parameter.
-- Via `createAnnouncementFromMarkdown` specifically (the function this row is about), it is **never constructed by
-  any caller** - both production call sites (`prompt-announcement-post.ts:27`, `walkthrough-announcement.ts:603`)
-  omit it, confirmed in section 2.
-- It is **not dead app-wide**, though: `createAnnouncement` (the plain-text, non-markdown sibling) reaches a real,
-  live image-attach path through a different feature entirely. `src/app/actions/canvas-inbox.ts:284-307`
-  (`createAnnouncementAction`) uploads and resolves an image via `resolveAnnouncementImage`
-  (`src/lib/canvas/announcement-image-upload.ts:138`) when one is supplied, and
-  `src/app/components/recording/useTakeAnnouncement.ts:745-769` is the one caller that actually builds and passes
-  one (a captured photo/whiteboard image, `altText` from `buildAnnouncementImageAltText`,
-  `src/lib/take-announcement.ts:316`). So the upload/resolve mechanism already exists in this repo and is proven
-  working for the "Take announcement" surface - it is just never wired to the **markdown** posting path either
-  surface (walkthrough or prompt-driven) uses.
-- Building image support into `createAnnouncementFromMarkdown`'s callers is a second, separable capability (an
-  image-attach control on a markdown draft) with its own UX questions (where does the image come from on the
-  walkthrough surface - a captured frame? an upload? neither exists there today) that the row's own title does not
-  ask for ("cannot SCHEDULE an announcement" - no mention of images in the title, only in the instrument's
-  parenthetical). Folding it into A32 would double the surface this chunk touches for a capability nobody has
-  asked for on this surface.
-
-**Residual, recorded here in substance (not a pointer) per `iteration-caps.md`'s definition (owner, instrument,
-step):**
-
-- **Object:** `image` parameter of `createAnnouncementFromMarkdown` (`announcements.ts:426`), unreached from both
-  its production callers.
-- **Owner:** the repo owner - whether the walkthrough or prompt-driven markdown surfaces should ever attach an
-  image is a product decision, not one this scoping pass can make (no UI, no capture path, and no request for it
-  exists on either surface today).
-- **Instrument:** `grep -rn "createAnnouncementFromMarkdown(" src --include=*.ts --include=*.tsx | grep -v
-  "\.test\."` and confirm the 5th positional argument is still absent from every call site (today: both sites
-  pass 4-5 args, never 6). Canary: the same grep with a nonsense function name exits 1, proving the pattern
-  actually matches when present.
-- **Direction of failure:** stays RED (meaning: still a live gap, not yet decided) for as long as no backlog row
-  or scope document exists that carries an owner and a step for it. It is a deletion, per `iteration-caps.md`'s
-  definition, the moment it stops appearing in `docs/BACKLOG.md`.
-- **Step:** the owner's next pass over the walkthrough/prompt-announcement surfaces (the same "next pass" the row's
-  own note already names for A17/A18/A19/A32), or a fresh backlog row filed if/when an image-capture UI is wanted
-  on a markdown-posting surface. Not blocking A32's own scheduling work.
+Attaching an image on a markdown-drafting surface is a separate capability with
+its own UX questions (where would the image come from on the walkthrough
+surface - a captured frame, an upload, neither exists there today). The row's
+title asks about scheduling. Recorded as residual 1.
 
 ---
 
-## 5. Timezone and validation
+## 5. REQ-A32-1: one predicate, or the app lies at the moment it matters
 
-**What Canvas expects, per the code (not verified against a live Canvas instance - see the limits section):**
-`delayed_post_at` as an ISO 8601 UTC string. Confirmed at `announcements.ts:441`
-(`params.append("delayed_post_at", when.toISOString())`) and identically in the plain-text sibling at `:351`. Both
-functions build this from whatever string `delayedPostAt` arrives as, via `new Date(delayedPostAt.trim())`.
+**This is the blocker, and the fix is a construction, not a stronger
+assertion.**
 
-**What the browser supplies:** a `datetime-local` input's value is a **local wall-clock string with no timezone
-offset** (`"YYYY-MM-DDTHH:mm"`, per `src/app/components/canvas-tab/utils.ts:19-22`'s own
-`toDatetimeLocalValue` comment, "the local wall-clock value a datetime-local input expects"). `new Date(...)` on
-that string is interpreted by the JS engine in the **browser's own local timezone**. This is where the conversion
-to UTC happens today, client-side, in the sibling's `handlePost` (`announcements-panel.tsx:242,248`,
-`when.toISOString()`), before the value ever reaches the server action. `createAnnouncementFromMarkdown` /
-`createAnnouncement` re-parse whatever string arrives and re-stringify it - a defensive second pass, not the
-primary conversion.
+### The mechanism
 
-**Consequence for A32:** the conversion must happen the same way - a `datetime-local` value read with `new
-Date(value)` and sent as `.toISOString()` - or a scheduled time will be silently wrong by the instructor's UTC
-offset. There is **no timezone-override control** on this path anywhere in the codebase (the only "timezone
-override" that exists, `SCHEDULING_TIME_ZONES`, belongs to the unrelated call-booking feature in section 2 above).
-The implicit assumption, inherited unchanged from the sibling, is that the instructor's browser timezone is the
-timezone they mean - which is unverifiable here (no live browser session against a real Canvas course) and is
-flagged as a residual below rather than asserted as correct.
+The sibling derives its BUTTON LABEL and its POST DECISION from two different
+predicates:
 
-**Validation, as the library actually enforces it (not as I would design it):**
-- A malformed/unparseable string throws `"Could not read the scheduled visibility time."`
-  (`announcements.ts:438-440`). This propagates through `postWalkthroughAnnouncementAction`'s existing
-  `catch` (`walkthrough-announcement.ts:605-607`, `{ error: err.message }`), which
-  `WalkthroughAnnouncementPanel.tsx`'s `postDraft` already turns into an instructor-facing string:
-  `` `Canvas refused the announcement - ${result.error}. Nothing was posted.` `` (`:650`). So a malformed date
-  would surface to the instructor, verbatim, as: **"Canvas refused the announcement - Could not read the scheduled
-  visibility time. Nothing was posted."** No new error copy is needed for this case; the existing wrapper already
-  produces a sane sentence.
-- A **past-dated** time is **not rejected** by the library - it is only rejected client-side, and only by the
-  sibling's own `handlePost`, which silently treats it as "post now" rather than surfacing an error
-  (`announcements-panel.tsx:247-250`, the `when.getTime() > Date.now()` guard). If A32 does not replicate this
-  client-side guard, a past-dated string would reach Canvas raw, and what Canvas does with a past
-  `delayed_post_at` is **not verifiable in this environment** (no live Canvas, no API key - `docs/loop/
-  this-repo.md` section 6). The honest, checkable requirement is: **replicate the sibling's client-side guard
-  exactly** (treat non-future as immediate, refuse only on `NaN`), so the walkthrough surface's behavior for a
-  past-dated pick is identical to the surface that already ships this, rather than an unverified new behavior.
-- The browser's own `min` attribute on the `datetime-local` input (`slotProps.htmlInput.min`,
-  `announcements-panel.tsx:472-474`) additionally prevents *picking* a past time through the native picker widget,
-  though a typed/pasted value can still bypass it - which is exactly why the client-side re-check at submit time
-  is load-bearing, not decorative.
+- `announcements-panel.tsx:296` - `const willSchedule = visibleAt.trim().length > 0;`
+- `announcements-panel.tsx:247` - `if (when.getTime() > Date.now()) { delayedPostAt = when.toISOString(); ... }`
+
+So the sibling already reads "Schedule announcement" (`:507-513`) on a button
+that posts immediately, whenever the chosen time is in the past. On the sibling
+this is cosmetic and is partly redeemed afterwards by the success copy at
+`:280-282`, which branches on `scheduledLabel` and is therefore honest.
+
+**On the walkthrough surface it is not cosmetic.**
+`AnnouncementDraftSlot.tsx:221-229` is an arm-then-confirm CONSEQUENCE
+statement - a paragraph with `id={...wta-post-consequence-${slot.id}}` at
+`:223`, wired to the confirm button by `consequenceId` at `:249`. Its whole
+job is to tell the instructor what pressing Confirm will do, and it currently
+says the post is immediate and that "this app cannot recall or delete it
+afterward" (`:224-226`). Give that paragraph a scheduled variant derived the
+sibling's way and the sequence is:
+
+1. The instructor types or pastes a time that is in the past - a mistyped year,
+   a value that went stale while the panel sat open, or a wall-clock value that
+   is already past in the browser's own timezone. The `min` attribute
+   (`announcements-panel.tsx:473`) blocks PICKING a past time in the native
+   widget; it does not block typing or pasting one.
+2. The consequence line says the post is scheduled.
+3. Confirm publishes it to every student in the course immediately and
+   irrevocably.
+
+That is the app stating the opposite of what it is about to do, in the one
+control designed to prevent exactly that.
+
+### The requirement
+
+**REQ-A32-1. The consequence copy, the button labels and the post decision
+must all read the SAME resolved value. The resolution happens once, in a pure
+exported function in a plain `.ts` leaf, and returns a discriminated result.**
+
+Shape, illustrative:
+
+```
+// src/app/components/walkthrough-announcement/scheduled-visibility.ts
+export type ScheduledVisibility =
+  | { kind: "immediate" }
+  | { kind: "scheduled"; iso: string; label: string }
+  | { kind: "invalid" };
+
+export function resolveScheduledVisibility(raw: string, now: number): ScheduledVisibility;
+```
+
+- Empty or whitespace `raw` -> `immediate`.
+- `Number.isNaN(new Date(raw).getTime())` -> `invalid`.
+- `when.getTime() > now` -> `scheduled`, with `iso = when.toISOString()`
+  (REQ-A32-2) and `label = when.toLocaleString()`.
+- Otherwise (a valid but non-future time) -> `immediate`. **This preserves the
+  sibling's actual BEHAVIOUR** - a past time posts now, it is not an error -
+  while making it impossible for the copy to disagree with it, because the copy
+  reads the same `kind`.
+
+**Why a construction rather than an assertion:** `iteration-caps.md` records
+that what ends a defect chain is "replacing an assertion with a construction
+that makes the bad state unrepresentable", and that strengthening the same
+mechanism never ends one. A boolean prop threaded from a length check is the
+assertion version and can drift again the first time someone edits either side.
+A single discriminated result cannot drift, because there is nothing to drift
+from.
+
+**It is also the only version this repo can test.** Vitest here is node-env and
+renders no component, so logic inline in a `.tsx` cannot be tested at all. A
+pure leaf can be, and must be: a table over empty / whitespace / malformed /
+past / now / future, with `now` injected rather than read from the clock.
+
+### How a future divergence gets caught - and a correction to the check
+
+The check stated: "no test reads `AnnouncementDraftSlot.tsx` at all
+(`grep -rn "AnnouncementDraftSlot" src --include=*.test.ts` returns only
+`walkthrough-announcement.structure.test.ts:163,175,176`)."
+
+**Measured, that is false.** The same grep, re-run this pass, returns **29**
+lines across **3** files. `walkthrough-announcement.structure.test.ts` reads
+`AnnouncementDraftSlot.tsx`'s OWN source in five separate describe blocks -
+`fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), ...)`
+at `:226`, `:256`, `:356`, `:746` and `:789` - and several of those assert on
+its COPY and its ARIA (`:264-271` on the research notice's own text, `:367` on
+`role="status" aria-live="polite"`, `:375` on the Retry gate).
+
+**This makes the blocker cheaper to close, not less real.** The blocker stands:
+no existing assertion ties the consequence copy to the post decision, and
+nothing would catch the split-predicate version. But the instrument to add is
+an in-repo idiom already running five times in the file the wave is already
+touching. The pass condition:
+
+> **Object:** the anchored slice of `AnnouncementDraftSlot.tsx` bounded by the
+> consequence paragraph's own `id={` ... `wta-post-consequence` anchor and its
+> closing `</p>`.
+> **Instrument:** `fs.readFileSync` plus paired `String.indexOf` anchors in
+> `walkthrough-announcement.structure.test.ts`, matching the idiom at
+> `:745-763` and `:788-806`, with both anchors asserted to resolve before the
+> slice is asserted on.
+> **Direction of failure:** RED when the slice does not reference the resolved
+> visibility value, RED when it references a separate length-derived boolean,
+> and RED when either anchor fails to resolve.
+
+A second assertion of the same shape pins the same value to the button labels
+at `:239-244`.
+
+### The third label round 1 missed
+
+Round 1 named `idleLabel="Post to Canvas"` (`:239`) and
+`loadingLabel="Posting..."` (`:244`). There is a third:
+`confirmLabel="Confirm post"` at **`:240`** - the label the instructor reads
+immediately before the irrevocable act. All three need a scheduled variant.
+
+(Citation correction: the check placed `consequenceId` at `:247`. It is at
+`:249`. `onConfirm` is at `:247`.)
+
+### The copy is duplicated; scoping to the walkthrough alone is correct
+
+```
+grep -rn "Posting publishes this announcement" src --include=*.tsx --include=*.ts | grep -v "\.test\."
+grep -rn "Posting publishes this announcementXYZ" src --include=*.tsx   -> exit 1 (canary)
+```
+
+Three production copies: `GeneratedPostSection.tsx:223`,
+`TakeAnnouncementPanel.tsx:597`, `AnnouncementDraftSlot.tsx:224`. **Only the
+third is in scope**, because the other two reach
+`createAnnouncementAction` without a delay (`useTakeAnnouncement.ts:762`
+passes `undefined` in the 5th position). Said explicitly here because a later
+reader grepping the sentence finds three and cannot otherwise tell which one
+A32 touched.
 
 ---
 
-## 6. Persistence
+## 6. Timezone, validation, and persistence
 
-**The repo-wide rule, as stated in the task and as this directory already implements it:** every new
-textbox/select/checkbox persists across reloads under a `ta-` prefixed localStorage key.
+### REQ-A32-2: the conversion
 
-**This directory's exact-set canary, opened directly:**
-`src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts:103-128` scans every
-non-test file in the directory for the pattern `` /(?<![a-zA-Z])ta-[a-z-]*[a-z]/g `` and asserts:
+`delayed_post_at` goes to Canvas as an ISO 8601 UTC string
+(`announcements.ts:441`, `params.append("delayed_post_at", when.toISOString())`;
+identically in the plain-text sibling at `:351`). A `datetime-local` input's
+value is a local wall-clock string with no offset -
+`src/app/components/canvas-tab/utils.ts:17-18`'s own comment says so. `new
+Date(thatString)` is interpreted in the browser's local timezone, and
+`.toISOString()` is where the conversion to UTC happens, client-side, before
+the server action is called (`announcements-panel.tsx:248`).
+
+**REQ-A32-2: the same conversion, in `resolveScheduledVisibility`, and nowhere
+else.** There is no timezone-override control on this path anywhere in the
+codebase (the only one that exists belongs to the unrelated call-booking
+feature, section 2). The assumption that the instructor's browser timezone is
+the one they mean is inherited from the sibling and is unverifiable here -
+residual 2.
+
+### Validation
+
+A malformed string throws "Could not read the scheduled visibility time."
+(`announcements.ts:438-440`), propagates through
+`walkthrough-announcement.ts:605-607`'s catch, and reaches the instructor
+through the existing wrapper at `WalkthroughAnnouncementPanel.tsx:650` as:
+"Canvas refused the announcement - Could not read the scheduled visibility
+time. Nothing was posted." No new error copy is needed for the server path.
+
+Client-side, `resolveScheduledVisibility` returns `invalid` and the confirm is
+refused before the action is called, matching the sibling's own early return at
+`announcements-panel.tsx:243-246`.
+
+### Persistence: DECIDED - Branch A, do not persist
+
+Round 1 left this open. The check ruled it. **This pass adopts the ruling.**
+
+The directory's canary, opened directly
+(`walkthrough-announcement.structure.test.ts`, describe at `:103`):
 
 ```
 it("finds exactly five distinct ta- keys across every non-test file in this directory today
     (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources)", () => {
-  expect(distinctKeys.size).toBe(5);
+  expect(distinctKeys.size).toBe(5);     // :123
 });
 ```
 
-(`:117-122`). This is an **exact-set assertion, not a floor** - adding any new `ta-` literal anywhere in this
-directory's non-test files (including inside a comment, since the regex has no comment-awareness) turns this test
-red until the count and the enumerated key list in the `it()` description are both bumped in the same commit,
-exactly as the file's own `:118-121` comment records happening once already (bumped from 3 to 5 when the
-emoji/resource toggles landed).
+**This is a COUNT assertion, not an exact set.** The five names appear only in
+the `it()` description and are asserted nowhere, so a renamed key passes and
+only a changed COUNT fails. Round 1 called it "an exact-set assertion, not a
+floor"; that changes Branch B's instruction materially - bumping 5 to 6 at
+`:123` is an enforced gate, and re-enumerating the names in the description is
+documentation the suite cannot check. The keys regex at `:111` scans RAW source
+including comments.
 
-**Whether this canary needs bumping for A32 depends entirely on the design-fork answer in section 3:**
+Three reasons for Branch A, in order of weight:
 
-- **Branch A (global, unpersisted)** - matches the sibling's own precedent of *not* persisting a scheduled-visibility
-  field (section 3's absence check). No new `ta-` key, no canary bump. This is a deliberate divergence from the
-  blanket "every new control persists" rule, and if chosen it needs its own one-line justification in the
-  criteria document (the precedent above, plus the reasoning that a stale future timestamp surviving a reload
-  could silently schedule against a now-wrong date) rather than being silently exempted.
-- **Branch B (global, persisted)** - needs a new `STORAGE_KEY_VISIBLE = "ta-rec-wta-visible"` (or similar, matching
-  the directory's own `ta-rec-wta-*` segment convention, `WalkthroughAnnouncementPanel.tsx:97-102`'s comment) and
-  the canary at `:117-122` bumped from 5 to 6 **in the same commit**, plus the six keys re-enumerated in the test's
-  own description string.
-- **Branch C (per-slot)** - has no natural singleton key (slots are added/removed dynamically,
-  `useAnnouncementDraftSlots.ts`'s `add`/`remove` actions), so it sidesteps the question rather than answering it;
-  whether that is acceptable is itself a question for whoever resolves the design fork.
+1. **A persisted wall-clock instant is stale by construction.** Restore it on
+   tomorrow's reload and the field holds a past time. Under
+   `resolveScheduledVisibility` that resolves to `immediate` and the copy says
+   so - so REQ-A32-1 removes the danger, but the control still silently
+   discards what the instructor thought they had set. A persisted stale
+   timestamp is the worst input this surface can receive and there is no reason
+   to build a way to receive it.
+2. **The repo's persist rule and this value are different classes.** The five
+   keys this directory persists (`WalkthroughAnnouncementPanel.tsx:97-102`) are
+   standing values an instructor reuses across sessions. A one-shot publication
+   instant is not. The rule exists to spare retyping.
+3. **The sibling already decided it, and the instrument does not move.**
+   Measured: `grep -c "visibleAt" src/app/components/canvas-tab/announcements-panel.tsx`
+   returns **6** (canary `grep -c "visibleAtXYZNOPE"` returns 0, exit 1), at
+   `:82,241,242,296,469,480`, none of them a storage call. **Stated narrowly on
+   purpose:** that file DOES use `localStorage`, at `:56` and `:176`, for
+   `COURSE_URL_KEY` - so "zero `localStorage`" is false about the file and true
+   only about `visibleAt`. Branch A keeps `distinctKeys.size` at 5 and touches
+   no canary.
 
-**This is a residual only in the sense that the AC/architect wave must pick one before an implementer can act -
-it is not something this scoping pass can settle**, because the canonical precedent in this very directory
-(the sibling in `announcements-panel.tsx`) and the repo's general persistence rule disagree with each other, and
-resolving that disagreement is a design decision, not a measurement.
+**This decision is orthogonal to the section 7 question.** It rules out Branch
+B. It applies equally to a panel-level field and a per-slot field: neither is
+persisted.
 
 ---
 
-## 7. The leverage question, answered honestly
+## 7. THE QUESTION FOR THE OWNER
 
-**The mechanism, named concretely rather than asserted:** Canvas's own server holds `delayed_post_at` and reveals
-the announcement to students at that instant with nobody - not this app, not the instructor - present or running
-anything at the moment it happens. A chat window cannot do this at all: it has no path to Canvas's API, scheduled
-or otherwise, so the closest a chat gets is producing the announcement text and telling the instructor to paste it
-into Canvas at 8am Monday themselves, which requires the instructor (or some other automation) to be present at
-that exact moment. This is a real instance of the INTEGRATION class in `docs/loop/leverage.md` (external system
-acts on the app's behalf with no human relaying it at execution time) - though the trigger direction is reversed
-from that card's own worked example (a GitHub webhook firing *into* this app; here, this app fires *into* Canvas
-once, and Canvas executes unattended afterward). Worth flagging to the AC seat as a shape this card's taxonomy
-does not describe exactly, even though the "a chat cannot do this" argument holds.
+Two rounds have not settled one thing, and it is a product call. Per
+`AGENTS.md` "Two rounds, then ask" it goes to the owner rather than into a
+third round; the wave plan in section 8 is written against the recommendation.
 
-**Earned or inherited - the honest answer is inherited, and the count says so precisely.** Applying
-`leverage.md`'s own failure-mode-B test (count how many comparable modules already carry the mechanism unearned):
-of the app's three Canvas-announcement-posting surfaces, **two already have Canvas-side scheduling today** -
-`createAnnouncementAction` / `announcements-panel.tsx` (`canvas-inbox.ts:297,302`, `delayedPostAt` threaded) and
-`postPromptAnnouncementAction` (`prompt-announcement-post.ts:27`, confirmed in section 2). Only the walkthrough
-surface (`postWalkthroughAnnouncementAction`) lacks it, and it lacks it purely because of the four-of-six arity
-gap this row exists to close - not because the underlying capability had to be invented. The library function
-(`createAnnouncementFromMarkdown`) already implements the scheduling logic in full; A32 adds zero new scheduling
-mechanism to this codebase. This is the same shape `docs/loop/leverage.md`'s struck classes describe: a mechanism
-already free to every comparable surface describes the platform, not the feature that merely reaches it.
+> **This panel drafts several announcements at once, each with its own content
+> timing ("Beginning of week", "Midweek check-in"). Should each draft get its
+> own "visible to students from" time, or should there be one time for the
+> panel, applied to whichever draft is posted next?**
 
-**Concretely, then: A32 is reachability work, not a new leverage claim.** Per `docs/DEV_LOOP.md`'s Criteria step
-("the requested feature is sometimes already built and merely unreachable - if so, say that") and this repo's own
-recorded rule ("verify reachability, not just correctness"), the honest framing is that the INTEGRATION-class
-advantage above was already earned once, by whichever change first added `delayed_post_at` support to
-`createAnnouncement`/`createAnnouncementFromMarkdown` and wired it into the other two surfaces - not by this row.
-The backlog row's own note calls this "a feature question, not a regression" because the walkthrough surface gets
-a *new user-facing control* it never had, which is true and is why Acceptance criteria should still run (per
-`seats.md`'s trigger table: "any change a user can see, click" fires User experience; a brand-new control is not a
-pure bug fix). But the criteria document should state plainly - mirroring the `AskAiModal.tsx` negative example in
-`leverage.md` - that the advantage is real, already earned by the platform, and not newly invented by this chunk,
-so a later reader does not credit A32's diff with inventing Canvas-side scheduling it merely extends to a third
-surface.
+| | Per-slot (Branch C, recommended) | One panel-level field (Branch A) |
+|---|---|---|
+| Panel lines added | ~5-10 | ~48-58 |
+| Extraction needed before the feature | yes, under the calibrated estimate (section 3) | yes, by plain arithmetic |
+| Files changed | `useAnnouncementDraftSlots.ts`, `announcement-draft-slots.ts`, `AnnouncementDraftSlot.tsx`, thin panel wiring | `WalkthroughAnnouncementPanel.tsx` (state + control + conversion), `AnnouncementDraftSlot.tsx` (copy + labels) |
+| Precedent to copy | `choose-timing`, already per-slot in these same files | `announcements-panel.tsx:462-489`, a different directory and a single-draft form |
+| Copy hazard | a second "when" control beside the existing "Timing" select - must not be named "Timing" or "Schedule" | one control, no collision |
+| Matches what the surface is for | yes - several announcements meant for several moments | no - one time for N drafts posted at different moments |
+
+**Recommendation: per-slot.** It is the cheaper branch on the panel that has
+15 lines of headroom, it has a precedent in the same three files, and it is the
+only one that is coherent with a surface whose whole purpose is producing
+several announcements for several moments. Round 1 declined to recommend;
+the cost table now has measured numbers on both sides.
+
+**What it costs to be wrong.** If the owner wants one panel-level field, the
+extraction target grows from "the calibrated 16 lines" to "at least 58 lines",
+which is a materially larger wave 0 and may need two extractions. Nothing built
+for per-slot is wasted: `resolveScheduledVisibility`, the copy rewrite, the
+three label variants and the action-layer change (wave 1) are identical under
+both; only where the raw string is stored differs.
 
 ---
 
 ## 8. Wave plan and write sets
 
-**Every wave below includes the file that calls whatever it adds**, per the repo's own recurring failure mode
-(a wave shipping an export with no caller reads green and does nothing).
+Round 1 named no gate command in any wave. Every gate below was RUN this pass
+and its exit code read from a file, not a pipe. Multi-path runs use
+`npm run test:paths --`; raw `npx vitest run <paths>` silently drops unmatched
+arguments and exits 0 (`this-repo.md` section 1), so it is never used.
 
-**Wave 0 - design (must land before Wave 1's file list is finalized):**
-- **Seat:** Architect + reuse (Wave 1 per `seats.md`'s default, but sequenced first here because everything below
-  depends on it). Resolves the Branch A/B/C fork in section 3 and the persistence question in section 6 together -
-  they are the same decision, not two.
-- **Also needed:** a concrete extraction plan for `WalkthroughAnnouncementPanel.tsx` (985/1000, section 3), sized
-  against this feature's own addition, not against the 1000-line wall in isolation - this repo has already shipped
-  one extraction that technically fit under the wall and still left the file "at the ceiling" for the next feature
-  (recorded lesson, not re-derived here).
-- **Files read, none written:** all files cited in sections 1-6.
+**Wave 0 - design, no files written.**
 
-**Wave 1 - action layer (server-side threading, no UI):**
-- **Write set:** `src/app/actions/walkthrough-announcement.ts` (add `delayedPostAt` as a 5th parameter to
-  `postWalkthroughAnnouncementAction`, `:595-608`, forwarded to `createAnnouncementFromMarkdown`),
-  `src/app/actions/walkthrough-announcement.test.ts` (the exact-arity assertion at `:566-571` will fail the
-  moment a 5th argument is added to the call - `toHaveBeenCalledWith` checks the full argument list - so it must
-  be updated in this wave, plus new tests: delayedPostAt forwarded verbatim, and the NaN-date error path already
-  proven by the library is not swallowed or reworded by the action).
-- **No change needed to `src/lib/canvas/announcements.ts`** - `createAnnouncementFromMarkdown` already supports
-  `delayedPostAt` end to end; this wave only reaches the parameter that already exists.
-- **Caller included:** N/A for this wave in isolation (the UI caller is Wave 2, and Wave 1 is not independently
-  shippable without it - a 5th parameter with no caller supplying it is inert, which is exactly the
-  "wave must include the caller" rule; recording it here as a known exception because a mid-file parameter
-  addition cannot itself be the whole chunk).
+- Resolve the section 7 question if the owner has answered; otherwise proceed
+  on the recommendation.
+- **REQ-A32-3, the extraction constraint round 1 did not have.**
+  `walkthrough-announcement.structure.test.ts`'s describe "G2" at `:169` reads
+  `WalkthroughAnnouncementPanel.tsx`'s OWN source and asserts:
+  - `:175-177` - `expect(panelSource).toMatch(/<AnnouncementDraftSlot\b/)`
+  - `:179-181` - `expect(panelSource).toMatch(/useAnnouncementDraftSlots\(/)`
 
-**Wave 2 - UI, gated on Wave 0's design decision:**
-- **Write set (Branch A/B, global field):** `src/app/components/walkthrough-announcement/
-  WalkthroughAnnouncementPanel.tsx` (new state and/or persistence per Wave 0's decision; the JSX control; the
-  `postDraft` callback updated to compute and forward `delayedPostAt`, `:644-657`; a label/prop threaded into the
-  `slots.map` call, `:899-912`), `src/app/components/walkthrough-announcement/AnnouncementDraftSlot.tsx` (new prop;
-  conditional consequence copy at `:221-229`; conditional button labels at `:238-244`), and - only if Branch B is
-  chosen - `src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts` (bump the
-  ta-key canary from 5 to 6, `:117-122`, and re-enumerate the keys in the `it()` description).
-- **Write set (Branch C, per-slot):** `src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.ts`
-  (new reducer action mirroring `edit` at `:240`, new slot field, `postDraft`'s type at `:148-151` and call at
-  `:332` updated to a 3rd argument), `src/app/components/walkthrough-announcement/AnnouncementDraftSlot.tsx` (the
-  control itself, plus the same conditional copy as above), and a thin update to
-  `WalkthroughAnnouncementPanel.tsx`'s `postDraft` wiring (`:644-657`).
-- **Caller included either way:** `WalkthroughAnnouncementPanel.tsx` is in every branch's write set, and it is the
-  file that already calls `postWalkthroughAnnouncementAction` (`:647`) - so this wave cannot ship the action change
-  from Wave 1 as dead code.
+  The obvious JSX extraction candidate is the `slots.map` block at `:899-912`,
+  which CONTAINS `<AnnouncementDraftSlot` and is therefore exactly what `:176`
+  forbids moving. The block's own header at `:159-167` records why it exists:
+  an earlier wave shipped 2,711 lines of fully-tested leaves that nothing
+  called. **So: the `slots.map` call and the `useAnnouncementDraftSlots(...)`
+  call stay in the panel. Extract something else.**
+- **The number.** Wave 0's exit criterion is
+  `@(Get-Content src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx).Count`.
+  Under the recommended per-slot branch the target is **940 or lower**: 1000
+  minus the branch's calibrated worst case (10 x 1.57 = 16, section 3) leaves
+  984, and 940 leaves a further 44 lines for the next feature to use. The 44 is
+  a POLICY choice, not a measurement, and the architect may move it - but wave
+  0 must exit on a number, not on "comfortably under". Under Branch A the same
+  policy gives **865 or lower** (1000 - 58 x 1.57 = 909, minus 44).
+- Lint is load-bearing here and must be named, because `this-repo.md:85-100`
+  records the React Compiler `preserve-manual-memoization` rule failing on an
+  untouched callback after a hook extraction from a sibling panel - a
+  LINT-ONLY failure that leaves tsc and the whole suite green.
 
-**Wave 3 - regression and the removal-test question:**
-- **Baseline** (`seats.md`'s Baseline seat trigger: "area has no coverage in `docs/REGRESSION.md`") - check with
-  `grep -a` before writing a new entry; not done in this pass, left for the seat that owns it.
-- **Test seat** owes a removal test for the leverage claim in section 7 if AC decides one is owed at all (section
-  7's own conclusion is that the advantage is inherited, not earned, which per `leverage.md`'s disposal rules is a
-  legitimate "no claim, or a reduced claim" outcome, not a gap to force a test around).
-- No component renders under vitest here (`vitest.config.ts` `include: ["src/**/*.test.ts"]`, node environment) -
-  every UI/copy claim above (the confirm-arm text, the button labels, the field layout) is a **reading claim**, not
-  a tested one, and must be confirmed by the owner in a real browser before being trusted as shipped correctly.
+**Wave 1 - action layer.**
+
+- Write set: `src/app/actions/walkthrough-announcement.ts` (a 5th
+  `delayedPostAt` parameter on `postWalkthroughAnnouncementAction`, `:595-608`,
+  forwarded to `createAnnouncementFromMarkdown` at `:603`) and
+  `src/app/actions/walkthrough-announcement.test.ts`.
+- The test file is NOT optional in this wave. `:565-571` is
+  `expect(createAnnouncementFromMarkdown).toHaveBeenCalledWith(...)` with
+  exactly four arguments; `toHaveBeenCalledWith` checks the full list, so
+  adding a fifth - even `undefined` - fails it. New tests owed: the argument
+  forwarded verbatim, and the library's `NaN` message not swallowed or
+  reworded by the action.
+- No change to `src/lib/canvas/announcements.ts`.
+- **Wave 1 is not independently shippable and is not meant to be.** A 5th
+  parameter no caller supplies is inert. It lands with wave 2 in the same push.
+- Gate:
+
+```
+npx tsc --noEmit
+npm run test:paths -- src/app/actions/walkthrough-announcement.test.ts \
+                      src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts \
+                      src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.test.ts \
+                      src/app/components/walkthrough-announcement/announcement-draft-slots.test.ts
+```
+
+Run this pass: `COVERED` on all four (26 / 77 / 12 / 81 passing). Exit code
+read from a file: **0**.
+
+**Wave 2 - the leaf.**
+
+- New file `src/app/components/walkthrough-announcement/scheduled-visibility.ts`
+  (`resolveScheduledVisibility`, section 5) and its own test. Pure, no React,
+  no DOM, `now` injected - the same discipline
+  `announcement-draft-slots.ts:3` states for itself ("no DOM, no use server -
+  this file is the pure leaf every reducer, hook and ... ").
+- Import `toDatetimeLocalValue` from `src/app/components/canvas-tab/utils.ts`
+  for the `min` attribute; do not copy it (section 2's trap).
+- Write set: the new file and its test. Nothing else.
+- Gate: `npx tsc --noEmit` and `npx vitest run <the one new test>` - a single
+  path may use raw vitest, since there is nothing for it to silently drop.
+
+**Wave 3 - the UI, per-slot (recommended branch).**
+
+- Write set:
+  `src/app/components/walkthrough-announcement/announcement-draft-slots.ts`
+  (new slot field and a new action, mirroring `choose-timing` at `:364` and
+  `:408`),
+  `src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.ts`
+  (the callback, mirroring `:238`; `postDraft`'s type at `:148-151` and its
+  call at `:332` gain the resolved value),
+  `src/app/components/walkthrough-announcement/AnnouncementDraftSlot.tsx` (the
+  control, the consequence copy at `:221-229`, and all THREE labels at
+  `:239`, `:240`, `:244`),
+  `src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx`
+  (thin `postDraft` wiring at `:644-657`; its `useCallback` deps at `:656`,
+  currently `[selectedCourse]`, gain whatever the new closure reads), and
+  `src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts`
+  (the two new anchored-slice assertions from section 5).
+- **The calling file is in the list by construction**: the panel is the file
+  that calls `postWalkthroughAnnouncementAction` at `:647`, so wave 1's
+  parameter cannot ship dead.
+- **No `ta-` key is added** (section 6), so `distinctKeys.size` stays 5 and the
+  canary at `:123` does not move. If any wave DOES add one, `:123` must be
+  bumped in the same commit and the names re-enumerated in the description.
+- Gate: the same four-path `test:paths` line as wave 1, plus wave 2's new test,
+  plus `npx tsc --noEmit`, `npm run lint`, and a final
+  `@(Get-Content .../WalkthroughAnnouncementPanel.tsx).Count` reported as a
+  number against 1000.
+
+**Wave 4 - baseline and regression.**
+
+- Baseline: check `docs/REGRESSION.md` with `grep -a` before writing. Not done
+  in this pass; owned by the baseline seat.
+- The test seat owes no removal test for a leverage claim, because section 9
+  concludes there is no new claim to remove - which is a legitimate disposal
+  under `leverage.md`, not a gap.
+
+---
+
+## 9. Leverage: inherited, and now understated
+
+The capability exists end to end in
+`createAnnouncementFromMarkdown:420-442`; the walkthrough action drops it at
+exactly one line, `walkthrough-announcement.ts:603`; the sibling one file over
+already passes it. **A32 adds zero new scheduling mechanism to this codebase.**
+
+Round 1's conclusion was right and is now stronger than round 1 knew: of seven
+production call sites (section 2), three already forward a schedule value, and
+one of those three - `steps.announcements.ts:532` - does it from an UNATTENDED
+workflow step. Round 1 argued the INTEGRATION shape here is one `leverage.md`'s
+taxonomy does not describe exactly, on the grounds that the trigger direction
+is reversed from that card's webhook example. That exact shape already ships.
+
+**So the honest framing, which the criteria document must state plainly:** the
+INTEGRATION-class advantage was earned by whichever change first added
+`delayed_post_at` support and wired it into the other surfaces, not by A32.
+This is the `AskAiModal.tsx` disposal `leverage.md` prescribes - "accept the
+cost explicitly: state in the criteria that the advantage is inherited" - and
+it is reached by counting rather than argued around.
+
+What A32 legitimately adds is a new user-facing control on a surface that
+lacked one, plus the copy that control makes false and REQ-A32-1 makes true
+again. That is reachability work with a correctness requirement attached, and
+saying so is not a reason to skip Acceptance criteria: a brand-new control
+fires `seats.md`'s User experience trigger.
+
+---
+
+## 10. The silent-green failure this scope exists to prevent
+
+The feature can be built, pass `npx tsc --noEmit`, `npm run lint`,
+`npm run build`'s compile line, all 20,200 vitest tests and every structure
+test, and ship with the arm-then-confirm consequence copy telling the
+instructor their announcement is scheduled while Canvas publishes it to every
+student immediately and irrevocably. Nothing renders under vitest; the
+action-layer test at `:565-571` asserts argument forwarding and says nothing
+about which predicate drove the copy. **The first observer would be a student.**
+REQ-A32-1 and its two new anchored-slice assertions exist for exactly that
+path, and they are the reason `walkthrough-announcement.structure.test.ts` is
+in wave 3's write set.
 
 ---
 
 ## Residual register
 
-1. **Image parameter of `createAnnouncementFromMarkdown`.** Owner: repo owner (product decision on whether markdown
-   surfaces need image attach). Instrument: `grep -rn "createAnnouncementFromMarkdown(" src --include=*.ts
-   --include=*.tsx | grep -v "\.test\."`, confirmed today at 4-5 positional args, never 6. Object: the unused 6th
-   parameter and its dead-from-this-path `AnnouncementBodyImage` argument. Direction of failure: treat as a
-   deletion the moment it stops appearing in `docs/BACKLOG.md` with an owner and a step. Step: the owner's next
-   pass over the walkthrough/prompt-announcement surfaces, or a fresh row if an image-capture UI is designed for a
-   markdown-posting surface. Full reasoning in section 4.
+Each entry names an object, an owner, an instrument, a direction of failure and
+a step. An entry missing any of those is a deletion and is not listed here.
 
-2. **Instructor-browser-timezone assumption.** Owner: repo owner, requires a real browser against a real Canvas
-   course (unverifiable here - no live Canvas, no API key, `docs/loop/this-repo.md` section 6). Instrument: post a
-   scheduled walkthrough announcement in a real session and confirm Canvas reveals it at the wall-clock time the
-   instructor actually picked, in the instructor's own timezone, not the course's or the server's. Object: the
-   actual Canvas-side reveal instant versus the instructor's intended local time. Direction of failure: FAIL if
-   the revealed time differs from what was picked in the browser by anything other than rounding to the minute.
-   Step: the owner's manual verification pass after this ships, the same pass every browser-dependent claim in
-   this repo already routes to.
+1. **The `image` parameter.** Object: `createAnnouncementFromMarkdown`'s 6th
+   parameter (`announcements.ts:426`), unreached from both its production
+   callers. Owner: **the repo owner** - whether a markdown-drafting surface
+   should attach an image is a product decision, and no capture path or UI
+   exists on either surface today. Instrument:
+   `grep -rn "createAnnouncementFromMarkdown(" src --include=*.ts --include=*.tsx | grep -v "\.test\."`,
+   confirming no call site passes a 6th argument; canary, the same grep with a
+   nonsense name, exits 1. Direction of failure: stays a live gap until a row
+   or scope document carries it; it becomes a deletion the moment it stops
+   appearing in `docs/BACKLOG.md` with an owner and a step. Step: the owner's
+   next pass over the walkthrough or prompt-announcement surfaces, or a fresh
+   row if an image-capture UI is wanted there. Not blocking A32.
 
-3. **Design-fork decision (section 3) and the persistence decision (section 6).** Not a residual in the strict
-   sense (it is not "knowingly not proven" so much as "not yet decided"), recorded here so it is not lost between
-   this document and Wave 0: owner of the decision is the Architect + reuse seat in Wave 0, instrument is the cost
-   table in section 3 plus the precedent/rule conflict in section 6, and the step is Wave 0 itself, before any
-   Wave 1/2 file list is finalized.
+2. **The instructor-browser-timezone assumption.** Object: the Canvas-side
+   reveal instant against the instructor's intended local time. Owner: the
+   repo owner - it needs a real browser against a real Canvas course, and this
+   environment has neither (`this-repo.md` section 6). Instrument: post a
+   scheduled walkthrough announcement in a real session and compare the
+   revealed time to the picked time. Direction of failure: FAIL if they differ
+   by anything other than rounding to the minute. Step: the owner's manual
+   verification pass after this ships.
+
+3. **The per-slot / panel-level shape.** Object: where the scheduled-visibility
+   value lives. Owner: **the repo owner** (section 7's question). Instrument:
+   the owner's answer; the cost table in section 7 is the evidence, and there
+   is no code measurement that decides it. Direction of failure: if
+   unanswered, wave 3 builds per-slot on the recommendation, and a later
+   panel-level answer costs a larger wave 0, not a rebuild. Step: asked now,
+   alongside other running work; absorbed in wave 0.
+
+4. **The "Timing" naming collision.** Object: the new control's label and hint
+   text, sitting in the same row as the existing `label="Timing"` select
+   (`AnnouncementDraftSlot.tsx:117`). Owner: the User experience seat in wave
+   3, and ultimately the repo owner in a browser. Instrument: a source-text
+   assertion in `walkthrough-announcement.structure.test.ts` that the new
+   control's label string is not "Timing" and not "Schedule", using the same
+   anchored-slice idiom; plus the owner's own reading of the rendered row.
+   Direction of failure: two adjacent controls both meaning "when", one
+   changing the drafted text and one changing Canvas visibility, is a
+   mis-click the app cannot detect and cannot undo. Step: wave 3.
+
+5. **Every UI and copy claim in this document is a reading claim.** Object: the
+   confirm-arm copy, the three button labels, the control's layout and focus
+   order. Owner: the repo owner, in a real browser. Instrument: manual check
+   against the deployed app - no component renders under vitest
+   (`vitest.config.ts` is node-env with `include: ["src/**/*.test.ts"]`).
+   Direction of failure: a source reading can be right about what the code says
+   and wrong about what paints, focuses or announces. Step: the owner's
+   verification pass after this ships.
 
 ---
 
 ## What this pass could not determine
 
-- Whether Canvas actually honors `delayed_post_at` the way the existing sibling's own comments assume (no live
-  Canvas access in this environment).
-- Real click counts or keyboard/focus behavior for any of the three UI branches - no component renders under
-  vitest here, so these are reading claims only, owed to the User experience and Accessibility seats in Wave 2,
-  and ultimately to the owner's own browser check.
-- Which of Branch A/B/C the architect will pick, and therefore the exact final line count for
-  `WalkthroughAnnouncementPanel.tsx` - only the cost table (section 3) and the conclusion that an extraction is
-  needed regardless of branch are established here.
+- Whether Canvas honours `delayed_post_at` as the existing callers assume, and
+  what it does with a past one. No live Canvas, no API key.
+- Click counts, focus order and keyboard behaviour for either branch. Nothing
+  renders under vitest here.
+- Which branch the owner wants (section 7), and therefore the exact wave-0
+  target. Both targets are stated so either answer is buildable.
+- Whether the architect's chosen wave-0 extraction trips the React Compiler
+  lint rule. `this-repo.md:85-100` records it happening on a sibling panel;
+  only `npm run lint` after the move can say.
 
 ---
 
-## Verification run for this document's own write set
+## Verification
 
-Command: `npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts`
+```
+npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+```
 
-Per-argument coverage lines and exit code recorded from a file, not a pipe, immediately below this document's
-creation (see the accompanying report for the exact output and exit code). This document's own write set is
-exactly one file: `docs/a32-scope.md` - confirmed by `git status --short` in the accompanying report.
+Output tail:
+
+```
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+COVERED src/lib/no-emojis.test.ts files=1 passed=18
+COVERED src/source-bytes.structure.test.ts files=1 passed=3
+```
+
+Exit code, written to a file and then read from that file rather than from a
+pipe (`... > <out> 2>&1; echo $? > <exit-file>; cat <exit-file>`): **0**.
+
+Both documents were also byte-scanned directly for non-ASCII content before
+that run (a Python read of the raw bytes, counting every byte above 127):
+**0 non-ASCII bytes in each**. Three U+2713 characters in a sibling document
+turned the emoji gate red for every concurrent agent earlier today, which is
+why this is measured rather than assumed.
+
+`git status --short`, run immediately after the gate above and after both
+files were written:
+
+```
+ M docs/BACKLOG.md
+ M docs/a24-scope.md
+ M docs/a32-scope.md
+ M docs/backlog.yml
+ M docs/css-orphans.md
+ M src/tools/backlog/yaml-codec.test.ts
+ M src/tools/backlog/yaml-codec.ts
+```
+
+This pass's write set is exactly `docs/a24-scope.md` and `docs/a32-scope.md`.
+The other five entries belong to concurrent agents working other rows; none
+was opened for writing here, and no file under `src/` was modified to produce
+any measurement in this document.

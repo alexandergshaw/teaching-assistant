@@ -1,7 +1,8 @@
 // Command-line entry point. Every subcommand is USABLE BY HAND (Ruling BA-5:
 // "the scripts are built and gated FIRST... nothing depends on the hook").
 // Run via the npm scripts in package.json (backlog:render,
-// backlog:check-generated, backlog:next, backlog:wave), or directly with:
+// backlog:check-generated, backlog:next, backlog:wave, backlog:round-bump,
+// backlog:round-status), or directly with:
 //   node --experimental-strip-types --experimental-default-type=module \
 //     --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts \
 //     src/tools/backlog/cli.ts <command>
@@ -34,6 +35,8 @@ import type { RecentWorkCommits } from "./git-commits";
 import { decideDispatchGuard } from "./dispatch-guard";
 import { readDispatchMarkerState, touchStopMarker, touchDispatchMarker } from "./dispatch-markers";
 import type { DispatchMarkerState } from "./dispatch-markers";
+import { decideRoundBump, decideRoundStatus, readRoundLedgerState, writeRoundLedgerState } from "./round-ledger";
+import type { LedgerState, RoundLedgerData } from "./round-ledger";
 
 export interface Dispatched {
   exitCode: number;
@@ -62,6 +65,17 @@ export interface CliDeps {
   touchStopMarker?: () => void;
   /** Best-effort; see dispatch-markers.ts's touchDispatchMarker. Omitted means no-op. */
   touchDispatchMarker?: () => void;
+  /**
+   * Optional so every command besides `round-bump`/`round-status` (and every
+   * existing caller of `dispatch`) is unaffected. When omitted, both round
+   * commands treat the ledger as "absent" (round-ledger.ts's own fail-open) -
+   * `realDeps()` below is the only place that wires the real ledger read in.
+   */
+  readRoundLedgerState?: () => LedgerState;
+  /** Best-effort; see round-ledger.ts's writeRoundLedgerState. Omitted means no-op - `round-status` never wires this, by construction (read-only). */
+  writeRoundLedgerState?: (data: RoundLedgerData) => void;
+  /** Injected so round-bump's tests never read the real clock. Omitted means the real Date.now(). */
+  nowIso?: () => string;
 }
 
 function requireDuplicateFree(items: BacklogItem[]): string | null {
@@ -209,9 +223,50 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
     return { exitCode: 3, output: `insufficient: ${result.reason}` };
   }
 
+  // The round cap ledger (src/tools/backlog/round-ledger.ts): enforces
+  // AGENTS.md's "Two rounds, then ask" rule / iteration-caps.md cap 2. Not
+  // gated on the backlog file - an artifact under revision (a design pass, a
+  // plan, test notes) need not correspond to a backlog item id at all.
+  if (command === "round-bump") {
+    const artifactId = argv[1];
+    if (!artifactId) {
+      return {
+        exitCode: 64,
+        output: "round-bump requires an artifact id, e.g. `round-bump a29-architecture-small`.",
+      };
+    }
+    const state = deps.readRoundLedgerState?.() ?? { kind: "absent" as const };
+    const nowIso = deps.nowIso?.() ?? new Date().toISOString();
+    const decision = decideRoundBump(state, artifactId, nowIso);
+    const warningLine = decision.warning ? `warning: ${decision.warning}\n` : "";
+    if (decision.decision === "block") {
+      return { exitCode: 2, output: `${warningLine}${decision.reason}` };
+    }
+    deps.writeRoundLedgerState?.(decision.data);
+    return { exitCode: 0, output: `${warningLine}${artifactId}: round ${String(decision.newRound)}` };
+  }
+
+  // Read-only by construction: no writeRoundLedgerState call anywhere in this
+  // branch. A diagnostic that mutates the state it reports on is a defect
+  // this repo hit today, when a hand-run of stop-guard advanced the stop
+  // marker and made the next turn look stalled - see stop-guard's --dry-run.
+  if (command === "round-status") {
+    const artifactId = argv[1];
+    const state = deps.readRoundLedgerState?.() ?? { kind: "absent" as const };
+    const result = decideRoundStatus(state, artifactId);
+    const warningLine = result.warning ? `warning: ${result.warning}\n` : "";
+    if (result.entries.length === 0) {
+      return { exitCode: 0, output: `${warningLine}no rounds recorded` };
+    }
+    const lines = result.entries.map(
+      (e) => `${e.artifactId}: round ${String(e.round)}${e.lastIncrementIso ? ` (last: ${e.lastIncrementIso})` : ""}`,
+    );
+    return { exitCode: 0, output: `${warningLine}${lines.join("\n")}` };
+  }
+
   return {
     exitCode: 64,
-    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard, touch-dispatch.`,
+    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard, touch-dispatch, round-bump, round-status.`,
   };
 }
 
@@ -224,6 +279,9 @@ function realDeps(): CliDeps {
     readDispatchMarkerState: () => readDispatchMarkerState(root),
     touchStopMarker: () => touchStopMarker(root),
     touchDispatchMarker: () => touchDispatchMarker(root),
+    readRoundLedgerState: () => readRoundLedgerState(root),
+    writeRoundLedgerState: (data) => writeRoundLedgerState(data, root),
+    nowIso: () => new Date().toISOString(),
   };
 }
 

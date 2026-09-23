@@ -105,6 +105,100 @@ describe("cli dispatch", () => {
     });
   });
 
+  describe("round-bump / round-status", () => {
+    function ledgerDeps(data: Record<string, { round: number; lastIncrementIso: string }> | null, now = "2026-09-23T12:00:00.000Z") {
+      let written: typeof data = null;
+      const readRoundLedgerState = () =>
+        data === null ? ({ kind: "absent" } as const) : ({ kind: "present" as const, data });
+      return {
+        ...deps([]),
+        readRoundLedgerState,
+        writeRoundLedgerState: (d: NonNullable<typeof data>) => {
+          written = d;
+        },
+        nowIso: () => now,
+        getWritten: () => written,
+      };
+    }
+
+    it("round-bump exits 0 and reports round 1 from an absent ledger", () => {
+      const d = ledgerDeps(null);
+      const result = dispatch(["round-bump", "a29-architecture-small"], d);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("a29-architecture-small");
+      expect(result.output).toContain("1");
+    });
+
+    it("round-bump writes the incremented ledger back", () => {
+      const d = ledgerDeps(null);
+      dispatch(["round-bump", "a1"], d);
+      expect(d.getWritten()).toEqual({ a1: { round: 1, lastIncrementIso: "2026-09-23T12:00:00.000Z" } });
+    });
+
+    it("round-bump allows round 2", () => {
+      const d = ledgerDeps({ a1: { round: 1, lastIncrementIso: "2026-09-22T00:00:00.000Z" } });
+      const result = dispatch(["round-bump", "a1"], d);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("2");
+    });
+
+    it("round-bump BLOCKS (non-zero exit) when the increment would reach round 3", () => {
+      const d = ledgerDeps({ a1: { round: 2, lastIncrementIso: "2026-09-22T00:00:00.000Z" } });
+      const result = dispatch(["round-bump", "a1"], d);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("a1");
+    });
+
+    it("round-bump does not write the ledger when it blocks", () => {
+      const d = ledgerDeps({ a1: { round: 2, lastIncrementIso: "2026-09-22T00:00:00.000Z" } });
+      dispatch(["round-bump", "a1"], d);
+      expect(d.getWritten()).toBeNull();
+    });
+
+    it("round-bump requires an artifact id", () => {
+      const result = dispatch(["round-bump"], ledgerDeps(null));
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it("round-status reports round 0 for an unrecorded artifact without mutating the ledger", () => {
+      const d = ledgerDeps(null);
+      const result = dispatch(["round-status", "a1"], d);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("a1");
+      expect(result.output).toContain("0");
+      expect(d.getWritten()).toBeNull();
+    });
+
+    it("round-status does not mutate an existing ledger either", () => {
+      const d = ledgerDeps({ a1: { round: 2, lastIncrementIso: "2026-09-22T00:00:00.000Z" } });
+      dispatch(["round-status", "a1"], d);
+      expect(d.getWritten()).toBeNull();
+    });
+
+    it("round-status with no artifact id lists every recorded artifact", () => {
+      const d = ledgerDeps({
+        a1: { round: 1, lastIncrementIso: "2026-09-22T00:00:00.000Z" },
+        a2: { round: 2, lastIncrementIso: "2026-09-22T00:00:00.000Z" },
+      });
+      const result = dispatch(["round-status"], d);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("a1");
+      expect(result.output).toContain("a2");
+    });
+
+    it("round-bump surfaces a warning line when the ledger is unreadable", () => {
+      const d = { ...deps([]), readRoundLedgerState: () => ({ kind: "unreadable" as const }), nowIso: () => "2026-09-23T12:00:00.000Z" };
+      const result = dispatch(["round-bump", "a1"], d);
+      expect(result.exitCode).toBe(0);
+      expect(result.output.toLowerCase()).toContain("warning");
+    });
+
+    it("an unknown command's message now lists round-bump and round-status too", () => {
+      const result = dispatch(["bogus"], deps([]));
+      expect(result.output).toMatch(/round-bump, round-status/);
+    });
+  });
+
   // Duplicate ids (Ruling BA-4) must block every selector, not just be a
   // theoretical property of ids.ts - this proves the CLI actually checks
   // before render/next/wave trust the parsed list.

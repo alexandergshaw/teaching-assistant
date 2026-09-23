@@ -454,3 +454,21 @@ Five of the six blockers live in ledger and pump machinery that exists only to
 serve the advantage OC9 questions. That is not a reason to stop - the
 single-recipient shape is correct at any class size - but it IS a reason to put
 the question in front of the owner now rather than at the push.
+
+## RULING 28 - the 77, and two of my rulings colliding
+
+RA12 says my 77 is not reproducible. It reproduces with MY instrument -
+grep -rln for the quoted specifier over src/lib/workflows, excluding tests,
+returns 77 - and the seat 75 comes from a different pattern; the unquoted form
+returns 84. THREE DEFENSIBLE NUMBERS FOR ONE CLAIM, which is the whole reason
+this loop requires a quantity to name its command. The conclusion is untouched
+and the seat was right to adopt neither silently. Record all three with their
+commands rather than picking one.
+
+AND RULINGS 20 AND 21 COLLIDED, WHICH THE SEAT CAUGHT AND I DID NOT: making
+pump-finished-with-unresolved-rows a third state value would drop the attempt
+out of the partial unique index on state = open, so it would stop blocking -
+reintroducing exactly what Ruling 21 closed. Its resolution stands: state stays
+two-valued and the fact lives in a timestamp column. Its extension stands too -
+REFUSED blocks as well as UNKNOWN, since 5 accepted and 3 refused is a partial
+outcome and auto-resolving it lets the natural retry re-message the five.

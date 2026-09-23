@@ -75,6 +75,8 @@ jobs:
             failedCount=$(jq '.failedCount' /tmp/resp.json 2>/dev/null)
             totalUserPrefixes=$(jq '.totalUserPrefixes' /tmp/resp.json 2>/dev/null)
             listingErrors=$(jq '.listingErrors' /tmp/resp.json 2>/dev/null)
+            truncatedByBudget=$(jq '.truncatedByBudget' /tmp/resp.json 2>/dev/null)
+            scannedUserPrefixes=$(jq '.scannedUserPrefixes' /tmp/resp.json 2>/dev/null)
           else
             # NOTE: this fallback path does NOT fail closed the way the jq
             # path below does. totalUserPrefixes becomes the prose string
@@ -95,6 +97,8 @@ jobs:
             fi
             totalUserPrefixes="unknown (grep fallback does not read totalUserPrefixes)"
             listingErrors="unknown (grep fallback does not read listingErrors)"
+            truncatedByBudget="unknown (grep fallback does not read truncatedByBudget)"
+            scannedUserPrefixes="unknown (grep fallback does not read scannedUserPrefixes)"
           fi
 
           if [ -z "$failedCount" ] || [ "$failedCount" = "null" ]; then
@@ -102,7 +106,7 @@ jobs:
             exit 1
           fi
 
-          echo "Total user prefixes this tick: $totalUserPrefixes; failedCount: $failedCount (observational only - not gating this workflow's exit code, see Ruling 1)."
+          echo "Total user prefixes this tick: $totalUserPrefixes; scanned: $scannedUserPrefixes; truncatedByBudget: $truncatedByBudget; failedCount: $failedCount (observational only - not gating this workflow's exit code, see Ruling 1)."
 
           # Non-failing, loud warning: a legitimately fresh deployment can be
           # quiet on day one. totalUserPrefixes is JSON null (not 0) when
@@ -144,6 +148,17 @@ jobs:
           # listingErrors doc.
           if [ -n "$listingErrors" ] && [ "$listingErrors" != "0" ] && [ "$listingErrors" != "null" ]; then
             echo "::warning::listingErrors is nonzero this tick ($listingErrors) - a Storage listing call actually failed (wrong bucket, revoked service-role key, a policy change), distinct from merely running out of time. Investigate if this persists across multiple ticks."
+          fi
+
+          # G3: truncatedByBudget/scannedUserPrefixes were computed by every
+          # tick but never read here, which hid the "sweep silently processes
+          # less than it claims" failure mode from the one alert this
+          # deployment has. Visibility only, per G3's own scope doc - not
+          # gating, and no re-sizing of the 250ms-derived constants happens
+          # here. See src/lib/orphan-upload-sweep.ts's phase 2 soft-deadline
+          # check.
+          if [ "$truncatedByBudget" = "true" ]; then
+            echo "::warning::truncatedByBudget is true this tick (scannedUserPrefixes: $scannedUserPrefixes) - phase 2 hit its soft deadline and stopped early, scanning fewer prefixes than the tick claims capacity for. Investigate if this persists across multiple ticks."
           fi
 
           echo "Sweep tick complete."

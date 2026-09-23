@@ -103,3 +103,66 @@ A40 is entangled with this: the cartridge panel's rubric field was filed partly
 as a persistence defect, and the filing pass established that the dropped policy
 never covered that field anyway. That row does not change shape, but it can now
 be scoped without waiting.
+
+## DECISION 4 - A24: the disclosure names NO assignment. Use the digest.
+
+The question was whether the class-trends disclosure line may NAME the
+assignments a cohort spans, or whether "more than one assignment" is enough.
+**The owner chose the digest.**
+
+What this settles:
+
+- Nothing identifying is stored. The digest is a derived, non-reversible value,
+  so the whole persistence argument that dominated round 1 - and the privacy
+  rule the scope wrongly believed forbade it - stops mattering. No assignment
+  text, no new control, no new `ta-snap-*` key, no key-canary bump.
+- `cohortLabelSpread`'s equivalent needs only `Set` distinctness over the
+  digest, which is the cheapest thing that answers the question the line asks.
+- **The cost the round-2 revision found, which does NOT go away**, and which the
+  wave plan must carry: a per-row field is not free even without a key canary.
+  `snapshot-row-serialization.test.ts:93-113` is an exact 17-key
+  `Object.keys(result).sort()` assertion on `toWire`, with a second exact set at
+  `:379-392`, so an 18th field turns both red. That is a feature, not an
+  obstacle - `snapshot-row-serialization.ts:60`'s `as unknown as` cast means tsc
+  will NOT flag a field added to the type and forgotten in the codec, so those
+  assertions are the only place a forgotten cohort field fails loudly. The wave
+  that adds the field bumps them deliberately and proves the failure first.
+
+What this does NOT settle: whether the digest's confirmable-match weakness
+matters. A digest lets someone holding a candidate assignment text confirm a
+match; it does not let them recover the text. The revision recorded this as a
+judgement rather than a defect, and the owner has now chosen the digest with
+that recorded - so it is accepted, not overlooked.
+
+## DECISION 5 - A32: per-slot schedule, not one panel-level field
+
+The question was whether a scheduled post time belongs to each draft slot or to
+the panel as a whole. **The owner chose per-slot.**
+
+What this settles, and the trap that comes with it:
+
+- The control is per-slot, which matches what the panel is for: drafting several
+  announcements meant for several different moments. A panel-level field would
+  force one time onto drafts that exist precisely because they are for different
+  weeks.
+- **The precedent is `choose-timing`, NOT the `edit` action** that round 1
+  named. The revision found the real one: `useAnnouncementDraftSlots.ts:238`,
+  action type at `announcement-draft-slots.ts:364`, reducer case at `:408`,
+  structure test at `:745-763`. Follow that shape rather than inventing a third.
+- **THE NAMING HAZARD, which must be designed against rather than discovered.**
+  `AnnouncementDraftSlot.tsx:117` already renders a per-slot select labelled
+  **"Timing"** - and it is not a schedule at all. It is content framing
+  ("Beginning of week" / "Midweek check-in", `AnnouncementTiming` at
+  `walkthrough-announcement-prompt.ts:64`). A per-slot Canvas schedule control
+  would sit directly beside it. Two adjacent controls, one named "Timing", the
+  other governing when Canvas actually posts, is the five-labels-for-one-act
+  defect `docs/a17-discovery.md` measured in this app today - reproduced
+  deliberately this time. The design must name both controls so an instructor
+  can tell which one decides when students see the announcement.
+- Ruling carried from the check and NOT reopened: the scheduled time is **not
+  persisted** (Branch A). A stale restored timestamp combined with the silent
+  non-future fallthrough is the worst available combination.
+- REQ-A32-1 still binds: ONE exported predicate returning immediate, scheduled
+  or invalid, read by the consequence copy, all three labels and the post
+  decision - so a past-dated pick cannot say "scheduled" while publishing
+  immediately and irrevocably to every student.

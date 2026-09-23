@@ -269,6 +269,24 @@ describe("cli dispatch", () => {
       expect(touched).toBe(true);
     });
 
+    // MUTANT: touch the stop marker on a --dry-run too (i.e. drop the guard
+    // on the call). This is the defect the flag was added for: a diagnostic
+    // run that advances the marker makes the NEXT real stop see a stale
+    // dispatch marker, so the instrument blocks a turn on state its own
+    // observation created.
+    it("does NOT touch the stop marker on a --dry-run, while still reporting the same decision", () => {
+      let touched = false;
+      const result = dispatch(["stop-guard", "--dry-run"], {
+        ...noItems(),
+        readDispatchMarkerState: () => ({ dispatch: ABSENT, lastStop: present(2000), warning: null }),
+        touchStopMarker: () => { touched = true; },
+      });
+      expect(touched).toBe(false);
+      // The DECISION must be unchanged - a dry run that also decided
+      // differently would be a second instrument, not a view of this one.
+      expect(result.exitCode).toBe(2);
+    });
+
     // Fail-open: when the dep is not wired at all, the check must be
     // silently skipped and the command must fall through unchanged.
     it("falls through to the existing empty-queue message when readDispatchMarkerState is not provided", () => {

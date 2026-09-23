@@ -115,14 +115,22 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
 
     const stopHookActive = argv.includes("--stop-hook-active");
     const overrideRequested = argv.includes("--override");
+    // A DIAGNOSTIC run: decide and report, but write nothing. Added 2026-09-23
+    // after running this command by hand to investigate a flag ADVANCED THE
+    // STOP MARKER, which made the next real stop see a stale dispatch marker
+    // and block a turn that had not stalled. An instrument whose read path
+    // mutates the thing it measures reports on a state its own observation
+    // created, so the diagnostic and the hook must not share one invocation.
+    const dryRun = argv.includes("--dry-run");
 
     // The DISPATCH guard (src/tools/backlog/dispatch-guard.ts): blocks when
     // no subagent was dispatched since the previous stop. Reuses this
     // command's own two escapes (decideDispatchGuard bakes both in, exactly
-    // like decideStopGuard). The stop marker is touched UNCONDITIONALLY,
-    // every time this command runs - including on an allow, an override, or
-    // a stopHookActive retry - because it marks "a stop happened here" for
-    // the NEXT comparison, not "a stop was blocked here".
+    // like decideStopGuard). The stop marker is touched on every run of this
+    // command EXCEPT a --dry-run - including on an allow, an override, or a
+    // stopHookActive retry - because it marks "a stop happened here" for the
+    // NEXT comparison, not "a stop was blocked here". --dry-run is the one
+    // exception precisely because it is not a stop: see the flag's comment.
     const markerState = deps.readDispatchMarkerState?.() ?? {
       dispatch: { kind: "absent" as const },
       lastStop: { kind: "absent" as const },
@@ -134,7 +142,7 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
       stopHookActive,
       overrideRequested,
     });
-    deps.touchStopMarker?.();
+    if (!dryRun) deps.touchStopMarker?.();
     if (dispatchDecision.decision === "block") {
       return { exitCode: 2, output: dispatchDecision.reason };
     }

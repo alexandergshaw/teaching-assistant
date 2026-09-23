@@ -274,3 +274,55 @@ and the durable per-student ledger. THE NUMBER THAT DECIDES WHETHER THAT IS
 THIN OR EMPTY is how many of this owner's courses exceed 100 students - the
 only cohort where Canvas's native path carries the group-thread risk. Put that
 in front of the owner with the question, rather than after it.
+
+---
+
+# Round 3 - correcting my correction, and one finding worth more than the row
+
+## RULING 16 - RULING 7 WAS ITSELF HALF WRONG. Verified twice, by me.
+
+Ruling 4 claimed a barrel re-export put `sendMessageDraftByEmailAction` in
+every workflow's closure "despite zero call sites". Ruling 7 corrected that to
+"no barrel re-exports it, and it has a call site". **Both are wrong, and the
+architecture seat caught it.** Measured, and I have now opened both files
+myself: `src/app/actions.ts:66` is `export * from "./actions/messaging-outlook"`,
+which DOES re-export it, and `MessageDraftsTab.tsx:9-14` imports it FROM THAT
+BARREL, not from the defining module. So Ruling 4 was wrong about the call
+site and Ruling 7 was wrong about the barrel.
+
+The conclusion is unaffected - measure the requests a send makes, not import
+edges - and the seat did the right thing: it replaced the example with a
+justification that depends on NEITHER value. `src/app/actions.ts` is 54
+`export *` lines over the whole actions directory, so any module importing
+anything from `@/app/actions` pulls a model-calling drafter into its closure.
+Import closure cannot tell a send from a draft in this tree, for any module.
+
+THE LESSON, and it is about me: I corrected a measurement with another
+unverified measurement, in the file that overrides everything downstream. A
+correction needs the same instrument as the thing it corrects. Two rounds of
+this row have now been spent on one four-line fact.
+
+## RULING 17 - `requireOwner` is a deprecated alias and A29 must not use it
+
+The seat found what revision 1 told it to use: `requireOwner` in
+`src/lib/supabase/auth.ts:451` is an alias for `requireUser()`, and its own
+doc comment says it is "DELIBERATELY LESS RESTRICTIVE than the requireOwner()
+it replaces ... a tracked, temporary state, not an oversight". A29 writes
+`requireUser()` explicitly instead, with its reasoning stated: the Canvas
+credentials are per-user and nothing here reaches an owner-private secret.
+That is correct and it stands.
+
+**ROUGHLY 105 OTHER CALL SITES STILL INHERIT THE ALIAS**, which is backlog row
+R2's territory, not A29's. A29 does not widen to fix them; it records the
+finding so R2's scoping starts from a measurement rather than from the name.
+
+## RULING 18 - the owner question moves to the front, and it is answerable
+
+OC9 now opens the section rather than trailing the leverage claim, which is
+right: for a class at or under 100 students Canvas's own compose already sends
+individual private conversations, per the documentation this design quotes. How
+many of the owner's courses exceed 100 students decides whether A29's advantage
+is modest or empty, and "use Canvas's compose" is a legitimate answer if the
+number is low. It does NOT gate the build - the single-recipient shape is
+correct at any class size - so the build proceeds while the question rides
+alongside.

@@ -472,3 +472,65 @@ reintroducing exactly what Ruling 21 closed. Its resolution stands: state stays
 two-valued and the fact lives in a timestamp column. Its extension stands too -
 REFUSED blocks as well as UNKNOWN, since 5 accepted and 3 refused is a partial
 outcome and auto-resolving it lets the natural retry re-message the five.
+
+---
+
+# Round 5 - the small shape, and the ruling the re-scope earned
+
+## RULING 29 - TAKE THE N-ID FORM. Not the course audience, not rejection.
+
+The re-scope offers three ends: ship the course-audience form as briefed (thin),
+redesign to N explicit numeric ids in one request, or reject and tell the owner
+to use Canvas own compose. It recommends redesign or rejection and says do not
+ship the middle. It is right, and the choice is REDESIGN.
+
+Why not rejection: the owner asked for this feature in words, twice, and the
+thing that makes it thin is a mechanism choice we control, not a fact about
+their courses.
+
+Why not the course audience: it hands the recipient set to Canvas, so the app
+cannot say who it reached. That withdraws the roster count as a binding, moots
+the exclusion criteria, and withdraws the leverage claim outright - and it is
+the variant that made the whole feature thin. The N-id form is ONE request
+under the SAME documented sentence, differs by one union variant and one
+frozen-set entry, and restores a real count, real exclusions and a per-recipient
+receipt.
+
+## RULING 30 - force_new IS THE PRIVACY DEFECT, and it ships today
+
+The re-scope found, and I have confirmed by opening the file, that
+ appends  UNCONDITIONALLY
+(). Canvas own controller source treats
+force_new as sufficient on its own to make a batch a GROUP batch - so reusing
+the shipped builder with a multi-recipient audience would create exactly the
+reply-all thread this design exists to prevent, AND bypass the over-limit
+refusal.
+
+**THE COURSE-AUDIENCE REQUEST MUST NOT CARRY force_new, and the frozen
+parameter set is split per variant so the difference is enforced rather than
+remembered.** This is labelled SOURCE, not documentation, and the design does
+not depend on settling it: omitting the parameter is safe under both readings.
+Note the second-order effect the re-scope measured - without force_new, a
+course that DID exceed 100 makes Canvas refuse rather than silently create a
+group thread, which is the safe direction.
+
+## RULING 31 - the builder has NO behavioural test, and that blocks reuse
+
+ exists and contains ZERO occurrences of
+ - I confirmed it. The function this feature re-implements
+or extends has never been tested. Any wave that touches it writes that test
+FIRST, against the emitted parameters, because the force_new finding is
+precisely the kind of thing a parameter-level test catches and a reading does
+not.
+
+## RULING 32 - carried
+
+The double-send guard is still owed and its hazard has changed: not partial
+state but an UNKNOWN outcome on one synchronous request that can create up to
+a hundred conversations inside a server action on an unmeasured duration
+default. The cheapest construction named - one table, one partial unique index,
+four functions, unknown leaves the row open - stands. In-memory and
+localStorage are disqualified with the in-repo reasoning that says so. The
+count is a DISCLOSURE, not a binding, and the refusal when the roster read
+fails keeps its behaviour with its reason replaced: the count is the only thing
+the instructor confirmation was informed by.

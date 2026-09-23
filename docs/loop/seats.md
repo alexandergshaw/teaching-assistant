@@ -121,12 +121,18 @@ criteria.)
   parameter - reachable with no value import at all - defeated every
   name-based version.
 - Does every numeric floor or cap get checked against every other numeric
-  floor or cap that bounds the same quantity elsewhere in the tree? A privacy
-  floor of 5 was set against a grading cap this card said also defaults to 5 - MEASURED 2026-09-23, IT IS 40 (`gemini.ts:32`), so the coincidence the argument rested on never existed (`gemini.ts:32`,
-  applied at `grade/engine.ts:126`), so the analysed set holds exactly five for
-  every class of five or more - the floor's guarantee is satisfied only at its
-  own boundary, forever, and naming the colliding knob as a design precedent is
-  not the same as resolving the collision.
+  floor or cap that bounds the same quantity elsewhere in the tree? This card
+  used to answer with a worked example: a privacy floor of 5 set against a
+  grading cap it said also defaulted to 5, so the analysed set would hold
+  exactly five for every class of five or more and the floor's guarantee would
+  be satisfied only at its own boundary, forever. MEASURED 2026-09-23, THE CAP
+  IS 40 (`DEFAULT_MAX_SUBMISSIONS`, `gemini.ts:32`, applied at
+  `grade/engine.ts:126`), NOT 5 - so the coincidence the example rested on
+  never existed, and the example was wrong for the whole time it was cited.
+  THE QUESTION SURVIVES ITS EXAMPLE, and is now better evidenced by how the
+  example failed: a card asserting a collision between two numbers, neither
+  re-measured, is exactly the shape it warns about. Re-measure both sides
+  before claiming any two knobs collide, and name the command.
 - Is anything here properly the architect's, the reuse survey's, or the test
   seat's - especially when one of those is running in the same wave? Two
   concurrently authored documents over the same ground reaching different

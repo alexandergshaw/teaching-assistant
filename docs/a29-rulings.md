@@ -326,3 +326,131 @@ is modest or empty, and "use Canvas's compose" is a legitimate answer if the
 number is low. It does NOT gate the build - the single-recipient shape is
 correct at any class size - so the build proceeds while the question rides
 alongside.
+
+---
+
+# Round 4 - disposal. Six blockers, four repeats, no third authoring round.
+
+Revision 2's check returned NOT CLEAN: 6 blockers (2 new, 4 repeat), 6 majors,
+4 minors. Under `docs/loop/iteration-caps.md` the repeats go to disposal now.
+What the check verified sound is NOT reopened: the token-and-pump closure and
+its seven-student instrument, the recipient allow-pattern (it attacked every
+form I could think of and more - comma-joined, whitespace, newline-anchored,
+unicode digits, array coercion, ledger-sourced - and the guard holds), both
+recorder seams verified by opening both files, C5's asymmetric fixture, and
+every line citation in the revision.
+
+## RULING 19 - K14's IMPORT INSTRUMENT IS WITHDRAWN. This is the ruling I owed.
+
+The check asked the one question only I can answer: can a transitive-import
+criterion mean anything in this tree? Measured, by me: `src/app/actions.ts` is
+54 export lines over the whole actions directory, and **77 workflow modules
+import that barrel**. So every workflow already imports every action, and the
+instant A29 is exported there - which its own write set mandates - K14 is red
+on arrival, exactly the class Ruling 12 exists to stop.
+
+The document cannot have it both ways, and the check is right that it asserts
+both: section 2.1 rejects a Route Handler BECAUSE it would make K14 red, while
+C12 concludes that import closure cannot distinguish a send from a draft in
+this tree at all. The second is true, so the first is not an argument.
+
+**THE IMPORT INSTRUMENT IS WITHDRAWN AND THE REQUIREMENT SURVIVES.** No module
+under `src/lib/workflows/**` or `src/app/api/**` may CALL the send - and the
+instrument is a CALL-graph check over those directories, or the request
+recorder, never an import edge. AND SECTION 2.1 MUST BE RE-ARGUED WITHOUT IT:
+the browser-pumped shape may still be right on duration grounds alone, but it
+no longer has K14 to lean on. State that honestly rather than keeping a
+conclusion whose premise has been withdrawn.
+
+## RULING 20 - the attempt is created under a database constraint (blocker 1)
+
+Two tabs confirming at once both read "no open attempt" and both insert, and
+the blast radius is the WHOLE CLASS TWICE. This is Ruling 14's mechanism at a
+worse seam. **A PARTIAL UNIQUE INDEX on `(user_id, course_id) WHERE state =
+'open'`** - a constraint only one caller can win, not a read-then-write check.
+Note the recorded 42P10 trap: a partial index cannot be a PostgREST upsert
+arbiter, but it works perfectly as a CONSTRAINT, which is what this needs.
+
+## RULING 21 - an attempt with unresolved rows does NOT self-resolve (blocker 2)
+
+The pump currently marks an attempt resolved when nothing is claimable,
+unconditionally - so an attempt ending with two unknown rows releases the
+course guard automatically, and a fresh full-roster send is permitted. That is
+Ruling 1's hazard restored by the very machinery meant to serve it, in exactly
+the partial-outcome case Ruling 1 was written for.
+
+**AN ATTEMPT WITH ANY UNKNOWN OR NON-TERMINAL ROW ENDS IN A STATE THAT STILL
+BLOCKS**, and only the instructor's explicit resolution clears it - the choice
+that shows them what was sent and what is unknown. The pump may never
+discharge that on their behalf.
+
+## RULING 22 - the state machine must be TOTAL (major)
+
+There is no row for "nothing claimable and at least one row still sending" -
+precisely what a killed invocation leaves. An implementer guesses, and both
+guesses are wrong: done completes an attempt holding a non-terminal row, so
+the summariser's states stop partitioning the set; not-done spins the pump.
+Enumerate every reachable combination and give each an outcome.
+
+## RULING 23 - the claim names ONE ROW, and its test uses a real fake (blocker 6)
+
+The cited precedent pins a row it already knows (`.eq("id", release.id)`), and
+tells the caller whether it won. The design writes a claim with **no row
+identity and no limit**, which through PostgREST updates EVERY pending row: the
+first invocation flips all N to sending, POSTs to one, and reports done -
+**one student messaged, six stranded**, swept to unknown by a sweep with no
+caller, on an attempt that then auto-resolves as completed.
+
+**THE CLAIM SELECTS A SPECIFIC RECIPIENT AND UPDATES BY ITS ID**, conditional
+on its state. AND THE TEST CHANGES KIND: the defect lives in the SQL, at the
+one seam every specified instrument replaces with a hand-written mock that
+returns one row by construction. **A FAITHFUL IN-MEMORY FAKE OF THE STORE, not
+a seam mock** - a mock that cannot express the defect is not an instrument.
+
+## RULING 24 - the sweep gets a caller, and not the forbidden one (blocker 5)
+
+The stale sweep is load-bearing twice - it produces unknown, and it is what
+stops a dead invocation wedging an attempt - and no wave contains a caller. Its
+only cited precedent runs from a cron Route Handler, inside the directory set
+the requirement forbids. As written, NOTHING reclaims a row whose pump died.
+Name a caller that is not in the forbidden set: the pump itself, sweeping on
+start, is the obvious candidate and needs no new surface.
+
+## RULING 25 - delete the phantom action, and give C9 a read path (blocker 4)
+
+`finishBulkCourseMessageAction` appears twice in 1462 lines and is defined
+nowhere, while the pump already performs the terminal transition - and the
+document nonetheless requires the implementer to give it a guard. DELETE IT.
+
+And C9's central case - reload after a kill, repopulate subject and body from
+the attempt row - is unsatisfiable by the defined interface: only the ABANDON
+path returns the text, and abandoning destroys the run you were resuming.
+**THE REFUSAL FROM prepare CARRIES THE SUBJECT AND BODY**, so the modal can
+repopulate without abandoning.
+
+## RULING 26 - majors carried
+
+- The frozen parameter set reads only the POST body, so a query parameter is
+  invisible - and `mode` is no longer banned anywhere. Cover the URL too.
+- **C13's provenance is unspecified**: if the server takes the course URL from
+  the request, the gate is server-side in location and client-determined in
+  value. Derive the course identity server-side from the stored row. And three
+  of its five categories are not server-distinguishable at all, so once-per-
+  category is over-specified by three - fix the enumeration.
+- **C14 is the weakest clause in the document**: reasonA not equal to reasonB
+  is satisfied by two equally useless strings. The requirement is that an
+  instructor can tell a missing credential from an unreachable host - pin the
+  CATEGORY, not string inequality.
+- C11's forbidden-word list omits "sent", so "Sent 5 of 11" passes while
+  claiming delivery the app cannot observe. Add it.
+- C5's instrument (a)(4) bans arithmetic "over an A29 value", which no text
+  scan can decide and which `subject.trim().length === 0` trips on sight.
+  Scope it to values of the summary type.
+- P7's replacement has no executing instrument.
+
+## RULING 27 - the owner question goes out with the build, not after it
+
+Five of the six blockers live in ledger and pump machinery that exists only to
+serve the advantage OC9 questions. That is not a reason to stop - the
+single-recipient shape is correct at any class size - but it IS a reason to put
+the question in front of the owner now rather than at the push.

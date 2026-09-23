@@ -200,6 +200,15 @@ export function parseBacklogYaml(text: string): BacklogItem[] {
       question,
     });
   }
+  // Structural check, alongside the per-field state/kind/area throws above.
+  // It runs AFTER the loop rather than inside it because the invariant is
+  // over the whole document (report every offending id at once, not just the
+  // first), and it is the last thing before the return so a caller can never
+  // receive a parsed document that violates it. Wired 2026-09-23, once L3, A4
+  // and A23 - the three rows that predated the `question` field - carried
+  // one; see this function's own comment for why it could not be wired on the
+  // day the field was added.
+  assertOwnerRowsHaveQuestion(items);
   return items;
 }
 
@@ -215,21 +224,30 @@ export function ownerRowsMissingQuestion(items: BacklogItem[]): string[] {
 }
 
 /**
- * Structural invariant, deliberately NOT wired into `parseBacklogYaml`
- * itself (unlike `state`/`kind`/`area`'s inline throws just above): as of
- * this field's introduction, docs/backlog.yml already carries three rows in
- * `owner` state filed before `question` existed - L3, A4, and A23 - and this
- * task was explicitly told to report any such row rather than invent a
- * question for it. Wiring this assertion into the parse path used by
- * `render`, `check-generated`, and backlog-file.structure.test.ts would
- * throw on the real committed file today and break every one of those
- * gates. A caller that wants this enforced (a future CLI command, or a test
- * scoped to rows that DO carry the field) calls it explicitly.
+ * Structural invariant, WIRED into `parseBacklogYaml` as of 2026-09-23
+ * alongside the `state`/`kind`/`area` throws, so no reader can ever receive
+ * a document with an owner row that carries no question.
  *
- * Rationale for the invariant itself, from AGENTS.md's "Two rounds, then
- * ask": "the owner-only section is not a parking lot... an item parked as
- * owner-blocked without a written question is a queue that has quietly
- * stopped while looking full."
+ * HISTORY, kept because it explains the shape rather than decorating it.
+ * When `question` was added (e8db798) this assertion was written and tested
+ * but deliberately LEFT UNWIRED: docs/backlog.yml then held three rows in
+ * `owner` state filed before the field existed - L3, A4 and A23 - so wiring
+ * it would have thrown on the real committed file and broken `render`,
+ * `check-generated` and backlog-file.structure.test.ts for everyone, which
+ * reports nothing and blocks everything. Those three rows now carry
+ * questions, so the reason to stay unwired is gone and the guard is what
+ * stops the state recurring.
+ *
+ * A BLANK DOES NOT SATISFY IT. `ownerRowsMissingQuestion` trims before
+ * measuring, so `question: ''` and `question: '   '` are rejected exactly
+ * like an absent line. Without that, the first inconvenient day produces an
+ * empty string and the guard buys nothing.
+ *
+ * Rationale for the invariant itself, quoted from AGENTS.md:107-108 (the
+ * "Never stall the loop" section): "The owner-only section is not a parking
+ * lot; an unescalated entry sitting there is a queue that has quietly
+ * stopped while looking full." A row parked in `owner` with no written
+ * question is exactly that entry.
  */
 export function assertOwnerRowsHaveQuestion(items: BacklogItem[]): void {
   const missing = ownerRowsMissingQuestion(items);

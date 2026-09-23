@@ -174,4 +174,87 @@ describe("yaml-codec round trip", () => {
       expect(ownerRowsMissingQuestion(items)).toEqual([]);
     });
   });
+
+  // The guard is only worth having if PARSING enforces it - an exported
+  // helper nobody calls is documentation. These tests bind parseBacklogYaml
+  // itself, so render, check-generated and backlog-file.structure.test.ts all
+  // inherit the refusal.
+  describe("parseBacklogYaml REJECTS an owner row with no usable question", () => {
+    // One row per case, written as raw YAML rather than round-tripped from
+    // serializeBacklogYaml, because the absent-line case cannot be produced
+    // by the serializer at all (it always writes `question: null`).
+    const ownerRow = (questionLine: string | null): string =>
+      [
+        "- id: 'L3'",
+        "  state: 'owner'",
+        "  kind: 'bug'",
+        "  area: 'loop-and-docs-maintenance'",
+        "  title: 't'",
+        "  owns: []",
+        "  verify: null",
+        "  blocked_by: []",
+        "  instrument: ''",
+        "  from: ''",
+        "  note: ''",
+        ...(questionLine === null ? [] : [questionLine]),
+        "",
+      ].join("\n");
+
+    it("throws when the owner row has NO question line at all", () => {
+      expect(() => parseBacklogYaml(ownerRow(null))).toThrow(/L3/);
+    });
+
+    it("throws when the owner row has an explicit question: null", () => {
+      expect(() => parseBacklogYaml(ownerRow("  question: null"))).toThrow(/L3/);
+    });
+
+    // The blank cases are the ones that decide whether the guard is real.
+    // A guard satisfiable by '' buys nothing: the first person in a hurry
+    // types two quotes and the row is parked again with no question, while
+    // every gate stays green.
+    it("throws when the owner row's question is the EMPTY string, not just absent", () => {
+      expect(() => parseBacklogYaml(ownerRow("  question: ''"))).toThrow(/L3/);
+    });
+
+    it("throws when the owner row's question is only whitespace", () => {
+      expect(() => parseBacklogYaml(ownerRow("  question: '   '"))).toThrow(/L3/);
+    });
+
+    it("names EVERY offending owner row, not only the first", () => {
+      const raw =
+        ownerRow(null).replace("- id: 'L3'", "- id: 'L3'") +
+        ownerRow("  question: ''").replace("- id: 'L3'", "- id: 'A4'");
+      expect(() => parseBacklogYaml(raw)).toThrow(/L3/);
+      expect(() => parseBacklogYaml(raw)).toThrow(/A4/);
+    });
+
+    it("accepts the same row once it carries a real question", () => {
+      const raw = ownerRow("  question: 'Which of the two readings did you mean, and what does being wrong cost?'");
+      const [parsed] = parseBacklogYaml(raw);
+      expect(parsed.id).toBe("L3");
+      expect(parsed.question).toBe("Which of the two readings did you mean, and what does being wrong cost?");
+    });
+
+    it("still accepts a NON-owner row with no question line, so the pre-field rows keep parsing", () => {
+      const raw = ownerRow(null).replace("  state: 'owner'", "  state: 'actionable'");
+      const [parsed] = parseBacklogYaml(raw);
+      expect(parsed.state).toBe("actionable");
+      expect(parsed.question).toBeNull();
+    });
+  });
+
+  // The committed file is the thing the guard exists to protect. This binds
+  // the real docs/backlog.yml rather than a fixture: if any future hand-edit
+  // parks a row in `owner` without a question, this fails here as well as in
+  // render and check-generated.
+  describe("the committed docs/backlog.yml satisfies the guard", () => {
+    it("parses, and reports no owner row missing a question", async () => {
+      const { readFileSync } = await import("node:fs");
+      const text = readFileSync("docs/backlog.yml", "utf8");
+      const items = parseBacklogYaml(text);
+      expect(items.length).toBeGreaterThan(0);
+      expect(ownerRowsMissingQuestion(items)).toEqual([]);
+      expect(items.filter((i) => i.state === "owner").length).toBeGreaterThan(0);
+    });
+  });
 });

@@ -103,4 +103,67 @@ describe("cli dispatch", () => {
     const d = deps([scopedItem]);
     expect(dispatch(["next"], d)).toEqual(dispatch(["next"], d));
   });
+
+  describe("stop-guard shipped-but-uncited check", () => {
+    const uncitedItem: BacklogItem = { ...scopedItem, id: "A30", state: "unscoped", owns: [], verify: null };
+    const workCommit = {
+      hash: "832e9d3",
+      subject: "fix(a30): route the per-cell path",
+      files: ["src/lib/grade/x.ts"],
+    };
+
+    function depsWithCommits(items: BacklogItem[], commits: (typeof workCommit)[]) {
+      return { ...deps(items), readWorkCommits: () => ({ commits, warning: null }) };
+    }
+
+    // MUTANT: drop this branch entirely (or drop shippedButUncited's call).
+    // This is the row this whole guard exists for.
+    it("blocks when a code commit names an uncited row", () => {
+      const result = dispatch(["stop-guard"], depsWithCommits([uncitedItem], [workCommit]));
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("A30");
+      expect(result.output).toContain("832e9d3");
+    });
+
+    it("does not block once the row cites the hash", () => {
+      const cited = { ...uncitedItem, note: "Shipped at 832e9d3." };
+      const result = dispatch(["stop-guard"], depsWithCommits([cited], [workCommit]));
+      expect(result.exitCode).toBe(0);
+    });
+
+    // MUTANT: ignore stopHookActive/overrideRequested for this check. Both
+    // escapes must be honoured exactly like the existing actionable check.
+    it("does not block a second time in the same turn (--stop-hook-active)", () => {
+      const result = dispatch(["stop-guard", "--stop-hook-active"], depsWithCommits([uncitedItem], [workCommit]));
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("does not block on an explicit override", () => {
+      const result = dispatch(["stop-guard", "--override"], depsWithCommits([uncitedItem], [workCommit]));
+      expect(result.exitCode).toBe(0);
+    });
+
+    // Fail-open: when the dep is not wired at all (mirrors a caller that
+    // never reaches for git), the check must be silently skipped and the
+    // command must fall through to its unchanged existing behaviour.
+    it("falls through to the existing unscoped message when readWorkCommits is not provided", () => {
+      const result = dispatch(["stop-guard"], deps([uncitedItem]));
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toMatch(/unscoped/);
+    });
+
+    // Existing behaviour, unchanged: no flags and an actionable item still
+    // blocks via decideStopGuard exactly as before this guard was added.
+    it("still blocks on the existing actionable-item guard when there is nothing to flag", () => {
+      const result = dispatch(["stop-guard"], depsWithCommits([scopedItem], []));
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("A1");
+    });
+
+    it("still exits 0 with the documented unscoped message when nothing is actionable or flagged", () => {
+      const result = dispatch(["stop-guard"], depsWithCommits([uncitedItem], []));
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("no actionable item; 1 item(s) are unscoped");
+    });
+  });
 });

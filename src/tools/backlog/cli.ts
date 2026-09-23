@@ -28,6 +28,9 @@ import { decideStopGuard } from "./stop-guard";
 import { selectNext } from "./next";
 import { selectWave } from "./wave";
 import { findDuplicateIds } from "./ids";
+import { shippedButUncited, formatShippedUncitedReason } from "./shipped-uncited";
+import { readRecentWorkCommits } from "./git-commits";
+import type { RecentWorkCommits } from "./git-commits";
 
 export interface Dispatched {
   exitCode: number;
@@ -37,6 +40,13 @@ export interface Dispatched {
 export interface CliDeps {
   readYaml: () => string;
   readMarkdown: () => string;
+  /**
+   * Optional so every command besides `stop-guard` (and every existing
+   * caller of `dispatch`) is unaffected. When omitted, `stop-guard` treats
+   * it as "nothing to check" rather than reaching for the real filesystem -
+   * `realDeps()` below is the only place that wires the real git read in.
+   */
+  readWorkCommits?: () => RecentWorkCommits;
 }
 
 function requireDuplicateFree(items: BacklogItem[]): string | null {
@@ -76,10 +86,31 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
     const items = parseBacklogYaml(deps.readYaml());
     const dupError = requireDuplicateFree(items);
     if (dupError) return { exitCode: 1, output: dupError };
+
+    const stopHookActive = argv.includes("--stop-hook-active");
+    const overrideRequested = argv.includes("--override");
+
+    // The SHIPPED-BUT-UNCITED check (src/tools/backlog/shipped-uncited.ts).
+    // Reuses this command's own two escapes rather than adding new ones:
+    // `--stop-hook-active` (this guard already blocked once this turn) and
+    // `--override` (the owner said stop). Checked before the existing
+    // actionable-item decision below, and does not touch decideStopGuard at
+    // all, so that function's own tests and behaviour are unchanged. A
+    // failed/unavailable git read (readWorkCommits omitted, or its own
+    // `warning` set) means "nothing to check" - it never blocks and never
+    // throws, per shipped-uncited's fail-open requirement.
+    if (!stopHookActive && !overrideRequested) {
+      const { commits } = deps.readWorkCommits?.() ?? { commits: [], warning: null };
+      const flags = shippedButUncited(items, commits);
+      if (flags.length > 0) {
+        return { exitCode: 2, output: formatShippedUncitedReason(flags) };
+      }
+    }
+
     const decision = decideStopGuard({
       items,
-      stopHookActive: argv.includes("--stop-hook-active"),
-      overrideRequested: argv.includes("--override"),
+      stopHookActive,
+      overrideRequested,
     });
     if (decision.decision === "block") {
       return { exitCode: 2, output: decision.reason };
@@ -132,6 +163,7 @@ function realDeps(): CliDeps {
   return {
     readYaml: () => readFileSync(resolve(root, "docs/backlog.yml"), "utf-8"),
     readMarkdown: () => readFileSync(resolve(root, "docs/BACKLOG.md"), "utf-8"),
+    readWorkCommits: () => readRecentWorkCommits(root),
   };
 }
 

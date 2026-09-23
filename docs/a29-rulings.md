@@ -499,8 +499,8 @@ receipt.
 ## RULING 30 - force_new IS THE PRIVACY DEFECT, and it ships today
 
 The re-scope found, and I have confirmed by opening the file, that
- appends  UNCONDITIONALLY
-(). Canvas own controller source treats
+`createConversation` appends `force_new=1` UNCONDITIONALLY
+(`src/lib/canvas/inbox.ts:406`, which I opened). Canvas own controller source treats
 force_new as sufficient on its own to make a batch a GROUP batch - so reusing
 the shipped builder with a multi-recipient audience would create exactly the
 reply-all thread this design exists to prevent, AND bypass the over-limit
@@ -516,8 +516,8 @@ group thread, which is the safe direction.
 
 ## RULING 31 - the builder has NO behavioural test, and that blocks reuse
 
- exists and contains ZERO occurrences of
- - I confirmed it. The function this feature re-implements
+`src/lib/canvas/inbox.test.ts` exists and contains ZERO occurrences of
+`createConversation` - I confirmed it. The function this feature re-implements
 or extends has never been tested. Any wave that touches it writes that test
 FIRST, against the emitted parameters, because the force_new finding is
 precisely the kind of thing a parameter-level test catches and a reading does

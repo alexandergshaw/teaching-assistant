@@ -18,6 +18,7 @@ import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { resolveContinuousWeeks, buildCourseScheduleDocx } from "./course-schedule-docx";
 import type { ScheduleWeekPlan } from "@/app/actions-types";
+import { scanRuntimeEdges } from "@/lib/module-graph/runtime-import-graph";
 
 async function unpackDocx(buffer: ArrayBuffer) {
   const zip = await JSZip.loadAsync(buffer);
@@ -38,13 +39,25 @@ describe("course-schedule-docx.ts stays a pure module", () => {
   // module's own source and asserts the import never comes back - a
   // regression here would otherwise be invisible until the next full build.
   it("never imports @/app/actions or next/headers - only the pure @/app/actions-types", () => {
-    const source = readFileSync(fileURLToPath(new URL("./course-schedule-docx.ts", import.meta.url)), "utf8");
-    expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
-    // Matches an actual import specifier (quoted), not this file's own
-    // explanatory comment above, which mentions `next/headers` in backticks
-    // - prose, not an import - while explaining exactly why this guard test
-    // exists.
-    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    const filePath = fileURLToPath(new URL("./course-schedule-docx.ts", import.meta.url));
+    const source = readFileSync(filePath, "utf8");
+    // A33: the previous /from ["']<specifier>["']/ pattern requires the
+    // literal token "from", so it never sees a bare side-effect import
+    // (`import "@/app/actions";`), a `require("@/app/actions")`, or a
+    // dynamic `import("@/app/actions")` - proven in the A33 report by
+    // constructing each string and testing it against the old pattern in
+    // node. A23 (src/lib/module-graph/runtime-import-graph.ts) already
+    // shipped the fix for the same class of hole: scanRuntimeEdges parses
+    // the file with the TypeScript compiler and enumerates every runtime
+    // edge (import, export-from, require, dynamic import) by AST node kind,
+    // so it cannot miss a form the way a text pattern can. Reused here
+    // directly on this file's own source, without the transitive walk
+    // (walkRuntimeGraph) A23's three chartered sites needed, because this
+    // guard - like its sibling below - only ever checks one file's own
+    // source, never anything transitive.
+    const specifiers = scanRuntimeEdges(source, filePath).edges.map((edge) => edge.specifier);
+    expect(specifiers).not.toContain("@/app/actions");
+    expect(specifiers).not.toContain("next/headers");
     expect(source).toContain('from "@/app/actions-types"');
   });
 });

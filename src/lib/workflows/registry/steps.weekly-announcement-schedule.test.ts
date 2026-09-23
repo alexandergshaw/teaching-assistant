@@ -32,6 +32,26 @@ import JSZip from "jszip";
 import type { Course } from "@/lib/supabase/courses";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
 import { buildCartridgeStampJson, CARTRIDGE_STAMP_PATH } from "@/lib/cartridge-import-stamp";
+import { scanRuntimeEdges } from "@/lib/module-graph/runtime-import-graph";
+
+// A33: every /from ["']<specifier>["']/ pattern below requires the literal
+// token "from", so none of them see a bare side-effect import
+// (`import "<specifier>";`), a `require("<specifier>")`, or a dynamic
+// `import("<specifier>")` - proven in the A33 report by constructing each
+// string and testing it against the old pattern in node. A23
+// (src/lib/module-graph/runtime-import-graph.ts) already shipped the fix for
+// the same class of hole: scanRuntimeEdges parses a file with the TypeScript
+// compiler and enumerates every runtime edge (import, export-from, require,
+// dynamic import) by AST node kind, so it cannot miss a form the way a text
+// pattern can. Reused here directly on each guarded file's own source,
+// without the transitive walk (walkRuntimeGraph) A23's three chartered sites
+// needed, because every guard below - like its sibling in
+// course-schedule-docx.test.ts - only ever checks one file's own source,
+// never anything transitive.
+function bannedRuntimeSpecifiers(filePath: string): string[] {
+  const source = readFileSync(filePath, "utf8");
+  return scanRuntimeEdges(source, filePath).edges.map((edge) => edge.specifier);
+}
 
 vi.mock("@/app/actions", () => ({
   listCourseHubAction: vi.fn(),
@@ -56,34 +76,27 @@ const step = weeklyAnnouncementScheduleSteps.find(
 
 describe("steps.weekly-announcement-schedule.ts stays client-bundle-safe", () => {
   it("never imports @/lib/supabase/server, @/app/actions/shared, or next/headers", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("./steps.weekly-announcement-schedule.ts", import.meta.url)),
-      "utf8"
-    );
-    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
-    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
-    // Matches an actual import specifier (quoted), not this file's own
-    // explanatory comments, which mention next/headers in prose while
-    // explaining exactly why this guard exists.
-    expect(source).not.toMatch(/from ["']next\/headers["']/);
-    expect(source).toContain('from "@/app/actions"');
+    const filePath = fileURLToPath(new URL("./steps.weekly-announcement-schedule.ts", import.meta.url));
+    const specifiers = bannedRuntimeSpecifiers(filePath);
+    expect(specifiers).not.toContain("@/lib/supabase/server");
+    expect(specifiers).not.toContain("@/app/actions/shared");
+    expect(specifiers).not.toContain("next/headers");
+    expect(readFileSync(filePath, "utf8")).toContain('from "@/app/actions"');
   });
 
   // Package-io AC, "Tests written BEFORE implementation" item 11: the same
   // guard, extended to the new orchestration module.
   it("announcement-package-run.ts never imports @/lib/supabase/server, @/app/actions/shared, next/headers, or @/app/actions at all", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("../announcement-package-run.ts", import.meta.url)),
-      "utf8"
-    );
-    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
-    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
-    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    const filePath = fileURLToPath(new URL("../announcement-package-run.ts", import.meta.url));
+    const specifiers = bannedRuntimeSpecifiers(filePath);
+    expect(specifiers).not.toContain("@/lib/supabase/server");
+    expect(specifiers).not.toContain("@/app/actions/shared");
+    expect(specifiers).not.toContain("next/headers");
     // Unlike the step file above, this module's own design (its header
     // comment) is to take every server call as an INJECTED callback, so it
     // should never import the "@/app/actions" barrel at all - not even the
     // sanctioned route the step file uses.
-    expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
+    expect(specifiers).not.toContain("@/app/actions");
   });
 
   // File-size-ceiling split (src/file-size-ceiling.structure.test.ts): the
@@ -93,31 +106,27 @@ describe("steps.weekly-announcement-schedule.ts stays client-bundle-safe", () =>
   // same way the package-run assertion above already does for
   // announcement-package-run.ts.
   it("steps.weekly-announcement-schedule.shared.ts never imports @/lib/supabase/server, @/app/actions/shared, next/headers, or @/app/actions at all", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("./steps.weekly-announcement-schedule.shared.ts", import.meta.url)),
-      "utf8"
-    );
-    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
-    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
-    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    const filePath = fileURLToPath(new URL("./steps.weekly-announcement-schedule.shared.ts", import.meta.url));
+    const specifiers = bannedRuntimeSpecifiers(filePath);
+    expect(specifiers).not.toContain("@/lib/supabase/server");
+    expect(specifiers).not.toContain("@/app/actions/shared");
+    expect(specifiers).not.toContain("next/headers");
     // Pure helpers/constants only - like announcement-package-run.ts, this
     // leaf should never need the "@/app/actions" barrel at all.
-    expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
+    expect(specifiers).not.toContain("@/app/actions");
   });
 
   it("steps.weekly-announcement-schedule.package-paths.ts never imports @/lib/supabase/server, @/app/actions/shared, or next/headers", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("./steps.weekly-announcement-schedule.package-paths.ts", import.meta.url)),
-      "utf8"
-    );
-    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
-    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
-    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    const filePath = fileURLToPath(new URL("./steps.weekly-announcement-schedule.package-paths.ts", import.meta.url));
+    const specifiers = bannedRuntimeSpecifiers(filePath);
+    expect(specifiers).not.toContain("@/lib/supabase/server");
+    expect(specifiers).not.toContain("@/app/actions/shared");
+    expect(specifiers).not.toContain("next/headers");
     // This leaf DOES use the same sanctioned "@/app/actions" route the
     // parent step file uses (draftModuleAnnouncementsAction,
     // draftPackageAnnouncementsAction, listCourseHubAction) - unlike
     // announcement-package-run.ts, which takes every server call injected.
-    expect(source).toContain('from "@/app/actions"');
+    expect(readFileSync(filePath, "utf8")).toContain('from "@/app/actions"');
   });
 });
 

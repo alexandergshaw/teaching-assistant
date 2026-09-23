@@ -254,7 +254,19 @@ describe("yaml-codec round trip", () => {
       const items = parseBacklogYaml(text);
       expect(items.length).toBeGreaterThan(0);
       expect(ownerRowsMissingQuestion(items)).toEqual([]);
-      expect(items.filter((i) => i.state === "owner").length).toBeGreaterThan(0);
+
+      // POSITIVE CONTROL. This used to assert the live file contains at least
+      // one owner-state row, which read as "prove the guard saw real data" and
+      // was really pinning a TRANSIENT state of the backlog: on 2026-09-23 the
+      // owner answered every open question, the count went to zero, and the
+      // suite went red because the queue got HEALTHIER. An empty result means
+      // nothing unless the instrument can produce a non-empty one, so prove
+      // that here instead - it holds whatever the backlog happens to contain.
+      const withSyntheticOwnerRow = [
+        ...items,
+        { ...items[0], id: "ZZ-CANARY", state: "owner" as const, question: null },
+      ];
+      expect(ownerRowsMissingQuestion(withSyntheticOwnerRow)).toEqual(["ZZ-CANARY"]);
     });
   });
 });

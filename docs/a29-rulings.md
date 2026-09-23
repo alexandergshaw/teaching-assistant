@@ -116,3 +116,161 @@ plain CSV takes any address; K1's wording states its failure backwards; P2
 under (B-prime) needs an instrument line. The backlog row's stale text - the
 old R3, the double meaning of R4, and the leftover "default (A)" - is mine and
 I am fixing it.
+
+---
+
+# Round 2 - rulings on the check of `docs/a29-architecture.md`
+
+NOT CLEAN: 7 blockers (4 new, 3 repeat), 7 majors, 5 minors, and the verdict
+that it is not buildable as written. The Canvas evidence section is SOUND and
+is not reopened: the checker re-fetched both pages live and every quoted
+string is verbatim on the page, including the odd `429 Forbidden (Rate Limit
+Exceeded)`, the one-simultaneous-request advice, `mode`'s "ignored if ... there
+is just one recipient", the batches endpoint returning only running batches,
+and the absence of any email statement on the Conversations page. It also
+confirmed the document never upgrades a Canvas SOURCE claim to documentation.
+
+## RULING 7 - MY RULING 4 CARRIED A FALSE PREMISE. Corrected here.
+
+Ruling 4 said a barrel re-export puts `sendMessageDraftByEmailAction` inside
+every workflow's import closure "despite zero call sites". Measured, both
+halves are wrong: no barrel re-exports it, and it HAS a call site at
+`MessageDraftsTab.tsx:222`. I have verified that myself.
+
+What survives is the RULING, not its example: measure the REQUESTS a send
+makes, not import edges. But the architecture cites Ruling 4's measurement as
+settled fact and re-measures nothing, which is how a wrong premise travels.
+Re-derive the wall's justification from a measurement taken now.
+
+## RULING 8 - the token authorises the RUN, not the request (B1)
+
+C7 says a consumed token must send nothing; C6 says the pump calls `sendNext`
+with that token once per recipient. For any class larger than one student
+those cannot both hold, and the document never reconciles them. An implementer
+will silently pick one: either the pump ships and the single-use rule is
+dropped, or the rule ships and the feature messages ONE STUDENT PER CONFIRM.
+Both pass every gate.
+
+**THE TOKEN AUTHORISES THE ATTEMPT.** It is minted at confirm, bound to
+course, recipients, subject and body, and consumed when the attempt reaches a
+terminal state - not on the first outbound request. What must be single-use is
+the CONFIRM, not each invocation. State the invariant in those terms and give
+it an instrument that drives N invocations, since the contradiction survived
+because nothing exercises a multi-invocation pump.
+
+AND FIX C9 WITH IT: clearing the draft "when a token is consumed (the first
+outbound request)" destroys the instructor's text at the moment the run
+becomes unable to continue.
+
+## RULING 9 - the recipient guard is an ALLOW-PATTERN on the emitted value (B4)
+
+The privacy guarantee rests on "the transport takes one recipient id, so the
+Canvas docs-versus-source conflict cannot arise". As specified it does not
+hold: a `string` carries two. `"401,402"` passes the type check, passes
+`getAll("recipients[]").length === 1`, and passes the `/^(course|group)_/`
+denylist - as do `section_12` and the `uuid:` form THE DESIGN ITSELF QUOTES
+from the `recipients[]` description. An enumerated two-prefix denylist over an
+unrestricted value is the shape this repo has recorded failing again and
+again.
+
+**THE SHIPPED CODE ALREADY HAS THE RIGHT GUARD AND THE DESIGN DROPPED IT.**
+`src/app/actions/messaging.ts:301` validates `/^\d+$/` on the emitted value
+before calling `createConversation` - I have verified it. Put an ALLOW-PATTERN
+on the emitted value INSIDE the builder, and pin that, not a count plus two
+prefixes at the test.
+
+## RULING 10 - the request recorder must sit where an unexpected host is visible (B2)
+
+C12 installs the recorder at `canvasFetch` and the Supabase client factory,
+and then fails when "any other host is requested". A recorder at those two
+seams can only ever see those two hosts, so the failure arm is unreachable and
+the instrument measures nothing.
+
+The stated reason for rejecting a global recorder is backwards: `vitest.setup.ts`
+replaces `globalThis.fetch` with a throwing stub, and its own header says a
+test that installs its own `vi.stubGlobal` never sees it. A recording
+`vi.stubGlobal` is therefore the ONLY seam that can observe a model host.
+Install it there.
+
+## RULING 11 - three requirements are marked kept and have no instrument (B3, B6, M5)
+
+The disposition table reports these as discharged and they point at nothing:
+
+- **C5 has no partition clause.** Ruling 5's "assert each state's count" and
+  K8's own fixture bullet both route into text that does not exist - a `grep`
+  for "partition" finds only the citation. So the summariser may swap accepted
+  and refused and stay green. Write the assertion over a fixture, per state.
+- **K1, the LMS gate, has no construction, no instrument and no direction of
+  failure** - it points at a JSX prop in a repo where no component is rendered
+  by any test. It is the criterion taken straight from the owner's own words.
+  It needs a SERVER-SIDE assertion: the entry point makes no Canvas request for
+  a course in either excluded category.
+- **K2's third failure clause** - a missing credential and an unreachable host
+  producing the same reason - is marked discharged by constructions that do
+  not mention reason-distinguishability. Map it or route it.
+
+A requirement whose instrument is missing is deleted, whatever the table says.
+
+## RULING 12 - no wall may be red on arrival (B5)
+
+C1's structure test requires `mode` to appear in ZERO non-test source files.
+Measured: 444 occurrences, because `mode` is an ordinary identifier in this
+tree. That is Ruling 4's own class, reproduced inside the construction the
+privacy guarantee rests on - and the recorded consequence is that the
+implementer loosens the wall rather than fixing it, unrecorded.
+
+Scope the assertion to the conversation-POST builder, or pin the emitted
+parameter names rather than tree-wide token absence. RUN EVERY NEW WALL
+AGAINST THE TREE BEFORE WRITING IT DOWN.
+
+## RULING 13 - name the real caller, and the barrel is not one (B7)
+
+W3 names `src/app/actions/index.ts`, which does not exist, hedged as "(or the
+existing actions barrel)". And the wave table answers the wrong question: asked
+"includes its caller?", W3 answers that it calls W1 and W2. The actions it
+exports are called from `useBulkCourseMessage.ts`, which is in W4. Ruling 4's
+own text says a barrel re-export exists despite zero call sites, so a barrel
+cannot be the caller.
+
+Name the file that CALLS each export, and put it in the wave that ships it -
+or state the no-caller exemption explicitly, as W1 does.
+
+## RULING 14 - the two-tab race (M1)
+
+Concurrency 1 is enforced by the pump awaiting its own promise, which binds
+nothing across tabs, and `sendNext` picks a pending recipient with no
+conditional claim - so two invocations select the same row and both POST. The
+double-send guard fires only at prepare, and the resume path mints a new token
+on the SAME attempt while the original tab may still be pumping. CLAIM THE
+RECIPIENT ROW SERVER-SIDE - a conditional update that only one caller can win.
+
+## RULING 15 - carried
+
+- **M3**: "there is no 60-second cap" is wrong as phrased and contradicts three
+  in-repo statements, including `ask/route.ts:57-59`: Vercel Hobby's hard cap
+  IS 60s, and a higher value fails the build. The correct distinction is that
+  an unconfigured Server Action gets the platform DEFAULT, which is smaller and
+  which this seat rightly declined to name from memory. Say exactly that; as
+  written an implementer may set 300 somewhere and fail the deploy.
+- **M4**: OC6 is referenced five times and defined nowhere, absorbing K12, OV2
+  and OV3 - three distinct owner checks collapsed into one undefined id with a
+  mismatched instrument. Define it or split it.
+- **M6**: six citations are off by one to four lines, after Ruling 6 told this
+  chain to cite by symbol. Cite by symbol.
+- **M7**: "eleven route handlers" is twelve, and names no command, in a
+  document whose own opening sentence requires one.
+- Minors: the types-tables glob is three files and disjointness needs exact
+  paths; the "wave's own command" spans two waves' directories; the
+  required-body reasoning is a non-sequitur; the import test proves import and
+  not use.
+
+## What the owner gets, and it is not a blocker
+
+The already-exists case is real and the document engages it honestly: for a
+course at or under 100 students, Canvas's own compose already sends one
+message to `course_<id>` as individual private conversations, per the
+documentation this design quotes. What A29 adds is the live-roster guarantee
+and the durable per-student ledger. THE NUMBER THAT DECIDES WHETHER THAT IS
+THIN OR EMPTY is how many of this owner's courses exceed 100 students - the
+only cohort where Canvas's native path carries the group-thread risk. Put that
+in front of the owner with the question, rather than after it.

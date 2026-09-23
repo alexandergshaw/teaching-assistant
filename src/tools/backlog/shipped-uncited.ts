@@ -42,6 +42,15 @@ const IGNORED_PATH_PREFIXES = ["docs/", ".claude/"];
 const IGNORED_EXACT_PATHS = [
   "src/tools/backlog/backlog-file.structure.test.ts",
   "src/tools/backlog/areas.ts",
+  // The loop's own instruction documents. They are documentation exactly like
+  // `docs/`, and they only escape IGNORED_PATH_PREFIXES because they sit at the
+  // repo ROOT rather than under a directory. Measured 2026-09-23: a commit whose
+  // only non-`docs/` path was AGENTS.md flagged two rows as shipped-but-uncited,
+  // because tightening a loop rule read as shipping code. Listing them here is
+  // narrow on purpose - a prefix rule like "every root .md" would also ignore a
+  // future root file that IS work.
+  "AGENTS.md",
+  "CLAUDE.md",
 ];
 
 function isIgnoredPath(path: string): boolean {

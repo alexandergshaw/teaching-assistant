@@ -169,3 +169,35 @@ describe("formatShippedUncitedReason", () => {
     expect(text).toContain("832e9d3");
   });
 });
+
+describe("shipped-uncited: the loop's own instruction documents are not a ship", () => {
+  // REGRESSION, 2026-09-23. A commit that only tightened a loop rule in
+  // AGENTS.md was reported as shipping code against two rows, because
+  // IGNORED_PATH_PREFIXES covers "docs/" and these files sit at the root.
+  // MUTANT: drop "AGENTS.md" from IGNORED_EXACT_PATHS and this goes red.
+  it("does not treat a commit touching only AGENTS.md and docs/ as a work commit", () => {
+    expect(
+      isWorkCommit({
+        hash: "7c5a75b",
+        subject: "docs(loop,a39,a3): the answer ends the activity",
+        files: ["AGENTS.md", "docs/BACKLOG.md", "docs/backlog.yml", "docs/loop/iteration-caps.md"],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat a commit touching only CLAUDE.md as a work commit", () => {
+    expect(isWorkCommit({ hash: "abc1234", subject: "docs: a rule", files: ["CLAUDE.md"] })).toBe(false);
+  });
+
+  // The narrowness matters: this must stay a two-name exemption, not "any root
+  // markdown file", or a future root file that IS work becomes invisible.
+  it("still treats another root-level file as work", () => {
+    expect(isWorkCommit({ hash: "def5678", subject: "chore: config", files: ["package.json"] })).toBe(true);
+  });
+
+  it("still treats AGENTS.md alongside a real source file as work", () => {
+    expect(
+      isWorkCommit({ hash: "0badc0d", subject: "feat: thing", files: ["AGENTS.md", "src/lib/thing.ts"] }),
+    ).toBe(true);
+  });
+});

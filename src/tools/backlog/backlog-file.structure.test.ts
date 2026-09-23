@@ -60,7 +60,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 53 -> 55: A40 and A41 filed 2026-09-23, the two defects the A39
 // interaction census found in passing (docs/a39-census.md section 5.2 /
 // RES-A39-3, and section 4 P7 / RES-A39-4).
-const EXPECTED_ROW_COUNT = 55;
+// 55 -> 56: A42 filed 2026-09-23, the stripComments source-text-instrument
+// defect found in passing while building 837f2e3 (see A42's own `from`).
+const EXPECTED_ROW_COUNT = 56;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

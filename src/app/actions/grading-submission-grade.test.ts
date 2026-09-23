@@ -26,6 +26,7 @@ vi.mock("@/lib/llm", async () => {
 import { requireOwner } from "@/lib/supabase/auth";
 import { callLlm } from "@/lib/llm";
 import { gradeCapturedSubmissionsAction } from "./grading-submission-grade";
+import { SUBMISSION_KIND_PROMPT_LABELS } from "@/lib/grade/submission-kind";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
 
@@ -390,7 +391,13 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
     expect(prompt).not.toContain("\n\nSubmission:\n");
   });
 
-  it('an unconfirmed row ("unknown") composes a request body with "Submission:", unchanged from before A8-R', async () => {
+  // Ruling O, and the owner's answer to it on 2026-09-20: an unconfirmed row
+  // gets a HEDGED prompt header, never today's "Submission:" bytes - calling
+  // an unrecognized contribution a submission asserts the very thing backlog
+  // row A8 says the grader must stop asserting. This pins the FACT (the
+  // header names the unknown kind and is not the bare "Submission:") rather
+  // than the wording, per this repo's "source-text tests over-specify" note.
+  it('an unconfirmed row ("unknown") composes a HEDGED request-body header, never the bare "Submission:"', async () => {
     vi.mocked(callLlm).mockResolvedValueOnce(gradeResponse("Fine.", "", "10/10"));
 
     await gradeCapturedSubmissionsAction(
@@ -400,7 +407,10 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
       "gemini"
     );
 
-    expect(promptTextOf(0)).toContain("\n\nSubmission:\ntext");
+    const prompt = promptTextOf(0);
+    expect(prompt).not.toContain("\n\nSubmission:\n");
+    expect(prompt).toContain(`\n\n${SUBMISSION_KIND_PROMPT_LABELS.unknown}:\ntext`);
+    expect(SUBMISSION_KIND_PROMPT_LABELS.unknown.toLowerCase()).toMatch(/unknown|not identified/);
   });
 
   it("each row's OWN confirmed kind composes independently - a mixed batch never bleeds one row's kind onto another", async () => {

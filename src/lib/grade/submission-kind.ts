@@ -18,11 +18,14 @@
 // client components under src/app/components already import from
 // @/lib/grade/* (docs/a8r-scope.md section 2.3).
 //
-// "unknown" maps to today's pre-A8-R strings everywhere this union is
-// composed into a label or a prompt header (the label Records live in this
-// same leaf, wave 2) - that single fact is what makes A8-R a no-op on the
-// model request body and the on-screen label until an instructor confirms
-// something (docs/a8r-scope.md section 3).
+// "unknown" maps to a NEUTRAL label and a HEDGED prompt header everywhere
+// this union is composed into a label or a prompt header (the label Records
+// live in this same leaf, wave 2) - per owner ruling O (commit d4c32cc,
+// OWNER ANSWER 2026-09-20): "an unconfirmed row gets a NEUTRAL LABEL AND A
+// HEDGED PROMPT, not today's 'Submission' bytes." Labelling an unrecognized
+// contribution "Submission" reads as marking it an original post, which is
+// exactly the defect backlog row A8 complains about, so "unknown" no longer
+// reproduces the pre-A8-R string.
 export type GradingSubmissionKind = "initial-post" | "reply" | "other" | "unknown";
 
 export const SUBMISSION_KINDS: readonly GradingSubmissionKind[] = ["initial-post", "reply", "other", "unknown"];
@@ -40,35 +43,45 @@ export function coerceSubmissionKind(raw: unknown): GradingSubmissionKind {
 }
 
 // ---------------------------------------------------------------------------
-// docs/a8r-scope.md (A8-R) section 3: "unknown" maps to today's pre-A8-R
-// strings everywhere - the single fact that makes G-R0/G-R1/G-R2 provable.
-// Every OTHER member maps to something else. The call-site canary
-// (submission-kind-callsites.structure.test.ts) pins which files may ever
-// reference these two Records - the composers (grading-feedback-prompt.ts,
-// grading-submission-grade.ts, GradingRecordingPanel.tsx, this file) must
-// contain zero references to `suggestedSubmissionKind`/`submissionKindCue`,
-// so the suggestion physically cannot reach a label or a prompt without an
-// instructor's confirmation.
+// Owner ruling O (commit d4c32cc, OWNER ANSWER 2026-09-20): "unknown" maps
+// to a NEUTRAL label and a HEDGED prompt header, not the pre-A8-R
+// "Submission" bytes - that guarantee was the shipped defect, not a safety
+// net ("freezing today's strings byte-for-byte is no longer a guarantee, it
+// is the defect"). The owner accepted the cost that an ordinary, not-yet-
+// confirmed essay row also reads neutral until an instructor confirms it.
+// Every member (including "unknown") maps to something that is NOT
+// "Submission". The call-site canary (submission-kind-callsites.
+// structure.test.ts) pins which files may ever reference these two Records -
+// the composers (grading-feedback-prompt.ts, grading-submission-grade.ts,
+// GradingRecordingPanel.tsx, this file) must contain zero references to
+// `suggestedSubmissionKind`/`submissionKindCue`, so the suggestion
+// physically cannot reach a label or a prompt without an instructor's
+// confirmation.
 // ---------------------------------------------------------------------------
 
-/** G-R2: the on-screen label. "unknown" is the literal word this surface has
- * always shown - see GradingTableRow.tsx's own "Submission" span before
- * A8-R, now replaced by `submissionKindLabel(row.submissionKind)`. */
+/** G-R2: the on-screen label. "unknown" reads as NOT IDENTIFIED - short,
+ * neutral, and matching the other three labels' style ("Initial post",
+ * "Reply", "Other work") - never the pre-A8-R "Submission" span
+ * GradingTableRow.tsx used to render unconditionally, which reads as
+ * marking an unrecognized contribution as an original post. */
 export const SUBMISSION_KIND_LABELS: Record<GradingSubmissionKind, string> = {
   "initial-post": "Initial post",
   reply: "Reply",
   other: "Other work",
-  unknown: "Submission",
+  unknown: "Not identified",
 };
 
 /** G-R1: the request body's header, composed by buildGradingRecordingPrompt
  * (grading-feedback-prompt.ts) as `${SUBMISSION_KIND_PROMPT_LABELS[kind]}:`.
- * "unknown" reproduces today's literal "Submission:" byte for byte (G-R0). */
+ * "unknown" is HEDGED - it tells the model the kind was not identified,
+ * rather than asserting the contribution is a submission or an original
+ * post. It deliberately does not reproduce "Submission:" (that byte-for-byte
+ * promise was ruled the defect, not the contract). */
 export const SUBMISSION_KIND_PROMPT_LABELS: Record<GradingSubmissionKind, string> = {
   "initial-post": "Initial post",
   reply: "Reply",
   other: "Other work",
-  unknown: "Submission",
+  unknown: "Contribution (kind not identified)",
 };
 
 export function submissionKindLabel(kind: GradingSubmissionKind): string {

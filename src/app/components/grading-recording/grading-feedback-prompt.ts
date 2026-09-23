@@ -118,9 +118,11 @@ export function buildGradingRecordingPrompt(
   // docs/a8r-scope.md (A8-R) G-R1: the instructor-CONFIRMED kind only -
   // never `suggestedSubmissionKind` (the submission-kind-callsites.
   // structure.test.ts canary pins that this file contains zero references
-  // to the suggestion). Defaults to "unknown" so G-R0's own frozen literal
-  // (grading-feedback-prompt.test.ts) still calls this with four arguments
-  // and gets byte-identical output to before this parameter existed.
+  // to the suggestion). Defaults to "unknown" so a call with four arguments
+  // still gets the neutral, hedged header (SUBMISSION_KIND_PROMPT_LABELS.
+  // unknown) rather than asserting a submission - per owner ruling O
+  // (commit d4c32cc), that neutral default is the contract now, not a
+  // byte-for-byte reproduction of the pre-A8-R "Submission:" header.
   kind: GradingSubmissionKind = "unknown"
 ): string {
   const knowledgeBlock = knowledgeContext ? `\n\n${knowledgeContext}` : "";

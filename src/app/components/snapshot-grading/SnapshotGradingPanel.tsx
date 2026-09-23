@@ -23,7 +23,7 @@ import styles from "../../page.module.css";
 import { extractPastedImageFiles, isFileDragTypes } from "@/lib/chat/attachments";
 import { extractSubmissionImageFiles } from "@/lib/submission-archive-sniff";
 import { DEFAULT_PROVIDER } from "@/lib/llm";
-import { TextField, Button, Checkbox, FormControlLabel } from "@mui/material";
+import { TextField } from "@mui/material";
 import { editAssessmentField } from "../assessment-shared/assessment-row";
 import type { AssessmentFeedbackField } from "../assessment-shared/assessment-row";
 import { useSnapshotCapture } from "./useSnapshotCapture";
@@ -32,7 +32,6 @@ import {
   checkShotWireBudget,
   groupShotsByRole,
   computeNextStudentCounts,
-  describeNextStudentCounts,
   shotsIncludingArrivals,
   MAX_SHOTS,
   type SnapshotRole,
@@ -57,10 +56,6 @@ import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStor
 import { snapshotRowCodec } from "./snapshot-row-serialization";
 import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
-import SnapshotCaptureBar from "./SnapshotCaptureBar";
-import { visuallyHidden } from "../ui/visuallyHidden";
-import SnapshotShotTray from "./SnapshotShotTray";
-import SnapshotRoleSuggestions from "./SnapshotRoleSuggestions";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
 import { useSnapshotGrade } from "./useSnapshotGrade";
@@ -68,9 +63,10 @@ import { useSnapshotAutoGrade } from "./useSnapshotAutoGrade";
 import { useSnapshotKeyboardShortcuts } from "./useSnapshotKeyboardShortcuts";
 import { useSnapshotRubricCapture } from "./useSnapshotRubricCapture";
 import SnapshotRubricCaptureReview from "./SnapshotRubricCaptureReview";
-import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
+import SnapshotCaptureSection from "./SnapshotCaptureSection";
+import SnapshotInstructionsSection from "./SnapshotInstructionsSection";
 
 // H1-D: module-scope (not component-scope) so the mount-hydrate effect below
 // can list it as a stable dependency-free reference, matching this file's own
@@ -724,166 +720,62 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         for (const zip of zips) void handleZipFile(zip);
       }}
     >
-      <p className={styles.fieldHint}>
-        Snap a screenshot of the assignment, rubric, post, replies, or submission - or paste/drop one -
-        and manage the tray below. Grade directly from the tray whenever you are ready - Read first
-        only if you want to review or edit a transcription before grading.
-      </p>
-
-      {/* RES-N15-4 / WCAG 2.2 SC 2.5.7: click-to-browse alternative to the
-          drop target above - same handleFiles/handleZipFile onDrop calls,
-          RubricInputModal.tsx's component="label" + role={undefined} recipe. */}
-      <Button component="label" role={undefined} tabIndex={-1} className={controls.uploadLabel}
-        variant="outlined" size="small" sx={{ alignSelf: "flex-start", textTransform: "none" }}>
-        Choose files
-        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,.zip,application/zip" multiple style={visuallyHidden}
-          onChange={(e) => {
-            const picked = Array.from(e.target.files ?? []);
-            const images = picked.filter((f) => f.type.startsWith("image/"));
-            const zips = picked.filter((f) => !f.type.startsWith("image/") && f.name.toLowerCase().endsWith(".zip"));
-            if (images.length > 0) void handleFiles(images, "drop");
-            for (const zip of zips) void handleZipFile(zip);
-            e.target.value = "";
-          }}
-        />
-      </Button>
-
-      <p ref={liveRegionRef} role="status" aria-live="polite" className={panelStyles.visuallyHidden} />
-
-      <video
-        ref={previewRef}
-        muted
-        playsInline
-        aria-hidden="true"
-        className={`${controls.previewVideo}${sharing ? "" : ` ${controls.previewVideoHidden}`}`}
-      />
-
-      <SnapshotCaptureBar
+      <SnapshotCaptureSection
+        previewRef={previewRef}
+        liveRegionRef={liveRegionRef}
+        sharing={sharing}
+        handleFiles={handleFiles}
+        handleZipFile={handleZipFile}
         armedRole={armedRole}
         onArmedRoleChange={setArmedRole}
         roleCounts={roleCounts}
-        sharing={sharing}
         onStartShare={() => void startShare()}
         onStopShare={stopShare}
         onSnap={handleSnap}
-        shotCount={shots.length}
         wireBytes={wireBytes}
         shareError={shareError}
         encodeNotice={encodeNotice}
         rubricCaptureNotice={rubricCaptureNotice}
-      />
-
-      <SnapshotShotTray
         shots={shots}
-        onRemove={removeShotById}
-        onSetRole={setRole}
-        onSetNote={setNote}
-        onMove={moveShot}
+        onRemoveShot={removeShotById}
+        onSetShotRole={setRole}
+        onSetShotNote={setNote}
+        onMoveShot={moveShot}
+        pendingSuggestions={pendingSuggestions}
+        onAcceptAllSuggestions={handleAcceptAllSuggestions}
+        nextStudentCounts={nextStudentCounts}
+        nextStudentArmed={nextStudentArmed}
+        onArmNextStudent={() => setNextStudentArmed(true)}
+        onConfirmNextStudent={handleNextStudentConfirm}
+        onCancelNextStudent={() => setNextStudentArmed(false)}
+        nextStudentButtonRef={nextStudentButtonRef}
       />
 
-      <SnapshotRoleSuggestions suggestions={pendingSuggestions} onAcceptAll={handleAcceptAllSuggestions} />
-
-      <p id="snap-next-student-consequence" className={styles.fieldHint}>
-        {describeNextStudentCounts(nextStudentCounts)}
-      </p>
-      <ConfirmArmButtons
-        armed={nextStudentArmed}
-        idleLabel="Next student"
-        confirmLabel="Confirm - clear this student's shots"
-        tone="warning"
-        onArm={() => setNextStudentArmed(true)}
-        onConfirm={handleNextStudentConfirm}
-        onCancel={() => setNextStudentArmed(false)}
-        consequenceId="snap-next-student-consequence"
-        buttonRef={nextStudentButtonRef}
-      />
-
-      <p className={styles.fieldHint}>
-        A rubric or assignment you can paste as text is more reliable than a photograph of it (A3a) - the shot is a
-        fallback, not the preferred path.
-      </p>
-      <TextField
-        label="Assignment instructions (optional - pasted text preferred over a shot)"
-        value={assignmentText}
-        onChange={(e) => setAssignmentText(e.target.value)}
-        multiline
-        minRows={2}
-        fullWidth
-        size="small"
-        slotProps={{ htmlInput: { "aria-label": "Assignment instructions text" } }}
-      />
-      {/* MAJOR-1 fix: the button used to read "Edit rubric" once rubric text
-          existed, but RubricInputModal has no initial-text prop (its own
-          `useState("")`), so "Edit" would open an EMPTY textarea rather than
-          the text already captured - a false promise. "Replace rubric" is
-          honest about what actually happens. The hint sentence restores the
-          preference this whole feature exists to state (A3a), and the status
-          line mirrors GradingRecordingPanel.tsx's own confirmation of what
-          was captured, which this button's own copy used to promise but
-          never rendered. */}
-      <Button variant="outlined" size="small" ref={rubricButtonRef} onClick={() => setRubricModalOpen(true)}>
-        {rubricText.trim() ? "Replace rubric" : "Add rubric"}
-      </Button>
-      <p className={styles.fieldHint}>
-        Rubric (optional - pasted text preferred over a shot).
-      </p>
-      {rubricText.trim() && (
-        <p className={styles.fieldHint}>{`Rubric set (${rubricText.trim().length} characters).`}</p>
-      )}
-
-      <p className={styles.fieldHint}>
-        Instructions for grading (optional, instructor-authored - kept separate from the rubric and
-        assignment above). This can direct emphasis, tone, focus, and feedback format; it cannot change
-        what counts as meeting a rubric criterion, which the rubric alone still decides. Saved on this
-        device and restored on reload.
-      </p>
-      <TextField
-        label="Instructions for grading (optional)"
-        value={instructorInstructions}
-        onChange={(e) => handleInstructorInstructionsChange(e.target.value)}
-        multiline
-        minRows={2}
-        fullWidth
-        size="small"
-        slotProps={{ htmlInput: { "aria-label": "Instructor-authored grading instructions" } }}
-      />
-
-      <p className={styles.fieldHint}>
-        Reading, grading, and the Alt+R rubric-capture chord each upload to Google&apos;s Gemini API
-        (generativelanguage.googleapis.com) - the only three actions that send anything from this machine. Nothing is
-        sent until you press Read or Grade, or press Alt+R while sharing a screen - except that while auto-grade
-        below is armed, a landed submission shot triggers the same Grade upload automatically, with no separate
-        button press.
-      </p>
-
-      <FormControlLabel
-        control={
-          // SHOULD-FIX 7: no aria-label - it would override the visible label text (MUI 9.0.1's `input` slot is the native input).
-          <Checkbox checked={autoGradeArmed} onChange={(e) => setAutoGradeArmed(e.target.checked)} />
+      <SnapshotInstructionsSection
+        assignmentText={assignmentText}
+        onAssignmentTextChange={setAssignmentText}
+        rubricText={rubricText}
+        onOpenRubricModal={() => setRubricModalOpen(true)}
+        rubricButtonRef={rubricButtonRef}
+        instructorInstructions={instructorInstructions}
+        onInstructorInstructionsChange={handleInstructorInstructionsChange}
+        autoGradeArmed={autoGradeArmed}
+        onAutoGradeArmedChange={setAutoGradeArmed}
+        reading={reading}
+        onRead={() => void handleRead()}
+        shotCount={shots.length}
+        grading={grading}
+        onGrade={() => void handleGrade()}
+        gradeDisabled={
+          !isGradeEligible({
+            grading,
+            shotCount: shots.length,
+            transcriptText,
+            rubricText,
+            confirmedRubricAreas,
+          })
         }
-        label="Auto-grade each submission as it lands (armed - confirms once per page load before the first automatic upload)"
       />
-
-      <div className={styles.ghActions}>
-        <Button variant="outlined" onClick={() => void handleRead()} disabled={reading || shots.length === 0}>
-          {reading ? "Reading..." : "Read shots"}
-        </Button>
-        <Button
-          variant="contained"
-          onClick={() => void handleGrade()}
-          disabled={
-            !isGradeEligible({
-              grading,
-              shotCount: shots.length,
-              transcriptText,
-              rubricText,
-              confirmedRubricAreas,
-            })
-          }
-        >
-          {grading ? "Grading..." : "Grade"}
-        </Button>
-      </div>
 
       {rubricText.trim() && (
         <ConfirmedRubricAreasEditor

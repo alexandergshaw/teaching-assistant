@@ -154,9 +154,16 @@ describe("no auto-drain effect (A7c): the read/grade/OCR actions are reachable O
     expect(hookSource).not.toMatch(/useEffect\(/);
   });
 
-  it("handleRead and handleGrade are wired to onClick, not to a dependency-array effect", () => {
-    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleRead\(\)\}/);
-    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleGrade\(\)\}/);
+  it("handleRead and handleGrade are wired to a zero-arg JSX-prop callback, not to a dependency-array effect", () => {
+    // A39 wave 3a-i moved the Read/Grade buttons into
+    // SnapshotInstructionsSection.tsx (RULING 33's grouped extraction), so
+    // the panel now hands these off via onRead={...}/onGrade={...} rather
+    // than an onClick={...} on the button element itself - the leaf's own
+    // <Button onClick={onRead}> is the click wiring. What this check must
+    // keep proving is unchanged: the call is a zero-arg arrow assigned
+    // directly to a JSX attribute, never read inside an effect body.
+    expect(panelSource).toMatch(/\w+=\{\(\)\s*=>\s*void handleRead\(\)\}/);
+    expect(panelSource).toMatch(/\w+=\{\(\)\s*=>\s*void handleGrade\(\)\}/);
   });
 
   it("calls snapshotTranscribeRubricAction somewhere in the rubric-capture hook - a check that it is called nowhere proves nothing", () => {
@@ -397,18 +404,22 @@ describe("no auto-drain effect (A7c): the read/grade/OCR actions are reachable O
     }
   });
 
-  it("handleGrade( is invoked only from the panel's own Grade button onClick and fireRef's own assigned body", () => {
+  it("handleGrade( is invoked only from the panel's own hand-off to the Grade button and fireRef's own assigned body", () => {
     const panelStripped = stripComments(panelSource);
     const autoGradeSource = stripComments(fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, "useSnapshotAutoGrade.ts"), "utf-8"));
 
-    const onClickLiteral = "onClick={() => void handleGrade()}";
-    const onClickStart = panelStripped.indexOf(onClickLiteral);
-    expect(onClickStart, "expected the Grade button's own onClick literal").toBeGreaterThan(-1);
+    // A39 wave 3a-i: the Grade button itself (and its onClick) moved into
+    // SnapshotInstructionsSection.tsx; the panel now hands handleGrade off
+    // via a zero-arg prop (onGrade={() => void handleGrade()}) rather than
+    // an onClick literal directly on the button.
+    const onGradeLiteral = "onGrade={() => void handleGrade()}";
+    const onClickStart = panelStripped.indexOf(onGradeLiteral);
+    expect(onClickStart, "expected the panel's own onGrade hand-off literal").toBeGreaterThan(-1);
     const panelSites = callSites(panelStripped, "handleGrade", "");
     for (const idx of panelSites) {
       expect(
-        idx >= onClickStart && idx < onClickStart + onClickLiteral.length,
-        `handleGrade( at index ${idx} in the panel is invoked outside the Grade button's own onClick`
+        idx >= onClickStart && idx < onClickStart + onGradeLiteral.length,
+        `handleGrade( at index ${idx} in the panel is invoked outside the onGrade hand-off`
       ).toBe(true);
     }
 

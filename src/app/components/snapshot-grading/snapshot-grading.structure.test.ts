@@ -669,7 +669,10 @@ describe("N15c AC 11 (Wiring A): every triggerAutoGradeIfDue( call site reads th
 // ---------------------------------------------------------------------------
 
 describe("N15c AC 17: the disclosure copy accounts for auto-grade (rewritten, not silently left claiming 'only' three actions)", () => {
-  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  // A39 wave 3a-i moved this paragraph out of SnapshotGradingPanel.tsx into
+  // SnapshotInstructionsSection.tsx (RULING 33's grouped extraction) - read
+  // from there, not the panel, or this pin goes dark instead of red.
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotInstructionsSection.tsx");
   const strippedPanelSource = stripComments(fs.readFileSync(panelPath, "utf-8"));
   const barPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotCaptureBar.tsx");
   const strippedBarSource = stripComments(fs.readFileSync(barPath, "utf-8"));
@@ -718,15 +721,19 @@ describe("N15c AC 17: the disclosure copy accounts for auto-grade (rewritten, no
 // ---------------------------------------------------------------------------
 
 describe("SHOULD-FIX 6: the auto-grade Checkbox is actually bound to autoGradeArmed/setAutoGradeArmed", () => {
-  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  // A39 wave 3a-i moved this control out of SnapshotGradingPanel.tsx into
+  // SnapshotInstructionsSection.tsx (RULING 33's grouped extraction); the
+  // leaf receives the state and its setter renamed to onAutoGradeArmedChange,
+  // so the onChange pin below is updated to match, not merely relocated.
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotInstructionsSection.tsx");
   const panelSource = stripComments(fs.readFileSync(panelPath, "utf-8"));
 
   it("renders a <Checkbox checked={autoGradeArmed} bound to the hook's own armed state", () => {
     expect(panelSource).toMatch(/<Checkbox\s+checked=\{autoGradeArmed\}/);
   });
 
-  it("its onChange forwards the native checkbox's .target.checked to setAutoGradeArmed - not a no-op and not a hardcoded literal", () => {
-    expect(panelSource).toMatch(/onChange=\{\(e\)\s*=>\s*setAutoGradeArmed\(e\.target\.checked\)\}/);
+  it("its onChange forwards the native checkbox's .target.checked to onAutoGradeArmedChange - not a no-op and not a hardcoded literal", () => {
+    expect(panelSource).toMatch(/onChange=\{\(e\)\s*=>\s*onAutoGradeArmedChange\(e\.target\.checked\)\}/);
   });
 });
 
@@ -828,12 +835,19 @@ describe("snapshot-grade.ts no longer imports or calls extractRubricCriteria (Ru
 // routes through the SAME handleFiles/handleZipFile the drop handler already
 // calls (never a second intake path). Nothing renders under vitest here, so
 // this only checks the fact and the wiring, never the exact label prose.
+//
+// A39 wave 3a-i: this control moved out of SnapshotGradingPanel.tsx into
+// SnapshotCaptureSection.tsx (RULING 33's "fewer, larger" grouped
+// extraction), so this scans the whole directory's combined non-test source
+// rather than the panel file alone - the same idiom the exact-key-set check
+// above already uses - so the anchor survives relocation within this
+// directory instead of pinning to one file.
 // ---------------------------------------------------------------------------
 
 describe("RES-N15-4: SnapshotGradingPanel ships a click-to-browse file input wired to the SAME intake functions as drop", () => {
-  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
-  const panelSource = fs.readFileSync(panelPath, "utf-8");
-  const stripped = stripComments(panelSource);
+  const files = fs.readdirSync(SNAPSHOT_GRADING_DIR).filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+  const combinedSource = files.map((f) => fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8")).join("\n");
+  const stripped = stripComments(combinedSource);
 
   it('declares an <input type="file"> - the instrument RES-N15-4 measured as absent (exit 1)', () => {
     expect(stripped).toMatch(/<input[\s\S]{0,400}type="file"/);

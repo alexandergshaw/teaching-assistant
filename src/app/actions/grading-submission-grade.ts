@@ -56,8 +56,11 @@
 // way gradeStudentEntries' own `.slice(0, maxSubmissions)` is silent,
 // because its caller owns the whole result list) - each excess submission
 // still gets its own row back, via composeFailedGradingRow, naming the limit
-// and telling the instructor to retry it on its own, so no row is left
-// wedged in "grading" forever.
+// and stating that it was not graded, so no row is left wedged in "grading"
+// forever. It does NOT tell the instructor to retry the row on its own: this
+// action's sole production caller (GradingRecordingPanel.tsx's
+// handleGradeAll) always rebuilds its submission list from the whole table,
+// so there is no control that grades a subset - see docs/backlog.yml A34.
 
 import { requireOwner } from "@/lib/supabase/auth";
 import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -71,6 +74,7 @@ import {
   type GradingRecordingFeedback,
 } from "@/app/components/grading-recording/grading-feedback-prompt";
 import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
+import { UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
 
 // Second, hard backstop on the already-framed, already-capped (10000 chars -
 // DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS in src/lib/chat/knowledge-context.ts)
@@ -193,7 +197,12 @@ export async function gradeCapturedSubmissionsAction(
       results.push({
         id: submission.id,
         ...composeFailedGradingRow(
-          `Too many submissions in one grading run (limit ${maxSubmissions}). Retry this row on its own.`
+          // A34: reuses A31's single-author vocabulary (types.ts) rather than
+          // minting a second sentence for the same "stopped at the
+          // submission-count bound" state. Offers no action - this action's
+          // sole production caller always resubmits the whole table, so
+          // there is no control that grades this row on its own.
+          `${UNGRADED_NOT_ATTEMPTED_MESSAGES["submission-count-bound"]} This run's limit was ${maxSubmissions} submissions.`
         ),
       });
     }

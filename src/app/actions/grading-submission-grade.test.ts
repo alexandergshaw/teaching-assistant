@@ -27,6 +27,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { callLlm } from "@/lib/llm";
 import { gradeCapturedSubmissionsAction } from "./grading-submission-grade";
 import { SUBMISSION_KIND_PROMPT_LABELS } from "@/lib/grade/submission-kind";
+import { UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
 
@@ -302,8 +303,18 @@ describe("gradeCapturedSubmissionsAction - the shared submissions cap (getGemini
     if (!("results" in result)) return;
     expect(result.results).toHaveLength(4);
     const row4 = result.results.find((r) => r.id === "4")!;
-    expect(row4.strengths).toContain("Too many submissions in one grading run");
-    expect(row4.strengths).toContain("Retry this row on its own");
+    // A34: this action has exactly one production caller
+    // (GradingRecordingPanel.tsx's handleGradeAll) and it always sends the
+    // whole table - there is no control that grades a subset, so the
+    // overflow message must never suggest one. Assert over the EMITTED
+    // string (what the instructor actually sees), never the file's source
+    // text - a retired literal kept only as a source-grep target would pass
+    // forever on correct code (docs/a31-rulings.md RULING 4).
+    expect(row4.strengths).not.toMatch(/retry|re-run|rerun|requeue|queue/i);
+    // Reuses A31's single-author vocabulary (src/lib/grade/types.ts) rather
+    // than minting a second sentence for the same "stopped at the
+    // submission-count bound, nothing graded" state.
+    expect(row4.strengths).toContain(UNGRADED_NOT_ATTEMPTED_MESSAGES["submission-count-bound"]);
     expect(row4.totalScore).toBe("");
     // FIX 2: an overflow row is a real failure by the discriminator too -
     // it never actually graded, so it must never render as "ready".

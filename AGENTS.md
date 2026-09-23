@@ -119,6 +119,35 @@ the correct move is to keep the backlog moving while waiting - not to idle.
 NEVER END A TURN WITH "standing by", "let me know", "waiting on you", or any
 variant, while the backlog has a dispatchable item.
 
+**SHAPE 3 - THE KILLED AGENT, 2026-09-22.** The owner stopped five running
+agents at once. I checked the tree for damage (correctly - a killed
+implementer had been stopped mid-sabotage, leaving a mutated file and tests
+that no longer matched it), fixed that, and then ENDED TWO TURNS WITH NOTHING
+RUNNING, closing with "Say the word and I'll restart" - the banned
+idle-waiting phrase, verbatim. The owner's next message was "restart both",
+which is the round trip the rule exists to prevent.
+
+The reasoning that produced it felt like respect: the owner had just
+intervened, so surely anything I dispatch is unwelcome. That is SHAPE 2 in new
+clothes. STOPPING AN AGENT KILLS THAT DISPATCH, NOT THE QUEUE. It is
+information about THAT agent - too slow, wrong direction, wrong moment - and
+says nothing about the other forty-odd rows. A stop is not a stop-work order
+unless the owner says so in words.
+
+**THE RULE: after a kill, the same turn that reports the tree state also
+restarts the killed work, re-scoped if the kill suggests why, or starts the
+next item if the killed work is genuinely unwanted.** If it is truly unclear
+whether the owner wants that work at all, say which reading you took and
+dispatch on it - never park BOTH the killed work and the queue and wait.
+One legitimate exception: the owner says stop working, in which case say so
+plainly and stop.
+
+**A killed implementer is a tree hazard first.** Check `git status --short`
+and the diff before anything else: a kill can land between "mutant applied"
+and "restore from backup", which leaves production code holding a deliberate
+defect while its tests expect the fix. That check is right and must stay - it
+is only the IDLING AFTERWARDS that is the violation.
+
 **THE CONTROL, tightened to close both.** The test above asks whether work is
 running. Both failures answered "no" honestly and ended the turn anyway,
 because the turn had an obvious non-backlog purpose. So the test now has a
@@ -158,6 +187,11 @@ Two corollaries, both learned the same day:
 - Let an off-backlog request from the owner absorb a whole turn with no backlog
   work running underneath it.
 - Treat a dismissed question as an instruction to stop working.
+- Treat a KILLED AGENT as an instruction to stop working. A stop kills that
+  dispatch, not the queue. Restart it, re-scope it, or start the next item -
+  in the same turn you report the tree state.
+- Offer to restart something instead of restarting it ("say the word and I'll
+  resume"). That is the idle-waiting phrase with a different costume.
 
 **Do:**
 - Finish a chunk, push it, and start the next one in the same turn.

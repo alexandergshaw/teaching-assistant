@@ -201,6 +201,38 @@ lines:
 | Neither (already migrated: media, snapshot, people, lms-actions) | 12 |
 | **Total `vi.mock` call sites on that module** | **85** |
 
+**These three numbers were cross-checked against a third, independent
+instrument after a first attempt returned a silent zero.** The shell-only
+version, which shares no code with the Python walk:
+
+```
+grep -rc 'vi.mock("@/lib/supabase/auth"' src/ --include=*.test.ts \
+  | grep -v ":0$" | awk -F: '{s+=$2} END {print s}'          -> 85
+grep -rl 'vi.mock("@/lib/supabase/auth"' src/ --include=*.test.ts | wc -l   -> 85
+... | xargs grep -l "requireOwner" | wc -l                                  -> 73
+... | xargs grep -lE "requireUser|requireAppOwner" | wc -l                   -> 13
+... | xargs grep -l "requireOwnerZZZ" | wc -l                                ->  0  (canary)
+```
+
+The 13 is a WHOLE-FILE measure against the table's 25-line-window measure, so
+the two are different objects and 73 + 12 = 85 is not in tension with it. The
+single file in both sets is `src/app/actions/course-hub-integrations.test.ts`,
+and its only `requireUser` mention is prose in a comment at `:6`; its factory at
+`:23` names `requireOwner` alone. **So "zero factories are dual-mocked" holds
+under both instruments.**
+
+**THE SILENT ZERO, recorded because it is a fourth defect of the shape the brief
+names.** A first Python pass built its file list with
+`subprocess.run(["grep", "-rl", 'vi.mock("@/lib/supabase/auth"', "src/", ...])`.
+It reported `total factories: 0` and **exited 0**. The cause is the embedded
+double quotes in the pattern argument: on this platform they do not survive
+Python's argument round-trip to `grep`, so the pattern matched nothing, the loop
+never ran, and an absence was reported as a measurement. The scratchpad scripts
+cited elsewhere in this document (`classify.py`, `retval.py`, `cohorts.py`,
+`svc.py`, `tests.py`) all pass patterns with NO embedded double quotes and all
+returned non-empty results, which is why their numbers stand - but see residual
+R2-r10 before re-running any of them with a modified pattern.
+
 **Nothing is dual-mocked.** Each of the 73 factories replaces the whole auth
 module with an object exporting only `requireOwner`, so a production file that
 switches to `requireUser()` finds no such export on the mock. The already-landed
@@ -677,6 +709,7 @@ deletion, and there are none such below.
 | R2-r7 | Nothing in this repo can exercise an authorization DECISION | repo owner | A real signed-in session; the 5 numbered checks in section 5 | Object: the member/owner boundary at runtime. FAILS IN BOTH DIRECTIONS and neither is visible to any gate here | Run checks 1-5 after each wave's push, not once at the end - a lockout found after three waves cannot be attributed |
 | R2-r8 | The alias survives until wave 4, so a new call site can be added with every gate green | wave-4 implementer | `grep -rnE "await requireOwner\(\)" src/ \| wc -l` -> must be 0 | Object: the alias export at `auth.ts:451-453`. FAILS SILENTLY: a new feature writes `requireOwner()` and inherits the weaker check | Delete the export in wave 4; until then, nothing prevents regrowth, and that is stated rather than assumed away |
 | R2-r9 | Wave test-file lists came from an import resolver that left 11 of 79 test files unmatched | each wave's implementer | The `grep -rl ... \| xargs grep -l <basename>` derivation in section 6, per file | Object: each wave's test file list. FAILS if a test is left behind: the wave gate goes green and `npm test` goes red later, attributed to the wrong change | Re-derive per file at the start of each wave; gate on a whole-tree `grep -rn "requireOwner" src/ --include=*.test.ts` |
+| R2-r10 | The scratchpad scripts this document cites shell out to `grep` via `subprocess.run`, and a pattern containing embedded double quotes silently matches nothing and exits 0 (measured this pass - see section 2) | each wave's implementer | A canary inside each script: assert the file list is non-empty before the loop, and print a count that a known-nonzero shell `grep` agrees with | Object: any re-run of `classify.py`, `retval.py`, `cohorts.py`, `svc.py`, `tests.py`. FAILS SILENTLY AND PERMISSIVELY: an empty cohort reads as "nothing left to do" | Before trusting any re-run, check its printed total against the plain shell command for the same quantity; never modify a pattern to contain `"` without re-checking |
 
 ---
 

@@ -34,6 +34,49 @@ Before a feature ships, ask what this app does that a chat with an LLM cannot; t
 <!-- END:leverage-question -->
 
 <!-- BEGIN:never-stall-the-loop -->
+# Two rounds, then ask (applies to the MAIN session only)
+
+**Owner rule, given in session 2026-09-23.** Any activity inside the dev loop -
+a scope, an architecture pass, acceptance criteria, test notes, a plan, an RCA,
+an implementation - gets at most TWO rounds. If a second round does not settle
+it, THE QUESTION GOES TO THE OWNER instead of a third round.
+
+Concretely: artifact, check, revision, check. That is round 1 and round 2. If
+the round-2 check returns defective, DO NOT dispatch a revision 3 and DO NOT
+dispatch a round-3 check. Stop the rounds, state what is unresolved, and ask.
+
+**What to send the owner.** Not "it failed again". One message carrying:
+
+- the specific question or fork that two rounds did not settle, in the owner's
+  terms rather than the loop's;
+- what each round concluded, and WHY they disagree - a repeated finding means
+  the artifact is wrong, a NEW finding each round usually means the thing being
+  designed is underspecified, and those two need different answers;
+- what I recommend and what it would cost to be wrong;
+- what is still running, because this is a question, NOT A STOP.
+
+**This does not pause the loop, and it must not become a way to.** The
+never-stall rule above is unchanged and outranks any reading of this one. The
+question rides alongside other work exactly like every other non-blocking
+question in this file: dispatch or confirm other backlog work in the same turn
+you ask. A turn that ends with a question and nothing running is a stall
+wearing this rule as a costume.
+
+**Why the owner set it.** Rounds are expensive and their yield falls off. Round
+1 finds real defects. Round 2 finds real defects and starts surfacing questions
+the loop cannot answer from the code - which is exactly when a human has the
+context that the agents do not. A third round spends a lot to rediscover that.
+Two rounds is also where THE ORCHESTRATOR'S OWN RULINGS start being the thing
+under revision: on 2026-09-23 both A29 and A38 reached round 2 with two of the
+blockers landing on MY rulings rather than on the seat, and no seat revision
+can resolve those - the only thing that resolves them is a decision. That is
+the signal this rule exists to catch.
+
+**What still counts as one round.** A mechanical re-run after a gate failure, a
+citation repair, or a revision that only applies rulings already accepted is not
+a new round. A round is a CHECK-AND-REVISE cycle over the substance. Do not game
+the count in either direction.
+
 # Never stall the loop (applies to the MAIN session only)
 
 **Scope, read this first.** This section is a working preference the repo

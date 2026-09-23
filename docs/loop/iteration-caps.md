@@ -41,9 +41,33 @@ build defeated all three.
 1. **Per defect class: two attempts.** The second attempt **must change kind,
    not strength**. Strengthening the same mechanism is forbidden at the second
    failure.
-2. **Per artifact: two revisions, then a disposal round.** Round three produces
-   no new requirements - only dispositions. After it, the artifact ships with a
-   residual register.
+2. **Per artifact: two rounds, then THE QUESTION GOES TO THE OWNER.** Owner
+   rule, 2026-09-23, recorded in `AGENTS.md` under "Two rounds, then ask" -
+   which is the authoritative statement; this entry exists so the card does not
+   contradict it. THERE IS NO ROUND THREE, and in particular no disposal round,
+   which is what this entry used to prescribe. If a round-2 check returns
+   defective, the orchestrator stops the rounds and asks, carrying: the
+   unresolved question in the owner's terms, what each round concluded and why
+   they disagree, a recommendation, and what is still running. A REPEATED
+   finding means the artifact is wrong; a NEW finding each round usually means
+   the thing being designed is underspecified - they need different answers, so
+   say which shape it is.
+
+   The disposals below are not withdrawn: they remain how an individual finding
+   is disposed of WITHIN a round. What is withdrawn is the idea that a third
+   round exists to apply them wholesale.
+
+   Why the owner set it: round 1 finds real defects, round 2 finds real defects
+   and starts surfacing questions the loop cannot answer from the code - which
+   is exactly when a human has context the agents do not. Round 2 is also where
+   the ORCHESTRATOR'S OWN RULINGS start being the thing under revision. On the
+   day the rule was set, both A29 and A38 reached round 2 with blockers landing
+   on the orchestrator's rulings rather than on the seat, and no seat revision
+   can resolve those - only a decision can.
+
+   Asking is NOT stopping. `AGENTS.md`'s never-stall rule is unchanged and
+   outranks any reading of this one: the question rides alongside other work,
+   and a turn that ends with a question and nothing running is a stall.
 3. **Oscillation override.** If more than half of a round's findings are defects
    introduced by the previous round's fix, force disposal immediately,
    regardless of the counts.
@@ -95,6 +119,7 @@ manufacture findings to look diligent.
 | Check result | Action |
 |---|---|
 | All findings are NEW classes, artifact under its cap | Normal revision round |
+| The artifact has had TWO rounds, whatever the findings say | **Stop. The question goes to the owner** (`AGENTS.md`, "Two rounds, then ask"). Not a third round, not a disposal round. Keep other work running while you ask. |
 | Any REPEAT class | That class goes to disposal **now**; other new-class findings may still be revised in the same round |
 | Stopping point says *rulings* | The orchestrator rules. **Do not re-dispatch the author.** |
 | Stopping point says *design* or *measurement* | Route there; the artifact ships as it stands |

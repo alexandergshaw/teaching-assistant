@@ -32,8 +32,12 @@ that read a source file by path" was wrong three rounds running. Any brief that
 hands over such a list must require the receiver to derive the set with its own
 instrument and report what the list missed.
 
-**At the third round on one artifact, stop patching instances: name the class
-and move it.** Three separate chunks each took six to nine revision rounds of
+**At the SECOND round on one artifact, stop patching instances: name the
+class and move it.** (This card said "third round" until 2026-09-23, when the
+owner capped every activity at two rounds - `AGENTS.md`, "Two rounds, then
+ask". There is no third round to notice the pattern in, so the move has to
+happen a round earlier, and anything still unsettled after it goes to the
+owner rather than into another cycle.) Three separate chunks each took six to nine revision rounds of
 their acceptance criteria. What ended each was moving work to the seat that
 could settle it - mechanism specification to the architect, global-invariant
 accounting to the plan where it is measured against the real tree, oracle

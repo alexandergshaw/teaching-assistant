@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { walkRuntimeGraph } from "@/lib/module-graph/runtime-import-graph";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -58,6 +59,10 @@ vi.setConfig({ testTimeout: 30_000 });
 // exists to prevent. Walking is now recursive, rooted at src/app rather than
 // just src/app/actions, so both examples are covered by the same fix.
 const APP_DIR = path.join(process.cwd(), "src", "app");
+// R2 wave 0 (docs/r2-scope.md section 3): srcRoot for the walkRuntimeGraph
+// closure check below - the tool's own WalkOptions shape, not this file's
+// APP_DIR (which is one level deeper, src/app).
+const SRC_ROOT = path.join(process.cwd(), "src");
 const GUARD_CALL = /\brequire(Owner|User|AppOwner)\s*\(/;
 // BUG 2(b): these two are deliberately separate from GUARD_CALL above.
 // GUARD_CALL only proves SOME guard was called; an OWNER_ONLY entry needs to
@@ -140,6 +145,54 @@ function collectActionExports(): ActionExport[] {
   }
 
   return found;
+}
+
+/**
+ * R2 wave 0 (docs/r2-scope.md section 3, RULING 80): recomputes the
+ * GitHub-PAT cohort by walking the REAL import graph from every "use server"
+ * module under src/app, instead of trusting a static file list. A specifier-
+ * string filter is exactly what missed the exposure this row exists to
+ * close - `src/lib/grade/repo-content.ts`'s RELATIVE import of `../github`
+ * was invisible to a filter that only matched `@/lib/github`-prefixed or
+ * canvas-named specifiers. `walkRuntimeGraph`
+ * (src/lib/module-graph/runtime-import-graph.ts) already does a real,
+ * TypeScript-compiler-parsed closure walk - built for a different wall
+ * (client-bundle vs server-only, docs/a23-architecture.md) but the walk
+ * itself is exactly "can file X reach module Y transitively," which is this
+ * question with a different forbidden target. No new walker is written here,
+ * per Ruling 80's own instruction to look for one before writing one.
+ *
+ * `treatUseServerAsWall: false` is deliberate, not a default left alone: the
+ * tool's "use server" wall exists to stop a walk from a CLIENT entry point at
+ * the RPC boundary; here the walk starts FROM a server action file and must
+ * be allowed to follow that very file's own edges, or it would find nothing
+ * for any root.
+ *
+ * This is what makes GITHUB_FILES a FLOOR rather than a trusted final list
+ * (R2-r9's own rule, restated in docs/r2-scope.md section 7): a file added
+ * later whose own module graph starts reaching `lib/github.repos.ts` is
+ * caught here the moment it exists, before anyone remembers to add it to the
+ * enumeration by hand - see "GITHUB_FILES tracks the live closure" below.
+ */
+function githubReachingActionFiles(): Set<string> {
+  const reaching = new Set<string>();
+  for (const filePath of collectCandidateFiles(APP_DIR)) {
+    const text = fs.readFileSync(filePath, "utf8");
+    if (!isUseServerModule(text)) continue;
+    const result = walkRuntimeGraph([filePath], {
+      srcRoot: SRC_ROOT,
+      forbiddenPathPrefixes: ["lib/github.repos.ts"],
+      browserSafeModules: [],
+      forbiddenBareSpecifiers: [],
+      allowedBareSpecifiers: [],
+      allowedAssetExtensions: [],
+      treatUseServerAsWall: false,
+    });
+    if (result.violations.length > 0) {
+      reaching.add(path.relative(APP_DIR, filePath).replace(/\\/g, "/"));
+    }
+  }
+  return reaching;
 }
 
 /** Resolve a relative or "@/"-prefixed import specifier to a real file. */
@@ -643,5 +696,218 @@ describe("media actions are owner-only", () => {
         `${action.file}:${action.line} ${name} should call requireUser() directly, having been classified as not owner-only`
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * R2 wave 0 (docs/r2-scope.md, RULINGS 80/83/84): the instrument that will
+ * police the requireOwner() call-site reclassification, landed BEFORE any
+ * of the 255 GitHub-cohort call sites moves off the deprecated alias
+ * (docs/r2-scope.md section 7, "lands red-then-green so the instrument is
+ * proven before it is trusted" - restored from the prior draft after the
+ * check (docs/r2-check.md, B5.1) found a version of this document that
+ * dropped it).
+ *
+ * THE POLARITY (RULING 83), stated once so nobody re-derives it wrong: the
+ * media block above (MEDIA_OWNER_ONLY_ACTIONS) defaults its cohort to
+ * PERMISSIVE and lists the RESTRICTIVE exceptions, because media's resource
+ * is shared and non-owner-private - permissive is safe there. The owner's
+ * GitHub personal access token is the opposite kind of resource: a single-
+ * owner secret, where permissive IS the harm. A block modelled line-for-line
+ * on the media block (defaulting the cohort to requireUser(), listing
+ * restrictive exceptions) would therefore PIN THE EXPOSURE GREEN - exactly
+ * the defect docs/r2-check.md's Ruling 83 finding is about. This block is
+ * the CONVERSE: the cohort defaults to requireAppOwner(), and
+ * GITHUB_NOT_OWNER_ONLY lists the PERMISSIVE exceptions - each one an action
+ * a per-action review has already proven safe on requireUser(). It starts
+ * empty, because no per-action review has run yet; that is wave 1-3's job,
+ * not this wave's.
+ *
+ * WHAT THIS INSTRUMENT IS, STATED HONESTLY (RULING 81, correcting a checked
+ * draft's own "EXECUTES the guard-name check" - that was a verb dressing up
+ * a grep): every assertion below is a regex over source text
+ * (BARE_REQUIRE_USER_CALL / REQUIRE_APP_OWNER_CALL against `action.body`,
+ * itself a text slice from `collectActionExports()`), except the closure
+ * membership check, which is a real TypeScript-parsed import-graph walk
+ * (`githubReachingActionFiles()`) but still never RUNS anything - no guard
+ * executes, no Supabase client is mocked, no authorization decision is
+ * exercised. That is a legitimate COVERAGE NET - cheap, and it is exactly
+ * what would have caught the media cohort's four leftover alias sites - but
+ * it cannot see a correctly-NAMED guard sitting on the WRONG resource, only
+ * a wrongly-named one. The instrument that catches THAT is the repo's real
+ * executing idiom, `src/lib/supabase/auth.test.ts:432-493`
+ * (`requireAppOwner()` mocked and actually invoked against an `active`
+ * non-owner, asserted to reject) - a per-action test in that shape belongs
+ * to wave 1-3, written the same day each call site's guard actually changes,
+ * which is out of this wave's write set (no guard call site moves here).
+ *
+ * WHAT A MECHANICAL RENAME DOES NOT SATISFY: a global find-replace of every
+ * `requireOwner(` call in the 41 GITHUB_FILES to `requireUser(` is textually
+ * different and behaviourally IDENTICAL (both admit any active account, not
+ * just the owner) - it would satisfy a check that only asserts "no
+ * `requireOwner` remains in src", and would satisfy nothing else this file
+ * already had (BUG 2(b)'s GUARD_CALL treats all three names as equivalent
+ * "some guard" evidence). It does NOT satisfy "no action in a GITHUB_FILES
+ * module calls requireUser() directly unless reviewed safe" below, because
+ * that check does not care what a call USED to say, only what it calls NOW -
+ * see the "mechanical rename" sabotage in the wave-0 report for the verbatim
+ * red this produces.
+ */
+
+// R2 wave 0: the 41 production files whose module graph closure-reaches
+// `lib/github.repos.ts` (docs/r2-scope.md section 3 - 255 requireOwner()
+// call sites today, reproduced in this checkout: `grep -c "await
+// requireOwner()" <these 41 files> | awk -F: '{s+=$2} END {print s}'` -> 255).
+// Keyed the same way ActionExport.file is - relative to APP_DIR (src/app),
+// forward slashes. This is a FLOOR, not the trusted final set - see
+// githubReachingActionFiles() and the "tracks the live closure" test below,
+// which recomputes membership from the real import graph on every run and
+// fails the moment a file this list does not know about starts reaching the
+// same target (R2-r9's rule: an enumeration is a floor, never the set).
+const GITHUB_FILES = new Set([
+  "actions/accommodations.ts",
+  "actions/automation-runs.ts",
+  "actions/canvas-inbox.ts",
+  "actions/canvas-modules.ts",
+  "actions/carry-module-pattern.ts",
+  "actions/castletop.ts",
+  "actions/command-interface.ts",
+  "actions/course-calendar.ts",
+  "actions/course-hub-core.ts",
+  "actions/course-hub-integrations.ts",
+  "actions/course-intel.ts",
+  "actions/course-project.ts",
+  "actions/current-events-assignments.ts",
+  "actions/github-content.ts",
+  "actions/github-repos.ts",
+  "actions/github-student-repos.ts",
+  "actions/github.ts",
+  "actions/grading-inbox.ts",
+  "actions/grading.ts",
+  "actions/institutions.ts",
+  "actions/live-class.ts",
+  "actions/llm-tools.ts",
+  "actions/lms-generation-refine.ts",
+  "actions/lms-generation.ts",
+  "actions/lms-syllabus-buttons.ts",
+  "actions/messaging-outlook.ts",
+  "actions/messaging.ts",
+  "actions/repo-grades.ts",
+  "actions/selection-chat-context.ts",
+  "actions/submission-repo.ts",
+  "actions/syllabus-templates.ts",
+  "actions/syllabus-upload.ts",
+  "actions/visualizer-coverage.ts",
+  "actions/visualizer-selection.ts",
+  "actions/visualizer.ts",
+  "actions/weekly-announcement-drafting.ts",
+  "api/automations/run-now/route.ts",
+  "api/lms-export/selection/route.ts",
+  "api/lms-generation/deck-from-capture/route.ts",
+  "api/lms-generation/deck/route.ts",
+  "api/visualizer/create/route.ts",
+]);
+
+// R2 wave 0 (RULING 83): the PERMISSIVE exceptions inside an otherwise
+// owner-only cohort - the mirror image of MEDIA_OWNER_ONLY_ACTIONS above,
+// which lists the RESTRICTIVE exceptions inside an otherwise-permissive
+// cohort. Starts empty: populated only as wave 1-3's per-action review
+// proves a specific GITHUB_FILES action's own body never reaches the
+// GitHub-spending chain, each entry carrying a one-line stated reason.
+const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {};
+
+// WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
+// closure" test below for the full account): docs/r2-scope.md derived its
+// 81-file/41-file/255-call cohort from `grep -rlE "await requireOwner\(\)"`,
+// which is blind to a file that already stopped calling the alias. Walking
+// EVERY "use server" file's own closure (not just those 81) finds these 4
+// ALSO reaching lib/github.repos.ts, entirely outside R2's stated universe:
+//   - actions/deck-source.ts: 2 actions call requireUser() directly today
+//     (already migrated off the alias per its own P14 comment) and reach
+//     GitHub - UNREVIEWED under RULING 83's rule, same shape as R2's own
+//     exposure, just never counted by R2's census.
+//   - actions/walkthrough-announcement.ts: 7 actions, same shape - its own
+//     header comment ("every action below calls requireUser() explicitly,
+//     never requireOwner()") shows the migration happened without the
+//     GitHub-reachability question ever being asked.
+//   - actions/media-likeness.ts: already requireAppOwner() on every action
+//     (the R3 media wave) - safe today, just absent from the enumeration.
+//   - actions/llm-content.ts: no guard call at all on any export - a
+//     PINNED_UNGUARDED matter (already tracked above by name), not a wrong-
+//     guard matter; still closure-reaches GitHub, so still named here rather
+//     than left for a reader to rediscover.
+// SHRINK-ONLY: this is not a safety classification (unlike
+// GITHUB_NOT_OWNER_ONLY) - it is a record of "known, not yet folded into a
+// per-action review." A name leaves this list only when GITHUB_FILES or
+// GITHUB_NOT_OWNER_ONLY takes it over for real; nothing may be added without
+// deliberately widening this comment to say why.
+const GITHUB_FILES_PENDING_ENUMERATION = new Set([
+  "actions/deck-source.ts",
+  "actions/llm-content.ts",
+  "actions/media-likeness.ts",
+  "actions/walkthrough-announcement.ts",
+]);
+
+describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () => {
+  it("GITHUB_NOT_OWNER_ONLY starts empty - no per-action review has run yet", () => {
+    // Pinned on the EXCEPTION list, never on an owner-only set enumerating
+    // the 255 call sites (RULING 84): asserting "every GITHUB_FILES action
+    // IS owner-only" would be false and would lock out most of the app - the
+    // closure only proves the FILE's graph contains owner-private code, not
+    // that every export in it calls it.
+    expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(0);
+  });
+
+  it("every GITHUB_NOT_OWNER_ONLY entry names a real action export with a stated reason", () => {
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    for (const [name, reason] of Object.entries(GITHUB_NOT_OWNER_ONLY)) {
+      expect(byName.has(name), `${name} is listed in GITHUB_NOT_OWNER_ONLY but is not an action export`).toBe(true);
+      expect(reason.trim().length, `${name} needs a stated reason`).toBeGreaterThan(10);
+    }
+  });
+
+  it("no action in a GITHUB_FILES module calls requireUser() directly unless reviewed safe", () => {
+    const notOwnerOnly = new Set(Object.keys(GITHUB_NOT_OWNER_ONLY));
+    const violations = collectActionExports()
+      .filter((a) => GITHUB_FILES.has(a.file))
+      .filter((a) => BARE_REQUIRE_USER_CALL.test(a.body) && !notOwnerOnly.has(a.name))
+      .map((a) => `${a.file}:${a.line} ${a.name}`);
+    expect(
+      violations,
+      "these GitHub-cohort actions call requireUser() directly without a per-action review listing them in " +
+        "GITHUB_NOT_OWNER_ONLY - default posture for this cohort is requireAppOwner() (RULING 83); either switch " +
+        "to requireAppOwner() or add a reviewed GITHUB_NOT_OWNER_ONLY entry with a stated reason"
+    ).toEqual([]);
+  });
+
+  it("GITHUB_FILES tracks the live import-graph closure - a floor, not a trusted final list (RULING 80/84)", () => {
+    // WAVE-0 FINDING (reported alongside this instrument, not fixed by it -
+    // out of this wave's write set): running the live closure over EVERY
+    // "use server" file under src/app, not just the 81 that still call
+    // `requireOwner()`, finds 4 files docs/r2-scope.md's own census could
+    // not see, because that census was `grep -rlE "await requireOwner\(\)"`
+    // - a filter that is blind to a file that ALREADY moved off the alias.
+    // Two of the four (deck-source.ts, walkthrough-announcement.ts) call
+    // requireUser() directly today and closure-reach lib/github.repos.ts -
+    // under RULING 83's own rule, applied consistently, that is an
+    // UNREVIEWED, PERMISSIVE guard on a GitHub-PAT-reaching action, the same
+    // shape of exposure R2 exists to close, just outside R2's own stated
+    // 81-file/408-call universe. This is named here, exactly, rather than
+    // silently folded into GITHUB_FILES (which would claim it was reviewed
+    // under R2's wave 1-3 plan, and it was not) or silently dropped (which
+    // would hide it). GITHUB_FILES_PENDING_ENUMERATION below is a SHRINK-ONLY
+    // list of exactly these names - not a safety classification like
+    // GITHUB_NOT_OWNER_ONLY, a record of "known, not yet reviewed."  A fifth
+    // file joining this set, or any of DECK_SOURCE_AND_WALKTHROUGH's actions
+    // changing shape, still fails loud below; only removing a name (once it
+    // is properly folded into GITHUB_FILES or GITHUB_NOT_OWNER_ONLY by a
+    // real per-action review) shrinks it.
+    const detected = githubReachingActionFiles();
+    const missingFromEnumeration = [...detected].filter((f) => !GITHUB_FILES.has(f)).sort();
+    expect(
+      missingFromEnumeration,
+      "the live closure found a DIFFERENT set of not-yet-enumerated files than GITHUB_FILES_PENDING_ENUMERATION " +
+        "expects - update the pending list deliberately (it must only shrink) rather than pins failing silently"
+    ).toEqual([...GITHUB_FILES_PENDING_ENUMERATION].sort());
   });
 });

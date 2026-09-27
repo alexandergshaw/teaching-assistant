@@ -36,8 +36,13 @@
 // silently apply to the wrong assignment: SnapshotGradingPanel.tsx's caller
 // does this today (`ta-snap-rubric` / `ta-snap-assignment`, canary in
 // snapshot-grading.structure.test.ts). GradingRecordingPanel.tsx's own
-// caller does not yet - it is at this repo's 1000-line ceiling with no
-// room left this wave; see this wave's report. What survives regardless: a
+// caller does this too, under `ta-rec-grade-rubric`, scoped by course and
+// assessment, with the key inside that directory's exact-set canary in
+// grading-rows.test.ts. (This sentence previously said that caller did NOT
+// persist, because it was at the 1000-line ceiling; an extraction cleared
+// the room and path F landed. Kept as a correction rather than a silent
+// edit, since a comment asserting the opposite of the code is exactly what
+// DECISION 3 was about.) What survives regardless: a
 // SHOT (an actual screen capture) and its transcribed text are not what
 // this modal or DECISION 3 are about, and neither persists.
 //

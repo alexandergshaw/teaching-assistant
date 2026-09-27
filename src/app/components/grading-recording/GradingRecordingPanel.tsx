@@ -101,6 +101,7 @@ import { useGradingRows } from "./useGradingRows";
 import type { GradingRow } from "./grading-row";
 import GradingTable from "./GradingTable";
 import { RubricInputModal } from "./RubricInputModal";
+import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
 import { useGradingCourses } from "./useGradingCourses";
 import { parseRosterNames } from "./grading-course-roster";
 // docs/a16-wave1-scope.md sections 0/6/7: the Capture fieldset (the course
@@ -178,6 +179,31 @@ const STORAGE_KEY_COURSE = "ta-rec-grade-course";
 // courses does not clear the rubric text either; the instructor is expected
 // to type a new one when they move on to grading a different assessment.
 const STORAGE_KEY_ASSESSMENT = "ta-rec-grade-assessment";
+
+// A39 wave 3b, path F (docs/owner-decisions-2026-09-23.md DECISION 3): the
+// rubric persists through src/lib/grade/rubric-memory.ts, scoped to this
+// panel's own course+assessment identity (recordingRubricScope below) so a
+// restored rubric can never silently apply to the wrong assignment.
+// DECISION 9's transition rule - "when a sixth ta- key lands in this
+// directory, the exact-set canary gets written then" - does not defer here:
+// this directory ALREADY carries an exact-set canary
+// (grading-rows.test.ts's "has exactly the expected set of persisted keys"),
+// written back when the sixth key ("ta-rec-grade-assessment") landed, before
+// DECISION 9 existed. This is the EIGHTH key in that same directory-wide
+// count (filter, sort, course, table, declarations, assessment, dismissed,
+// rubric), so the canary the decision would have deferred is already in
+// force and this key goes straight into its expected set in the same commit
+// - see grading-rows.test.ts's own updated block.
+const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric";
+
+// Scope key for rubric-memory.ts, mirroring CartridgeDropPanel.tsx's own
+// cartridgeRubricScope: empty (refused by rubric-memory.ts itself) until
+// BOTH the course and the assessment label are known, so an instructor who
+// has picked neither cannot restore a rubric that looks like it belongs to
+// whatever they pick next.
+function recordingRubricScope(courseName: string, assessmentIdValue: string): string {
+  return courseName.trim() && assessmentIdValue.trim() ? `recording:${courseName}|${assessmentIdValue}` : "";
+}
 
 interface Notice extends GradingExtractionOutcome {
   id: string;
@@ -375,6 +401,46 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const [rubricText, setRubricText] = useState("");
   const [rubricModalOpen, setRubricModalOpen] = useState(false);
   const rubricButtonRef = useRef<HTMLButtonElement>(null);
+  // A39 wave 3b, path F: origin label for a restored rubric (never blank -
+  // describeRubricOrigin always names a scope and a time), and the
+  // dirty-tracking ref CartridgeDropPanel.tsx's own restore effect uses -
+  // the last value THIS restore wrote, so a later restore never overwrites
+  // text the instructor has since edited themselves.
+  const [rubricOrigin, setRubricOrigin] = useState<string | null>(null);
+  const lastRestoredRubricRef = useRef<string | null>(null);
+
+  // A39 wave 3b, path F (docs/owner-decisions-2026-09-23.md DECISION 3):
+  // restore only once BOTH course and assessment are known
+  // (recordingRubricScope returns "" - and rubric-memory.ts's own
+  // empty-scope guard refuses - until then, matching path H exactly), and
+  // only into a field the instructor has not since edited themselves. No
+  // sole-producer invariant guards rubricText in this file (unlike
+  // SnapshotGradingPanel.tsx's applyReviewedRubricText/confirmed-areas
+  // reset) - setRubricText's only other caller is RubricInputModal's own
+  // onSubmit below, a plain setter with nothing downstream to protect - so
+  // setting it directly here does not reproduce path G's hazard.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const scope = recordingRubricScope(selectedCourse?.name ?? "", assessmentId);
+      if (!scope) return;
+      const loaded = loadRubricMemory(STORAGE_KEY_RUBRIC, scope);
+      if (!loaded) return;
+      const untouched = rubricText === "" || rubricText === lastRestoredRubricRef.current;
+      if (!untouched) return;
+      // react-hooks/set-state-in-effect: every setState below follows an
+      // await (docs/loop/... set-state-in-effect idiom).
+      await Promise.resolve();
+      if (cancelled) return;
+      if (loaded.entry.rubric !== rubricText) setRubricText(loaded.entry.rubric);
+      lastRestoredRubricRef.current = loaded.entry.rubric;
+      setRubricOrigin(describeRubricOrigin(loaded, scope));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCourse?.name, assessmentId]);
 
   const [knowledgeContext, setKnowledgeContext] = useState<RecordingKnowledgeContext | null>(null);
 
@@ -800,6 +866,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
             ? `Rubric set (${rubricText.trim().length} characters).`
             : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
         </p>
+        {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
       </fieldset>
 
       <GradingRecordingContextPanel knowledgeContext={knowledgeContext} setKnowledgeContext={setKnowledgeContext} />
@@ -894,6 +961,12 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           onSubmit={(text) => {
             setRubricText(text);
             setRubricModalOpen(false);
+            // A39 wave 3b, path F: save under THIS submission's actual
+            // scope (not any stale state), mirroring CartridgeDropPanel.tsx's
+            // own saveScope - the same discipline as its own comment there.
+            lastRestoredRubricRef.current = text;
+            const scope = recordingRubricScope(selectedCourse?.name ?? "", assessmentId);
+            if (scope) saveRubricMemory(STORAGE_KEY_RUBRIC, scope, { rubric: text });
           }}
           onClose={() => setRubricModalOpen(false)}
           restoreFocusRef={rubricButtonRef}

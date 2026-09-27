@@ -667,7 +667,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment, dismissed)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment, dismissed, rubric)", () => {
     // A9 wave 2 (docs/REGRESSION.md entry 428/RES-A9-8): six keys became
     // seven when a per-course dismissed-submission tombstone set (the fix
     // that makes a deletion survive a reload) had to persist somewhere.
@@ -675,6 +675,15 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     // neither A9 nor A10 was filed to change" - A9 cannot remember a
     // deletion across a reload without persisting something, so this key
     // count change is exactly that carve-out, not a falsified floor.
+    //
+    // A39 wave 3b, path F (docs/owner-decisions-2026-09-23.md DECISION 3):
+    // seven keys became eight with "ta-rec-grade-rubric" - the rubric text
+    // now persists through src/lib/grade/rubric-memory.ts, scoped by
+    // course+assessment (recordingRubricScope in GradingRecordingPanel.tsx).
+    // This is the panel's own literal key binding entering the scan below;
+    // rubric-memory.ts's actual localStorage calls live outside this
+    // directory entirely and are covered by the separate A4d-shaped block
+    // beneath this describe block, not by isWired() below.
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
     expect(keys).toEqual([
       "ta-rec-grade-assessment",
@@ -682,6 +691,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
       "ta-rec-grade-declarations",
       "ta-rec-grade-dismissed",
       "ta-rec-grade-filter",
+      "ta-rec-grade-rubric",
       "ta-rec-grade-sort",
       "ta-rec-grade-table",
     ]);
@@ -730,4 +740,46 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
       expect(isWired(key, "write"), `expected a localStorage write call wired to "${key}"`).toBe(true);
     }
   );
+});
+
+// A39 wave 3b, path F (docs/owner-decisions-2026-09-23.md DECISION 3): same
+// A4d shape as snapshot-grading.structure.test.ts's own rubric-memory block
+// (MAJOR-1: a directory-local key scan cannot see a call made from outside
+// the directory). "ta-rec-grade-rubric" is wired into the exact-set canary
+// above by its literal in GradingRecordingPanel.tsx, but the actual
+// localStorage.getItem/setItem calls live in src/lib/grade/rubric-memory.ts,
+// outside both `combined`'s directories - so isWired() above cannot see it,
+// and deleting the loadRubricMemory/saveRubricMemory calls from the panel
+// would leave every check above this block green.
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
+describe('A4d: GradingRecordingPanel is actually wired to rubric-memory.ts for STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric"', () => {
+  const panelPath = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const leafPath = path.resolve(process.cwd(), "src/lib/grade/rubric-memory.ts");
+  const leafSource = fs.readFileSync(leafPath, "utf-8");
+
+  it('GradingRecordingPanel.tsx declares const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric"', () => {
+    expect(panelSource).toMatch(/const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric";/);
+  });
+
+  it("GradingRecordingPanel.tsx actually calls rubric-memory's load/save with STORAGE_KEY_RUBRIC - declaring the key literal alone proves nothing", () => {
+    const stripped = stripComments(panelSource);
+    const called =
+      /loadRubricMemory\(\s*STORAGE_KEY_RUBRIC\s*,/.test(stripped) &&
+      /saveRubricMemory\(\s*STORAGE_KEY_RUBRIC\s*,/.test(stripped);
+    expect(called).toBe(true);
+  });
+
+  it("rubric-memory.ts passes its storageKey parameter through to both localStorage.getItem and localStorage.setItem", () => {
+    const stripped = stripComments(leafSource);
+    expect(stripped).toMatch(/localStorage\.getItem\(storageKey\)/);
+    expect(stripped).toMatch(/localStorage\.setItem\(storageKey,/);
+  });
 });

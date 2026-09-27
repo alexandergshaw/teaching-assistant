@@ -126,10 +126,12 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 // .test.ts's exact-set canary scans only src/app/components/recording/ plus
 // RecordingTab.tsx, and does NOT reach this directory - so without this
 // block, a persisted key landing here would be invisible to every existing
-// gate in this repo. Exact-set (not merely ordinal). H1-D deliberately
-// persists ONE new field, the instructor-authored grading-instructions text
-// (ta-snap-grading-instructions) - unlike rubric/assignment text, which U10
-// still keeps out of localStorage for the same sensitivity reason as before.
+// gate in this repo. Exact-set (not merely ordinal). H1-D persists the
+// instructor-authored grading-instructions field (ta-snap-grading-
+// instructions); A39 wave 3b (DECISION 3) adds two more - ta-snap-rubric and
+// ta-snap-assignment - under a single last-used slot (architecture 6.2). A
+// SHOT and its transcribed text still never touch storage at all - that is
+// U10's remaining scope.
 // ---------------------------------------------------------------------------
 
 // N15c remediation round 3 (BLOCKER 1): the A7c/AC10 auto-fire reachability
@@ -173,6 +175,41 @@ describe("A4d: SnapshotGradingPanel is actually wired to useAssessmentRowStore f
   });
 });
 
+// A39 wave 3b (DECISION 3): the same A4d shape, for the two new keys
+// rubric-memory.ts persists on this panel's behalf - the directory key scan
+// above sees only the literal; rubric-memory.ts's own read/write calls live
+// outside this directory entirely.
+function rubricMemoryLeafSource(): string {
+  return fs.readFileSync(path.resolve(process.cwd(), "src/lib/grade/rubric-memory.ts"), "utf-8");
+}
+
+describe.each([
+  ["STORAGE_KEY_RUBRIC", "ta-snap-rubric"],
+  ["STORAGE_KEY_ASSIGNMENT", "ta-snap-assignment"],
+])("A4d: SnapshotGradingPanel is actually wired to rubric-memory.ts for %s = \"%s\"", (constName, key) => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const leafSource = rubricMemoryLeafSource();
+
+  it(`SnapshotGradingPanel.tsx declares const ${constName} = "${key}"`, () => {
+    expect(panelSource).toMatch(new RegExp(`const ${constName} = "${key}";`));
+  });
+
+  it(`SnapshotGradingPanel.tsx actually calls rubric-memory's load/save with ${constName} - declaring the key literal alone proves nothing`, () => {
+    const stripped = stripComments(panelSource);
+    const called =
+      new RegExp(`loadRubricMemory\\(\\s*${constName}\\s*,`).test(stripped) &&
+      new RegExp(`saveRubricMemory\\(\\s*${constName}\\s*,`).test(stripped);
+    expect(called).toBe(true);
+  });
+
+  it("rubric-memory.ts passes its storageKey parameter through to both localStorage.getItem and localStorage.setItem", () => {
+    const stripped = stripComments(leafSource);
+    expect(stripped).toMatch(/localStorage\.getItem\(storageKey\)/);
+    expect(stripped).toMatch(/localStorage\.setItem\(storageKey,/);
+  });
+});
+
 describe("directory-wide ta-snap-* key exact-set canary (this directory has no canary anywhere else)", () => {
   const files = fs.readdirSync(SNAPSHOT_GRADING_DIR);
   const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
@@ -192,11 +229,13 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly the expected ta-snap-* key set (the armed-role toggle, N15c's auto-grade-armed checkbox, H1-D's instructor grading-instructions field, and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
+  it("finds exactly the expected ta-snap-* key set (the armed-role toggle, N15c's auto-grade-armed checkbox, H1-D's instructor grading-instructions field, the completed-assessment table, and A39 wave 3b's two persisted grading-criteria/assignment keys; U10 keeps a captured shot's bytes out of localStorage)", () => {
     expect(distinctKeys).toEqual([
       "ta-snap-armed-role",
+      "ta-snap-assignment",
       "ta-snap-auto-grade-armed",
       "ta-snap-grading-instructions",
+      "ta-snap-rubric",
       "ta-snap-table",
     ]);
   });

@@ -55,6 +55,7 @@ import {
 import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
 import { RubricInputModal } from "../grading-recording/RubricInputModal";
+import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
 import SnapshotResultCard from "./SnapshotResultCard";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
@@ -140,13 +141,25 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     }
   }, [active]);
 
-  // WAVE 5: assignment/rubric text (A3a's text path, alongside a shot) -
-  // U10-style caution applies here too, deliberately NOT persisted (unlike
-  // every other textbox in this app): an unreleased assignment or rubric is
-  // at least as sensitive as the rubric text RubricInputModal.tsx already
-  // refuses to persist for the same reason.
+  // WAVE 5: assignment/rubric text (A3a's text path, alongside a shot).
+  // A39 wave 3b (docs/owner-decisions-2026-09-23.md DECISION 3): the old
+  // policy here - that this text was deliberately NOT persisted, unlike
+  // every other textbox in this app - is DROPPED. Both fields now persist
+  // through src/lib/grade/rubric-memory.ts under a single last-used slot
+  // (architecture 6.2: this panel has no course/assignment identity to
+  // scope by), always labelled on restore: `ta-snap-rubric` and
+  // `ta-snap-assignment`, canary in snapshot-grading.structure.test.ts.
+  // What survives: a SHOT and its transcribed text still never persist -
+  // the rule instructorInstructions below already states for the file.
   const [assignmentText, setAssignmentText] = useState("");
   const [rubricText, setRubricText] = useState("");
+  const RUBRIC_SCOPE = "snapshot";
+  const STORAGE_KEY_RUBRIC = "ta-snap-rubric";
+  const STORAGE_KEY_ASSIGNMENT = "ta-snap-assignment";
+  const [rubricOrigin, setRubricOrigin] = useState<string | null>(null);
+  const [assignmentOrigin, setAssignmentOrigin] = useState<string | null>(null);
+  const lastRestoredRubricRef = useRef<string | null>(null);
+  const lastRestoredAssignmentRef = useRef<string | null>(null);
   // H1-D: instructor-authored grading guidance (emphasis/tone/focus/feedback
   // format only - it cannot change what counts as meeting a criterion, see
   // snapshot-grade-prompt.ts's own framing block). Unlike assignmentText and
@@ -191,6 +204,11 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     } catch {
       // storage full/unavailable - keep working in memory for this session
     }
+  }, []);
+  const handleAssignmentTextChange = useCallback((value: string) => {
+    setAssignmentText(value);
+    lastRestoredAssignmentRef.current = value;
+    saveRubricMemory(STORAGE_KEY_ASSIGNMENT, RUBRIC_SCOPE, { rubric: value });
   }, []);
   // A3a: RubricInputModal (paste + PDF/doc extract) is the reviewed-text
   // path, matching GradingRecordingPanel.tsx's own button/modal wiring.
@@ -574,6 +592,27 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     setPinnedRubricAreas,
     seedConfirmedAreas,
   });
+  // A39 wave 3b: restore rubric/assignment text once on mount, never over an
+  // edit. Rubric restoration goes through applyReviewedRubricText - the ONE
+  // producer (Ruling B35-1/N14-10) - never setRubricText directly.
+  useEffect(() => {
+    void (async () => {
+      const loadedRubric = loadRubricMemory(STORAGE_KEY_RUBRIC, RUBRIC_SCOPE);
+      const loadedAssignment = loadRubricMemory(STORAGE_KEY_ASSIGNMENT, RUBRIC_SCOPE);
+      await Promise.resolve();
+      if (loadedRubric && (rubricText === "" || rubricText === lastRestoredRubricRef.current)) {
+        applyReviewedRubricText(loadedRubric.entry.rubric);
+        lastRestoredRubricRef.current = loadedRubric.entry.rubric;
+        setRubricOrigin(describeRubricOrigin(loadedRubric, RUBRIC_SCOPE));
+      }
+      if (loadedAssignment && (assignmentText === "" || assignmentText === lastRestoredAssignmentRef.current)) {
+        setAssignmentText(loadedAssignment.entry.rubric);
+        lastRestoredAssignmentRef.current = loadedAssignment.entry.rubric;
+        setAssignmentOrigin(describeRubricOrigin(loadedAssignment, RUBRIC_SCOPE));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // U4/X6/N14 WAVE 1-2: THE keyboard binding - see useSnapshotKeyboardShortcuts.ts.
   useSnapshotKeyboardShortcuts({
@@ -766,7 +805,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
       <SnapshotInstructionsSection
         assignmentText={assignmentText}
-        onAssignmentTextChange={setAssignmentText}
+        onAssignmentTextChange={handleAssignmentTextChange}
         rubricText={rubricText}
         onOpenRubricModal={() => setRubricModalOpen(true)}
         rubricButtonRef={rubricButtonRef}
@@ -789,6 +828,8 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
           })
         }
       />
+      {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
+      {assignmentOrigin && <p className={styles.fieldHint}>{assignmentOrigin}</p>}
 
       {rubricText.trim() && (
         <ConfirmedRubricAreasEditor
@@ -890,6 +931,8 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
             // Ruling N14-10: the ONE producer, HERE and only here (useSnapshotRubricCapture.ts).
             applyReviewedRubricText(text);
             setRubricModalOpen(false);
+            lastRestoredRubricRef.current = text; // A39 wave 3b
+            saveRubricMemory(STORAGE_KEY_RUBRIC, RUBRIC_SCOPE, { rubric: text });
           }}
           onClose={() => setRubricModalOpen(false)}
           restoreFocusRef={rubricButtonRef}

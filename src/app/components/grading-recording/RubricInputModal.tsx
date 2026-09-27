@@ -25,13 +25,21 @@
 // What this modal DOES do: it ONLY collects and lets the
 // instructor review rubric text; it does not capture a recording, does not
 // grade anything, and does not render a table - those are separate, later
-// pieces. Per requirement 5, the text is handed to the caller via onSubmit
-// and NOTHING here persists it - no localStorage, no persisted-control key of
-// any kind, no server record. That is a deliberate exception to this repo's
-// usual "every new textbox persists" rule (memory: persist-ui-control-state):
-// a rubric is exactly as sensitive as a syllabus (AC section 2) and this
-// feature's whole point is that nothing about it lingers once the instructor
-// moves on.
+// pieces. Per requirement 5, the text is handed to the caller via onSubmit -
+// this modal itself still holds and persists nothing on its own.
+//
+// A39 wave 3b (docs/owner-decisions-2026-09-23.md DECISION 3): the policy
+// this comment used to assert here - that nothing about a rubric lingers
+// once the instructor moves on - is DROPPED. A caller of this modal now MAY
+// save the reviewed text through src/lib/grade/rubric-memory.ts the moment
+// it is confirmed, under its own scoped ta- key so a stored rubric can never
+// silently apply to the wrong assignment: SnapshotGradingPanel.tsx's caller
+// does this today (`ta-snap-rubric` / `ta-snap-assignment`, canary in
+// snapshot-grading.structure.test.ts). GradingRecordingPanel.tsx's own
+// caller does not yet - it is at this repo's 1000-line ceiling with no
+// room left this wave; see this wave's report. What survives regardless: a
+// SHOT (an actual screen capture) and its transcribed text are not what
+// this modal or DECISION 3 are about, and neither persists.
 //
 // R2a - PLAIN-TEXT PASTE IS THE PRIMARY PATH. The textarea below works with
 // zero uploads: type or paste, "Use this rubric" enables the moment there is
@@ -113,9 +121,10 @@ export interface RubricInputModalProps {
   /** Called once, with the reviewed rubric text (already non-blank -
    * enforced by the disabled state of the submit button), when the
    * instructor confirms. This modal never persists the text itself
-   * (requirement 5) - what the caller does with it, and where it flows
-   * next (there is nothing to wire it to yet - AC section 5), is entirely
-   * up to them. */
+   * (requirement 5) - a caller now may, through src/lib/grade/rubric-
+   * memory.ts (A39 wave 3b, DECISION 3): this callback is where a caller
+   * that persists saves the just-confirmed text under its own scoped key,
+   * the same place it already applies the text to its own state. */
   onSubmit: (rubricText: string) => void;
   onClose: () => void;
   /** Forwarded to ModalShell - see its own props for the capture/connected

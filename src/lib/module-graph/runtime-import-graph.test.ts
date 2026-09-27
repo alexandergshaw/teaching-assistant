@@ -596,3 +596,114 @@ describe("R-15: Violation.resolved is relative(srcRoot, abs), POSIX-joined - a c
     expect(result.violations.some((v) => v.resolved?.startsWith("lib/supabase/server"))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// R-16: engine.ts's OWN runtime closure, pinned per-DIRECT-EDGE, by exact
+// trail. A39 W2-5 residual (docs/backlog.yml): R-9 above already proves
+// lib/supabase/server.ts is reachable from lib/grade.ts's barrel through
+// lib/grade/rubric.ts, so a plain `walkRuntimeGraph([engineAbs], ...)` here
+// would not measure what W2-5 needs, for a second, subtler reason beyond the
+// resolved-target problem the residual names: walkRuntimeGraph MEMOIZES on
+// the visited absolute path (runtime-import-graph.ts:229-230). Once
+// lib/research/rubric-bank.ts is visited via engine.ts -> lib/grade/rubric.ts
+// -> rubric-bank.ts, a SECOND, more direct edge from engine.ts straight to
+// rubric-bank.ts - exactly what importing rubricFingerprint from
+// ../research/rubric-bank instead of ../research/rubric-fingerprint adds -
+// hits the `if (visited.has(abs)) return;` guard and is silently dropped
+// from a single whole-graph walk rooted at engine.ts: no new violation, no
+// new trail, verified empirically (npx tsx probe against the sabotaged
+// file, reported in this change's PR/handback) to reproduce zero change in
+// violations under that exact mutation.
+//
+// The fix is to walk each of engine.ts's DIRECT edges INDEPENDENTLY, each
+// with its OWN fresh call to walkRuntimeGraph (a fresh `visited` Set is
+// created inside every call), so a new direct edge always gets its own
+// full, unshadowed downstream walk rather than being absorbed into a
+// visited-set left behind by a sibling edge's traversal.
+// ---------------------------------------------------------------------------
+describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by exact trail", () => {
+  const walkOptions = {
+    srcRoot: SRC,
+    forbiddenPathPrefixes: FORBIDDEN_PATH_PREFIXES,
+    browserSafeModules: BROWSER_SAFE_MODULES,
+    forbiddenBareSpecifiers: FORBIDDEN_BARE_SPECIFIERS,
+    allowedBareSpecifiers: ALLOWED_BARE_SPECIFIERS,
+    allowedAssetExtensions: ALLOWED_ASSET_EXTENSIONS,
+    treatUseServerAsWall: true,
+  };
+  const ENGINE_ABS = join(SRC, "lib", "grade", "engine.ts");
+
+  // Frozen literal, measured against the real tree at authoring time (npx tsx
+  // probe, reported in this change's handback): engine.ts has THREE direct
+  // edges whose INDEPENDENT downstream walk reaches lib/supabase -
+  // lib/grade/rubric.ts (-> rubric-bank.ts -> db.ts), lib/grade/extraction.ts
+  // (a dynamic import, -> the Canvas credential chain, which itself reaches
+  // rubric-bank.ts a second way through lib/grade.ts's barrel), and "../canvas"
+  // (also a dynamic import, inside gradeCanvasUrl, duplicating the same Canvas
+  // chain one hop shorter) - nine trails in total. engine.ts's fourth relevant
+  // direct edge today, ../research/rubric-fingerprint, walks to ZERO
+  // violations (it depends on nothing but node:crypto and a text helper) -
+  // that is the leaf the sabotage below swaps out from under this list. A
+  // tenth trail whose first hop is "lib/grade/engine.ts ->
+  // lib/research/rubric-bank.ts" - what importing rubricFingerprint from
+  // ../research/rubric-bank instead produces - is not in this list, and the
+  // deep-equal goes red on it because that edge now gets its OWN independent
+  // walk instead of being memoized away (confirmed empirically: this exact
+  // mutation raised the list from 9 to 10 trails and failed the deep-equal).
+  const FROZEN_TRAILS = [
+    "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts",
+    "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
+    "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/inbox.ts",
+    "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
+    "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts",
+    "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
+    "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/inbox.ts",
+    "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
+    "lib/grade/engine.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
+  ];
+
+  // PURE per test run: reads engine.ts's real source, extracts its own direct
+  // edges with the same AST scanner the walk itself uses (never a duplicated
+  // text pattern), then walks each distinct resolved child as its OWN root -
+  // a fresh, unshadowed walkRuntimeGraph call per direct edge.
+  function engineViolationTrails(): string[] {
+    const source = readFileSync(ENGINE_ABS, "utf8");
+    const scan = scanRuntimeEdges(source, ENGINE_ABS);
+    const trails: string[] = [];
+    const visitedChildren = new Set<string>();
+    for (const edge of scan.edges) {
+      const disposition = classifySpecifier(edge.specifier, ENGINE_ABS, SRC);
+      if (disposition.kind !== "module") continue;
+      if (visitedChildren.has(disposition.resolved)) continue;
+      visitedChildren.add(disposition.resolved);
+      const childResult = walkRuntimeGraph([disposition.resolved], walkOptions);
+      for (const v of childResult.violations) {
+        trails.push(["lib/grade/engine.ts", ...v.trail].join(" -> "));
+      }
+    }
+    return trails.sort();
+  }
+
+  it("engine.ts reaches exactly the frozen set of server-only trails today (positive control: non-empty)", () => {
+    const trails = engineViolationTrails();
+    expect(trails.length).toBeGreaterThan(0);
+    expect(trails).toEqual(FROZEN_TRAILS);
+  });
+
+  it("every frozen trail resolves to a lib/supabase module - the class this guards against", () => {
+    const source = readFileSync(ENGINE_ABS, "utf8");
+    const scan = scanRuntimeEdges(source, ENGINE_ABS);
+    let total = 0;
+    for (const edge of scan.edges) {
+      const disposition = classifySpecifier(edge.specifier, ENGINE_ABS, SRC);
+      if (disposition.kind !== "module") continue;
+      const childResult = walkRuntimeGraph([disposition.resolved], walkOptions);
+      for (const v of childResult.violations) {
+        total += 1;
+        expect(v.resolved).not.toBeNull();
+        expect(v.resolved?.startsWith("lib/supabase")).toBe(true);
+      }
+    }
+    expect(total).toBeGreaterThan(0);
+  });
+});

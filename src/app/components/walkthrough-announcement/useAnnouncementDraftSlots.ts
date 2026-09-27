@@ -36,6 +36,7 @@ import {
   type ResourceOutcome,
   type TemplateChoice,
 } from "./announcement-draft-slots";
+import { resolveScheduledVisibility } from "./scheduled-visibility";
 
 /** The synchronous snapshot buildRequest() returns - everything needed to
  * draft EXCEPT the research result, which cannot exist until after an await
@@ -144,10 +145,17 @@ export function useAnnouncementDraftSlots(args: {
    * `runDraft`'s own `.then(onResult, onRejected)` - `onRejected` dispatches
    * `post-result {error: "Could not reach the server - the post may or may
    * not have gone through."}`.
+   *
+   * A32/REQ-A32-1: the 3rd argument is the ALREADY-RESOLVED scheduled ISO
+   * string (or `undefined` for "post immediately"), computed once by
+   * `resolveScheduledVisibility` in `commitPost` below - never the raw
+   * per-slot input. This function forwards it verbatim to
+   * `postWalkthroughAnnouncementAction`'s own `delayedPostAt` parameter.
    */
   readonly postDraft: (
     title: string,
-    message: string
+    message: string,
+    delayedPostAt?: string
   ) => Promise<{ course: string } | { error: string }> | null;
   /** G3 Ruling 2/9: the actual research call - injected, per the same
    * blocker-5 rule that keeps every literal server-action call in the
@@ -236,6 +244,7 @@ export function useAnnouncementDraftSlots(args: {
   const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), []);
   const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), []);
   const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), []);
+  const setScheduledAt = useCallback((id: string, raw: string) => dispatch({ type: "set-scheduled-at", id, raw }), []);
   const editSlot = useCallback(
     (id: string, field: "title" | "message", value: string) => dispatch({ type: "edit", id, field, value }),
     []
@@ -329,7 +338,24 @@ export function useAnnouncementDraftSlots(args: {
     (id: string) => {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot || slot.draft.phase !== "drafted") return;
-      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message);
+      // A32/REQ-A32-1: resolve ONCE, here, and forward only the result - the
+      // SAME resolution AnnouncementDraftSlot.tsx reads for its consequence
+      // copy and all five ConfirmArmButtons labels. A past-dated (but valid)
+      // pick resolves to "immediate" here exactly as it does there, so the
+      // copy and the post decision can never disagree (this is what the
+      // mandatory watched failure in docs/a24-a32-waves.md section 6.4.4
+      // proved: a length check here and a future-time check there CAN
+      // disagree on this exact input).
+      const visibility = resolveScheduledVisibility(slot.scheduledAt, Date.now());
+      if (visibility.kind === "invalid") {
+        dispatch({ type: "post-result", id, result: { error: "Could not read the scheduled visibility time." } });
+        return;
+      }
+      const promise = argsRef.current.postDraft(
+        slot.draft.draft.title,
+        slot.draft.draft.message,
+        visibility.kind === "scheduled" ? visibility.iso : undefined
+      );
       if (promise === null) {
         dispatch({ type: "post-result", id, result: { error: "Choose a course above to post." } });
         return;
@@ -399,6 +425,7 @@ export function useAnnouncementDraftSlots(args: {
     removeSlot,
     chooseTemplate,
     chooseTiming,
+    setScheduledAt,
     editSlot,
     generate,
     regenerate,

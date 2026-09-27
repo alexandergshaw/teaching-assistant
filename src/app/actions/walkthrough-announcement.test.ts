@@ -567,7 +567,8 @@ describe("postWalkthroughAnnouncementAction (P1: markdown-safe posting path)", (
       "https://canvas.example.edu/courses/1",
       "T",
       "## M",
-      "MCC"
+      "MCC",
+      undefined
     );
   });
 
@@ -575,6 +576,58 @@ describe("postWalkthroughAnnouncementAction (P1: markdown-safe posting path)", (
     vi.mocked(createAnnouncementFromMarkdown).mockRejectedValue(new Error("Canvas rejected the request"));
     const result = await postWalkthroughAnnouncementAction("https://canvas.example.edu/courses/1", "T", "M");
     expect(result).toEqual({ error: "Canvas rejected the request" });
+  });
+
+  // A32/wave A32-1: a 5th delayedPostAt argument, forwarded VERBATIM to
+  // createAnnouncementFromMarkdown - the library already supports scheduling
+  // (src/lib/canvas/announcements.ts:420-427), this action just stopped
+  // dropping the argument.
+  it("forwards a 5th delayedPostAt argument verbatim to createAnnouncementFromMarkdown", async () => {
+    vi.mocked(createAnnouncementFromMarkdown).mockResolvedValue({
+      id: 43,
+      title: "T",
+      message: "M",
+      postedAt: null,
+      delayedPostAt: "2026-06-20T09:30:00.000Z",
+      author: "",
+      htmlUrl: "",
+    });
+
+    const result = await postWalkthroughAnnouncementAction(
+      "https://canvas.example.edu/courses/1",
+      "T",
+      "## M",
+      "MCC",
+      "2026-06-20T09:30:00.000Z"
+    );
+
+    expect(result).toEqual({ id: 43 });
+    expect(createAnnouncementFromMarkdown).toHaveBeenCalledWith(
+      "https://canvas.example.edu/courses/1",
+      "T",
+      "## M",
+      "MCC",
+      "2026-06-20T09:30:00.000Z"
+    );
+  });
+
+  // The library's own NaN message (announcements.ts:438-440) must reach the
+  // instructor unchanged - the action's catch (:606-608 above) must neither
+  // swallow it nor reword it into something more generic.
+  it("does not swallow or reword the library's own scheduled-visibility NaN message", async () => {
+    vi.mocked(createAnnouncementFromMarkdown).mockRejectedValue(
+      new Error("Could not read the scheduled visibility time.")
+    );
+
+    const result = await postWalkthroughAnnouncementAction(
+      "https://canvas.example.edu/courses/1",
+      "T",
+      "## M",
+      "MCC",
+      "not-a-date"
+    );
+
+    expect(result).toEqual({ error: "Could not read the scheduled visibility time." });
   });
 });
 

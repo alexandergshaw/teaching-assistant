@@ -745,7 +745,14 @@ describe("A19 AC-7: draftWalkthroughAnnouncementAction forwards input.timing int
 describe("A19 AC-11: the per-slot timing control is reachable from the rendered row, sliced structurally", () => {
   const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
 
-  const startIdx = source.indexOf('label="Timing"');
+  // DECISION 5 / RULING 35 (docs/a24-a32-waves.md section 6.4.1): renamed
+  // from "Timing" to "Written for" so the content-framing choice cannot be
+  // mistaken for the new per-slot Canvas-visibility control that now sits
+  // directly beside it ("Visible to students (optional)", below). Neither
+  // control's label may contain the substring "Timing" after A32 - see
+  // that section's own note on why indexOf's first-match behaviour makes a
+  // "Timing"-prefixed new label a silent hazard, not merely a rename.
+  const startIdx = source.indexOf('label="Written for"');
   const endIdx = source.indexOf("</TextField>", startIdx);
 
   it("finds the timing control's own label (start anchor resolves)", () => {
@@ -759,6 +766,71 @@ describe("A19 AC-11: the per-slot timing control is reachable from the rendered 
   it("the bounded slice wires onChooseTiming (reading claim: no component is rendered by any test here)", () => {
     const slice = source.slice(startIdx, endIdx);
     expect(slice).toContain("onChooseTiming");
+  });
+});
+
+describe('A32/RULING 35: neither per-slot control may be named "Timing" or contain it as a substring', () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  it('the literal "Timing" no longer appears as a rendered label - the mechanical consequence of DECISION 5 (indexOf(\'label="Timing"\') would otherwise silently re-bind to a wrongly-named new control, since indexOf matches the FIRST occurrence)', () => {
+    expect(source).not.toMatch(/label="Timing"/);
+  });
+
+  it('the new Canvas-visibility control is labelled "Visible to students (optional)" - verbatim, from announcements-panel.tsx:463', () => {
+    expect(source).toContain('label="Visible to students (optional)"');
+  });
+});
+
+describe("A32/REQ-A32-1: the consequence copy and all five ConfirmArmButtons labels read ONE resolved value, sliced structurally", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  // Anchored on the literal "wta-post-consequence", never a bare
+  // "consequenceId=" - a SECOND ConfirmArmButtons block for Regenerate
+  // follows immediately after with its own "wta-regenerate-consequence"
+  // consequenceId, and a bare anchor would risk binding to that block
+  // instead (docs/a24-a32-waves.md section 6.4.3).
+  const consequenceStart = source.indexOf("wta-post-consequence");
+  const consequenceEnd = source.indexOf("</p>", consequenceStart);
+
+  it("finds the post-consequence paragraph's own anchor (start anchor resolves)", () => {
+    expect(consequenceStart, "expected to find the wta-post-consequence anchor").toBeGreaterThan(-1);
+  });
+
+  it("finds the post-consequence paragraph's closing tag (end anchor resolves)", () => {
+    expect(consequenceEnd, "expected to find the consequence paragraph's closing </p>").toBeGreaterThan(-1);
+  });
+
+  it("the consequence copy's bounded slice references the resolved visibility value (isScheduled/visibility), not a separate length-derived boolean", () => {
+    const slice = source.slice(consequenceStart, consequenceEnd);
+    expect(slice).toMatch(/isScheduled|visibility\.kind/);
+    // Sabotage direction: a length check on slot.scheduledAt directly (the
+    // sibling's own shape at announcements-panel.tsx:296) is exactly what
+    // this assertion must catch if it replaces isScheduled/visibility.kind.
+    expect(slice).not.toMatch(/scheduledAt\.(trim\(\)\.)?length/);
+  });
+
+  // The five labels: idleLabel (:idx varies), confirmLabel, loadingLabel,
+  // idleAriaLabel, confirmAriaLabel - RULING 35 names all five, and :250/
+  // :251 (the aria labels) are the ACCESSIBLE names a screen reader
+  // announces, so they are not optional companions to the visible pair.
+  const idlePostStart = source.indexOf('idleLabel={isScheduled');
+  const confirmArmButtonsBlockEnd = source.indexOf("<ConfirmArmButtons", source.indexOf("<ConfirmArmButtons") + 1);
+
+  it("finds the Post ConfirmArmButtons block's own idleLabel (start anchor resolves)", () => {
+    expect(idlePostStart, "expected to find idleLabel driven by isScheduled").toBeGreaterThan(-1);
+  });
+
+  it("finds the second (Regenerate) ConfirmArmButtons block, bounding the slice below (end anchor resolves)", () => {
+    expect(confirmArmButtonsBlockEnd, "expected to find a second <ConfirmArmButtons block").toBeGreaterThan(-1);
+  });
+
+  it("the bounded slice's five label props all read isScheduled - none is a fixed string unconditioned on the resolved value", () => {
+    const slice = source.slice(idlePostStart, confirmArmButtonsBlockEnd);
+    expect(slice).toMatch(/idleLabel=\{isScheduled/);
+    expect(slice).toMatch(/confirmLabel=\{isScheduled/);
+    expect(slice).toMatch(/loadingLabel=\{isScheduled/);
+    expect(slice).toMatch(/idleAriaLabel=\{isScheduled/);
+    expect(slice).toMatch(/confirmAriaLabel=\{[\s\S]*isScheduled/);
   });
 });
 

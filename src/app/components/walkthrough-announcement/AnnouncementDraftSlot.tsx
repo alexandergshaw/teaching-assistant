@@ -17,6 +17,7 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import { markdownToHtml } from "@/lib/markdown";
+import { toDatetimeLocalValue } from "../canvas-tab/utils";
 import {
   builtFromId,
   choiceId,
@@ -29,11 +30,24 @@ import {
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
+import { resolveScheduledVisibility } from "./scheduled-visibility";
 
 const TIMING_OPTIONS: readonly { readonly value: AnnouncementTiming; readonly label: string }[] = [
   { value: "beginning-of-week", label: "Beginning of week" },
   { value: "midweek", label: "Midweek check-in" },
 ];
+
+// Impure Date.now() read isolated in this tiny top-level helper (mirrors
+// currentTimeMs in WeeklyChecklistCell.tsx and urgencyOf in
+// LiveFeedPanel.tsx) so eslint's react-hooks/purity rule - which flags a
+// DIRECT Date.now() call inside a component body - reads clean, while the
+// row still resolves "is this pick in the future, right now" without
+// waiting for a click. scheduled-visibility.ts itself stays a pure module;
+// this is the one place its injected `now` parameter is sourced from the
+// clock in this component.
+function currentTimeMs(): number {
+  return Date.now();
+}
 
 export interface AnnouncementDraftSlotProps {
   readonly slot: DraftSlot;
@@ -45,6 +59,7 @@ export interface AnnouncementDraftSlotProps {
   readonly canRemove: boolean;
   readonly onChooseTemplate: (id: string, choice: TemplateChoice) => void;
   readonly onChooseTiming: (id: string, timing: AnnouncementTiming) => void;
+  readonly onSetScheduledAt: (id: string, raw: string) => void;
   readonly onEdit: (id: string, field: "title" | "message", value: string) => void;
   readonly onRegenerateArm: (id: string) => void;
   readonly onRegenerateConfirm: (id: string) => void;
@@ -65,6 +80,7 @@ export default function AnnouncementDraftSlot({
   canRemove,
   onChooseTemplate,
   onChooseTiming,
+  onSetScheduledAt,
   onEdit,
   onRegenerateArm,
   onRegenerateConfirm,
@@ -88,6 +104,15 @@ export default function AnnouncementDraftSlot({
 
   const staleTiming =
     phase === "drafted" && slot.draft.phase === "drafted" ? slot.timing !== slot.draft.draft.timing : false;
+
+  // REQ-A32-1: ONE resolution, read by the consequence copy, all five
+  // ConfirmArmButtons labels below, AND (via useAnnouncementDraftSlots.ts's
+  // commitPost) the post decision itself - so a past-dated pick cannot say
+  // "scheduled" while publishing immediately and irrevocably to every
+  // student. `now` is read here (not injected) because this is the one
+  // production call site; resolveScheduledVisibility.test.ts injects it.
+  const visibility = resolveScheduledVisibility(slot.scheduledAt, currentTimeMs());
+  const isScheduled = visibility.kind === "scheduled";
 
   return (
     <fieldset className={controls.section}>
@@ -114,7 +139,7 @@ export default function AnnouncementDraftSlot({
       <TextField
         select
         size="small"
-        label="Timing"
+        label="Written for"
         className={controls.fieldMd}
         value={slot.timing}
         onChange={(e) => onChooseTiming(slot.id, e.target.value as AnnouncementTiming)}
@@ -125,6 +150,30 @@ export default function AnnouncementDraftSlot({
           </MenuItem>
         ))}
       </TextField>
+
+      <TextField
+        type="datetime-local"
+        size="small"
+        label="Visible to students (optional)"
+        className={controls.fieldMd}
+        value={slot.scheduledAt}
+        onChange={(e) => onSetScheduledAt(slot.id, e.target.value)}
+        slotProps={{
+          htmlInput: { min: toDatetimeLocalValue(new Date()) },
+          inputLabel: { shrink: true },
+        }}
+      />
+      <p className={styles.fieldHint}>
+        Leave blank to post immediately. Pick a future date and time to schedule when students can see it.
+        {slot.scheduledAt && (
+          <>
+            {" "}
+            <button type="button" className={styles.linkButton} onClick={() => onSetScheduledAt(slot.id, "")}>
+              Clear
+            </button>
+          </>
+        )}
+      </p>
 
       {(() => {
         const statusText = savedFormatsStatusText(optionSource.savedState, optionSource.saved.length);
@@ -221,9 +270,19 @@ export default function AnnouncementDraftSlot({
           {postArmed && (
             <div className={`${controls.notice} ${controls.noticeWarning}`}>
               <p id={`wta-post-consequence-${slot.id}`} role="status" aria-live="polite">
-                Posting publishes this announcement to every student in {courseName ?? "the course"} immediately -
-                Canvas has no unpublished state for an announcement - and this app cannot recall or delete it
-                afterward.
+                {isScheduled ? (
+                  <>
+                    Confirming schedules this announcement to become visible to every student in{" "}
+                    {courseName ?? "the course"} at {visibility.kind === "scheduled" ? visibility.label : ""} - Canvas
+                    has no unpublished state before then, and this app cannot recall or delete it afterward.
+                  </>
+                ) : (
+                  <>
+                    Posting publishes this announcement to every student in {courseName ?? "the course"} immediately -
+                    Canvas has no unpublished state for an announcement - and this app cannot recall or delete it
+                    afterward.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -236,19 +295,26 @@ export default function AnnouncementDraftSlot({
           <div className={`${styles.ghActions} ${controls.runRow}`}>
             <ConfirmArmButtons
               armed={postArmed}
-              idleLabel="Post to Canvas"
-              confirmLabel="Confirm post"
+              idleLabel={isScheduled ? "Schedule post" : "Post to Canvas"}
+              confirmLabel={isScheduled ? "Confirm schedule" : "Confirm post"}
               tone="primary"
               idleVariant="contained"
               loading={slot.posting}
-              loadingLabel="Posting…"
-              disabled={!courseName || !slot.draft.draft.title.trim() || !slot.draft.draft.message.trim()}
+              loadingLabel={isScheduled ? "Scheduling…" : "Posting…"}
+              disabled={
+                !courseName ||
+                !slot.draft.draft.title.trim() ||
+                !slot.draft.draft.message.trim() ||
+                visibility.kind === "invalid"
+              }
               onArm={() => onPostArm(slot.id)}
               onConfirm={() => onPostArm(slot.id)}
               onCancel={() => onPostCancel(slot.id)}
               consequenceId={`wta-post-consequence-${slot.id}`}
-              idleAriaLabel={`Post draft ${ordinal} to Canvas`}
-              confirmAriaLabel={`Confirm posting draft ${ordinal} to Canvas`}
+              idleAriaLabel={isScheduled ? `Schedule draft ${ordinal} to post to Canvas` : `Post draft ${ordinal} to Canvas`}
+              confirmAriaLabel={
+                isScheduled ? `Confirm scheduling draft ${ordinal} to post to Canvas` : `Confirm posting draft ${ordinal} to Canvas`
+              }
             />
             <ConfirmArmButtons
               armed={slot.regenerateArmed}

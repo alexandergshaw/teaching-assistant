@@ -358,6 +358,44 @@ describe('"choose-timing" (A19)', () => {
   });
 });
 
+describe('"set-scheduled-at" (A32/DECISION 5 - per-slot, mirroring "choose-timing")', () => {
+  it("effect: writes the raw scheduled-visibility string", () => {
+    const state = [drafted(FIRST_SLOT_ID)];
+    const next = slotsReducer(state, { type: "set-scheduled-at", id: FIRST_SLOT_ID, raw: "2026-06-20T09:30" });
+    expect(next[0].scheduledAt).toBe("2026-06-20T09:30");
+  });
+
+  it("effect: an empty string clears it back to immediate", () => {
+    const state = [{ ...drafted(FIRST_SLOT_ID), scheduledAt: "2026-06-20T09:30" }];
+    const next = slotsReducer(state, { type: "set-scheduled-at", id: FIRST_SLOT_ID, raw: "" });
+    expect(next[0].scheduledAt).toBe("");
+  });
+
+  it("guard: does NOT clear regenerateArmed or touch draft - unlike choose-timing, this field does not change what would be drafted", () => {
+    const state = [drafted(FIRST_SLOT_ID, { regenerateArmed: true })];
+    const next = slotsReducer(state, { type: "set-scheduled-at", id: FIRST_SLOT_ID, raw: "2026-06-20T09:30" });
+    expect(next[0].regenerateArmed).toBe(true);
+    expect(next[0].draft).toBe(state[0].draft);
+  });
+
+  it("guard: unknown id is a no-op", () => {
+    const state = initialSlots(FIRST_SLOT_ID);
+    const next = slotsReducer(state, { type: "set-scheduled-at", id: "does-not-exist", raw: "2026-06-20T09:30" });
+    expect(next).toBe(state);
+  });
+
+  it("does not affect the slot's own timing (content framing) - orthogonal fields", () => {
+    const state = [makeSlot(FIRST_SLOT_ID, { kind: "none" }, "midweek")];
+    const next = slotsReducer(state, { type: "set-scheduled-at", id: FIRST_SLOT_ID, raw: "2026-06-20T09:30" });
+    expect(next[0].timing).toBe("midweek");
+    expect(next[0].scheduledAt).toBe("2026-06-20T09:30");
+  });
+
+  it("new slots default scheduledAt to empty (immediate)", () => {
+    expect(makeSlot(FIRST_SLOT_ID, { kind: "default" }, "beginning-of-week").scheduledAt).toBe("");
+  });
+});
+
 describe('"edit"', () => {
   it("effect: writes the field and clears postArmedFor, regenerateArmed, copyError", () => {
     const state = [drafted(FIRST_SLOT_ID, { postArmedFor: "sig", regenerateArmed: true, copyError: "oops" })];
@@ -709,9 +747,9 @@ describe("savedFormatsStatusText - G1", () => {
   });
 });
 
-describe("SlotsAction union has exactly 15 members (C1)", () => {
+describe("SlotsAction union has exactly 16 members (C1)", () => {
   it("compile-time exhaustiveness: a Record keyed by every union member fails TypeScript compilation (not merely this test) if a member is added without a matching key here - an array typed SlotsAction['type'][] only checks each element IS a member, never that every member is present, so it cannot catch an addition", () => {
-    // If a 16th SlotsAction member is ever added, tsc reports this object
+    // If a 17th SlotsAction member is ever added, tsc reports this object
     // literal is missing that property - the failure is `npx tsc --noEmit`,
     // not a red assertion below, which is why the runtime check is only the
     // key COUNT, not membership.
@@ -720,6 +758,7 @@ describe("SlotsAction union has exactly 15 members (C1)", () => {
       remove: true,
       choose: true,
       "choose-timing": true,
+      "set-scheduled-at": true,
       edit: true,
       "generate-started": true,
       "regenerate-started": true,
@@ -732,6 +771,6 @@ describe("SlotsAction union has exactly 15 members (C1)", () => {
       "post-result": true,
       "copy-result": true,
     };
-    expect(Object.keys(memberTypes)).toHaveLength(15);
+    expect(Object.keys(memberTypes)).toHaveLength(16);
   });
 });

@@ -642,16 +642,20 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   );
 
   const postDraft = useCallback(
-    (title: string, message: string) => {
+    (title: string, message: string, delayedPostAt?: string) => {
       if (!selectedCourse) return null;
-      return postWalkthroughAnnouncementAction(selectedCourse.canvasUrl, title, message, selectedCourse.institution ?? undefined).then(
-        (result) => {
-          if ("error" in result) {
-            return { error: `Canvas refused the announcement - ${result.error}. Nothing was posted.` };
-          }
-          return { course: selectedCourse.name };
+      return postWalkthroughAnnouncementAction(
+        selectedCourse.canvasUrl,
+        title,
+        message,
+        selectedCourse.institution ?? undefined,
+        delayedPostAt
+      ).then((result) => {
+        if ("error" in result) {
+          return { error: `Canvas refused the announcement - ${result.error}. Nothing was posted.` };
         }
-      );
+        return { course: selectedCourse.name };
+      });
     },
     [selectedCourse]
   );
@@ -664,6 +668,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     removeSlot,
     chooseTemplate,
     chooseTiming,
+    setScheduledAt,
     editSlot,
     generate,
     regenerate,
@@ -914,6 +919,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             canRemove={slots.length > 1}
             onChooseTemplate={chooseTemplate}
             onChooseTiming={chooseTiming}
+            onSetScheduledAt={setScheduledAt}
             onEdit={editSlot}
             onRegenerateArm={armRegenerate}
             onRegenerateConfirm={regenerate}

@@ -100,6 +100,18 @@ export interface DraftSlot {
    * instructor can want a midweek announcement in a saved exemplar's
    * format). REQUIRED, not optional - same reasoning as `choice` itself. */
   readonly timing: AnnouncementTiming;
+  /** A32/DECISION 5: the LIVE, per-slot Canvas-visibility pick - a raw
+   * `datetime-local` string, "" meaning "post immediately" (the sibling's
+   * own convention at announcements-panel.tsx's `visibleAt`). Resolved
+   * exactly once, by resolveScheduledVisibility (REQ-A32-1), everywhere it
+   * matters: the consequence copy, all five ConfirmArmButtons labels in
+   * AnnouncementDraftSlot.tsx, and the post decision in commitPost below.
+   * DELIBERATELY NOT PERSISTED under a ta- key (Branch A, docs/a32-scope.md
+   * section 6) - a restored wall-clock instant is stale by construction and
+   * this repo's persist rule is for standing values an instructor reuses
+   * across sessions, not a one-shot publication instant. Defaults to "" on
+   * every new slot, same as `postArmedFor` and friends below. */
+  readonly scheduledAt: string;
   readonly draft: SlotDraft;
   readonly postArmedFor: string | null;
   readonly regenerateArmed: boolean;
@@ -338,6 +350,7 @@ export function makeSlot(id: string, choice: TemplateChoice, timing: Announcemen
     id,
     choice,
     timing,
+    scheduledAt: "",
     draft: { phase: "empty", error: null },
     postArmedFor: null,
     regenerateArmed: false,
@@ -362,6 +375,7 @@ export type SlotsAction =
   | { type: "remove"; id: string }
   | { type: "choose"; id: string; choice: TemplateChoice }
   | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
+  | { type: "set-scheduled-at"; id: string; raw: string }
   | { type: "edit"; id: string; field: "title" | "message"; value: string }
   | { type: "generate-started"; ids: readonly string[] }
   | { type: "regenerate-started"; id: string }
@@ -373,9 +387,9 @@ export type SlotsAction =
   | { type: "posting"; id: string }
   | { type: "post-result"; id: string; result: { course: string } | { error: string } }
   | { type: "copy-result"; id: string; error: string | null };
-// 15 members. See announcement-draft-slots.test.ts - the C1 guard there is
+// 16 members. See announcement-draft-slots.test.ts - the C1 guard there is
 // an exhaustive `Record<SlotsAction["type"], true>` literal, which tsc
-// refuses to compile if a 15th member is added here without a matching key
+// refuses to compile if a 17th member is added here without a matching key
 // there ("property is missing"). A plain `SlotsAction["type"][]` array only
 // checks that each listed element IS a member, never that every member is
 // listed, so it cannot catch an addition - only the Record form can.
@@ -407,6 +421,9 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     }
     case "choose-timing": {
       return updateSlot(state, action.id, (slot) => ({ ...slot, timing: action.timing, regenerateArmed: false }));
+    }
+    case "set-scheduled-at": {
+      return updateSlot(state, action.id, (slot) => ({ ...slot, scheduledAt: action.raw }));
     }
     case "edit": {
       return updateSlot(state, action.id, (slot) => {

@@ -596,11 +596,12 @@ export async function postWalkthroughAnnouncementAction(
   courseUrl: string,
   title: string,
   markdownBody: string,
-  acronym?: string
+  acronym?: string,
+  delayedPostAt?: string
 ): Promise<{ id: number } | { error: string }> {
   try {
     await requireUser();
-    const announcement = await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym);
+    const announcement = await createAnnouncementFromMarkdown(courseUrl, title, markdownBody, acronym, delayedPostAt);
     return { id: announcement.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };

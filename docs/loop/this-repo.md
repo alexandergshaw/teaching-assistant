@@ -260,17 +260,36 @@ State these rather than working around them:
 ## 8. Model tiers, mapped to this environment
 
 The Agent tool's `model` field accepts `opus`, `sonnet`, `haiku`, `fable`.
-Current IDs and first-party API rates, per the `claude-api` skill (cached
-2026-06-24) - re-read that skill rather than quoting these from memory later:
+Current IDs and first-party API rates, per the `claude-api` skill (re-read
+2026-09-27) - re-read that skill rather than quoting these from memory later:
+
+**OWNER SET THE OPUS TIER TO 4.8 on 2026-09-27** ("move all opus 5 to 4.8").
+Two things to know before acting on that row:
+
+- **It costs nothing.** Opus 4.8 and Opus 5 are both $5.00 / $25.00 per MTok
+  with a 1M context, measured from the skill's model table the same day. This is
+  not a downgrade for price.
+- **THE AGENT TOOL CANNOT PIN A VERSION.** Its `model` field takes only the
+  family aliases above, so a dispatch says `opus` and the harness resolves which
+  Opus that is. This table therefore records the INTENDED tier; it does not
+  enforce it. Making it effective is a session or settings-level choice the
+  owner makes, not something a brief can do. Do not write `claude-opus-4-8` into
+  an Agent call - it is not a legal value for that field.
+- **One behavioural difference matters if anything here ever calls the API
+  directly** (nothing does today - `grep -rn "claude-opus" src/` returns
+  nothing, and the app's model calls go to Gemini): on Opus 4.8, OMITTING
+  `thinking` runs the model WITHOUT thinking, while on Opus 5 omitting it runs
+  adaptive. So code ported from an Opus 5 example silently loses thinking on
+  4.8 unless it sets `thinking: {type: "adaptive"}` explicitly.
 
 | Agent | Model | ID | Input $/MTok | Output $/MTok |
 |---|---|---|---|---|
-| `loop-checker` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| `loop-top` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| `loop-ac` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| `loop-plan` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| `loop-architect` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| `loop-test-author` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-checker` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-top` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-ac` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-plan` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-architect` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-test-author` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
 | `loop-seat` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 | `loop-implementer` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 

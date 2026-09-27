@@ -46,6 +46,7 @@ export const BACKLOG_AREAS: readonly BacklogArea[] = [
   { slug: "recording-capture-surfaces", label: "Screen-capture surfaces: what they record, keep and hand back" },
   { slug: "announcement-composition-surfaces", label: "Announcement composition: prompts, templates and what reaches the model" },
   { slug: "grading-setup-interaction-cost", label: "What it costs an instructor to get from rubric to graded, measured against a chat window" },
+  { slug: "deck-generation-from-source", label: "Slide decks generated from an uploaded source against an uploaded template" },
 ];
 
 export function isBacklogArea(slug: string): boolean {

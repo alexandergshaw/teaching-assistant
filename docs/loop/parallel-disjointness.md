@@ -181,3 +181,37 @@ File sets are not the only shared thing. Before dispatching concurrently:
       worktree**.
 - [ ] Tell each agent **which paths are not theirs, by name**, and that the
       sets were verified disjoint.
+
+## When disjointness and the caller rule collide - RULING 96, 2026-09-27
+
+Two rules in this loop can contradict each other, and A44's wave plan derived the
+contradiction rather than conceding it:
+
+- **waves are disjoint by write set** (`DEV_LOOP.md`), and
+- **every wave's file list contains the CALLER of any new export it ships**
+  (`seats.md`) - the rule that exists because a wave shipping a helper nobody imports
+  ships dead code with every gate green, which this repo did twice in one week.
+
+A44 hit a case where no cut satisfies both. Its refusal predicate needs a
+discriminator that provably cannot come from the identity key - measured, a convention
+match and a directory-less fallback both decode to the same arity - so it must be a
+field on the parser's return; and putting that field in the earlier wave gives that
+wave data nothing consumes. So the later wave must write the earlier wave's file.
+
+**RULED: the CALLER rule wins, and disjointness is satisfied by SEQUENCING.**
+
+Two grounds. This card scopes disjointness to **simultaneity** - it exists to stop two
+agents overwriting each other, and waves that run in sequence cannot. Whereas the caller
+rule prevents **dead code**, which is a correctness property of what ships. When a
+concurrency rule and a correctness rule collide, the correctness rule wins and the
+concurrency rule is satisfied by ordering instead.
+
+**Two obligations come with it.** The overlap must be **printed, not implied** - A44's
+plan ran `cat w1 w2 | sort | uniq -d` and pasted the two shared paths. And the waves must
+be marked **MUST NOT RUN CONCURRENTLY**, because the disjointness gate that would
+normally catch a collision no longer applies to them.
+
+**The alternative, and why it lost:** merging into one wave satisfies both rules
+literally. It was rejected because it forces the predicate to freeze BEFORE the sweep
+that validates it can be re-run - inverting the one dependency that must not invert -
+and produces a diff spanning identity, display and refusal at once.

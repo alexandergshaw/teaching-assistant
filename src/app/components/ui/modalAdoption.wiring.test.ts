@@ -125,6 +125,45 @@ describe("the classification predicates (canaries first, per entry 239 check 10)
   // explains why using the literal phrase `styles.previewBackdrop` - a raw
   // substring match against unstripped source would misclassify exactly the
   // file that documents NOT being a dialog.
+  // RULING 79 - the two defeating shapes stripComments must resolve at once,
+  // since no line-wise regex can do both (modalAdoptionScan.ts's own comment
+  // on stripComments has the full history). Each gets its own assertion.
+  it("removes a TRAILING // comment (shape 1 - the anchored form used to leave this untouched)", () => {
+    expect(stripComments("const x = 1; // ungraded rows are handled upstream")).toBe("const x = 1; ");
+  });
+
+  it("does NOT remove a // inside a string literal, and does not truncate the string (shape 2 - the unanchored form used elsewhere in this repo truncates this)", () => {
+    const src = 'const u = "https://canvas.example.edu/courses/1";';
+    expect(stripComments(src)).toBe(src);
+  });
+
+  it("removes a /* */ block comment", () => {
+    expect(stripComments("const a = 1; /* drop this */ const b = 2;")).toBe("const a = 1;  const b = 2;");
+  });
+
+  it("does not remove a /* inside a string literal", () => {
+    const src = 'const note = "/* not a real comment */";';
+    expect(stripComments(src)).toBe(src);
+  });
+
+  it("does not remove a // inside a template literal", () => {
+    const src = "const u = `https://canvas.example.edu/${courseId}`;";
+    expect(stripComments(src)).toBe(src);
+  });
+
+  it("does not treat an apostrophe inside a double-quoted string as a string delimiter", () => {
+    const src = 'const label = "it\'s fine // not a comment";';
+    expect(stripComments(src)).toBe(src);
+  });
+
+  it("does not remove a // inside a regex literal", () => {
+    // `[//]` is a character class containing a literal `/` (duplicated); the
+    // two adjacent `/` characters are real regex source text, not a comment
+    // start, because they sit inside the class.
+    const src = "const re = /[//]/;";
+    expect(stripComments(src)).toBe(src);
+  });
+
   it("does not classify a component as a dialog site from a comment alone", () => {
     const src = [
       "// RENDERS NO MODAL, DIALOG, POPOVER OR FIXED-POSITION OVERLAY, on purpose:",

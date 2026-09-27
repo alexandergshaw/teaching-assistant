@@ -139,12 +139,144 @@ export function walkTsxFiles(dir: string): string[] {
   return walkFiles(dir, (fileName) => fileName.endsWith(".tsx"));
 }
 
-/** Source with comments stripped, so a marker string mentioned in prose is
- * never mistaken for the real thing - see this module's header comment on
- * DownloadSelectionSection.tsx, the concrete case this exists for. Same
- * idiom generatedPreviewModal.wiring.test.ts uses. */
+/** Identifiers after which a following `/` starts a regex literal, not a
+ * division operator - used by regexAllowedHere below. */
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+  "yield", "throw", "case", "do", "else",
+]);
+
+/** True when a `/` at the current scan position starts a regex literal, not
+ * division - the standard "operand expected" heuristic, judged from the code
+ * already emitted (`outSoFar`): start of file, or a preceding operand-
+ * introducing punctuation character, or a preceding keyword from
+ * REGEX_PRECEDING_KEYWORDS (never a plain identifier/number) all allow a
+ * regex; anything else (`)`, `]`, `}`, a closing quote) is treated as
+ * division/ambiguous.
+ *
+ * KNOWN LIMITATION: `)` and `}` are genuinely ambiguous in real JS
+ * (`(a+b)/c` is division; `if (x) /re/.test(y)` is a regex) and resolving the
+ * general case needs full expression-grammar context this scanner does not
+ * carry. Both resolve to "division" here, matching every real occurrence in
+ * this codebase today (verified by grep - no regex literal in src/app
+ * immediately follows a bare `)`/`}`). Revisit if one is ever added. */
+function regexAllowedHere(outSoFar: string): boolean {
+  let j = outSoFar.length - 1;
+  while (j >= 0 && /\s/.test(outSoFar[j])) j--;
+  if (j < 0) return true;
+  const c = outSoFar[j];
+  if ("([{,;:=!&|?+-*%^~<>".includes(c)) return true;
+  if (/[A-Za-z0-9_$]/.test(c)) {
+    const wordMatch = /[A-Za-z_$][A-Za-z0-9_$]*$/.exec(outSoFar.slice(0, j + 1));
+    return !!wordMatch && REGEX_PRECEDING_KEYWORDS.has(wordMatch[0]);
+  }
+  return false;
+}
+
+type ScanMode = "code" | "line-comment" | "block-comment" | "string-single" | "string-double" | "template";
+
+interface ScanFrame {
+  readonly mode: ScanMode;
+  /** True only for the synthetic "code" frame opened by a template literal's
+   * `${` - the frame a matching `}` pops back through to resume template
+   * scanning, unlike a frame opened by an ordinary `{` in code. */
+  readonly viaTemplateExpr: boolean;
+}
+
+/** Source with comments stripped by a character-scanning tokenizer, not a
+ * regex pair (RULING 79): no line-wise regex can both remove a TRAILING `//`
+ * comment and leave a `//` inside a string literal (a URL) alone - the old
+ * anchored form here was blind to the former, the unanchored form used
+ * elsewhere in this repo is blind to the latter, and the two defects are
+ * mutually exclusive for any regex operating line-by-line. This tracks
+ * whether the scan is inside a single/double-quoted string, a template
+ * literal (including nested `${...}` substitutions, which resume ordinary
+ * code scanning and can themselves contain new strings/templates/regexes/
+ * comments), a regex literal (regexAllowedHere decides where one starts), a
+ * line comment, or a block comment - and removes only real comments in the
+ * last two. Escaped delimiters (`\'`, `\"`, `` \` ``, `\/`) copy through as
+ * pairs. A line comment's own newline survives (matching the old regex's
+ * `.*$`); a block comment is removed entirely, newlines included, also
+ * matching the old regex.
+ *
+ * KNOWN LIMITATIONS: regexAllowedHere's `)`/`}` ambiguity (see its own
+ * comment); an unterminated regex (`/` with no closing `/` before the next
+ * newline) is scanned only to end of line with no recovery attempt - not a
+ * real shape in this repo today. */
 export function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  const stack: ScanFrame[] = [{ mode: "code", viaTemplateExpr: false }];
+  const push = (mode: ScanMode, viaTemplateExpr = false) => stack.push({ mode, viaTemplateExpr });
+
+  while (i < n) {
+    const mode = stack[stack.length - 1].mode;
+    const ch = text[i];
+    const next = i + 1 < n ? text[i + 1] : "";
+
+    if (mode === "line-comment") {
+      if (ch === "\n") { stack.pop(); out += ch; }
+      i++;
+      continue;
+    }
+    if (mode === "block-comment") {
+      if (ch === "*" && next === "/") { stack.pop(); i += 2; } else i++;
+      continue;
+    }
+    if (mode === "string-single" || mode === "string-double") {
+      const quote = mode === "string-single" ? "'" : '"';
+      if (ch === "\\") { out += ch + next; i += 2; continue; }
+      out += ch;
+      if (ch === quote) stack.pop();
+      i++;
+      continue;
+    }
+    if (mode === "template") {
+      if (ch === "\\") { out += ch + next; i += 2; continue; }
+      if (ch === "`") { stack.pop(); out += ch; i++; continue; }
+      if (ch === "$" && next === "{") { out += "${"; push("code", true); i += 2; continue; }
+      out += ch;
+      i++;
+      continue;
+    }
+
+    // mode === "code"
+    if (ch === "/" && next === "/") { push("line-comment"); i += 2; continue; }
+    if (ch === "/" && next === "*") { push("block-comment"); i += 2; continue; }
+    if (ch === "'") { out += ch; push("string-single"); i++; continue; }
+    if (ch === '"') { out += ch; push("string-double"); i++; continue; }
+    if (ch === "`") { out += ch; push("template"); i++; continue; }
+    if (ch === "/" && regexAllowedHere(out)) {
+      out += ch;
+      let j = i + 1;
+      let inClass = false;
+      while (j < n) {
+        const rc = text[j];
+        if (rc === "\n") break;
+        if (rc === "\\" && j + 1 < n) { out += rc + text[j + 1]; j += 2; continue; }
+        out += rc;
+        if (rc === "[") inClass = true;
+        else if (rc === "]") inClass = false;
+        else if (rc === "/" && !inClass) { j++; break; }
+        j++;
+      }
+      while (j < n && /[a-zA-Z]/.test(text[j])) { out += text[j]; j++; }
+      i = j;
+      continue;
+    }
+    if (ch === "{") { out += ch; push("code"); i++; continue; }
+    if (ch === "}") {
+      out += ch;
+      if (stack.length > 1) stack.pop();
+      i++;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+
+  return out;
 }
 
 /** True for either shape MUI's `Dialog` is imported in this codebase: a

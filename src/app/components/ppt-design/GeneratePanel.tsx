@@ -1,8 +1,10 @@
 "use client";
 
+import { useRef } from "react";
 import { TextField, Button, CircularProgress, Card, CardContent } from "@mui/material";
 import type { PptxSlide } from "@/lib/pptx";
 import type { DeckTemplate } from "@/lib/decks/types";
+import type { DeckSourceReceipt } from "@/lib/decks/deck-source";
 import { needsOnNavyFocusRing } from "@/lib/focus-ring-fill";
 
 interface GeneratePanelProps {
@@ -10,6 +12,10 @@ interface GeneratePanelProps {
   subject: string;
   audience: string;
   loopItems: Record<string, string>;
+  sourceReceipt: DeckSourceReceipt | null;
+  sourceRepoText: string;
+  sourceBusy: boolean;
+  sourceError: string | null;
   generatedDeck: { presentationTitle: string; slides: PptxSlide[] } | null;
   editedSlides: PptxSlide[];
   editingSlideIdx: number | null;
@@ -21,6 +27,10 @@ interface GeneratePanelProps {
   onSubjectChange: (value: string) => void;
   onAudienceChange: (value: string) => void;
   onLoopItemsChange: (groupId: string, value: string) => void;
+  onSourceRepoTextChange: (value: string) => void;
+  onResolveSourceRepo: () => void;
+  onPickSourceFile: (file: File) => void;
+  onClearSource: () => void;
   onGenerateDeck: () => void;
   onEditSlide: (idx: number, updates: Partial<PptxSlide>) => void;
   onDownloadPptx: () => void;
@@ -36,6 +46,10 @@ export default function GeneratePanel({
   subject,
   audience,
   loopItems,
+  sourceReceipt,
+  sourceRepoText,
+  sourceBusy,
+  sourceError,
   generatedDeck,
   editedSlides,
   editingSlideIdx,
@@ -47,6 +61,10 @@ export default function GeneratePanel({
   onSubjectChange,
   onAudienceChange,
   onLoopItemsChange,
+  onSourceRepoTextChange,
+  onResolveSourceRepo,
+  onPickSourceFile,
+  onClearSource,
   onGenerateDeck,
   onEditSlide,
   onDownloadPptx,
@@ -56,6 +74,7 @@ export default function GeneratePanel({
   onSetEditingSlideIdx,
   onDiscardSlideEdit,
 }: GeneratePanelProps) {
+  const sourceFileInputRef = useRef<HTMLInputElement>(null);
   return (
     <div style={{ padding: "var(--space-6)", backgroundColor: "var(--field-bg)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius-md)", marginBottom: "var(--space-6)" }}>
       <h3
@@ -74,6 +93,68 @@ export default function GeneratePanel({
       {!generatedDeck ? (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginBottom: "var(--space-6)" }}>
+            {/* A43-S: the ONE source control (C3) - a single field that
+                accepts either a pasted repo reference/URL or an attached
+                file, never both labelled separately. Entirely optional: no
+                new required step, no course prerequisite. */}
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
+              <TextField
+                label="Source (optional)"
+                value={sourceReceipt ? sourceReceipt.name : sourceRepoText}
+                onChange={(e) => onSourceRepoTextChange(e.target.value)}
+                onBlur={onResolveSourceRepo}
+                disabled={!!sourceReceipt || sourceBusy}
+                fullWidth
+                size="small"
+                placeholder="Paste a repo (owner/name or URL), or attach a file"
+              />
+              <input
+                ref={sourceFileInputRef}
+                type="file"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onPickSourceFile(file);
+                  e.target.value = "";
+                }}
+              />
+              {sourceReceipt ? (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={onClearSource}
+                  disabled={sourceBusy}
+                  sx={{ textTransform: "none", whiteSpace: "nowrap" }}
+                >
+                  Remove
+                </Button>
+              ) : (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={sourceBusy || sourceRepoText.trim().length > 0}
+                  onClick={() => sourceFileInputRef.current?.click()}
+                  sx={{ textTransform: "none", whiteSpace: "nowrap" }}
+                >
+                  Attach file
+                </Button>
+              )}
+            </div>
+            {sourceBusy && (
+              <div style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
+                Reading source…
+              </div>
+            )}
+            {sourceReceipt && !sourceBusy && (
+              <div style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
+                {sourceReceipt.characters.toLocaleString()} characters kept
+                {sourceReceipt.truncated ? " (truncated to fit the prompt)" : ""}
+              </div>
+            )}
+            {sourceError && (
+              <div style={{ fontSize: "var(--font-size-sm)", color: "var(--danger)" }}>{sourceError}</div>
+            )}
+
             <TextField
               label="Subject / topic"
               value={subject}
@@ -176,7 +257,7 @@ export default function GeneratePanel({
           <Button
             variant="contained"
             onClick={onGenerateDeck}
-            disabled={generateBusy || !subject}
+            disabled={generateBusy}
             sx={{ textTransform: "none" }}
           >
             {generateBusy ? (

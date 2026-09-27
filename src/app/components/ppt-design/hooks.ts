@@ -9,6 +9,7 @@ import {
 import { DECK_PRESETS, isPresetDeckId } from "@/lib/decks/presets";
 import type { DeckTemplate } from "@/lib/decks/types";
 import type { PptxSlide } from "@/lib/pptx";
+import type { DeckSourceReceipt } from "@/lib/decks/deck-source";
 
 export function useLocalStorageState<T>(key: string, defaultValue: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -103,6 +104,21 @@ export function usePendingTemplateSave(user: User | null, supabase: SupabaseClie
   };
 
   return commit;
+}
+
+/**
+ * A43-S: the dropped/pasted source persists across a reload (this repo's
+ * standing ta- persistence rule) - a term-long choice, same as the template
+ * pick above, not something the instructor should have to redo per deck.
+ * Two keys, matching the existing ta-ppt-gen-* split of related fields into
+ * separate storage entries rather than one bag.
+ */
+export function useDeckSourceReceipt() {
+  return useLocalStorageState<DeckSourceReceipt | null>("ta-ppt-source-receipt", null);
+}
+
+export function useDeckSourceMaterials() {
+  return useLocalStorageState<string>("ta-ppt-source-materials", "");
 }
 
 export function useGenerationState() {

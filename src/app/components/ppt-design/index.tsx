@@ -24,9 +24,11 @@ import {
   type SlideRole,
 } from "@/lib/decks/types";
 import { generateDeckFromTemplateAction, savePresentationFileAction } from "@/app/actions";
+import { extractDeckSourceFileAction, extractDeckSourceRepoAction } from "@/app/actions/deck-source";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { deriveSubjectFromSource } from "@/lib/decks/deck-source";
 import styles from "../../page.module.css";
 import TemplateSelector from "./TemplateSelector";
 import DeckSettingsPanel from "./DeckSettingsPanel";
@@ -39,6 +41,8 @@ import {
   useDeckSettingsOpen,
   usePendingTemplateSave,
   useGenerationState,
+  useDeckSourceReceipt,
+  useDeckSourceMaterials,
 } from "./hooks";
 import { gradientPng } from "./utils";
 
@@ -80,6 +84,12 @@ export default function PowerPointDesignTab() {
   } = generationState;
 
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const [sourceReceipt, setSourceReceipt] = useDeckSourceReceipt();
+  const [sourceMaterials, setSourceMaterials] = useDeckSourceMaterials();
+  const [sourceRepoText, setSourceRepoText] = useState("");
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   const allTemplates = useMemo(() => [...DECK_PRESETS, ...custom], [custom]);
 
@@ -319,6 +329,66 @@ export default function PowerPointDesignTab() {
     setSelectedId(nextId);
   };
 
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // "data:<mime>;base64,<payload>" - keep only the payload.
+        const comma = result.indexOf(",");
+        resolve(comma === -1 ? result : result.slice(comma + 1));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+      reader.readAsDataURL(file);
+    });
+
+  const handlePickSourceFile = async (file: File) => {
+    setSourceBusy(true);
+    setSourceError(null);
+    try {
+      const base64 = await readFileAsBase64(file);
+      const result = await extractDeckSourceFileAction(file.name, base64);
+      if ("error" in result) {
+        setSourceError(result.error);
+      } else {
+        setSourceReceipt(result.receipt);
+        setSourceMaterials(result.materials);
+      }
+    } catch (err) {
+      setSourceError(err instanceof Error ? err.message : "Could not read that file.");
+    } finally {
+      setSourceBusy(false);
+    }
+  };
+
+  const handleResolveSourceRepo = async () => {
+    const ref = sourceRepoText.trim();
+    if (!ref || sourceReceipt) return;
+    setSourceBusy(true);
+    setSourceError(null);
+    try {
+      const result = await extractDeckSourceRepoAction(ref);
+      if ("error" in result) {
+        setSourceError(result.error);
+      } else {
+        setSourceReceipt(result.receipt);
+        setSourceMaterials(result.materials);
+        setSourceRepoText("");
+      }
+    } catch (err) {
+      setSourceError(err instanceof Error ? err.message : "Could not read that repository.");
+    } finally {
+      setSourceBusy(false);
+    }
+  };
+
+  const handleClearSource = () => {
+    setSourceReceipt(null);
+    setSourceMaterials("");
+    setSourceRepoText("");
+    setSourceError(null);
+  };
+
   const handleGenerateDeck = async () => {
     if (!selected) return;
     setGenerateBusy(true);
@@ -338,9 +408,17 @@ export default function PowerPointDesignTab() {
         }
       }
 
+      // A43-S/C2: a subject the instructor typed always wins; otherwise a
+      // present source's own filename/first heading fills it in - Generate
+      // must succeed with no subject typed, source or no source.
+      const derivedSubject = sourceMaterials
+        ? deriveSubjectFromSource(sourceReceipt?.name ?? "", sourceMaterials)
+        : "";
+
       const ctx = {
-        subject: subject || selected.name,
+        subject: subject || derivedSubject || selected.name,
         audience: audience || selected.audience,
+        materials: sourceMaterials || undefined,
         loopItems: resolvedLoopItems,
       };
 
@@ -553,6 +631,10 @@ export default function PowerPointDesignTab() {
               subject={subject}
               audience={audience}
               loopItems={loopItems}
+              sourceReceipt={sourceReceipt}
+              sourceRepoText={sourceRepoText}
+              sourceBusy={sourceBusy}
+              sourceError={sourceError}
               generatedDeck={generatedDeck}
               editedSlides={editedSlides}
               editingSlideIdx={editingSlideIdx}
@@ -564,6 +646,10 @@ export default function PowerPointDesignTab() {
               onSubjectChange={setSubject}
               onAudienceChange={setAudience}
               onLoopItemsChange={(groupId, value) => setLoopItems({ ...loopItems, [groupId]: value })}
+              onSourceRepoTextChange={setSourceRepoText}
+              onResolveSourceRepo={handleResolveSourceRepo}
+              onPickSourceFile={handlePickSourceFile}
+              onClearSource={handleClearSource}
               onGenerateDeck={handleGenerateDeck}
               onEditSlide={(idx, updates) => {
                 const updated = [...editedSlides];

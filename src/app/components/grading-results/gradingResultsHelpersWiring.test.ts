@@ -120,6 +120,7 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./RubricProvenance.tsx", // A39 wave 2: the run's version-provenance leaf, mounted by GradingTab.tsx (not by this directory's own GradingResults.tsx).
     "../GradingResults.tsx",
     "../GradingTab.tsx", // A39 wave 2: the new non-local consumer of ./RubricProvenance.tsx above.
+    "../LiveFeedPanel.tsx", // A39 wave 5 (docs/a39-waves.md 8.5): the second RubricProvenance.tsx mount, on the Live Feed surface.
   ];
 
   it("R-2: directoryRoots(dir)'s ./ half matches the CLIENT_FILES literal's ./ half", () => {

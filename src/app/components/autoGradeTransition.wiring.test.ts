@@ -239,3 +239,52 @@ describe("A15: Live Feed Auto Grade dispatch runs inside a transition", () => {
     expect(span).toContain("styles.loadingState");
   });
 });
+
+// A39 wave 5 (docs/a39-waves.md 8.5): the credential has a route, and the
+// rubric-provenance receipt reaches the Live Feed surface too.
+describe("W5: the credential CTA is reachable and conditional, and RubricProvenance mounts on Live Feed", () => {
+  it("W5-1: both surfaces detect the credential-required error via the shared predicate, never a copied literal", () => {
+    for (const src of [gtSource, lfSource]) {
+      expect(src).toContain("isCanvasCredentialRequiredError");
+      // The literal CANVAS_CREDENTIAL_REQUIRED_MESSAGE text must never appear
+      // hand-copied in a caller - that is exactly the drift canvas-credential-
+      // cta.test.ts's W5-1 block watches for.
+      expect(src).not.toContain("Connect your Canvas account for this institution in Settings.");
+    }
+  });
+
+  it("W5-2 (reachability): both surfaces render the shared CTA link (href + label), imported not re-typed", () => {
+    for (const src of [gtSource, lfSource]) {
+      expect(src).toContain('from "@/lib/canvas-credential-cta"');
+      expect(src).toContain("CANVAS_CREDENTIAL_CTA_HREF");
+      expect(src).toContain("CANVAS_CREDENTIAL_CTA_LABEL");
+      // The route itself is asserted once, at its source of truth, in
+      // canvas-credential-cta.test.ts - not re-typed as a literal here.
+      expect(src).not.toContain("/account/integrations");
+    }
+  });
+
+  it("W5 (no added step): the CTA render is gated on isCanvasCredentialRequiredError(...), not unconditional", () => {
+    for (const src of [gtSource, lfSource]) {
+      // The predicate call must sit directly inside a `{cond && (` guard -
+      // an unconditional mount (e.g. assigned to a variable and rendered
+      // regardless) would not match this shape.
+      expect(/\{\s*isCanvasCredentialRequiredError\([^)]*\)\s*&&/.test(src)).toBe(true);
+    }
+  });
+
+  it("W5-3: LiveFeedPanel mounts RubricProvenance before its GradingResults mount, same as GradingTab", () => {
+    const rpIdx = lfSource.indexOf("<RubricProvenance");
+    // `<GradingResults[\s>]` - not `.indexOf("<GradingResults")`, which also
+    // matches the earlier, unrelated `useRef<GradingResultsHandle>` type
+    // argument and would make this assertion pass by finding the wrong tag.
+    const grMatch = /<GradingResults[\s>]/.exec(lfSource);
+    expect(rpIdx).toBeGreaterThanOrEqual(0);
+    expect(grMatch).not.toBeNull();
+    expect(rpIdx).toBeLessThan(grMatch!.index);
+  });
+
+  it("canary: an absent tag reports -1, proving indexOf is not vacuously true (W5-3's own instrument)", () => {
+    expect(lfSource.indexOf("<RubricProvenanceZZZ")).toBe(-1);
+  });
+});

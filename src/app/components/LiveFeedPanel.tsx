@@ -20,6 +20,8 @@ import { formatRelative } from "../utils/time";
 import { useInstitutionSelection, readActiveInstitution } from "@/lib/institutions";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import GradingResults, { type GradingResultsHandle } from "./GradingResults";
+import RubricProvenance from "./grading-results/RubricProvenance";
+import { isCanvasCredentialRequiredError, CANVAS_CREDENTIAL_CTA_HREF, CANVAS_CREDENTIAL_CTA_LABEL } from "@/lib/canvas-credential-cta";
 import styles from "../page.module.css";
 
 const AUTO_REFRESH_KEY = "ta-livefeed-autorefresh";
@@ -427,6 +429,7 @@ export default function LiveFeedPanel({
           </div>
         ) : activeRun && activeRun.results.length > 0 ? (
           <>
+            <RubricProvenance run={activeRun} />
             <GradingResults
               ref={resultsHandle}
               run={activeRun}
@@ -618,9 +621,18 @@ export default function LiveFeedPanel({
             )}
             {queueState.status === "error" && <p className={styles.lfRailError}>{queueState.message}</p>}
             {queueErrors.map((e) => (
-              <p key={e.acronym} className={styles.lfRailError}>
-                {e.acronym}: {e.error}
-              </p>
+              <div key={e.acronym}>
+                <p className={styles.lfRailError}>
+                  {e.acronym}: {e.error}
+                </p>
+                {isCanvasCredentialRequiredError(e.error) && (
+                  <p className={styles.lfRailError}>
+                    <a href={CANVAS_CREDENTIAL_CTA_HREF} className={styles.lfLink}>
+                      {CANVAS_CREDENTIAL_CTA_LABEL}
+                    </a>
+                  </p>
+                )}
+              </div>
             ))}
             {queueState.status === "idle" && rows.length === 0 && (
               <p className={styles.lfRailEmpty}>Nothing is waiting to be graded right now.</p>

@@ -20,6 +20,7 @@ import GithubGradingPanel from "./GithubGradingPanel";
 import CartridgeDropPanel from "./CartridgeDropPanel";
 import RubricProvenance from "./grading-results/RubricProvenance";
 import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
+import { isCanvasCredentialRequiredError, CANVAS_CREDENTIAL_CTA_HREF, CANVAS_CREDENTIAL_CTA_LABEL } from "@/lib/canvas-credential-cta";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -261,6 +262,14 @@ export default function GradingTab({
       {state.error && (
         <p role="alert" className={styles.error}>
           {state.error}
+        </p>
+      )}
+
+      {isCanvasCredentialRequiredError(state.error) && (
+        <p className={styles.fieldHint}>
+          <a href={CANVAS_CREDENTIAL_CTA_HREF} className={styles.lfLink}>
+            {CANVAS_CREDENTIAL_CTA_LABEL}
+          </a>
         </p>
       )}
 

@@ -105,3 +105,25 @@ flattened, and pass. When a spec contains a table of instances, the pass
 condition must range over the table, and any prose that exempts part of it is a
 contradiction to resolve before hand-off, not a summary.
 
+**A seat-derived reading of precedent may not foreclose a branch when an owner
+decision on the same question exists.** Added 2026-09-27 after TWO scopes in one
+day invented a blocking premise from inferred precedent. One built a foreclosure
+from a rule that asserts only a four-key list, with the sentence it relied on
+living in a test's `it()` description. The other built one from a UI-staleness
+rule about un-posted scores, a test whose own body says its negative search was
+NOT performed in that wave, and a "ruling" that exists in the tree only as a
+comment about a roster in one panel - while an owner decision settling the exact
+question sat in `docs/owner-decisions-*.md`, uncited, and live code persisted the
+same class of data under an existing key whose quota message enumerates it.
+
+Both scopes then designed around a constraint that was not there, which is
+expensive in the worst way: the cheap branch gets priced as the expensive one and
+the item grows a wave it does not need.
+
+THE RULE: check the decisions record FIRST. If a decision bears on the question,
+the ORCHESTRATOR rules on the decision and the seat does not reason from inferred
+precedent at all. If no decision bears on it, a precedent may only foreclose a
+branch when the passage doing the forbidding is QUOTED and its scope is stated -
+an `it()` description is not an assertion, a comment is not a ruling, and a rule
+about one surface does not bind another. State what the passage forbids, and state
+what it does not.

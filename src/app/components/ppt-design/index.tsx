@@ -25,6 +25,11 @@ import {
 } from "@/lib/decks/types";
 import { generateDeckFromTemplateAction, savePresentationFileAction } from "@/app/actions";
 import { extractDeckSourceFileAction, extractDeckSourceRepoAction } from "@/app/actions/deck-source";
+import {
+  uploadDeckTemplateFileAction,
+  deleteDeckTemplateFileAction,
+  fillDeckTemplateFileAction,
+} from "@/app/actions/deck-template-files";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -43,10 +48,22 @@ import {
   useGenerationState,
   useDeckSourceReceipt,
   useDeckSourceMaterials,
+  useSelectedDeckTemplateFileId,
+  useDeckTemplateFiles,
 } from "./hooks";
 import { gradientPng } from "./utils";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+// A43-T: fillDeckTemplateFileAction returns base64 (server actions return
+// serialized JSON, not a Buffer/ArrayBuffer); buildSlidesPptx's ArrayBuffer
+// needs no such conversion, so only this path needs the step.
+function base64ToBytes(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
 
 export default function PowerPointDesignTab() {
   const { supabase, user } = useSupabase();
@@ -90,6 +107,18 @@ export default function PowerPointDesignTab() {
   const [sourceRepoText, setSourceRepoText] = useState("");
   const [sourceBusy, setSourceBusy] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
+
+  // A43-T (docs/a43-scope.md section 11.3): an owner-uploaded .pptx template,
+  // selected independently of the structural DeckTemplate above. When set,
+  // Download/Save-to-Files route the generated deck's content into this
+  // file's own slides (src/lib/decks/office-template-fill.ts) instead of
+  // building a fresh presentation with buildSlidesPptx.
+  const [selectedFileId, setSelectedFileId] = useSelectedDeckTemplateFileId();
+  const { templateFiles, loadError: templateFilesLoadError, refresh: refreshTemplateFiles } =
+    useDeckTemplateFiles(user);
+  const [fileUploadBusy, setFileUploadBusy] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileDeleteConfirm, setFileDeleteConfirm] = useState<string | null>(null);
 
   const allTemplates = useMemo(() => [...DECK_PRESETS, ...custom], [custom]);
 
@@ -389,6 +418,50 @@ export default function PowerPointDesignTab() {
     setSourceError(null);
   };
 
+  const handleSelectTemplateFileId = (id: string) => {
+    setSelectedFileId(id);
+    setFileDeleteConfirm(null);
+    setFileError(null);
+  };
+
+  const handleUploadTemplateFile = async (file: File) => {
+    setFileUploadBusy(true);
+    setFileError(null);
+    try {
+      const base64 = await readFileAsBase64(file);
+      const result = await uploadDeckTemplateFileAction(file.name.replace(/\.pptx$/i, ""), file.name, base64);
+      if ("error" in result) {
+        setFileError(result.error);
+      } else {
+        await refreshTemplateFiles();
+        setSelectedFileId(result.template.id);
+      }
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : "Could not upload that template.");
+    } finally {
+      setFileUploadBusy(false);
+    }
+  };
+
+  const handleDeleteTemplateFile = async (id: string) => {
+    if (fileDeleteConfirm !== id) {
+      setFileDeleteConfirm(id);
+      return;
+    }
+    setFileDeleteConfirm(null);
+    try {
+      const result = await deleteDeckTemplateFileAction(id);
+      if ("error" in result) {
+        setFileError(result.error);
+        return;
+      }
+      await refreshTemplateFiles();
+      if (selectedFileId === id) setSelectedFileId("");
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : "Could not delete that template.");
+    }
+  };
+
   const handleGenerateDeck = async () => {
     if (!selected) return;
     setGenerateBusy(true);
@@ -438,29 +511,50 @@ export default function PowerPointDesignTab() {
     }
   };
 
+  // A43-T: routes to the file-backed writer when a template is uploaded
+  // (docs/a43-scope.md 11.3), else buildSlidesPptx. Shared by download and
+  // save-to-Files so the two paths never drift apart.
+  const buildOutputPptx = async (): Promise<{ bytes: ArrayBuffer; name: string } | { error: string }> => {
+    if (!generatedDeck || !selected) return { error: "Generate a deck first." };
+    if (selectedFileId) {
+      const result = await fillDeckTemplateFileAction(selectedFileId, {
+        presentationTitle: generatedDeck.presentationTitle,
+        slides: editedSlides,
+      });
+      if ("error" in result) return result;
+      return { bytes: base64ToBytes(result.base64), name: result.name };
+    }
+    const pptxTheme: PptxTheme | undefined = selected.theme && selected.theme.backgroundKind !== "classic"
+      ? {
+          backgroundKind: selected.theme.backgroundKind,
+          backgroundColor: selected.theme.backgroundColor,
+          backgroundColor2: selected.theme.backgroundColor2,
+          fontColor: selected.theme.fontColor,
+          backgroundImageData: gradientPng(selected.theme),
+        }
+      : undefined;
+    const buf = await buildSlidesPptx({
+      presentationTitle: generatedDeck.presentationTitle,
+      slides: editedSlides,
+      author: user?.user_metadata?.full_name || undefined,
+      theme: pptxTheme,
+    });
+    return { bytes: buf, name: generatedDeck.presentationTitle };
+  };
+
   const handleDownloadPptx = async () => {
     if (!generatedDeck || !selected) return;
     try {
-      const pptxTheme: PptxTheme | undefined = selected.theme && selected.theme.backgroundKind !== "classic"
-        ? {
-            backgroundKind: selected.theme.backgroundKind,
-            backgroundColor: selected.theme.backgroundColor,
-            backgroundColor2: selected.theme.backgroundColor2,
-            fontColor: selected.theme.fontColor,
-            backgroundImageData: gradientPng(selected.theme),
-          }
-        : undefined;
-      const buf = await buildSlidesPptx({
-        presentationTitle: generatedDeck.presentationTitle,
-        slides: editedSlides,
-        author: user?.user_metadata?.full_name || undefined,
-        theme: pptxTheme,
-      });
-      const blob = new Blob([buf], { type: PPTX_MIME });
+      const out = await buildOutputPptx();
+      if ("error" in out) {
+        setGenerateError(out.error);
+        return;
+      }
+      const blob = new Blob([out.bytes], { type: PPTX_MIME });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${generatedDeck.presentationTitle}.pptx`;
+      anchor.download = `${out.name}.pptx`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -472,24 +566,14 @@ export default function PowerPointDesignTab() {
     if (!generatedDeck || !user || !supabase || !selected) return;
     setSavingFile(true);
     try {
-      const pptxTheme: PptxTheme | undefined = selected.theme && selected.theme.backgroundKind !== "classic"
-        ? {
-            backgroundKind: selected.theme.backgroundKind,
-            backgroundColor: selected.theme.backgroundColor,
-            backgroundColor2: selected.theme.backgroundColor2,
-            fontColor: selected.theme.fontColor,
-            backgroundImageData: gradientPng(selected.theme),
-          }
-        : undefined;
-      const buf = await buildSlidesPptx({
-        presentationTitle: generatedDeck.presentationTitle,
-        slides: editedSlides,
-        author: user?.user_metadata?.full_name || undefined,
-        theme: pptxTheme,
-      });
-      const blob = new Blob([buf], { type: PPTX_MIME });
+      const out = await buildOutputPptx();
+      if ("error" in out) {
+        setGenerateError(out.error);
+        return;
+      }
+      const blob = new Blob([out.bytes], { type: PPTX_MIME });
       await saveRecordingFile(supabase, user.id, blob, {
-        name: `${generatedDeck.presentationTitle}.pptx`,
+        name: `${out.name}.pptx`,
         kind: "file",
         mimeType: PPTX_MIME,
         durationSec: null,
@@ -555,6 +639,14 @@ export default function PowerPointDesignTab() {
           onDuplicateTemplate={handleDuplicateTemplate}
           deleteConfirm={deleteConfirm}
           loadError={loadError}
+          templateFiles={templateFiles}
+          selectedFileId={selectedFileId}
+          onSelectFileId={handleSelectTemplateFileId}
+          onUploadTemplateFile={handleUploadTemplateFile}
+          onDeleteTemplateFile={handleDeleteTemplateFile}
+          fileUploadBusy={fileUploadBusy}
+          fileError={fileError ?? templateFilesLoadError}
+          fileDeleteConfirm={fileDeleteConfirm}
         />
 
         {selected && (

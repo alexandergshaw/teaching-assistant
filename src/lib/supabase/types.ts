@@ -255,6 +255,49 @@ export interface CourseIntelAnswersUpdate {
   created_at?: string;
 }
 
+// supabase/migrations/20261021000000_create_deck_template_files.sql
+//
+// Defined directly in this file, rather than added to
+// ./types.tables-a.ts / ./types.tables-b.ts / ./types.tables-c.ts as this
+// repo's usual hand-maintained-row-types convention would put it - mirrors
+// AnnouncementExemplarsRow/Insert/Update and CourseIntelAnswersRow/Insert/
+// Update just above, added the same way for the same reason: this table's
+// migration, action and tests were built in a wave scoped to a disjoint file
+// set (docs/a43-scope.md wave T1), and this file was the only types file in
+// that wave's write set.
+export interface DeckTemplateFilesRow {
+  id: string;
+  user_id: string;
+  name: string;
+  file_name: string;
+  content: string;
+  template_sha256: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckTemplateFilesInsert {
+  id?: string;
+  user_id: string;
+  name: string;
+  file_name: string;
+  content: string;
+  template_sha256: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DeckTemplateFilesUpdate {
+  id?: string;
+  user_id?: string;
+  name?: string;
+  file_name?: string;
+  content?: string;
+  template_sha256?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // @supabase/postgrest-js's generic client requires each table entry to
 // satisfy `GenericTable` (Row/Insert/Update assignable to Record<string,
 // unknown>, plus a `Relationships` array) or the whole schema silently
@@ -376,6 +419,12 @@ export interface Database {
         Row: Expand<CourseTaskInstructionsRow>;
         Insert: Expand<CourseTaskInstructionsInsert>;
         Update: Expand<CourseTaskInstructionsUpdate>;
+        Relationships: [];
+      };
+      deck_template_files: {
+        Row: Expand<DeckTemplateFilesRow>;
+        Insert: Expand<DeckTemplateFilesInsert>;
+        Update: Expand<DeckTemplateFilesUpdate>;
         Relationships: [];
       };
       deck_templates: {

@@ -10,6 +10,7 @@ import { DECK_PRESETS, isPresetDeckId } from "@/lib/decks/presets";
 import type { DeckTemplate } from "@/lib/decks/types";
 import type { PptxSlide } from "@/lib/pptx";
 import type { DeckSourceReceipt } from "@/lib/decks/deck-source";
+import { listDeckTemplateFilesAction, type DeckTemplateFileMeta } from "@/app/actions/deck-template-files";
 
 export function useLocalStorageState<T>(key: string, defaultValue: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -119,6 +120,74 @@ export function useDeckSourceReceipt() {
 
 export function useDeckSourceMaterials() {
   return useLocalStorageState<string>("ta-ppt-source-materials", "");
+}
+
+/**
+ * A43-T (docs/a43-scope.md section 11.3): which uploaded .pptx template, if
+ * any, is selected. A term-long choice like the structural template pick
+ * above (ta-ppt-selected-id), so it persists the same way (C4, section
+ * 12.1) - the empty string means "no file-backed template selected", i.e.
+ * generation stays on the structural buildSlidesPptx path.
+ */
+export function useSelectedDeckTemplateFileId() {
+  return useLocalStorageState<string>("ta-ppt-template-file-id", "");
+}
+
+/**
+ * The owner's uploaded deck template files (metadata only). `refresh` is
+ * exposed so a caller can re-fetch after an upload or delete without a full
+ * page reload.
+ */
+export function useDeckTemplateFiles(user: User | null) {
+  const [templateFiles, setTemplateFiles] = useState<DeckTemplateFileMeta[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    if (!user) {
+      setTemplateFiles([]);
+      return;
+    }
+    try {
+      const result = await listDeckTemplateFilesAction();
+      if ("error" in result) {
+        setLoadError(result.error);
+      } else {
+        setLoadError(null);
+        setTemplateFiles(result.templates);
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not load uploaded templates.");
+    }
+  };
+
+  // Inline async IIFE + cancelled flag: setState only happens after the
+  // await, never synchronously within the effect body itself.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user) {
+        if (!cancelled) setTemplateFiles([]);
+        return;
+      }
+      try {
+        const result = await listDeckTemplateFilesAction();
+        if (cancelled) return;
+        if ("error" in result) {
+          setLoadError(result.error);
+        } else {
+          setLoadError(null);
+          setTemplateFiles(result.templates);
+        }
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Could not load uploaded templates.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  return { templateFiles, loadError, refresh };
 }
 
 export function useGenerationState() {

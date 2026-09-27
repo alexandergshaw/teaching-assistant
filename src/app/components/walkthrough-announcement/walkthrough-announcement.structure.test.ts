@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import * as fs from "fs";
 import * as path from "path";
+import { stripComments } from "@/app/components/ui/modalAdoptionScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -631,29 +632,40 @@ describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, 
 // ---------------------------------------------------------------------------
 
 describe("A18 AC-4: the protected video-script wording is untouched", () => {
-  const panelSource = fs.readFileSync(
+  // L9 (docs/l9-wave1-classification.md 3.4): this describe block is a
+  // proven SPLIT SUBJECT - the two comment-fragment assertions below target
+  // text that lives inside a JSX {/* ... */} comment in
+  // WalkthroughAnnouncementPanel.tsx:945-946 (the video-script wording), so
+  // they are FILE-CONTENT under RULING 72 and must read the file RAW. The
+  // three legend/label/filename assertions above them are CODE-BEHAVIOUR
+  // (they pin rendered/executed text, not commentary) and must strip
+  // comments in both directions, or a commented-out legend/button/filename
+  // could satisfy them. rawPanelSource is deliberately unstripped for the
+  // two comment-target assertions named above.
+  const rawPanelSource = fs.readFileSync(
     path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
     "utf-8"
   );
+  const strippedPanelSource = stripComments(rawPanelSource);
 
   it('keeps the "Video script draft" legend', () => {
-    expect(panelSource).toContain("Video script draft");
+    expect(strippedPanelSource).toContain("Video script draft");
   });
 
   it('keeps the "Generate video script" button label', () => {
-    expect(panelSource).toContain("Generate video script");
+    expect(strippedPanelSource).toContain("Generate video script");
   });
 
   it("keeps the downloaded filename walkthrough-video-script.txt", () => {
-    expect(panelSource).toContain('"walkthrough-video-script.txt"');
+    expect(strippedPanelSource).toContain('"walkthrough-video-script.txt"');
   });
 
   it('keeps the comment fragment "read aloud while"', () => {
-    expect(panelSource).toContain("read aloud while");
+    expect(rawPanelSource).toContain("read aloud while");
   });
 
   it('keeps the comment fragment "re-recording"', () => {
-    expect(panelSource).toContain("re-recording");
+    expect(rawPanelSource).toContain("re-recording");
   });
 });
 

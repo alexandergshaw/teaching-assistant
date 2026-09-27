@@ -14,8 +14,17 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { stripComments } from "@/app/components/ui/modalAdoptionScan";
 
-const SOURCE = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/message-replies/useMessageReplies.ts"), "utf-8");
+const RAW_SOURCE = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/message-replies/useMessageReplies.ts"), "utf-8");
+// L9 (docs/l9-wave1-classification.md 3.4): RAW_SOURCE is kept unstripped
+// ONLY for the "stop() always force-refetches" assertion below - its
+// pattern targets text that IS a trailing // comment ("M15: auto-match
+// runs..."), so it is a FILE-CONTENT assertion under RULING 72 and must see
+// the comment verbatim. Every other assertion in this file is
+// CODE-BEHAVIOUR and reads STRIPPED_SOURCE instead, so a commented-out
+// guard, import or call can no longer satisfy (or falsely trip) any of them.
+const STRIPPED_SOURCE = stripComments(RAW_SOURCE);
 
 describe("useMessageReplies.ts wiring", () => {
   it("no longer persists M5's nine simple controls directly - useMessagePersistedControls.ts owns them now", () => {
@@ -30,27 +39,27 @@ describe("useMessageReplies.ts wiring", () => {
       "ta-rec-msg-thread-expand",
       "ta-rec-msg-save-video",
     ]) {
-      expect(SOURCE, `did not expect the literal "${key}" in useMessageReplies.ts anymore`).not.toContain(`"${key}"`);
+      expect(STRIPPED_SOURCE, `did not expect the literal "${key}" in useMessageReplies.ts anymore`).not.toContain(`"${key}"`);
     }
-    expect(SOURCE).toMatch(/const controls = useMessagePersistedControls\(\);/);
+    expect(STRIPPED_SOURCE).toMatch(/const controls = useMessagePersistedControls\(\);/);
   });
 
   it("still writes the kb-context-label key useMessageKnowledgeContext.ts reads", () => {
-    expect(SOURCE).toContain('"ta-rec-msg-kb-context-label"');
+    expect(STRIPPED_SOURCE).toContain('"ta-rec-msg-kb-context-label"');
   });
 
   it("dispatches draftMessageRepliesAction with no provider argument (the action's surface omits it)", () => {
-    expect(SOURCE).toMatch(/draftAction: draftMessageRepliesAction as DraftMessageRepliesAction/);
+    expect(STRIPPED_SOURCE).toMatch(/draftAction: draftMessageRepliesAction as DraftMessageRepliesAction/);
   });
 
   it("isDraftAllPendingEligible requires a real latest-incoming message - a thread of only [you] lines is never bulk-drafted", () => {
-    const fn = SOURCE.match(/function isDraftAllPendingEligible\([\s\S]{0,400}?\n\}/)?.[0] ?? "";
+    const fn = STRIPPED_SOURCE.match(/function isDraftAllPendingEligible\([\s\S]{0,400}?\n\}/)?.[0] ?? "";
     expect(fn).toMatch(/latestIncoming\(row\) !== undefined/);
     expect(fn).not.toMatch(/skipAnswered/); // deliberately NOT gated on skipAnswered - see the function's own doc comment
   });
 
   it("hasFetchedCourseUrlsRef is reset on a genuine fetch failure AND in the effect's own cleanup (StrictMode/cancelled-before-landed), never left permanently latched", () => {
-    const effectFn = SOURCE.match(/useEffect\(\(\) => \{\s*if \(!active \|\| hasFetchedCourseUrlsRef\.current\) return;[\s\S]*?\n  \}, \[active\]\);/)?.[0] ?? "";
+    const effectFn = STRIPPED_SOURCE.match(/useEffect\(\(\) => \{\s*if \(!active \|\| hasFetchedCourseUrlsRef\.current\) return;[\s\S]*?\n  \}, \[active\]\);/)?.[0] ?? "";
     expect(effectFn).not.toBe("");
     // The reset must sit in the failure path itself (the `catch` and the
     // error branch), not only in the cleanup - pinned on the code, never on
@@ -67,7 +76,7 @@ describe("useMessageReplies.ts wiring", () => {
   });
 
   it("runMatchPass: a merge-triggered pass (no forceRefetch) never calls listConversationsAction - only the cached-conversations branch runs", () => {
-    const fn = SOURCE.match(/const runMatchPass = useCallback\(\s*async \(opts:[\s\S]*?\n    \},\s*\n    \[courseId, pushNotice\]\s*\n  \);/)?.[0] ?? "";
+    const fn = STRIPPED_SOURCE.match(/const runMatchPass = useCallback\(\s*async \(opts:[\s\S]*?\n    \},\s*\n    \[courseId, pushNotice\]\s*\n  \);/)?.[0] ?? "";
     expect(fn).not.toBe("");
     const noRefetchBranch = fn.match(/if \(!opts\.forceRefetch\) \{[\s\S]*?\n      \}/)?.[0] ?? "";
     expect(noRefetchBranch).not.toMatch(/listConversationsAction/);
@@ -75,23 +84,23 @@ describe("useMessageReplies.ts wiring", () => {
   });
 
   it("a manual call arriving while a refetch is already in flight pushes a notice instead of silently no-opping; a background (stop's) call queues one more pass", () => {
-    const fn = SOURCE.match(/if \(matchInFlightRef\.current\) \{[\s\S]{0,300}?\n      \}/)?.[0] ?? "";
+    const fn = STRIPPED_SOURCE.match(/if \(matchInFlightRef\.current\) \{[\s\S]{0,300}?\n      \}/)?.[0] ?? "";
     expect(fn).toMatch(/pushNotice\("Already checking Canvas - try again in a moment\."\)/);
     expect(fn).toMatch(/queuedMatchPassRef\.current = true;/);
   });
 
   it("stop() always force-refetches; extraction-loop merges never do", () => {
-    expect(SOURCE).toMatch(/captureRef\.current\.stop\(\);\s*\/\/ M15: auto-match runs "on capture stop" - always a real refetch\.\s*void runMatchPass\(\{ manual: false, forceRefetch: true \}\);/);
-    expect(SOURCE).toMatch(/onMerged: \(\) => void runMatchPass\(\{ manual: false \}\),/);
+    expect(RAW_SOURCE).toMatch(/captureRef\.current\.stop\(\);\s*\/\/ M15: auto-match runs "on capture stop" - always a real refetch\.\s*void runMatchPass\(\{ manual: false, forceRefetch: true \}\);/);
+    expect(STRIPPED_SOURCE).toMatch(/onMerged: \(\) => void runMatchPass\(\{ manual: false \}\),/);
   });
 
   it("matchUnmatched dispatches a manual, force-refetching match pass; unmatchedCount excludes matched and previewOnly rows", () => {
-    expect(SOURCE).toMatch(/void runMatchPass\(\{ manual: true, forceRefetch: true \}\);/);
-    expect(SOURCE).toMatch(/rowsApi\.rawRows\.filter\(\(r\) => !r\.canvas && !r\.previewOnly\)\.length/);
+    expect(STRIPPED_SOURCE).toMatch(/void runMatchPass\(\{ manual: true, forceRefetch: true \}\);/);
+    expect(STRIPPED_SOURCE).toMatch(/rowsApi\.rawRows\.filter\(\(r\) => !r\.canvas && !r\.previewOnly\)\.length/);
   });
 
   it("clearTable drains the draft queue and the delivery hook's own in-flight state", () => {
-    const fn = SOURCE.match(/const clearTable = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[setKnowledgeContextState, delivery\]\);/)?.[0] ?? "";
+    const fn = STRIPPED_SOURCE.match(/const clearTable = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[setKnowledgeContextState, delivery\]\);/)?.[0] ?? "";
     expect(fn).not.toBe("");
     expect(fn).toMatch(/draftQueueRef\.current = \[\];/);
     expect(fn).toMatch(/setDraftQueueSize\(0\);/);
@@ -99,24 +108,24 @@ describe("useMessageReplies.ts wiring", () => {
   });
 
   it("sendErrorById is derived from rawRows via useMemo, never its own useState", () => {
-    expect(SOURCE).toMatch(/const sendErrorById = useMemo\(\(\) => \{/);
-    expect(SOURCE).not.toMatch(/useState<Record<string, string>>/); // no local sendErrorById state left behind
+    expect(STRIPPED_SOURCE).toMatch(/const sendErrorById = useMemo\(\(\) => \{/);
+    expect(STRIPPED_SOURCE).not.toMatch(/useState<Record<string, string>>/); // no local sendErrorById state left behind
   });
 
   it("mirrors every dispatch-time value into a plain useRef, kept current by its own useEffect", () => {
-    expect(SOURCE).toMatch(/const captureRef = useRef\(capture\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*captureRef\.current = capture;/);
-    expect(SOURCE).toMatch(/const rowsApiRef = useRef\(rowsApi\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*rowsApiRef\.current = rowsApi;/);
-    expect(SOURCE).toMatch(/const compositionRef = useRef\(composition\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*compositionRef\.current = composition;/);
+    expect(STRIPPED_SOURCE).toMatch(/const captureRef = useRef\(capture\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*captureRef\.current = capture;/);
+    expect(STRIPPED_SOURCE).toMatch(/const rowsApiRef = useRef\(rowsApi\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*rowsApiRef\.current = rowsApi;/);
+    expect(STRIPPED_SOURCE).toMatch(/const compositionRef = useRef\(composition\);\s*\n\s*useEffect\(\(\) => \{\s*\n\s*compositionRef\.current = composition;/);
   });
 
   it("computes courseName as a plain reactive value (never a ref read) for the render-time run-log call - react-hooks/refs forbids reading .current during render", () => {
-    expect(SOURCE).toMatch(/const courseName = courses\?\.find\(\(c\) => c\.id === courseId\)\?\.name \?\? "";/);
-    expect(SOURCE).toMatch(/courseName,\s*\n\s*composition,\s*\n\s*signoffSet:/);
+    expect(STRIPPED_SOURCE).toMatch(/const courseName = courses\?\.find\(\(c\) => c\.id === courseId\)\?\.name \?\? "";/);
+    expect(STRIPPED_SOURCE).toMatch(/courseName,\s*\n\s*composition,\s*\n\s*signoffSet:/);
   });
 
   it("never imports the resource-search or audience surface this feature has none of", () => {
-    expect(SOURCE).not.toMatch(/useReplyResources/);
-    expect(SOURCE).not.toMatch(/DiscussionAudience/);
+    expect(STRIPPED_SOURCE).not.toMatch(/useReplyResources/);
+    expect(STRIPPED_SOURCE).not.toMatch(/DiscussionAudience/);
   });
 
   // The instructor's writing-style block is resolved entirely server-side by
@@ -126,10 +135,10 @@ describe("useMessageReplies.ts wiring", () => {
   // (an existing, unrelated feature's action module) must not be imported
   // here just to reach it.
   it("does not import media-voice, and never references getWritingStyleBlock or a client-side writing-sample ref", () => {
-    expect(SOURCE).not.toMatch(/media-voice/);
-    expect(SOURCE).not.toMatch(/getUserStyleAction/);
-    expect(SOURCE).not.toMatch(/getWritingStyleBlock/);
-    expect(SOURCE).not.toMatch(/writingSampleRef/);
+    expect(STRIPPED_SOURCE).not.toMatch(/media-voice/);
+    expect(STRIPPED_SOURCE).not.toMatch(/getUserStyleAction/);
+    expect(STRIPPED_SOURCE).not.toMatch(/getWritingStyleBlock/);
+    expect(STRIPPED_SOURCE).not.toMatch(/writingSampleRef/);
   });
 
   // A20 (docs/a20-scope.md AC4/AC6, RULING W2/M-F): the control-to-call
@@ -137,8 +146,8 @@ describe("useMessageReplies.ts wiring", () => {
   // sibling's own test of the identical shape.
   describe("A20's start({...}) call carries autoDownload and its own filename stem", () => {
     const startAnchor = "await captureRef.current.start({";
-    const startIdx = SOURCE.indexOf(startAnchor);
-    const startEnd = SOURCE.indexOf("});", startIdx);
+    const startIdx = STRIPPED_SOURCE.indexOf(startAnchor);
+    const startEnd = STRIPPED_SOURCE.indexOf("});", startIdx);
 
     it("anchor resolves: finds the captureRef.current.start({ call", () => {
       expect(startIdx, "expected to find await captureRef.current.start({").toBeGreaterThan(-1);
@@ -148,7 +157,7 @@ describe("useMessageReplies.ts wiring", () => {
       expect(startEnd, "expected to find the start({...}) call's closing });").toBeGreaterThan(startIdx);
     });
 
-    const callSlice = startIdx > -1 && startEnd > startIdx ? SOURCE.slice(startIdx, startEnd) : "";
+    const callSlice = startIdx > -1 && startEnd > startIdx ? STRIPPED_SOURCE.slice(startIdx, startEnd) : "";
 
     it("the call passes autoDownload: autoDownloadRef.current", () => {
       expect(callSlice).toMatch(/autoDownload:\s*autoDownloadRef\.current/);

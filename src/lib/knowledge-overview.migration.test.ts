@@ -45,11 +45,20 @@ function stripSqlComments(text: string): string {
 }
 
 describe("20261011000000_institution_knowledge_overview.sql (offline structural test)", () => {
+  // L9 (docs/l9-wave1-classification.md 3.4/3.6): rawSql is FILE-CONTENT-ONLY
+  // now - it exists solely for the idempotency-note assertion just below,
+  // which targets text that IS a SQL comment ("-- Written idempotently.")
+  // and must therefore never be stripped. Every code-behaviour assertion in
+  // this describe block reads `sql` (stripped), never `rawSql`.
   const rawSql = readMigration();
   const sql = stripSqlComments(rawSql);
 
   it("the file exists and is non-trivial (canary against a bad path silently reading nothing)", () => {
-    expect(rawSql.length).toBeGreaterThan(2000);
+    // L9: moved from rawSql to sql - this is a code-behaviour canary (the
+    // migration file was actually read and is non-trivial), not a claim
+    // about comment text, so it belongs on the stripped variable per
+    // RULING 72. Sabotage-verified below (family: line/trailing/block).
+    expect(sql.length).toBeGreaterThan(2000);
   });
 
   it("ends its header comment with the idempotency note", () => {

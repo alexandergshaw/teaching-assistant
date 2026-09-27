@@ -608,6 +608,44 @@ describe("callLlm request shape", () => {
     expect(sentBody.generationConfig).not.toHaveProperty("temperature");
     expect(sentBody.generationConfig.maxOutputTokens).toBe(512);
   });
+
+  // G4 Wave B: postGenerateContent's catch block used to treat every caught
+  // fetch rejection as "network/transport error - always transient, retry
+  // with backoff", which meant an AbortError from our own deadline firing
+  // got retried instead of propagating - so the deadline that fired did not
+  // actually bound anything. These two tests execute the loop (never read
+  // the source) and pin the fix and its converse.
+  it("an AbortError is attempted once and propagates immediately, never retried (G4 Wave B)", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    const abortError = new DOMException("This operation was aborted.", "AbortError");
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await callLlm({ contents: [{ role: "user", parts: [{ text: "hi" }] }] });
+
+    // Exact count: fails for 2, 3, 4 or 5 calls alike, not just for "retried
+    // to exhaustion" - the whole "abort got retried" mutation family.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: false, status: 0, body: "This operation was aborted." });
+  });
+
+  it("still retries a genuine network error up to MAX_ATTEMPTS - the abort fix must not touch this path (G4 Wave B)", async () => {
+    vi.useFakeTimers();
+    process.env.GEMINI_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = callLlm({ contents: [{ role: "user", parts: [{ text: "hi" }] }] });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const result = await pending;
+
+    // Exact count: fails for 1 (made terminal) through 4 (limit quietly
+    // shrunk) as well as more than 5 - the whole "retry limit changed"
+    // mutation family, in either direction.
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(result).toEqual({ ok: false, status: 0, body: "fetch failed" });
+    vi.useRealTimers();
+  });
 });
 
 describe("describeEmptyLlmImage", () => {
@@ -847,6 +885,25 @@ describe("generateGeminiImage", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(result).toEqual({ ok: false, status: 0, body: "fetch failed" });
+  });
+
+  // G4 Wave B: the image path shares postInteraction's transport with
+  // callGemini's postGenerateContent, so an AbortError here must be terminal
+  // exactly like the text path below - one attempt, no backoff sleep, no
+  // retry. toHaveBeenCalledTimes(1) is an exact count: it fails equally for
+  // "retried once more" (2), "retried the full ladder" (5), or anything else
+  // that is not exactly one attempt - the whole "abort got retried" family,
+  // not just the specific case of exhausting all 5.
+  it("an AbortError is attempted once and propagates immediately, never retried (G4 Wave B)", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    const abortError = new DOMException("This operation was aborted.", "AbortError");
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateGeminiImage("a simple illustration");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: false, status: 0, body: "This operation was aborted." });
   });
 
   it("rejects (never resolves to an error value) when GEMINI_API_KEY is missing - matching callGemini's own precedent", async () => {

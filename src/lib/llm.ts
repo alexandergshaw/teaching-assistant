@@ -401,6 +401,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * True when `err` is the rejection a `fetch` promise carries when its own
+ * `AbortSignal` fires — a caller-supplied signal, or (once a future wave adds
+ * one) a deadline wrapper's `AbortSignal.timeout`. Checked by `name`, which
+ * the WHATWG fetch/DOM spec guarantees is exactly `"AbortError"` for this
+ * case regardless of whether the runtime throws a `DOMException` or a plain
+ * `Error` — the standard discriminator for this one case, not a fragile
+ * message-text match (verified against this repo's Node runtime: an aborted
+ * `AbortSignal`'s error is `instanceof Error` here, so this check does not
+ * need a separate `DOMException` branch).
+ *
+ * G4 Wave B: an abort on this path is OUR OWN deadline firing, never a
+ * transient server/network condition — the one failure that must not be
+ * retried, because retrying it lets the call run past the very budget that
+ * aborted it.
+ */
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}
+
 /** Parse a Retry-After header (delta-seconds or HTTP date) into milliseconds. */
 function parseRetryAfter(value: string | null): number | null {
   if (!value) return null;
@@ -455,6 +475,13 @@ async function postGenerateContent(
         body,
       });
     } catch (err) {
+      if (isAbortError(err)) {
+        // Our own deadline fired (or a caller cancelled this call). This is
+        // TERMINAL, never transient — retrying it would let the call run
+        // past the very budget that aborted it. Return immediately after
+        // this one attempt; do not fall through to the retry branch below.
+        return { ok: false, status: 0, body: err instanceof Error ? err.message : "Aborted" };
+      }
       // Network/transport error — always transient, retry with backoff.
       lastResult = { ok: false, status: 0, body: err instanceof Error ? err.message : "Network error" };
       if (isLastAttempt) return lastResult;
@@ -615,6 +642,12 @@ async function postInteraction(
         body,
       });
     } catch (err) {
+      if (isAbortError(err)) {
+        // Same terminal-abort rule as postGenerateContent's catch above —
+        // shared here because generateGeminiImage routes through this same
+        // transport, so the image path gets the fix without a second copy.
+        return { ok: false, status: 0, body: err instanceof Error ? err.message : "Aborted" };
+      }
       // Network/transport error — always transient, retry with backoff.
       lastResult = { ok: false, status: 0, body: err instanceof Error ? err.message : "Network error" };
       if (isLastAttempt) return lastResult;

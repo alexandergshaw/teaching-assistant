@@ -23,7 +23,7 @@ Run them from **PowerShell**. All four are repo-root commands.
 | Gate | Command | Time | Passing looks like |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit` | 10.2s | **No output at all**, exit 0. Any output is a failure. |
-| Lint | `npm run lint` | 104.9s | `(cross-mark) 4 problems (0 errors, 4 warnings)`, exit 0 |
+| Lint | `npm run lint` | 104.9s | exit 0, warnings only - **DO NOT PIN THE COUNT.** It read 4 when this card was written, 7 during a check on 2026-09-27 and **8** an hour later while a sibling was writing `src/`. A wave gate quoting an absolute number fails before any code exists, and the likely recovery is an implementer 'fixing' warnings outside its write set. **The pass condition is: exit 0, and no NEW warning in the files this wave writes** - measured against the same command run before the change, never against a literal from this card. |
 | Tests | `npm test` | 107.4s | `Test Files 1111 passed (1111)` / `Tests 22454 passed (22454)`, exit 0. Re-measured 2026-09-23; the card said 1017/20200/63.6s, so treat these as a snapshot that drifts upward and re-measure rather than quoting them. |
 | Build | `npm run build` | 66.6s | `(check-mark) Compiled successfully in 16.5s`, then **exit 1**. See below. |
 

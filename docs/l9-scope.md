@@ -1,207 +1,277 @@
-# L9 scope (revision 2) - source-scanning tests satisfied by commented-out code
+# L9 scope (revision 3) - source-scanning tests satisfied by commented-out code
 
-Seat: loop-seat (scoping pass, re-run 2026-09-27). **This is a restructuring of
-an existing `docs/l9-scope.md`**, not a fresh scope - the file already existed
-before this pass wrote it (confirmed: it was read in full below and its
-content is quoted throughout). Section 0 is therefore the disposition table
-`iteration-caps.md` requires before any new content is trusted.
+Seat: loop-seat (revision pass, 2026-09-27). **This is the ONE revision available
+against `docs/l9-check.md` (committed `8b81835`)**, itself a check of
+`docs/l9-scope.md` at `4b33346`. Per `AGENTS.md` ("Two rounds, then ask") and
+`docs/loop/iteration-caps.md`, anything this revision cannot settle from the
+tree becomes a residual, not a third round.
 
-Write set of this pass: exactly `docs/l9-scope.md`. No other file was edited.
-`git status --short` at the end of this document proves that.
+Write set of this pass: exactly `docs/l9-scope.md`. `git status --short` at the
+end of this document proves that.
 
-Inputs read in full before any measurement below: the L9 row of
-`docs/BACKLOG.md` (`grep -a -n "L9" docs/BACKLOG.md`, row at line 144), the
-adjacent A42 row (same file, line 98) and L13 row (line 99), `AGENTS.md`,
+Inputs read in full before any edit: `docs/l9-check.md` (all 665 lines, `wc -l`),
 `docs/DEV_LOOP.md`, `docs/loop/traps-spec.md`, `docs/loop/iteration-caps.md`,
-`docs/loop/leverage.md`, `docs/loop/this-repo.md`, and the PRIOR
-`docs/l9-scope.md` in full (456 lines, read before any edit). Tree: `main`,
-working tree has unrelated in-flight changes from four sibling agents on
-`src/lib/grade/*`, `src/app/actions/grading*`, `src/lib/embedded-grader/*`,
-and `docs/a25-*`/`docs/a32-*`/`docs/a41-*` (see `git status --short` at the
-end of this document) - none of those files were read for their live content
-being asserted on here except read-only citation, and none were edited.
+`docs/loop/leverage.md`, the prior `docs/l9-scope.md` (541 lines, `wc -l`, at
+`4b33346`), the L9/A42/L13/A13 rows of `docs/BACKLOG.md`
+(`grep -a -n "A42\|L9\|L13" docs/BACKLOG.md`, lines 98/99/145), and
+`docs/BACKLOG.md:1-19` for its schema and generation rule.
+
+**Three rulings from the orchestrator drive this revision and are applied as
+transcription, not re-derived:**
+
+- **RULING 72** - a scanning assertion is classified by its SUBJECT, not by its
+  direction (presence/absence) and not by the construct it matches. Applied
+  throughout Section 2 below; it replaces the binary "absence assertions may
+  need stripping removed" that the prior round re-adopted and the check
+  correctly found had dropped the prior pass's owed decision.
+- **RULING 73** - L9 and A42 stay separate, restated on the surviving ground
+  only (L9's other waves do not need A42); the false ground ("A42 already has
+  its own filed scope") is struck. Applied in Section 10.
+- **RULING 74** - the ratchet wave (Wave 3) is not dispatchable until Wave 1's
+  classification exists, because a frozen allowlist seeded from a proxy the
+  census cannot see is a ratchet that locks in the gap. Applied in Section 7,
+  Wave 3's own heading.
+
+No new question for the owner is posed by this revision. The three rulings
+above settled every decision the check routed to the orchestrator; what remains
+unresolved is recorded as residuals in Section 8, each with an owner, an
+instrument, and a step, per `iteration-caps.md`'s anti-gaming rule that a
+residual missing any of those three is a deletion.
 
 ---
 
-## 0. Disposition table - what the prior scope's content becomes here
+## 0. Disposition table - every prior requirement, traced to a sentence, not a heading
 
-The prior pass's own census methodology, triage rule, and wave structure hold
-up under re-measurement (Section 1 below) and are KEPT. What changed since
-2026-09-23 is: one of its two "armed" citations is now FIXED on `main` (a
-different agent's commit, not this pass's), so it cannot be re-cited as live;
-this pass replaces it with two fresh, independently re-verified empirical
-proofs (Section 3). Everything else is either kept, updated with a fresh
-number, or left exactly as before.
+Per `docs/loop/iteration-caps.md` entry gate 3: this maps each requirement in
+the CHECKED round (`docs/l9-scope.md` at `4b33346`) to where it lands here, by
+**text location**, not by section label - the check's B1 finding was exactly
+that a table mapping to a surviving heading can hide an obligation the heading
+no longer carries.
 
-| Prior requirement / finding | Disposition | Detail |
-|---|---|---|
-| Section 0: L9/A42 ordering tension (wave 2b blocked on A42) | **KEPT**, id ORD-1 | Re-verified below (Section 4); A42 is still `unscoped` and its regex is still unfixed (`grep -n "UNSAFE_BARRELS\|stripComments" ` was not the check - see Section 4's fresh grep of A42's row). The tension is structural, not time-bound, and nothing has removed it. |
-| Section 1 census (205/70/22/77, adjusted gap 113) | **KEPT with updated numbers** | Re-measured fresh (Section 1): 208/71/22/79, adjusted gap 111-114 depending on which of two set-difference orders is used (both shown, see Section 1's own note on why they differ by 3). The methodology - two shells, an absence canary, a hand-verified regex literal - is unchanged and re-run today rather than trusted from the prior document. |
-| Section 2a: `ModalShell.tsx` / `snapshot-grading.structure.test.ts:245-246` presence-assertion citation | **WITHDRAWN as a live citation, reason: fixed** | Verified today (`sed -n '280,292p' src/app/components/snapshot-grading/snapshot-grading.structure.test.ts`): the assertion now reads `expect(modalShellSource).toMatch(/role="dialog"\s*aria-modal="true"/)`, a positional regex the doc comment's prose cannot satisfy (the comment separates the two with a comma). This is commit `6125260`, landed 2026-09-23, the SAME fix the L9 backlog row itself already credits. The enforcer this citation protected - proof that an undefended presence assertion in this file was live-exploitable - is REPLACED, not removed: Section 3a below builds a fresh presence-direction proof on a different, currently-undefended file (`src/lib/grade/grade-result-doors.wiring.test.ts`'s `referencesUngradedFlag`, which is independently already flagged as RES-7 on the A13 backlog row, confirming this pass did not invent the target). |
-| Section 2b: `canvas-client-boundary.test.ts` absence-direction mechanism proof | **KEPT, re-verified fresh** | Re-run today with a corrected extraction script (Section 3b): same three-fixture result (line-comment ignored correctly, block-comment falsely fires, live import correctly fires). No file in the tree today trips it for real - re-confirmed by a fresh `git status`/grep pass, same conclusion as before. |
-| Section 3: remedy space (triage rule, frozen-oracle requirement for any stripComments change) | **KEPT** | Sections 5-6 below restate and extend it, adding the requirement-5 instrument analysis (a grep-shaped meta-test is itself the vulnerable shape) that the prior pass did not have to address because this pass's brief asks for it explicitly. |
-| Section 4 wave plan (1: triage: 2a: remove: 2b: add, blocked on A42: 3: sabotage canaries) | **KEPT**, waves renumbered W1-W4 in Section 7 | Wave 3's sabotage-canary requirement is PROMOTED from "a good idea" to "the only acceptable instrument for the fix," per this pass's brief step 5 and the reasoning in Section 6. |
-| Residuals R1-R6 | **KEPT**, renumbered, R2/R3/R4 reworded to reflect today's numbers | See Section 8. None were dropped; none were silently resolved - R2 (the block-comment sweep) was NOT performed by this pass either, and R3/R4's sampling is still 2 files, now different two files. |
+| # | Prior requirement (source: `4b33346`) | Disposition | Where it lands here |
+|---|---|---|---|
+| D1 | Section 0, L9/A42 ordering tension, id ORD-1 | KEPT | `docs/l9-scope.md:419-436` (unchanged claim), `:667-696` (Ruling 73's correction of its false second ground) |
+| D2 | Section 1 census 208/71/22/79, gap 111-114 | KEPT, re-measured fresh today, single clean method replacing the two disputed orders | `docs/l9-scope.md:84-87` (210/71/23/79 today), `:122-126` (gap 113, canaried), `:141-147` (two-population table 83/70/64/842/359) |
+| D3 | Section 2a presence-direction proof (`grade-result-doors.wiring.test.ts`) | KEPT, extended with the caller table and Variant D the check ran | `docs/l9-scope.md:265-372` |
+| D4 | Section 2b absence-direction proof (`canvas-client-boundary.test.ts`) | KEPT, RECLASSIFIED under Ruling 72 (see B5's disposition below) | `docs/l9-scope.md:374-417` |
+| D5 | Section 2's triage rule (presence must strip, absence must not, comment-content is a third bucket) | WITHDRAWN, replaced by Ruling 72's subject-based classification - the enforcer it protected (Wave 2a's sizing) is carried forward under the new rule, not deleted | `docs/l9-scope.md:164-257` |
+| D6 | Section 3's owed decision on comment-aware absence matching (prior-prior pass, `docs/l9-check.md:74-88`, B1(a)) | **RESTORED as answered**: this is exactly what Ruling 72 answers. It was dropped by the round the check audited; it is not dropped here | `docs/l9-scope.md:22-33` (header note), `:175-185` (the rule itself) |
+| D7 | Section 4 wave plan (1 triage / 2a remove / 2b add / 3 canaries) | KEPT, renumbered W1-W4, Wave 2a's WORK reshaped by Ruling 72 (from "remove" to "classify by subject, then fix code-behavior scanners' comment-awareness"), Wave 3 gated per Ruling 74 | `docs/l9-scope.md:520-638` |
+| D8 | Residual R1 (full per-assertion triage) | KEPT, reworded for subject-based classification | `docs/l9-scope.md:643` (R1 row) |
+| D9 | Residual R2 (block-comment sweep for `canvas-client-boundary.test.ts`), owner "the fix wave's first step" | **RELOCATED per B1's/M1's finding**: the owner was fabricated (A42 owns nothing - `docs/BACKLOG.md:98` has `owns`/`verify`/`blocked_by` all `-`). Under Ruling 72 this file's defect is a Wave 2a item in its own right (a code-behavior scanner needing `/* */`-awareness added to its existing `//`-awareness), so R2 is discharged into Wave 2a rather than left as a residual with an invented owner | `docs/l9-scope.md:570-575` (Wave 2a's write set); `:644` (R2 row records the relocation, not a residual) |
+| D10 | Residual R3 (a third stripping idiom under a third name hiding in the uncounted gap), owner `loop-test-author`'s Wave 1, instrument "extend R1's script to flag any `.replace(` removing `/*`/`//` by ANY name" | **RESTORED** - the checked round replaced this with a different, narrower finding (the 111-vs-114 one-file disagreement) under the same label, which `docs/l9-check.md:90-98` (B1(b)) correctly identified as an object-and-instrument swap, not a rewording | `docs/l9-scope.md:645` (R3 row) |
+| D11 | The 111-vs-114 adjusted-gap disagreement, attributed to `src/lib/decks/deck-source.test.ts` | **WITHDRAWN as stated - the attribution was false.** Re-verified this pass (`grep -n "replace(" src/lib/decks/deck-source.test.ts` -> `:116` is `.replace(/\/\*[\s\S]*?\*\//g, "")`): that file unambiguously contains the literal and is correctly excluded from the gap under any subtraction order. The underlying two-order disagreement itself is real (this revision replaces the two-order comparison with a single clean gap measurement, Section 1, and files the *identity* of any residual per-file disagreement as its own residual, R3b) | `docs/l9-scope.md:121-131` (withdrawal), `:646` (R3b row) |
+| D12 | Residual R4 (sample beyond the 2 proven live instances), "sampled exactly 2 of 208" | KEPT, NARROWED per M5 - the two files this document already proves (Section 3a's Variant D, Section 3b's fixtures) are removed from R4's remaining population | `docs/l9-scope.md:647` (R4 row) |
+| D13 | Residual R5 (A42/L9 cross-link), instrument `docs/BACKLOG.md`'s two rows | **CORRECTED per M3** - `docs/BACKLOG.md:3-6` states it is GENERATED from `docs/backlog.yml` and hand-editing it fails `npm run backlog:check-generated` (confirmed present at `package.json:13`, this pass). Retargeted to `docs/backlog.yml` | `docs/l9-scope.md:648` (R5 row) |
+| D14 | Residual R6 (sibling in-flight branch risk) | KEPT unchanged | `docs/l9-scope.md:649` (R6 row) |
+| D15 | Residual R7 (ratchet is name-level, not behaviour-level) | KEPT unchanged, and is now the measured reason Ruling 74 blocks Wave 3 | `docs/l9-scope.md:460` (Shape (3) row), `:605-628` (Wave 3), `:650` (R7 row) |
+| D16 | Section 5 remedy space, Shape (3)'s false-positive mode stated | KEPT, Shape (3)'s population blind spot quantified (B4) and its dispatch gated (Ruling 74) | `docs/l9-scope.md:441-466` |
+| D17 | Section 6, the sabotage-canary instrument for each fix | KEPT, SPECIFIED per M4 - the checked round's version named no command, no discriminating count, no recorded evidence requirement, and dropped the cp-backup restore discipline; all four fixed here, plus a concurrency clause `docs/l9-check.md:385-390` found missing | `docs/l9-scope.md:470-519`, `:629-638` (Wave 4) |
+| D18 | Section 9 Leverage (no claim, this is a chore on the loop's own instruments) | KEPT unchanged - `docs/l9-check.md`'s "Confirmed sound" list marks this correct | `docs/l9-scope.md:655-665` |
+| D19 | Section 10 fork (L9/A42 merge), recommendation X, ground "A42 already has its own filed scope" | **Ground struck, recommendation KEPT on the surviving ground** (Ruling 73) | `docs/l9-scope.md:667-696` |
+| D20 | Section 11 final gate check, reason "this pass touches no file either gate scans" | **CORRECTED per m4** - both gates DO scan `docs/` (`src/lib/no-emojis.test.ts:237,254`; `src/source-bytes.structure.test.ts`), which is why re-running them after writing this file is meaningful evidence, not a formality | `docs/l9-scope.md:698-742` |
 
-No prior requirement was withdrawn without a replacement or silently dropped.
-The one substantive change - swapping the ModalShell citation - is a
-**correction driven by the tree itself having moved**, not a defect in the
-prior pass's reasoning at the time it ran.
+Six defects the check found that are pure corrections rather than restructuring
+(the ModalShell/`canvas-client-boundary.test.ts` line-span citation off by two,
+`m5`) are folded into the sections above rather than given their own row.
 
 ---
 
-## 1. The census, re-measured fresh today (2026-09-27)
+## 1. The census, re-measured fresh today (2026-09-27, after the check's own pass)
 
 | Quantity | Command | Result |
 |---|---|---|
-| `readFileSync` in `*.test.ts` | `grep -rl readFileSync --include=*.test.ts src \| wc -l` | **208** |
+| `readFileSync` in `*.test.ts` | `grep -rl readFileSync --include=*.test.ts src \| wc -l` | **210** |
 | `stripComments` (the word) in `*.test.ts` | `grep -rl stripComments --include=*.test.ts src \| wc -l` | **71** |
-| `*.structure.test.ts` files | `find src -name "*.structure.test.ts" \| wc -l` | **22** |
+| `*.structure.test.ts` files | `find src -name "*.structure.test.ts" \| wc -l` | **23** |
 | `*.wiring.test.ts` files | `find src -name "*.wiring.test.ts" \| wc -l` | **79** |
 
-This confirms the two figures this pass's own brief asserted (79 wiring / 22
-structure) against `this-repo.md`'s stale 68/17 - both are measured here
-independently, not copied from the brief.
+**This drifted again since the check's own pass four hours ago** (208->209
+during the check, 210 now; structure 22->23; the check's own m1 already
+recorded 208->209 as tree drift from concurrent sibling work, not instrument
+disagreement - `diffA.py` in the check's session showed grep and an independent
+Python walk agreeing exactly). Recorded here as the same phenomenon continuing,
+not a new finding, and specifically why the wave plan below (Section 7) works
+off a re-run population at dispatch time, never off a number frozen today.
 
-**Reconciling against the prior scope's 2026-09-23 numbers (205/70/22/77):**
-readFileSync +3, stripComments +1, structure unchanged, wiring +2 in four
-days - consistent with ordinary concurrent feature work (the sibling agents'
-own in-flight changes visible in `git status --short` touch grading test
-files), not a measurement disagreement. Both counts were re-run once each;
-no shell-disagreement was found this time (unlike `this-repo.md`'s own
-warning that the two shells can differ by up to 138 lines elsewhere in this
-repo - these four counts are simple file/line counts of the kind that
-historically agree).
-
-**The A42 regex-literal census - redone with a Python script, not a shell
-one-liner, after a real instrument failure caught mid-measurement.**
-
-My first attempt used `grep -rlF '[\s\S]*?\*/' src` (missing the backslash
-before the closing `/` that the real code actually contains) and returned
-**0 files** - a false "clean" result, i.e. exactly the failure mode this row
-is about, caught here on my own instrument before trusting it. I confirmed
-the miss by opening `src/app/actions/carry-module-pattern.test.ts` directly
-(`grep -n "replace(" src/app/actions/carry-module-pattern.test.ts`) and
-reading the real line: `.replace(/\/\*[\s\S]*?\*\//g, "")` - the closing `*/`
-in the SOURCE is written `\*\/` (both characters escaped, because it sits
-inside a JS regex literal), not `*/`. Rebuilt the search as a Python script
-(`census2.py`/`census3.py` in this session's scratchpad) matching the exact
-byte sequence `[`, `\`, `s`, `\`, `S`, `]`, `*`, `?`, `\`, `*`, `\`, `/`, built
-with `chr(92)` rather than typed backslashes (this repo's own recorded lesson
-that a shell heredoc can halve a doubled escape before it reaches the target
-language - confirmed again, separately, while building this document's own
-proof scripts in Section 3, where a bash heredoc silently dropped every
-`\\` down to a single `\` and a `\s+` became `s+`; switching to the `Write`
-tool for those scripts avoided it).
+**The A42 regex-literal census - re-run fresh with a Python script
+(`a42_census_revision.py`, this pass's scratchpad), matching the check's own
+figures exactly:**
 
 | Quantity | Result |
 |---|---|
-| Files containing `[\s\S]*?\*\/` literal, all `src/` | **87** |
+| Files containing the `[\s\S]*?\*\/` literal, all `src/` | **87** |
 | Of those, `*.test.ts` | **86** |
 | Total occurrences of that literal | **107** |
 | Files containing the `[^]*?\*\/` sibling variant | **5** (`src/app/actions/prompt-announcement-draft.test.ts`, `src/app/actions/prompt-announcement-post.test.ts`, `src/app/components/canvas-tab/announcements-panel.wiring.test.ts`, `src/app/components/canvas-tab/promptAnnouncementDraft.test.ts`, `src/lib/prompt-announcement-types.test.ts`) |
-| Absence canary (`stripCommentsZZCANARYZZNONEXISTENT`) | **0 files** - confirms the script distinguishes presence from absence |
+| Absence canary (`stripCommentsZZCANARYZZNONEXISTENT`) | **0 files** |
 
-Compared with A42's own row (85 files / 102 occurrences, `*.test.ts`-only 84)
-and the prior L9 scope's same-day re-measurement (85/105, `*.test.ts` 84):
-today's 87/107 (test.ts: 86) is a further drift of +2 files, +2 occurrences,
-consistent with the same ongoing feature work. The `[^]*?` variant count grew
-from 2 (prior scope, hand-inspected) to 5 (this pass, script-swept) - **this
-is not new drift, it is the prior scope under-counting**: three of the five
-(`prompt-announcement-draft.test.ts`, `prompt-announcement-post.test.ts`,
-`promptAnnouncementDraft.test.ts`) were not in the prior document's 8-file
-"contains the word but not the literal" table at all, meaning the prior
-pass's hand search missed them. Recorded as a correction, not hidden.
+Unlike the `readFileSync`/`stripComments` word counts above, this specific
+number has now been measured identically three times today by two different
+authors and three different scripts (this pass's prior round, the check's
+`census.py`, and this revision's `a42_census_revision.py`) - it is stable, not
+drifting, in the window this document has existed.
 
-**Adjusted gap - two orders of the same set subtraction, shown both ways
-because they disagree by 3 and neither is obviously wrong.**
+**Gap - re-measured with a single clean method, replacing the two disputed
+subtraction orders.** The prior two rounds computed `(A - B) - (C - B)` two
+independently-coded ways and got 111 and 114, without printing which files
+differed. This revision instead computes the gap directly and canaries the
+absence claim (`gap_revision.py`, this pass's scratchpad, a Python walk over
+`src/`, not a shell pipeline):
 
 ```
-A = {*.test.ts files containing readFileSync}                    (208)
-B = {*.test.ts files containing the word "stripComments"}         (71)
-C = {*.test.ts files containing the [\s\S]*?\*\/ or [^]*? literal, minus B}
+A = readFileSync test files                                          210
+Absence canary (nonexistent readFileSync token, must be 0)             0
+Gap = A minus files containing ANY of the three stripping idioms     113
 ```
 
-- Order 1 (subtract B, then subtract C-minus-B): `(A - B) - (C - B)` = **111**
-  files, computed by `gap_list.py` in this session's scratchpad (a Python
-  walk over `src/`, not a shell pipeline, after the heredoc/backslash
-  instrument failure above made shell-based regex search suspect for this
-  exact pattern).
-- Order 2 (compute `A - B` first, list it, subtract the literal-only set):
-  `census3.py` in the same scratchpad, same two input sets, same operation,
-  independently coded: **114**.
+**113 is a floor on the defended population and a ceiling on the true gap**,
+for the same reason the prior two rounds gave: a fourth naming idiom would hide
+inside it. That is restored as Residual R3 (Section 8), not silently dropped -
+see D10/D11 in the disposition table above. The specific one-file disagreement
+the prior round attributed to `src/lib/decks/deck-source.test.ts` is WITHDRAWN
+(D11): re-verified directly, that file's line 116 is
+`.replace(/\/\*[\s\S]*?\*\//g, "")` - it unambiguously contains the literal and
+is correctly excluded from the gap either way. Whatever file(s) actually caused
+the 111-vs-114 split, this revision does not know, and says so (Residual R3b,
+Section 8) rather than re-asserting a wrong one-file explanation a second time.
 
-The 3-file difference is `src/lib/decks/deck-source.test.ts`, which is present
-in one script's "strips inline under an unnamed mechanism" bucket and absent
-from the other's - not yet resolved by this pass, and not decisive either way
-for the wave plan below, which works off the FULL 208-file population and a
-per-file triage (Wave 1), not off this floor number. **Both counts are a
-floor on the defended population and a ceiling on the true gap**, per the
-prior scope's own caveat, which still holds: a third stripping idiom under a
-third name would hide inside either number. Recorded as Residual R3.
+**Two populations within the 113-file gap, same script, canaried:**
 
-**Two populations within the gap, as the brief requires, not one number.**
-
-Scanning the 111-file gap list (`classify_gap.py`, scratchpad) for
-`expect(...).toContain(`/`.toMatch(` calls NOT preceded by `.not.` (a
-presence-shaped assertion) versus `.not.toContain(`/`.not.toMatch(` calls (an
-absence-shaped assertion):
-
-| Population | Count | Command basis |
+| Population | Count | Basis |
 |---|---|---|
-| Files with >=1 presence-shaped assertion | **81** | `classify_gap.py`, regex `\.to(Contain\|Match)\(` minus the `.not.` count, per file |
-| Files with >=1 absence-shaped assertion | **68** | Same script, `\.not\.to(Contain\|Match)\(` |
-| Files with BOTH shapes | **62** | Set intersection of the two file sets |
-| Total presence-shaped assertion occurrences | **839** | Sum across files |
-| Total absence-shaped assertion occurrences | **353** | Sum across files |
+| Gap files with >=1 presence-shaped assertion (`.toContain(`/`.toMatch(`, not `.not.`) | **83** | `gap_revision.py` |
+| Gap files with >=1 absence-shaped assertion (`.not.toContain(`/`.not.toMatch(`) | **70** | Same script |
+| Gap files with BOTH shapes | **64** | Set intersection |
+| Total presence-shaped occurrences | **842** | Sum across files |
+| Total absence-shaped occurrences | **359** | Sum across files |
 
-**This is a syntactic proxy, stated plainly as one.** It counts
-`.toContain(`/`.toMatch(` call SHAPES, not semantics - a `.toMatch()` call can
-be testing a count, a formatted number, or a comment's own content (the
-row's explicitly carved-out third category), not just "does this capability's
-call site exist." It also cannot see `indexOf`-based or `.toBe(true)`-based
-presence checks (e.g. `grade-result-doors.wiring.test.ts`'s own
-`callsBuilder`/`referencesUngradedFlag`, which return booleans consumed by
-`expect(...).toBe(true)`, not `.toContain`) - so the true presence-assertion
-population is a FLOOR, undercounted by this proxy, not an overcount. The
-per-assertion triage the row's own note calls for (Wave 1, Section 7) is the
-only way to turn this proxy into a real classification; this number exists
-so the scope does not report one population where the brief requires two.
-
----
-
-## 2. Which direction fails, and how - restated with today's evidence
-
-The prior scope's triage framing (presence assertions need stripping added;
-absence assertions may need it removed; comment-content assertions are a
-third, untouched category) is unchanged and re-adopted here. What follows in
-Section 3 replaces its worked examples with fresh ones, because one of the
-two originals no longer demonstrates a live gap.
+Compared with the checked round's own re-measurement four hours ago (82/69/63,
+same 842/359 occurrence totals): file counts differ by 1 (83 vs 82, 70 vs 69,
+64 vs 63), occurrence totals are IDENTICAL across two independently-coded
+scripts on two different passes. That is the expected shape for a regex-shaped
+proxy scanning a tree that gained files in between (readFileSync alone went
+209->210 in the same window) - not a new instrument disagreement, and not
+re-litigated further here. **This remains a syntactic proxy, stated plainly as
+one**: it cannot see the `.toBe(true)`-shaped presence checks
+(`grade-result-doors.wiring.test.ts`'s own `referencesUngradedFlag`), so the
+true presence-assertion population is a FLOOR. Turning this proxy into a real
+classification, BY SUBJECT per Ruling 72 (not just by direction, which is what
+the prior two rounds' triage did), is Wave 1's job (Section 7).
 
 ---
 
-## 3. Proof on real files - two genuinely different tests, empirically, on scratch copies
+## 2. The classification rule for scanning assertions (RULING 72, applied)
 
-Both proofs below (a) extract the REAL assertion logic VERBATIM from the real
-test file (not a hand-typed re-implementation - the technique
-`docs/a41-scope.md` used and this pass's brief names explicitly), (b) run it
-under `node --experimental-strip-types` against fixture text, and (c) never
-write to any production or test file. Extraction script:
-`extract_functions.py` (scratchpad); driver scripts: `proof1_driver.ts` and
-`proof2_driver.ts` (scratchpad, both via the `Write` tool after the heredoc
-backslash-halving failure noted in Section 1 corrupted an earlier attempt at
-`proof2_driver.ts` - caught by re-reading the written file with `sed -n`
-before trusting its output, the same discipline this row itself is about).
+The checked round re-adopted a binary the prior-prior pass had explicitly left
+undecided: "presence assertions must strip comments; absence assertions may
+need it removed." The check (`docs/l9-check.md` B1(a), B2, B5) found that
+binary cannot be applied mechanically without either weakening a real guard or
+disarming this repo's own proof that its strippers work, and routed the
+decision to the orchestrator. **RULING 72 answers it, and this section
+restates the rule exactly as ruled, then applies it to every worked example in
+this document.**
 
-### 3a. Presence direction - `src/lib/grade/grade-result-doors.wiring.test.ts`, `referencesUngradedFlag`
+**The rule: classify every scanning assertion by its SUBJECT, never by its
+direction and never by the construct it matches.**
 
-This file and function are independently already named on the A13 backlog
-row as **RES-7** ("grade-result-doors.wiring.test.ts is satisfied by a
-COMMENT... the next chunk that touches [it], or L9's triage wave, whichever
-lands first") - confirming this pass did not invent the target, and that
-this scope is that chunk.
+- **Code-behaviour scanners** - the assertion's claim is about what the
+  program DOES: an import that executes and reaches the client bundle, an
+  event listener that registers, a builder function that gets called, a guard
+  that runs before a side effect. **These MUST strip comments in BOTH
+  directions.** A commented-out guard must not satisfy a presence assertion
+  (that is the L9 defect itself), and a commented-out import or call must not
+  trip an absence assertion, because it does not execute and therefore cannot
+  produce the behaviour the assertion is actually guarding against.
+- **File-content scanners** - the assertion's claim is about what the FILE
+  CONTAINS, regardless of whether it executes: no emoji anywhere including
+  comments (`src/lib/no-emojis.test.ts` - confirmed this pass,
+  `grep -c stripComments src/lib/no-emojis.test.ts` returns `0`, and it must
+  stay that way, because this repo's own rule explicitly covers comments), no
+  mojibake, no BOM, a required licence header, a pinned citation comment.
+  **These MUST NOT strip, and each must say so explicitly in the file** (a
+  one-line comment stating "this scanner deliberately does not strip
+  comments, because X"), so the next person does not "fix" it by adding
+  stripping - the exact failure this row is itself about, one level removed.
+- **Stripper-mechanism meta-tests (a subtype of file-content scanner, excluded
+  by RULE, not by list)** - an assertion whose subject is the stripping
+  HELPER's own output on a fixture the test itself constructed (e.g.
+  `src/app/components/autoGradeTransition.wiring.test.ts:32`,
+  `expect(stripped).not.toContain("used to live here")` inside a describe
+  block literally named `"stripComments (canary first)"` - confirmed this
+  pass), rather than a scan of real production or test source. The rule that
+  excludes them: **a scanning assertion, for the purposes of this
+  classification, ranges only over assertions applied to text read from a
+  real file (`readFileSync`) or a real module** - never over an assertion
+  applied to a hand-built string literal whose entire purpose is proving the
+  stripper itself works. Applying the code-behaviour/file-content split
+  mechanically to these would order the removal of the only instruments in
+  this repo that watch a stripper fail (the check's B2 finding, `142` such
+  occurrences measured, of which `21` were this exact shape) - the rule above
+  is why that never happens, without needing a maintained list of which 21.
 
-The function, extracted verbatim (`src/lib/grade/grade-result-doors.wiring.test.ts:78-80`):
+**Consequence for the worked examples already in this document (Section 3),
+worked through rather than assumed:**
+
+- **`src/lib/grade/grade-result-doors.wiring.test.ts`'s `referencesUngradedFlag`
+  (Section 3a)** is a code-behaviour scanner (its claim: does this caller file
+  show awareness that a row can be ungraded, i.e. does the code path exist).
+  Unaffected by Ruling 72 either way - it already needed stripping added under
+  every version of the rule, old or new, and Section 3a is unchanged.
+- **`src/lib/canvas-client-boundary.test.ts`'s `findClientUnsafeBarrelImports`
+  (Section 3b)** is a code-behaviour scanner (its claim: does this
+  `"use client"` file actually import a server-only barrel, which is only true
+  if the import EXECUTES). Under Ruling 72 it must strip BOTH `//` and `/* */`
+  comment forms. It currently strips neither explicitly, but its `^import`
+  anchor is a de facto `//`-ignoring mechanism (an unrelated `import` token
+  inside a `//` comment never starts a line with `import`), which the file's
+  own header comment states is deliberate. **So Fixture A ("`//`-commented
+  import produces zero violations") is CORRECT under Ruling 72, and Fixture B
+  ("the same import inside a `/* */` block comment produces one violation") IS
+  THE DEFECT** - it fires on inert, non-executing code, which is exactly the
+  false-positive half of this row. This is the SAME classification the
+  checked round's own Section 3b prose used ("Fixture A correctly", "Fixture B
+  falsely fires") - what was wrong was not that prose, it was Section 2's
+  re-adopted binary contradicting it (the check's B5 finding). Ruling 72
+  resolves the contradiction by replacing the binary, not by re-labelling
+  Section 3b. Restated in Section 3b below with this reasoning inline.
+- **This reclassifies which file needs which fix.** `canvas-client-boundary.test.ts`
+  is now correctly a Wave 2a candidate (comment-aware matching needs
+  extending to cover `/* */`, not removing) - the check's B5 finding that the
+  prior round's Wave 2a-is-empty claim rested on an inverted classification is
+  now moot, because Wave 2a's population and shape both change (Section 7).
+
+**One consequence this document records but cannot act on**: the L9 backlog
+row's own note (`docs/BACKLOG.md:145`, generated from `docs/backlog.yml`)
+still states the pre-ruling framing verbatim ("an assertion that something is
+ABSENT must NOT strip them ... an absence guard that correctly ignores a line
+comment and FALSELY FIRES on the same import inside a block comment"). Read
+under Ruling 72 that second half is actually still right (a code-behaviour
+absence scanner falsely firing on inert code IS the defect), but the first
+half is the binary Ruling 72 just replaced, stated as a general rule rather
+than scoped to file-content subjects. `docs/backlog.yml` is outside this
+pass's write set. Folded into Residual R5/R8 (Section 8) for whoever next
+edits that file, rather than left as a silent contradiction between this scope
+and the row it scopes.
+
+---
+
+## 3. Proof on real files - reclassified under Ruling 72
+
+Both proofs extract the REAL assertion logic VERBATIM from the real test file,
+run it under `node --experimental-strip-types` against fixture text, and
+mutate no production or test file.
+
+### 3a. Code-behaviour, presence direction - `src/lib/grade/grade-result-doors.wiring.test.ts`, `referencesUngradedFlag`
+
+Unchanged in substance from the prior round; independently already flagged on
+the A13 backlog row as **RES-7** (confirmed this pass,
+`grep -a -n "RES-7" docs/BACKLOG.md` -> `docs/BACKLOG.md:80`, the A13 row's
+note: "grade-result-doors.wiring.test.ts is satisfied by a COMMENT ... STEP:
+the next chunk that touches [it], or L9's triage wave, whichever lands
+first").
+
+The function, verbatim (`src/lib/grade/grade-result-doors.wiring.test.ts:78-80`):
 
 ```ts
 function referencesUngradedFlag(source: string): boolean {
@@ -209,70 +279,110 @@ function referencesUngradedFlag(source: string): boolean {
 }
 ```
 
-No `stripComments` call anywhere in this file (confirmed:
-`grep -c stripComments src/lib/grade/grade-result-doors.wiring.test.ts`
-returns `0`) - it is a raw-source presence check, run against every file that
-calls one of four "door" builders including `postCanvasGradesAction`.
+No `stripComments` call anywhere in this file
+(`grep -c stripComments src/lib/grade/grade-result-doors.wiring.test.ts` -> `0`,
+confirmed this pass).
 
-**A real, currently-live caller, confirmed today, not touched by any sibling
-agent:** `src/app/components/repo-grades/useRepoGradesGradingActions.ts:554`
-and `:674` both call `postCanvasGradesAction(` with parentheses (the exact
-predicate the test itself uses:
-`new RegExp('\\bpostCanvasGradesAction\\s*\\(')`), and its one real
-functional reference to the flag is `:263`:
-`if (cell.status !== "ungraded") return;` - confirmed as the file's ONLY
-non-comment occurrence of the word (the other two hits, `:260` and `:338`,
-are prose in comments).
-
-Driver output (`node --experimental-strip-types proof1_driver.ts`, full
-output captured, reproduced here):
+**The write-set gap the check found and this revision restores (B3).** The
+prior round named exactly one caller
+(`src/app/components/repo-grades/useRepoGradesGradingActions.ts`) and called
+the fix "standalone." The check ran the test's OWN caller predicate
+(`callsBuilder`, verbatim) over the real 1592-file non-test tree and found a
+FOURTH caller this document had not named:
+`src/lib/workflows/registry/steps.grading-draft-flow.ts`. Re-verified directly
+this pass:
 
 ```
-calls postCanvasGradesAction( for real, in the unmodified file: true
-referencesUngradedFlag(original real file content): true
-target line found verbatim, occurrence count: 1
-
-=== Variant B: real guard commented out, comment still says ungraded ===
-variantB no longer contains the LIVE functional line as executable code: true
-referencesUngradedFlag(variantB) - EXPECTED true if the hole is real: true
-
-=== Variant C: word fully scrubbed (comment and any residue) ===
-variantC still contains the word 'ungraded' anywhere (should be false): false
-referencesUngradedFlag(variantC) - EXPECTED false: false
+grep -n -i "ungraded" src/lib/workflows/registry/steps.grading-draft-flow.ts
 ```
 
-**Reading this precisely.** Variant B takes the real, unmodified file content
-and replaces ONLY the one functional guard line with a comment that still
-contains the word "ungraded" ("`// ungraded rows used to be excluded here;
-guard removed for this L9 scratch-copy proof...`") - simulating exactly what
-the row describes: a capability deleted, left behind as a comment. The real
-function, run unmodified against this variant, still returns `true` - the
-SAME verdict as the untouched original. Variant C proves this is not a
-trivial always-true function: scrubbing the word entirely correctly flips it
-to `false`. So the function's true/false verdict is driven by the presence of
-a WORD anywhere in the file, not by whether the guarded CODE PATH still
-executes - which is the exact defect L9 names. **This was proven without
-editing any production or test file**: the real file was read once, and the
-"variants" exist only as in-memory strings inside the driver script and one
-scratch copy (`useRepoGradesGradingActions.variantB.ts` in the scratchpad,
-never imported by anything, never referenced by `git status`).
+```
+20:import { gradedResults, ungradedResults } from "@/lib/grade/types";
+297:          const notGradedCount = ungradedResults(gradeResult.run.results).length;
+598:            // N13a: this gate is exactly what keeps an ungraded row (result.ungraded
+600:            // union type makes userId and ungraded mutually exclusive, so an
+601:            // ungraded row always fails this typeof check by construction.
+```
 
-Confirmed the real test currently passes, unmodified, before any of the
-above: `npm run test:paths -- src/lib/grade/grade-result-doors.wiring.test.ts`
-→ `Test Files 1 passed (1)`, `Tests 7 passed (7)`, `COVERED
-src/lib/grade/grade-result-doors.wiring.test.ts files=1 passed=7`.
+Confirmed: this file's only LIVE (non-comment) occurrences of the word are
+`:20` and `:297`, both as `ungradedResults` - which `/\bungraded\b/i` does NOT
+match, because `\b` requires a word-boundary transition and `d` immediately
+followed by `R` (word character to word character) is not one. Its three
+comment lines (`:598,600,601`) DO match. So today, this file satisfies
+`referencesUngradedFlag` through prose alone, and would fail it if
+comment-stripping were added without also widening the predicate to recognise
+`ungradedResults(`.
 
-### 3b. Absence direction - `src/lib/canvas-client-boundary.test.ts`, `findClientUnsafeBarrelImports`
+**Two consequences, both now carried into Wave 2b's brief (Section 7) rather
+than left implicit:**
 
-Extracted verbatim (`src/lib/canvas-client-boundary.test.ts:71`, `:132-179`):
-`UNSAFE_BARRELS = ["@/lib/canvas", "@/lib/canvas-modules"]` and the full
-`findClientUnsafeBarrelImports` function, which anchors on `^import` with the
-`m` flag specifically so "an unrelated `import` keyword mentioned inside a
-comment... is never matched" (the file's own header comment, quoted
-verbatim, not paraphrased).
+1. **The write set must include `steps.grading-draft-flow.ts`.** Adding
+   comment-stripping to `referencesUngradedFlag` with no other change turns
+   `grade-result-doors.wiring.test.ts` RED on this file, which was outside the
+   prior round's write set. `docs/loop/traps-spec.md`'s own rule ("an
+   assignment must include the file that CALLS the new export") applies
+   directly, one layer removed - the CALLER here is the file the predicate
+   scans, not a code caller of the test, but the shape is the same: a write
+   set that omits the file the change breaks ships dead or ships red.
+2. **A predicate decision, not just a stripping call.** `referencesUngradedFlag`
+   is deliberately loose per its own doc comment ("pins the FACT of
+   awareness, not a particular predicate's spelling"). Whether
+   `steps.grading-draft-flow.ts`'s use of `ungradedResults(` counts as
+   "awareness of the flag" for this predicate's purpose is a decision for
+   whoever builds Wave 2b's fix (a test-author/implementer decision inside an
+   already-scoped wave, not an owner escalation): either widen the regex to
+   also match `ungradedResults\(` and `gradedResults\(`, or leave it narrow
+   and treat this file's current code as NOT YET acknowledging the flag
+   through this predicate's lens, in which case the wiring test going red here
+   is the correct, intended signal that the file needs its own guard added.
+   Both options are legitimate; Wave 2b's brief (Section 7) states the fork
+   and requires whichever is picked to be justified against the two live
+   comment lines it accepts or rejects.
 
-Three fixtures, run through the extracted function unmodified
-(`proof2_driver.ts`, full output):
+**This is also a stronger currently-armed instance of L9 than the one the
+scope's prior round could already point to** (the ModalShell citation, fixed
+at `6125260`): for `steps.grading-draft-flow.ts`, `referencesUngradedFlag`'s
+verdict is carried 100% by three comments today, in a wiring test that ships
+green on `main` right now.
+
+Confirmed green today, unmodified, before any of the above:
+`npm run test:paths -- src/lib/grade/grade-result-doors.wiring.test.ts
+src/lib/canvas-client-boundary.test.ts` (run this pass, exit code read
+directly, not through a pipe) ->
+
+```
+Test Files  2 passed (2)
+     Tests  22 passed (22)
+COVERED src/lib/grade/grade-result-doors.wiring.test.ts files=1 passed=7
+COVERED src/lib/canvas-client-boundary.test.ts files=1 passed=15
+EXITCODE:0
+```
+
+The `useRepoGradesGradingActions.ts` Variant-D result the check produced
+(deleting the guard line outright, no replacement, and confirming the
+UNMODIFIED real predicate still returns `true` with no commenting-out at all -
+a stronger statement than "commenting it out is satisfied," it is "the guard
+is already gone-equivalent for this predicate today") is adopted from
+`docs/l9-check.md`'s reproduction (`proof1.ts`, its M5 section) rather than
+re-run in this pass: the underlying facts it depends on
+(`useRepoGradesGradingActions.ts:260,263,338` and the two real
+`postCanvasGradesAction(` calls) were independently re-confirmed by this pass
+via `grep`, but the driver script itself was not re-executed here. Stated
+plainly rather than silently inherited, per this pass's own method
+requirements.
+
+### 3b. Code-behaviour, absence direction - `src/lib/canvas-client-boundary.test.ts`, `findClientUnsafeBarrelImports`
+
+Verbatim (`src/lib/canvas-client-boundary.test.ts:132-181` - corrected from the
+prior round's `:132-179`; re-measured this pass with
+`awk '/^function findClientUnsafeBarrelImports/{start=NR} start && /^}/{print NR; exit}'`,
+which returns `181`): `UNSAFE_BARRELS = ["@/lib/canvas", "@/lib/canvas-modules"]`
+and the full `findClientUnsafeBarrelImports` function, which anchors on
+`^import` with the `m` flag specifically so "an unrelated `import` keyword
+mentioned inside a comment ... is never matched" (the file's own header
+comment, quoted verbatim).
+
+Three fixtures (reproduced by the check, `proof2_driver.ts`, exit 0):
 
 ```
 Fixture A (// line-commented import) violations: []
@@ -280,262 +390,372 @@ Fixture B (block-commented import) violations: [{"line":3,"specifier":"@/lib/can
 Fixture C (live, real import) violations: [{"line":1,"specifier":"@/lib/canvas-modules","binding":"COURSE_COPY_TYPES"}]
 ```
 
-Fixture A confirms the `^import` anchor does what its own comment claims: a
-`//`-commented forbidden import produces zero violations, correctly. Fixture
-B is the mirror-image defect the row's absence-direction half asks about: the
-SAME import, wrapped in a `/* */` block comment on its own line, produces
-ONE violation - identical in shape to Fixture C's genuinely live, uncommented
-import. The guard has no concept of `/* */` nesting, so it cannot tell inert,
-commented-out code from a real value import; it FALSELY FIRES on the former.
+**Classified under Ruling 72 (Section 2 above), not under the withdrawn
+binary**: this scanner's subject is CODE-BEHAVIOUR (whether a server-only
+barrel is actually imported into a client bundle). A commented-out import,
+`//` or `/* */`, never executes and can never actually pull the barrel into
+the bundle. So:
 
-**Is this currently live?** No file in the tree today trips it: re-run today,
-`npm run test:paths -- src/lib/canvas-client-boundary.test.ts` →
-`Test Files 1 passed (1)`, `Tests 15 passed (15)`,
-`COVERED src/lib/canvas-client-boundary.test.ts files=1 passed=15`, matching
-the prior scope's same finding four days ago. This is a **proven mechanism
-defect, not yet triggered** - the opposite failure direction from 3a (a false
-CI failure on inert code, rather than a silent gap), and it belongs in the
-same row because it is the same instrument shape (a raw-source regex with no
-awareness of comment syntax) failing in the other direction. A full sweep for
-a real block-commented import of either barrel was NOT re-run this pass
-(carried forward as Residual R2, unchanged in substance from the prior
-scope).
+- **Fixture A is CORRECT** - a `//`-commented import produces zero
+  violations, and it should.
+- **Fixture B IS THE DEFECT** - a `/* */`-commented import produces one
+  violation, identical in shape to Fixture C's genuinely live import. The
+  guard has no concept of `/* */` nesting and cannot distinguish inert,
+  commented-out code from a real value import.
+
+This is a **false-positive defect** (the opposite failure direction from
+Section 3a's silent gap): a real block-commented import of either barrel would
+fail CI today for no reason. **Is it currently live?** No file in the tree
+today trips it - re-confirmed this pass,
+`npm run test:paths -- src/lib/canvas-client-boundary.test.ts` exits 0,
+`Tests 15 passed (15)`. Dormant, proven mechanism, not yet triggered. A sweep
+for a real live trigger was not re-run this pass; that sweep, plus the fix
+itself, is now Wave 2a's write-set item under Ruling 72 (Section 7) - it is no
+longer a residual with a fabricated owner (see D9 in Section 0, and R2's
+disposition in Section 8).
 
 ---
 
 ## 4. The A42 dependency, re-verified
 
 `docs/BACKLOG.md`'s A42 row (line 98, `grep -a -n "A42" docs/BACKLOG.md`) is
-still `unscoped` today and its own text still states the MIME-wildcard
-`accept="image/*"`-style false block-comment-open defect against the shared
-`[\s\S]*?\*\/`-family regex, unresolved. Section 1's fresh count (87 files,
-`*.test.ts`: 86, up from A42's own 85/84) confirms the population this defect
-threatens has grown, not shrunk, since A42 was filed. **The ordering
-constraint from the prior scope holds unchanged**: any L9 wave that ADDS a
-new call to this regex family inherits A42's live bug on day one if the file
-it scans happens to contain a MIME-wildcard `accept=` attribute; any L9 wave
-that REMOVES a call, or that adds a NON-regex stripping mechanism (a
-character-by-character parser, or the positional-anchor technique
-`snapshot-grading.structure.test.ts` now uses per Section 0's disposition
-table), does not.
+still `unscoped` today, with `owns`/`verify`/`blocked_by` all `-` (re-verified
+this pass by reading the row directly). Its note still states the
+MIME-wildcard `accept="image/*"`-style false block-comment-open defect against
+the shared `[\s\S]*?\*\/`-family regex, unresolved. Section 1's fresh count
+(87 files, `*.test.ts`: 86, unchanged three times running today) confirms the
+population this defect threatens has not shrunk since A42 was filed (85/84).
+
+**The ordering constraint holds unchanged**: any L9 wave that ADDS a new call
+to this regex family inherits A42's live bug on day one for any file it scans
+that happens to contain a MIME-wildcard `accept=` attribute; any L9 wave that
+REMOVES a call, or adds a NON-regex mechanism (a positional anchor, the
+technique `snapshot-grading.structure.test.ts` already uses), does not. Waves
+1, 2a and 3 below touch no file matching that regex family; Wave 2b's named
+candidate (`steps.grading-draft-flow.ts`, a `.ts` source file scanned for an
+identifier and a word) is MIME-wildcard-attribute-free by construction (it is
+not a JSX/TSX file and defines no `accept=` prop).
 
 ---
 
-## 5. The remedy space - costed, with the reuse question answered
+## 5. The remedy space - costed, ratchet dispatch gated by Ruling 74
 
-**Reuse question, answered directly per this pass's brief.** There is no
-single shared `stripComments` helper this repo's test files import today,
-apart from `src/app/components/ui/modalAdoptionScan.ts` (one production
-module, imported by exactly 2 test files:
-`src/app/components/ui/modalAdoption.wiring.test.ts` and
-`src/app/components/ui/modalAdoptionWiring.attributes.test.ts`, confirmed by
-`grep -rn "from \"./modalAdoptionScan\"" src/app/components/ui`). Everything
-else - at minimum the 71 files matching the word `stripComments` plus the 87
-matching the regex literal directly - is an independently duplicated local
-copy, per this repo's own stated house rule
-(`GradingRecordingPanel.wiring.test.ts:38`: "this repo forbids importing a
-helper from another `*.test.ts` file"). **So this is "adopt an existing
-helper everywhere," not "write a helper," EXCEPT that the one existing
-shared helper (`modalAdoptionScan.ts`) is ITSELF inside A42's blast radius**
-(it contains the same vulnerable regex family - A42's own row names it by
-path) - adopting it as-is would spread A42's defect to every file that
-adopts it, which is the exact ordering hazard Section 4 states generalized to
-the reuse question specifically.
-
-Three remedy shapes, costed:
+**Reuse question, answered directly.** The one existing shared helper is
+`src/app/components/ui/modalAdoptionScan.ts`, imported by exactly 2 test files
+(`grep -rn 'from "./modalAdoptionScan"' src/app/components/ui`, confirmed this
+pass: `modalAdoption.wiring.test.ts:47`,
+`modalAdoptionWiring.attributes.test.ts:20`). Everything else - at minimum 71
+files matching the word `stripComments` plus 87 matching the regex literal
+directly - is an independently duplicated local copy, per this repo's own
+house rule (`GradingRecordingPanel.wiring.test.ts:38`: "this repo forbids
+importing a helper from another `*.test.ts` file"). The one existing shared
+helper is itself inside A42's blast radius (same vulnerable regex family), so
+adopting it as-is would spread A42's defect - the same ordering hazard as
+Section 4, generalised to the reuse question.
 
 | Shape | Files touched | Cost / risk | False-positive mode |
 |---|---|---|---|
-| **(1) One shared, non-test helper module**, all scanning tests import it (breaking the current "duplicate, never import" house style deliberately, as `modalAdoptionScan.ts` already does for 2 files) | Up to 208 (every `readFileSync`-using test file), in practice fewer once Wave 1's triage removes comment-content-only and already-correctly-defended files | Largest one-time cost; requires a FROZEN ORACLE (stripComments' output on a representative real-file sample, captured before/after) proving the migration changes no existing stripping decision, per `docs/DEV_LOOP.md`'s own "a refactor that silently changes output is the classic defect." Must also fix A42 first or simultaneously, or it inherits the bug at the moment of adoption. | None directly - a shared helper is a mechanism, not an instrument, so it has no false-positive mode of its own; the RISK is a wrong migration silently changing an existing test's verdict, which the oracle is what catches. |
-| **(2) A lint rule** (a custom ESLint rule flagging a `readFileSync`-in-test-file plus a presence-shaped assertion with no stripping call in the same file) | 1 new rule file, 0 test files touched to ADD the rule; each violation it finds becomes its own fix | Cheapest to add, but ESLint at 104.9s (`this-repo.md` section 1) already runs on every file; a custom rule needs its own test suite (this repo's convention per every other `*.structure.test.ts`) and duplicates most of the census logic already built in Section 1's scripts. | A lint rule operating on AST or text patterns has THE SAME blind spot as the row itself if it looks for the word `stripComments` rather than proving the found call actually defends the found assertion - i.e., a naive version of this rule reproduces the class of bug it exists to catch, one level up. |
-| **(3) A meta-test / coverage ratchet** (`src/lib/source-scan-comment-coverage.structure.test.ts`-shaped: enumerate every `*.test.ts` file with `readFileSync`, classify presence/absence via Section 1's proxy, and assert the "undefended presence" file list against a FROZEN allowlist that may only shrink) | 1 new file; 0 existing files touched to add it | Cheap (this repo already runs `file-size-ceiling.structure.test.ts`'s `ALLOWED_OVERAGE` ratchet in exactly this shape) and catches NEW drift immediately (any newly-added undefended presence assertion fails the moment its file is added, because the allowlist is frozen at today's count) | **Evaluated seriously, and it does false-positive in exactly the way this row is about**: this ratchet is itself a grep/census over source text. A file that defines `stripComments` under a fourth, unsearched name (Residual R3) is misclassified as undefended and blocks a legitimate new file forever, OR - the sharper failure - a file that correctly APPEARS to call a `stripComments`-shaped helper but whose helper is CRLF-blind (L13's own finding: one of 53 copies was silently broken) or MIME-wildcard-blind (A42) is misclassified as SAFE. **A census-shaped ratchet can prove coverage of the NAME, never of the BEHAVIOUR** - it is the same category error `this-repo.md`'s own opening warning names ("a syntax filter over a helper's source does not measure that helper's behaviour," the exact correction L13 had to make about itself). |
+| **(1) One shared, non-test helper module**, migrate scanning tests to import it | Up to 210, in practice fewer after Wave 1's per-subject triage | Largest one-time cost; needs a FROZEN ORACLE (stripComments' output on a representative real-file sample, captured before/after) proving the migration changes no existing stripping decision. Must fix A42 first or simultaneously. | None of its own - the risk is a silent migration regression, which the oracle catches. |
+| **(2) A lint rule** flagging a `readFileSync`-in-test-file plus a presence-shaped assertion with no stripping call in the same file | 1 new rule file | Cheapest to add; needs its own test suite and duplicates most of Section 1's census logic | A naive version (looking for the WORD `stripComments` rather than proving the call actually defends the assertion) reproduces the exact class of bug it exists to catch, one level up. |
+| **(3) A meta-test / coverage ratchet**, seeded from today's census, allowlist may only shrink | 1 new file | Cheap, and this repo already runs exactly this shape (`file-size-ceiling.structure.test.ts`'s `ALLOWED_OVERAGE`) | **Evaluated seriously, and it false-positives in exactly the way this row is about.** Measured (B4, Section 7 below): the syntactic proxy this ratchet would freeze from cannot see boolean-returning presence/absence checks (`.toBe(true)`/`.toBe(false)`) at all - **19 gap files invisible to it, including `src/lib/no-emojis.test.ts`, `src/lib/use-server-exports.test.ts`, `src/lib/module-graph/runtime-import-graph.test.ts`, `src/app/actions/action-guard-coverage.test.ts`, `src/app/components/ui/modalFocus.test.ts`, AND BOTH files this document's own Section 3 proofs are built on** (`grade-result-doors.wiring.test.ts`, `canvas-client-boundary.test.ts`). A ratchet frozen over a population its own census cannot see locks in the gap rather than closing it - **this is why Wave 3 is gated by Ruling 74, below, not merely caveated.** |
 
-**Recommendation, stated as a combination, per the brief's own suggestion
-that this need not be a single choice:** (3) as a cheap, immediate coverage
-ratchet to stop the gap from growing (ships in Wave 1's tail, no A42
-dependency, no per-file triage needed to seed it beyond today's census), PLUS
-(1) as the eventual consolidation, sequenced AFTER A42 lands or is
-explicitly ruled safe for the migrated files, because (1) is the only shape
-that actually reduces the 71-vs-87 duplicate-copy count L13 already flags as
-its own separate, related debt. (2) is not recommended on its own: it
-duplicates (3)'s census machinery inside a slower, harder-to-test surface
-(ESLint) for no behavioural gain over (3).
+**Recommendation, unchanged from the prior round, now gated**: (3) as a cheap
+coverage ratchet once its population is measured correctly (Wave 1's job, not
+before), PLUS (1) as the eventual consolidation after A42 lands. (2) is not
+recommended on its own for the same reason as before - it duplicates (3)'s
+census machinery on a slower, harder-to-test surface.
 
 ---
 
-## 6. The instrument for the fix itself - why a grep-shaped guard is refused here
+## 6. The instrument for the fix itself - the sabotage canary, specified (M4 applied)
 
-This pass's own brief states the rule directly: "a requirement whose subject
-is a produced value needs an assertion that executes the producer, and an
-assertion that greps for an identifier is the very shape this row is about -
-so do not propose one." Shape (3) above is exactly that shape at the
-COVERAGE level, and Section 5's table already states its false-positive mode
-plainly rather than hiding it - it is proposed as a cheap ratchet on
-POPULATION DRIFT, never as proof that any individual fix is correct.
+A grep-shaped guard is refused here, unchanged: "an assertion that greps for
+an identifier is the very shape this row is about." The instrument that
+satisfies the rule is a sabotage canary that EXECUTES the real, temporarily
+mutated file against the real test. The checked round specified this too
+loosely (`docs/l9-check.md` M4: no command named, no discriminating count, no
+recorded evidence, restore discipline dropped, and no concurrency clause). All
+four fixed here, plus the fifth (concurrency) the check found missing.
 
-**The instrument that DOES satisfy the rule, for each individual fix Wave 2
-lands, is the sabotage canary this pass's Section 3 already demonstrates the
-technique for**: for every assertion Wave 2b newly defends, comment out (in
-the real file, as part of that wave's own commit, then revert and re-apply
-exactly as `docs/l9-scope.md`'s own predecessor commit `6125260` did) the
-capability the assertion guards, run the REAL test, and confirm it goes RED;
-then restore the capability and confirm GREEN again. This EXECUTES the
-producer (the real assertion, against the real, temporarily-mutated file),
-which is what distinguishes it from a grep for `stripComments`'s name. Both
-proofs in Section 3 already demonstrate the extraction-and-fixture technique
-this requires, on scratch copies; a real Wave 2b/3 pass repeats it on the
-actual tree, inside its own commit, exactly as `6125260` already did for the
-one instance fixed so far.
+**For every assertion Wave 2 newly defends (2a or 2b), the fix's own commit
+must, in this exact order:**
+
+1. Run `npm run test:paths -- <the real test file>` on the UNMODIFIED,
+   already-fixed file and confirm GREEN (`Test Files N passed (N)`, exit code
+   0, read directly from the command, never through a pipe).
+2. `cp` the real file to a backup (never `git stash`, never rely on the
+   index) - e.g. `cp <file> <file>.l9-sabotage-backup`.
+3. Comment out, in the REAL file, exactly the capability the assertion
+   guards (the guard line, the import, the call - whichever this specific
+   assertion's fix newly defends).
+4. Run `npm run test:paths -- <the real test file>` again and require
+   **EXACTLY ONE failure - the target assertion**, matching this repo's own
+   precedent at `6125260` (`docs/BACKLOG.md:145`'s note: "exactly one failure
+   - the target assertion"). A file that goes red for an unrelated reason does
+   NOT satisfy this step.
+5. **Record the VERBATIM red output** (the failing assertion's expected vs.
+   received values, and the exit code) in the wave's own commit message or an
+   adjoining note - not merely "it went red," per `docs/loop/iteration-caps.md`
+   entry gate 2 and `docs/l9-check.md`'s own citation of "disposal is recorded
+   with evidence, not asserted."
+6. **Restore from the `cp` backup** - `cp <file>.l9-sabotage-backup <file>` -
+   **never `git checkout --`**, which reverts to the index and can destroy
+   uncommitted work still in flight on that file from a concurrent chunk.
+7. Run `npm run test:paths -- <the real test file>` a third time and confirm
+   GREEN again, matching step 1's baseline exactly.
+8. Delete the backup file only after step 7's green is confirmed.
+
+**Concurrency, per `docs/DEV_LOOP.md`'s standing rule that "no two agents may
+sabotage-verify on the tree at once" is a shared resource invisible in any
+file list**: Wave 4 runs as its own single-agent step, never fanned out in
+parallel with any other wave that also mutates and restores a file, and never
+concurrently with a sibling agent whose own file list includes the target file
+of a given canary. Before step 3 above, run `git status --short` and treat any
+unexpected modification to the target file as a signal to STOP and re-check
+rather than proceed - a kill or a stall mid-sabotage on that exact file is
+recoverable only from the `cp` backup, never by assuming the tree is clean.
 
 ---
 
 ## 7. Wave plan
 
-**Wave 1 - triage (a seat, e.g. `loop-test-author`; produces a classification
-table, no production or test code changes).**
+**Wave 1 - triage (a seat, e.g. `loop-test-author`; produces a classification,
+no production or test code changes).**
 
-- Write set: a new scratchpad or docs artifact, classifying the 208-file
-  `readFileSync` population (not just the 111-114 gap, because the two
-  set-difference orders in Section 1 disagree by 3 and a per-file triage
-  resolves that disagreement as a side effect) into presence / absence /
-  comment-content buckets, PER ASSERTION, using Section 1's proxy as a
-  starting list to refine, not as ground truth (it undercounts
-  boolean-returning presence checks like `grade-result-doors.wiring.test.ts`'s
-  own `referencesUngradedFlag`, which is exactly the kind of file Wave 1 must
-  still catch).
-- Also seeds Shape (3)'s frozen allowlist (Section 5) from today's census, so
-  the ratchet can ship in this wave's tail without waiting for the full
-  per-assertion triage to finish for every file.
+- **Write set, restored to three parts** (the checked round collapsed this to
+  one number, B1(c)):
+  1. The 113-file gap population (Section 1), classified PER ASSERTION by
+     SUBJECT under Ruling 72 (code-behaviour / file-content /
+     stripper-mechanism-meta-test), refining Section 1's proxy which
+     undercounts boolean-returning checks (Wave 3's B4 finding names five
+     concrete examples that must be added to the census, not just the gap).
+  2. **The other 97 files that already strip by some idiom** (Section 1's
+     stripper population, not just the 113-file gap), to confirm they are
+     correctly classified as already-defended under Ruling 72 - i.e. that
+     each is genuinely a code-behaviour scanner stripping correctly, not a
+     file-content scanner stripping when it should not.
+  3. **`modalAdoptionScan.ts`'s two dependents** (`modalAdoption.wiring.test.ts`,
+     `modalAdoptionWiring.attributes.test.ts`), to confirm they correctly
+     inherit whatever A42's own fix (still `unscoped`) ends up doing to the
+     shared helper - the one obligation the checked round's collapse dropped
+     entirely, because it is about a fix that has not happened yet and is not
+     implied by any population count.
+- Also produces the frozen allowlist Shape (3) (Section 5) will need, but
+  **does not freeze it** - that is Wave 3's own step, gated below.
 - Depends on: nothing code-side. Can start immediately and independently of
   A42.
 
-**Wave 2a - remove wrongful stripping from absence assertions (an
-implementer wave; NOT blocked on A42).**
+**Wave 2a - code-behaviour absence scanners: make comment-matching complete,
+not remove it (reshaped by Ruling 72).**
 
-- File list: produced by Wave 1. None confirmed by this pass's sampling (the
-  one absence-style test sampled, `canvas-client-boundary.test.ts`, already
-  correctly does not strip comments - see Section 3b) - same finding as the
-  prior scope, not contradicted.
+Under the withdrawn binary this wave was "remove stripping from absence
+assertions" and measured empty. Under Ruling 72 it is: **for every absence
+assertion whose subject is code-behaviour, confirm its comment-handling covers
+BOTH `//` and `/* */` forms; where it does not, fix it.**
 
-**Wave 2b - add stripping (or a positional-anchor alternative, per Section 0's
-disposition table noting `snapshot-grading.structure.test.ts` now uses one)
-to presence assertions currently unguarded (an implementer wave; BLOCKED on
-A42 for any file wave 1 confirms could contain a MIME-wildcard `accept=`
-attribute, per Section 4).**
+- **Sized from B2's measurement, corroborated independently this revision**
+  (`wave2a_revision2.py`, this pass's scratchpad, exact match on the two
+  coarsest counts): 97 files strip comments by one of the three named idioms
+  (my count: 97, identical to the check's); of those, 78 files / 446
+  occurrences (upper bound) carry an absence-shaped assertion (my count: 78
+  files / 446 occurrences, identical to the check's). The finer breakdown -
+  which of those occurrences apply to text read from a real file versus a
+  stripper's own fixture - is the check's own figure (95 occurrences / 30
+  files real, 21 occurrences / 15 files stripper-canary, 17/9 unresolved),
+  reproduced by this pass at a coarser grain (131 occurrences / 39 files
+  "stripped-variable" heuristic, not independently re-derived at the check's
+  finer canary-exclusion grain within this revision's time budget - stated
+  plainly rather than silently adopted as exact).
+- **Named write-set items already confirmed, not merely proposed:**
+  - `src/lib/canvas-client-boundary.test.ts`'s `findClientUnsafeBarrelImports`
+    (Section 3b) - extend the `//`-ignoring anchor to also ignore `/* */`
+    block comments, and sweep for any currently-live block-commented
+    `@/lib/canvas`/`@/lib/canvas-modules` import before or with the fix (this
+    absorbs Residual R2, D9 in Section 0 - RELOCATED here rather than left as
+    a residual with a fabricated owner).
+  - The stripper-mechanism-meta-test exclusion (Section 2) applies to the
+    canary-shaped occurrences named in B2 (e.g.
+    `src/app/components/autoGradeTransition.wiring.test.ts:32`,
+    `expect(stripped).not.toContain("used to live here")` inside
+    `describe("stripComments (canary first)"`, confirmed this pass) - these
+    are excluded BY RULE, not enumerated.
+  - The remainder (the real-file occurrences B2/this revision's script found)
+    is Wave 1's classification output, not sampled ad hoc here.
+- File list beyond the two confirmed items above: produced by Wave 1
+  (dependency, not a note).
 
-- One file is confirmed as a candidate by this pass:
-  `src/lib/grade/grade-result-doors.wiring.test.ts`'s `referencesUngradedFlag`
-  (Section 3a) - already independently flagged as RES-7 on the A13 row. This
-  file has no MIME-wildcard exposure risk (it scans `.ts`/`.tsx` source for a
-  builder-name call and a flag word, not an `accept=` attribute), so it is
-  NOT blocked on A42 and could ship standalone.
+**Wave 2b - presence direction, code-behaviour scanners currently unguarded
+(BLOCKED on A42 file-by-file, per Section 4).**
+
+- **Write set corrected per B3**: `src/lib/grade/grade-result-doors.wiring.test.ts`'s
+  `referencesUngradedFlag` AND `src/lib/workflows/registry/steps.grading-draft-flow.ts`
+  (the caller the prior round's write set omitted, confirmed this pass at
+  Section 3a - comment-stripping the predicate with no other change turns the
+  wiring test red on this second file today).
+- **Predicate decision required, not just a stripping call** (Section 3a):
+  either widen `referencesUngradedFlag` to recognise `ungradedResults(`/
+  `gradedResults(`, or keep it narrow and accept that this file's wiring test
+  goes red until the file itself gains an explicit ungraded-aware guard. State
+  which, and why, against the two live comment lines (`:598,600,601`) that
+  currently satisfy the predicate.
+- Not blocked on A42 (Section 4: neither file is a JSX/TSX file with an
+  `accept=` attribute).
 - The remainder of the file list comes from Wave 1.
 
-**Wave 3 - the meta-test / coverage ratchet (Shape (3), Section 5) - an
-implementer wave, seeded from Wave 1's census, no A42 dependency.**
+**Wave 3 - the meta-test / coverage ratchet (Shape (3), Section 5). NOT
+DISPATCHABLE UNTIL WAVE 1'S PER-SUBJECT CLASSIFICATION EXISTS - this is a
+requirement, not a note (RULING 74).**
 
-- New file only: `src/lib/source-scan-comment-coverage.structure.test.ts`
-  (name illustrative, not binding). Ships independently of 2a/2b's timeline.
+Freezing an allowlist now would freeze it against Section 1's syntactic proxy,
+which is proven blind to 19 gap files including `src/lib/no-emojis.test.ts`
+and BOTH of this document's own proof files
+(`grade-result-doors.wiring.test.ts`, `canvas-client-boundary.test.ts`,
+Section 5's Shape (3) row). A ratchet seeded from a population its own census
+cannot see is a ratchet that locks in exactly the gap this row exists to
+close: after Wave 2b fixes `grade-result-doors.wiring.test.ts`, the ratchet
+could not credit the fix (the file was never in the allowlist), and a newly
+added boolean-shaped undefended presence check anywhere in `src/` would pass
+the ratchet silently, forever.
 
-**Wave 4 - sabotage canary per newly-defended assertion (Section 6) -
-follows 2b, one canary per assertion Wave 2b lands, not a separate file.**
+- **Dependency, stated as a blocking requirement**: Wave 3 may not be
+  dispatched until Wave 1 has produced the per-subject classification
+  (Section 7, Wave 1) INCLUDING the boolean-returning shapes named in Section
+  5's Shape (3) row. Seeding the allowlist from "today's census" without that
+  classification, as the prior round proposed, is exactly the shape Ruling 74
+  forbids.
+- New file only once dispatched: `src/lib/source-scan-comment-coverage.structure.test.ts`
+  (name illustrative, not binding).
 
-- Depends on: 2b's actual diffs. This is the load-bearing correctness
-  instrument, per Section 6 - Wave 3's ratchet is coverage-only and must not
-  be substituted for this.
+**Wave 4 - sabotage canary per newly-defended assertion (Section 6). Follows
+2a/2b's actual diffs.**
+
+- Depends on: 2a's and 2b's actual diffs, run one canary per assertion either
+  wave lands, per Section 6's eight-step protocol and its concurrency clause.
+- This is the load-bearing correctness instrument; Wave 3's ratchet is
+  coverage-only (R7, Section 8) and must not be substituted for it.
 
 ---
 
 ## 8. Residual register
 
-| # | What is not proven now | Owner | Instrument | Object / direction of failure | Step that measures it |
+| # | What is not proven now | Owner | Instrument | Object / direction of failure | Step |
 |---|---|---|---|---|---|
-| R1 | Full per-assertion triage of the 208-file `readFileSync` population (presence / absence / comment-content), refining Section 1's syntactic proxy which undercounts boolean-returning presence checks | `loop-test-author` | A script pairing each `expect(...)` call (not just `.toContain`/`.toMatch` - also `.toBe(true/false)` on a named boolean-returning scan function) with whether a comment-stripping call of ANY name precedes it in the same file | The 208-file population; direction of failure: a file misclassified ships the wrong-direction fix, either leaving a gap open or weakening a legitimate absence guard | Wave 1 |
-| R2 | Whether any file in the tree today contains a `/* */`-block-commented import of `@/lib/canvas` or `@/lib/canvas-modules` that would trip `canvas-client-boundary.test.ts`'s false positive (Section 3b) - not swept this pass, same as the prior scope | The fix wave's first step (A42's own STEP field already claims this sweep as its job) | A Node script replaying `findClientUnsafeBarrelImports` verbatim over every file `isUseClientModuleText` selects, flagging any match whose line falls inside a `/* */` span | `src/lib/canvas-client-boundary.test.ts`'s scanned file set; direction of failure: a false CI failure the first time such a file is added | Before or alongside any L9 wave touching this file, or A42's own sweep, whichever lands first |
-| R3 | The 111-vs-114 adjusted-gap disagreement (Section 1) traces to exactly one file (`src/lib/decks/deck-source.test.ts`) whose classification differs between two independently-coded scripts computing the same set difference - not resolved by this pass | `loop-test-author`'s Wave 1 | Read `src/lib/decks/deck-source.test.ts` directly and determine by hand which bucket it belongs in; fold that one-file resolution into Wave 1's broader per-file pass rather than treating it as a separate step | That one file; direction of failure: neither direction is dangerous on its own (a 3-file floor/ceiling gap), but an unresolved 3-file disagreement between two scripts measuring the SAME population is exactly the kind of instrument disagreement `traps-spec.md` warns never to leave unmeasured | Wave 1 |
-| R4 | Whether other currently-live files besides the two proven in Section 3 have the SAME "the assertion's verdict does not depend on whether the real code executes" property - Section 3 sampled exactly 2 of 208 | `loop-test-author`'s Wave 1 | For each presence-style assertion (from R1's classification), extract its search string/function and replay it against a scratch copy with the guarded line commented out, exactly as `proof1_driver.ts`/`proof2_driver.ts` do here | The presence-assertion subset of the 208-file population; direction of failure: a live-armed instance (like the fixed ModalShell one, or the fresh `grade-result-doors.wiring.test.ts` one this pass found) ships unnoticed for another cycle | Wave 1's per-file audit |
-| R5 | The A42/L9 cross-reference (Section 4) is stated in this document and in each row's own backlog text, but `docs/BACKLOG.md` has no structured cross-link between the two rows beyond prose | Whichever agent next edits `docs/BACKLOG.md` (not this pass - `docs/BACKLOG.md` is outside this pass's write set) | The two rows themselves, cross-linked explicitly | `docs/BACKLOG.md`'s L9 and A42 rows; direction of failure: a future session scopes or fixes A42 in isolation and a concurrent L9 wave copies the pre-fix regex into new files because the rows were never linked in a form more durable than prose | The next backlog reconciliation or push that touches either row |
-| R6 | Whether a Wave 2 edit breaks an assumption a DIFFERENT in-flight sibling agent's branch currently relies on - unverifiable in this environment (no live multi-branch CI view) | The repo owner / orchestrator at push time | `docs/DEV_LOOP.md`'s "Regression, batched per group" step | Any actual code wave from this plan; direction of failure: a wave passes every local gate but breaks a sibling in-flight branch's shared-file assumption | The regression pass at whichever wave's push lands first |
-| R7 | Shape (3)'s coverage ratchet (Section 5/7, Wave 3) is a NAME-level census and cannot detect a `stripComments`-shaped helper that runs but is behaviourally wrong (CRLF-blind per L13, or MIME-wildcard-blind per A42) | Whoever authors Wave 3's meta-test | None yet - this is the false-positive mode Section 5's table already states; the only real mitigation is NOT relying on Wave 3 alone, which is why Wave 4's sabotage canary is marked load-bearing and Wave 3 is marked coverage-only | Any file the ratchet marks "defended" whose defense mechanism is itself broken; direction of failure: false confidence, exactly the shape this whole row is about, one level up | Wave 4, and any future L13-style behavioural audit of the stripping helpers the ratchet credits |
+| R1 | Full per-assertion classification of the readFileSync population BY SUBJECT (code-behaviour / file-content / stripper-mechanism-meta-test, Ruling 72), refining Section 1's proxy which undercounts boolean-returning checks | `loop-test-author` | A script pairing each `expect(...)` call (including `.toBe(true/false)` on a named boolean-returning scan function, not just `.toContain`/`.toMatch`) with its subject classification and whether comment-stripping of ANY name precedes it in the same file | The full readFileSync population; a misclassified file ships the wrong-direction fix or leaves a gap open | Wave 1 |
+| R2 | RELOCATED, not a residual - see Section 7, Wave 2a and D9 in Section 0. The prior round's owner ("the fix wave's first step" / implicitly A42) was fabricated (M1): A42's `owns`/`verify`/`blocked_by` are all `-`, and `canvas-client-boundary.test.ts` is not in A42's own named population (`grep -c stripComments` returns `0`). Discharged into Wave 2a's own write set instead of left as an unowned residual. | - | - | - | - |
+| R3 | RESTORED (D10): a third stripping idiom under a third name would hide inside the 113-file gap or the 97-file stripper population, uncounted by either | `loop-test-author`'s Wave 1 | Extend Wave 1's classification script to flag any function whose body contains a `.replace(` call removing `/\*...\*\/` or `//...` sequences under ANY name, not just the three named idioms | The full readFileSync population; a hidden fourth idiom is misclassified as undefended (widens the false gap) or as defended (hides a real gap) | Wave 1 |
+| R3b | The 111-vs-114 adjusted-gap disagreement the prior two rounds measured but never identified the file(s) for - this revision confirmed the one file previously blamed (`src/lib/decks/deck-source.test.ts`) is NOT the cause (D11) and does not know what is | `loop-test-author`'s Wave 1 | Re-run both set-difference orders and print the SYMMETRIC DIFFERENCE of the two file lists (not just the counts), then read whichever file(s) appear and classify by hand | The gap population; a 3-file (or however many, re-measured) floor/ceiling spread is not dangerous on its own, but an unidentified instrument disagreement on the SAME population is exactly what `docs/loop/traps-spec.md` says never to leave unmeasured | Wave 1 |
+| R4 | NARROWED (M5): whether files besides the two this document already proves live (Section 3a: `useRepoGradesGradingActions.ts`/`steps.grading-draft-flow.ts` via `grade-result-doors.wiring.test.ts`; Section 3b: the mechanism proof on `canvas-client-boundary.test.ts`) share the "verdict does not depend on real code executing" property | `loop-test-author`'s Wave 1 | For each REMAINING presence-style assertion from R1's classification, extract its predicate and replay it against a scratch copy with the guarded line deleted outright (the Variant-D technique, no commenting-out needed to demonstrate it) | The presence-assertion subset, minus the two files this document already covers; a live-armed instance ships unnoticed another cycle | Wave 1's per-file audit |
+| R5 | RETARGETED (M3): the A42/L9 cross-reference is stated in prose in both rows' notes but `docs/BACKLOG.md` (GENERATED, per its own header, `docs/BACKLOG.md:3-6`) has no structured cross-link, and hand-editing the generated file fails `npm run backlog:check-generated` (`package.json:13`, confirmed present this pass) | Whichever agent next edits `docs/backlog.yml` (outside this pass's write set) | The two rows in `docs/backlog.yml` itself, cross-linked explicitly, then re-rendered via `npm run backlog:render` | `docs/backlog.yml`'s L9 and A42 entries; a future session scopes or fixes A42 in isolation and a concurrent L9 wave copies the pre-fix regex into new files | The next backlog reconciliation or push touching either row |
+| R6 | Whether a Wave 2 edit breaks an assumption a DIFFERENT in-flight sibling agent's branch currently relies on - unverifiable in this environment (no live multi-branch CI view) | The repo owner / orchestrator at push time | `docs/DEV_LOOP.md`'s "Regression, batched per group" step | Any code wave from this plan; a wave passes every local gate but breaks a sibling branch's shared-file assumption | The regression pass at whichever wave's push lands first |
+| R7 | Shape (3)'s coverage ratchet (Wave 3) is a NAME-level census and cannot detect a stripping helper that runs but is behaviourally wrong (CRLF-blind per L13, or MIME-wildcard-blind per A42) | Whoever authors Wave 3's meta-test, once Ruling 74's gate clears | None yet beyond Wave 4's sabotage canaries - the mitigation is NOT relying on Wave 3 alone, which is why it is coverage-only and Wave 4 is load-bearing | Any file the ratchet marks "defended" whose defence mechanism is itself broken; false confidence, one level up from this row's own subject | Wave 4, and any future L13-style behavioural audit |
+| R8 | `docs/backlog.yml`'s L9 note states the pre-Ruling-72 binary framing ("an assertion that something is ABSENT must NOT strip") as a general rule, unscoped to file-content subjects - a future reader could inherit the withdrawn binary from the row's own prose even after this scope applies Ruling 72 | Same receiver as R5 - whichever agent next edits `docs/backlog.yml` | Update the L9 note's triage-rule sentence to state the subject-based rule (Section 2) instead of the binary, keeping the row's existing "correctly ignores / falsely fires" language, which is already consistent with Ruling 72 | `docs/backlog.yml`'s L9 entry; a later session designs Wave 2a or 2b against the row's stale prose instead of this scope | Same push as R5 |
 
 ---
 
 ## 9. Leverage
 
-Per `docs/loop/leverage.md`, this row is a chore on the loop's OWN
-instruments - it changes no code a user reaches, adds no persisted record, no
-capture, no live-loop control, no integration, no scale, and no guaranteed
-output property visible to an instructor or student. **The honest answer is
-none**: this is a guard on the guards, not a feature, and manufacturing a
-leverage claim for it would be exactly the failure mode `leverage.md`'s own
-"What a failing answer looks like" section warns against (a claim that names
-no mechanism a user experiences). No leverage claim is written for this row,
-and none should be expected from whichever wave eventually implements it.
+Per `docs/loop/leverage.md`, unchanged from the prior round and confirmed
+correct by the check's own "Confirmed sound" list: this row is a chore on the
+loop's own instruments. It changes no code a user reaches, adds no persisted
+record, no capture, no live-loop control, no integration, no scale, and no
+guaranteed output property visible to an instructor or student. No leverage
+claim is written, and none should be expected from whichever wave eventually
+implements this.
 
 ---
 
-## 10. Fork - stated so every answer terminates
+## 10. Fork - resolved by RULING 73, ground corrected
 
-**The fork:** should L9 and A42 remain two separate backlog rows with L9's
-Wave 2b explicitly blocked on A42 (as Section 4 and the prior scope both
-already assume), or should the two be MERGED into one sequenced item now that
-this pass has confirmed they share both a mechanism (the same regex family)
-and, per Section 5, the single existing shared helper module
-(`modalAdoptionScan.ts`) that either fix would need to touch?
+The prior round's Section 10 framed this as an open fork with a
+recommendation. It was not open - the orchestrator had already ruled (the
+check calls it "the ruling handed to this check"), and this section restates
+that standing ruling with its false ground struck, per Ruling 73.
 
-- **Answer X - keep separate, sequenced (this pass's default assumption
-  throughout, and the recommendation):** L9 ships Waves 1, 2a, and 3 (triage,
-  absence-direction fixes, and the coverage ratchet) now, independently of
-  A42, because none of those three needs the shared regex to be correct
-  first. Wave 2b (the presence-direction fixes that would ADD new stripping
-  calls) stays blocked file-by-file on A42 having either landed a fix or an
-  oracle-backed ruling of safety for the specific files touched. Cost of
-  being wrong: if A42 and L9's remedies turn out to need the same design
-  decision anyway (e.g., both settle on Shape (1)'s shared helper), the two
-  rows will have been scoped separately for no reason, costing one redundant
-  scoping pass - cheap, and already partly paid (this document already reads
-  A42's row in full at every relevant point).
-- **Answer Y - merge into one item:** a single scope/architect pass designs
-  the shared, corrected stripping mechanism (Shape (1)) once, satisfying both
-  rows' remedy requirements simultaneously, and both backlog rows close
-  together when it ships. Cost of being wrong: A42 was filed and is owned as
-  its own row already (`docs/BACKLOG.md` line 98, with its own STEP field);
-  merging it into L9's scope without A42's own owner agreeing re-opens a row
-  this pass has no mandate to close or redirect, and L9's non-2b waves (which
-  do not need A42 at all) would then wait on a larger, harder item for no
-  reason.
+**The ruling: L9 and A42 stay separate.** The prior round gave two grounds:
 
-**Recommendation: X.** A42 already has its own filed scope, its own STEP
-field, and its own owner path; L9's Waves 1/2a/3 do not depend on it at all,
-and gating them on a merge would cost real, immediate, unblocked work for a
-consolidation that Shape (1) in Section 5 already names as the eventual
-right move WITHOUT requiring the two backlog rows themselves to merge first.
+1. ~~"A42 already has its own filed scope, its own STEP field, and its own
+   owner path."~~ **FALSE, struck.** Re-verified this pass: `ls docs | grep -i
+   a42` returns nothing (no filed A42 scope document exists), and A42's row
+   (`docs/BACKLOG.md:98`) has `owns`/`verify`/`blocked_by` all `-`, `state`
+   `unscoped`. This document's own Section 4 already said "unscoped" eleven
+   lines from where the prior round's Section 10 said the opposite - both
+   sentences existed in the same document, and the second was wrong.
+2. **"L9's other waves (1, 2a, 3) do not need A42 to be correct first."**
+   **This ground survives and is measured true**: Wave 1 is a classification
+   pass, touching no stripping regex; Wave 2a's confirmed candidate
+   (`canvas-client-boundary.test.ts`) scans for an `^import` anchor, never an
+   `accept=` attribute; Wave 3, once dispatchable, is a census/ratchet over
+   assertion shapes, not a new stripping call. Only Wave 2b's file-by-file
+   gating (Section 4, Section 7) touches the shared regex family at all, and
+   it is already gated on A42 per file, not on the row-level merge question.
+
+**The ruling's conclusion is unchanged: keep the rows separate.** Only its
+stated grounds change - one struck, one confirmed by measurement. No further
+fork is open here; nothing in this section needs a decision from the owner.
 
 ---
 
 ## 11. Final gate check for this pass
 
 This pass wrote documentation only (`docs/l9-scope.md`); read several
-production and test files for citation but edited none. The structural gates
-below were run both BEFORE this document existed in its current form
-(baseline, Section 1 sub-note) and are re-run now to confirm nothing in `src/`
-changed as a side effect of writing this file:
+production and test files for citation but edited none.
 
-Command: `npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts`
+**Corrected reasoning (m4): both structural gates below DO scan `docs/`** -
+`src/lib/no-emojis.test.ts:237,254` walks `["src", "docs"]` with `.md` in
+`SCAN_EXTENSIONS` (confirmed this pass, `sed -n '236,254p'`), and
+`src/source-bytes.structure.test.ts` walks `process.cwd()` with `.md` in its
+own extension set. So this file IS inside both gates' population, and
+re-running them after writing it is the actual evidence that writing this
+file introduced no NUL byte, no BOM, no emoji and no mojibake - not a
+formality, as the prior round's stated reason implied.
 
-Result: `Test Files 2 passed (2)`, `Tests 21 passed (21)`, `COVERED
-src/lib/no-emojis.test.ts files=1 passed=18`, `COVERED
-src/source-bytes.structure.test.ts files=1 passed=3` - identical to the
-pre-write baseline run minutes earlier in this same session, as expected
-since this pass touches no file either gate scans.
+Re-run this pass, exit code read directly from the command:
 
-Also re-ran, as evidence for Section 3's citations rather than as a
-structural gate: `npm run test:paths -- src/lib/grade/grade-result-doors.wiring.test.ts src/lib/canvas-client-boundary.test.ts` →
-both GREEN, `Tests 7 passed (7)` and `Tests 15 passed (15)` respectively,
-confirming neither citation was mutated by anything else running
-concurrently in this session.
+```
+npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+```
 
-`git status --short` at the end of this pass (paste below when running) must
-show exactly one modified/added path under `docs/` for this file plus the
-unrelated sibling-agent paths already present at session start - nothing
-under `src/`.
+```
+Test Files  2 passed (2)
+     Tests  21 passed (21)
+COVERED src/lib/no-emojis.test.ts files=1 passed=18
+COVERED src/source-bytes.structure.test.ts files=1 passed=3
+EXITCODE:0
+```
+
+Also re-run, as evidence for Section 3's citations rather than as a
+structural gate:
+
+```
+npm run test:paths -- src/lib/grade/grade-result-doors.wiring.test.ts src/lib/canvas-client-boundary.test.ts
+```
+
+```
+Test Files  2 passed (2)
+     Tests  22 passed (22)
+COVERED src/lib/grade/grade-result-doors.wiring.test.ts files=1 passed=7
+COVERED src/lib/canvas-client-boundary.test.ts files=1 passed=15
+EXITCODE:0
+```
+
+`git status --short` immediately before writing this file (this pass's session
+start, after the check's own pass had already landed its file and the
+sibling-owned `walkthrough-announcement` files had already been resolved by
+their own agent):
+
+```
+ M docs/css-orphans.md
+```
+
+`git status --short` after writing this file and re-running both gates above
+(both still exit 0, `Tests 21 passed (21)` unchanged):
+
+```
+ M docs/css-orphans.md
+ M docs/l9-scope.md
+```
+
+`docs/l9-scope.md` is this pass's own entry (`M`, not `??`, because it already
+existed at `4b33346`). `docs/css-orphans.md` is sibling-owned and untouched by
+this pass, unchanged from the pre-write status above. No `git stash`, no
+`git add -A`, and no `git checkout --` was run at any point in this pass.

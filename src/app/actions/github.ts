@@ -9,7 +9,7 @@ import { rememberRubric } from "@/lib/research/rubric-bank";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, isScaffoldingFile, excludeInstructionsFromDigest, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
 import { listGithubModels, chatWithGithubModel, type GithubModel, type ModelUsage, type ChatMessage } from "@/lib/github-models";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireOwner, requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
 import { studentRepoName } from "@/lib/student-repo-names";
 import { fetchJUnitSummary, testWorkflowYaml } from "@/lib/github-test-workflow";
@@ -257,7 +257,15 @@ export async function listGithubBranchesAction(
 /** Build a bounded text digest of a repo (README + source) for course/rubric generation. */
 export async function ingestRepoAction(repoRef: string, branch?: string): Promise<{ digest: RepoDigest } | { error: string }> {
   try {
-    await requireOwner();
+    // R4 (docs/r4-scope.md section 5): this action is its own client-reachable
+    // "use server" endpoint (referenced from the workflow registry that ships
+    // in the client bundle), on the identical GitHub-PAT chain as
+    // extractDeckSourceRepoAction (deck-source.ts). The old guard was a
+    // permissive alias admitting any active account - hardening only the
+    // deck-source wrapper would leave this endpoint open to the same
+    // exposure. The other 26 permissive-alias call sites in this file are
+    // untouched and remain R2's own review.
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return { digest: await ingestRepo(parsed.owner, parsed.repo, {}, branch) };

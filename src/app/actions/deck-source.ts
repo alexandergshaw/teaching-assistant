@@ -16,9 +16,15 @@
 // requireUser, not the deprecated requireOwner alias: that alias is literally
 // `return requireUser()` (auth.ts:451-453), so it reads as an ownership check and
 // performs a signed-in check. Backlog row R2 exists to retire it, and new call
-// sites make that row bigger. These actions are correctly user-scoped: a deck is
-// built from material the caller supplies, per-user, with no owner-only resource.
-import { requireUser } from "@/lib/supabase/auth";
+// sites make that row bigger.
+//
+// The two actions below are NOT scoped identically (R4, docs/r4-scope.md
+// section 2.3). extractDeckSourceFileAction reads only the caller's own
+// uploaded bytes - no owner-only resource on this path. extractDeckSourceRepoAction
+// calls ingestRepoAction (./github), which reaches the deployment's single
+// GITHUB_TOKEN PAT (github.ts:258, github.digest.ts:262, github.repos.ts:32) -
+// an owner-private resource, so it uses requireAppOwner() instead.
+import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { extractTextFromBuffer } from "@/lib/office-extract";
 import { checkWireBudget } from "@/lib/upload-budget";
 import { ingestRepoAction } from "./github";
@@ -55,7 +61,7 @@ export async function extractDeckSourceFileAction(
 
 /** Extract deck source materials from a repo reference (owner/name or a github.com URL). */
 export async function extractDeckSourceRepoAction(repoRef: string): Promise<DeckSourceResult | { error: string }> {
-  await requireUser();
+  await requireAppOwner();
 
   const trimmed = repoRef.trim();
   if (!trimmed) return { error: "Enter a repository as owner/name or a github.com URL." };

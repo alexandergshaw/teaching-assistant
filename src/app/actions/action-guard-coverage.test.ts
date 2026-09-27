@@ -778,6 +778,10 @@ const GITHUB_FILES = new Set([
   "actions/course-intel.ts",
   "actions/course-project.ts",
   "actions/current-events-assignments.ts",
+  // R4 (docs/r4-scope.md): moved in from GITHUB_FILES_PENDING_ENUMERATION
+  // once each action was per-action reviewed against both owner-private
+  // targets (lib/github.repos.ts, lib/canvas-credentials.ts).
+  "actions/deck-source.ts",
   "actions/github-content.ts",
   "actions/github-repos.ts",
   "actions/github-student-repos.ts",
@@ -790,6 +794,7 @@ const GITHUB_FILES = new Set([
   "actions/lms-generation-refine.ts",
   "actions/lms-generation.ts",
   "actions/lms-syllabus-buttons.ts",
+  "actions/media-likeness.ts",
   "actions/messaging-outlook.ts",
   "actions/messaging.ts",
   "actions/repo-grades.ts",
@@ -800,6 +805,7 @@ const GITHUB_FILES = new Set([
   "actions/visualizer-coverage.ts",
   "actions/visualizer-selection.ts",
   "actions/visualizer.ts",
+  "actions/walkthrough-announcement.ts",
   "actions/weekly-announcement-drafting.ts",
   "api/automations/run-now/route.ts",
   "api/lms-export/selection/route.ts",
@@ -811,53 +817,70 @@ const GITHUB_FILES = new Set([
 // R2 wave 0 (RULING 83): the PERMISSIVE exceptions inside an otherwise
 // owner-only cohort - the mirror image of MEDIA_OWNER_ONLY_ACTIONS above,
 // which lists the RESTRICTIVE exceptions inside an otherwise-permissive
-// cohort. Starts empty: populated only as wave 1-3's per-action review
-// proves a specific GITHUB_FILES action's own body never reaches the
-// GitHub-spending chain, each entry carrying a one-line stated reason.
-const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {};
+// cohort. Populated by R4's per-action review (docs/r4-scope.md section 2),
+// each entry carrying a one-line stated reason. Traced against BOTH
+// owner-private targets (lib/github.repos.ts, lib/canvas-credentials.ts -
+// RULING 90): none of these nine reaches the GitHub PAT, and the one that
+// reaches the Canvas credential resolver (postWalkthroughAnnouncementAction)
+// is contained at resolveCanvasCredential, which only reaches the owner's
+// env pair when the CALLING identity's own role is "owner" - see
+// docs/r4-scope.md section 2.4.
+const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
+  extractDeckSourceFileAction:
+    "reads only the caller's own uploaded bytes via extractTextFromBuffer/checkWireBudget - never touches the ./github edge its sibling extractDeckSourceRepoAction does",
+  getMostRecentAnnouncementExemplarAction:
+    "reads only the caller's own Supabase row (announcement-exemplars.ts, scoped on user.id) - no GitHub or Canvas import",
+  listAnnouncementExemplarsAction:
+    "reads only the caller's own Supabase row (announcement-exemplars.ts, scoped on user.id) - no GitHub or Canvas import",
+  saveAnnouncementExemplarAction:
+    "writes only the caller's own Supabase row (announcement-exemplars.ts, scoped on user.id) - no GitHub or Canvas import",
+  deleteAnnouncementExemplarAction:
+    "deletes only the caller's own Supabase row (announcement-exemplars.ts, scoped on user.id) - no GitHub or Canvas import",
+  gatherWalkthroughResourcesAction:
+    "calls deriveResourceConcepts (./learning-resources-generator) and findResourceLinksForConceptsAction (./learning-resource-links) - both walk to zero violations against either target",
+  draftWalkthroughAnnouncementAction:
+    "calls only callLlm/prompt builders - never calls createAnnouncementFromMarkdown, the file's one Canvas call site",
+  draftWalkthroughVideoScriptAction:
+    "calls only callLlm/prompt builders - never calls createAnnouncementFromMarkdown, the file's one Canvas call site",
+  postWalkthroughAnnouncementAction:
+    "its one call to createAnnouncementFromMarkdown reaches resolveCanvasCredential, which only touches the owner's env pair when the CALLING identity's own role is 'owner' - a non-owner caller gets CANVAS_CREDENTIAL_REQUIRED_MESSAGE, never the owner's Canvas token",
+};
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
 // closure" test below for the full account): docs/r2-scope.md derived its
 // 81-file/41-file/255-call cohort from `grep -rlE "await requireOwner\(\)"`,
 // which is blind to a file that already stopped calling the alias. Walking
-// EVERY "use server" file's own closure (not just those 81) finds these 4
-// ALSO reaching lib/github.repos.ts, entirely outside R2's stated universe:
-//   - actions/deck-source.ts: 2 actions call requireUser() directly today
-//     (already migrated off the alias per its own P14 comment) and reach
-//     GitHub - UNREVIEWED under RULING 83's rule, same shape as R2's own
-//     exposure, just never counted by R2's census.
-//   - actions/walkthrough-announcement.ts: 7 actions, same shape - its own
-//     header comment ("every action below calls requireUser() explicitly,
-//     never requireOwner()") shows the migration happened without the
-//     GitHub-reachability question ever being asked.
+// EVERY "use server" file's own closure (not just those 81) originally found
+// 4 files ALSO reaching lib/github.repos.ts, entirely outside R2's stated
+// universe. R4 (docs/r4-scope.md) per-action reviewed three of them against
+// both owner-private targets (lib/github.repos.ts, lib/canvas-credentials.ts)
+// and folded them into GITHUB_FILES/GITHUB_NOT_OWNER_ONLY above:
+//   - actions/deck-source.ts: 1 of 2 actions (extractDeckSourceRepoAction)
+//     genuinely reaches the GitHub PAT via ingestRepoAction and moved to
+//     requireAppOwner(); the other (extractDeckSourceFileAction) stays
+//     requireUser(), reviewed safe.
+//   - actions/walkthrough-announcement.ts: 8 actions, all reviewed safe on
+//     requireUser() - its own header comment ("every action below calls
+//     requireUser() explicitly, never requireOwner()") shows the migration
+//     happened without the GitHub-reachability question having been asked
+//     before R4.
 //   - actions/media-likeness.ts: already requireAppOwner() on every action
-//     (the R3 media wave) - safe today, just absent from the enumeration.
-//   - actions/llm-content.ts: no guard call at all on any export - a
-//     PINNED_UNGUARDED matter (already tracked above by name), not a wrong-
-//     guard matter; still closure-reaches GitHub, so still named here rather
-//     than left for a reader to rediscover.
+//     (the R3 media wave) - safe today, now folded into GITHUB_FILES.
+// Still pending: actions/llm-content.ts - no guard call at all on any
+// export, a PINNED_UNGUARDED matter (already tracked above by name), not a
+// wrong-guard matter; still closure-reaches GitHub, so still named here
+// rather than left for a reader to rediscover (R4-r2, docs/r4-scope.md
+// section 7).
 // SHRINK-ONLY: this is not a safety classification (unlike
 // GITHUB_NOT_OWNER_ONLY) - it is a record of "known, not yet folded into a
 // per-action review." A name leaves this list only when GITHUB_FILES or
 // GITHUB_NOT_OWNER_ONLY takes it over for real; nothing may be added without
 // deliberately widening this comment to say why.
 const GITHUB_FILES_PENDING_ENUMERATION = new Set([
-  "actions/deck-source.ts",
   "actions/llm-content.ts",
-  "actions/media-likeness.ts",
-  "actions/walkthrough-announcement.ts",
 ]);
 
 describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () => {
-  it("GITHUB_NOT_OWNER_ONLY starts empty - no per-action review has run yet", () => {
-    // Pinned on the EXCEPTION list, never on an owner-only set enumerating
-    // the 255 call sites (RULING 84): asserting "every GITHUB_FILES action
-    // IS owner-only" would be false and would lock out most of the app - the
-    // closure only proves the FILE's graph contains owner-private code, not
-    // that every export in it calls it.
-    expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(0);
-  });
-
   it("every GITHUB_NOT_OWNER_ONLY entry names a real action export with a stated reason", () => {
     const byName = new Map(collectActionExports().map((a) => [a.name, a]));
     for (const [name, reason] of Object.entries(GITHUB_NOT_OWNER_ONLY)) {
@@ -878,6 +901,25 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
         "GITHUB_NOT_OWNER_ONLY - default posture for this cohort is requireAppOwner() (RULING 83); either switch " +
         "to requireAppOwner() or add a reviewed GITHUB_NOT_OWNER_ONLY entry with a stated reason"
     ).toEqual([]);
+  });
+
+  // R4 (docs/r4-scope.md M4b), modelled on the media cohort's own converse
+  // check above (:679-700): the check just above catches only silent
+  // OVER-PERMISSIVENESS (an action that should be reviewed but is not
+  // listed). Nothing previously caught silent OVER-TIGHTENING - a later
+  // sweep flipping one of these nine reviewed-safe actions to
+  // requireAppOwner() while its "reviewed safe, stays permissive" reason
+  // keeps reading as current, with every other gate here still green.
+  it("every GITHUB_NOT_OWNER_ONLY action still calls requireUser() directly - a silent over-tightening would leave a stale reviewed-safe reason", () => {
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    for (const name of Object.keys(GITHUB_NOT_OWNER_ONLY)) {
+      const action = byName.get(name);
+      expect(action, `${name} is listed in GITHUB_NOT_OWNER_ONLY but is not an action export`).toBeTruthy();
+      expect(
+        BARE_REQUIRE_USER_CALL.test(action!.body),
+        `${action!.file}:${action!.line} ${name} should still call requireUser() directly, having been reviewed as safe to stay permissive`
+      ).toBe(true);
+    }
   });
 
   it("GITHUB_FILES tracks the live import-graph closure - a floor, not a trusted final list (RULING 80/84)", () => {

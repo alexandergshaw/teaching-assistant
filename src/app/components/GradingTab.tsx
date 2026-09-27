@@ -18,6 +18,8 @@ import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
 import GithubGradingPanel from "./GithubGradingPanel";
 import CartridgeDropPanel from "./CartridgeDropPanel";
+import RubricProvenance from "./grading-results/RubricProvenance";
+import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -43,6 +45,12 @@ const SINGLE_SUBMISSION_EXTENSIONS = [
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif",
 ];
 const STUDENT_SUBMISSIONS_ACCEPT = [".zip", "application/zip", ...SINGLE_SUBMISSION_EXTENSIONS].join(",");
+
+// A39 wave 2: path A's own ta- key for rubric-memory.ts, scoped per
+// uploaded file name ("upload:<name>") - never a single global slot. DECISION
+// 9 (docs/owner-decisions-2026-09-23.md): ships with no exact-set canary;
+// write one when a sixth ta- key lands in this directory, covering all of them.
+const RUBRIC_MEMORY_STORAGE_KEY = "ta-grading-rubric-memory";
 
 type GradingTabProps = {
   formAction: (payload: FormData) => void;
@@ -97,6 +105,16 @@ export default function GradingTab({
   const [canvasRetrieved, setCanvasRetrieved] = useState(false);
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
+  // A39 wave 2: the visible origin label for path A's rubric-memory restore
+  // (docs/a39-architecture.md 6.3, "the field IS the receipt").
+  const [rubricOrigin, setRubricOrigin] = useState<string | null>(null);
+  // What THIS component last restored into the two fields, so a later
+  // restore can tell "edited since" apart from "still what we put there"
+  // (architecture 6.2.1).
+  const lastRestoredRef = useRef<{ instructions: string; rubric: string } | null>(null);
+  // The chosen upload's name - the save side of the "upload:<name>" scope
+  // key the restore handler below uses.
+  const [uploadFileName, setUploadFileName] = useState("");
 
   const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
 
@@ -183,6 +201,28 @@ export default function GradingTab({
   const handleRubricChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setRubric(e.target.value);
 
+  // A39 wave 2, path A (docs/a39-architecture.md 6.2.1): nothing is
+  // restored until a file is chosen, scoped to that file's own name; an
+  // edited field is left alone rather than overwritten.
+  const handleUploadFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const name = e.target.files?.[0]?.name ?? "";
+    setUploadFileName(name);
+    if (!name) return;
+    const loaded = loadRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, `upload:${name}`);
+    if (!loaded) return;
+    const last = lastRestoredRef.current;
+    const iOk = assignmentInstructions === "" || assignmentInstructions === last?.instructions;
+    const rOk = rubric === "" || rubric === last?.rubric;
+    const nextI = iOk ? loaded.entry.instructions ?? "" : assignmentInstructions;
+    const nextR = rOk ? loaded.entry.rubric : rubric;
+    if (iOk) setAssignmentInstructions(nextI);
+    if (rOk) setRubric(nextR);
+    if (iOk || rOk) {
+      lastRestoredRef.current = { instructions: nextI, rubric: nextR };
+      setRubricOrigin(describeRubricOrigin(loaded, `upload:${name}`));
+    }
+  };
+
   const showContextFields = source === "zip" || canvasRetrieved;
 
   return (
@@ -244,7 +284,20 @@ export default function GradingTab({
           }}
         />
       ) : (
-      <form className={styles.form} action={formAction}>
+      <form
+        className={styles.form}
+        action={formAction}
+        onSubmit={() => {
+          // A39 wave 2: save under the same scope the restore handler
+          // reads. Does not call preventDefault, so formAction still runs.
+          if (source === "zip" && uploadFileName) {
+            saveRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, `upload:${uploadFileName}`, {
+              rubric,
+              instructions: assignmentInstructions,
+            });
+          }
+        }}
+      >
         <input type="hidden" name="provider" value={selectedProvider} />
         {source === "zip" ? (
           <div className={styles.field}>
@@ -255,6 +308,7 @@ export default function GradingTab({
                 name="studentSubmissions"
                 type="file"
                 accept={STUDENT_SUBMISSIONS_ACCEPT}
+                onChange={handleUploadFileChange}
               />
               <p>Upload a zip archive of student submissions, or a single student&apos;s file (a document, text file, or image) to grade it on its own.</p>
             </div>
@@ -314,6 +368,7 @@ export default function GradingTab({
               <TextField
                 multiline
                 minRows={10}
+                maxRows={20}
                 fullWidth
                 id="assignment-instructions"
                 name="assignmentInstructions"
@@ -330,6 +385,7 @@ export default function GradingTab({
                 <TextField
                   multiline
                   minRows={10}
+                  maxRows={20}
                   fullWidth
                   id="rubric"
                   name="rubric"
@@ -338,6 +394,9 @@ export default function GradingTab({
                   onChange={handleRubricChange}
                   placeholder="Paste the grading rubric, expectations, and scoring guidance."
                 />
+                {rubricOrigin && source === "zip" && (
+                  <p className={styles.fieldHint}>{rubricOrigin}</p>
+                )}
               </div>
             )}
           </>
@@ -443,6 +502,8 @@ export default function GradingTab({
       )}
 
       {source !== "livefeed" && run && run.results.length > 0 && (
+        <>
+        <RubricProvenance run={run} />
         <GradingResults
           run={run}
           canvasUrl={canvasUrl}
@@ -487,6 +548,7 @@ export default function GradingTab({
             ) : undefined
           }
         />
+        </>
       )}
 
       <CartridgeDropPanel />

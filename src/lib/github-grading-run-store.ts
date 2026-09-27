@@ -285,8 +285,22 @@ function parseGradingRun(raw: unknown): GradingRun | null {
   if (fullCreditChecklist === null) return null;
   const speedGraderUrl = parseNullableString(raw.speedGraderUrl);
   const sampleAnswer = typeof raw.sampleAnswer === "string" ? raw.sampleAnswer : undefined;
+  // A39 wave 2 (W2-4): same field-by-field rebuild as coerceGradingRun
+  // (grading-drafts.ts) - an optional field added to GradingRun without
+  // being added here is silently dropped on every restore, not just failed
+  // to parse.
+  const rubricUsed = typeof raw.rubricUsed === "string" ? raw.rubricUsed : undefined;
+  const rubricFingerprint = typeof raw.rubricFingerprint === "string" ? raw.rubricFingerprint : undefined;
 
-  return { results, rubricAreaNames, fullCreditChecklist, speedGraderUrl, sampleAnswer };
+  return {
+    results,
+    rubricAreaNames,
+    fullCreditChecklist,
+    speedGraderUrl,
+    sampleAnswer,
+    rubricUsed,
+    rubricFingerprint,
+  };
 }
 
 /** Pure parse: a hand-edited or partially-written blob (bad JSON, a missing

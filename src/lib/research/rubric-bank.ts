@@ -10,11 +10,16 @@
  * nothing and lookups return null, and nothing throws.
  */
 
-import { createHash } from "node:crypto";
 import { cleanText, significantWords } from "@/lib/embedded/scaffold";
 import { scoreFields } from "./scoring";
 import type { Database } from "@/lib/supabase/types";
 import { getDbClient } from "./db";
+// A39 wave 2 (docs/a39-architecture.md 5.2): rubricFingerprint moved to its
+// own leaf so engine.ts can import it without pulling in getDbClient/the
+// Supabase Database type below. Re-exported here so every existing caller -
+// including this file's own upsert and rubric-bank.test.ts - is unchanged.
+export { rubricFingerprint } from "./rubric-fingerprint";
+import { rubricFingerprint } from "./rubric-fingerprint";
 
 type RubricRow = Database["public"]["Tables"]["rubric_bank"]["Row"];
 type RubricInsert = Database["public"]["Tables"]["rubric_bank"]["Insert"];
@@ -23,11 +28,6 @@ type RubricInsert = Database["public"]["Tables"]["rubric_bank"]["Insert"];
  *  matches) before it replaces generation — a weak match is worse than the
  *  rule-based rubric built from the actual instructions. */
 const MIN_MATCH_SCORE = 6;
-
-/** Stable content id for a rubric: hash of its whitespace-normalized text. */
-export function rubricFingerprint(rubricText: string): string {
-  return createHash("sha256").update(cleanText(rubricText).toLowerCase()).digest("hex");
-}
 
 // Same convention as db.ts: cast at the from() boundary, keep row types explicit.
 interface RubricTable {

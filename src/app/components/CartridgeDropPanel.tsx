@@ -18,11 +18,26 @@ import {
 } from "@/lib/workflow-triggers";
 import { readActiveInstitution } from "@/lib/institutions";
 import { sniffSubmissionArchive, mergeSniffedValues, type SniffResult } from "@/lib/submission-archive-sniff";
+import {
+  loadRubricMemory,
+  saveRubricMemory,
+  describeRubricOrigin,
+} from "@/lib/grade/rubric-memory";
 import { formatRelative } from "@/app/utils/time";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
+
+// A39 wave 2, path H: this surface's own ta- key for rubric-memory.ts,
+// scoped per "cartridge:<course>|<assignment>" - never a global slot.
+// DECISION 9: ships with no exact-set canary; write one when a sixth ta- key
+// lands in this directory, covering all of them.
+const RUBRIC_MEMORY_STORAGE_KEY = "ta-cartridge-rubric";
+
+function cartridgeRubricScope(course: string, assignment: string): string {
+  return course.trim() && assignment.trim() ? `cartridge:${course}|${assignment}` : "";
+}
 
 export default function CartridgeDropPanel() {
   const { supabase, user } = useSupabase();
@@ -53,6 +68,10 @@ export default function CartridgeDropPanel() {
     return saved === "brightspace" || saved === "blackboard" || saved === "moodle" ? saved : "canvas";
   });
   const [rubricText, setRubricText] = useState("");
+  // A39 wave 2: the visible rubric-memory origin label, and what THIS
+  // component last restored (so a later edit is never overwritten).
+  const [rubricOrigin, setRubricOrigin] = useState<string | null>(null);
+  const lastRestoredRubricRef = useRef<string | null>(null);
   const [sniffHint, setSniffHint] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [lmsChosen, setLmsChosen] = useState(() => {
@@ -94,6 +113,33 @@ export default function CartridgeDropPanel() {
       }
     }
   }, [lmsChosen]);
+
+  // A39 wave 2, path H (docs/a39-architecture.md 6.2): restore only once
+  // BOTH course and assignment are known (cartridgeRubricScope returns "" -
+  // and rubric-memory.ts's own empty-scope guard refuses - until then), and
+  // only into a field the instructor has not since edited themselves.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const scope = cartridgeRubricScope(courseLabel, assignmentLabel);
+      if (!scope) return;
+      const loaded = loadRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, scope);
+      if (!loaded) return;
+      const untouched = rubricText === "" || rubricText === lastRestoredRubricRef.current;
+      if (!untouched) return;
+      // react-hooks/set-state-in-effect (docs' set-state-in-effect-idiom):
+      // every setState below must follow an await.
+      await Promise.resolve();
+      if (cancelled) return;
+      if (loaded.entry.rubric !== rubricText) setRubricText(loaded.entry.rubric);
+      lastRestoredRubricRef.current = loaded.entry.rubric;
+      setRubricOrigin(describeRubricOrigin(loaded, scope));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseLabel, assignmentLabel]);
 
   const loadDrops = async (uid: string) => {
     try {
@@ -204,6 +250,14 @@ export default function CartridgeDropPanel() {
         setSniffHint(`Detected from the archive: ${sniffResult.notes.join("; ")}`);
       } else {
         setSniffHint(null);
+      }
+
+      // A39 wave 2: remember this rubric under the SCOPE THIS UPLOAD ACTUALLY
+      // USED (the effective course/assignment, not any stale state), so a
+      // later drop for the same assignment restores it.
+      const saveScope = cartridgeRubricScope(effective.courseLabel, effective.assignmentLabel);
+      if (saveScope && effective.rubricText) {
+        saveRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, saveScope, { rubric: effective.rubricText });
       }
 
       // Upload with effective values (passed directly, not relying on state which hasn't updated yet)
@@ -407,6 +461,7 @@ export default function CartridgeDropPanel() {
           <TextField
             multiline
             minRows={4}
+            maxRows={12}
             fullWidth
             id="cartridge-rubric"
             value={rubricText}
@@ -414,6 +469,7 @@ export default function CartridgeDropPanel() {
             placeholder="Paste a rubric or grading criteria. If blank, the workflow will generate one."
             disabled={loading}
           />
+          {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
         </div>
       </div>
 

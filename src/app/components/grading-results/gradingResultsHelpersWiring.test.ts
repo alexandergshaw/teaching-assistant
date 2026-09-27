@@ -117,7 +117,9 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
     "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
     "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.
+    "./RubricProvenance.tsx", // A39 wave 2: the run's version-provenance leaf, mounted by GradingTab.tsx (not by this directory's own GradingResults.tsx).
     "../GradingResults.tsx",
+    "../GradingTab.tsx", // A39 wave 2: the new non-local consumer of ./RubricProvenance.tsx above.
   ];
 
   it("R-2: directoryRoots(dir)'s ./ half matches the CLIENT_FILES literal's ./ half", () => {

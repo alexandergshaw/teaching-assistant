@@ -174,6 +174,13 @@ function coerceGradingRun(value: unknown): GradingRun | null {
       : [],
     speedGraderUrl: typeof o.speedGraderUrl === "string" ? o.speedGraderUrl : null,
     sampleAnswer: typeof o.sampleAnswer === "string" ? o.sampleAnswer : undefined,
+    // A39 wave 2 (W2-4): this rebuild is field-by-field, so a field on
+    // GradingRun that is not listed here is silently dropped regardless of
+    // whether it is optional - see grade-result-allowlist-coverage.test.ts's
+    // run-level sentinel, which is exactly how this was caught for
+    // GradeResult once already.
+    rubricUsed: typeof o.rubricUsed === "string" ? o.rubricUsed : undefined,
+    rubricFingerprint: typeof o.rubricFingerprint === "string" ? o.rubricFingerprint : undefined,
   };
 }
 

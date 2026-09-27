@@ -339,6 +339,15 @@ export interface GradingRun {
   // A full-credit model answer generated on the LLM grading path, shown to the
   // instructor as a per-assignment reference. Never posted to Canvas.
   sampleAnswer?: string;
+  // A39 wave 2 (docs/owner-decisions-2026-09-23.md DECISION 3's leverage
+  // claim): the exact rubric text this run graded against, and its content
+  // fingerprint (src/lib/research/rubric-fingerprint.ts), stamped at every
+  // engine.ts return site - never read back from whatever a caller has
+  // persisted. RubricProvenance.tsx reads these two fields off the RUN, so
+  // editing a stored rubric afterward cannot change what a past run reports
+  // it was graded against.
+  rubricUsed?: string;
+  rubricFingerprint?: string;
 }
 
 /**

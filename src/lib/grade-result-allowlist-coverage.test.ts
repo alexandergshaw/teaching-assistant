@@ -37,6 +37,7 @@ import type {
   GradeResult,
   GradedResult,
   UngradedResult,
+  GradingRun,
   NotAttemptedOutcome,
   GradingFailedOutcome,
 } from "@/lib/grade";
@@ -293,6 +294,93 @@ describe("parseGradeResult, via serializeGithubGradingRun/parseStoredGithubGradi
         continue;
       }
       expect(result[field], `field "${field}" was not preserved`).toEqual(sentinel[field]);
+    }
+  });
+});
+
+// A39 wave 2 (W2-4, docs/a39-waves.md 8.2): "It covers GradeResult. There is
+// no sibling for GradingRun." This extends the same two-level guard one
+// level up - a compile-time exhaustiveness assertion over GradingRun's own
+// keys, and a run-level sentinel pushed through the same two rebuilders
+// above (coerceGradingRun via coerceGradingDraftPayload, and parseGradingRun
+// via serializeGithubGradingRun/parseStoredGithubGradingRun).
+const ALL_GRADING_RUN_FIELDS = [
+  "results",
+  "rubricAreaNames",
+  "fullCreditChecklist",
+  "speedGraderUrl",
+  "sampleAnswer",
+  "rubricUsed",
+  "rubricFingerprint",
+] as const;
+
+type MissingRunFields = Exclude<keyof GradingRun, (typeof ALL_GRADING_RUN_FIELDS)[number]>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _exhaustiveRunFieldCheck: MissingRunFields extends never ? true : ["add the missing field(s) to ALL_GRADING_RUN_FIELDS above", MissingRunFields] = true;
+
+/** Every field GradingRun can carry, each set to a distinctive, detectable
+ *  value - the run-level counterpart of gradedSentinel()/ungradedSentinel(). */
+function runSentinel(): GradingRun {
+  return {
+    results: [],
+    rubricAreaNames: ["SENTINEL_area"],
+    fullCreditChecklist: ["SENTINEL_checklist_item"],
+    speedGraderUrl: "https://example.com/speedgrader/SENTINEL",
+    sampleAnswer: "SENTINEL_sampleAnswer",
+    rubricUsed: "SENTINEL_rubricUsed",
+    rubricFingerprint: "SENTINEL_rubricFingerprint",
+  };
+}
+
+const RUN_FIELDS_TO_COMPARE = ALL_GRADING_RUN_FIELDS.filter((f) => f !== "results");
+
+describe("the run sentinel covers every field in ALL_GRADING_RUN_FIELDS", () => {
+  it("has a defined, non-undefined value for every field GradingRun can carry", () => {
+    const run = runSentinel();
+    for (const field of ALL_GRADING_RUN_FIELDS) {
+      expect(run[field], `runSentinel() is missing field "${field}"`).not.toBeUndefined();
+    }
+  });
+});
+
+describe("coerceGradingRun, via coerceGradingDraftPayload (grading-drafts.ts), carries every GradingRun field forward", () => {
+  it("preserves rubricUsed and rubricFingerprint through the field-by-field rebuild", () => {
+    const sentinel = runSentinel();
+    const raw = JSON.parse(JSON.stringify(sentinel)) as Record<string, unknown>;
+    const payload = coerceGradingDraftPayload({
+      runs: [
+        {
+          courseName: "Course",
+          assignmentName: "Assignment",
+          canvasUrl: "https://canvas.example.com",
+          run: raw,
+        },
+      ],
+    });
+    expect(payload.runs).toHaveLength(1);
+    const run = payload.runs[0].run;
+    for (const field of RUN_FIELDS_TO_COMPARE) {
+      expect(run[field], `field "${field}" was not preserved by coerceGradingRun`).toEqual(sentinel[field]);
+    }
+  });
+});
+
+describe("parseGradingRun, via serializeGithubGradingRun/parseStoredGithubGradingRun, carries every GradingRun field forward", () => {
+  it("preserves rubricUsed and rubricFingerprint through the round trip", () => {
+    const sentinel = runSentinel();
+    const json = serializeGithubGradingRun({
+      run: sentinel,
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
+    const restored = parseStoredGithubGradingRun(json);
+    expect(restored).not.toBeNull();
+    const run = restored!.run;
+    for (const field of RUN_FIELDS_TO_COMPARE) {
+      expect(run[field], `field "${field}" was not preserved by parseGradingRun`).toEqual(sentinel[field]);
     }
   });
 });

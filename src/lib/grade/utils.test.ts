@@ -78,10 +78,13 @@ describe("buildCodeExecutionNote", () => {
 // like "main.py", which does not carry the studentname_date_time_filename
 // convention), and multiple students' files collapse onto one row keyed by
 // a shared filename stem ("main", "report"). Fixed per the binding rulings
-// in scratchpad/a14-rulings.md: leaf-first, then an outward-in scan of the
-// WHOLE zip-crossing chain extraction.ts now threads through, ground truth
-// (a crossing match) outranking a byBase guess, and the userId folded into
-// the grouping key so sanitized-name collisions do not merge.
+// in scratchpad/a14-rulings.md: leaf-first, then the WHOLE zip-crossing
+// chain extraction.ts now threads through, scanned NARROWEST FIRST
+// (innermost to outermost - A14 rulings v2 CORRECTION 1), ground truth (a
+// crossing match) outranking a byBase guess. CORRECTION 2 withdrew the
+// userId fold this comment used to describe here: a sanitized-name
+// collision is a known-open merge, not disambiguated (see the "known-open
+// merge" describe block below, which pins exactly that).
 describe("parseSubmissionFileName - nested-zip identity via the crossing chain (A14)", () => {
   it("takes identity from the crossing chain's matching zip name, not the leaf, when the leaf itself doesn't match Canvas's convention (the filed bug's own shape)", () => {
     const parsed = parseSubmissionFileName(
@@ -116,7 +119,7 @@ describe("parseSubmissionFileName - nested-zip identity via the crossing chain (
     expect(parsed.studentDisplay).toBe("johndoe");
   });
 
-  it("scans the whole chain outward-in through intermediate bulk wrappers to reach the per-student zip", () => {
+  it("scans the whole chain narrowest-first (innermost to outermost) through intermediate bulk wrappers to reach the per-student zip", () => {
     const parsed = parseSubmissionFileName(
       "wrapper.zip/bulk.zip/janedoe_2024-01-01_120000_project.zip/main.py",
       undefined,
@@ -125,14 +128,14 @@ describe("parseSubmissionFileName - nested-zip identity via the crossing chain (
     expect(parsed.studentDisplay).toBe("janedoe");
   });
 
-  it("matches today's exact leaf-stem output when the chain is empty (no zip crossing at all)", () => {
+  it("folds the containing folder into the display via RULE D when the chain is empty (no zip crossing at all)", () => {
     const parsed = parseSubmissionFileName("src/main.py", undefined, []);
-    expect(parsed.studentDisplay).toBe("main");
+    expect(parsed.studentDisplay).toBe("src/main");
   });
 
-  it("matches today's exact leaf-stem output when the chain argument is omitted entirely (an un-migrated caller)", () => {
+  it("folds the containing folder into the display via RULE D even when the chain argument is omitted entirely (an un-migrated caller) - RULE D's fold is unconditional and does not depend on zipChain being threaded through", () => {
     const parsed = parseSubmissionFileName("src/main.py");
-    expect(parsed.studentDisplay).toBe("main");
+    expect(parsed.studentDisplay).toBe("src/main");
   });
 });
 

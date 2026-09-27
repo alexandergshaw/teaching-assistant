@@ -126,6 +126,85 @@ function leafStemFallback(baseName: string): { studentKey: string; studentDispla
 }
 
 /**
+ * A44 RULE K: length-prefix every identity component (`${part.length}:${part}`)
+ * and concatenate. Applied TOTALLY, at all six `parseSubmissionFileName`
+ * return sites below - never only at the two stem-fallback sites. A partial
+ * encoding is forgeable: a flat file whose own name happens to spell an
+ * already-encoded key (e.g. a leading space that defeats `leafStemFallback`'s
+ * anchored regex, so `.trim()` hands back the whole crafted string) then
+ * collides with a genuinely foldered student's key and the two silently
+ * merge into one graded row - see docs/a44-test-notes.md R13 (the K1
+ * fixture) for the exact bytes. The length prefix, not a printable
+ * separator, is what makes this injective: a printable separator such as
+ * `::` can itself appear inside a folder name or stem and produce the same
+ * concatenation from two different splits (docs/a44-test-notes.md G13).
+ */
+function a44Encode(parts: string[]): string {
+  return parts.map((part) => `${part.length}:${part}`).join("");
+}
+
+/**
+ * Wrap an identity produced by a non-fallback step (1-4) in the same
+ * length-prefixed encoding the folded fallback steps (5-6) use, so every one
+ * of the six return sites emits an encoded key and none can be mistaken for
+ * a raw, unencoded one - see `a44Encode` above for why the encoding must be
+ * total.
+ */
+function a44Wrap(id: { studentKey: string; studentDisplay: string }): {
+  studentKey: string;
+  studentDisplay: string;
+} {
+  return { studentKey: a44Encode([id.studentKey]), studentDisplay: id.studentDisplay };
+}
+
+/**
+ * A44 RULE K: the container-relative directory PATH - every path segment
+ * strictly between a file's innermost container (the last `zipChain` entry,
+ * or the run root when `zipChain` is empty) and the file's own leaf name.
+ * Returns "" when the file sits directly in its container (no folder to
+ * fold). Case-preserving: RULE D's display fold uses this verbatim; RULE K's
+ * key fold lower-cases it itself.
+ */
+function a44ContainerRelativeDir(filePath: string, zipChain: string[]): string {
+  const segments = filePath.replace(/\\/g, "/").split("/");
+  let startIndex = 0;
+  if (zipChain.length > 0) {
+    const innermost = getBaseFileName(zipChain[zipChain.length - 1]);
+    const idx = segments.findIndex((segment) => segment === innermost);
+    if (idx >= 0) {
+      startIndex = idx + 1;
+    }
+  }
+  return segments.slice(startIndex, segments.length - 1).join("/");
+}
+
+/**
+ * A44 RULE K + RULE D: fold the container-relative directory into both the
+ * identity key (lower-cased, length-prefixed alongside the base key so the
+ * fold stays injective) and the display (verbatim, in path order) - only at
+ * the two stem-fallback return sites (5 and 6), never at 1-4, where a file's
+ * identity already came from a ground-truth convention match or model
+ * inference the folder must not perturb. `dirFirst` controls DISPLAY order
+ * only: true for the ordinary leaf-stem fallback (folder, then the stem -
+ * "AlvarezMaria/essay"), false for the innermost-crossing fallback (the
+ * per-student zip's own stem, then the folder inside it - "bulk/AlvarezMaria"),
+ * matching what each site's `studentDisplay` already meant before this fold.
+ */
+function a44Fold(
+  id: { studentKey: string; studentDisplay: string },
+  relDir: string,
+  dirFirst: boolean
+): { studentKey: string; studentDisplay: string } {
+  if (!relDir) {
+    return a44Wrap(id);
+  }
+  return {
+    studentKey: a44Encode([relDir.toLowerCase(), id.studentKey]),
+    studentDisplay: dirFirst ? `${relDir}/${id.studentDisplay}` : `${id.studentDisplay}/${relDir}`,
+  };
+}
+
+/**
  * Parse one submission file path into the student identity it belongs to,
  * plus the citation name/extension to show for that file.
  *
@@ -190,7 +269,7 @@ export function parseSubmissionFileName(
   const rawInferred = inferredLookup?.byRaw.get(filePath);
   if (rawInferred) {
     return {
-      studentKey: rawInferred.studentDisplay.toLowerCase(),
+      studentKey: a44Encode([rawInferred.studentDisplay.toLowerCase()]),
       studentDisplay: rawInferred.studentDisplay,
       citationFileName: rawInferred.citationFileName,
       extension: getFileExtension(baseName) || getFileExtension(rawInferred.citationFileName) || "(none)",
@@ -201,7 +280,7 @@ export function parseSubmissionFileName(
   const leafMatch = matchStudentFileConvention(baseName);
   if (leafMatch) {
     return {
-      ...identityFromConventionMatch(leafMatch),
+      ...a44Wrap(identityFromConventionMatch(leafMatch)),
       citationFileName: leafMatch.filePart,
       extension: getFileExtension(leafMatch.filePart) || "(none)",
     };
@@ -218,7 +297,7 @@ export function parseSubmissionFileName(
     const crossingMatch = matchStudentFileConvention(getBaseFileName(crossing));
     if (crossingMatch) {
       return {
-        ...identityFromConventionMatch(crossingMatch),
+        ...a44Wrap(identityFromConventionMatch(crossingMatch)),
         citationFileName: baseName,
         extension: getFileExtension(baseName) || "(none)",
       };
@@ -231,7 +310,7 @@ export function parseSubmissionFileName(
   const baseInferred = inferredLookup?.byBase.get(baseName);
   if (baseInferred) {
     return {
-      studentKey: baseInferred.studentDisplay.toLowerCase(),
+      studentKey: a44Encode([baseInferred.studentDisplay.toLowerCase()]),
       studentDisplay: baseInferred.studentDisplay,
       citationFileName: baseInferred.citationFileName,
       extension: getFileExtension(baseName) || getFileExtension(baseInferred.citationFileName) || "(none)",
@@ -239,21 +318,32 @@ export function parseSubmissionFileName(
   }
 
   // 5. THE INNERMOST CROSSING's stem - the per-student zip in the ordinary
-  // nested case, and the fix for the filed bug.
+  // nested case, and the fix for the filed bug. A44 RULE K/D: the container-
+  // relative directory INSIDE that per-student zip is folded into both the
+  // key and the display here, which is what stops that zip's own several
+  // subdirectories from blending onto one row (the immediate-parent rule
+  // rejected by the architecture still blended them one level down).
   if (zipChain.length > 0) {
     const innermost = zipChain[zipChain.length - 1];
     const fallback = leafStemFallback(getBaseFileName(innermost));
+    const relDir5 = a44ContainerRelativeDir(filePath, zipChain);
     return {
-      ...fallback,
+      ...a44Fold(fallback, relDir5, false),
       citationFileName: baseName,
       extension: getFileExtension(baseName) || "(none)",
     };
   }
 
-  // 6. Today's leaf-stem fallback, unchanged.
+  // 6. Today's leaf-stem fallback. A44 RULE K/D: the container-relative
+  // directory (here, simply the file's own containing folder path, since
+  // there is no zip to be relative to) is folded into both the key and the
+  // display, unconditionally - this is the headline fix: three students each
+  // submitting the same filename in their own folder no longer collapse onto
+  // one row keyed by that shared filename stem.
   const fallback = leafStemFallback(baseName);
+  const relDir6 = a44ContainerRelativeDir(filePath, zipChain);
   return {
-    ...fallback,
+    ...a44Fold(fallback, relDir6, true),
     citationFileName: baseName,
     extension: getFileExtension(baseName) || "(none)",
   };
@@ -315,7 +405,49 @@ export function groupSubmissionsByStudent(
     existing.files.push([filePath, content]);
   }
 
-  const entries = Array.from(grouped.values());
+  // A44 RULE D's terminal disambiguation pass. RULE D's fold above is a
+  // function of the FILE alone, so two distinct identity keys can still
+  // produce the identical raw display (e.g. one file resolved via an
+  // innermost-crossing zip stem, another via the ordinary leaf-stem
+  // fallback, both landing on "JaneDoe/src/deep"). This pass guarantees the
+  // returned rows' displays are pairwise distinct.
+  //
+  // Walked in IDENTITY-KEY order, never insertion/Object.entries order: the
+  // two orders assign different labels to the same set of files (only key
+  // order gives the same answer regardless of which file happened to be
+  // read first), and under RULING 93 the display IS the storage label, so
+  // an order-dependent assignment would silently reassign a stored edit
+  // across runs (docs/a44-test-notes.md R16).
+  //
+  // Assigns the first UNCLAIMED label against the set of labels already
+  // taken, never a counted suffix: appending " (2)", " (3)" to the Nth
+  // claimant of a base label does not guarantee distinctness, because a
+  // crafted or coincidental RAW label (e.g. a leading space defeating
+  // leafStemFallback's anchored regex, so a file's own stem IS "deep (2)")
+  // can collide with a suffix a counting pass would also produce
+  // (docs/a44-test-notes.md R15, fixture K4).
+  const sortedKeys = Array.from(grouped.keys()).sort();
+  const takenLabels = new Set<string>();
+  const displayByKey = new Map<string, string>();
+  for (const key of sortedKeys) {
+    const group = grouped.get(key);
+    if (!group) continue;
+    const baseLabel = group.student;
+    let candidate = baseLabel;
+    let suffix = 2;
+    while (takenLabels.has(candidate)) {
+      candidate = `${baseLabel} (${suffix})`;
+      suffix += 1;
+    }
+    takenLabels.add(candidate);
+    displayByKey.set(key, candidate);
+  }
+
+  const entries = sortedKeys.map((key) => {
+    const group = grouped.get(key);
+    if (!group) throw new Error(`groupSubmissionsByStudent: missing group for key ${key}`);
+    return { student: displayByKey.get(key) ?? group.student, files: group.files };
+  });
   entries.sort((a, b) => a.student.localeCompare(b.student));
 
   return entries.map((entry) => {

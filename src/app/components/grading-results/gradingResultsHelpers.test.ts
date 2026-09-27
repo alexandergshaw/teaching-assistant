@@ -497,6 +497,62 @@ describe("buildCsvContent", () => {
         brokenRow
     );
   });
+
+  // A44: buildCsvContent is one of the 43 sites this feature's design keys
+  // on `result.student` (docs/a44-waves.md section 9) - it is EXECUTABLE
+  // (unlike the 34 sites inside GradingResults.tsx, which vitest never
+  // renders), so this is where a display collapse would actually be caught.
+  // Two rows whose folder-disambiguated displays would have collapsed onto
+  // one bare stem before A44 ("AlvarezMaria/essay" and "BrownTom/essay",
+  // both bare "essay" pre-fix) must each keep their own edits and land in
+  // their own CSV row - never one row silently absorbing both edits because
+  // two different students shared one lookup key.
+  it("keeps each folder-disambiguated student's edits in its own CSV row, never merged onto a shared bare-stem key", () => {
+    const run: GradingRun = {
+      rubricAreaNames: ["Code Quality"],
+      results: [
+        {
+          student: "AlvarezMaria/essay",
+          totalScore: "5/10",
+          overallComment: "",
+          strengths: "",
+          improvements: "",
+          resubmitNotice: "",
+          rubricAreas: [{ area: "Code Quality", score: "5/10" }],
+          submittedFiles: [{ name: "essay.txt", extension: "txt" }],
+        },
+        {
+          student: "BrownTom/essay",
+          totalScore: "7/10",
+          overallComment: "",
+          strengths: "",
+          improvements: "",
+          resubmitNotice: "",
+          rubricAreas: [{ area: "Code Quality", score: "7/10" }],
+          submittedFiles: [{ name: "essay.txt", extension: "txt" }],
+        },
+      ],
+    } as unknown as GradingRun;
+    const edits: Record<string, RowEdit> = {
+      "AlvarezMaria/essay": {
+        total: "6/10",
+        overall: "",
+        strengths: "Alvarez-specific note.",
+        improvements: "",
+        resubmitNotice: "",
+        areas: { "Code Quality": { score: "6/10" } },
+      },
+    };
+
+    const actual = buildCsvContent(run, edits);
+    const lines = actual.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain('"AlvarezMaria/essay"');
+    expect(lines[1]).toContain("Alvarez-specific note.");
+    expect(lines[2]).toContain('"BrownTom/essay"');
+    expect(lines[2]).not.toContain("Alvarez-specific note.");
+    expect(lines[2]).toContain('"7/10"');
+  });
 });
 
 // B1's fanOutGradingPostResult tests (and the GradingResults.tsx wiring

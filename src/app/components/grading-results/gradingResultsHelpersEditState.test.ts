@@ -255,6 +255,62 @@ describe("loadPersistedEdits", () => {
     const result = loadPersistedEdits(raw, run);
     expect(Object.keys(result)).toEqual(["Alice Smith"]);
   });
+
+  // A44 / RULING 93 (docs/a44-test-notes.md R7', P1'/P3'/P4): the instructor's
+  // edit is filed under the DISPLAY, and the old-label recovery is DELETED -
+  // which needs zero production code, because this loader already drops a
+  // stored key absent from the current run (the test above, generically).
+  // These two tests tie that same mechanism to A44's actual transition: a
+  // display that folded from a bare stem into a folder-disambiguated path.
+  describe("A44 RULING 93 - display-keyed storage, no legacy-key recovery", () => {
+    const foldedRun: GradingRun = {
+      results: [
+        {
+          student: "AlvarezMaria/essay",
+          totalScore: "18/20",
+          overallComment: "",
+          strengths: "",
+          improvements: "",
+          resubmitNotice: "",
+          rubricAreas: [],
+        },
+        {
+          student: "BrownTom/essay",
+          totalScore: "15/20",
+          overallComment: "",
+          strengths: "",
+          improvements: "",
+          resubmitNotice: "",
+          rubricAreas: [],
+        },
+      ],
+    } as unknown as GradingRun;
+
+    it("P1': an edit stored under a display the current run still has survives, and a same-run sibling's own edit is untouched", () => {
+      const raw = JSON.stringify({
+        "AlvarezMaria/essay": { total: "19/20", strengths: "Nice work.", improvements: "", resubmitNotice: "" },
+        "BrownTom/essay": { total: "16/20", strengths: "Also nice.", improvements: "", resubmitNotice: "" },
+      });
+      const result = loadPersistedEdits(raw, foldedRun);
+      expect(result["AlvarezMaria/essay"].total).toBe("19/20");
+      expect(result["BrownTom/essay"].total).toBe("16/20");
+      expect(result["BrownTom/essay"].strengths).not.toBe("Nice work.");
+    });
+
+    it("P3': an edit stored under the pre-A44 bare-stem key ('essay') is dropped, not resurrected onto either folder-disambiguated row - the accepted one-time loss RULING 93 accounts for", () => {
+      const raw = JSON.stringify({
+        essay: { total: "20/20", strengths: "Old edit under the collapsed pre-fix key.", improvements: "", resubmitNotice: "" },
+      });
+      const result = loadPersistedEdits(raw, foldedRun);
+      expect(Object.keys(result).sort()).toEqual(["AlvarezMaria/essay", "BrownTom/essay"]);
+      expect(result["AlvarezMaria/essay"].strengths).not.toBe("Old edit under the collapsed pre-fix key.");
+      expect(result["BrownTom/essay"].strengths).not.toBe("Old edit under the collapsed pre-fix key.");
+    });
+
+    it("P4: the seeded map has exactly one slot per result, unaffected by folder-disambiguated displays", () => {
+      expect(Object.keys(seedEdits(foldedRun)).length).toBe(foldedRun.results.length);
+    });
+  });
 });
 
 describe("localStorage-backed persistence (loadGradingResultsEdits / persistGradingResultsEdits)", () => {

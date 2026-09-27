@@ -464,6 +464,35 @@ describe("correctUngradedSeeds - AC-9", () => {
     expect(correctUngradedSeeds(run, edits)).not.toEqual(passThrough(run, edits));
     expect(correctUngradedSeeds(run, edits)[countBoundRow.student].strengths).not.toBe(countBoundOutcome.message);
   });
+
+  // A44: correctUngradedSeeds is one of the 43 sites this feature's design
+  // keys on `result.student` (docs/a44-waves.md section 9) and one of the
+  // three EXECUTABLE ones - it is keyed entirely by `result.student`, so two
+  // rows whose displays would have collapsed onto one bare stem before A44
+  // (e.g. both bare "essay") but are now folder-disambiguated must each be
+  // corrected (or left alone) independently, never one row's correction
+  // leaking onto the other because they once shared a key.
+  it("corrects two folder-disambiguated rows independently, never letting one's correction leak onto the other", () => {
+    const alvarezRow = makeUngradedRow({ ...countBoundOutcome, student: "AlvarezMaria/essay" });
+    const brownRow = makeGradedRow({ student: "BrownTom/essay" });
+    const run: GradingRun = {
+      results: [alvarezRow, brownRow],
+      rubricAreaNames: [],
+      fullCreditChecklist: [],
+    };
+    const staleEdit = makeEdit({ strengths: countBoundOutcome.message, overall: countBoundOutcome.message });
+    const brownEdit = makeEdit({ total: "9/10", overall: brownRow.overallComment, strengths: brownRow.strengths });
+    const edits: Record<string, RowEdit> = {
+      "AlvarezMaria/essay": staleEdit,
+      "BrownTom/essay": brownEdit,
+    };
+
+    const next = correctUngradedSeeds(run, edits);
+
+    expect(next["AlvarezMaria/essay"].strengths).toBe(UNGRADED_DISCLOSURE_COPY["submission-count-bound"]);
+    expect(next["BrownTom/essay"]).toBe(brownEdit);
+    expect(next["BrownTom/essay"].strengths).not.toBe(UNGRADED_DISCLOSURE_COPY["submission-count-bound"]);
+  });
 });
 
 // ── AC-5 / AC-6 wiring / AC-8: source-text checks over GradingResults.tsx ──

@@ -341,13 +341,19 @@ export default function AnnouncementDraftSlot({
           {!courseName && <p className={styles.fieldHint}>Choose a course above to post.</p>}
           {slot.postedTo && (
             <p role="status" aria-live="polite" className={styles.fieldHint}>
-              {/* A32/RULING 64: this line must not claim "can see it now" on
-                  the scheduled path - postedScheduledLabel is frozen at
-                  commitPost's own decision time (never re-resolved here),
-                  mirroring the sibling's own branching success copy at
-                  announcements-panel.tsx:280-283. */}
+              {/* A32/RULING 64, round-2 M4: this line must not claim "can
+                  see it now" on the scheduled path - postedScheduledLabel is
+                  frozen at commitPost's own decision time (never re-resolved
+                  here). The scheduled branch follows the sibling's own
+                  branching success copy at announcements-panel.tsx:280-282
+                  EXACTLY - announcement scheduled, then when students will
+                  see it, with no course interpolated - because "Scheduled
+                  for {course}" immediately followed by a time reads as
+                  though the course were the time. The immediate branch
+                  keeps the course, since "Posted to {course}" is correct
+                  and useful there. */}
               {slot.postedScheduledLabel
-                ? `Scheduled for ${slot.postedTo}. Students will see it ${slot.postedScheduledLabel}.`
+                ? `Announcement scheduled. Students will see it ${slot.postedScheduledLabel}.`
                 : `Posted to ${slot.postedTo}. Students can see it now.`}
             </p>
           )}

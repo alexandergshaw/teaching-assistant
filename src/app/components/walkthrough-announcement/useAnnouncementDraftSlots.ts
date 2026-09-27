@@ -159,6 +159,40 @@ export function resolvePostCommit(
 }
 
 /**
+ * A32 round-2 remediation, BLOCKER R2-1: the EXACT third argument commitPost
+ * forwards to `postDraft` - pulled out of commitPost's body so a test can
+ * EXECUTE the forwarding itself rather than only reading commitPost as
+ * source text. The round-2 check measured that no test in this repo reads
+ * useAnnouncementDraftSlots.ts as source at all
+ * (`grep -rn 'readFileSync[^)]*useAnnouncementDraftSlots' src --include=*.test.ts`
+ * exits 1), so `decision.delayedPostAt` -> `undefined` at the old inline call
+ * site kept every gate green while publishing every scheduled post
+ * immediately and irrevocably. commitPost below calls this function and
+ * forwards nothing else on this path.
+ */
+export function postArgsFor(decision: {
+  readonly kind: "commit";
+  readonly delayedPostAt: string | undefined;
+}): string | undefined {
+  return decision.delayedPostAt;
+}
+
+/**
+ * A32 round-2 remediation, BLOCKER R2-1 (RULING 64's field): the EXACT
+ * success payload commitPost dispatches as "post-result" - pulled out for
+ * the same reason as postArgsFor above. An error result passes through
+ * unchanged; a success result is paired with the decision's OWN
+ * scheduledLabel (resolved once, at commit time), never re-resolved from a
+ * later render-time clock.
+ */
+export function postResultFor(
+  decision: { readonly kind: "commit"; readonly scheduledLabel: string | null },
+  result: { course: string } | { error: string }
+): { error: string } | { course: string; scheduledLabel: string | null } {
+  return "error" in result ? result : { course: result.course, scheduledLabel: decision.scheduledLabel };
+}
+
+/**
  * A32/M7 (RULING 68): the confirm-arm signature - now includes
  * `slot.scheduledAt`, so changing the scheduled time on an armed post
  * disarms it exactly as editing the title or message already does
@@ -399,7 +433,7 @@ export function useAnnouncementDraftSlots(args: {
         dispatch({ type: "post-result", id, result: { error: "Could not read the scheduled visibility time." } });
         return;
       }
-      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message, decision.delayedPostAt);
+      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message, postArgsFor(decision));
       if (promise === null) {
         dispatch({ type: "post-result", id, result: { error: "Choose a course above to post." } });
         return;
@@ -410,7 +444,7 @@ export function useAnnouncementDraftSlots(args: {
           dispatch({
             type: "post-result",
             id,
-            result: "error" in result ? result : { course: result.course, scheduledLabel: decision.scheduledLabel },
+            result: postResultFor(decision, result),
           }),
         () =>
           dispatch({

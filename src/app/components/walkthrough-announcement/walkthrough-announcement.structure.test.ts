@@ -772,12 +772,11 @@ describe("A19 AC-11: the per-slot timing control is reachable from the rendered 
 describe('A32/RULING 35: neither per-slot control may be named "Timing" or contain it as a substring', () => {
   const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
 
-  it('no rendered label CONTAINS the substring "Timing" anywhere - not just the exact string "Timing" (RULING 66/M8: a third control labelled e.g. "Timing preset" is the exact hazard the substring wording in this describe\'s own title names, and the old exact-string regex missed it)', () => {
-    const labels = source.match(/label="[^"]*"/g) ?? [];
-    expect(labels.length).toBeGreaterThan(0); // canary: the file does have label= props for this to check
-    for (const label of labels) {
-      expect(label).not.toMatch(/Timing/);
-    }
+  it('no rendered label CONTAINS "Timing", in a quoted literal OR a braced string expression, and no label is a bare identifier (round-2 MAJOR R2-3: label={"Timing preset"} escaped the old literal-only regex)', () => {
+    const labels = source.match(/label=\{?["'`][^"'`]*["'`]\}?/g) ?? [];
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(label).not.toMatch(/Timing/);
+    expect(source).not.toMatch(/label=\{[A-Za-z_$][\w$]*\}/);
   });
 
   it('the new Canvas-visibility control is labelled "Visible to students (optional)" - verbatim, from announcements-panel.tsx:463', () => {
@@ -808,21 +807,30 @@ describe("A32/REQ-A32-1: the consequence copy and all five ConfirmArmButtons lab
     expect(consequenceEnd, "expected the consequence paragraph's closing </p>").toBeGreaterThan(-1);
   });
 
-  // RULING 66/M1: the OLD assertion searched the whole slice for
-  // /isScheduled|visibility\.kind/, satisfied by an inner re-narrowing even
-  // when the OUTER condition is swapped for a length-derived boolean. This
-  // anchors on the ternary's own condition token, the thing that actually
-  // decides which sentence renders.
+  // round-2: also pins isScheduled's DEFINITION below (BLOCKER R2-2), and
+  // M5 disposition: the branch split below RESTORES, stronger and
+  // per-branch, the whole-slice length ban round 1's remediation withdrew.
   it("the outer branch condition is literally isScheduled, not a separate length-derived boolean (RULING 66/M1)", () => {
     const slice = source.slice(consequenceStart, consequenceEnd);
     expect(slice).toMatch(/aria-live="polite">\s*\{isScheduled\s*\?/);
     expect(slice).not.toMatch(/aria-live="polite">\s*\{slot\.scheduledAt/);
   });
 
-  it("the two branches say different things - one promises a future time, the other says immediately", () => {
+  it('isScheduled is DEFINED as visibility.kind === "scheduled" (BLOCKER R2-2)', () => {
+    expect(source).toMatch(/const isScheduled = visibility\.kind === "scheduled";/);
+    expect(source).not.toMatch(/const isScheduled =[^\n]*scheduledAt/);
+  });
+
+  it("the two branches say different things, each bound to its own side of the ternary (round-2 MAJOR R2-1/R2-5)", () => {
     const slice = source.slice(consequenceStart, consequenceEnd);
-    expect(slice).toMatch(/schedules this announcement to become visible/);
-    expect(slice).toMatch(/publishes this announcement to every student[\s\S]*immediately/);
+    const qIdx = slice.indexOf("?");
+    const cIdx = slice.indexOf(":", qIdx);
+    const scheduledBranch = slice.slice(qIdx, cIdx);
+    const immediateBranch = slice.slice(cIdx);
+    expect(scheduledBranch).toMatch(/schedules this announcement to become visible/);
+    expect(scheduledBranch).not.toMatch(/publishes this announcement to every student|scheduledAt\.(trim\(\)\.)?length/);
+    expect(immediateBranch).toMatch(/publishes this announcement to every student[\s\S]*immediately/);
+    expect(immediateBranch).not.toMatch(/schedules this announcement to become visible|scheduledAt\.(trim\(\)\.)?length/);
   });
 
   // RULING 66/M3: the OLD assertions only checked each prop STARTS WITH
@@ -930,8 +938,8 @@ describe("A32/RULING 64: the postedTo success sentence branches honestly on post
 
   const slice = source.slice(startIdx, endIdx);
 
-  it("the block's own condition is driven by slot.postedScheduledLabel, not a fixed unconditional sentence", () => {
-    expect(slice).toMatch(/slot\.postedScheduledLabel\s*\?/);
+  it("the block's own condition is the WHOLE postedScheduledLabel value, not an optional-chain/derived boolean (round-2 MAJOR R2-2: postedScheduledLabel?.length === -1 satisfied the old regex)", () => {
+    expect(slice).toMatch(/\{slot\.postedScheduledLabel\s*\n?\s*\?(?!\.)/);
   });
 
   it("the scheduled branch does not say students can see it now, and the immediate branch keeps the original honest sentence", () => {

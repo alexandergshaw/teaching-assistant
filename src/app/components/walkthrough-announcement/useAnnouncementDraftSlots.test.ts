@@ -21,8 +21,12 @@
 // `disabled=` prop read off WalkthroughAnnouncementPanel.tsx, not this file.
 
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import {
   cachedResearchFor,
+  postArgsFor,
+  postResultFor,
   postSignatureFor,
   resolvePostCommit,
   resolveRegenerateResearchOutcome,
@@ -129,6 +133,62 @@ describe("resolvePostCommit - RULING 65 (the decision half of REQ-A32-1)", () =>
   });
 });
 
+// A32 round-2 remediation, BLOCKER R2-1: postArgsFor and postResultFor are
+// commitPost's own forwarding, pulled out so this test EXECUTES the
+// forwarding rather than only reading commitPost as source text. The round-2
+// check's exact mutation family: a single-token edit at either forwarding
+// site (`decision.delayedPostAt` -> `undefined`, or
+// `scheduledLabel: decision.scheduledLabel` -> `scheduledLabel: null`) kept
+// every prior gate green. These tests pin the IDENTITY of the forwarded
+// value, not the presence of a name, so both the "replace with undefined/
+// null" mutation and the "drop the field entirely" mutation fail loudly.
+describe("postArgsFor - RULING 65/BLOCKER R2-1 (the exact 3rd argument commitPost forwards to postDraft)", () => {
+  it("forwards a resolved delayedPostAt ISO string verbatim - not a constant undefined", () => {
+    const decision = { kind: "commit" as const, delayedPostAt: "2026-06-20T09:30:00.000Z" };
+    expect(postArgsFor(decision)).toBe("2026-06-20T09:30:00.000Z");
+  });
+
+  it("forwards undefined for an immediate post - the other half of the same forwarding", () => {
+    const decision = { kind: "commit" as const, delayedPostAt: undefined };
+    expect(postArgsFor(decision)).toBeUndefined();
+  });
+
+  it("sabotage check: a mutation that hardcodes the return to undefined would pass the immediate case above but fail the scheduled case - both cases are required together, closing that escape", () => {
+    const scheduled = { kind: "commit" as const, delayedPostAt: "2026-12-25T00:00:00.000Z" };
+    const result = postArgsFor(scheduled);
+    expect(result).not.toBeUndefined();
+    expect(result).toBe(scheduled.delayedPostAt);
+  });
+});
+
+describe("postResultFor - RULING 64/BLOCKER R2-1 (the exact post-result payload commitPost dispatches)", () => {
+  it("an error result passes through unchanged", () => {
+    expect(postResultFor({ kind: "commit", scheduledLabel: "6/20/2026, 9:30:00 AM" }, { error: "boom" })).toEqual({
+      error: "boom",
+    });
+  });
+
+  it("a success result on a SCHEDULED decision carries the decision's own scheduledLabel, not null", () => {
+    const decision = { kind: "commit" as const, scheduledLabel: "6/20/2026, 9:30:00 AM" };
+    expect(postResultFor(decision, { course: "CS 101" })).toEqual({
+      course: "CS 101",
+      scheduledLabel: "6/20/2026, 9:30:00 AM",
+    });
+  });
+
+  it("a success result on an IMMEDIATE decision carries scheduledLabel null - the other half of the same forwarding", () => {
+    const decision = { kind: "commit" as const, scheduledLabel: null };
+    expect(postResultFor(decision, { course: "CS 101" })).toEqual({ course: "CS 101", scheduledLabel: null });
+  });
+
+  it("sabotage check: a mutation that hardcodes scheduledLabel to null would pass the immediate case above but fail the scheduled case - both cases are required together, closing that escape (this is RULING 64's field going always-null forever, the exact defect round 2 found)", () => {
+    const decision = { kind: "commit" as const, scheduledLabel: "12/25/2026, 12:00:00 AM" };
+    const result = postResultFor(decision, { course: "CS 101" });
+    expect(result).not.toHaveProperty("scheduledLabel", null);
+    expect((result as { scheduledLabel: string | null }).scheduledLabel).toBe(decision.scheduledLabel);
+  });
+});
+
 // A32/M7 (RULING 68): postSignatureFor now includes scheduledAt, so an armed
 // post disarms (a new signature no longer matches the armed one) when the
 // scheduled time changes - the same guarantee editing title/message already
@@ -164,5 +224,28 @@ describe("postSignatureFor - RULING 68/M7 (scheduledAt is part of the confirm-ar
     const a = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T09:30" });
     const b = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T09:30" });
     expect(a).toBe(b);
+  });
+});
+
+// A32 round-2 remediation, BLOCKER R2-1: postArgsFor/postResultFor above are
+// correct in isolation, but nothing stops commitPost's own CALL SITE from
+// reverting to the old inline literals while those two functions sit
+// untested-in-context. This reads this very file as source - the round-2
+// check's own canary, `grep -rn 'readFileSync[^)]*useAnnouncementDraftSlots'
+// src --include=*.test.ts`, exits 1 before this describe and 0 after it - to
+// pin that commitPost actually calls them and forwards nothing else.
+describe("BLOCKER R2-1: commitPost forwards through postArgsFor/postResultFor, never an inline literal", () => {
+  const hookSource = fs.readFileSync(path.join(__dirname, "useAnnouncementDraftSlots.ts"), "utf-8");
+  const slice = hookSource.slice(hookSource.indexOf("const commitPost = useCallback("), hookSource.indexOf("const armPost = useCallback("));
+
+  it("both anchors resolve", () => {
+    expect(slice.length).toBeGreaterThan(0);
+  });
+
+  it("postDraft's 3rd argument is postArgsFor(decision), and the dispatched result is postResultFor(decision, result) - never decision.delayedPostAt/scheduledLabel inlined", () => {
+    expect(slice).toMatch(/postDraft\([^)]*,\s*postArgsFor\(decision\)\)/);
+    expect(slice).toMatch(/result:\s*postResultFor\(decision,\s*result\)/);
+    expect(slice).not.toMatch(/postDraft\([^)]*,\s*decision\.delayedPostAt\)/);
+    expect(slice).not.toMatch(/scheduledLabel:\s*decision\.scheduledLabel/);
   });
 });

@@ -1,9 +1,11 @@
 // AC8's derived inventory guard - docs/modal-dismissal-focus-acceptance-
-// criteria.md. The scan (the tree walk, the classification predicates, the
-// four allowlists, and the derived sets) lives in modalAdoptionScan.ts, a
-// non-test module shared with modalAdoptionWiring.attributes.test.ts - see
-// that module's header comment for the full contract of what a "dialog site"
-// and "adopts" mean, and for the four lists' own reasoning.
+// criteria.md. The scan (the tree walk, the comment tokenizer, and the
+// classification predicates) lives in modalAdoptionSourceScan.ts; the four
+// allowlists and the derived sets live in modalAdoptionScan.ts, which
+// re-exports the former unchanged - both non-test modules shared with
+// modalAdoptionWiring.attributes.test.ts - see modalAdoptionScan.ts's own
+// header comment for the full contract of what a "dialog site" and "adopts"
+// mean, and for the four lists' own reasoning.
 //
 // THIS FILE covers the INVENTORY half of the split: the classification
 // predicate canaries, the count pins, the four-list two-directional honesty
@@ -16,10 +18,11 @@
 // are on which list" in one file and every test that reasons about "what does
 // this one file's markup look like" in the other.
 //
-// This file also owns the bundle guard on modalAdoptionScan.ts itself: that
-// module imports `node:fs`, and it lives under `src/app`, so an application
-// file importing it would pull a node builtin into the client bundle - see
-// modalAdoptionScan.ts's own header comment.
+// This file also owns the bundle guard on modalAdoptionScan.ts AND
+// modalAdoptionSourceScan.ts: both import (or re-export) `node:fs`, and both
+// live under `src/app`, so an application file importing either would pull a
+// node builtin into the client bundle - see modalAdoptionScan.ts's own
+// header comment.
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -613,19 +616,27 @@ describe("AC8 point 6 - the wave-2, wave-3 and wave-5 adopters really do adopt, 
 // list of "files that don't import it" - so a NEW application file that adds
 // the import is caught the same way an existing one would be.
 // ---------------------------------------------------------------------------
-describe("modalAdoptionScan.ts bundle guard - node:fs must never reach the client bundle", () => {
+describe("modalAdoptionScan.ts / modalAdoptionSourceScan.ts bundle guard - node:fs must never reach the client bundle", () => {
   it("is imported only by test files, never by an application component", () => {
-    const scanModuleRelativePath = "src/app/components/ui/modalAdoptionScan.ts";
-    const importPattern = /from\s+["'][^"']*\/modalAdoptionScan["']/;
+    // Both modules must be guarded: modalAdoptionScan.ts re-exports the
+    // node:fs-importing primitives (walkFiles, classify, ...) that actually
+    // live in modalAdoptionSourceScan.ts as of the L9-wave-off-the-ceiling
+    // extraction, so a component importing EITHER path directly would pull
+    // node:fs into the client bundle.
+    const scanModuleRelativePaths = new Set([
+      "src/app/components/ui/modalAdoptionScan.ts",
+      "src/app/components/ui/modalAdoptionSourceScan.ts",
+    ]);
+    const importPattern = /from\s+["'][^"']*\/(modalAdoptionScan|modalAdoptionSourceScan)["']/;
     const allSourceFiles = walkFiles(APP_ROOT, (fileName) => fileName.endsWith(".ts") || fileName.endsWith(".tsx"));
     const violators = allSourceFiles
-      .filter((absPath) => toRepoRelativePosix(absPath) !== scanModuleRelativePath)
+      .filter((absPath) => !scanModuleRelativePaths.has(toRepoRelativePosix(absPath)))
       .filter((absPath) => !/\.test\.tsx?$/.test(absPath))
       .filter((absPath) => importPattern.test(readFileSync(absPath, "utf8")))
       .map((absPath) => toRepoRelativePosix(absPath));
     expect(
       violators,
-      "modalAdoptionScan.ts imports node:fs; only test files may import it - a non-test import would pull a node builtin into the client bundle and break the build",
+      "modalAdoptionScan.ts/modalAdoptionSourceScan.ts import node:fs; only test files may import them - a non-test import would pull a node builtin into the client bundle and break the build",
     ).toEqual([]);
   });
 });

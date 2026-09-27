@@ -1,14 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { describeRunRubricProvenance } from "./rubricProvenance";
+import { restoreStampedRubricText } from "./rubric-provenance-stamp";
 import { saveRubricMemory } from "./rubric-memory";
 import type { GradingRun } from "./types";
 
-function run(overrides: Partial<GradingRun> = {}): GradingRun {
+// Plain strings in, not StampedRubricText - these fixtures are testing
+// describeRunRubricProvenance's own reading of the run, not the pin
+// (RULING 58), so restoreStampedRubricText is the legitimate way to obtain
+// the brand from a literal here (see rubric-provenance-stamp.ts's header).
+function run(
+  overrides: Partial<Omit<GradingRun, "rubricUsed" | "rubricFingerprint">> & {
+    rubricUsed?: string;
+    rubricFingerprint?: string;
+  } = {}
+): GradingRun {
+  const { rubricUsed, rubricFingerprint, ...rest } = overrides;
   return {
     results: [],
     rubricAreaNames: [],
     fullCreditChecklist: [],
-    ...overrides,
+    ...rest,
+    rubricUsed: restoreStampedRubricText(rubricUsed),
+    rubricFingerprint: restoreStampedRubricText(rubricFingerprint),
   };
 }
 

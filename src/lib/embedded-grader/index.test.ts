@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "@/lib/grade";
-import { buildEmbeddedRubric, gradeEntriesEmbedded, MAX_CRITERIA } from "./index";
+import { rubricFingerprint } from "@/lib/research/rubric-fingerprint";
+import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, MAX_CRITERIA } from "./index";
 
 function entry(student: string, content: string, extensions: string[] = [], userId?: number): StudentSubmissionEntry {
   return {
@@ -252,5 +253,26 @@ describe("gradeEntriesEmbedded", () => {
     const area = run.results[0].rubricAreas.find((a) => a.area === "Code runs");
     expect(area?.score).toBe("10/10");
     expect(run.results[0].totalScore).toBe("40/40");
+  });
+});
+
+// RULING 57 (docs/a39-build-rulings.md): the deterministic "embedded"
+// provider is one of the two producers the A39 build check found silently
+// unstamped. This executes the real gradeEntriesEmbedded (no LLM/network seam
+// to mock - the deterministic engine calls neither) and asserts the returned
+// run carries the pair, against the actual rendered criteria text it graded
+// against - not a hand-built GradingRun literal.
+describe("gradeEntriesEmbedded stamps the rubricUsed/rubricFingerprint pair on the produced run", () => {
+  it("stamps rubricUsed as the rendered criteria text this run actually graded against, and rubricFingerprint as that text's fingerprint", () => {
+    const rubric = buildEmbeddedRubric({
+      rubricText: JSON.stringify([
+        { criterion: "Uses pandas", checkType: "keyword", target: "pandas", points: 10 },
+      ]),
+    });
+    const run = gradeEntriesEmbedded([entry("Ada", "import pandas", ["py"])], rubric);
+    const expectedText = renderRubricText(rubric);
+
+    expect(run.rubricUsed).toBe(expectedText);
+    expect(run.rubricFingerprint).toBe(rubricFingerprint(expectedText));
   });
 });

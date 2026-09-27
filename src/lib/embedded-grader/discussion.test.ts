@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { RESUBMIT_NOTICE } from "@/lib/grade";
+import { rubricFingerprint } from "@/lib/research/rubric-fingerprint";
 import {
   defaultDiscussionRubric,
   buildDiscussionRubric,
   gradeDiscussion,
   discussionChecklist,
+  renderDiscussionRubric,
   type DiscussionStudent,
   type DiscussionContext,
   type DiscussionSignal,
@@ -175,5 +177,23 @@ describe("buildDiscussionRubric", () => {
   it("adds a multi-day signal only when the prompt explicitly asks for one", () => {
     const rubric = buildDiscussionRubric("Post on at least 3 different days throughout the week. Reply to 2 peers.");
     expect(signalsOf(rubric, "Timeliness")).toContainEqual({ kind: "distinct_days", count: 3 });
+  });
+});
+
+// RULING 57 (docs/a39-build-rulings.md): gradeDiscussion is the second of the
+// two producers the A39 build check found silently unstamped - the
+// discussion sub-path of the "embedded" provider, distinct from
+// gradeEntriesEmbedded (index.test.ts carries that one's instrument). No
+// LLM/network seam to mock. Executes the real function and asserts the
+// returned run carries the pair against the actual rendered rubric text it
+// graded against.
+describe("gradeDiscussion stamps the rubricUsed/rubricFingerprint pair on the produced run", () => {
+  it("stamps rubricUsed as the rendered discussion rubric text this run actually graded against, and rubricFingerprint as that text's fingerprint", () => {
+    const rubric = defaultDiscussionRubric();
+    const run = gradeDiscussion([strong], rubric, ctx);
+    const expectedText = renderDiscussionRubric(rubric);
+
+    expect(run.rubricUsed).toBe(expectedText);
+    expect(run.rubricFingerprint).toBe(rubricFingerprint(expectedText));
   });
 });

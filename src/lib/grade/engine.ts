@@ -25,11 +25,14 @@ import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, normalizeAreaName, extractRubricCriteria } from "./rubric";
 import { buildSubmittedFileNamesBlock } from "./prompts";
-// A39 wave 2 (docs/a39-architecture.md 5.2): imported from this leaf, never
-// from ../research/rubric-bank, so stamping every run's fingerprint does not
+// A39 wave 2 (docs/a39-architecture.md 5.2), tightened by RULING 57/58: the
+// stamp itself (never a raw rubricFingerprint() call plus an inline literal)
+// so every producer of a GradingRun - not only this file's three - stamps
+// the pair the identical way. stampRubricProvenance imports rubricFingerprint
+// from THIS leaf, never from ../research/rubric-bank, so stamping does not
 // widen the engine's runtime import closure to include a database client
 // (runtime-import-graph.test.ts is the instrument, W2-5).
-import { rubricFingerprint } from "../research/rubric-fingerprint";
+import { stampRubricProvenance } from "./rubric-provenance-stamp";
 
 /** Grade a single student submission. */
 async function gradeSubmission(
@@ -405,8 +408,7 @@ async function gradeStudentEntries(
     // that rubric's content fingerprint, read from THIS call's own `rubric`
     // parameter - never from whatever a caller may have separately
     // persisted (docs/a39-architecture.md 6.4, W2-3's removal test).
-    rubricUsed: rubric,
-    rubricFingerprint: rubricFingerprint(rubric),
+    ...stampRubricProvenance(rubric),
   };
 }
 
@@ -447,8 +449,7 @@ export async function gradeSubmissions(
       results: [],
       rubricAreaNames: [],
       fullCreditChecklist: [],
-      rubricUsed: rubric,
-      rubricFingerprint: rubricFingerprint(rubric),
+      ...stampRubricProvenance(rubric),
     };
   }
 
@@ -503,8 +504,7 @@ export async function gradeCanvasUrl(
       results: [],
       rubricAreaNames: [],
       fullCreditChecklist: [],
-      rubricUsed: rubric,
-      rubricFingerprint: rubricFingerprint(rubric),
+      ...stampRubricProvenance(rubric),
     };
   }
 

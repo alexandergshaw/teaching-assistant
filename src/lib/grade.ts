@@ -1,5 +1,7 @@
 // Re-export all public APIs from submodules
-export { RESUBMIT_NOTICE, GRADING_FAILURE_PREFIX, MAX_NESTED_ZIP_DEPTH, composeOverallComment, GRADE_DETERMINATIONS, coerceGradeDetermination, coerceUngradedOutcome, isUngraded, gradedResults, ungradedResults, type RubricAreaResult, type SubmittedFileInfo, type GradeResult, type GradedResult, type UngradedResult, type UngradedOutcome, type NotAttemptedOutcome, type GradingFailedOutcome, type GradeDetermination, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "./grade/types";
+export { RESUBMIT_NOTICE, GRADING_FAILURE_PREFIX, MAX_NESTED_ZIP_DEPTH, composeOverallComment, GRADE_DETERMINATIONS, coerceGradeDetermination, coerceUngradedOutcome, isUngraded, gradedResults, ungradedResults, type RubricAreaResult, type SubmittedFileInfo, type GradeResult, type GradedResult, type UngradedResult, type UngradedOutcome, type NotAttemptedOutcome, type GradingFailedOutcome, type GradeDetermination, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry, type StampedRubricText } from "./grade/types";
+
+export { stampRubricProvenance, restoreStampedRubricText } from "./grade/rubric-provenance-stamp";
 
 export { getMimeType, IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES } from "./grade/constants";
 

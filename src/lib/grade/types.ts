@@ -329,6 +329,21 @@ export function coerceUngradedOutcome(value: unknown): UngradedOutcome | undefin
   return undefined;
 }
 
+// RULING 58 (docs/a39-build-rulings.md): a nominal brand with no runtime
+// representation, so the ONLY way to produce a value of this type is through
+// stampRubricProvenance (src/lib/grade/rubric-provenance-stamp.ts) - a plain
+// string, including one read back from rubric-memory's store, is not
+// assignable to it. Before this brand existed, `Pick<GradingRun,
+// "rubricUsed" | "rubricFingerprint">`'s fields were plain `string |
+// undefined`, so a mount site doing `<RubricProvenance run={{ ...run,
+// rubricUsed: rubricFromStore }} />` typechecked while defeating the "cannot
+// see the storage shape" claim (docs/a39-build-check.md MAJOR 2). That
+// assignment now fails the type gate instead.
+declare const STAMPED_RUBRIC_PROVENANCE_BRAND: unique symbol;
+export type StampedRubricText = string & {
+  readonly [STAMPED_RUBRIC_PROVENANCE_BRAND]: true;
+};
+
 export interface GradingRun {
   results: GradeResult[];
   rubricAreaNames: string[];
@@ -341,13 +356,15 @@ export interface GradingRun {
   sampleAnswer?: string;
   // A39 wave 2 (docs/owner-decisions-2026-09-23.md DECISION 3's leverage
   // claim): the exact rubric text this run graded against, and its content
-  // fingerprint (src/lib/research/rubric-fingerprint.ts), stamped at every
-  // engine.ts return site - never read back from whatever a caller has
-  // persisted. RubricProvenance.tsx reads these two fields off the RUN, so
-  // editing a stored rubric afterward cannot change what a past run reports
-  // it was graded against.
-  rubricUsed?: string;
-  rubricFingerprint?: string;
+  // fingerprint (src/lib/research/rubric-fingerprint.ts), stamped by every
+  // producer of a GradingRun via stampRubricProvenance - never read back from
+  // whatever a caller has persisted. RubricProvenance.tsx reads these two
+  // fields off the RUN, so editing a stored rubric afterward cannot change
+  // what a past run reports it was graded against. RULING 57: every producer
+  // stamps this pair, not only engine.ts - see rubric-provenance-stamp.ts's
+  // header for the enumeration.
+  rubricUsed?: StampedRubricText;
+  rubricFingerprint?: StampedRubricText;
 }
 
 /**

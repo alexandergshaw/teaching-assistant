@@ -41,6 +41,7 @@ import type {
   NotAttemptedOutcome,
   GradingFailedOutcome,
 } from "@/lib/grade";
+import { restoreStampedRubricText } from "@/lib/grade";
 import { stripGradeResultForDraft } from "@/lib/workflows/grading-review-rows";
 import { coerceGradingDraftPayload } from "@/lib/grading-drafts";
 import { parseStoredGithubGradingRun, serializeGithubGradingRun } from "@/lib/github-grading-run-store";
@@ -327,8 +328,10 @@ function runSentinel(): GradingRun {
     fullCreditChecklist: ["SENTINEL_checklist_item"],
     speedGraderUrl: "https://example.com/speedgrader/SENTINEL",
     sampleAnswer: "SENTINEL_sampleAnswer",
-    rubricUsed: "SENTINEL_rubricUsed",
-    rubricFingerprint: "SENTINEL_rubricFingerprint",
+    // A fixture, not a fresh provenance claim - restoreStampedRubricText is
+    // the legitimate way to get the brand here too (RULING 58).
+    rubricUsed: restoreStampedRubricText("SENTINEL_rubricUsed"),
+    rubricFingerprint: restoreStampedRubricText("SENTINEL_rubricFingerprint"),
   };
 }
 

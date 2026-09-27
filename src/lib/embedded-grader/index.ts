@@ -13,6 +13,7 @@ import {
   scaleResultToPoints,
   composeOverallComment,
   RESUBMIT_NOTICE,
+  stampRubricProvenance,
   type GradingRun,
   type RubricAreaResult,
   type StudentSubmissionEntry,
@@ -27,6 +28,7 @@ import {
   buildRubricFromRubricText,
   capCriteria,
   fullCreditChecklist,
+  renderRubricText,
 } from "./rubric";
 
 export type { EmbeddedRubric } from "./types";
@@ -216,5 +218,12 @@ export function gradeEntriesEmbedded(
     results,
     rubricAreaNames,
     fullCreditChecklist: fullCreditChecklist(rubric),
+    // RULING 57 (docs/a39-build-rulings.md): the deterministic engine is a
+    // real, user-selectable producer of a rendered run, same as engine.ts's
+    // Gemini path - it stamps the pair the same way, against the actual
+    // criteria text this run graded against (renderRubricText(rubric)), not
+    // the caller's raw input (which may have been generated from
+    // instructions, or capped to MAX_CRITERIA).
+    ...stampRubricProvenance(renderRubricText(rubric)),
   };
 }

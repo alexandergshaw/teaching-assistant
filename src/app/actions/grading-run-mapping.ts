@@ -13,7 +13,7 @@
 // GradingTab renders it unchanged. No I/O, no clock, no randomness - every
 // export below is a pure function of its arguments.
 
-import { scaleResultToPoints, composeOverallComment, type GradingRun } from "@/lib/grade";
+import { scaleResultToPoints, composeOverallComment, stampRubricProvenance, type GradingRun } from "@/lib/grade";
 import type { GradingApiResponse } from "@/lib/grading-engine";
 
 // Map the deterministic Grading API response onto the app's GradingRun so the
@@ -24,13 +24,22 @@ import type { GradingApiResponse } from "@/lib/grading-engine";
 // When grading from a Canvas URL, pointsPossible re-bases the engine's rubric
 // total onto the assignment's real scale (same anchoring as the AI path), so the
 // tool never grades out of a different total than Canvas.
+//
+// RULING 57 (docs/a39-build-rulings.md): the external "Other API" grader is a
+// third user-selectable producer of a rendered run. `rubricText` is the exact
+// text the caller (gradeZipViaEngine, src/app/actions/grading.ts) sent to the
+// engine for this run - optional and undefined-safe so every existing call
+// (including the frozen-literal tests in grading-run-mapping.test.ts) keeps
+// compiling and passing unchanged when it is omitted.
 export function gradingApiToRun(
   resp: GradingApiResponse,
-  pointsPossible: number | null = null
+  pointsPossible: number | null = null,
+  rubricText?: string
 ): GradingRun {
   return {
     rubricAreaNames: resp.criteria,
     fullCreditChecklist: [],
+    ...stampRubricProvenance(rubricText ?? ""),
     results: resp.students.map((s) => {
       const passedCount = s.criteria.filter((c) => c.passed).length;
       const rawAreas = s.criteria.map((c) => ({

@@ -696,7 +696,7 @@ async function gradeZipViaEngine(
       ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
       : []),
   ];
-  return { run: gradingApiToRun(resp, pointsPossible), error: null, warnings };
+  return { run: gradingApiToRun(resp, pointsPossible, rubricText), error: null, warnings };
 }
 
 // attachCodeRuns/CODE_RUN_CONCURRENCY moved to @/lib/code-runner (imported

@@ -22,6 +22,7 @@ import type {
   RubricAreaResult,
   SubmittedFileInfo,
 } from "./grade";
+import { restoreStampedRubricText } from "./grade";
 import { coerceGradeDetermination, coerceUngradedOutcome } from "./grade/types";
 import { coerceRepoGradingRunLog, type RepoGradingRunLog } from "./repo-grading-log";
 
@@ -179,8 +180,14 @@ function coerceGradingRun(value: unknown): GradingRun | null {
     // whether it is optional - see grade-result-allowlist-coverage.test.ts's
     // run-level sentinel, which is exactly how this was caught for
     // GradeResult once already.
-    rubricUsed: typeof o.rubricUsed === "string" ? o.rubricUsed : undefined,
-    rubricFingerprint: typeof o.rubricFingerprint === "string" ? o.rubricFingerprint : undefined,
+    // RULING 58: restores a run's OWN already-stamped field back from
+    // storage - never a fresh value from another source - so
+    // restoreStampedRubricText is the legitimate way to reobtain the brand
+    // here (see rubric-provenance-stamp.ts's header).
+    rubricUsed: restoreStampedRubricText(typeof o.rubricUsed === "string" ? o.rubricUsed : undefined),
+    rubricFingerprint: restoreStampedRubricText(
+      typeof o.rubricFingerprint === "string" ? o.rubricFingerprint : undefined
+    ),
   };
 }
 

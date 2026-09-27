@@ -13,6 +13,7 @@ import {
   scaleResultToPoints,
   composeOverallComment,
   RESUBMIT_NOTICE,
+  stampRubricProvenance,
   type GradingRun,
   type RubricAreaResult,
 } from "@/lib/grade";
@@ -485,5 +486,15 @@ export function gradeDiscussion(
     };
   });
 
-  return { results, rubricAreaNames, fullCreditChecklist: discussionChecklist(rubric) };
+  return {
+    results,
+    rubricAreaNames,
+    fullCreditChecklist: discussionChecklist(rubric),
+    // RULING 57 (docs/a39-build-rulings.md): the discussion path is a
+    // user-selectable "embedded" producer distinct from gradeEntriesEmbedded
+    // (this same provider grades discussions and regular submissions with two
+    // different functions) - it stamps against the actual composite-criteria
+    // text this run graded against (renderDiscussionRubric(rubric)).
+    ...stampRubricProvenance(renderDiscussionRubric(rubric)),
+  };
 }

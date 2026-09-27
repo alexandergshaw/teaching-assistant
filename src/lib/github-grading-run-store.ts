@@ -18,6 +18,7 @@
 // for the component to call.
 
 import type { GradeResult, GradingRun, RubricAreaResult } from "@/lib/grade";
+import { restoreStampedRubricText } from "@/lib/grade";
 import { coerceGradeDetermination, coerceUngradedOutcome } from "@/lib/grade/types";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 
@@ -289,8 +290,14 @@ function parseGradingRun(raw: unknown): GradingRun | null {
   // (grading-drafts.ts) - an optional field added to GradingRun without
   // being added here is silently dropped on every restore, not just failed
   // to parse.
-  const rubricUsed = typeof raw.rubricUsed === "string" ? raw.rubricUsed : undefined;
-  const rubricFingerprint = typeof raw.rubricFingerprint === "string" ? raw.rubricFingerprint : undefined;
+  // RULING 58: this restores a run's OWN already-stamped field back from
+  // storage - never a fresh value from another source - so
+  // restoreStampedRubricText is the legitimate way to reobtain the brand
+  // here (see rubric-provenance-stamp.ts's header).
+  const rubricUsed = restoreStampedRubricText(typeof raw.rubricUsed === "string" ? raw.rubricUsed : undefined);
+  const rubricFingerprint = restoreStampedRubricText(
+    typeof raw.rubricFingerprint === "string" ? raw.rubricFingerprint : undefined
+  );
 
   return {
     results,

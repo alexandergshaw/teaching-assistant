@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { gradingApiToRun } from "./grading-run-mapping";
+import { rubricFingerprint } from "@/lib/research/rubric-fingerprint";
 import type { GradingApiResponse } from "@/lib/grading-engine";
 
 const sampleResponse: GradingApiResponse = {
@@ -125,5 +126,27 @@ describe("gradingApiToRun (frozen literal oracle)", () => {
       fullCreditChecklist: [],
       results: [],
     });
+  });
+});
+
+// RULING 57 (docs/a39-build-rulings.md): the external "Other API" grader is
+// the third of the three producers the A39 build check found silently
+// unstamped. gradingApiToRun has no LLM/network seam of its own (the network
+// call already happened by the time this pure mapper runs) - this executes
+// the real function with the rubric text argument threaded through, the same
+// text gradeZipViaEngine (src/app/actions/grading.ts) sends to the engine.
+describe("gradingApiToRun stamps the rubricUsed/rubricFingerprint pair on the produced run", () => {
+  it("stamps rubricUsed as the exact rubric text the caller sent to the engine for this run, and rubricFingerprint as that text's fingerprint", () => {
+    const rubricText = "Correctness (50%): tests pass. Style (50%): docstrings.";
+    const run = gradingApiToRun(sampleResponse, null, rubricText);
+
+    expect(run.rubricUsed).toBe(rubricText);
+    expect(run.rubricFingerprint).toBe(rubricFingerprint(rubricText));
+  });
+
+  it("stamps neither field when no rubric text is given (existing callers, unchanged)", () => {
+    const run = gradingApiToRun(sampleResponse, null);
+    expect(run.rubricUsed).toBeUndefined();
+    expect(run.rubricFingerprint).toBeUndefined();
   });
 });

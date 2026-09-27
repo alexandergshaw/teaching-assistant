@@ -127,3 +127,32 @@ branch when the passage doing the forbidding is QUOTED and its scope is stated -
 an `it()` description is not an assertion, a comment is not a ruling, and a rule
 about one surface does not bind another. State what the passage forbids, and state
 what it does not.
+
+**An absence claim may not rest on WHERE A GRAPH WALK'S TRAIL BEGINS.** Added
+2026-09-27 after a scope exonerated eight call sites by observing that all 17 of a
+file's boundary violations had trails starting at one re-export barrel, and concluded
+the file's own code was therefore clean.
+
+The walker in `src/lib/module-graph/runtime-import-graph.ts` shares ONE `visited` set
+across the whole walk and returns early on a revisit, and a violation's `trail`
+records whichever path reached the importing file FIRST. So "every trail begins at X"
+is COMPATIBLE with a second, independent import of the same file reaching the
+forbidden resource through a module the walk had already visited. **Trail-prefix
+attribution under a shared visited set is not an absence proof** - it is a statement
+about traversal order.
+
+THE VALID PROOF IS ONE WALK PER DIRECT EDGE, rooted at each import in turn, reporting
+a violation count for each. Measured on the file in question: 18 edges, exactly ONE
+producing 17 violations and the other 17 producing zero each. That distinguishes "this
+file's graph contains the resource" from "this file's own call reaches it", which is
+what RULING 84 requires and what a trail prefix cannot show.
+
+Two corollaries. A walk must STATE WHICH TARGETS IT FORBADE - a walk against a subset
+of the owner-private resources is a partial result and must be labelled one, which is
+the gap RULING 90 closed. And this is the fifth shape in one day where an absence
+claim failed on the INSTRUMENT rather than the pattern, after an `--include` flag that
+missed `.tsx`, a relative import specifier invisible to an alias filter, a
+single-line grep against multi-line export blocks, and a census grep blind to files
+already migrated off a deprecated alias. The general rule: **when a count appears to
+settle a question, ask whether the instrument can even observe the thing it is being
+read as settling.**

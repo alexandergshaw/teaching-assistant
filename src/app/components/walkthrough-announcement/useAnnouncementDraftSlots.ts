@@ -129,6 +129,56 @@ export function resolveRegenerateResearchOutcome(
   return cachedResearchFor(cached, fingerprint) ?? { kind: "off" };
 }
 
+/**
+ * A32/REQ-A32-1, RULING 65: commitPost's own decision, pulled into a pure
+ * exported function - mirroring cachedResearchFor/shouldReuseInFlightResearch/
+ * resolveRegenerateResearchOutcome above - precisely so a test can EXECUTE
+ * the confirm path directly rather than only reading commitPost as source
+ * text (which is what shipped with no instrument at all: the checker's
+ * BLOCKER 3). commitPost below calls this function; it never re-derives the
+ * decision inline. Resolves through resolveScheduledVisibility - the same
+ * function AnnouncementDraftSlot.tsx reads for its copy - never a
+ * hand-rolled truthiness check on the raw string. The discriminating case
+ * this function's own test pins: a past-dated, non-empty pick (which a raw
+ * `.trim()` truthiness check would treat as "scheduled") must resolve
+ * "commit" with `delayedPostAt: undefined`, exactly like an empty pick -
+ * see resolvePostCommit.test cases below for the executing proof.
+ */
+export function resolvePostCommit(
+  scheduledAt: string,
+  now: number
+):
+  | { readonly kind: "invalid" }
+  | { readonly kind: "commit"; readonly delayedPostAt: string | undefined; readonly scheduledLabel: string | null } {
+  const visibility = resolveScheduledVisibility(scheduledAt, now);
+  if (visibility.kind === "invalid") return { kind: "invalid" };
+  if (visibility.kind === "scheduled") {
+    return { kind: "commit", delayedPostAt: visibility.iso, scheduledLabel: visibility.label };
+  }
+  return { kind: "commit", delayedPostAt: undefined, scheduledLabel: null };
+}
+
+/**
+ * A32/M7 (RULING 68): the confirm-arm signature - now includes
+ * `slot.scheduledAt`, so changing the scheduled time on an armed post
+ * disarms it exactly as editing the title or message already does
+ * (`announcement-draft-slots.ts`'s "edit" case). Before this, the field
+ * deciding WHEN an irrevocable act takes effect was the one field excluded
+ * from the signature an armed confirm re-checks. Promoted to a top-level
+ * pure function (it closed over nothing even as a useCallback) so a test
+ * can exercise it directly.
+ */
+export function postSignatureFor(slot: DraftSlot): string | null {
+  if (slot.draft.phase !== "drafted") return null;
+  return JSON.stringify([
+    "walkthrough-announcement",
+    slot.id,
+    slot.draft.draft.title,
+    slot.draft.draft.message,
+    slot.scheduledAt,
+  ]);
+}
+
 export function useAnnouncementDraftSlots(args: {
   readonly buildRequest: () => AnnouncementDraftRequestContext;
   readonly resolveLive: () => LiveDefaults;
@@ -329,40 +379,39 @@ export function useAnnouncementDraftSlots(args: {
   const armRegenerate = useCallback((id: string) => dispatch({ type: "arm-regenerate", id }), []);
   const cancelRegenerate = useCallback((id: string) => dispatch({ type: "cancel-regenerate", id }), []);
 
-  const postSignatureFor = useCallback((slot: DraftSlot): string | null => {
-    if (slot.draft.phase !== "drafted") return null;
-    return JSON.stringify(["walkthrough-announcement", slot.id, slot.draft.draft.title, slot.draft.draft.message]);
-  }, []);
-
   const commitPost = useCallback(
     (id: string) => {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot || slot.draft.phase !== "drafted") return;
-      // A32/REQ-A32-1: resolve ONCE, here, and forward only the result - the
-      // SAME resolution AnnouncementDraftSlot.tsx reads for its consequence
-      // copy and all five ConfirmArmButtons labels. A past-dated (but valid)
-      // pick resolves to "immediate" here exactly as it does there, so the
-      // copy and the post decision can never disagree (this is what the
-      // mandatory watched failure in docs/a24-a32-waves.md section 6.4.4
-      // proved: a length check here and a future-time check there CAN
-      // disagree on this exact input).
-      const visibility = resolveScheduledVisibility(slot.scheduledAt, Date.now());
-      if (visibility.kind === "invalid") {
+      // A32/REQ-A32-1, RULING 65: resolve ONCE, through resolvePostCommit -
+      // the SAME resolveScheduledVisibility call AnnouncementDraftSlot.tsx
+      // reads for its consequence copy and all five ConfirmArmButtons
+      // labels. A past-dated (but valid) pick resolves to "immediate" here
+      // exactly as it does there, so the copy and the post decision can
+      // never disagree (this is what the mandatory watched failure in
+      // docs/a24-a32-waves.md section 6.4.4 proved: a length check here and
+      // a future-time check there CAN disagree on this exact input). The
+      // resolved scheduledLabel (or null) is carried into "post-result" so
+      // the success sentence never has to re-resolve visibility at a later
+      // render-time clock (RULING 64).
+      const decision = resolvePostCommit(slot.scheduledAt, Date.now());
+      if (decision.kind === "invalid") {
         dispatch({ type: "post-result", id, result: { error: "Could not read the scheduled visibility time." } });
         return;
       }
-      const promise = argsRef.current.postDraft(
-        slot.draft.draft.title,
-        slot.draft.draft.message,
-        visibility.kind === "scheduled" ? visibility.iso : undefined
-      );
+      const promise = argsRef.current.postDraft(slot.draft.draft.title, slot.draft.draft.message, decision.delayedPostAt);
       if (promise === null) {
         dispatch({ type: "post-result", id, result: { error: "Choose a course above to post." } });
         return;
       }
       dispatch({ type: "posting", id });
       promise.then(
-        (result) => dispatch({ type: "post-result", id, result }),
+        (result) =>
+          dispatch({
+            type: "post-result",
+            id,
+            result: "error" in result ? result : { course: result.course, scheduledLabel: decision.scheduledLabel },
+          }),
         () =>
           dispatch({
             type: "post-result",
@@ -386,7 +435,7 @@ export function useAnnouncementDraftSlots(args: {
       }
       dispatch({ type: "arm-post", id, signature });
     },
-    [postSignatureFor, commitPost]
+    [commitPost]
   );
 
   const cancelPost = useCallback((id: string) => dispatch({ type: "cancel-post", id }), []);

@@ -512,13 +512,14 @@ describe('"arm-regenerate" / "cancel-regenerate" - Set E (C1\'s relocated obliga
 });
 
 describe('"result" - Set D-succ / Set D-fail (flagship chain, part 2)', () => {
-  it("Set D-succ effect: success yields drafted with builtFrom deep-equal, and clears postArmedFor, postedTo, postError, copyError, posting", () => {
+  it("Set D-succ effect: success yields drafted with builtFrom deep-equal, and clears postArmedFor, postedTo, postedScheduledLabel, postError, copyError, posting", () => {
     const state = [
       {
         ...makeSlot(FIRST_SLOT_ID, { kind: "default" }, "beginning-of-week"),
         draft: { phase: "drafting" as const, restore: null },
         postArmedFor: "sig",
         postedTo: "Old Course",
+        postedScheduledLabel: "6/1/2026, 9:00:00 AM",
         postError: "boom",
         copyError: "oops",
         posting: true,
@@ -528,6 +529,7 @@ describe('"result" - Set D-succ / Set D-fail (flagship chain, part 2)', () => {
     expect(next[0].draft).toEqual({ phase: "drafted", draft: DRAFTED, error: null });
     expect(next[0].postArmedFor).toBeNull();
     expect(next[0].postedTo).toBeNull();
+    expect(next[0].postedScheduledLabel).toBeNull();
     expect(next[0].postError).toBeNull();
     expect(next[0].copyError).toBeNull();
     expect(next[0].posting).toBe(false);
@@ -600,12 +602,28 @@ describe('"posting"', () => {
 });
 
 describe('"post-result"', () => {
-  it("effect: ok sets postedTo and clears postArmedFor", () => {
+  it("effect: ok (immediate) sets postedTo, clears postArmedFor, and leaves postedScheduledLabel null", () => {
     const state = [drafted(FIRST_SLOT_ID, { posting: true, postArmedFor: "sig" })];
-    const next = slotsReducer(state, { type: "post-result", id: FIRST_SLOT_ID, result: { course: "CS 101" } });
+    const next = slotsReducer(state, {
+      type: "post-result",
+      id: FIRST_SLOT_ID,
+      result: { course: "CS 101", scheduledLabel: null },
+    });
     expect(next[0].posting).toBe(false);
     expect(next[0].postedTo).toBe("CS 101");
     expect(next[0].postArmedFor).toBeNull();
+    expect(next[0].postedScheduledLabel).toBeNull();
+  });
+
+  it("effect: ok (scheduled) writes postedScheduledLabel from the result - A32/RULING 64, the fact the success sentence branches on", () => {
+    const state = [drafted(FIRST_SLOT_ID, { posting: true, postArmedFor: "sig" })];
+    const next = slotsReducer(state, {
+      type: "post-result",
+      id: FIRST_SLOT_ID,
+      result: { course: "CS 101", scheduledLabel: "6/20/2026, 9:30:00 AM" },
+    });
+    expect(next[0].postedTo).toBe("CS 101");
+    expect(next[0].postedScheduledLabel).toBe("6/20/2026, 9:30:00 AM");
   });
 
   it("effect: error sets postError and clears posting", () => {
@@ -617,7 +635,11 @@ describe('"post-result"', () => {
 
   it("guard: unknown id is a no-op", () => {
     const state = [drafted(FIRST_SLOT_ID)];
-    const next = slotsReducer(state, { type: "post-result", id: "does-not-exist", result: { course: "CS 101" } });
+    const next = slotsReducer(state, {
+      type: "post-result",
+      id: "does-not-exist",
+      result: { course: "CS 101", scheduledLabel: null },
+    });
     expect(next).toBe(state);
   });
 });

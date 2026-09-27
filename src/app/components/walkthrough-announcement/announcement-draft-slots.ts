@@ -118,6 +118,16 @@ export interface DraftSlot {
   readonly posting: boolean;
   readonly postError: string | null;
   readonly postedTo: string | null;
+  /** A32/RULING 64: the ONE fact `postedTo`'s own success sentence needs to
+   * tell the truth on the scheduled path - the locale-formatted label
+   * `resolveScheduledVisibility` produced at the moment `commitPost`
+   * actually decided to schedule, or `null` if that post was immediate.
+   * Frozen at commit time (never re-resolved at render) so the success
+   * sentence cannot drift from what was actually decided, the same
+   * decide-once-and-carry-the-result shape REQ-A32-1 already uses for the
+   * post itself. Cleared alongside `postedTo` whenever a fresh draft
+   * result arrives. */
+  readonly postedScheduledLabel: string | null;
   readonly copyError: string | null;
   /** True immediately after a successful Copy, cleared by the next edit,
    * template choice, regenerate, or copy attempt - a minor confirmation
@@ -357,6 +367,7 @@ export function makeSlot(id: string, choice: TemplateChoice, timing: Announcemen
     posting: false,
     postError: null,
     postedTo: null,
+    postedScheduledLabel: null,
     copyError: null,
     copied: false,
   };
@@ -385,7 +396,11 @@ export type SlotsAction =
   | { type: "arm-regenerate"; id: string }
   | { type: "cancel-regenerate"; id: string }
   | { type: "posting"; id: string }
-  | { type: "post-result"; id: string; result: { course: string } | { error: string } }
+  | {
+      type: "post-result";
+      id: string;
+      result: { course: string; scheduledLabel: string | null } | { error: string };
+    }
   | { type: "copy-result"; id: string; error: string | null };
 // 16 members. See announcement-draft-slots.test.ts - the C1 guard there is
 // an exhaustive `Record<SlotsAction["type"], true>` literal, which tsc
@@ -487,6 +502,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
           draft: { phase: "drafted", draft: action.result, error: null },
           postArmedFor: null,
           postedTo: null,
+          postedScheduledLabel: null,
           postError: null,
           copyError: null,
           copied: false,
@@ -514,7 +530,13 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         if ("error" in action.result) {
           return { ...slot, posting: false, postError: action.result.error };
         }
-        return { ...slot, posting: false, postedTo: action.result.course, postArmedFor: null };
+        return {
+          ...slot,
+          posting: false,
+          postedTo: action.result.course,
+          postedScheduledLabel: action.result.scheduledLabel,
+          postArmedFor: null,
+        };
       });
     }
     case "copy-result": {

@@ -341,7 +341,14 @@ export default function AnnouncementDraftSlot({
           {!courseName && <p className={styles.fieldHint}>Choose a course above to post.</p>}
           {slot.postedTo && (
             <p role="status" aria-live="polite" className={styles.fieldHint}>
-              Posted to {slot.postedTo}. Students can see it now.
+              {/* A32/RULING 64: this line must not claim "can see it now" on
+                  the scheduled path - postedScheduledLabel is frozen at
+                  commitPost's own decision time (never re-resolved here),
+                  mirroring the sibling's own branching success copy at
+                  announcements-panel.tsx:280-283. */}
+              {slot.postedScheduledLabel
+                ? `Scheduled for ${slot.postedTo}. Students will see it ${slot.postedScheduledLabel}.`
+                : `Posted to ${slot.postedTo}. Students can see it now.`}
             </p>
           )}
         </>

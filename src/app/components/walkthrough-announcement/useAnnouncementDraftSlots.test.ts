@@ -23,10 +23,12 @@
 import { describe, it, expect } from "vitest";
 import {
   cachedResearchFor,
+  postSignatureFor,
+  resolvePostCommit,
   resolveRegenerateResearchOutcome,
   shouldReuseInFlightResearch,
 } from "./useAnnouncementDraftSlots";
-import type { ResourceOutcome } from "./announcement-draft-slots";
+import { makeSlot, type ResourceOutcome } from "./announcement-draft-slots";
 
 const FOUND: ResourceOutcome = { kind: "found", links: [{ title: "A", url: "https://example.edu/a" }] };
 const OFF: ResourceOutcome = { kind: "off" };
@@ -89,5 +91,78 @@ describe("resolveRegenerateResearchOutcome - Ruling 17", () => {
     // Regenerate. The correct behavior ignores the cache entirely here.
     const result = resolveRegenerateResearchOutcome(false, { fingerprint: "fp-1", outcome: FOUND }, "fp-1");
     expect(result).toEqual(OFF);
+  });
+});
+
+// A32/REQ-A32-1, RULING 65 and RULING 66/M4: resolvePostCommit is
+// commitPost's own decision - the DECISION half of REQ-A32-1, which the
+// build check found had no instrument of any kind (BLOCKER 3) even though
+// this file was in the wave's own declared write set. These tests execute
+// the function directly (not merely read commitPost as source text), and
+// the past-dated case is the discriminating one: it is what a raw
+// `.trim()`-truthiness stand-in for resolveScheduledVisibility gets wrong.
+describe("resolvePostCommit - RULING 65 (the decision half of REQ-A32-1)", () => {
+  const NOW = new Date("2026-06-15T12:00:00.000Z").getTime();
+
+  it("empty scheduledAt commits immediately - delayedPostAt undefined, scheduledLabel null", () => {
+    expect(resolvePostCommit("", NOW)).toEqual({ kind: "commit", delayedPostAt: undefined, scheduledLabel: null });
+  });
+
+  it("a future scheduledAt commits with delayedPostAt as the resolved ISO string and scheduledLabel as the resolved locale label", () => {
+    const raw = "2026-06-20T09:30";
+    const when = new Date(raw);
+    expect(resolvePostCommit(raw, NOW)).toEqual({
+      kind: "commit",
+      delayedPostAt: when.toISOString(),
+      scheduledLabel: when.toLocaleString(),
+    });
+  });
+
+  it('a PAST scheduledAt commits IMMEDIATELY (delayedPostAt undefined, scheduledLabel null) - this is the case a raw truthiness check gets wrong, since a past ISO string is non-empty and therefore "truthy"', () => {
+    const raw = "2020-01-01T09:00";
+    expect(raw.trim().length > 0).toBe(true); // sanity: this input IS truthy
+    expect(resolvePostCommit(raw, NOW)).toEqual({ kind: "commit", delayedPostAt: undefined, scheduledLabel: null });
+  });
+
+  it("a malformed scheduledAt is invalid", () => {
+    expect(resolvePostCommit("not-a-date", NOW)).toEqual({ kind: "invalid" });
+  });
+});
+
+// A32/M7 (RULING 68): postSignatureFor now includes scheduledAt, so an armed
+// post disarms (a new signature no longer matches the armed one) when the
+// scheduled time changes - the same guarantee editing title/message already
+// had. This is the field that decides WHEN an irrevocable act takes effect,
+// so it is the one field whose exclusion from the signature mattered most.
+describe("postSignatureFor - RULING 68/M7 (scheduledAt is part of the confirm-arm signature)", () => {
+  const DRAFTED_SLOT = {
+    ...makeSlot("wta-slot-1", { kind: "default" }, "beginning-of-week"),
+    draft: {
+      phase: "drafted" as const,
+      draft: {
+        title: "Week 3",
+        message: "Hello",
+        builtFrom: { kind: "pasted" as const },
+        researchNotice: { kind: "off" as const },
+        timing: "beginning-of-week" as const,
+      },
+      error: null,
+    },
+  };
+
+  it("returns null for a slot with no draft yet", () => {
+    expect(postSignatureFor(makeSlot("wta-slot-1", { kind: "default" }, "beginning-of-week"))).toBeNull();
+  });
+
+  it("two slots that differ ONLY in scheduledAt get DIFFERENT signatures - changing just the time must disarm an already-armed post", () => {
+    const a = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T09:30" });
+    const b = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T10:00" });
+    expect(a).not.toBe(b);
+  });
+
+  it("the same scheduledAt (and everything else unchanged) gets the SAME signature - so an unchanged armed post still confirms", () => {
+    const a = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T09:30" });
+    const b = postSignatureFor({ ...DRAFTED_SLOT, scheduledAt: "2026-06-20T09:30" });
+    expect(a).toBe(b);
   });
 });

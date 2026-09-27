@@ -772,8 +772,12 @@ describe("A19 AC-11: the per-slot timing control is reachable from the rendered 
 describe('A32/RULING 35: neither per-slot control may be named "Timing" or contain it as a substring', () => {
   const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
 
-  it('the literal "Timing" no longer appears as a rendered label - the mechanical consequence of DECISION 5 (indexOf(\'label="Timing"\') would otherwise silently re-bind to a wrongly-named new control, since indexOf matches the FIRST occurrence)', () => {
-    expect(source).not.toMatch(/label="Timing"/);
+  it('no rendered label CONTAINS the substring "Timing" anywhere - not just the exact string "Timing" (RULING 66/M8: a third control labelled e.g. "Timing preset" is the exact hazard the substring wording in this describe\'s own title names, and the old exact-string regex missed it)', () => {
+    const labels = source.match(/label="[^"]*"/g) ?? [];
+    expect(labels.length).toBeGreaterThan(0); // canary: the file does have label= props for this to check
+    for (const label of labels) {
+      expect(label).not.toMatch(/Timing/);
+    }
   });
 
   it('the new Canvas-visibility control is labelled "Visible to students (optional)" - verbatim, from announcements-panel.tsx:463', () => {
@@ -781,56 +785,165 @@ describe('A32/RULING 35: neither per-slot control may be named "Timing" or conta
   });
 });
 
+describe("A32/RULING 66/M4: AnnouncementDraftSlot.tsx imports and CALLS resolveScheduledVisibility, not a hand-rolled substitute with the same field names", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  it("imports and calls resolveScheduledVisibility(...)", () => {
+    expect(source).toMatch(/import\s*\{\s*resolveScheduledVisibility\s*\}\s*from\s*"\.\/scheduled-visibility"/);
+    expect(source).toMatch(/const visibility = resolveScheduledVisibility\(/);
+  });
+});
+
 describe("A32/REQ-A32-1: the consequence copy and all five ConfirmArmButtons labels read ONE resolved value, sliced structurally", () => {
   const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
 
-  // Anchored on the literal "wta-post-consequence", never a bare
-  // "consequenceId=" - a SECOND ConfirmArmButtons block for Regenerate
-  // follows immediately after with its own "wta-regenerate-consequence"
-  // consequenceId, and a bare anchor would risk binding to that block
-  // instead (docs/a24-a32-waves.md section 6.4.3).
+  // Anchored on "wta-post-consequence", never a bare "consequenceId=" - a
+  // SECOND ConfirmArmButtons block for Regenerate follows immediately after
+  // with its own "wta-regenerate-consequence" id (docs/a24-a32-waves.md 6.4.3).
   const consequenceStart = source.indexOf("wta-post-consequence");
   const consequenceEnd = source.indexOf("</p>", consequenceStart);
 
-  it("finds the post-consequence paragraph's own anchor (start anchor resolves)", () => {
-    expect(consequenceStart, "expected to find the wta-post-consequence anchor").toBeGreaterThan(-1);
+  it("both anchors resolve", () => {
+    expect(consequenceStart, "expected the wta-post-consequence anchor").toBeGreaterThan(-1);
+    expect(consequenceEnd, "expected the consequence paragraph's closing </p>").toBeGreaterThan(-1);
   });
 
-  it("finds the post-consequence paragraph's closing tag (end anchor resolves)", () => {
-    expect(consequenceEnd, "expected to find the consequence paragraph's closing </p>").toBeGreaterThan(-1);
-  });
-
-  it("the consequence copy's bounded slice references the resolved visibility value (isScheduled/visibility), not a separate length-derived boolean", () => {
+  // RULING 66/M1: the OLD assertion searched the whole slice for
+  // /isScheduled|visibility\.kind/, satisfied by an inner re-narrowing even
+  // when the OUTER condition is swapped for a length-derived boolean. This
+  // anchors on the ternary's own condition token, the thing that actually
+  // decides which sentence renders.
+  it("the outer branch condition is literally isScheduled, not a separate length-derived boolean (RULING 66/M1)", () => {
     const slice = source.slice(consequenceStart, consequenceEnd);
-    expect(slice).toMatch(/isScheduled|visibility\.kind/);
-    // Sabotage direction: a length check on slot.scheduledAt directly (the
-    // sibling's own shape at announcements-panel.tsx:296) is exactly what
-    // this assertion must catch if it replaces isScheduled/visibility.kind.
-    expect(slice).not.toMatch(/scheduledAt\.(trim\(\)\.)?length/);
+    expect(slice).toMatch(/aria-live="polite">\s*\{isScheduled\s*\?/);
+    expect(slice).not.toMatch(/aria-live="polite">\s*\{slot\.scheduledAt/);
   });
 
-  // The five labels: idleLabel (:idx varies), confirmLabel, loadingLabel,
-  // idleAriaLabel, confirmAriaLabel - RULING 35 names all five, and :250/
-  // :251 (the aria labels) are the ACCESSIBLE names a screen reader
-  // announces, so they are not optional companions to the visible pair.
+  it("the two branches say different things - one promises a future time, the other says immediately", () => {
+    const slice = source.slice(consequenceStart, consequenceEnd);
+    expect(slice).toMatch(/schedules this announcement to become visible/);
+    expect(slice).toMatch(/publishes this announcement to every student[\s\S]*immediately/);
+  });
+
+  // RULING 66/M3: the OLD assertions only checked each prop STARTS WITH
+  // isScheduled - satisfied even when both ternary branches are hard-coded
+  // to the identical string. twoBranches() extracts BOTH literals and each
+  // check below requires them to differ and each carry its own wording -
+  // idleAriaLabel/confirmAriaLabel are the ACCESSIBLE names a screen reader
+  // announces, not optional companions to the visible pair.
   const idlePostStart = source.indexOf('idleLabel={isScheduled');
   const confirmArmButtonsBlockEnd = source.indexOf("<ConfirmArmButtons", source.indexOf("<ConfirmArmButtons") + 1);
 
-  it("finds the Post ConfirmArmButtons block's own idleLabel (start anchor resolves)", () => {
-    expect(idlePostStart, "expected to find idleLabel driven by isScheduled").toBeGreaterThan(-1);
+  it("both label-block anchors resolve", () => {
+    expect(idlePostStart, "expected idleLabel driven by isScheduled").toBeGreaterThan(-1);
+    expect(confirmArmButtonsBlockEnd, "expected a second <ConfirmArmButtons block").toBeGreaterThan(-1);
   });
 
-  it("finds the second (Regenerate) ConfirmArmButtons block, bounding the slice below (end anchor resolves)", () => {
-    expect(confirmArmButtonsBlockEnd, "expected to find a second <ConfirmArmButtons block").toBeGreaterThan(-1);
+  const slice = source.slice(idlePostStart, confirmArmButtonsBlockEnd);
+
+  function twoBranches(pattern: RegExp): [string, string] {
+    const m = slice.match(pattern);
+    expect(m, `expected ${pattern} to match within the Post ConfirmArmButtons block`).toBeTruthy();
+    return [m![1], m![2]];
+  }
+
+  it("idleLabel's two branches differ and each carries its own wording", () => {
+    const [scheduled, immediate] = twoBranches(/idleLabel=\{isScheduled\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"\}/);
+    expect(scheduled).not.toBe(immediate);
+    expect(scheduled).toMatch(/Schedule/);
+    expect(immediate).toMatch(/Post/);
+    expect(immediate).not.toMatch(/Schedule/);
   });
 
-  it("the bounded slice's five label props all read isScheduled - none is a fixed string unconditioned on the resolved value", () => {
-    const slice = source.slice(idlePostStart, confirmArmButtonsBlockEnd);
-    expect(slice).toMatch(/idleLabel=\{isScheduled/);
-    expect(slice).toMatch(/confirmLabel=\{isScheduled/);
-    expect(slice).toMatch(/loadingLabel=\{isScheduled/);
-    expect(slice).toMatch(/idleAriaLabel=\{isScheduled/);
-    expect(slice).toMatch(/confirmAriaLabel=\{[\s\S]*isScheduled/);
+  it("confirmLabel's two branches differ and each carries its own wording", () => {
+    const [scheduled, immediate] = twoBranches(/confirmLabel=\{isScheduled\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"\}/);
+    expect(scheduled).not.toBe(immediate);
+    expect(scheduled).toMatch(/schedule/);
+    expect(immediate).toMatch(/post/);
+    expect(immediate).not.toMatch(/schedule/i);
+  });
+
+  it("loadingLabel's two branches differ and each carries its own wording", () => {
+    const [scheduled, immediate] = twoBranches(/loadingLabel=\{isScheduled\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"\}/);
+    expect(scheduled).not.toBe(immediate);
+    expect(scheduled).toMatch(/Scheduling/);
+    expect(immediate).toMatch(/Posting/);
+    expect(immediate).not.toMatch(/Scheduling/);
+  });
+
+  it("idleAriaLabel's two branches differ and each carries its own wording (the accessible name)", () => {
+    const [scheduled, immediate] = twoBranches(/idleAriaLabel=\{isScheduled\s*\?\s*`([^`]+)`\s*:\s*`([^`]+)`\}/);
+    expect(scheduled).not.toBe(immediate);
+    expect(scheduled).toMatch(/Schedule/);
+    expect(immediate).toMatch(/Post/);
+    expect(immediate).not.toMatch(/Schedule/);
+  });
+
+  it("confirmAriaLabel's two branches differ and each carries its own wording (the accessible name)", () => {
+    const [scheduled, immediate] = twoBranches(
+      /confirmAriaLabel=\{\s*isScheduled\s*\?\s*`([^`]+)`\s*:\s*`([^`]+)`\s*\}/
+    );
+    expect(scheduled).not.toBe(immediate);
+    expect(scheduled).toMatch(/scheduling/);
+    expect(immediate).toMatch(/posting/);
+    expect(immediate).not.toMatch(/scheduling/i);
+  });
+});
+
+describe("A32/RULING 66/M6: the datetime-local control forwards the REAL typed value, not a constant that leaves scheduledAt permanently empty", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  // Bounded on the control's own label, mirroring A19 AC-11 above. A
+  // mutation that keeps the onSetScheduledAt identifier but always forwards
+  // "" (permanently empty) would satisfy a bare toContain check on that
+  // name alone - this asserts the CALL's real argument instead.
+  const startIdx = source.indexOf('label="Visible to students (optional)"');
+  const endIdx = source.indexOf("</p>", startIdx);
+
+  it("both anchors resolve", () => {
+    expect(startIdx, "expected the Canvas-visibility control's own label").toBeGreaterThan(-1);
+    expect(endIdx, "expected the control's trailing hint paragraph").toBeGreaterThan(-1);
+  });
+
+  it("onChange forwards the real typed value - onSetScheduledAt(slot.id, e.target.value) - never a constant", () => {
+    const slice = source.slice(startIdx, endIdx);
+    expect(slice).toMatch(/onChange=\{\(e\) => onSetScheduledAt\(slot\.id, e\.target\.value\)\}/);
+  });
+});
+
+// A32/RULING 64: the success sentence must not claim "can see it now" on the
+// scheduled path - it must branch honestly on whether the post that
+// actually succeeded was scheduled (mirroring the sibling's own branching
+// success copy at announcements-panel.tsx:280-283). Asserts BOTH branches
+// are present and distinct, not merely that scheduled wording exists
+// somewhere in the file.
+describe("A32/RULING 64: the postedTo success sentence branches honestly on postedScheduledLabel", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  const startIdx = source.indexOf("{slot.postedTo && (");
+  const endIdx = source.indexOf(")}", startIdx);
+
+  it("both anchors resolve", () => {
+    expect(startIdx, "expected the {slot.postedTo && ( block").toBeGreaterThan(-1);
+    expect(endIdx, "expected the block's closing )}").toBeGreaterThan(-1);
+  });
+
+  const slice = source.slice(startIdx, endIdx);
+
+  it("the block's own condition is driven by slot.postedScheduledLabel, not a fixed unconditional sentence", () => {
+    expect(slice).toMatch(/slot\.postedScheduledLabel\s*\?/);
+  });
+
+  it("the scheduled branch does not say students can see it now, and the immediate branch keeps the original honest sentence", () => {
+    const qIdx = slice.indexOf("?");
+    const cIdx = slice.indexOf(":", qIdx);
+    expect(qIdx, "expected the ternary's ?").toBeGreaterThan(-1);
+    expect(cIdx, "expected the ternary's :").toBeGreaterThan(qIdx);
+    const scheduledBranch = slice.slice(qIdx, cIdx);
+    const immediateBranch = slice.slice(cIdx);
+    expect(scheduledBranch).not.toMatch(/can see it now/);
+    expect(scheduledBranch).toMatch(/Students will see it/);
+    expect(immediateBranch).toMatch(/can see it now/);
   });
 });
 

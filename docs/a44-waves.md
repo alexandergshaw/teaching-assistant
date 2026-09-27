@@ -1,71 +1,44 @@
-# A44 wave plan
+# A44 wave plan - round 2, revised against `docs/a44-waves-check.md`
 
-Seat: `loop-plan` (elevated per RULING 86, `docs/DEV_LOOP.md:48`). Round 1 of at
-most two for this activity. Written 2026-09-27.
+Seat: `loop-plan`. **Round 2 of two for this activity, and the last.** Written
+2026-09-27. Revising `docs/a44-waves.md` as committed `210f6b8` against its check
+`docs/a44-waves-check.md` (`313edbb`), now that BL-1 and BL-2 have been designed
+in `docs/a44-architecture.md` (`391b694`).
 
-**Write set for this pass is exactly `docs/a44-waves.md`.** Section 14 pastes
+**Write set for this pass is exactly `docs/a44-waves.md`.** Section 15 pastes
 `git status --short` and separates this pass's entry from the sibling-owned ones.
-No `git stash`, no `git add -A`, no `git checkout --` was run at any point, and
-nothing under `src/` was written or mutated.
+No `git stash`, no `git add -A`, no `git checkout --` was run at any point;
+nothing under `src/` was written, staged or reverted; `docs/backlog.yml` was
+neither written nor staged (it was read by one `grep` for section 10's counts).
 
-**Inputs, in the order the brief named them.** `docs/a44-scope.md` (committed
-`bd7bca0`) - its "what this requires of the wave plan" statements (section 8) are
-this document's brief, and section 7 below records where this plan DIVERGES from
-one of them and why. `docs/a44-check.md` (`e8faea4`), especially B2, which is the
-wave-disjointness failure this document exists to not reproduce.
-`docs/a41-scope.md` sections 4.1 and 7.1; `docs/a41-test-notes.md` sections 1.4,
-2 (R1-R6) and 5. Then `docs/DEV_LOOP.md`, `docs/loop/traps-spec.md`,
-`docs/loop/iteration-caps.md`, `docs/loop/parallel-disjointness.md`,
-`docs/loop/this-repo.md`.
+**What is a settled INPUT here and is not reopened.** RULE K and RULE D
+(`docs/a44-architecture.md` section 2), RULING 87, RULING 92, RULING 93 and
+RULING 95. The architecture's frozen-fixture dispositions (its section 10.2) are
+CONSUMED, not re-derived: all 23 `rowsAfter` counts unchanged, a named list of
+display literals that change, three assertions in `utils.test.ts` that change
+and none of them a row count, and `utils.test.ts:373`'s uniqueness assertion
+still passing. Where a measurement of mine touches one of those, it corroborates
+it and says so; nothing here contradicts it.
 
-**This document does NOT contain oracles, instruments, fixtures, expected
-literals or a sabotage protocol.** `docs/a44-test-notes.md` is being authored
-concurrently by `loop-test-author` and is not read, created or edited here.
-Section 11 lists what that artifact owes and stops there. Where a measurement
-below happens to exercise a shape, it is evidence for a WAVE BOUNDARY, never a
-proposed test.
+**What this document still does NOT contain.** No oracles, no fixtures, no
+expected literals, no sabotage protocol - `docs/a44-test-notes.md` (`1163a54`)
+owns those and is not edited here. Section 13 states what each wave REQUIRES of
+that seat. Where a measurement below exercises a shape, it is evidence for a
+WAVE BOUNDARY, never a proposed test.
 
 ---
 
 ## 0. How every number in this document was produced
 
-**(a) Line counts: both mandated counters, on every file named.** `wc -l` from
-the Bash tool and `@(Get-Content <file>).Count` from PowerShell, run this pass.
-`Measure-Object -Line` was not used. The two agreed on all fourteen files:
-
-| File | `wc -l` | `@(Get-Content).Count` |
-|---|---|---|
-| `src/app/actions/grading.ts` | 941 | 941 |
-| `src/lib/grade/utils.ts` | 393 | 393 |
-| `src/lib/grade/utils.test.ts` | 390 | 390 |
-| `src/app/components/GradingResults.tsx` | 906 | 906 |
-| `src/app/components/grading-results/gradingResultsHelpers.ts` | 728 | 728 |
-| `src/app/components/grading-results/ungradedDisclosure.ts` | 196 | 196 |
-| `src/lib/grade/extraction.ts` | 300 | 300 |
-| `src/lib/grade/engine.ts` | 517 | 517 |
-| `src/app/components/GradingTab.tsx` | 566 | 566 |
-| `src/lib/submission-zip-intake.ts` | 158 | 158 |
-| `src/lib/grade/single-file-entry.ts` | 133 | 133 |
-| `src/lib/grade/grouping-zip-parents.wiring.test.ts` | 148 | 148 |
-| `src/lib/grade/extraction.test.ts` | 271 | 271 |
-| `src/file-size-ceiling.structure.test.ts` | 151 | 151 |
-
-`src/lib/module-graph/runtime-import-graph.test.ts` is 709 (`wc -l`).
-`LIMIT = 1000` is at `src/file-size-ceiling.structure.test.ts:41`
-(`grep -n "LIMIT = 1000" src/file-size-ceiling.structure.test.ts` -> `41:`).
-**This document does not state its own line count**; it is reported in the
-handback, measured after the last edit.
-
-**(b) Behavioural numbers execute the REAL modules, with an import-only diff.**
-`src/lib/grade/utils.ts`, `types.ts`, `constants.ts` and
-`src/app/components/grading-results/gradingResultsHelpers.ts` were copied into an
-untracked `.a44plan/` directory at the repo root by a committed-to-disk Python
-script (no shell heredoc), and driven with `node --experimental-strip-types`
-(`node --version` -> `v22.14.0`). The diffs, in full, exit codes read from the
-command:
+**(a) Behavioural numbers execute the REAL modules, import-only diffs printed in
+full.** `src/lib/grade/{utils,types,constants}.ts` were copied by a
+committed-to-disk Python script (no shell heredoc) into `hp/` inside the SESSION
+SCRATCHPAD, which is OUTSIDE the repository, and driven with
+`node --experimental-strip-types` (`node --version` -> `v22.14.0`). Exit codes
+read from the command, never through a pipe:
 
 ```
-$ diff --strip-trailing-cr src/lib/grade/utils.ts .a44plan/utils.ts
+$ diff --strip-trailing-cr src/lib/grade/utils.ts <scratchpad>/hp/utils.ts
 1,3c1,3
 < import type { SubmittedFileInfo, InferredFileNameLookup } from "./types";
 < import type { CodeRunResult } from "../code-runner";
@@ -74,468 +47,503 @@ $ diff --strip-trailing-cr src/lib/grade/utils.ts .a44plan/utils.ts
 > import type { SubmittedFileInfo, InferredFileNameLookup } from "./types.ts";
 > import type { CodeRunResult } from "./code-runner-stub.ts";
 > import { getMimeType } from "./constants.ts";
-utils diff exit=1
-$ diff --strip-trailing-cr src/lib/grade/types.ts .a44plan/types.ts
-1c1
-< import type { CodeRunResult } from "../code-runner";
----
-> import type { CodeRunResult } from "./code-runner-stub.ts";
-types diff exit=1
-$ diff --strip-trailing-cr src/lib/grade/constants.ts .a44plan/constants.ts
-constants diff exit=0
-$ diff --strip-trailing-cr src/app/components/grading-results/gradingResultsHelpers.ts .a44plan/grh.ts
-50c50
-< import type { GradeActionState } from "../../actions";
----
-> import type { GradeActionState } from "./actions-stub.ts";
-grh diff exit=1
+baseline_diff_exit=1
+$ diff --strip-trailing-cr src/lib/grade/constants.ts <scratchpad>/hp/constants.ts
+constants_diff_exit=0        (CANARY: the instrument does not always fire)
 ```
 
-So `parseSubmissionFileName`, `getBaseFileName`, `removeLastExtension`,
-`seedEdits`, `mergeStoredRowEdit` and `loadPersistedEdits` are the REAL
-functions, byte-identical below their import lines. A canary proves the real
-module is loaded rather than a stub: `removeLastExtension("a.b.c")` returned
-`a.b`.
+**(b) Two variants, both GENERATED by a script from that baseline rather than
+hand-written, and both diffed against it.** `hp/utils_w1.ts` is Wave 1's change
+alone (RULE K plus RULE D, encoder and container-relative-dir helper both
+module-private, no decoder, no discriminator). `hp/utils_a44.ts` adds Wave 2's
+share (the exported decoder, `export` on the helper, and
+`reachedStemFallback` at all six return sites). Every quantity attributed to a
+wave below is a difference between those two files, not an estimate.
 
-**(c) Two things in the harness are local reimplementations, and are labelled as
-such wherever their output is quoted.** First, `matchStudentFileConvention`,
-copied VERBATIM from `utils.ts:87-107`, because the real function is
-module-private and `parseSubmissionFileName` does not expose which of its six
-steps fired - it is the only way to tell step 3 (a crossing matched the
-convention) from steps 5 and 6 (a stem fallback). Second, the GROUPING
-(`utils.ts:301-319`: one `Map` entry per key, the first file's display wins,
-`sort` by display) is replicated for key/display only; content assembly
-(`:321-349`) is not replicated and no claim here depends on it. Identity itself
-is always the real `parseSubmissionFileName`.
+The generated `hp/utils_a44.ts` touches exactly the line positions
+`docs/a44-architecture.md` section 3 prints - `175a176`, `193`, `204`, `221`,
+`234`, `245a`/`247`, `254a`/`256`, `315a` - plus the discriminator lines the
+architecture's own harness did not carry. That agreement is **corroboration of a
+settled input, obtained independently; it is not a re-derivation of it.**
 
-**(d) Exit codes are read from the command, never through a pipe.** All three
-harnesses were re-run with `> file 2> file` and the exit code read on the next
-line: `EXITCODE=0` for each.
+**(c) One labelled reimplementation.** Section 6.4's immediate-parent folder set
+is one line (the last segment of the container-relative directory), used ONLY for
+the amnesty comparison. Identity is always the real `parseSubmissionFileName`.
+Nothing else in this document is a reimplementation - in particular I did not
+have to copy `matchStudentFileConvention`, because `reachedStemFallback` makes the
+step observable, which is itself part of section 6.3's evidence.
 
-**(e) Every absence claim carries a canary using the same pattern AND the same
-filter.** Each is printed inline where the claim is made.
+**(d) Line counts by BOTH mandated counters, `wc -l` from the Bash tool and
+`@(Get-Content <file>).Count` from PowerShell, run this pass.**
+`Measure-Object -Line` was not used. The two agree on all nineteen files quoted
+here; the table is section 11. **This document does not state its own line
+count**; it is reported in the handback, measured after the last edit.
 
-**(f) Multi-path test runs use `npm run test:paths -- <p1> <p2> ...` only.** No
-raw multi-path `vitest`/`npm test` appears anywhere in this document, including
-in the gates it specifies.
+**(e) No absolute lint warning count is a pass condition anywhere in this
+document.** Section 5.5 step 3 replaces round 1's literal. BL-6 is why.
 
-**(g) `npx tsc --noEmit` was deliberately NOT run by this pass.** It has exactly
-one caller in this repo's concurrency model (`docs/loop/this-repo.md` section 2:
+**(f) Every absence claim carries a canary at the SAME command shape and the SAME
+filter**, printed inline, and every derivation ranges over the set it claims -
+section 5.2's source-text sweep filters 200-odd test files by content rather than
+excluding tests up front, because a filter that excludes tests cannot range over
+a set of tests.
+
+**(g) Multi-path test runs use `npm run test:paths -- <p1> <p2> ...` only.** No
+raw multi-path `vitest`/`npm test` appears anywhere in this document, including in
+the gates it specifies - that form silently drops arguments it does not match.
+
+**(h) `npx tsc --noEmit` was deliberately NOT run by this pass.** It has exactly
+one caller in this repo's concurrency model (`docs/loop/this-repo.md` section 2 -
 it races on `tsconfig.tsbuildinfo`), that caller is the wave gate, and this pass
-wrote no TypeScript for a type gate to measure.
+wrote no TypeScript.
 
-**(h) Scratch directory removed before this document was finalised.**
+**(i) No scratch directory was created inside the repository.** Verified rather
+than asserted, with a positive canary:
 
 ```
-$ rm -rf .a44plan
-rm exit=0
-$ ls -d .a44plan
-ls: cannot access '.a44plan': No such file or directory
-ls exit=2   (confirmed absent)
+.a44plan exists=False   .a44wv exists=False   .a44arch exists=False
+hp exists=False   h exists=False   scratchpad exists=False   a44-scratch exists=False
+docs exists=True        (CANARY: Test-Path CAN find a present directory)
 ```
 
 ---
 
-## 1. The settled inputs this plan does not reopen
+## 1. Disposition of every round-1 requirement and every check finding
 
-**RULING 87.** The folder name becomes an identity signal - a compound key
-FOLDED ONTO the existing fallback key, never replacing it - and A44 owns the
-refusal decision that A41 had held. The refusal is folder-aware only in its
-REFINED form: amnesty from refusal is granted only when the same run's
-fallback-reaching population shows two or more DISTINCT folder segments
-elsewhere. A41's frozen fixture F6 stays REFUSE in isolation. The false-split
-regression (`docs/a44-scope.md` 2.4: 97.6% of the
-`single-student-multi-folder-shared-filename` shape) is accepted explicitly.
+`docs/loop/iteration-caps.md` entry gate 3: a restructuring round ships a
+disposition table, and the checker audits it before reading the new round on its
+own terms. Ids in the `prior` column are the check's; `D*` ids are the
+architecture's disposition rows, carried not re-decided.
 
-**Facts handed over by the scope and not re-derived here**, per the brief: the
-real harm goes to zero on the folder shape (12,177 of 12,177 blended sets,
-`docs/a44-scope.md` 3.3); the false-refusal reduction is 14.6% to 6.4% (same
-table); there are 30 display-keyed sites across three files including a
-post-to-Canvas fan-out (`docs/a44-scope.md` 4.2); `GradingResults.tsx` is 906 of
-1000 lines and holds 24 of those 30.
+| prior | What round 1 said | Disposition in this round |
+|---|---|---|
+| BL-1 | the fold is the file's IMMEDIATE ENCLOSING FOLDER segment, "binding on the implementer"; Wave 1 is "strictly better than today's and never worse" | **WITHDRAWN, both halves.** The rule is replaced by RULE K (architecture D1); the no-harm claim is replaced by section 4's honest statement - Wave 1 alone is better on the BLEND and worse on the SPLIT, and RULING 95's criterion is what makes that acceptable. The check was right and the architecture found two further defects it had not: the immediate parent still blends two students one level down, and its partial key encoding is forgeable. |
+| BL-2 | "distinct keys implies distinct displays is restored inside `groupSubmissionsByStudent`" is the sole ground for keeping the 906-line file out | **WITHDRAWN as a bare assertion, REPLACED by an enforcer.** RULE D's terminal disambiguation pass makes it INVARIANT D with a violating shape, and section 9 records the new ground. The 906-line file stays out on the enforcer plus RULING 93, not on the sentence. |
+| BL-3 | a read-only legacy path in `loadPersistedEdits` recovers the pre-fold label, which is why `gradingResultsHelpers.ts` is in Wave 1's write set | **WITHDRAWN by RULING 93, and the write-set entry with it.** `gradingResultsHelpers.ts` is in NO wave's write set: `loadPersistedEdits` (`:619-635`) already drops a stored key absent from the current run, and its own comment at `:614-618` says so, so "delete the recovery" is discharged by writing no code. The check's measured `ROWS RECEIVING THAT ONE STORED EDIT=3` is the reason and it stands. |
+| BL-4 (a)(b)(c) | storage keyed on the display versus the identity key; the fold conditional versus unconditional; the two near-ceiling files | **SETTLED BY RULING, transcribed.** (a) display-keyed, no recovery (RULING 93). (b) unconditional fold plus a terminal pass (RULE D, RULING 92). (c) resolves itself: section 11 measures that neither near-ceiling file is in any write set, on a construction. |
+| BL-5 | Wave 1's new exports are "**NONE**", so Wave 2's predicate is unbuildable from what Wave 1 leaves | **CLOSED, and the fix is structural rather than cosmetic.** Three new exports are required (architecture section 9); section 6.3 EXECUTES a consumer that imports exactly those and computes the whole predicate; section 3 proves the exports must land in the wave that consumes them, and that this forces a two-path overlap no cut can avoid. |
+| BL-6 | Wave 1's lint gate passes at the literal `4 problems (0 errors, 4 warnings)` | **WITHDRAWN.** Section 5.5 step 3 is now "exit 0, and no warning naming a file in this wave's write set that was absent from the same command run immediately before the change". Section 5.5 records four values measured for this one command in one day. |
+| BL-7 | round 1's "whole suite stays green" and "nothing else moves" | **RE-DERIVED, in section 8, against RULE K and RULE D.** Three of the four silent-green paths round 1 had are gone; two NEW ones are named and measured, and one of the two is Wave 2's frozen integer. |
+| MA-1 | "30 display-keyed sites across three files"; the post-to-Canvas fan-out located at `GradingResults.tsx:332-403` and routed to owner verification | **CORRECTED to 43, re-derived this pass (section 9), and the fan-out RE-ROUTED.** It is `gradingResultsHelpers.ts:703-727`, an exported pure function, and `gradingResultsHelpers.test.ts` is in Wave 1's write set so the collision is EXECUTED rather than owner-verified. |
+| MA-2 | "key unchanged implies display unchanged BY CONSTRUCTION" | **The word "construction" is REMOVED** (architecture D3). Section 7.2 states it as a protection that holds for the common case, with the pre-existing entry-order hazard named. |
+| MA-3 | RES-A44W-4's one in-`src/` instance is `ungradedDisclosure.test.ts:146` | **CORRECTED, and the instrument replaced.** Section 10 measures that the citation lives at `:9` and `:67`, cites `engine.ts:146`, and is ABOVE Wave 2's insertion point so cannot shift; the one that WILL shift is `single-file-entry.ts:67`'s bare `engine.ts:457`, invisible to a path-qualified pattern. |
+| MA-4 | the scope's section 8 THIRD requirement passed over in silence | **RECORDED as a divergence with its ground** (section 12.2), per architecture D9. |
+| m1 | "28 pinned tests" on `groupSubmissionsByStudent` | **CORRECTED.** 28 is the whole file; by `it()` the split is 14 / 7 / 7 (section 11). The exclusion it supported still holds on its own ground. |
+| m2 | `gradingResultsHelpers.ts` has 39 exported names | **CORRECTED to 40**, and moot: section 12.3 reassigns the header correction, because no wave writes that file. |
+| m3 | "Exactly ONE existing fixture's OUTPUT moves" | **WITHDRAWN as understated.** Under RULE K's TOTAL encoding **every** identity key changes; the architecture's consumed disposition is three changed assertions in `utils.test.ts`, none a row count. Section 8 measures why no existing test notices the key change at all. |
+| m4 | the terminating question is re-asked and RES-A44W-1 assigns the display rule to "the architect pass" | **BOTH DELETED.** RULING 92 and RULING 95 answered it; the architect pass ran and produced RULE D. This round asks no question about the display rule and assigns none. |
+| m5 | RES-A44W-3's direction of failure was a process condition | **RESTATED on the object** (section 14, R3). |
+| m6 | the Gemini branch cited as `grading.ts:905-907` | **CONFIRMED and narrowed** to `grading.ts:907` (section 11). |
+| D5 | the test notes' R7 keys storage on the identity key | **WITHDRAWN by RULING 93 and RE-POINTED, not ignored.** Section 13 item 3 states what R7's P1/P2/P3/P5 become under display-keyed storage. |
+| D6 | RES-A44T-6 assigns the ceiling owner to "the wave whose write set includes either file" | **Nothing left to trigger on** (section 11): neither file is in any write set. |
+| D11 | RULING 87's frozen exact integer holds because the two folder definitions coincide | **NOT ADOPTED. Section 6.4 measures a shape where they do not coincide and the refusal verdict FLIPS**, and section 14's R1 carries the obligation. The architecture explicitly declined to verify this; I did, and it does not hold as stated. |
 
 ---
 
-## 2. The one structural fact that decides the cut
+## 2. What changed structurally, in one paragraph
 
-This is the fact the previous plan got wrong, and the check found it as B2(c)
-(`docs/a44-check.md:296`): the plan cut a "key wave" and a "display wave" and
-they were the same file.
+Round 1 cut two waves along the right seam for the wrong reason and gave Wave 1
+one file too many and Wave 2 nothing to build with. RULING 93 removes the storage
+file from Wave 1 (no code at all), and RULE K's three exports move INTO Wave 2,
+because that is the only wave that calls them. The seam, the order and the two
+call sites are unchanged and the check confirmed all three. What is new is that
+the two waves' write sets **overlap by exactly two paths, unavoidably**, and
+section 3 proves it rather than apologising for it.
 
-**Re-derived this pass with my own instrument, against the current tree:**
+---
+
+## 3. The structural facts that decide the cut
+
+### 3.1 The identity key still has no reader outside its own file
+
+Re-derived this pass with my own instrument:
 
 ```
 $ grep -rn "studentKey" src --include=*.ts --include=*.tsx
-  ... 40 hits under src/lib/course-intel/ (a DIFFERENT `studentKey`, unrelated)
-  src/lib/grade/utils.ts:114,116,121,125,181,193,234,276    <- the only grade-side hits
-exit=0
-$ grep -rn "inferStudentPrefix" src --include=*.ts --include=*.tsx
-src/lib/grade/utils.ts:269      (the definition)
-src/lib/grade/utils.ts:304      (the only call)
-src/lib/grade.ts:14             (a re-export by name, no call)
-exit=0
-$ grep -rn "parseSubmissionFileName" src --include=*.ts --include=*.tsx
-  src/lib/grade/utils.ts:176,274,324,330          (definition + three in-file calls)
-  src/lib/grade/utils.test.ts (7 call sites)
-  src/lib/grade.ts:14                              (re-export by name)
-  src/lib/code-run-selection.ts:12, src/lib/grade/prompts.ts:226,
-  src/lib/grade/single-file-entry.ts:50, grouping-zip-parents.wiring.test.ts:2   (all COMMENTS)
+src/lib/grade/utils.ts:83,114,116,121,125,181,193,234,276    <- the only grade-side hits
+  (plus src/lib/course-intel/{engagement,offline-assembly,offline-signals}.ts and
+   their tests, a DIFFERENT studentKey - course-intel's roster identity)
 exit=0
 $ grep -rn "studentKeyZZZ" src --include=*.ts --include=*.tsx
-exit=1                                             (CANARY, same command, same filter: misses)
+exit=1                        (CANARY, same command, same filter: misses)
 ```
 
-So:
+`parseSubmissionFileName(...).studentKey` is consumed only at `utils.ts:276`
+(inside `inferStudentPrefix`), which is consumed only at `utils.ts:304` (inside
+`groupSubmissionsByStudent`). `src/lib/grade.ts:14` re-exports both by name
+without calling either. So RULE K's re-encoding of all six return sites is
+contained in one file, which is what the architecture's section 9 requires.
 
-1. **The identity KEY has exactly one reader outside its own file: nobody.**
-   `parseSubmissionFileName(...).studentKey` is consumed only at
-   `utils.ts:276` (inside `inferStudentPrefix`), which is consumed only at
-   `utils.ts:304` (inside `groupSubmissionsByStudent`). `src/lib/grade.ts:14`
-   re-exports both by name without calling either. **The key fold is therefore
-   fully contained in `src/lib/grade/utils.ts`.**
-2. **A row's DISPLAY is constructed in exactly one place**, `utils.ts:344`
-   (`student: entry.student`, sourced from `:309`'s `student: inferred.display`)
-   - the same file. And the "fold the display when rows would otherwise collide"
-   rule is SET-LEVEL: it cannot be evaluated inside `parseSubmissionFileName`,
-   which sees one path. So it must live in `groupSubmissionsByStudent`.
+### 3.2 RULE D puts the display fold INSIDE `parseSubmissionFileName`, and two landed pins move as a result
 
-**Therefore the key fold and the display fold are ONE change in ONE file, and
-this plan makes them ONE WAVE.** They are not two waves pretending to be
-separable, which is precisely what B2(c) caught.
-
-**A consequence that decides where each half goes, measured.** If the display
-fold is placed inside `parseSubmissionFileName` rather than inside
-`groupSubmissionsByStudent`, it breaks two landed A14 pins.
-`utils.test.ts:128-136` asserts
-`parseSubmissionFileName("src/main.py").studentDisplay === "main"` twice, and
-`src/main.py` reaches step 6 with the folder segment `src`. Measured against the
-real function:
+Round 1 ruled "the key fold goes in `parseSubmissionFileName`; the display fold
+goes in `groupSubmissionsByStudent`", to keep `utils.test.ts:130` and `:135`
+green. **RULE D withdraws that split and this round transcribes the withdrawal.**
+RULE D's fold is a function of the FILE, so it lives where the file is parsed,
+and the terminal pass - which is genuinely set-level - lives in
+`groupSubmissionsByStudent`. Measured on the generated Wave-1 variant:
 
 ```
-parseSubmissionFileName("src/main.py", undefined, [])        display="main" todayKey="main" foldedKeyWouldBe="3:src4:main"
-parseSubmissionFileName("src/main.py", undefined, undefined) display="main" todayKey="main" foldedKeyWouldBe="3:src4:main"
+utils.test.ts:130 control   src/main.py display="src/main"      (was "main")
 ```
 
-The KEY may be folded there without touching either assertion (neither asserts
-`studentKey`, and the `studentKey` census above shows no test does). The DISPLAY
-may not. **Binding on the implementer: the key fold goes in
-`parseSubmissionFileName`; the display fold goes in
-`groupSubmissionsByStudent`.** That placement is what keeps `utils.test.ts:130`
-and `:135` green, and it is also what lets Wave 2's refusal leaf read the
-compound key off the same function every other consumer reads.
+So `utils.test.ts:129-131` and `:133-136` change, which is exactly two of the
+three assertions the architecture's section 10.2 lists, and both are in Wave 1's
+write set. Their `it()` descriptions ("matches today's exact leaf-stem output")
+change with them, or the file acquires a stale comment of the kind section 12.3
+already catalogues.
+
+### 3.3 THE OVERLAP IS FORCED: no two-wave cut of A44 has path-disjoint write sets AND contains the caller of each of its own exports
+
+This is the load-bearing structural conclusion of the round, so it is stated as a
+derivation rather than a preference.
+
+1. RULE K and RULE D live in `src/lib/grade/utils.ts`, and the architecture
+   requires that file to be **the only home of the identity change** (its section
+   9). Wave 1 therefore writes `utils.ts`.
+2. RULING 87's refined amnesty needs, per file, whether the file REACHED the stem
+   fallback. That cannot come from the key: `matchStudentFileConvention` is
+   module-private (`src/lib/grade/utils.ts:87`, no `export`), and a decoded key's
+   ARITY does not distinguish a convention match from a directory-less fallback.
+   **Measured, both arity 1:**
+
+   ```
+   janedoe_2024-01-01_120000_report.docx  key="7:janedoe" arity=1 reachedStemFallback=false
+   essay.docx                             key="5:essay"   arity=1 reachedStemFallback=true
+   Submissions/AlvarezMaria/essay.txt     key="24:submissions/alvarezmaria5:essay" arity=2 reachedStemFallback=true
+   ```
+
+3. So the discriminator must be a field on `parseSubmissionFileName`'s return,
+   which means the wave that adds it writes `utils.ts`.
+4. Placing the discriminator in Wave 1 gives Wave 1 a field no code reads - the
+   same failure class as an export with no caller, and `docs/loop/seats.md:161-164`
+   grants exactly one exception, a type-only module, which this is not.
+5. Therefore the discriminator lands in Wave 2, and **Wave 2 writes `utils.ts`
+   too.** QED.
+
+`docs/DEV_LOOP.md:137` says "Waves are disjoint by write set" and
+`docs/loop/seats.md:161` says every wave contains the caller of each of its
+exports. Under RULE K those two cannot both hold across a two-wave cut. **I am
+resolving it in favour of the caller rule, and here is the ground:**
+`docs/loop/parallel-disjointness.md` is the named authority on what disjointness
+means, and its rule is scoped to simultaneity - "Two items may run
+**simultaneously** only if..." (`:11-13`). The hazard it prevents is two agents
+editing one file concurrently and one silently losing (`:19-21`). Sequenced waves
+by different implementers at different times are ordinary incremental
+development; reading the summary line as forbidding a later wave from ever
+touching an earlier wave's file would forbid all of it.
+
+**The one alternative, priced so the orchestrator can overrule this in a
+sentence: MERGE into a single wave** - `utils.ts`, `utils.test.ts`, the new
+refusal leaf, `extraction.ts`, `engine.ts` and four test files in one diff. That
+satisfies both rules literally. It costs a review spanning identity resolution,
+display construction and the refusal predicate at once, and - the real cost - it
+forces the refusal to ship before the obligation in section 14's R1 can be
+discharged, because R1 must be measured before a predicate is frozen, not
+alongside it. I recommend the two waves. **Either way the two waves are NEVER
+dispatched concurrently**, which is unchanged from round 1 and which the check
+confirmed is the right order.
 
 ---
 
-## 3. The wave table
+## 4. The wave table
 
-Two waves. Sequenced, not concurrent - section 6.2 computes why.
+Two waves. Sequenced, never concurrent - section 7.2 computes why, and section
+3.3 states what the sequencing buys and costs.
 
-| # | Wave | Production files written | Test files written | New exports | Where those exports are called | Independently landable AND green? |
+| # | Wave | Production files | Test files | New exports | Where each new export is CALLED | Independently gateable? |
 |---|---|---|---|---|---|---|
-| 1 | **Identity: the folder becomes a discriminator, and the display follows it per-file** | `src/lib/grade/utils.ts`, `src/app/components/grading-results/gradingResultsHelpers.ts` | `src/lib/grade/utils.test.ts`, `src/app/components/grading-results/gradingResultsHelpersEditState.test.ts`, NEW `src/app/components/grading-results/gradingResultsEditsIdentity.test.ts` | **NONE.** Both changes are internal to already-exported functions (`parseSubmissionFileName`, `groupSubmissionsByStudent`, `loadPersistedEdits`). `inferStudentPrefix`'s return shape may gain a field; its only caller is `utils.ts:304`, in this wave's own file. | n/a - no new export. Every changed function's callers are either in this wave's write set or unchanged in signature. | **YES.** Section 4.4. |
-| 2 | **The refusal, in its refined folder-aware form** | NEW `src/lib/grade/collisionRefusal.ts`, `src/lib/grade/extraction.ts`, `src/lib/grade/engine.ts` | NEW `src/lib/grade/collisionRefusal.test.ts`, NEW `src/lib/grade/collisionRefusal.wiring.test.ts`, NEW `src/app/actions/grading.collisionRefusal.test.ts` | the decision function exported from `collisionRefusal.ts` | `src/lib/grade/extraction.ts:137-138` (`extractStudentEntries`, the embedded branch) and `src/lib/grade/engine.ts:427-437` (`gradeSubmissions`, the Gemini branch) - **both in this wave's write set.** | **YES.** Section 5.4. |
+| 1 | **Identity and display: RULE K plus RULE D** | `src/lib/grade/utils.ts` | `src/lib/grade/utils.test.ts`, NEW `src/lib/grade/identityInvariants.test.ts`, `src/app/components/grading-results/gradingResultsHelpers.test.ts`, `src/app/components/grading-results/gradingResultsHelpersEditState.test.ts`, `src/app/components/grading-results/ungradedDisclosure.test.ts` | **NONE.** The encoder and the container-relative-directory helper are module-private; the terminal pass is inside an already-exported function. No signature changes. | n/a - no new export. Every changed function's existing callers (`extraction.ts:138`, `engine.ts:432`, via `inferStudentPrefix`) are unchanged and already live. | **YES**, with the cost named honestly in section 5.4: better on the blend, worse on the split. |
+| 2 | **The refusal, in RULING 87's refined folder-aware form** | `src/lib/grade/utils.ts`, NEW `src/lib/grade/collisionRefusal.ts`, `src/lib/grade/extraction.ts`, `src/lib/grade/engine.ts` | `src/lib/grade/utils.test.ts`, NEW `src/lib/grade/collisionRefusal.test.ts`, NEW `src/lib/grade/collisionRefusal.wiring.test.ts`, NEW `src/app/actions/grading.collisionRefusal.test.ts` | `a44DecodeKey` (the key decoder); `export` on `a44ContainerRelativeDir`; `reachedStemFallback` on `parseSubmissionFileName`'s return; the decision function on `collisionRefusal.ts` | **all four inside this wave**: the decoder and the discriminator at `collisionRefusal.ts` (the fallback population and its colliding groups); the helper at `collisionRefusal.ts`'s MESSAGE, which binds `folder "<name>"` to the folder segment **verbatim** and the decoded key gives only the lowercased form (section 6.3 measures both); the decision function at `extraction.ts:137-138` and `engine.ts:427-437`. | **YES**, and only AFTER section 14's R1 is discharged - section 6.5. |
 
-**The three NEW `collisionRefusal*` paths and `gradingResultsEditsIdentity.test.ts`
-are RESERVED, not named.** The architect may rename the leaf; the test author may
-rename or split the test files. What this plan fixes is that the paths exist, are
-counted in the disjointness computation, and do not collide - a rename is a
-one-line change to section 6.1's input and must be re-intersected before
-dispatch. Confirmed against the tree this pass:
+**Reserved, not named.** `identityInvariants.test.ts` and the three
+`collisionRefusal*` paths are RESERVED: the test-notes seat may rename or split
+the test files and the implementer may rename the leaf. What this plan fixes is
+that the paths exist, are counted in section 7.1's intersection, and do not
+collide. A rename is a one-line change to section 7.1's input and **must be
+re-intersected before dispatch.** Status against the tree this pass:
 
 ```
-NEW      src/app/components/grading-results/gradingResultsEditsIdentity.test.ts
+$ for p in <the thirteen paths both waves touch>; do
+    if [ -e "$p" ]; then echo "EXISTS   $p"; else echo "NEW      $p"; fi; done
+LOOP_EXIT=0
+NEW      src/lib/grade/identityInvariants.test.ts
 NEW      src/lib/grade/collisionRefusal.ts
 NEW      src/lib/grade/collisionRefusal.test.ts
 NEW      src/lib/grade/collisionRefusal.wiring.test.ts
 NEW      src/app/actions/grading.collisionRefusal.test.ts
 EXISTS   src/lib/grade/utils.ts
 EXISTS   src/lib/grade/utils.test.ts
-EXISTS   src/app/components/grading-results/gradingResultsHelpers.ts
-EXISTS   src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
 EXISTS   src/lib/grade/extraction.ts
 EXISTS   src/lib/grade/engine.ts
+EXISTS   src/app/components/grading-results/gradingResultsHelpers.test.ts
+EXISTS   src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
+EXISTS   src/app/components/grading-results/ungradedDisclosure.test.ts
+EXISTS   src/app/components/grading-results/gradingResultsPostOutcome.test.ts
 ```
 
-**No wave writes `src/app/actions/grading.ts` (941 of 1000) or
-`src/app/components/GradingResults.tsx` (906 of 1000).** Sections 5.2 and 9 give
-the measured reasons, and section 10 names the single decision that would drag
-both in - at which point the ceiling question stops being mine.
+**No wave writes `src/app/actions/grading.ts` (941), `src/app/components/GradingResults.tsx`
+(906), `src/app/components/grading-results/gradingResultsHelpers.ts` (728),
+`src/app/components/grading-results/ungradedDisclosure.ts` (196) or
+`src/lib/grade/types.ts` (432).** Section 9 and section 11 give the measured
+reasons, and unlike round 1 those reasons are a construction rather than an
+assertion.
 
 ---
 
-## 4. Wave 1 in detail
+## 5. Wave 1 in detail
 
-### 4.1 What it changes
+### 5.1 What it changes, and how big it is
 
-- `src/lib/grade/utils.ts`: inside `parseSubmissionFileName`, whenever a file's
-  identity resolves via step 5 (`:243-251`, the innermost crossing's stem) or
-  step 6 (`:254-259`, the bare leaf stem), fold that file's own immediate
-  enclosing folder segment INTO the existing fallback key as an additional
-  discriminator. Inside `groupSubmissionsByStudent` (`:290-350`), give every row
-  whose key was folded a display that names the folder.
-- `src/app/components/grading-results/gradingResultsHelpers.ts`: a READ-ONLY
-  legacy path in `loadPersistedEdits` (`:619-635`), so an edit stored under a
-  row's PRE-FOLD display is still found. Section 4.3 measures why this is in
-  this wave rather than a later one.
+One production file. Measured on the generated Wave-1 variant, both counters:
 
-**Two constructions this wave is bound to, both forced by measurement rather
-than preference:**
+```
+393  <scratchpad>/hp/utils.ts        (the import-only baseline = the real file)
+436  <scratchpad>/hp/utils_w1.ts     (RULE K + RULE D, Wave 1's share only)
+459  <scratchpad>/hp/utils_a44.ts    (plus Wave 2's exports and discriminator)
+```
 
-1. **The compound key must make the collision unrepresentable, not assert it
-   away.** `docs/a44-scope.md` 2.2 (m2's fix) shows `leafStemFallback`
-   (`utils.ts:121-126`) can return a stem containing arbitrary characters, so no
-   printable separator is provably injective. The harness used a
-   length-prefixed join (`"3:src4:main"` above) purely to have SOMETHING
-   injective while measuring; a tuple key is equally acceptable. What is binding
-   is that the construction cannot collide, not which of the two is used.
-2. **The display fold must be UNCONDITIONAL on collision - a function of the
-   file alone, never of the batch.** This is the section-4.3 measurement and it
-   is the single most load-bearing decision in this plan.
+So **Wave 1 is +43 lines in `utils.ts`, Wave 2 a further +23, and the pair ends
+at 459 with 541 lines of headroom.** That is a measurement of a generated
+variant, not a mandate on the diff's shape.
 
-### 4.2 Write set, derived with a stated command
+Inside those 43 lines: the length-prefixed encoder and the
+container-relative-directory helper, both module-private; the encoding applied at
+**all six** return sites; the container-relative directory folded into the key and
+the display at steps 5 and 6 only; and the terminal disambiguation pass at the
+end of `groupSubmissionsByStudent`, walked in identity-key order.
+
+**Three things the implementer is bound to, each because something measured says
+so.** The encoding is TOTAL - a partial one is forgeable (architecture 4.4) and
+section 8 measures that nothing in the suite would notice. The terminal pass
+walks identity-KEY order - section 8 measures that insertion order gives a
+different answer. And `citationFileName`, `extension`, `mergedFileCount`,
+`submittedFiles` and the `localeCompare` row sort are left alone;
+`utils.test.ts:192-197` pins the citation name staying a bare leaf.
+
+### 5.2 Write set, derived with stated commands
 
 An item's file set is the files it edits PLUS the tests asserting on the
-behaviour it changes, INCLUDING tests that read those files as source text
+behaviour it changes, INCLUDING tests that read those files AS SOURCE TEXT
 (`docs/loop/parallel-disjointness.md` section 2).
+
+**(1) Who imports the changed module.**
 
 ```
 $ grep -rlnE "grade/utils|from \"\./utils\"|from \"\.\./grade/utils\"" src
-  ... 21 hits in unrelated directories (content-tab/utils.ts, ppt-design, etc.)
-  src/lib/grade/engine.ts
-  src/lib/grade/extraction.ts
-  src/lib/grade/prompts.ts
-  src/lib/grade/single-file-entry.ts
-  src/lib/grade/utils.test.ts
-  src/lib/grade.ts
-  src/lib/code-run-selection.ts
+  src/lib/grade/engine.ts   src/lib/grade/extraction.ts   src/lib/grade/prompts.ts
+  src/lib/grade/single-file-entry.ts   src/lib/grade/utils.test.ts
+  src/lib/grade.ts   src/lib/code-run-selection.ts
+  (plus 21 hits in unrelated directories - content-tab/utils.ts, ppt-design)
 exit=0
 $ grep -rlnE "grade/utilsZZZ" src
-exit=1                                   (CANARY, same pattern shape, same filter: misses)
+exit=1                                 (CANARY, same pattern shape, same filter)
+```
 
-$ grep -rlnE "readFileSync\(|readFile\(" src --include=*.test.ts \
-    | xargs grep -lE "grade/(utils|extraction|engine)"
-src/app/components/grading-results/ungradedDisclosure.test.ts
-src/lib/grade/grouping-zip-parents.wiring.test.ts
-src/lib/module-graph/runtime-import-graph.test.ts
-exit=0
-$ grep -rlnE "grade/extraction" src        (CANARY for the same filter chain: must HIT)
-src/lib/grade/grouping-zip-parents.wiring.test.ts
-src/lib/grade.ts
-src/lib/module-graph/runtime-import-graph.test.ts
-src/lib/office-edit.test.ts
-exit=0
+**(2) Who reads a grade module AS SOURCE TEXT - derived over the whole set of
+source-text-reading tests, not over a list.** 210 test files call
+`readFileSync(`, `readFile(` or `readdirSync(`
+(`grep -rlE "readFileSync\(|readFile\(|readdirSync\(" src --include=*.test.ts | wc -l`);
+each was then filtered by content,
+so the derivation ranges over the set it claims:
 
-$ grep -rn "loadGradingResultsEdits\|loadPersistedEdits\|seedEdits\|persistGradingResultsEdits\|mergeStoredRowEdit" \
+```
+$ for f in $(grep -rlE "readFileSync\(|readFile\(|readdirSync\(" src --include=*.test.ts); do
+    hits=$(grep -oE "grade/(utils|extraction|engine|types|single-file-entry)[A-Za-z.]*" "$f" | sort -u | tr '\n' ' ')
+    [ -n "$hits" ] && echo "$f -> $hits"; done
+src/app/components/grading-recording/classTrendsRunCohort.test.ts        -> grade/types
+src/app/components/grading-recording/copy-feedback.test.ts               -> grade/types
+src/app/components/grading-results/gradingResultsHelpersWiring.test.ts   -> grade/types
+src/app/components/grading-results/ungradedDisclosure.test.ts            -> grade/engine.ts grade/types
+src/app/components/repo-grades/classTrendsFolderEntry.test.ts            -> grade/types
+src/app/components/repo-grades/repoGradesCodeExecution.wiring.test.ts    -> grade/types.ts
+src/lib/grade/grouping-zip-parents.wiring.test.ts                        -> grade/engine.ts grade/extraction.ts
+src/lib/module-graph/runtime-import-graph.test.ts                        -> grade/engine.ts grade/extraction.ts grade/types
+exit=0
+$ same chain, pattern "grade/utilsZZZ"
+CANARY_EXIT=1
+```
+
+**`grade/utils` appears in none of them.** Because a path can also be built from
+SEGMENTS, which the slash pattern cannot see, the same claim was re-run with a
+second instrument:
+
+```
+$ grep -rnE '"grade"' src --include=*.test.ts
+gradingResultsHelpersWiring.test.ts:138,141,148,209   join(SRC, "lib", "grade", "types.ts")
+runtime-import-graph.test.ts:399,634                  join(SRC, "lib", "grade", "types.ts" | "engine.ts")
+  (the remaining hits are workflow step types literally named "grade")
+exit=0
+$ canary, same command shape: grep -rnE '"lib"' src --include=*.test.ts  -> hits
+```
+
+Both instruments agree: **no test reads `src/lib/grade/utils.ts` as source text**,
+so Wave 1 can be gated on behaviour alone. What DOES cover it is the three
+whole-tree sweeps, each confirmed to recurse all of `src`:
+`src/file-size-ceiling.structure.test.ts` (`:102` `readdirSync`, `:115`
+`path.resolve(repoRoot, "src")`), `src/source-bytes.structure.test.ts` (`:57`),
+`src/lib/no-emojis.test.ts` (`:241`, `:254` `["src","docs"]` - which also collects
+THIS document).
+
+**(3) Who asserts on the storage behaviour RULING 93 leaves in place.**
+
+```
+$ grep -rn "loadGradingResultsEdits\|loadPersistedEdits\|seedEdits\|persistGradingResultsEdits\|mergeStoredRowEdit\|fanOutGradingPostResult\|correctUngradedSeeds" \
     src --include=*.ts --include=*.tsx | grep -v "gradingResultsHelpers.ts:"
-  src/app/components/grading-results/gradingResultsHelpers.test.ts        (7 hits)
-  src/app/components/grading-results/gradingResultsHelpersEditState.test.ts (24 hits)
-  src/app/components/grading-results/ungradedDisclosure.test.ts:539,542
-  src/app/components/GradingResults.tsx:29,30,79,199,202,218,222,233,236
+  gradingResultsHelpers.test.ts, gradingResultsHelpersEditState.test.ts,
+  ungradedDisclosure.ts / .test.ts, GradingResults.tsx, gradingResultsPostOutcome.test.ts
 exit=0
 $ grep -rn "loadGradingResultsEditsZZZ" src
-exit=1                                   (CANARY: misses)
+exit=1                                 (CANARY: misses)
 ```
 
-**WRITTEN by Wave 1 (5 paths):**
+**WRITTEN by Wave 1 (6 paths) - one production file and five test files:**
 
 ```
-src/lib/grade/utils.ts
+src/lib/grade/utils.ts                                                      PRODUCTION
 src/lib/grade/utils.test.ts
-src/app/components/grading-results/gradingResultsHelpers.ts
-src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
-src/app/components/grading-results/gradingResultsEditsIdentity.test.ts    (NEW)
+src/lib/grade/identityInvariants.test.ts                                    NEW
+src/app/components/grading-results/gradingResultsHelpers.test.ts            TEST ONLY
+src/app/components/grading-results/gradingResultsHelpersEditState.test.ts   TEST ONLY
+src/app/components/grading-results/ungradedDisclosure.test.ts               TEST ONLY
 ```
 
-**READ-COUPLED, not written - no other agent may edit these in Wave 1's
-window, and every one of them is in Wave 1's gate:**
+**The three TEST ONLY entries carry MA-1's re-routing, and no production line in
+`src/app/components/grading-results/` changes.** They are in the write set
+because the three EXECUTABLE members of the 43-site display-keyed census live in
+those two modules - `fanOutGradingPostResult`
+(`gradingResultsHelpers.ts:703-727`, keying `next[row.student]` at `:717`,
+`:722`, `:725`), `buildCsvContent` (`:503-504`) and `correctUngradedSeeds`
+(`ungradedDisclosure.ts:191-193`) - and round 1 routed the first of those to
+owner-only verification after locating it in the component file. It is an
+exported pure function in a plain `.ts` file. The most damaging consequence of a
+display collision is testable, and this is the wave that tests it.
 
-| Path | Why it is coupled | Measured verdict |
+**READ-COUPLED, not written. Every one is in Wave 1's gate, and each carries a
+stated condition:**
+
+| Path | Why coupled | Condition for Wave 1 to stay green |
 |---|---|---|
-| `src/lib/grade/extraction.test.ts` | drives `extractStudentEntries` over real archive bytes (`:246-271`) | its fixture resolves at step 3 (convention crossings); rows=2, displays `[janedoe, johndoe]` under all four modes. UNAFFECTED. |
-| `src/lib/grade/single-file-entry.test.ts` | named in this feature's area | `grep -nE "parseSubmissionFileName\|groupSubmissionsByStudent\|inferStudentPrefix\|leafStemFallback" src/lib/grade/single-file-entry.ts` returns two COMMENT lines (`:50`, `:52`), exit 0, and no code line. UNAFFECTED. |
-| `src/lib/grade/grouping-zip-parents.wiring.test.ts` | source-text test over `extraction.ts` and `engine.ts` | Wave 1 edits neither. UNAFFECTED. |
-| `src/app/components/grading-results/gradingResultsHelpers.test.ts` | asserts `seedEdits(run)` with an exact `toEqual` (`:302`) | Wave 1 does not change `seedEdits`. UNAFFECTED, and this is the assertion that goes red if an implementer "fixes" the collapse inside `seedEdits` instead of inside the display rule. |
-| `src/app/components/grading-results/ungradedDisclosure.test.ts` | `:539-542` asserts BOTH `loadGradingResultsEdits` call sites in `GradingResults.tsx` are wrapped in `correctUngradedSeeds` | Wave 1 changes `loadPersistedEdits`'s internals, not `loadGradingResultsEdits`'s call shape. UNAFFECTED. |
-| `src/app/components/GradingResults.tsx` | holds 24 of the 30 display-keyed sites | NOT written. Section 4.3's invariant is what keeps it out; section 10 names what would drag it in. |
-| `src/lib/no-emojis.test.ts`, `src/source-bytes.structure.test.ts`, `src/file-size-ceiling.structure.test.ts` | directory sweeps: they collect any file this wave ADDS, automatically (`docs/loop/parallel-disjointness.md` section 6) | in the gate. |
+| `src/lib/grade/extraction.test.ts` | drives `extractStudentEntries` over real archive bytes (`:246-271`) | its two fixture files resolve at step 3, so no fold applies. Architecture 4.6 measures F7 at 2 rows before and after. |
+| `src/lib/grade/single-file-entry.test.ts` | named in this feature's area | `grep -nE "parseSubmissionFileName\|groupSubmissionsByStudent\|inferStudentPrefix\|leafStemFallback" src/lib/grade/single-file-entry.ts` returns two COMMENT lines (`:50`, `:52`), exit 0, no code line. |
+| `src/lib/grade/grouping-zip-parents.wiring.test.ts` | source-text test over `extraction.ts` (`:39`) and `engine.ts` (`:40`) | Wave 1 edits neither. |
+| `src/lib/module-graph/runtime-import-graph.test.ts` | `:653-663`'s frozen deep-equal list of nine import trails from `engine.ts`, which imports `./utils` statically (`:24`) | **Wave 1 must add NO import to `utils.ts`.** RULE K needs none - the helpers use only `getBaseFileName`, already in the file. A new import is the only way Wave 1 can move that list. |
+| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | walks a client-boundary closure rooted at the grading-results directory plus `GradingResults.tsx` plus `grade/types.ts` (`:145-154`) | same condition: no new import anywhere Wave 1 writes. Its R-5 canary roots at `grade.ts` and asserts violations > 0, so a clean change cannot make it fail. |
+| `src/app/components/grading-results/gradingResultsPostOutcome.test.ts` | asserts on post-outcome shapes keyed by display | Wave 1 changes no production line there; in the gate as verification, not as a write. |
+| `src/app/components/GradingResults.tsx` | holds 34 of the 43 display-keyed sites | NOT written. Section 9 is what keeps it out; section 11 confirms the ceiling never becomes a question. |
+| the three whole-tree sweeps | they collect the file Wave 1 ADDS, automatically | in the gate. |
 
-### 4.3 Why the display fold must be per-file, and why the storage layer is in THIS wave
+### 5.3 What Wave 1 exports, and why the answer is nothing
 
-The check proved two separate data-loss facts. Both reproduce here against the
-REAL `seedEdits` and `loadPersistedEdits`.
+`parseSubmissionFileName`, `inferStudentPrefix` and `groupSubmissionsByStudent`
+are already exported and already called from `extraction.ts:138` and
+`engine.ts:425,432`. Wave 1 adds no export and changes no signature, so there is
+nothing for the caller rule to catch - and this is a different claim from round
+1's identical-looking "NONE", which was true only because it had omitted the three
+exports the design needs. Those are Wave 2's, with their caller.
 
-**Fact 1 - the key fold ALONE loses instructor feedback inside a single run.**
-Driving A41's F3 fixture (`docs/a41-test-notes.md:215`) through the real
-`seedEdits`:
+### 5.4 Red before, green after - and the cost stated where round 1 claimed there was none
 
-```
-=== S1: the within-run collapse a KEY-ONLY wave ships, against the REAL seedEdits ===
-  today      rows=1 displays=[essay] seedEdits slots=1
-  keyOnly    rows=3 displays=[essay, essay, essay] seedEdits slots=1  <-- 2 ROW(S) LOSE THEIR SEED
-  always     rows=3 displays=[essay (AlvarezMaria), essay (BrownTom), essay (ChenLi)] seedEdits slots=3
-```
-
-This is the check's B2(a) and B2(b) in one line. It is also why the key fold and
-the display fold are one wave and not two.
-
-**Fact 2 - a CONDITIONAL display fold orphans an edit on a row whose identity
-key never moved.** This is the case `docs/a44-scope.md` 6.1 restates as the
-requirement's correct object. Run 1 holds `AlvarezMaria/essay.txt` alone and an
-instructor edit is saved; run 2 adds `BrownTom/essay.txt`:
-
-```
-=== S2: a row whose IDENTITY KEY never changed, with a sibling arriving in run 2 ===
-  today        run1 display="essay"                 run2 display="essay"                 EDIT SURVIVED=true
-  onCollision  run1 display="essay"                 run2 display="essay (AlvarezMaria)"  identityKeyUnchanged=true (12:alvarezmaria5:essay)  EDIT SURVIVED=false
-  always       run1 display="essay (AlvarezMaria)"  run2 display="essay (AlvarezMaria)"  identityKeyUnchanged=true (12:alvarezmaria5:essay)  EDIT SURVIVED=true
-```
-
-**`onCollision` is `docs/a44-scope.md` 3.4's recommended default, and it is the
-rule that loses the edit.** `always` - the same suffix, applied to every row
-whose key was folded, regardless of what else is in the batch - keeps it,
-because the display is then a function of the FILE and "key unchanged" implies
-"display unchanged" by construction. That is `traps-spec.md`'s own preference
-("prefer the construction that makes the banned state unrepresentable over the
-assertion that it is absent") applied to this requirement, and it is why this
-plan makes the unconditional form binding rather than advisory.
-
-**Fact 3 - either display rule orphans the PRE-FOLD blob once, and a read-only
-legacy path recovers it.** A blob stored under today's displays, read by a
-post-fold run:
-
-```
-=== S3: the ONE-TIME rollout read - a blob stored under TODAY's displays, read by a post-fold run ===
-  always       post-fold displays=[essay (AlvarezMaria), essay (BrownTom), essay (ChenLi)]  foundByTodaysLoader=false  foundByLegacyAwareLoader=true
-  onCollision  post-fold displays=[essay (AlvarezMaria), essay (BrownTom), essay (ChenLi)]  foundByTodaysLoader=false  foundByLegacyAwareLoader=true
-```
-
-`foundByLegacyAwareLoader` is a HARNESS REIMPLEMENTATION, labelled as such: it
-tries the row's own display, then the pre-fold display recovered from it, and
-merges through the real `mergeStoredRowEdit`. It is evidence that the wave's
-write set must include the storage layer - not a proposed test and not a
-proposed implementation.
-
-**The consequence for the write set.** The A44 row's own verify clause
-(`docs/BACKLOG.md:118`, extracted by parsing the row rather than grepping it)
-reads: "zero saved instructor edits may be orphaned - proven by an assertion
-that executes the display-string keying in the grading-results helpers, not by
-reading the source". `foundByTodaysLoader=false` is a non-zero orphaning.
-**So `gradingResultsHelpers.ts` is in Wave 1's write set, not a later wave's.**
-This is the brief's point 5 discharged: there is no released intermediate state
-that loses an instructor edit, and it does NOT force a larger single wave -
-it forces one more file in this one.
-
-**What the legacy path needs from the display wording, and it is an argument
-rather than a measurement.** Recovering the pre-fold display from the post-fold
-display requires the post-fold display to CONTAIN it. The suffix form
-(`"essay (AlvarezMaria)"`) does; replacing the display with the folder alone
-(`"AlvarezMaria"`, `docs/a44-scope.md` section 10's branch 2) does not, and
-under that wording the legacy path would need the row to CARRY its pre-fold
-display or its identity key - a change to `StudentSubmissionEntry`
-(`src/lib/grade/types.ts:393-415`) and `GradeResultBase` (`:212-271`) and every
-producer of a `GradeResult`. **This plan is built on the suffix form**, which is
-also the scope's own recommendation. Section 10 prices the alternative.
-
-### 4.4 Red before, green after - stated per assertion, honestly
-
-The brief asks what is red before this wave and green after it. Three of the
-assertions this wave needs are NOT of that shape, and saying so is the point:
-a protection that is green on both sides is still a real requirement, and the
-thing that proves it can fail is the sabotage, not the before-state.
-
-| Assertion class | Before Wave 1 | After Wave 1 | Measured |
+| Assertion class | Before | After | Evidence |
 |---|---|---|---|
-| Per-student folders produce one row per folder (A41's F3 shape) | **RED** - rows=1, displays `[essay]` | GREEN - rows=3, 3 distinct displays | h1, `today` vs `always` |
-| A zip-wrapped per-student-folder upload produces one row per folder (the check's GAP-A, `docs/a44-check.md:487`) | **RED** - rows=1, key `bulk` | GREEN - rows=3, displays `[bulk (AlvarezMaria), bulk (BrownTom), bulk (ChenLi)]` | h1 |
-| No two returned rows share a `student` string (`utils.test.ts:360-375`) | GREEN, but as the TAUTOLOGY A41 diagnosed - the folder shape yields one row, so uniqueness is free | GREEN, and load-bearing for the first time | h1: `keyOnly` gives rows=3 distinctDisplays=1, so this assertion is RED against a key-only implementation. That is the sabotage, not the before-state. |
-| A key-unchanged row keeps its saved edit across runs | GREEN (`today`: EDIT SURVIVED=true) | GREEN (`always`: true) | S2. It is RED against the CONDITIONAL-fold implementation (`onCollision`: false). A protection, not a fix. |
-| A pre-fold saved edit survives the first post-fold run | not applicable - nothing to migrate | GREEN | S3. RED against a Wave 1 implementation without the legacy read path (`foundByTodaysLoader=false`). |
+| Per-student folders produce one row per folder | **RED** - 1 row, 3 students blended | GREEN - 3 rows | architecture 4.1 (F3, G8, G1, G2), consumed |
+| Two students each with their own subdirectories are not blended | **RED** - 2 rows for 4 files, each blending two students | GREEN - 4 rows | architecture 4.2, consumed. This is the shape the immediate-parent rule did NOT fix. |
+| Distinct keys never share a display (`utils.test.ts:373`) | GREEN as a tautology - every return site sets `studentKey = studentDisplay.toLowerCase()` | GREEN and load-bearing for the first time | architecture 5.2 / 5.3, consumed. Falsifiable under RULE K, which is what makes it an instrument. |
+| INVARIANT M: the post-A44 row partition refines the pre-A44 one | GREEN trivially (nothing changed) | GREEN, over generated input | architecture 5.1 / 5.3, consumed |
+| `utils.test.ts:130`, `:135`, and `:366`'s display inside the uniqueness fixture | GREEN at `"main"` / `"otherfile"` | GREEN at `"src/main"` / `"src/otherfile"`, assertion at `:373` still 4 against 4 | architecture 10.2, corroborated by section 3.2's own run |
 
-**Does the whole suite stay green after Wave 1?** Measured, not asserted. Every
-fixture literal in the two test files that drive the changed functions was run
-through the real `parseSubmissionFileName` under all four modes. **Exactly ONE
-existing fixture's OUTPUT moves, and its assertion still passes:**
+**And the cost, which round 1 asserted away as "strictly better than today and
+never worse".** Wave 1 alone splits one student's own subdirectories into
+separate graded rows - 1 correct row today becomes 2, each holding half the work
+and each scored against the whole rubric (architecture L1). The sibling test
+notes measure that shape at `splitBefore 0 -> splitAfter 19440 (97.8%)`
+(`docs/a44-test-notes.md:439`) with `splitUnrefused` equal to the whole of it
+(`:465-470`). **RULING 95 accepts it on a stated criterion: prefer a VISIBLE
+SPLIT over an INVISIBLE BLEND** - a split shows the instructor two rows they can
+see and act on, a blend shows one confident wrong grade nobody can detect. The
+real fix needs a signal from outside the file paths and is filed as **A45**, the
+roster-corroboration row, because knowing the student list is the only thing that
+distinguishes a student's folder from a subdirectory, and no rule reading paths
+alone can do it. So the honest statement of what Wave 1 alone ships is: **better
+on the blend, worse on the split, accepted on a recorded criterion** - not
+"never worse".
 
-```
-### utils.test.ts:362-370 THE UNIQUENESS GUARD fixture      (asserted at :371-373)
-    today                        rows=4 displays=[janedoe, johndoe, marysmith, otherfile]       distinctDisplays=4
-    keyOnly                      rows=4 displays=[janedoe, johndoe, marysmith, otherfile]       distinctDisplays=4
-    keyPlusDisplayAlways         rows=4 displays=[janedoe, johndoe, marysmith, otherfile (src)] distinctDisplays=4
-    keyPlusDisplayOnCollision    rows=4 displays=[janedoe, johndoe, marysmith, otherfile]       distinctDisplays=4
-```
+### 5.5 Gate for Wave 1
 
-`"src/otherfile.py"` reaches step 6 with the folder segment `src`, so its display
-becomes `otherfile (src)`. `:373` asserts only
-`new Set(students).size === students.length`, which is 4 against 4. Green.
+Every step names its object, its instrument and its direction of failure. Exit
+codes are read from the command, never through a pipe.
 
-The other eleven fixtures are byte-identical across all four modes, because each
-resolves at step 2 or step 3 (the convention branch) and the fold never applies
-there: `utils.test.ts:161-174`, `:201-204`, `:212-221`, `:230-235`, `:241-246`,
-`:262-275`, `:297-312`, `:326-329`, `:343-346`, `:379`, and
-`extraction.test.ts:248-259`. In particular `utils.test.ts:380-389`'s exact
-`toEqual` over the whole returned row object is untouched (display stays
-`janedoe`) - which is also why **no wave may add a REQUIRED field to
-`groupSubmissionsByStudent`'s returned entry without editing
-`utils.test.ts` in the same wave**; `toEqual` treats an always-present new
-field as a mismatch.
-
-### 4.5 Gate for Wave 1
-
-Every step's pass condition is stated. Read exit codes from the command.
-
-1. **`git status --short`** in the main checkout. Pass: exactly the 5 assigned
+1. **`git status --short`** in the main checkout. Pass: exactly the 6 assigned
    paths, plus whichever sibling-owned entries were present at dispatch and
-   recorded in the brief. Any other path is a failure, including anything under
-   `.claude/worktrees` (`docs/loop/this-repo.md` section 7 - `Glob` returns the
-   worktree copy FIRST, so a report is not evidence).
-2. **`npx tsc --noEmit`** - this wave is the single caller. Pass: no output at
-   all, exit 0.
-3. **`npm run lint`** - pass: `4 problems (0 errors, 4 warnings)`, exit 0. A
-   fifth warning is this wave's regression, named, not absorbed.
-4. **The named set**, one command, never a raw multi-path vitest:
+   recorded verbatim in the brief. Any other path fails, including anything under
+   `.claude/worktrees` - `Glob` returns the worktree copy FIRST, so an agent can
+   edit it, pass every gate and change nothing real. A report is not evidence.
+2. **`npx tsc --noEmit`** - this wave is the single caller in its window. Pass: no
+   output, exit 0. vitest erases types without reading them, so the suite is not
+   a type check.
+3. **`npm run lint`** - **pass: exit 0, AND the warning list contains no entry
+   naming a file in this wave's write set that was absent from the output of the
+   SAME command run on the same tree immediately before the change.** Do not pin
+   a count. Four values have been measured for this one command in one day:
+   `docs/loop/this-repo.md` recorded **4**, the round-1 check measured **7**, the
+   orchestrator measured **8** an hour later while a sibling was writing `src/`,
+   and this pass measured:
+
    ```
-   npm run test:paths -- src/lib/grade/utils.test.ts src/lib/grade/extraction.test.ts src/lib/grade/single-file-entry.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/app/components/grading-results/gradingResultsHelpers.test.ts src/app/components/grading-results/gradingResultsHelpersEditState.test.ts src/app/components/grading-results/ungradedDisclosure.test.ts src/app/components/grading-results/gradingResultsEditsIdentity.test.ts
+   $ npm run lint
+   LINT_EXIT=0
+   ... 7 problems (0 errors, 7 warnings)
+   src/app/components/RecordingTab.tsx:347
+   src/app/components/recording/useDiscussionCapture.wiring.test.ts:188,201,201
+   src/app/components/repo-grades/repoGradesSliceA.guards.test.ts:84
+   src/lib/canvas-modules/new-quiz.test.ts:25,46
    ```
-   Pass: a `COVERED` line for EVERY argument, 0 failed, exit 0. The measured
-   pre-wave baseline for the first seven of those paths, run this pass:
+
+   **None of those four files is in either wave's write set**, which is what makes
+   the condition satisfiable without an implementer "fixing" warnings outside its
+   assignment - the write-set violation this gate exists to prevent.
+4. **The named set**, one command:
    ```
-   COVERED src/lib/grade/utils.test.ts files=1 passed=28
-   COVERED src/lib/grade/extraction.test.ts files=1 passed=9
-   COVERED src/lib/grade/single-file-entry.test.ts files=1 passed=15
-   COVERED src/lib/grade/grouping-zip-parents.wiring.test.ts files=1 passed=7
-   COVERED src/app/components/grading-results/gradingResultsHelpers.test.ts files=1 passed=45
-   COVERED src/app/components/grading-results/gradingResultsHelpersEditState.test.ts files=1 passed=28
-   COVERED src/app/components/grading-results/ungradedDisclosure.test.ts files=1 passed=47
-   (with src/lib/module-graph/runtime-import-graph.test.ts as the eighth: files=1 passed=174)
-   Test Files  8 passed (8) / Tests  353 passed (353)
-   EXITCODE=0
+   npm run test:paths -- src/lib/grade/utils.test.ts src/lib/grade/identityInvariants.test.ts src/lib/grade/extraction.test.ts src/lib/grade/single-file-entry.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/app/components/grading-results/gradingResultsHelpers.test.ts src/app/components/grading-results/gradingResultsHelpersEditState.test.ts src/app/components/grading-results/ungradedDisclosure.test.ts src/app/components/grading-results/gradingResultsPostOutcome.test.ts src/lib/module-graph/runtime-import-graph.test.ts
    ```
-   A `NOT COVERED` line on the new file means the new test file exists and
-   matched nothing - which is the failure mode a raw `vitest run` hides
-   (`docs/loop/this-repo.md` section 1).
+   Pass: a `COVERED` line for EVERY argument, 0 failed, exit 0. A `NOT COVERED`
+   line means the file exists and matched nothing, which is the failure a raw
+   `vitest run` hides. Pre-wave baseline measured this pass for the eight of
+   those that exist today plus `grading.budget.test.ts`:
+   ```
+   $ npm run test:paths -- <nine existing paths>
+   TP_EXIT=0
+   COVERED src/lib/grade/utils.test.ts                            files=1 passed=28
+   COVERED src/lib/grade/extraction.test.ts                       files=1 passed=9
+   COVERED src/lib/grade/single-file-entry.test.ts                 files=1 passed=15
+   COVERED src/lib/grade/grouping-zip-parents.wiring.test.ts       files=1 passed=7
+   COVERED .../gradingResultsHelpers.test.ts                       files=1 passed=45
+   COVERED .../gradingResultsHelpersEditState.test.ts              files=1 passed=28
+   COVERED .../ungradedDisclosure.test.ts                          files=1 passed=47
+   COVERED src/lib/module-graph/runtime-import-graph.test.ts        files=1 passed=174
+   COVERED src/app/actions/grading.budget.test.ts                  files=1 passed=5
+   Test Files  9 passed (9) / Tests  358 passed (358)
+   ```
+   Wave 1's eight existing paths therefore stand at **353** before the wave.
+   `gradingResultsPostOutcome.test.ts` was not in that run and must be baselined
+   at dispatch rather than quoted from here.
 5. **Hygiene and ceiling sweeps**, one command:
    ```
    npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts src/file-size-ceiling.structure.test.ts
    ```
-   Measured pre-wave: `COVERED ... passed=18 / 3 / 3`,
-   `Test Files 3 passed (3) / Tests 24 passed (24)`, `EXITCODE=0`. Never
-   hand-roll an emoji or byte scan - `grep -P` here exits 0 without checking.
-6. **`npm test`** - pass: 0 failed, and the file/test counts at or above the run
-   taken on the same tree immediately before the wave. The card's
-   1111/22454 is explicitly a drifting snapshot
-   (`docs/loop/this-repo.md` section 1); measure, do not quote.
-7. **`npm run build`** - pass: the line `Compiled successfully` is present.
-   The exit code is 1 by design (no `.env` in this checkout) and must not be
-   `&&`-chained. This is the ONLY gate that catches a `"use server"` file
-   exporting a non-async binding; Wave 1 touches no such file, and the gate runs
-   anyway.
-8. **Line counts**, both counters, on every written file: each strictly under
-   1000. Projected: `utils.ts` 393 + the fold, `gradingResultsHelpers.ts`
-   728 + the legacy path, `utils.test.ts` 390 + fixtures. None of the three has
-   an `ALLOWED_OVERAGE` entry:
+   Never hand-roll an emoji or byte scan: `grep -P` here exits 0 without
+   checking, and `src/source-bytes.structure.test.ts` owns the materialised
+   `\uXXXX` scan because Write/Edit land such an escape as the literal character.
+6. **`npm test`** - pass: 0 failed, and the file and test counts at or above a run
+   taken on the same tree immediately before the wave. Measure; the card's totals
+   are an explicitly drifting snapshot.
+7. **`npm run build`** - pass: the line `Compiled successfully` is present. The
+   exit code is 1 by design (no `.env` here) and must not be `&&`-chained.
+8. **Line counts, both counters, on every written file**, each strictly under
+   1000. No file in either wave has an `ALLOWED_OVERAGE` entry:
    ```
    $ grep -nE "grade/utils|grade/extraction|grade/engine|GradingResults|gradingResultsHelpers|actions/grading" src/file-size-ceiling.structure.test.ts
-   exit=1        (no ratchet entry for any of them - they must stay under 1000)
+   exit=1        (no ratchet entry for any of them)
    $ grep -nE "lms-generation.test.ts" src/file-size-ceiling.structure.test.ts
    76:  "src/app/actions/lms-generation.test.ts": {
    exit=0        (POSITIVE CANARY: the same command DOES find a real entry)
@@ -543,152 +551,237 @@ Every step's pass condition is stated. Read exit codes from the command.
 
 ---
 
-## 5. Wave 2 in detail
+## 6. Wave 2 in detail
 
-### 5.1 What it changes
+### 6.1 What it changes
 
-A new pure leaf computing the refined refusal decision of RULING 87 over a run's
-`submissions` keys and `zipParents`, shaped like `decideZipIntake`
-(`src/lib/submission-zip-intake.ts:112`), plus its two call sites. The refusal
-is delivered by THROWING, which is the mechanism `engine.ts:443` already uses for
+`utils.ts` gains the exported decoder, the `export` keyword on the
+container-relative-directory helper, and `reachedStemFallback` at all six return
+sites (+23 lines, measured in 5.1). A new pure leaf computes RULING 87's refined
+decision over a run's `submissions` and `zipParents`, shaped like `decideZipIntake`
+(`src/lib/submission-zip-intake.ts:112`), and is called at its two sites. The
+refusal is delivered by THROWING, the mechanism `engine.ts:443` already uses for
 an ingestion-level refusal on the same branch.
 
-### 5.2 Where it is called, and why that is exactly two places
+### 6.2 Where it is called, and why that is exactly two places
 
-`docs/a41-scope.md:955-962` requires the write set to reach BOTH of
-`gradeAction`'s zip-reaching branches - `src/app/actions/grading.ts:854`
-(embedded, `extractStudentEntries`) and `:905-907` (Gemini, `gradeSubmissions`)
-- "or the collision decision ships live on one provider and dead on the other."
 Census re-derived this pass:
 
 ```
 $ grep -rn "extractSubmissions" src --include=*.ts --include=*.tsx
-src/app/actions/llm-content.ts:667    <- testGeminiAction, a DIAGNOSTIC that takes only the first file
-src/lib/grade/engine.ts:423,428       <- gradeSubmissions (the Gemini zip branch)
-src/lib/grade/extraction.ts:33,137    <- the definition, and extractStudentEntries (the embedded branch)
+src/app/actions/llm-content.ts:667    <- testGeminiAction, a DIAGNOSTIC taking only entries[0]
+src/lib/grade/engine.ts:423,428       <- gradeSubmissions, the Gemini zip branch
+src/lib/grade/extraction.ts:33,137    <- the definition, and extractStudentEntries
 src/lib/grade.ts:12                   <- barrel re-export
-  (remaining hits are extraction.test.ts and grouping-zip-parents.wiring.test.ts)
 exit=0
 $ grep -rn "groupSubmissionsByStudent" src --include=*.ts --include=*.tsx | grep -v "\.test\."
-src/lib/grade/engine.ts:425,432
-src/lib/grade/extraction.ts:11,138
-src/lib/grade/utils.ts:290
-src/lib/grade.ts:14
+src/lib/grade/engine.ts:425,432   src/lib/grade/extraction.ts:11,138
+src/lib/grade/utils.ts:290        src/lib/grade.ts:14
 exit=0
 ```
 
-**Three placements are available and two of them are wrong, measured:**
+Three placements exist and two are wrong, unchanged from round 1 and confirmed by
+the check. Inside `extractSubmissions`: WRONG, because
+`llm-content.ts:667`'s `testGeminiAction` also calls it and grades nothing
+(`:669-676` takes `entries[0]` truncated to 2000 chars), so a refusal there fires
+where nothing was at risk - `docs/a41-test-notes.md:458-475` R4c forbids exactly
+that. Inside `groupSubmissionsByStudent`: WRONG, because
+`docs/a41-test-notes.md:318-338` R2 freezes its F3 row count as a
+characterisation that must be READ, not thrown. Inside `extractStudentEntries`
+(`extraction.ts:137-138`) and `gradeSubmissions` (`engine.ts:427-437`): CORRECT,
+two edits because those are two files, both in this wave's write set.
 
-- **Inside `extractSubmissions`** (one edit, both branches reached) - WRONG.
-  `src/app/actions/llm-content.ts:667`'s `testGeminiAction` also calls it, and
-  that action deliberately grades nothing (`:669-676`: it takes `entries[0]`
-  and truncates to 2000 chars). A refusal there fires where nothing was at
-  risk, which is precisely what `docs/a41-test-notes.md` R4c
-  (`:458-475`) forbids.
-- **Inside `groupSubmissionsByStudent`** (one edit, both branches reached) -
-  WRONG. It is a pure function with 28 pinned tests in `utils.test.ts`, and
-  `docs/a41-test-notes.md` R2 (`:318-338`) freezes its F3 row count as a
-  CHARACTERISATION that must be READ, not thrown.
-- **Inside `extractStudentEntries` (`extraction.ts:137-138`) and
-  `gradeSubmissions` (`engine.ts:427-437`)** - CORRECT, and it is two edits
-  because those are two files. Both are in this wave's write set.
-
-**`src/app/actions/grading.ts` needs no edit, and that is a measured finding,
-not an omission.** The refusal throws; `gradeAction`'s outer catch at
+**`src/app/actions/grading.ts` still needs no edit, and the reachability chain is
+inherited rather than built.** The refusal throws; `gradeAction`'s outer catch at
 `grading.ts:921-924` returns `{ run: null, error: message }` with `err.message`
-VERBATIM at `:923`; `state.error` renders at `GradingTab.tsx:262-266` with
-`role="alert"`; and all three exposed unattended callers already read `.error`
-(`docs/a41-test-notes.md:396-401`, re-verified as a citation, not re-derived).
-So the reachability chain is INHERITED from a landed path rather than built,
-which is what keeps the 941-of-1000 file out of every write set. **The
-reachability claim about the RENDERER remains a reading claim** - no component is
-rendered by any test here - and is RES-A44W-5.
+verbatim at `:923`; `state.error` renders at `GradingTab.tsx:262-266` with
+`role="alert"`. The two zip-reaching branches are `grading.ts:854`
+(`extractStudentEntries`) and `grading.ts:907` (`gradeSubmissions`), both opened
+this pass - `:905` is `const zipBuffer`, so round 1's `:905-907` was a range
+containing the call and `:907` is the call. **The claim about the RENDERER stays a
+READING CLAIM** - no component is rendered by any test here - and is R5 in section
+14.
 
-**`src/lib/grade.ts` needs no edit either**: both call sites are inside
-`src/lib/grade/`, so the leaf needs no barrel export, which also keeps it clear
-of the barrel's client-bundle hazard documented at
-`gradingResultsHelpers.ts:58-80`.
+`src/lib/grade.ts` needs no edit either: both call sites are inside
+`src/lib/grade/`, so the leaf needs no barrel export, which also keeps it clear of
+the barrel's client-bundle hazard documented at `gradingResultsHelpers.ts:58-80`.
 
-### 5.3 Write set, with the two source-text tests that can turn it red
+### 6.3 BL-5 closed: the predicate and its copy are EXECUTED from exactly the new exports
 
-**WRITTEN by Wave 2 (6 paths):**
+A consumer was written in the scratchpad that imports ONLY
+`parseSubmissionFileName`, `a44DecodeKey`, `a44ContainerRelativeDir` and
+`groupSubmissionsByStudent` from the RULE K variant, and computes the fallback
+population, its colliding groups, the distinct-folder amnesty count, the refusal
+verdict, and the copy clause that binds `folder "<name>"` to the folder segment
+verbatim. It is a BUILDABILITY PROBE, not an oracle and not a proposed
+implementation. `PROBE_EXIT=0`:
 
 ```
-src/lib/grade/collisionRefusal.ts                          (NEW)
-src/lib/grade/collisionRefusal.test.ts                     (NEW)
-src/lib/grade/collisionRefusal.wiring.test.ts              (NEW)
+--- G8 two students, two levels
+    fallbackPopulation=2 undecodableKeys=0 collidingGroups=0 distinctFolders=2 amnesty=true refuse=false
+    rows=["Submissions/AlvarezMaria/essay","Submissions/BrownTom/essay"]
+--- F6 one owner, two drafts in one folder
+    fallbackPopulation=2 undecodableKeys=0 collidingGroups=1 distinctFolders=1 amnesty=false refuse=true
+    copyFolderVerbatim="AlvarezMaria"  keyOfCollidingGroup="12:alvarezmaria8:homework"
+--- F4 flat, no folder at all
+    fallbackPopulation=2 undecodableKeys=0 collidingGroups=1 distinctFolders=0 amnesty=false refuse=true
+--- G1 shared wrapper zip, per-student folders
+    fallbackPopulation=3 undecodableKeys=0 collidingGroups=0 distinctFolders=3 amnesty=true refuse=false
+--- F7 two per-student convention zips (step 3)
+    fallbackPopulation=0 undecodableKeys=0 collidingGroups=0 distinctFolders=0 amnesty=false refuse=false
+--- G4 one folder, one stem, two extensions
+    fallbackPopulation=2 undecodableKeys=0 collidingGroups=1 distinctFolders=1 amnesty=false refuse=true
+    copyFolderVerbatim="Submissions"  keyOfCollidingGroup="11:submissions5:essay"
+```
+
+Three things this settles, and one it does not.
+
+- **Every quantity the predicate needs is computable from the three exports.**
+  `undecodableKeys=0` on all six runs, and `fallbackPopulation=0` on the
+  convention shape, which is the membership test the discriminator exists for.
+- **The discriminator is load-bearing and not redundant with the decoder**, because
+  a convention match and a directory-less fallback both decode to arity 1 -
+  measured in section 3.3. Without it, Wave 2 would have to re-implement the
+  identity algorithm in production code, which is the divergence this repo has a
+  standing rule against.
+- **The helper export has a real caller, and it is the COPY, not the predicate.**
+  The decoded key gives `"submissions/alvarezmaria"` (RULE K lowercases the path);
+  `docs/a44-test-notes.md`'s clause table binds `folder "AlvarezMaria"` to "the
+  group's folder segment, **verbatim**, quoted and labelled", and only the helper
+  produces `"Submissions/AlvarezMaria"`. **Condition, stated so it is not
+  discovered later: if the architect or the owner overwrites the refusal copy so
+  that no clause names a folder, `a44ContainerRelativeDir` loses its only caller
+  and must stay module-private** - at which point Wave 2 has two new exports, not
+  three, and the wave gate should say so rather than shipping a third dead one.
+- **What it does NOT settle: the verdicts.** Those six `refuse` values agree with
+  `docs/a44-test-notes.md:341-362`'s frozen `DECISION` column, which is
+  corroboration that the predicate is buildable and reaches the frozen decisions
+  on six fixtures. The frozen values remain the test-notes seat's, and section 6.5
+  is what Wave 2 owes before any of them is relied on.
+
+### 6.4 RULE K CHANGES RULING 87's AMNESTY, and the frozen integer is not carried
+
+The architecture's D11 reasoned that RULE K and the immediate parent give the same
+folder SET because every fixture is one directory deep, and said plainly that it
+had not verified this. **Measured, they do not always, and the refusal verdict
+flips.** Identity was held at RULE K and ONLY the folder definition was varied, so
+the flip isolates the amnesty term. `AMNESTY_EXIT=0`:
+
+```
+--- DIRECTED: every file under a folder literally named src, and one src holds a two-student collision
+    ["AlvarezMaria/src/notes.py","BrownTom/src/report.py","Shared/src/essay.docx","Shared/src/essay.pdf"]
+    collidingGroups=1 distinctFolders(RULE K path)=3 distinctFolders(immediate parent)=1
+    refuse under RULE K=false   refuse under immediate parent=true   <-- VERDICTS DIFFER
+--- CONTROL: the same shape one level shallower              RULE K=false  immediate parent=false
+--- CONTROL: G8, one segment deep                            RULE K=false  immediate parent=false
+--- CONTROL: F6, one folder only                             RULE K=true   immediate parent=true
+RUNS WHERE THE TWO FOLDER DEFINITIONS DISAGREE = 1 of 4
+```
+
+The instrument fires on one shape and agrees on three, so a zero here would have
+meant something; it is not a sweep that reports zero for everything.
+
+**The direction is provable, not just exhibited.** A container-relative PATH
+determines its own last segment, so the map path -> immediate-parent is a
+function, so distinct immediate parents imply distinct paths, so
+`|folders(RULE K)| >= |folders(immediate parent)|` on every input. Amnesty is
+granted when that count reaches 2, so **RULE K grants amnesty at least as often,
+refuses at most as often, and leaves at least as many harmful runs unrefused, for
+the amnesty term taken alone.**
+
+**What I am NOT concluding.** RULE K also changes the KEY, which reduces the harm
+being refused, so the two terms move in opposite directions and the overall sign
+on `UNSOUND` is not derivable from this. I adopt neither value: the frozen exact
+integer and the `UNSOUND 10.8%` were computed with BOTH terms defined by the
+immediate parent, **neither of which the implementation will use**, and one of the
+two moves strictly toward unsoundness on a shape I constructed. So this plan
+quotes no integer for it, and section 6.5 states what the wave owes instead.
+
+### 6.5 Wave 2's prerequisite, which is not a residual and not a gate step
+
+**Wave 2 must not be dispatched until the eleven-shape sweep has been re-run
+under RULE K.** Its generator is not in the tree, verified by the architecture at
+two scopes (its section 11), so nobody can re-run it as things stand. The wave
+therefore owes exactly one of two things, and both are the test-notes seat's:
+either the generator lands in the tree, or the sweep's shape list and its
+`UNSOUND` / `CONSERVATIVE` / `splitUnrefused` columns are re-derived under RULE K
+by that seat and re-frozen. Until then the predicate has no oracle, and a
+predicate frozen against the immediate parent's numbers is section 8's sharpest
+silent green. Section 14's R1 carries the owner, the instrument and the step.
+
+### 6.6 Write set, and the source-text tests that can turn it red
+
+**WRITTEN by Wave 2 (8 paths):**
+
+```
+src/lib/grade/utils.ts                                     the three exports + discriminator
+src/lib/grade/utils.test.ts                                assertions on those exports
+src/lib/grade/collisionRefusal.ts                          NEW
+src/lib/grade/collisionRefusal.test.ts                     NEW
+src/lib/grade/collisionRefusal.wiring.test.ts              NEW
 src/lib/grade/extraction.ts
 src/lib/grade/engine.ts
-src/app/actions/grading.collisionRefusal.test.ts           (NEW)
+src/app/actions/grading.collisionRefusal.test.ts           NEW
 ```
-
-**READ-COUPLED, not written - two of these are frozen source-text assertions
-over the files this wave edits, and each has a stated condition:**
 
 | Path | What it pins | Condition for Wave 2 to stay green |
 |---|---|---|
-| `src/lib/grade/grouping-zip-parents.wiring.test.ts` | `:48-63`: every file must destructure `zipParents` from an `await extractSubmissions(` call AND **every** `groupSubmissionsByStudent(...)` call in the file must forward it - the regex is `/groupSubmissionsByStudent\(([\s\S]*?)\)\s*;/g` | the inserted refusal call must not add a second `groupSubmissionsByStudent(` call and must not remove `zipParents` from either existing argument list. Inserting a separate statement between the destructure and the group call does not match that regex at all. |
-| `src/lib/module-graph/runtime-import-graph.test.ts` | `:653-663`: a FROZEN deep-equal list of exactly NINE import trails from `lib/grade/engine.ts` to `lib/supabase`, computed by walking each of engine.ts's DIRECT edges independently (`:669-685`) | the new leaf's import closure must reach nothing under `lib/supabase`. `engine.ts` already imports `./types` (`:9-22`) and `./utils` (`:24`) statically and neither appears as a first hop in the frozen list, so a leaf importing only those two adds zero trails. A leaf that imports the `@/lib/grade` barrel, `../canvas`, or `./rubric` grows the list and the deep-equal goes RED. |
-| `src/app/actions/grading.budget.test.ts` | mocks `extractStudentEntries` (`:27`, `:110`) | the mock replaces the function the refusal lives inside, so the refusal never runs there. Unaffected - and this is also why this wave cannot rely on that file to prove reachability. |
-| `src/lib/grade/extraction.test.ts` | `:246-271` drives `extractStudentEntries` end to end on real bytes | its fixture's two files resolve at step 3, keys `janedoe`/`johndoe`, no fallback-reaching collision, so the refusal must not fire. Measured: rows=2, distinct. |
-| the three sweeps in 4.2 | they collect the four new files automatically | in the gate. |
+| `src/lib/grade/grouping-zip-parents.wiring.test.ts` | `:48-63`: every file must destructure `zipParents` from an `await extractSubmissions(` call AND **every** `groupSubmissionsByStudent(...)` call in the file must forward it; the regex is `/groupSubmissionsByStudent\(([\s\S]*?)\)\s*;/g` | the inserted refusal must not add a second `groupSubmissionsByStudent(` call and must not remove `zipParents` from either argument list. A separate statement between the destructure and the group call does not match that regex at all. |
+| `src/lib/module-graph/runtime-import-graph.test.ts` | `:653-663`: a frozen deep-equal list of exactly NINE import trails from `lib/grade/engine.ts` to `lib/supabase`, computed one walk per direct edge (`:669-685`) | the new leaf's import closure must reach nothing under `lib/supabase`. `engine.ts` already imports `./types` (`:9-22`) and `./utils` (`:24`) statically and neither is a first hop in the frozen list, so a leaf importing only those adds zero trails. A leaf importing the `@/lib/grade` barrel, `../canvas` or `./rubric` grows the list and the deep-equal goes RED. |
+| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | a client-boundary closure rooted at the grading-results directory, `GradingResults.tsx` and `grade/types.ts` | the new leaf must not be imported from anything under `src/app/components/grading-results/`. Its R-5 canary roots at `grade.ts` and asserts violations > 0, so a clean leaf cannot make that canary fail. |
+| `src/app/actions/grading.budget.test.ts` | mocks `extractStudentEntries` (`:27`, `:110`) | the mock replaces the function the refusal lives inside, so the refusal never runs there. Unaffected - and this is also why this wave cannot use that file to prove reachability. Baselined at 5 tests this pass. |
+| `src/lib/grade/extraction.test.ts` | `:246-271` drives `extractStudentEntries` end to end on real bytes | its fixture resolves at step 3, `fallbackPopulation=0` (section 6.3's F7 row), so the refusal must not fire. |
+| `src/app/components/grading-results/ungradedDisclosure.test.ts` | cites `grade/engine.ts:146` at `:9` and `:67` | that line is ABOVE Wave 2's insertion point and cannot shift - section 10. |
+| the three whole-tree sweeps | they collect the four files Wave 2 ADDS | in the gate. |
 
-### 5.4 Red before, green after
+**The absence claim this wave rests on**, with its canary at the same command
+shape and the same filter:
+
+```
+$ grep -rln "resolve to the same student" src
+exit=1                       (A41's own decision-leaf instrument: nothing in src/ refuses today)
+$ grep -rln "leafStemFallback" src
+src/lib/grade/single-file-entry.test.ts  src/lib/grade/single-file-entry.ts  src/lib/grade/utils.ts
+exit=0                       (CANARY, same command, same filter: it CAN find a present string)
+```
+
+`extraction.ts:137-138` is two lines with nothing between them, and
+`engine.ts:427-437` likewise. **A41 exists only as documents; there is no decision
+leaf in `src/`.** Section 12.1 is the consequence.
+
+### 6.7 Red before, green after
 
 - **RED before**: every assertion in `collisionRefusal.test.ts` and
-  `collisionRefusal.wiring.test.ts` - the module does not exist, so the import
-  fails. `grading.collisionRefusal.test.ts` is red because `gradeAction`
-  returns a graded run for a colliding zip instead of a refusal.
-- **GREEN after**: those three files pass, and nothing else moves. The nine
-  frozen import trails are unchanged (5.3's condition), the wiring detector's
-  two checks still hold (5.3's condition), and no fixture in the existing suite
-  presents a fallback-reaching collision that the refusal would newly reject -
-  measured across all sixteen shapes in section 4.4 and section 7.2.
-- **The absence claim this wave rests on**, with its canary at the same command
-  shape and the same filter:
+  `collisionRefusal.wiring.test.ts` (the module does not exist, so the import
+  fails); `grading.collisionRefusal.test.ts` because `gradeAction` returns a
+  graded run for a colliding zip instead of a refusal; and the new assertions in
+  `utils.test.ts` on `a44DecodeKey` and `reachedStemFallback` (the exports do not
+  exist).
+- **GREEN after**: those pass and nothing else moves - the nine frozen import
+  trails unchanged, the wiring detector's two checks holding, and no existing
+  fixture presenting a fallback-reaching collision the refusal would newly reject
+  (section 6.3's F7 and `extraction.test.ts`'s own fixture are the two that
+  matter).
+- **The gate** is section 5.5 with these substitutions: step 1 expects exactly the
+  8 assigned paths; step 4 is
   ```
-  $ grep -rln "resolve to the same student" src
-  exit=1                       (A41's own decision-leaf instrument: nothing in src/ refuses today)
-  $ grep -rln "leafStemFallback" src
-  src/lib/grade/single-file-entry.test.ts
-  src/lib/grade/single-file-entry.ts
-  src/lib/grade/utils.ts
-  exit=0                       (CANARY, same command, same filter: it CAN find a present string)
+  npm run test:paths -- src/lib/grade/collisionRefusal.test.ts src/lib/grade/collisionRefusal.wiring.test.ts src/app/actions/grading.collisionRefusal.test.ts src/lib/grade/extraction.test.ts src/lib/grade/utils.test.ts src/lib/grade/identityInvariants.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/lib/module-graph/runtime-import-graph.test.ts src/app/actions/grading.budget.test.ts
   ```
-  Read directly rather than inferred: `extraction.ts:137-138` is two lines
-  (`extractSubmissions` then `return groupSubmissionsByStudent(...)`) with
-  nothing between them, and `engine.ts:427-437` likewise. **A41 exists only as
-  documents; there is no decision leaf in `src/`.** Section 7.1 is the
-  consequence.
-
-### 5.5 Gate for Wave 2
-
-Identical in shape to 4.5, with these substitutions:
-
-- step 1: exactly the 6 assigned paths.
-- step 4:
-  ```
-  npm run test:paths -- src/lib/grade/collisionRefusal.test.ts src/lib/grade/collisionRefusal.wiring.test.ts src/app/actions/grading.collisionRefusal.test.ts src/lib/grade/extraction.test.ts src/lib/grade/utils.test.ts src/lib/grade/grouping-zip-parents.wiring.test.ts src/lib/module-graph/runtime-import-graph.test.ts src/app/actions/grading.budget.test.ts
-  ```
-  Pass: a `COVERED` line for every argument, 0 failed, exit 0. Measured
-  pre-wave for the five that exist today: `utils.test.ts passed=28`,
-  `extraction.test.ts passed=9`, `grouping-zip-parents.wiring.test.ts passed=7`,
-  `runtime-import-graph.test.ts passed=174`; `grading.budget.test.ts` was not in
-  the run above and must be baselined at dispatch rather than quoted from here.
-- step 8: the new leaf and all three new test files strictly under 1000 by both
-  counters; `extraction.ts` (300) and `engine.ts` (517) likewise. Neither has an
-  `ALLOWED_OVERAGE` entry (4.5's grep, exit 1, with its positive canary).
+  whose five already-existing members stand at **223** before the wave
+  (9 + 28 + 7 + 174 + 5, each measured in 5.5 step 4); step 8 adds
+  `extraction.ts` (300) and `engine.ts` (517) and the four new files.
 
 ---
 
-## 6. Disjointness, proven in BOTH senses
+## 7. Disjointness, proven in both senses
 
-### 6.1 Sense one: exact path, computed mechanically
+### 7.1 Sense one: exact path, computed mechanically
 
 ```
 $ cat w1.txt w2.txt | sort | uniq -d
-(no output)
-exit=0                                 <- EMPTY is the only pass
+src/lib/grade/utils.test.ts
+src/lib/grade/utils.ts
+exit=0                                 <- NOT EMPTY, and section 3.3 proves it cannot be
 
 $ cat w1.txt siblings.txt | sort | uniq -d
 (no output)
@@ -696,501 +789,541 @@ exit=0
 $ cat w2.txt siblings.txt | sort | uniq -d
 (no output)
 exit=0
-
-$ cat w1.txt w1.txt | sort | uniq -d   <- POSITIVE CANARY: the same command DOES print duplicates
-src/app/components/grading-results/gradingResultsEditsIdentity.test.ts
-src/app/components/grading-results/gradingResultsHelpers.ts
+$ cat w1.txt w1.txt | sort | uniq -d   <- POSITIVE CANARY: the command DOES print duplicates
+src/app/components/grading-results/gradingResultsHelpers.test.ts
 src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
+src/app/components/grading-results/ungradedDisclosure.test.ts
+src/lib/grade/identityInvariants.test.ts
 src/lib/grade/utils.test.ts
 src/lib/grade/utils.ts
 exit=0
 ```
 
-`w1.txt` is section 4.2's five written paths; `w2.txt` is section 5.3's six;
-`siblings.txt` is `docs/a44-test-notes.md`, `docs/r4-scope.md`,
-`docs/css-orphans.md`, `docs/a44-waves.md`. The read-coupled lists in 4.2 and
-5.3 DO intersect (`grouping-zip-parents.wiring.test.ts`,
-`extraction.test.ts`, `utils.test.ts` and the three sweeps appear in both), and
-that is stated rather than hidden: it is another reason the two waves are
-SEQUENCED, since a read-coupled file that one wave's gate must observe green is
-not safe to have a sibling changing underneath it.
+`w1.txt` is section 5.2's six written paths, `w2.txt` section 6.6's eight,
+`siblings.txt` the live and queued siblings' write sets: `docs/g5-test-notes.md`,
+`docs/css-orphans.md`, `docs/a44-waves.md`, `docs/backlog.yml`,
+`docs/BACKLOG.md`.
 
-### 6.2 Sense two: informational independence, computed from each side's STATED write set
+**What the non-empty intersection means and what it does not.** It does NOT mean
+the waves may not both exist; it means they may never run at the same time, which
+is already the plan, and it means the two overlapping paths carry a further
+obligation: **`src/lib/grade/utils.ts` and `src/lib/grade/utils.test.ts` are
+Wave-2 territory the moment Wave 1's gate passes, and no sibling item may hold
+either path in either window.** Re-intersect against whatever the siblings
+actually hold at each dispatch; sets change as work proceeds, and neither wave's
+set may be read from this document at dispatch time.
 
-| Fact | Who establishes it | Who designs against it |
+The READ-COUPLED lists in 5.2 and 6.6 also intersect
+(`extraction.test.ts`, `grouping-zip-parents.wiring.test.ts`,
+`runtime-import-graph.test.ts`, `gradingResultsHelpersWiring.test.ts`, the three
+sweeps), which is stated rather than hidden and is a second reason the waves are
+sequenced: a read-coupled file one wave's gate must observe green is not safe to
+have a sibling changing underneath it.
+
+### 7.2 Sense two: informational independence, from each side's stated write set
+
+| Fact | Established by | Designed against by |
 |---|---|---|
 | the six-step identity priority order (`utils.ts:142-175`) | A14, LANDED | both waves |
-| **what a file's identity KEY is - specifically whether the folder segment is folded into it** | **WAVE 1** | **WAVE 2** - the refusal counts fallback-reaching files that SHARE A KEY, and the refined amnesty counts DISTINCT FOLDER SEGMENTS in the same run. Both quantities are defined by Wave 1's fold. |
-| the refusal's channel (`error`), the catch at `grading.ts:921-924`, the two zip branches at `:854` and `:905-907` | LANDED | Wave 2 |
-| the display-keyed storage contract (`seedEdits` keys on `result.student`, `gradingResultsHelpers.ts:287`) | LANDED | Wave 1 |
-| the 1000-line ceiling (`LIMIT = 1000` at `file-size-ceiling.structure.test.ts:41`) | LANDED | both |
+| **what a file's identity KEY is, and whether the container-relative directory is folded into it** | **WAVE 1** | **WAVE 2** - the refusal counts fallback-reaching files that SHARE A KEY, and the amnesty counts DISTINCT container-relative DIRECTORIES. Both quantities are defined by Wave 1. |
+| **whether a file reached the stem fallback** | **WAVE 2**, in its own write set | Wave 2 - not a cross-wave coupling, which is the point of moving the discriminator here |
+| the refusal's channel (`error`), the catch at `grading.ts:921-924`, the two zip branches at `:854` and `:907` | LANDED | Wave 2 |
+| the display-keyed storage contract (`seedEdits` keys on `result.student`, `gradingResultsHelpers.ts:287`) and the drop-unknown-keys loader (`:614-635`) | LANDED, and RULING 93 leaves it alone | Wave 1's test-only entries |
+| the eleven-shape sweep's numbers under RULE K | **NOBODY YET** - section 6.5 | Wave 2's oracle |
+| the 1000-line ceiling (`LIMIT = 1000`, `file-size-ceiling.structure.test.ts:41`) | LANDED | both |
 
-**Wave 2 designs against a fact Wave 1 establishes. They are COUPLED,
-directionally.** Per `docs/loop/parallel-disjointness.md` section 3 the options
-are sequence, merge, or extract the shared contract; the coupling is
-DIRECTIONAL rather than mutual, so **SEQUENCE: Wave 1 lands, then Wave 2 is
-briefed with Wave 1's landed output.** They must NOT be dispatched
-concurrently even though their file sets are disjoint - that is exactly the
-second failure the card says passes every file-level check and is invisible
-until integration.
+Wave 2 designs against a fact Wave 1 establishes. The coupling is DIRECTIONAL, so
+per `docs/loop/parallel-disjointness.md` section 3 the disposal is **SEQUENCE:
+Wave 1 lands, then Wave 2 is briefed with Wave 1's landed output.** They must not
+be dispatched concurrently even where their file sets do not overlap. **And the
+reverse order is worse, explicitly:** with Wave 2 first the refusal would have to
+ship A41's folder-unaware predicate and then be rewritten, which is two versions
+of one predicate and two versions of its frozen oracle.
 
-**Why this ordering and not the reverse, said explicitly:** with Wave 2 first,
-the refusal would have to ship A41's folder-UNAWARE predicate (nothing else is
-computable before the fold exists) and then be rewritten by Wave 1 - two
-versions of one predicate and two versions of its frozen oracle. With Wave 1
-first, the refusal is written once, in the only form RULING 87 sanctions.
+**The mutual coupling with the test-notes seat is still live and is now
+concrete.** `docs/a44-test-notes.md` is in the tree at `1163a54` and predates both
+RULING 93 and RULE K. Section 13 lists what it owes; R6 in section 14 carries the
+obligation. This is not resolvable by any file-set check.
 
-**A third item is coupled and is not a wave of this item.**
-`docs/a44-test-notes.md` is being authored concurrently and establishes the
-oracle both waves' tests are built from, while designing against this document's
-wave boundaries. That is a MUTUAL coupling between two live seats, created by
-RULING 86's split, and it cannot be resolved by a file-set check. What the test
-author must be re-briefed with, concretely, before either wave is dispatched:
+### 7.3 Shared resources no file list shows
 
-- the display fold is **per-file and unconditional**, not collision-triggered
-  (section 4.3) - which changes what the display column of any frozen table says
-  for a non-colliding foldered row;
-- A41 F3's `rowsOut` moves from the frozen **1** to **3**, and its `DECISION`
-  from **REFUSE** to **ALLOW** (no fallback-reaching collision survives the
-  fold); F8's `rowsOut` moves from **3** to **4** and its `DECISION` from
-  **REFUSE** to **ALLOW**; F6 stays **REFUSE** per RULING 87; F4 and F9 stay
-  **REFUSE** because no folder exists to fold (section 7.2 measures all of
-  these);
-- Wave 1 is ONE wave containing both folds AND the storage layer's legacy read
-  path, so an instrument that assumes a key-only intermediate state has no
-  state to bind to;
-- the decision leaf's reserved path and its exactly two call sites.
-
-### 6.3 Shared resources no file list shows
-
-- **`npx tsc --noEmit` has exactly one caller**: the wave gate. Forbidden to
-  every other concurrent agent in that window.
-- **No two agents sabotage-verify on this tree at once.** Each wave's sabotage
-  pass (the test author's protocol, not this document's) mutates shared files;
-  every sibling measurement taken during that window is untrustworthy.
-- **`git stash` reverts every sibling's files; `git add -A` stages them.**
+- **`npx tsc --noEmit` has exactly one caller**: the wave gate. Forbidden to every
+  other concurrent agent in that window.
+- **No two agents sabotage-verify on this tree at once.** Every sibling
+  measurement taken during that window is untrustworthy even if the restore is
+  perfect. A restore uses a `cp` backup, never `git checkout --`, which reverts to
+  the index and destroys uncommitted work.
+- **`git stash` reverts every sibling's files and `git add -A` stages them.**
   Forbidden in both waves' briefs. Each wave stages its own explicit paths.
-- **`docs/BACKLOG.md` is a file like any other.** If a wave's brief lets it
-  write the backlog, the orchestrator must not write the backlog in that window.
+- **`docs/BACKLOG.md` and `docs/backlog.yml` are files like any other.** If a
+  wave's brief lets it write either, the orchestrator must not write it in that
+  window.
 - **A stale `.claude/worktrees` copy is returned FIRST by `Glob`**, so
   `git status --short` in the main checkout is the only proof of what changed.
 
 ---
 
-## 7. Where this plan diverges from the scope, and from R2's citations
+## 8. What could be built exactly as specified, pass every gate, and be wrong
 
-### 7.1 `docs/a44-scope.md` section 8's first requirement does not hold against the tree, and I am not adopting it silently
+Round 1's version of this section named none of the three defects its check then
+demonstrated. Re-derived against RULE K and RULE D. Three of round 1's four paths
+are closed by the design; **two new ones are measured here and neither is closed
+by anything in the tree.**
 
-The scope requires:
+**CLOSED by the design, stated so they are not re-litigated.** The one-student
+split (round 1's (i)) is now a declared cost with a criterion (5.4) rather than an
+unnamed regression. The display collapse (round 1's (ii)) is closed by INVARIANT
+D plus the terminal pass and is now EXECUTED at the three consumer sites in Wave
+1's write set. The mis-attributing legacy recovery (round 1's (iii)) is closed by
+RULING 93, by not writing it.
 
-> "**The key fold (2.2) and the decision predicate (3.3) are now ONE change, not
-> two.** A wave that lands the key fold without also landing the folder-aware
-> refusal ships the 14.6% -> 25.1% regression measured in section 3.1, live,
-> with every existing gate green. Whoever plans this must land both in the same
-> wave, or land the refusal first with the key fold as its own
-> immediately-following wave with no intervening ship."
-
-**The measurement it rests on is real; the conclusion does not transfer to this
-tree.** The 14.6% and the 25.1% are both rates of a predicate that DOES NOT
-EXIST IN `src/`. Section 5.4's absence claim, with its canary, plus a direct
-read of the only two places the predicate could sit (`extraction.ts:137-138`
-and `engine.ts:427-437`, adjacent lines with nothing between them), establish
-that today's conservative refusal rate is **0%, because nothing refuses**.
-So a key-fold wave landing alone cannot RAISE a false-refusal rate from 14.6%
-to 25.1%; there is no 14.6% in production to raise. What Wave 1 alone ships is:
-the folder shapes fixed, and the flat shapes silently blended exactly as they
-are today (measured: A41's F4 is unchanged under all four modes, section 7.2).
-**That intermediate state is strictly better than today's and never worse**,
-which is what makes Wave 1 independently landable.
-
-The scope's requirement and this plan disagree, and neither value is adopted
-silently: **the scope's number is correct about the mechanism and wrong about the
-baseline; this plan adopts two waves and the conflict is recorded here for the
-checker to rule on.** The scope's SECOND requirement in the same section - that
-the display fold land in the same wave as the key fold - is adopted in full and
-is section 4.3's Fact 1.
-
-### 7.2 The frozen-oracle rows this plan moves, measured so the test author does not re-derive them
-
-Not a proposed oracle. These are the rows whose FROZEN values change, which is a
-sequencing fact.
+**NEW, SILENT-GREEN 1: a PARTIAL encoding passes the entire existing suite.** The
+natural minimal change is to encode at the two fallback sites only and leave steps
+1 to 4 alone. That is the forgeable state the architecture measured at its 4.4,
+where a flat file whose NAME carries the prefix pattern produces a key identical
+to a foldered student's and two students merge into one row. Measured, **nothing
+in `src/` would notice**:
 
 ```
-### A41 F3 (a41-test-notes.md:215)
-    today    rows=1 displays=[essay]                                                  fallbackKeyCollisionPresent=true
-    always   rows=3 displays=[essay (AlvarezMaria) | essay (BrownTom) | essay (ChenLi)] fallbackKeyCollisionPresent=false
-### A41 F6 (a41-test-notes.md:218)
-    today    rows=1 displays=[Homework]                 collision=true
-    always   rows=1 displays=[Homework (AlvarezMaria)]   collision=true   <- stays REFUSE per RULING 87
-### A41 F4 (a41-test-notes.md:216) - FLAT, no folder at all
-    today    rows=1 displays=[Homework] fallbackKeyCollisionPresent=true
-    always   rows=1 displays=[Homework] fallbackKeyCollisionPresent=true   <- UNCHANGED by any fold
-### A41 F8 (a41-test-notes.md:220) - mixed
-    today    rows=3 displays=[alvarezmaria | browntom | reflection]                                   collision=true
-    always   rows=4 displays=[alvarezmaria | browntom | reflection (ChenLi) | reflection (DavisAnn)]  collision=false
-### GAP-A (a44-check.md:487) - bulk.zip containing per-student FOLDERS
-    today    rows=1 displays=[bulk]                                              collision-irrelevant
-    always   rows=3 displays=[bulk (AlvarezMaria) | bulk (BrownTom) | bulk (ChenLi)]
-### B3's false split (a44-check.md:382) - ONE student, backend/ + frontend/, same filename
-    today    rows=1 displays=[config]                              collision=true
-    always   rows=2 displays=[config (backend) | config (frontend)] collision=false
-### shared-wrapper-folder (a44-scope.md 3.2) - whole class in ONE folder
-    today    rows=2 displays=[essay | report]                             collision=true
-    always   rows=2 displays=[essay (Submissions) | report (Submissions)] collision=true
+$ grep -rn "studentKey" src --include=*.test.ts --include=*.test.tsx | grep -v "course-intel"
+exit=1                    (NO test in the repository asserts a studentKey, anywhere)
+$ grep -rn "studentDisplay" src --include=*.test.ts | head -3
+src/lib/grade/utils.test.ts:92,106,116     expect(parsed.studentDisplay).toBe(...)
+exit=0                    (CANARY, same command shape and same filter: it CAN find a grade-side assertion)
 ```
 
-Two consequences worth stating plainly, because neither is in the scope:
+Every existing assertion is on the DISPLAY. The totality of the encoding is
+enforced by nothing that exists, and a partial encoding does not even change a
+display. What closes it is INVARIANT M over generated input including the
+flat-forgery family - section 13 item 1.
 
-- **The unconditional fold slightly MITIGATES B3's invisibility.** The check
-  (`docs/a44-check.md:394`) noted the two false-split rows both display
-  `config`; under the fold they display `config (backend)` and
-  `config (frontend)`, so the split is at least legible. The split RATE is
-  unchanged - it is a key-level fact, and the scope's accepted 97.6% stands.
-- **The unconditional fold decorates displays with a NON-identifying folder
-  name in the shared-wrapper case** (`essay (Submissions)`). Where the run's
-  fallback keys collide, Wave 2 refuses and nobody sees it. Where they do not
-  (A41's shapes 2 and 4, "unchanged, correct"), a correct row's display gains a
-  meaningless suffix. That is a cosmetic regression on a correct shape and it is
-  the price of Fact 2 in section 4.3. RES-A44W-3.
-
-### 7.3 A stale header comment in each wave's own file, and who owns correcting it
-
-The brief names one. I found two, and cannot determine with certainty which was
-meant, so both are assigned.
-
-**Primary - `src/lib/grade/utils.test.ts:80-84`, a claim the code contradicts
-twice**, verbatim from the tree:
+**NEW, SILENT-GREEN 2: the terminal pass walked in the wrong order is
+undetectable by INVARIANT D.** The architecture requires identity-KEY order. An
+implementer who walks `Object.entries` order still produces pairwise-distinct
+displays, so INVARIANT D passes - but which row carries the ` (2)` depends on zip
+entry order, and under RULING 93 the display IS the storage label. Measured, both
+orders of the same two files, `ORDER_EXIT=0`:
 
 ```
-// a shared filename stem ("main", "report"). Fixed per the binding rulings
-// in scratchpad/a14-rulings.md: leaf-first, then an outward-in scan of the
-// WHOLE zip-crossing chain extraction.ts now threads through, ground truth
-// (a crossing match) outranking a byBase guess, and the userId folded into
-// the grouping key so sanitized-name collisions do not merge.
+raw displays = ["JaneDoe/src/deep","JaneDoe/src/deep"]     (two distinct keys, one label)
+
+insertion order A = [JaneDoe.zip/src/deep/main.py, JaneDoe/src/deep.txt]
+  KEY-ORDER walk:      deep.txt -> "JaneDoe/src/deep"   main.py -> "JaneDoe/src/deep (2)"
+  ENTRIES-ORDER walk:  main.py  -> "JaneDoe/src/deep"   deep.txt -> "JaneDoe/src/deep (2)"
+
+insertion order B = [JaneDoe/src/deep.txt, JaneDoe.zip/src/deep/main.py]
+  KEY-ORDER walk:      deep.txt -> "JaneDoe/src/deep"   main.py -> "JaneDoe/src/deep (2)"
+  ENTRIES-ORDER walk:  deep.txt -> "JaneDoe/src/deep"   main.py -> "JaneDoe/src/deep (2)"
 ```
 
-- "an **outward-in** scan" is the direction the code explicitly does NOT take.
-  `utils.ts:150-152`: "THE CROSSING CHAIN, scanned NARROWEST FIRST (A14 rulings
-  v2 CORRECTION 1 - this scanned outward-in, outermost first, before, and that
-  was wrong)". The same wrong direction survives in an `it()` description at
-  `utils.test.ts:119`.
-- "the userId folded into the grouping key so sanitized-name collisions do not
-  merge" was WITHDRAWN. `utils.ts:76-85` records CORRECTION 2 withdrawing it,
-  and `utils.test.ts:324-334` pins the OPPOSITE as current behaviour ("merges
-  two different students' files into one row"). A reader of the header would
-  conclude A44's fold is a second such fold and that the first one worked.
+Key order gives one answer under both insertion orders; entries order gives two.
+So the requirement is enforceable AND currently unenforced. What closes it is the
+two-order comparison in section 13 item 2.
 
-**Owner: Wave 1**, which writes that file.
+**NEW, SILENT-GREEN 3, and the sharpest: Wave 2 can ship the refusal against
+numbers no longer measuring its own mechanism.** Section 6.4 measures one shape
+where the folder definition alone flips the verdict. Every gate passes, because
+the gates compare the predicate to a frozen oracle and the oracle is the thing
+that is stale. Section 6.5 is the prerequisite that closes it, and it is a
+prerequisite rather than a gate step precisely because a gate cannot detect it.
 
-**Secondary - `src/app/components/grading-results/gradingResultsHelpers.ts:16-25`,
-an "Owns:" list that understates the file.** The list names the type aliases,
-the sort model, the editable-row model, numeric parsing, `formatFeedback` and
-CSV export. `grep -nE "^export (function|const|interface|type)"` on that file
-returns 39 exported names (exit 0), including the whole persistence group the
-header does not mention: `gradingResultsEditsKey` (`:558`), `mergeStoredRowEdit`
-(`:597`), `loadPersistedEdits` (`:619`), `loadGradingResultsEdits` (`:641`),
-`persistGradingResultsEdits` (`:663`). Wave 1 adds behaviour to exactly that
-unmentioned group, so **Owner: Wave 1**, and the correction is one sentence.
-
-### 7.4 R2/R4's citations into a file Wave 2 edits
-
-`docs/r2-scope.md:290` and `docs/r2-check.md:60,63` pin
-`src/lib/grade/extraction.ts:202` and `:210` as hops in a PAT-reaching closure
-trace. Wave 2 inserts at roughly `extraction.ts:137`, which shifts both. Section
-8 carries the obligation. On the other axis the two items are clean:
-
-```
-$ grep -nE "requireOwner|requireUser|requireAppOwner" src/lib/grade/utils.ts src/lib/grade/utils.test.ts src/lib/grade/extraction.ts src/lib/grade/engine.ts src/app/components/grading-results/gradingResultsHelpers.ts src/app/components/grading-results/gradingResultsHelpersEditState.test.ts
-exit=1                 (none of R2/R4's universe's symbols appear in any file this plan writes)
-$ grep -nE "requireOwner" src/app/actions/grading.ts | head -3
-14:import { requireOwner } from "@/lib/supabase/auth";
-37:    const user = await requireOwner();
-54:    await requireOwner();
-exit=0                 (POSITIVE CANARY, same command: a file that IS in R2's universe)
-```
-
-R4's own wave, per its backlog row, is one site in
-`src/app/actions/deck-source.ts` plus bookkeeping - no intersection. **But sets
-change as work proceeds**, so the intersection must be RE-RUN at dispatch time
-against whatever R2/R4 actually land, not read from this document.
+**One hazard checked and clean.** Every multi-path run in this document is
+`npm run test:paths --`; no raw multi-path `vitest`/`npm test` appears in any gate
+here.
 
 ---
 
-## 8. Line-shift obligations this plan creates
+## 9. The display-keyed census: 43, and the right reason
 
-Every wave here inserts lines above existing ones, so every `file:line` citation
-below the insertion point goes stale. The delta itself cannot be computed before
-the code is written; what CAN be computed, and is, is the SIZE and LOCATION of
-the obligation. Two instruments, because a bare basename over-counts (this repo
-holds several files named `utils.ts`, `engine.ts` and `extraction.ts`).
+Re-derived this pass by CONSTRUCTION rather than by enumerating identifier names,
+which is how the scope's and the round-1 check's regex missed the `row.student`
+family:
 
-**(A) Path-qualified citations, repo-wide, unambiguous.** Pattern shown with
-each count.
+```
+$ grep -rnE "\[[A-Za-z_][A-Za-z0-9_.]*\.student\]|\[student\]|\[codeOutputStudent\]|\.student ===|=== *codeOutputStudent|\[[A-Za-z_][A-Za-z0-9_]*Student\]" src \
+    --include=*.ts --include=*.tsx | grep -v "\.test\." | grep -vE ":[0-9]+: *(//|\*|/\*)" | cut -d: -f1 | sort | uniq -c
+  34 src/app/components/GradingResults.tsx
+   7 src/app/components/grading-results/gradingResultsHelpers.ts
+   2 src/app/components/grading-results/ungradedDisclosure.ts
+   1 each in six unrelated files (message-serialization.ts, offline-identity.ts,
+     message-reply-prompt.ts, courses.row.ts, two workflow step files)
+exit=0
+```
 
-| Edited file | pattern | total citations elsewhere |
-|---|---|---|
-| `src/lib/grade/utils.ts` | `grade/utils\.ts:(\d+)` | 13 |
-| `src/lib/grade/utils.test.ts` | `grade/utils\.test\.ts:(\d+)` | 2 |
-| `src/lib/grade/extraction.ts` | `grade/extraction\.ts:(\d+)` | 12 |
-| `src/lib/grade/engine.ts` | `grade/engine\.ts:(\d+)` | 35 |
-| `src/app/components/grading-results/gradingResultsHelpers.ts` | `grading-results/gradingResultsHelpers\.ts:(\d+)` | 4 |
+34 + 7 + 2 = **43**, not the 30 this document said in three places in round 1, one
+of which was the sentence keeping the 906-line file out of scope.
+`docs/a44-test-notes.md` RES-A44T-7 states the direction of failure as "RED if any
+artifact downstream still says 30".
 
-**(B) All citations inside the A41/A44 chain documents plus the two backlog
-files plus `docs/REGRESSION.md`**, where a bare basename unambiguously means the
-grade module in the chain documents:
+**Zero of the 43 change, and the ground is an enforcer plus a ruling, not an
+assertion that a separator is injective.** All 43 key on the DISPLAY; RULE D makes
+the display unique within a run by a terminal pass that checks rather than
+assumes, and RULING 93 leaves storage display-keyed with no recovery, so no row
+has to carry its key and no consumer has to learn a second identifier. The
+conclusion the round-1 sentence reached survives; its reason did not, and 13 of
+the sites it reached that conclusion about were invisible to its instrument.
 
-| Edited file | a41-scope | a41-test-notes | a41-check | a44-scope | a44-check | chain subtotal | BACKLOG.md / backlog.yml / REGRESSION.md |
-|---|---|---|---|---|---|---|---|
-| `utils.ts` | 6 | 4 | 2 | 4 | 6 | **22** | 4 / 4 / 1 |
-| `utils.test.ts` | 2 | 4 | 2 | 3 | 4 | **15** | 0 / 0 / 0 |
-| `extraction.ts` | 5 | 4 | 5 | 1 | 5 | **20** | 5 / 5 / 0 |
-| `engine.ts` | 1 | 4 | 1 | 2 | 3 | **11** | 14 / 14 / 7 |
-| `gradingResultsHelpers.ts` | 2 | 1 | 2 | 0 | 2 | **7** | 5 / 5 / 0 |
+**9 of the 43 lines are executable and this plan executes them**: `seedEdits`
+(`:287`), `mergeStoredRowEdit` (`:597`), `loadPersistedEdits` (`:632`),
+`buildCsvContent` (`:503-504`), `fanOutGradingPostResult` (`:717`, `:722`,
+`:725`) and `correctUngradedSeeds` (`ungradedDisclosure.ts:191`, `:193`). The
+other 34 are in `GradingResults.tsx`, which vitest never renders; those are owner
+verification, R5 in section 14. Naming a fraction would mislead in both
+directions, because those 9 are the pure helpers through which all 34 get their
+data.
 
-**The bare-name counts in the last column are an UPPER BOUND**, because
-`docs/BACKLOG.md`, `docs/backlog.yml` and `docs/REGRESSION.md` cite several
-same-named files (`content-tab/utils.ts`, other `engine.ts` files). Whoever
-re-pins must check those individually rather than trusting the count.
+---
 
-**Who re-pins, per artifact:**
+## 10. Line-shift obligations, with the instrument corrected
+
+Both waves insert lines above existing ones, so every `file:line` citation below
+an insertion point goes stale. **Round 1's named in-`src/` instance was the wrong
+address and could not have gone stale; the one that will was invisible to its
+instrument.** Measured:
+
+```
+$ grep -rnoE 'grade/engine\.ts:[0-9]+' src --include=*.ts --include=*.tsx
+src/app/components/grading-results/ungradedDisclosure.test.ts:9:grade/engine.ts:146
+src/app/components/grading-results/ungradedDisclosure.test.ts:67:grade/engine.ts:146
+exit=0
+$ grep -rnoE 'engine\.ts:[0-9]+' src --include=*.ts --include=*.tsx        <- UNQUALIFIED
+... the two above, plus:
+src/app/components/grading-results/ungradedDisclosure.ts:152:engine.ts:264
+src/app/components/GradingResults.tsx:762:engine.ts:212
+src/app/components/repo-grades/RepoGradeCellControl.tsx:424:engine.ts:212
+src/lib/grade/class-trends.ts:18:engine.ts:126
+src/lib/grade/engine.test.ts:17:engine.ts:142
+src/lib/grade/single-file-entry.ts:67:engine.ts:457
+exit=0
+```
+
+- The citation of `engine.ts:146` lives at `ungradedDisclosure.test.ts:9` and
+  `:67`. Round 1 wrote `ungradedDisclosure.test.ts:146`, confusing the CITED line
+  with the CITING one, and `engine.ts:146` is ABOVE Wave 2's insertion point
+  (`engine.ts:427-437`), so it cannot shift at all.
+- **`src/lib/grade/single-file-entry.ts:67` cites the bare `engine.ts:457`, which
+  IS below the insertion point and WILL shift.** It is the only in-`src/` citation
+  that will, and the path-qualified pattern round 1 used cannot see it.
+
+**The corrected instrument is BOTH patterns, and the unqualified one needs per-hit
+adjudication** - which is why round 1 reached for the qualified form. Measured on
+`utils.ts`, where the adjudication actually bites:
+
+```
+$ grep -rnoE '(utils|extraction|gradingResultsHelpers|utils\.test)\.ts:[0-9]+' src --include=*.ts --include=*.tsx
+src/lib/grade/utils.test.ts:337                     -> utils.ts:70
+lmsGenerationModuleTarget.ts:72,101,107             -> content-tab/utils.ts (liveModuleIdsFromKeys, repoModuleKey)
+src/lib/repo-module-mapping.ts:14,57,153,221        -> "content-tab/utils.ts", written out
+exit=0        (7 of the 8 are a DIFFERENT utils.ts; all eight opened this pass)
+```
+
+So the in-`src/` obligation is exactly two entries, and one of them is empty:
+
+| Wave | in-`src/` citations below its insertion points | Owner | When |
+|---|---|---|---|
+| 1 | **NONE.** The only grade-side citation is `utils.test.ts:337` -> `utils.ts:70`, above every Wave 1 insertion (the helpers go in at `:176`, the folds at `:245`/`:254`, the terminal pass at `:315`). | n/a | n/a |
+| 2 | **exactly one**: `src/lib/grade/single-file-entry.ts:67` -> `engine.ts:457`, which becomes `457 + N` where N is the lines Wave 2 inserts at `engine.ts:427-437`. N is not computable before the diff exists; the sign and the location are. | Wave 2's implementer | Wave 2's gate, before its push - a stale value here ships in code |
+
+**Outside `src/`, measured this pass and labelled a moving snapshot**, since two
+more chain documents landed between the round-1 check and now (`grade/utils.ts:`
+went 13 -> 25, `grade/engine.ts:` 35 -> 42 by the same command):
+
+```
+$ grep -raoE '<pattern>' docs src --include=*.md --include=*.ts --include=*.tsx --include=*.yml | wc -l
+grade/utils.ts 25   grade/utils.test.ts 9   grade/extraction.ts 17
+grade/engine.ts 42  grading-results/gradingResultsHelpers.ts 9
+$ canary, pattern 'grade/utilsZZZ\.ts:[0-9]+'   ->  exit=1
+$ canary, same pattern against one file          ->  6 hits in docs/a44-architecture.md, exit=0
+
+bare-basename counts in the three files that ARE re-pinned (grep -a, per the
+REGRESSION.md rule), each an UPPER BOUND needing per-hit adjudication:
+                  BACKLOG.md  backlog.yml  REGRESSION.md
+utils.ts               5           5             4
+extraction.ts          7           6             0
+engine.ts             20          18             7
+gradingResultsHelpers  5           5             0
+$ canary, pattern 'engineZZZ\.ts:[0-9]+' on BACKLOG.md   ->  exit=1
+```
+
+**Who re-pins:**
 
 | Artifact | Owner | When |
 |---|---|---|
-| `docs/a44-test-notes.md` (not yet in the tree) | `loop-test-author`, the live sibling | as part of authoring, so it never ships a stale citation - and re-checked after each wave lands |
-| `docs/a44-scope.md`, `docs/a44-check.md`, `docs/a41-*.md` | **nobody re-pins them, deliberately.** They are a dated record of a decision, not a live index; `traps-spec.md`'s rule is "brief from the tree, not from the doc". | n/a - but any LATER brief quoting a line from them must re-open it against the tree first |
-| `docs/BACKLOG.md` and `docs/backlog.yml` rows A41, A44, R2, R4 | the orchestrator, at reconciliation | the push that lands each wave |
-| `docs/REGRESSION.md`'s 7 `engine.ts:` citations | the baseline/regression seat for this group | the group's single regression pass; use `grep -a` on that file |
-| `docs/r2-scope.md:290`, `docs/r2-check.md:60,63` (`extraction.ts:202`, `:210`) | the orchestrator, at reconciliation, or R4's own seat if it is still live | after Wave 2 lands - section 7.4 |
-| `src/lib/module-graph/runtime-import-graph.test.ts:653-663` | **nothing to re-pin**: the frozen list is by MODULE PATH, not by line, so a line insertion cannot stale it. Only a new import can. | n/a |
-| `src/app/components/grading-results/ungradedDisclosure.test.ts:146` (`engine.ts:146`) | Wave 2's implementer, if the insertion moves it | Wave 2's gate - this one is a citation inside `src/`, so a stale value ships in code |
+| `src/lib/grade/single-file-entry.ts:67` | Wave 2's implementer | Wave 2's gate |
+| `docs/a44-test-notes.md` | `loop-test-author`, in the revision section 13 asks for | as part of authoring, and re-checked after each wave lands |
+| `docs/a44-scope.md`, `docs/a44-check.md`, `docs/a44-waves-check.md`, `docs/a44-architecture.md`, `docs/a41-*.md` | **nobody, deliberately.** They are a dated record of a decision, not a live index. Any LATER brief quoting a line from them re-opens it against the tree first. | n/a |
+| `docs/BACKLOG.md`, `docs/backlog.yml` rows A41, A44, A45, R2 | the orchestrator, at reconciliation | the push that lands each wave |
+| `docs/REGRESSION.md`'s `engine.ts:` citations | the baseline/regression seat for this group | the group's single regression pass, with `grep -a` |
+| `src/lib/module-graph/runtime-import-graph.test.ts:653-663` | **nothing to re-pin**: the frozen list is by MODULE PATH, so a line insertion cannot stale it. Only a new import can, which is 5.2's and 6.6's stated condition. | n/a |
 
 ---
 
-## 9. Ceilings: measured, and no extraction is planned
+## 11. Ceilings: measured, and no extraction is planned or needed
 
-`LIMIT = 1000` at `src/file-size-ceiling.structure.test.ts:41`, repo-wide over
-all of `src/`. No file this plan writes has an `ALLOWED_OVERAGE` entry (4.5's
-grep, exit 1, with its positive canary), so each must stay strictly under 1000.
+`LIMIT = 1000` at `src/file-size-ceiling.structure.test.ts:41`, repo-wide over all
+of `src/`. Both counters agree on every file, run this pass:
 
-| File | today (both counters) | wave | headroom |
-|---|---|---|---|
-| `src/lib/grade/utils.ts` | 393 | 1 | 607 |
-| `src/lib/grade/utils.test.ts` | 390 | 1 | 610 |
-| `src/app/components/grading-results/gradingResultsHelpers.ts` | 728 | 1 | 272 |
-| `src/lib/grade/extraction.ts` | 300 | 2 | 700 |
-| `src/lib/grade/engine.ts` | 517 | 2 | 483 |
-| four new files | 0 | 1 and 2 | 1000 each |
+| File | `wc -l` | `@(Get-Content).Count` | Wave | Headroom after |
+|---|---|---|---|---|
+| `src/lib/grade/utils.ts` | 393 | 393 | 1 and 2 | **541** at 459, measured on the generated variant |
+| `src/lib/grade/utils.test.ts` | 390 | 390 | 1 and 2 | 610 before additions |
+| `src/lib/grade/extraction.ts` | 300 | 300 | 2 | 700 |
+| `src/lib/grade/engine.ts` | 517 | 517 | 2 | 483 |
+| `src/app/components/grading-results/gradingResultsHelpers.test.ts` | - | - | 1, test only | measured at dispatch |
+| `src/app/components/grading-results/gradingResultsHelpersEditState.test.ts` | - | - | 1, test only | measured at dispatch |
+| `src/app/components/grading-results/ungradedDisclosure.test.ts` | - | - | 1, test only | measured at dispatch |
+| five new files | 0 | 0 | 1 and 2 | 1000 each |
+| **NOT in any write set:** `src/app/actions/grading.ts` | 941 | 941 | none | 59, untouched |
+| **NOT in any write set:** `src/app/components/GradingResults.tsx` | 906 | 906 | none | 94, untouched |
+| **NOT in any write set:** `gradingResultsHelpers.ts` | 728 | 728 | none | 272, untouched |
+| **NOT in any write set:** `src/lib/grade/types.ts` | 432 | 432 | none | 568, untouched |
+| **NOT in any write set:** `src/app/components/grading-results/ungradedDisclosure.ts` | 196 | 196 | none | 804, untouched |
+| context: `src/app/actions/action-guard-coverage.test.ts` | 955 | 955 | **none - a live sibling's** | 45 |
 
-**`src/app/actions/grading.ts` (941, 59 of headroom) and
-`src/app/components/GradingResults.tsx` (906, 94 of headroom) are in NO wave's
-write set.** Section 5.2 measures why `grading.ts` is not needed (the refusal
-inherits a landed catch-and-render path) and section 4.3 measures why
-`GradingResults.tsx` is not needed (the invariant "distinct keys implies
-distinct displays" is restored inside `groupSubmissionsByStudent`, so all 30
-display-keyed sites - including the post-to-Canvas fan-out at
-`GradingResults.tsx:332-403` - keep working unchanged).
+**No file this plan writes has an `ALLOWED_OVERAGE` entry** (5.5 step 8's grep,
+exit 1, with its positive canary at `:76`). **No wave needs to touch a file near
+the ceiling, and no extraction is proposed.** The orchestrator rules extractions;
+the brief is explicit that a wave needing to edit a near-ceiling file must say so
+and stop. None does, and unlike round 1 that is a construction rather than a
+promise: RULING 93 needs zero code, so the two near-ceiling grading files are out
+by the same fact that discharges the migration requirement.
+`src/app/actions/action-guard-coverage.test.ts` at 955 is named only because it
+belongs to a live sibling and is in no wave of this plan; if that sibling's wave
+pushes it to the wall, that is its own ruling to ask for, not this one's.
 
-**No extraction is proposed here, by construction.** The orchestrator rules
-extractions, and the brief is explicit that a wave needing to edit a
-near-ceiling file must say so and stop. **No wave in this plan needs to.**
-Section 10 names the single decision that would change that, and if that
-decision goes the other way this plan stops and hands the ceiling question over
-rather than planning the extraction itself.
-
-**The condition under which `GradingResults.tsx` re-enters scope**, so it is not
-discovered later: if any future display rule can produce two rows with the same
-`student` string, the 30 display-keyed sites are live again. The enforcer is
-`utils.test.ts:360-375`, which is exactly why `docs/a44-scope.md` section 5 calls
-it this feature's primary regression test rather than inherited hygiene.
-
----
-
-## 10. Review size, and the one decision that would collapse the two waves into one
-
-**Wave 1 is reviewable.** Two production files. In `utils.ts`, a fold inside
-`parseSubmissionFileName`'s steps 5-6 plus a display rule inside
-`groupSubmissionsByStudent` - one cohesive mechanism, and section 2 proves it
-cannot be split without splitting a function. In `gradingResultsHelpers.ts`, one
-read-only fallback inside `loadPersistedEdits` (`:619-635`), following the
-already-shipped precedent of `LEGACY_EMPTY_CANVAS_URL_EDITS_KEY` at `:562-567`.
-The diff touches identity resolution AND persistence, which the brief flags as
-the reason to consider splitting - and section 4.3 measures that splitting them
-releases a state that loses instructor edits. **It is one unit because the data
-loss says so, not because it is convenient.**
-
-**Wave 2 is reviewable.** One new pure leaf, plus three to six lines at each of
-two call sites. It is not splittable either: a decision leaf without its two
-callers is dead code with a green gate, which is the failure
-`traps-spec.md` names and which this repo has shipped twice this week.
-
-**The decision that changes all of this** is the display wording, and it is the
-architect's under RES-A44-1 (`docs/a44-scope.md` section 11). This plan is built
-on **unconditional suffix**, which is the scope's own recommended wording
-(section 10) applied unconditionally rather than on collision. If instead the
-display folds only on collision, or replaces the display with the folder alone,
-then by section 4.3's Fact 2 and 4.3's closing paragraph the persistence work
-can no longer be a read-only fallback: the row must CARRY its identity key or
-its pre-fold display, which means `src/lib/grade/types.ts` (`:393-415` and
-`:212-271`), every producer of a `GradeResult`,
-`gradingResultsHelpers.ts`, `GradingResults.tsx` (906 of 1000) and
-`ungradedDisclosure.ts` all land in ONE wave together, and
-`GradingResults.tsx`'s ceiling becomes a live question. **At that point this plan
-stops and the ceiling question goes to the orchestrator** rather than my
-proposing an extraction.
+Two further measurements this section owes, since round 1's counts were wrong:
+`grep -c "  it(" src/lib/grade/utils.test.ts` returns **28** for the whole file,
+and per `describe` the split is **14 on `groupSubmissionsByStudent`, 7 on
+`parseSubmissionFileName`, 7 unrelated** (13 top-level `describe`s, counted with
+an `awk` pass over the file). `grep -cE "^export (function|const|interface|type)"
+src/app/components/grading-results/gradingResultsHelpers.ts` returns **40**, not
+39.
 
 ---
 
-## 11. What `docs/a44-test-notes.md` owes - reference only, not authored here
+## 12. Where this plan diverges from the scope
 
-Listed so no wave assumes an instrument exists. This document creates none of
-them and names no fixture, expected literal or sabotage.
+### 12.1 Section 8's FIRST requirement does not hold against the tree
 
-1. The repair of `utils.test.ts:360-375` from a tautology into this feature's
-   primary regression test, exercised on a folder-shaped fixture. Section 4.4
-   measures that it is RED against a key-only implementation
-   (rows=3, distinctDisplays=1) - which is the sabotage it must survive.
-2. The assertion the A44 row's own verify clause demands: one that EXECUTES the
-   display-string keying in the grading-results helpers and shows zero orphaned
-   edits across a run change. Section 4.3's S2 and S3 are the two populations.
-3. A re-freeze of `docs/a41-test-notes.md` section 1.4's oracle for F3, F6, F4,
-   F8 and F9, and of R2's frozen `rowsOut = 1` characterisation - section 7.2
-   measures every one of those rows so they need not be re-derived.
-4. The decision leaf's own oracle and the refined predicate's sweep, including
-   the amnesty condition, and R4a/R4b/R4c's driven-`gradeAction` instruments
-   (`docs/a41-test-notes.md:373-475`), which must be re-based onto A44's
-   predicate.
-5. The channel wiring test A41's R5 specifies (`:479-533`), with its three
-   mandatory canaries, no `/s` flag (TS1501), and an anchor-resolves assertion
-   at both ends of any `indexOf`/`slice` region.
-6. A separator/collision instrument for the compound key that binds to the
-   CONSTRUCTION rather than to a string assertion (`docs/a44-scope.md` 2.2, m2).
+The scope requires the key fold and the decision predicate to land in one wave,
+because a key-fold-only wave "ships the 14.6% -> 25.1% regression measured in
+section 3.1, live, with every existing gate green". **The measurement is real; the
+conclusion does not transfer**, because both rates belong to a predicate that does
+not exist in `src/` (section 6.6's absence claim plus a direct read of the only
+two places it could sit). Today's conservative refusal rate is **0%, because
+nothing refuses**, so a key-fold wave landing alone cannot raise a false-refusal
+rate from 14.6%. The round-1 check independently confirmed this refusal and I have
+not re-derived it. **Two waves stand.** What has changed since round 1 is the
+honest description of the intermediate state: section 5.4, not "strictly better and
+never worse".
+
+The scope's SECOND requirement in the same section - that the display fold land in
+the same wave as the key fold - is adopted in full, and is now stronger than an
+adoption: RULE K and RULE D are one mechanism in one function, and architecture
+5.2's `seedEdits` measurement shows a key-only wave losing two of three students'
+seeded feedback.
+
+### 12.2 Section 8's THIRD requirement, recorded rather than passed over in silence
+
+The scope requires: "Whichever construction discharges section 6's migration
+requirement touches storage, which section 4.2 shows has 30 display-keyed call
+sites across three files, including the post-to-Canvas fan-out - a wave that
+changes fewer of them ships a partial fix with the same gates green."
+
+**DIVERGED, with the ground stated.** The count is 43, not 30 (section 9). This
+plan changes ZERO of them and the ground is INVARIANT D with an enforcer plus
+RULING 93's no-recovery - not an assertion that they are unaffected. The scope's
+own stated failure mode (a partial fix with green gates) is answered by putting
+the three EXECUTABLE sites into Wave 1's write set as tests and routing the other
+34 to owner verification with an instrument and a step (section 14, R5). Round 1
+recorded only the first requirement's divergence and passed over this one in
+silence, which is what the check's MA-4 named.
+
+### 12.3 The two stale header comments, reassigned
+
+Round 1 assigned both to Wave 1. One moves.
+
+**`src/lib/grade/utils.test.ts:80-84`** is in Wave 1's write set and stays there.
+It says "an **outward-in** scan of the WHOLE zip-crossing chain" against
+`utils.ts:150-152`'s "scanned NARROWEST FIRST (A14 rulings v2 CORRECTION 1 - this
+scanned outward-in, outermost first, before, and that was wrong)", and the same
+wrong direction survives in an `it()` description at `utils.test.ts:119`. It also
+claims "the userId folded into the grouping key so sanitized-name collisions do
+not merge", which `utils.ts:76-85` CORRECTION 2 withdrew and
+`utils.test.ts:324-334` pins the opposite of. A reader would conclude A44's fold
+is a second such fold and that the first worked. **Owner: Wave 1.** Two of the
+three `it()` descriptions Wave 1 must rewrite anyway (section 3.2) are in the same
+file.
+
+**`src/app/components/grading-results/gradingResultsHelpers.ts:16-25`**, whose
+"Owns:" list omits the whole persistence group (`gradingResultsEditsKey` `:558`,
+`mergeStoredRowEdit` `:597`, `loadPersistedEdits` `:619`,
+`loadGradingResultsEdits` `:641`, `persistGradingResultsEdits` `:663`) out of 40
+exported names: **REASSIGNED away from Wave 1, because RULING 93 means no wave
+writes that file.** It becomes R4 in section 14 - a documentation correction owned
+by the next chunk that writes the file, not a reason to open it now.
 
 ---
 
-## 12. Residual register
+## 13. What `docs/a44-test-notes.md` owes these waves
 
-Each carries an owner, an instrument and the step that will measure it. Missing
-any of the three it is a deletion, and would be called that.
+Reference only; this document authors none of it and names no fixture, expected
+literal or sabotage. The notes are at `1163a54`, which predates RULE K, RULE D
+and RULING 93, so most of this is a re-point rather than new work.
+
+1. **INVARIANT M as an instrument over GENERATED input**, not a fixture test,
+   covering the flat-forgery family, because section 8's silent-green 1 measures
+   that no existing assertion reads a key at all. Architecture 5.1 and 5.3 give
+   the invariant and the family.
+2. **INVARIANT D as an instrument, plus the ORDER-INDEPENDENCE comparison** -
+   the same file set in two insertion orders, asserting identical label
+   assignment. Section 8's silent-green 2 measures that INVARIANT D alone cannot
+   see the order. Architecture 5.3 requires the sabotage for INVARIANT D to be
+   the CROSS-STEP shape and not the flat-forgery family, which does not reach
+   RULE D at all - a sabotage from the wrong family will appear to prove the
+   terminal pass unnecessary.
+3. **R7 re-pointed from the identity key to the DISPLAY**, per RULING 93 and
+   architecture D5. Concretely: P1/P2's pair collapses to the display-keyed case
+   and its verdict is now the ACCEPTED one; P3's "the pre-fix key is absent from
+   the after-key set" becomes the pre-fix DISPLAY absent from the after-display
+   set, and is the assertion that makes RULING 93's one-time loss a test rather
+   than a paragraph; P4's `Object.keys(seedEdits(run)).length === run.results.length`
+   is unchanged and is now the consumer-side face of INVARIANT D; P5's
+   sorts-before-Maria case is unchanged and still required, because
+   `utils.ts:319` sorts rows by display and a row-index mutant survives P1 alone.
+   The 173/0 satisfiability score's storage clause is re-scored, not ignored.
+4. **The frozen display literals re-derived per architecture 10.2**, which lists
+   every one that changes. The `rowsAfter` column does not move for any of the 23
+   fixtures. Do not re-derive these; do not contradict them silently.
+5. **The eleven-shape sweep re-run under RULE K** - section 6.5's prerequisite,
+   including the `UNSOUND`, `CONSERVATIVE` and `splitUnrefused` columns, and
+   including the shape section 6.4 constructed, on which the two folder
+   definitions disagree. The generator is not in the tree.
+6. **R2's accepted-split reporting**, so L1's rate is recorded as the accepted
+   cost of RULE K under RULING 95's criterion rather than surfacing later as a
+   defect to be fixed.
+7. **The decision leaf's own oracle and the refined predicate's amnesty
+   condition**, plus A41's R4a/R4b/R4c driven-`gradeAction` instruments
+   (`docs/a41-test-notes.md:373-475`) re-based onto A44's predicate, and the
+   channel wiring test R5 specifies (`:479-533`) with its three canaries, no `/s`
+   or `/gs` flag (TS1501 fails `tsc` while passing vitest), and an
+   anchor-resolves assertion at both ends of any `indexOf`/`slice` region.
+8. **Consumer-side guards for the three executable display-keyed sites** -
+   `fanOutGradingPostResult`, `buildCsvContent`, `correctUngradedSeeds` - which
+   Wave 1's write set exists to carry.
+9. Any instrument naming two or more test files is spelled
+   `npm run test:paths <p1> <p2> ...`, never a raw multi-path run.
+
+---
+
+## 14. Residual register
+
+Each carries an owner, an instrument, and the step that will measure it. Missing
+any of the three it is a deletion, and is called one.
 
 | id | Residual | Owner | Instrument | Object / direction of failure | Step |
 |---|---|---|---|---|---|
-| RES-A44W-1 | The display WORDING is the architect's (RES-A44-1), and this plan's wave count depends on it. | the architect pass consuming `docs/a44-scope.md` | section 7.2's fixture sweep, re-run against the chosen rule, plus section 4.3's S2 | The chosen rule's display for a foldered row that does NOT collide in its batch. **RED if the display is not a function of the file alone** - at which point section 10's single-wave costing applies. | The architect pass, before Wave 1 is dispatched. |
-| RES-A44W-2 | The legacy read path recovers the pre-fold display by inspecting the post-fold one. `leafStemFallback` (`utils.ts:121-126`) can return a stem containing arbitrary characters - `docs/a41-scope.md`'s own 13-path table records `"_draft one.docx" -> key="_draft one"` - so a stem that itself contains the suffix delimiter can mis-recover, and in the worst case recover a DIFFERENT row's stored edit. | Wave 1's implementer, from the test author's instrument | an assertion over the real `loadPersistedEdits` with a stem containing the delimiter, alongside the S3 population | The recovered edit's identity. **RED when a row recovers an edit stored for a different row.** | Wave 1's test step, before Wave 1's gate. |
-| RES-A44W-3 | The unconditional fold gives a correct, non-colliding row in a shared wrapper folder a meaningless display suffix (measured: `essay (Submissions)`, section 7.2). Cosmetic, on a shape the fold does not otherwise touch. | the follow-up UX pass on the as-built diff | section 7.2's `shared-wrapper-folder` row, re-run against the built code | The display of a row in a single-folder run with distinct stems. **FAILS as a residual if the UX pass closes without ruling on it.** | The follow-up UX pass, after Wave 1 lands. |
-| RES-A44W-4 | Line-shift re-pinning. Section 8's two tables are the size; the delta is not computable until the code exists. | per artifact, section 8's table | the two patterns in section 8, re-run after each wave | Each cited line against the post-wave file. **FAILS if a wave's push lands while any citation in `src/` (notably `ungradedDisclosure.test.ts:146`) still names a moved line.** | Each wave's push. |
-| RES-A44W-5 | Whether newly-separated rows render as distinct, independently-editable rows, and whether the refusal's `state.error` actually lands in the instructor's eye at `GradingTab.tsx:262-266`. Carried forward from RES-A44-2; **no component is rendered by any test in this repo** and there is no API key, so neither is verifiable here. | the repo owner (browser check) | upload a real folder-shaped zip with Wave 1 live, then a real flat colliding zip with Wave 2 live; inspect the DOM | What is on screen. **FAILS if editing one row's grade visibly affects another, if fewer than the expected row count appears, or if the refusal text does not appear.** | Owner verification, after each wave. Blocks nothing. |
-| RES-A44W-6 | The two live seats (`loop-plan` and `loop-test-author`) are MUTUALLY coupled by RULING 86's split and no file check can detect it (section 6.2). | the orchestrator | section 6.2's four-item re-brief list, delivered to whichever seat finishes second | The test notes' assumptions against this plan's boundaries. **RED if the test notes assume a key-only intermediate state, a collision-triggered display, or a decision leaf outside `src/lib/grade/`.** | Before either wave is dispatched. |
+| R1 | RULING 87's frozen exact integer and its `UNSOUND` rate were computed with BOTH the colliding-group term and the amnesty term defined by the immediate parent. RULE K uses neither. Section 6.4 measures a shape where the amnesty term alone flips the verdict, and proves the folder set can only grow. | the test-notes seat | the eleven-shape sweep rebuilt under RULE K (its generator is not in the tree - architecture section 11), including section 6.4's directed shape | the sweep's `UNSOUND` and `CONSERVATIVE` columns under RULE K. **RED if Wave 2 is dispatched while the predicate's oracle is a value measured under a folder definition the implementation does not use.** | Section 6.5: before Wave 2 is dispatched, not at its gate - a gate cannot see this. |
+| R2 | L1's split rate on one student's own subdirectories is accepted by RULING 95's criterion (visible split over invisible blend) and no instrument enforces the criterion. The real fix is A45, the roster-corroboration row. | the orchestrator | the sweep's `splitAfter` and `splitUnrefused` columns for that shape, quoted with the command that produced them | the reported split rate. **RED if a later artifact reports it as a defect to be fixed rather than as RULING 95's accepted cost, and equally if a later change lowers it by reverting the step-5 fold**, which re-opens G1's three-student blend. | The test-notes revision, and each wave's push. |
+| R3 | RULE D's spelling - path order, `/` separator, ` (2)` suffix - is unverified against any rendered row. | the follow-up UX pass on the as-built diff | a reading of `GradingResults.tsx`'s row-label render path, naming the element that renders `row.student` and its width constraint, plus the CSV header | the rendered label for a two-segment path and for a ` (2)` suffix. **FAILS if a two-segment path overflows its cell, or if ` (2)` is indistinguishable from part of a filename.** Every claim here about what the instructor sees is a READING CLAIM - no component is rendered by any test in this repo. | The follow-up UX pass, after Wave 1 lands. |
+| R4 | `gradingResultsHelpers.ts:16-25`'s "Owns:" list omits the whole persistence group, out of 40 exported names (`grep -cE "^export (function\|const\|interface\|type)"`). RULING 93 means no A44 wave writes that file, so A44 cannot fix it. | the next chunk whose write set includes `src/app/components/grading-results/gradingResultsHelpers.ts` | the same `grep -cE` against the header's own list | the header against the file's exports. **RED if that chunk's push lands with the persistence group still unmentioned.** | That chunk's gate. |
+| R5 | The 34 `GradingResults.tsx` display-keyed sites, the bulk post fan-out (`:332-395`), the single-row post path (`:427-500`), and whether the refusal's `state.error` reaches the instructor at `GradingTab.tsx:262-266`. Not verifiable here: no component is rendered and there is no API key. | the repo owner (browser check) | upload a real folder-shaped zip with Wave 1 live, then a real flat colliding zip with Wave 2 live; inspect the table, edit one row, post one row to Canvas | what is on screen and what Canvas receives. **FAILS if editing one row's grade visibly affects another, if fewer than the expected rows appear, if two rows' post statuses collide, or if the refusal text does not appear.** | Owner verification, after each wave. Blocks nothing. |
+| R6 | `docs/a44-test-notes.md` (`1163a54`) predates RULING 93, RULE K and RULE D; both waves' tests are built from it. | the test-notes seat, re-briefed | section 13's nine items, each checked off against the revised notes | the notes' assumptions against this plan and the architecture. **RED if the revised notes key storage on the identity key, assume a collision-triggered display, assume a key-only intermediate state, or carry the frozen integer un-re-derived.** | Before Wave 1 is dispatched for items 1-4 and 8; before Wave 2 for 5 and 7. |
+| R7 | Line-shift re-pinning. Section 10 gives the exactly-one in-`src/` instance, the corrected two-instrument method, and the per-artifact owners; the delta is not computable until the diff exists. | per artifact, section 10's table | both patterns in section 10, the unqualified one with per-hit adjudication | each cited line against the post-wave file. **FAILS if a wave's push lands while `single-file-entry.ts:67` still names a moved line.** | Each wave's push. |
+| R8 | Whether real instructor zips take these shapes at the assumed frequencies (the scope's RES-A44-6, the notes' RES-A44T-2). | the repo owner | **none exists in this checkout** - no live uploads, no analytics, no network under vitest | real-world shape frequency. **This entry has an owner and a step but NO instrument, so it is a DELETION, not a residual, and I am calling it that.** What is deleted is any claim that the measured rates are probabilities. | Owner-only backlog escalation; not an agent task. |
 
 ---
 
-## 13. What I could not determine
+## 15. What I could not determine, the stopping point, and the tree
 
-- **Which of the two stale header comments the brief meant** (section 7.3). Both
-  are measured and both are assigned to Wave 1, so nothing is dropped either way.
-- **The exact line delta each wave inserts**, and therefore the exact re-pinning
-  edits. Section 8 gives the size and location of the obligation and its owners;
-  the delta is knowable only from the written diff.
-- **Whether `docs/a44-test-notes.md`'s author will choose instrument file paths
-  matching this plan's reserved ones.** Section 3 states the reservation and
-  section 6.1 states that a rename must be re-intersected before dispatch.
-- **Whether real instructor zips take these shapes at the assumed frequencies**
-  (the scope's RES-A44-6). Not verifiable in this environment at all.
+### 15.1 What I could not determine
 
----
+- **The exact line delta each wave inserts.** Section 5.1 measures +43 and +23 on
+  a generated variant, which bounds the ceiling question but is not the diff.
+- **Whether the refusal copy will keep a clause naming a folder.** Section 6.3
+  makes `a44ContainerRelativeDir`'s export conditional on it, states the
+  condition, and says what the wave gate should do if the copy changes. I did not
+  decide the copy; it is the architect's and the owner's.
+- **Whether `docs/a44-test-notes.md`'s author will choose the reserved instrument
+  paths.** Section 4 states the reservation; section 7.1 states that a rename must
+  be re-intersected before dispatch.
+- **The overall sign of RULE K's effect on RULING 87's frozen integer.** Section
+  6.4 proves the direction of one of the two terms and refuses to guess the other.
 
-## 14. Tree state for this pass
+### 15.2 Stopping point
 
-Hygiene gates over this write, exit code read from the command:
+**This is round 2 of two, and the activity ends here.** Per `AGENTS.md`'s "Two
+rounds, then ask" and `docs/loop/iteration-caps.md` cap 2, there is no round
+three: everything above ships as it stands, with the rulings applied and
+everything unresolved recorded in section 14.
+
+**This round asks the owner nothing.** Round 1's question is answered by RULING
+92 and RULING 95, and re-asking it would be the cycle those rulings ended. What
+remains is not argument:
+
+- **One prerequisite that MEASURES** (section 6.5 / R1): the sweep under RULE K,
+  owned by the test-notes seat. Steps that execute are never capped.
+- **One decision that is the orchestrator's and needs one sentence** (section
+  3.3): two sequenced waves sharing two paths, which is what this plan specifies
+  and recommends, or one merged wave that satisfies the disjointness line
+  literally at the cost of review size and of freezing the predicate before R1 can
+  be discharged.
+- **One thing I disagree with a settled input about, with the measurement**
+  (section 6.4): the architecture's D11 reasoning that the frozen integer holds.
+  It does not hold as stated, RULE K and RULE D are unaffected either way, and the
+  disposal is R1 rather than a revision of anything.
+
+### 15.3 Tree state
+
+Hygiene gates over this write, exit codes read from the command, never a pipe,
+and spelled `npm run test:paths --`:
 
 ```
-$ npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts src/file-size-ceiling.structure.test.ts
-COVERED src/lib/no-emojis.test.ts files=1 passed=18
-COVERED src/source-bytes.structure.test.ts files=1 passed=3
-COVERED src/file-size-ceiling.structure.test.ts files=1 passed=3
-Test Files  3 passed (3) / Tests  24 passed (24)
-EXITCODE=0
+$ npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts \
+    src/file-size-ceiling.structure.test.ts src/loop-docs.structure.test.ts
+COVERED src/lib/no-emojis.test.ts                  files=1 passed=18
+COVERED src/source-bytes.structure.test.ts         files=1 passed=3
+COVERED src/file-size-ceiling.structure.test.ts    files=1 passed=3
+COVERED src/loop-docs.structure.test.ts            files=1 passed=30
+Test Files  4 passed (4) / Tests  54 passed (54)
+GATE_EXITCODE=0
 ```
 
-Scratch directory removed and its absence confirmed (section 0(h)).
+`src/lib/no-emojis.test.ts` walks `["src","docs"]` (`:254`), so that pass covers
+this document; `src/file-size-ceiling.structure.test.ts` walks `src` only
+(`:115`, `path.resolve(repoRoot, "src")`), which is why a long document is green
+under it - stated so nobody reads the pass as a licence for a 1011-line module.
 
-**`git status --short`, read twice, because the tree moved under this pass.**
-At the start, and again immediately after the scratch directory was removed:
+**Byte hygiene on this file, with a canary that fires**, because
+`src/source-bytes.structure.test.ts` walks `src` only and cannot see a
+materialised `\uXXXX` escape in `docs/`:
 
 ```
+$ grep -nP '[^\x00-\x7F]' docs/a44-waves.md
+grep: -P supports only unibyte and UTF-8 locales
+GREP_P_EXIT=0        <- the known hazard, live: -P ERRORS and still exits 0
+$ python: count bytes > 127 in docs/a44-waves.md
+non-ascii byte count = 0        BOM present = False
+$ the same python scan on docs/a18-ac.md
+CANARY non-ascii 33             (the instrument DOES fire on a file that has them)
+```
+
+No in-tree scratch directory was created; section 0(i) verifies the absence with a
+positive canary, and the whole harness lived in the session scratchpad outside the
+repository.
+
+**`git status --short`, read twice, the second time after this file's last edit:**
+
+```
+ M docs/a44-waves.md
  M docs/css-orphans.md
 ```
 
-And after this file was written, the `loop-test-author` sibling having landed its
-own artifact in between:
-
-```
- M docs/css-orphans.md
-?? docs/a44-test-notes.md
-?? docs/a44-waves.md
-```
-
-`docs/a44-waves.md` is **this pass's only entry, in both readings.** Every other
-line is sibling-owned. `docs/css-orphans.md` belongs to another row and was
-already modified before this pass began; it was not touched here.
-**`docs/a44-test-notes.md` is the live `loop-test-author` sibling's artifact. It
-appeared between the two readings because that sibling wrote it, not because
-anything here touched it - it was never read, opened, created or edited by this
-pass, and it is not in this pass's write set.** It is now in the tree, which
-means section 6.2's RES-A44W-6 re-brief is immediately actionable: whichever
-seat the orchestrator reads second must be reconciled against the other, and
-this document was authored with no knowledge of that file's contents.
-`docs/r4-scope.md` had not written to the tree at either reading. **No
-`git stash`, `git add -A` or `git checkout --` was run at any point, and nothing
-under `src/` was written or mutated** - the only removal was `rm -rf .a44plan` on
-the untracked directory this pass itself created.
-
----
-
-## THE ONE QUESTION, shaped so every answer ends this activity
-
-Not a stop. Both waves are fully specified under answer (1), which is what this
-document is built on and what the scope itself recommends; the other two answers
-change the wave COUNT and the ceiling exposure, which is why they cannot be
-settled by another round of this document.
-
-> **A44 must change how a graded row is LABELLED, and the rule chosen decides
-> whether this is two reviewable waves or one large one. Measured this pass
-> against the real storage functions: if a row's label is folded only when two
-> rows would otherwise collide (the scope's own default), then an instructor's
-> saved feedback on a row whose identity never changed is SILENTLY LOST the next
-> time a classmate's file joins the upload - EDIT SURVIVED=false. If the label
-> is folded whenever the folder was used as the identity signal, regardless of
-> what else is in the upload, that loss is impossible by construction - EDIT
-> SURVIVED=true - at the cost that a correct row inside a single shared folder
-> gains a meaningless suffix (`essay (Submissions)`).**
->
-> Pick ONE. Each ends this activity; the plan ships as it stands with the answer
-> applied and everything unresolved recorded in section 12.
->
-> **(1) ALWAYS NAME THE FOLDER when the folder decided the identity.** Two waves
-> exactly as tabled in section 3. Five files in Wave 1, six in Wave 2,
-> `grading.ts` (941 of 1000) and `GradingResults.tsx` (906 of 1000) untouched, no
-> extraction needed. Cost of being wrong: some correct rows carry a suffix that
-> names a folder every student shared, which is noise on screen and nothing more.
->
-> **(2) NAME THE FOLDER ONLY WHEN TWO ROWS WOULD COLLIDE** (the scope's section
-> 3.4 default). The row must then carry its identity key so storage can follow
-> it, which merges Wave 1 with the whole consumer layer: `types.ts`, every
-> `GradeResult` producer, `gradingResultsHelpers.ts`, `ungradedDisclosure.ts` and
-> `GradingResults.tsx` at 906 of 1000 - and the ceiling question comes to you.
-> Cost of being wrong: one large, hard-to-review wave over identity resolution
-> AND persistence AND the post-to-Canvas fan-out, for a cosmetic gain.
->
-> **(3) REPLACE THE LABEL WITH THE FOLDER NAME ALONE** (`AlvarezMaria` instead of
-> `essay (AlvarezMaria)`). This is the cleanest label on screen and it has the
-> same structural cost as (2): the pre-fold label becomes unrecoverable from the
-> row, so the row must carry it, so the consumer layer merges into one wave.
-> Cost of being wrong: as (2), plus the label stops naming the assignment.
->
-> **My recommendation: (1).** It is the only one of the three where no released
-> intermediate state loses an instructor edit AND no near-ceiling file is
-> touched, and both of those are measured rather than argued. Its cost is a
-> cosmetic suffix on a shape the refusal usually refuses anyway; the cost of
-> being wrong about (2) or (3) is a single wave spanning identity, persistence
-> and the grade-posting fan-out, which is the review size this plan exists to
-> avoid.
+`docs/a44-waves.md` is **this pass's only entry, in both readings** - it shows as
+modified rather than untracked because round 1 is committed at `210f6b8`.
+`docs/css-orphans.md` belongs to another row, was already modified before this
+pass began, and was not touched here. `docs/g5-test-notes.md` - the live sibling's
+artifact - had not written to the tree at either reading; if it appears in a later
+reading it is that sibling's, not this pass's. **No `git stash`, `git add -A` or
+`git checkout --` was run at any point, and nothing under `src/` was written,
+staged or reverted.**

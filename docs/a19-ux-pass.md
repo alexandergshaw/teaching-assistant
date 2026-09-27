@@ -356,7 +356,7 @@ plainly is the premise correction above - this is a stack, not a row.
 <p className={styles.fieldHint}>{timingLabel(slot.draft.draft.timing)}</p>
 ```
 
-`receiptLabel` (`announcement-draft-slots.ts:229-233`) returns one of:
+`receiptLabel` (`announcement-draft-slots.ts:251-255`) returns one of:
 `Drafted from "X"` / `Drafted from the pasted announcement` / `Drafted
 without a format to match` - all full clauses, verb-led.
 

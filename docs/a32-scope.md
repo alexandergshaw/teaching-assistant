@@ -40,7 +40,7 @@ a reading claim (`docs/loop/this-repo.md` section 6).
 | S8: Wave 1's write set includes `walkthrough-announcement.test.ts` because `:566-571` asserts exactly four arguments | **KEPT.** Re-verified at `:565-571`, section 8. |
 | S8: no wave names a gate command | **WITHDRAWN.** Every wave now names one, each run this pass with its exit code read from a file. Section 8. |
 | S8: Wave 0 is told to produce "a concrete extraction plan" with no constraint and no number | **WITHDRAWN.** Replaced by two named constraints and a number, section 8. |
-| S3's Branch C: "new reducer action ... mirroring the existing `edit` action at `:240`" | **WITHDRAWN as the nearest precedent.** The nearest precedent is `choose-timing` (`useAnnouncementDraftSlots.ts:238`, action type at `announcement-draft-slots.ts:364`, reducer case at `:408`), which is a per-slot CHOICE control, not a text edit. Section 3. |
+| S3's Branch C: "new reducer action ... mirroring the existing `edit` action at `:240`" | **WITHDRAWN as the nearest precedent.** The nearest precedent is `choose-timing` (`useAnnouncementDraftSlots.ts:330`, action type at `announcement-draft-slots.ts:388`, reducer case at `:437`), which is a per-slot CHOICE control, not a text edit. Section 3. |
 
 New in this round: REQ-A32-1 (the single-predicate requirement and its
 instrument), REQ-A32-2 (the conversion), REQ-A32-3 (the extraction
@@ -148,7 +148,7 @@ Import; do not copy, and do not name a `ta-` key in a comment there.
 its arm/confirm state and its copy render in `AnnouncementDraftSlot.tsx`, which
 the panel maps its `slots` array into at `:899-912`. The panel supplies
 `postDraft` (`:644-657`, deps `[selectedCourse]` at `:656`) with a fixed
-two-argument shape declared at `useAnnouncementDraftSlots.ts:148-151` and
+two-argument shape declared at `useAnnouncementDraftSlots.ts:232-235` and
 invoked at `:332`.
 
 ### Line budget, both counters
@@ -216,10 +216,10 @@ visibility.
 Two consequences:
 
 1. **Branch C has a ready template.** The action type is at
-   `announcement-draft-slots.ts:364`, the reducer case at `:408`, the hook
-   callback at `useAnnouncementDraftSlots.ts:238`, the staleness mirror at
+   `announcement-draft-slots.ts:388`, the reducer case at `:437`, the hook
+   callback at `useAnnouncementDraftSlots.ts:330`, the staleness mirror at
    `AnnouncementDraftSlot.tsx:89-90`, and a structure test already pins the
-   control to the rendered row (`walkthrough-announcement.structure.test.ts:745-763`,
+   control to the rendered row (`walkthrough-announcement-timing.structure.test.ts:84-102`,
    the anchored-slice idiom on `label="Timing"`). Round 1 named `edit` (`:240`)
    as the precedent; `choose-timing` is the closer one by a wide margin.
 2. **Branch C puts a second "when" control in the same row as a select
@@ -358,8 +358,8 @@ touching. The pass condition:
 > consequence paragraph's own `id={` ... `wta-post-consequence` anchor and its
 > closing `</p>`.
 > **Instrument:** `fs.readFileSync` plus paired `String.indexOf` anchors in
-> `walkthrough-announcement.structure.test.ts`, matching the idiom at
-> `:745-763` and `:788-806`, with both anchors asserted to resolve before the
+> `walkthrough-announcement-timing.structure.test.ts`, matching the idiom at
+> `:84-102` and `:138-165`, with both anchors asserted to resolve before the
 > slice is asserted on.
 > **Direction of failure:** RED when the slice does not reference the resolved
 > visibility value, RED when it references a separate length-derived boolean,
@@ -594,11 +594,11 @@ read from a file: **0**.
 
 - Write set:
   `src/app/components/walkthrough-announcement/announcement-draft-slots.ts`
-  (new slot field and a new action, mirroring `choose-timing` at `:364` and
-  `:408`),
+  (new slot field and a new action, mirroring `choose-timing` at `:388` and
+  `:437`),
   `src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.ts`
-  (the callback, mirroring `:238`; `postDraft`'s type at `:148-151` and its
-  call at `:332` gain the resolved value),
+  (the callback, mirroring `:330`; `postDraft`'s type at `:148-151` and its
+  call at `:436` gain the resolved value),
   `src/app/components/walkthrough-announcement/AnnouncementDraftSlot.tsx` (the
   control, the consequence copy at `:221-229`, and all THREE labels at
   `:239`, `:240`, `:244`),

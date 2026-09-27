@@ -650,14 +650,14 @@ DECISION 5 binds: **per-slot**, and the precedent is `choose-timing`, NOT the
 exits 1):
 
 ```
-announcement-draft-slots.ts:364   | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
-announcement-draft-slots.ts:408   case "choose-timing": {
-useAnnouncementDraftSlots.ts:238  const chooseTiming = useCallback((id, timing) => dispatch({...}), []);
-walkthrough-announcement.structure.test.ts:745-763   the anchored-slice test
+announcement-draft-slots.ts:388   | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
+announcement-draft-slots.ts:437   case "choose-timing": {
+useAnnouncementDraftSlots.ts:330  const chooseTiming = useCallback((id, timing) => dispatch({...}), []);
+walkthrough-announcement-timing.structure.test.ts:84-102   the anchored-slice test
 ```
 
 **Three further sites in the same precedent that neither scope named, and they
-are the wiring half:** `useAnnouncementDraftSlots.ts:401` (the hook's return
+are the wiring half:** `useAnnouncementDraftSlots.ts:484` (the hook's return
 object exposing `chooseTiming`), `WalkthroughAnnouncementPanel.tsx:666` (the
 panel destructuring it) and `WalkthroughAnnouncementPanel.tsx:916`
 (`onChooseTiming={chooseTiming}` passed into `<AnnouncementDraftSlot`). A
@@ -678,7 +678,7 @@ live only in the `it()` description at `:117`) does not move.
 | **A32-0** | extraction, headroom only | new component(s) under `src/app/components/walkthrough-announcement/` | `WalkthroughAnnouncementPanel.tsx`, same wave | **YES** |
 | **A32-1** | action layer | a 5th `delayedPostAt` parameter on `postWalkthroughAnnouncementAction` | **nowhere until A32-3** | **NO** |
 | **A32-2** | the pure leaf | `resolveScheduledVisibility` | **nowhere until A32-3** | **NO** |
-| **A32-3** | reducer, hook, control, copy, labels | nothing new | `WalkthroughAnnouncementPanel.tsx:916` and `useAnnouncementDraftSlots.ts:332` | **YES** |
+| **A32-3** | reducer, hook, control, copy, labels | nothing new | `WalkthroughAnnouncementPanel.tsx:916` and `useAnnouncementDraftSlots.ts:205` | **YES** |
 
 **A32-1, A32-2 and A32-3 are ONE SHIPPING UNIT.** A 5th parameter no caller
 supplies is inert, and a pure leaf nothing imports is dead. Neither is a
@@ -893,8 +893,8 @@ git status --short
 **Write set:**
 
 - `src/app/components/walkthrough-announcement/announcement-draft-slots.ts` -
-  the new slot field and a new action, mirroring `choose-timing` at `:364`
-  (action type) and `:408` (reducer case)
+  the new slot field and a new action, mirroring `choose-timing` at `:388`
+  (action type) and `:437` (reducer case)
 - `src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.ts` -
   the callback mirroring `:238`, its entry in the returned object mirroring
   `:401`, and `commitPost` at `:328-340`, which is where `slot` is in scope at
@@ -937,7 +937,7 @@ today, reproduced deliberately.
 subject to two mechanical constraints, but may not leave it called "Timing".
 
 **6.4.2 The mechanical consequence, which is what makes the naming a gate
-rather than a preference.** `walkthrough-announcement.structure.test.ts:748`
+rather than a preference.** `walkthrough-announcement-timing.structure.test.ts:87`
 reads:
 
 ```
@@ -1026,7 +1026,7 @@ halves are watched:
 > `AnnouncementDraftSlot.tsx` bounded by the literal `wta-post-consequence` and
 > the next `</p>`. **Instrument** - `fs.readFileSync` plus paired
 > `String.indexOf`, both anchors asserted to resolve before the slice is
-> asserted on, matching the idiom already running at `:745-763` and `:788-806`.
+> asserted on, matching the idiom already running at `walkthrough-announcement-timing.structure.test.ts:84-102` and `:138-165`.
 > **Direction of failure** - RED when the slice does not reference the resolved
 > visibility value, RED when it references a separate length-derived boolean,
 > RED when either anchor fails to resolve.

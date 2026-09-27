@@ -70,15 +70,15 @@ on every change. This matters in section 3.5.
 | **Click dispatch** | `onClick={armed ? onConfirm : onArm}` - one Button element, two handlers | `src/app/components/ui/ConfirmArmButtons.tsx:107` |
 | **Props in** | `onRegenerateArm={armRegenerate}` / `onRegenerateConfirm={regenerate}` / `onRegenerateCancel={cancelRegenerate}` | `WalkthroughAnnouncementPanel.tsx:918-920` |
 | **Hook bindings** | destructured from `useAnnouncementDraftSlots` at `:669` (`regenerate`), `:673` (`armRegenerate`), `:674` (`cancelRegenerate`) | `WalkthroughAnnouncementPanel.tsx:669,673-674` |
-| **Hook: arm** | `const armRegenerate = useCallback((id) => dispatch({ type: "arm-regenerate", id }), [])` | `useAnnouncementDraftSlots.ts:320` |
-| **Hook: cancel** | `const cancelRegenerate = useCallback((id) => dispatch({ type: "cancel-regenerate", id }), [])` | `useAnnouncementDraftSlots.ts:321` |
-| **Hook: confirm** | `regenerate` dispatches `regenerate-started`, rebuilds the request context, resolves the research outcome, calls `runDraft` | `useAnnouncementDraftSlots.ts:298-318` |
+| **Hook: arm** | `const armRegenerate = useCallback((id) => dispatch({ type: "arm-regenerate", id }), [])` | `useAnnouncementDraftSlots.ts:404` |
+| **Hook: cancel** | `const cancelRegenerate = useCallback((id) => dispatch({ type: "cancel-regenerate", id }), [])` | `useAnnouncementDraftSlots.ts:405` |
+| **Hook: confirm** | `regenerate` dispatches `regenerate-started`, rebuilds the request context, resolves the research outcome, calls `runDraft` | `useAnnouncementDraftSlots.ts:382-402` |
 | **Research reuse** | `resolveRegenerateResearchOutcome(ctx.researchOn, researchCacheRef.current, fingerprint)` - exact fingerprint match or falls back to `off`; regenerate never awaits a fresh research call | `useAnnouncementDraftSlots.ts:122`, called at `:313` |
-| **Draft adapter** | `runDraft` calls `argsRef.current.draftOne(ctx, resolved.outline)` | `useAnnouncementDraftSlots.ts:225` |
+| **Draft adapter** | `runDraft` calls `argsRef.current.draftOne(ctx, resolved.outline)` | `useAnnouncementDraftSlots.ts:317` |
 | **Injected adapter** | `draftOne` in the panel, passed into the hook at `:676` | `WalkthroughAnnouncementPanel.tsx:615-642, 676` |
 | **Server action call** | `await draftWalkthroughAnnouncementAction({ courseLabel, moduleLabel, materialsText, outline, coverageBlock, notes, provider, emojiPolicy, researchedResources, researchOutcome, timing })` | `WalkthroughAnnouncementPanel.tsx:625-637` |
 | **The action** | `export async function draftWalkthroughAnnouncementAction(input): Promise<({title, message, researchNotice} \| {error}) & {diag}>` | `src/app/actions/walkthrough-announcement.ts:385-391` |
-| **Result back into state** | `dispatch({ type: "result", id: slotId, result: {...} })` on success, and on rejection `"Could not reach the server - nothing was drafted."` | `useAnnouncementDraftSlots.ts:210-223` |
+| **Result back into state** | `dispatch({ type: "result", id: slotId, result: {...} })` on success, and on rejection `"Could not reach the server - nothing was drafted."` | `useAnnouncementDraftSlots.ts:294-307` |
 
 **Nothing in that chain is dead and nothing in it is a stub.** Both failure
 shapes this repo has recorded - a library with no surface above it, and a
@@ -164,7 +164,7 @@ once:
 `[READING]` A control that changes its own text, fills itself in, grows a
 sibling and prints a sentence is not mistakable for a dead button. The generic
 form of the hazard is real - this repo has already been bitten by it, and
-`useAnnouncementDraftSlots.ts:188-193` records the instance in a comment: a
+`useAnnouncementDraftSlots.ts:272-277` records the instance in a comment: a
 suppressing boolean once left a second Generate click doing nothing,
 "indistinguishable from a broken button - the exact complaint this chunk opened
 with". But the arm state here is the well-behaved version of the pattern.
@@ -290,7 +290,7 @@ This candidate fails here. It does **not** fail repo-wide - section 5.1.
 
 **The drafts are not persisted.** State comes from
 `useReducer(slotsReducer, FIRST_SLOT_ID, initialSlotsFromId)`
-(`useAnnouncementDraftSlots.ts:166`) and nothing writes it anywhere.
+(`useAnnouncementDraftSlots.ts:250`) and nothing writes it anywhere.
 
 The consequence is sharp: after any reload, the persisted sub-tab puts the
 owner **back on this exact tool**, with every text field they filled in still
@@ -418,7 +418,7 @@ so on screen, next to the existing `:806-808` warning.
 as *absent* - a button you cannot find is not a button you found and disliked -
 but it is a real cost on the same control, it is cheap, and the precedent is
 already written. **Smallest fix:** add a `touched` boolean to the slot, set by
-`case "edit"` (`announcement-draft-slots.ts:411`), cleared by `case "result"`,
+`case "edit"` (`announcement-draft-slots.ts:443`), cleared by `case "result"`,
 and mirror `TakeAnnouncementPanel`'s `onArm` branch.
 
 ### 4.4 What I could not determine, and the exact owner check that settles it

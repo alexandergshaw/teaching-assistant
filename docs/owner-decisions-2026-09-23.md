@@ -146,9 +146,10 @@ What this settles, and the trap that comes with it:
   force one time onto drafts that exist precisely because they are for different
   weeks.
 - **The precedent is `choose-timing`, NOT the `edit` action** that round 1
-  named. The revision found the real one: `useAnnouncementDraftSlots.ts:238`,
-  action type at `announcement-draft-slots.ts:364`, reducer case at `:408`,
-  structure test at `:745-763`. Follow that shape rather than inventing a third.
+  named. The revision found the real one: `useAnnouncementDraftSlots.ts:330`,
+  action type at `announcement-draft-slots.ts:388`, reducer case at `:437`,
+  structure test at `walkthrough-announcement-timing.structure.test.ts:84-102`.
+  Follow that shape rather than inventing a third.
 - **THE NAMING HAZARD, which must be designed against rather than discovered.**
   `AnnouncementDraftSlot.tsx:117` already renders a per-slot select labelled
   **"Timing"** - and it is not a schedule at all. It is content framing

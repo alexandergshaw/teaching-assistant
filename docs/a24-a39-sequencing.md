@@ -70,7 +70,7 @@ Carried from the plan into any brief that touches this area:
 
 ## RULING 35 - the A32 naming contract is already enforced, and that is lucky
 
-`walkthrough-announcement.structure.test.ts:748` is
+`walkthrough-announcement-timing.structure.test.ts:87` is
 `source.indexOf('label="Timing"')` - substring matching, first occurrence. Two
 consequences the plan found and I am adopting:
 

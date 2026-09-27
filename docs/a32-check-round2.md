@@ -41,7 +41,7 @@ section 2 bans two concurrent sabotage-verifies on one tree. Instead:
    arguments (94 / 19 / 88 / 9), `EXIT=0` read from the command, not a pipe.
 
 2. **Proof of what they can and cannot FAIL on, by replica.** Every new
-   assertion in `walkthrough-announcement.structure.test.ts:772-947` is a pure
+   assertion in `walkthrough-announcement-timing.structure.test.ts:111-294` is a pure
    function of source TEXT (`fs.readFileSync` + `String.indexOf` +
    `String.slice` + `toMatch`). I transcribed them assertion-for-assertion into
    a Node script and evaluated them over mutated copies of the real file held in
@@ -102,14 +102,14 @@ observed at a call site. Canary that the token is assertable elsewhere:
 So both of these single-token edits keep lint, tsc, `next build`, all 210 A32
 tests and every structure test green:
 
-- `useAnnouncementDraftSlots.ts:402`
+- `useAnnouncementDraftSlots.ts:436`
   `postDraft(slot.draft.draft.title, slot.draft.draft.message, decision.delayedPostAt)`
   -> `..., undefined)`. **Every scheduled post publishes immediately and
   irrevocably to every student**, while the consequence paragraph, all five
   labels and `resolvePostCommit`'s own green test still say "schedule". This is
   A32's original blocker, and it is the same mutation round 1 spelled out at
   `docs/a32-build-check.md:414`.
-- `useAnnouncementDraftSlots.ts:413`
+- `useAnnouncementDraftSlots.ts:447`
   `scheduledLabel: decision.scheduledLabel` -> `scheduledLabel: null`. `null` is
   assignable to `string | null`, so tsc is silent. **RULING 64's new field is
   then always null and the false sentence renders on every scheduled post,
@@ -128,7 +128,7 @@ correctly at runtime as shipped.** The chain is complete and I traced every hop 
 `resolvePostCommit` carries it (`useAnnouncementDraftSlots.ts:156`), `commitPost`
 forwards it into the success payload (`:413`), the reducer writes it
 (`announcement-draft-slots.ts:537`), the render branches on it
-(`AnnouncementDraftSlot.tsx:349`). The defect is not that the field is null; it
+(`AnnouncementDraftSlot.tsx:355`). The defect is not that the field is null; it
 is that **nothing holds it non-null**, so RULING 64's fix is one token deep.
 
 **Disposition: (i) an implementer can fix this from this report.** Two options,
@@ -158,7 +158,7 @@ the mutation. REPEAT-OF RULING 66.**
 
 The remediation pinned two things and left the line that connects them open:
 
-- `walkthrough-announcement.structure.test.ts:793` pins that
+- `walkthrough-announcement-timing.structure.test.ts:131` pins that
   `resolveScheduledVisibility` is imported and CALLED.
 - `:818` and the five `twoBranches` regexes pin that the branch sites read the
   token `isScheduled`.
@@ -201,7 +201,7 @@ at each site, so there is no intermediate boolean to redefine - the
 
 ### MAJOR R2-1 - the consequence paragraph's two sentences are searched over the whole slice, so swapping the branches is green
 
-**REPEAT-OF RULING 66.** `walkthrough-announcement.structure.test.ts:823-827`:
+**REPEAT-OF RULING 66.** `walkthrough-announcement-timing.structure.test.ts:164-174`:
 
 ```
 expect(slice).toMatch(/schedules this announcement to become visible/);
@@ -254,7 +254,7 @@ audited by source text at all, so ban the shape), and keep the existing canary.
 
 ### MAJOR R2-4 - the replacement success sentence misnames its own subject, and the mirror it cites does not say what it says
 
-**NEW.** `AnnouncementDraftSlot.tsx:350`:
+**NEW.** `AnnouncementDraftSlot.tsx:356`:
 
 ```
 ? `Scheduled for ${slot.postedTo}. Students will see it ${slot.postedScheduledLabel}.`
@@ -320,7 +320,7 @@ implementer pass that fixes MAJOR R2-1.
 
 ## 3. The instruments: the eleven mutations, measured
 
-Replica of `walkthrough-announcement.structure.test.ts:772-947`, evaluated over
+Replica of `walkthrough-announcement-timing.structure.test.ts:111-294`, evaluated over
 in-memory mutated copies of `AnnouncementDraftSlot.tsx`. "Named" means the
 mutation round 1 demonstrated the old instrument green under.
 
@@ -368,7 +368,7 @@ is the measurement, and its canary is in section 1.
 
 **RULING 68/M7, verified end to end because the brief asked.** `postSignatureFor`
 moved from a `useCallback` to a top-level export
-(`useAnnouncementDraftSlots.ts:171-180`) and now hashes five elements. The
+(`useAnnouncementDraftSlots.ts:205-214`) and now hashes five elements. The
 comparison site is `armPost` at `:432` (`slot.postArmedFor === signature`) and the
 UI's own armed state is `isConfirmArmed(slot.postArmedFor, postSignatureFor(slot) ?? "")`
 at `WalkthroughAnnouncementPanel.tsx:917`. The panel destructures
@@ -522,6 +522,18 @@ question already in front of the owner:
 
 ## 7. M8 - citations the 327f3e3 diff has invalidated
 
+> **Orchestrator note, 2026-09-27.** This table is a DATED RECORD of one bounded
+> computation - `327f3e3^` to `327f3e3` only - and it is left as written rather than
+> updated. Do not use it as a live pointer. Two commits landed after it (`2fef046`,
+> then `3da8210`, which SPLIT the structure test and moved 320 lines into
+> `walkthrough-announcement-timing.structure.test.ts`), so some right-hand numbers
+> here now name neither the right line nor the right FILE. Worse, the re-pinning pass
+> that consumed this table found several of its baseline numbers were already stale
+> BEFORE `327f3e3`, from earlier feature work - so arithmetic applied to them produced
+> new numbers that still pointed at the wrong function. The live citations were
+> corrected by CONTENT in the target docs instead. Editing this table to reflect drift
+> its own method could not see would misrepresent what this round computed.
+
 Method: for each of the six changed files I mapped parent line -> current line
 with `difflib.SequenceMatcher` over `git show 327f3e3^:<file>` and
 `git show 327f3e3:<file>`, then scanned every `docs/**/*.md` for
@@ -597,7 +609,7 @@ docs/owner-decisions-2026-09-23.md:150 announcement-draft-slots.ts:364  -> 375
 Two `docs/` citations that are wrong for a reason a line shift cannot fix, and
 that a re-pin pass should catch:
 
-- `AnnouncementDraftSlot.tsx:344-348`'s own comment cites
+- `AnnouncementDraftSlot.tsx:344-352`'s own comment cites
   `announcements-panel.tsx:280-283` as the thing it mirrors. The range is right
   and the claim is not - see MAJOR R2-4.
 - Round 1's MAJOR 8 table (`docs/a32-build-check.md:420-430`) gives post-1878a48

@@ -398,7 +398,7 @@ Two design facts, both load-bearing:
   request; in particular RED on the always-`none` implementation, which misses
   **11**, not 10, of the 16 rows (a REPEAT of major M-b's class - a table cited
   to prevent a miscount had the miscount). Computed against the frozen table
-  above and `resolveChoice` (`announcement-draft-slots.ts:313-334`): the
+  above and `resolveChoice` (`announcement-draft-slots.ts:323-344`): the
   always-`none`+`EMPTY` implementation mismatches on **template** for the 3
   `default` rows whose live state is not `neither` (`default`+`neither`
   already resolves to `none` and matches) plus all 4 `pasted` rows plus all 4
@@ -458,7 +458,7 @@ instrument", not "the call is in file X".
 - **Why this and not a frozen expected string:** comparing the state's receipt
   to `promptDraftReceipt(...)` would be a self-comparison, and freezing the eight
   strings would pin `receiptLabel`'s spelling
-  (`announcement-draft-slots.ts:229-233`), a file A21 does not own. Asserting
+  (`announcement-draft-slots.ts:251-255`), a file A21 does not own. Asserting
   that the value CHANGES with the input binds the threading without binding
   either.
 

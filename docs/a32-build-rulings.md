@@ -6,7 +6,7 @@ B2 and M7 is remediation with no fork. **M6 is MY error and I correct it below.*
 I verified the three blockers myself before ruling: the success paragraph renders
 unconditionally on `slot.postedTo` and reads "Students can see it now."; the
 predicate is evaluated from `currentTimeMs()` at `AnnouncementDraftSlot.tsx:114`
-and again from `Date.now()` at `useAnnouncementDraftSlots.ts:349`; and no test
+and again from `Date.now()` at `useAnnouncementDraftSlots.ts:430`; and no test
 reads the hook as source at all, against a canary showing the slot component IS
 read. All three hold.
 

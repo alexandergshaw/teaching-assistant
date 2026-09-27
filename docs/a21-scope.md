@@ -198,7 +198,7 @@ Click path, counted from source (reading claim):
 |---|---|---|
 | First use | rail "Announcements" (1), pick course in `CoursePicker` (1), type, "Draft with AI" (1), "Post announcement" (1) = **4** | rail "Recording" (1), sub-tab "Announcement from a walkthrough" (1), a mode switch to skip capture (1), course (1), "Generate announcement" (1), "Post to Canvas" + "Confirm post" (2) = **at least 7** |
 | Repeat use | `courseUrl` is restored from `localStorage` (`announcements-panel.tsx:24-26,62`), so rail (1), "Draft with AI" (1), "Post" (1) = **3** | the recording view is restored by the panel's own restore ladder, so rail (1), mode (1), Generate (1), Post + Confirm (2) = **at least 5** |
-| Template pick | 0 extra clicks in the common case - the default resolves to the course's most recent saved exemplar (`resolveChoice`, `announcement-draft-slots.ts:313-334`); 1 click only to change it | same |
+| Template pick | 0 extra clicks in the common case - the default resolves to the course's most recent saved exemplar (`resolveChoice`, `announcement-draft-slots.ts:323-344`); 1 click only to change it | same |
 
 **`docs/loop/leverage.md:64` struck click cost as a leverage class.** The table
 above is a UX cost comparison between placements and is NOT part of section 3's
@@ -372,7 +372,7 @@ documented adapters.**
 Priced, by opening the types:
 
 *What joining would cost.* `useAnnouncementDraftSlots(args)`
-(`useAnnouncementDraftSlots.ts:131-165`) requires **six** injected members, not
+(`useAnnouncementDraftSlots.ts:215-249`) requires **six** injected members, not
 five: `buildRequest`, `resolveLive`, `draftOne`, `postDraft`, `fetchResources`
 and `researchFingerprint` (round 1 said five and was wrong). Four of them are
 research/capture/post-specific and would be stubs or dead weight on a prompt
@@ -428,7 +428,7 @@ import { makeSlot, optionsForSlot, type TemplateChoice, type TemplateOption, typ
 
 /** Reuses optionsForSlot VERBATIM rather than duplicating the frozen
  * "the list always contains the current choice" invariant
- * (announcement-draft-slots.ts:236-265). The slot is a throwaway: that
+ * (announcement-draft-slots.ts:246-275). The slot is a throwaway: that
  * function reads only `slot.choice` (:283,285,293), so the id and the
  * timing are inert. AC-4b proves that claim rather than asserting it. */
 export function optionsForChoice(choice: TemplateChoice, src: TemplateOptionSource): readonly TemplateOption[] {
@@ -703,7 +703,7 @@ trigger and names this explicitly. Nothing here can render it.
 
 ### 4.7 Server-action calls stay in the panel, and the draft path stays pure
 
-`useAnnouncementDraftSlots.ts:152-155` records this repo's rule in its own words:
+`useAnnouncementDraftSlots.ts:236-239` records this repo's rule in its own words:
 every literal server-action call lives in the panel, and the leaf receives what
 it needs as data. A21 adopts it, and it is what makes AC-9 buildable:
 

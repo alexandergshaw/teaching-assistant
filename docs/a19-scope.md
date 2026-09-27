@@ -149,7 +149,7 @@ same-authority instructions.
 **(c) The claim withdrawn, honestly - M-c, disposed above (no further round;
 this is the ruling).** Round 2's own "per-slot divergence" claim was itself
 INHERITED, not earned, and the check was right to say so:
-`useAnnouncementDraftSlots.ts:287`'s `{ ...ctx, researchOutcome }` spread
+`useAnnouncementDraftSlots.ts:387`'s `{ ...ctx, researchOutcome }` spread
 already exists, and `slot.choice` is ALREADY a per-slot field read at exactly
 that call site - **two slots in one Generate already carry two different
 `TemplateChoice` outlines into two differently-composed prompts TODAY**, with
@@ -240,7 +240,7 @@ The slot-machinery table (`TemplateChoice` at `:50-54`, `ResolvedTemplate` at
 `choiceId`/`builtFromId` at `:148-156`, `defaultOptionLabel`/`receiptLabel` at
 `:158-169,209-213`, the frozen dropdown invariant at `:216-245`,
 `optionsForSlot` at `:246-283`, `SlotsAction` 14 members at `:339-360` with
-its canary at `announcement-draft-slots.test.ts:668-684`, `makeSlot`/
+its canary at `announcement-draft-slots.test.ts:772-798`, `makeSlot`/
 `initialSlots` at `:316-333`, `slotsReducer` at `:372-488`) was re-opened this
 round in full (`src/app/components/walkthrough-announcement/announcement-draft-slots.ts`,
 `src/app/components/walkthrough-announcement/useAnnouncementDraftSlots.ts`)
@@ -423,7 +423,7 @@ grep, not quoted from memory). **This design departs from that standing rule
 for the per-slot `timing` control**, on the strength of a real, in-feature
 analogy: `TemplateChoice` is the SAME shape of per-slot control (a dropdown
 choosing one of a small closed set, scoped to a single slot, not a panel-wide
-preference) and is itself NOT persisted - `useAnnouncementDraftSlots.ts:161`'s
+preference) and is itself NOT persisted - `useAnnouncementDraftSlots.ts:245`'s
 `useReducer(slotsReducer, FIRST_SLOT_ID, initialSlotsFromId)` re-derives every
 slot's `choice` fresh on every mount via `initialSlotsFromId` ->
 `makeSlot(id, { kind: "default" })`, never reading a stored value. `timing`
@@ -640,7 +640,7 @@ m4's slicing correction applied).
 identifier `ctx`, but across two DIFFERENT types: AC-5's `ctx` is a
 `slot`-scoped local inside `generate()`'s loop reading `AnnouncementDraftDispatchContext`
 fields spread from the shared request context (`{ ...ctx, researchOutcome }`,
-`useAnnouncementDraftSlots.ts:287`), while AC-6's `ctx` is
+`useAnnouncementDraftSlots.ts:387`), while AC-6's `ctx` is
 `draftOne`'s own parameter, typed `AnnouncementDraftDispatchContext` directly
 (`WalkthroughAnnouncementPanel.tsx:617`). The two readings are compatible only
 because `AnnouncementDraftDispatchContext extends AnnouncementDraftRequestContext`
@@ -664,15 +664,21 @@ this round:
    dispatch({ type: "add", id, choice }); }`) **and must gain a second,**
    `timing: AnnouncementTiming`, forwarded into the dispatched action. Round
    1's owns table for this file did not list this edit at all - it is added
-   to section 5 below.
+   to section 5 below. [Re-pin, 2026-09-27: this single-parameter shape shipped
+   and no longer exists verbatim - `addSlot` has taken both parameters since
+   this item closed. Its current two-parameter form is at
+   `useAnnouncementDraftSlots.ts:322-326`.]
 3. `SlotsAction["add"]` (`announcement-draft-slots.ts:340`) gains a `timing:
-   AnnouncementTiming` field alongside its existing `choice`.
+   AnnouncementTiming` field alongside its existing `choice`. [Re-pin,
+   2026-09-27: the pre-`timing` member this describes no longer exists
+   verbatim - it already carries `timing` today, at
+   `announcement-draft-slots.ts:385`.]
 4. `slotsReducer`'s `"add"` case (`:374-377`) forwards `action.timing` into
    `makeSlot(action.id, action.choice, action.timing)`, and `makeSlot`
    itself (`:316-329`) gains the third parameter.
 
 The exhaustive `Record<SlotsAction["type"], true>` canary
-(`announcement-draft-slots.test.ts:668-684`) is unaffected by the new
+(`announcement-draft-slots.test.ts:772-798`) is unaffected by the new
 **field** on an existing member (it keys on `type`, the discriminant, not on
 a member's other fields) - it still needs no change for this specific edit,
 only for a wholly new member (`"choose-timing"`, unchanged from round 1).
@@ -683,7 +689,7 @@ only for a wholly new member (`"choose-timing"`, unchanged from round 1).
 round-1 check confirmed the re-derivation sound (front matter, "confirmed
 sound" list).** `AnnouncementTiming` is a closed, static, two-member union
 with no live source, no async fetch, no deletion-elsewhere case - the
-invariant at `announcement-draft-slots.ts:216-245` does not apply to it, for
+invariant at `announcement-draft-slots.ts:226-255` does not apply to it, for
 the stated, re-checkable reason given in round 1.
 
 ### 4.4 The line budget
@@ -791,7 +797,7 @@ sabotage - if the sabotage compiles, the criterion fails. *(Restored verbatim
 from round 1, Ruling V1 - unchanged.)*
 
 **AC-3 - the `SlotsAction` exhaustive canary is bumped in the same commit as
-the 15th member.** Object: `announcement-draft-slots.test.ts:668-684`.
+the 15th member.** Object: `announcement-draft-slots.test.ts:772-798`.
 Instrument: `npx tsc --noEmit`. Direction of failure: RED ("Property
 'choose-timing' is missing") if `SlotsAction` gains the member without the
 canary being updated; this is the PASSING behavior of the un-fixed sabotage,
@@ -806,8 +812,8 @@ while its own Object line cites six ranges; section 4.2's own numbered list
 names four hops - panel call sites, hook `addSlot`, `SlotsAction["add"]`'s
 field, and `slotsReducer`'s `"add"` case plus `makeSlot` - two of which each
 span two ranges, so 4 hops x uneven fan-out = 6 ranges, not a fifth hop).**
-Object: `announcement-draft-slots.ts:316-333,339-360,374-377`,
-`useAnnouncementDraftSlots.ts:224-228`, `WalkthroughAnnouncementPanel.tsx:780-786,926`
+Object: `announcement-draft-slots.ts:358-378,339-360,374-377`,
+`useAnnouncementDraftSlots.ts:308-312`, `WalkthroughAnnouncementPanel.tsx:780-786,926`
 (six ranges). Instrument: source-text grep for `timing` as an argument at
 both panel call sites AND at the hook's `addSlot` definition and its
 `dispatch({ type: "add", ... })` call, plus `npx tsc --noEmit` (a missing
@@ -819,7 +825,7 @@ version where the hook's own `addSlot` silently dropped `timing` on the
 floor).
 
 **AC-5 - `generate()` and `regenerate()` forward the SLOT's `timing`, not a
-shared/batch value.** Object: `useAnnouncementDraftSlots.ts:284-288` (inside
+shared/batch value.** Object: `useAnnouncementDraftSlots.ts:368-372` (inside
 the `for (const id of ids)` loop) and `:291-311` (`regenerate`). Instrument:
 source-text assertion that the dispatch-context object literal at each site
 reads `slot.timing` (or `slotsRef.current.find(...).timing`), not `ctx.timing`

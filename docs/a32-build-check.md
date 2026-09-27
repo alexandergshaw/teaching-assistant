@@ -68,7 +68,7 @@ the next reader can audit it:
 **Unconditional.** There is no scheduled variant. The scheduled path reaches it:
 `commitPost` forwards the ISO string, the action returns `{id}`, `postDraft`
 maps it to `{course}` (`WalkthroughAnnouncementPanel.tsx:655`), and the reducer
-sets `postedTo` at `announcement-draft-slots.ts:517`. So after a successful
+sets `postedTo` at `announcement-draft-slots.ts:533`. So after a successful
 SCHEDULED post the instructor is told, in a live region a screen reader
 announces, that **students can see it now** - when the whole point of the pick
 is that they cannot.
@@ -107,7 +107,7 @@ Two production call sites, each sourcing `now` independently
 canary `resolveScheduledVisibilityXYZNOPE` exits 1):
 
 - `AnnouncementDraftSlot.tsx:114` - `resolveScheduledVisibility(slot.scheduledAt, currentTimeMs())`, at RENDER. Drives the consequence paragraph, all five labels and the `disabled` guard.
-- `useAnnouncementDraftSlots.ts:349` - `resolveScheduledVisibility(slot.scheduledAt, Date.now())`, at CONFIRM. Drives the post.
+- `useAnnouncementDraftSlots.ts:430` - `resolveScheduledVisibility(slot.scheduledAt, Date.now())`, at CONFIRM. Drives the post.
 
 REQ-A32-1 as written in the scope (line 297) is: "The resolution happens once,
 in a pure exported function." It happens twice. The hook's own comment at
@@ -157,7 +157,7 @@ That is the identical harm REQ-A32-1 exists to prevent, moved from the value
 dimension into the time dimension. `iteration-caps.md`'s standard - what ends a
 defect chain is a construction that makes the bad state unrepresentable - is not
 met: the bad state is still representable, and the commit message, the code
-comments at `useAnnouncementDraftSlots.ts:341-348` and
+comments at `useAnnouncementDraftSlots.ts:420-429` and
 `scheduled-visibility.ts:5-9`, and the `docs/BACKLOG.md` A32 row all state a
 guarantee the code does not have.
 
@@ -180,7 +180,7 @@ Same command form, same file glob; the second proves the command fires and the
 pattern shape is valid. So **no test in this repo reads
 `useAnnouncementDraftSlots.ts` as source text**, and the two new anchored-slice
 describes both read only `AnnouncementDraftSlot.tsx`
-(`walkthrough-announcement.structure.test.ts:785`, `:773`).
+(`walkthrough-announcement-timing.structure.test.ts:136`, `:112`).
 
 Nor is `commitPost` exercised behaviourally.
 `useAnnouncementDraftSlots.test.ts` is 93 lines (`wc -l`) and its 12 tests cover
@@ -193,7 +193,7 @@ does not touch it (`git show --stat 1878a48` lists 10 files; that is not one of
 them). A write-set item was dropped silently.
 
 Consequence, stated as the silent-green failure the brief asks for: change
-`useAnnouncementDraftSlots.ts:349-356` to
+`useAnnouncementDraftSlots.ts:430-436` to
 
     const promise = argsRef.current.postDraft(title, message, slot.scheduledAt || undefined);
 
@@ -260,7 +260,7 @@ guarded. And deleting the control outright fails on
 
 ### MAJOR 1 - the Half-B mandated failure direction does not hold (M1)
 
-`walkthrough-announcement.structure.test.ts:803-811`:
+`walkthrough-announcement-timing.structure.test.ts:158-174`:
 
     expect(slice).toMatch(/isScheduled|visibility\.kind/);
     expect(slice).not.toMatch(/scheduledAt\.(trim\(\)\.)?length/);
@@ -376,7 +376,7 @@ ruling.
 
 ### MAJOR 7 - the publication time is outside the confirm signature
 
-`useAnnouncementDraftSlots.ts:332-335`:
+`useAnnouncementDraftSlots.ts:205-213`:
 
     const postSignatureFor = useCallback((slot: DraftSlot): string | null => {
       if (slot.draft.phase !== "drafted") return null;

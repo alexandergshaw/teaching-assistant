@@ -610,7 +610,7 @@ Two things it got right that this repo keeps getting wrong:
    is in Wave 1's write set.
 
 The `postDraft` +0 estimate for Branch A also holds: `argsRef.current = args` is
-refreshed in an effect at `useAnnouncementDraftSlots.ts:178`, so the hook reads
+refreshed in an effect at `useAnnouncementDraftSlots.ts:262`, so the hook reads
 the panel's latest closure at `:332` and the two-argument shape at `:148-151`
 genuinely need not change. The panel's own `postDraft` `useCallback` deps
 (`:657`, currently `[selectedCourse]`) must gain the new state - worth one line

@@ -1,570 +1,1102 @@
-# A25 scope: cross-assignment trend accumulation
+# A25 scope: cross-assignment trend accumulation - REVISION 2
 
-Row: `docs/backlog.yml`, `- id: 'A25'` (measured today at line 451,
-`grep -n "id: 'A25'" -A 40 docs/backlog.yml`). State `unscoped`, `blocked_by: []`,
-`owns: []`. Title: trends that span SEVERAL assignments over a term for one
-course, explicitly the LARGER item A16 carved itself away from. Owner's words,
-quoted in the row: "when i run a tool over a series of assignments, that run
-should generate trends," settled to mean one run over many students for ONE
-assignment (A16, shipped) - this row holds the reading the owner also meant but
-that A16 deliberately did not build: trends that accumulate ACROSS assignments
-over a term.
+Row: `docs/backlog.yml`, `- id: 'A25'`, at line **457** measured this pass
+(`grep -n "id: 'A25'" docs/backlog.yml` -> `457:- id: 'A25'`; canary
+`grep -n "id: 'A25ZZZ'" docs/backlog.yml` exits 1, so the pattern
+discriminates). State `unscoped`, `blocked_by: []`, `owns: []`.
 
-This is a first scoping pass. No `docs/a25-scope.md` existed before this file
-(`ls docs/a25-scope.md` before this write: "No such file or directory";
-`git log --all --oneline -- docs/a25-scope.md` before this write: empty). **No
-disposition table is included** - there is no prior version of this scope to
-restructure.
+**This is revision 2 and it is TERMINAL.** Written against
+`docs/a25-rulings.md` at commit e25e56d, which disposes round 1's check
+(`docs/a25-check.md`: NOT BUILDABLE, 5 blockers / 9 majors / 4 minors). Under
+`AGENTS.md` "Two rounds, then ask" and `docs/loop/iteration-caps.md` cap 2
+there is no round 3: everything not settled here is a residual with all five
+fields (section 11), or the owner question in section 13, which gates nothing.
 
-Every quantity below names the command that produced it, measured in this
-checkout today (2026-09-23) unless stated otherwise. Nothing here is inherited
-from the row's own instrument field without being re-checked against the tree.
+**Measurement discipline for this revision.** RULING 62 found three mechanical
+classes in revision 1: a named instrument that produced no output, three
+"measured this pass" figures that were another card's stale numbers, and a gate
+misattributed to a file deliberately exempt from it. So **every command below
+was re-run in this checkout on 2026-09-27 and its output read before the
+sentence around it was written**; every absence claim carries a canary that
+exercises the same pattern and the same filter; no command whose exit status
+matters is piped through `wc -l`, `cat` or `head`. Where a citation revision 1
+carried has moved, both addresses are given.
 
----
-
-## 0. Correcting the row's own citation before building on it
-
-The row's `instrument` cites `GradingRunEntry` at `types.ts:320-338`. Re-measured
-this pass: `grep -n "^export interface GradingRunEntry" src/lib/grade/types.ts`
-returns line **353**, and the interface's closing brace (found by scanning
-forward from 353 for the next `^}`) is line **362**. The type has moved since
-A16's scoping pass four days ago; the shape itself is unchanged:
-
-```
-export interface GradingRunEntry {
-  courseName: string;
-  assignmentName: string;
-  canvasUrl: string;
-  run: GradingRun;
-  institution?: string;
-  assignmentId?: string;
-  pointsPossible?: number | null;
-  offline?: boolean;
-}
-```
-(`src/lib/grade/types.ts:353-362`)
-
-This matters beyond pedantry: it is the object every later section below cites
-by line number, and it is why every citation in this document was opened this
-pass rather than copied from A16's note.
+**Concurrency snapshot.** `git status --short` at the start of this pass listed
+`docs/css-orphans.md`, `src/app/components/grading-recording/GradingRecordingPanel.tsx`,
+`src/app/components/grading-recording/grading-rows.test.ts`,
+`src/app/components/ppt-design/{TemplateSelector.tsx,hooks.ts,index.tsx}`,
+`src/lib/grade/engine.ts`, `src/lib/supabase/types.ts` modified and four
+untracked paths, all belonging to concurrently running agents. **No load-bearing
+claim below rests on any of those files.** `src/lib/grade/engine.ts` is cited
+once, for `DEFAULT_MAX_SUBMISSIONS`'s application site, and that citation is
+flagged as a snapshot where it appears.
 
 ---
 
-## 1. What already exists (traced from the control to the code)
+## 0. How to read this revision, and what is dispatchable now
 
-**The control an instructor would press today, if this feature existed, does
-not exist and nothing routes to it.** Traced exhaustively:
+The owner question in section 13 - **is A25 its own layer, or an additional
+signal inside the existing `src/lib/course-intel/` subsystem?** - is not this
+scope's to settle. So this document is structured so that the answer changes as
+little as possible:
 
-- The only function that computes a rubric-area trend is
-  `computeClassTrends(entry: GradingRunEntry): ClassTrendsReport`
-  (`src/lib/grade/class-trends.ts:259`). Its signature takes **exactly one**
-  `GradingRunEntry` - one assignment's run. `grep -rn "GradingRunEntry\[\]"
-  src --include=*.ts | grep -v ".test.ts"` (run this pass) returns 8 hits, all
-  of them either a single workflow step building one run array to grade RIGHT
-  NOW (`steps.grading-run.ts:426`, `steps.grading-cartridge.ts:45`,
-  `steps.grading-draft-flow.ts:224`), or plumbing that carries a runs array
-  through for POSTING/STRIPPING (`grading-review-rows.ts:95,109,154`,
-  `grading-drafts.ts:33`, `actions/grading.ts:280`) - never a function that
-  reduces runs from DIFFERENT points in time into one report. There is no
-  `computeCrossAssignmentTrends`, no `ClassTrendsHistory`, no function anywhere
-  in the tree whose input type is an array of runs spanning more than one
-  grading session. This independently confirms A16's own finding
-  (`docs/backlog.yml:457`), with fresh line numbers rather than inherited ones.
-- Every grading surface that DOES show a trend today builds a single-run
-  "cohort" and feeds it to `computeClassTrends`: `classTrendsRunCohort.ts`
-  (`src/app/components/grading-recording/classTrendsRunCohort.ts`, 181 lines,
-  `wc -l`), `classTrendsFolderEntry.ts`
-  (`src/app/components/repo-grades/classTrendsFolderEntry.ts`, 113 lines),
-  and `classTrendsEntry.ts`
-  (`src/app/components/grading-results/classTrendsEntry.ts`, 54 lines). Each
-  is a per-surface adapter that turns THIS SESSION's in-memory results into
-  one `GradingRunEntry`-shaped cohort. None persists or reads back a prior
-  cohort.
-- **The raw data a term-trend would need is already being written, one row
-  per run, and is unreachable.** `grading_drafts` (Supabase table,
-  `supabase/migrations/20260811000000_create_grading_drafts.sql:8-15`) stores
-  one row per grading run with `payload jsonb` holding `{ runs:
-  GradingRunEntry[] }` (`src/lib/grading-drafts.ts:32-39`), scoped
-  `.eq("user_id", userId)` throughout (`grading-drafts.ts:246,262,283,303`
-  etc.). `markGradingDraftReviewed` (`grading-drafts.ts:330-341`, called from
-  `src/app/actions/grading.ts:414` and `:558` after a successful post) sets
-  `status: "reviewed"` and **does not delete the row**. `deleteGradingDraft`
-  (`grading-drafts.ts:361-368`) is the only path that removes a row, and its
-  one caller (`src/app/actions/grading.ts:428`,
-  `deleteGradingDraftAction`) is wired only to an explicit user "discard"
-  button - never called automatically after review. So a reviewed draft is a
-  **durable, growing, per-course history of every graded run**, sitting in the
-  database indefinitely, already scoped to the account that owns it.
-- **And nothing reads it back.** The only list function is
-  `listPendingGradingDrafts` (`grading-drafts.ts:242-254`), which filters
-  `.eq("status", "pending")` - a reviewed row is invisible to it. `grep -rn
-  "listPendingGradingDrafts\|listPendingGradingDraftsAction"
-  src/app/actions/grading.ts src/app/components/DraftedGradesTab.tsx` (run
-  this pass) shows the ONLY consumer of the list function is
-  `DraftedGradesTab.tsx:151,173`, and it always calls the pending-only
-  variant. There is no `listReviewedGradingDrafts`, no admin or history view,
-  no export. `grep -rn "reviewed" src/app/components/drafted-grades/*.tsx`
-  (run this pass) returns zero lines - nothing under `drafted-grades/` even
-  mentions the reviewed state.
+| Part | Branch (A), own layer | Branch (B), signal inside course-intel | Dispatchable now? |
+|---|---|---|---|
+| Sections 3, 4, 5 - the corpus read, the join key, the unkeyable remainder, the denominators | identical | identical | **YES** |
+| Section 8 - the leverage claim | identical | identical, with one extra requirement (REQ-9) | **YES** |
+| Section 6 - the surface, the trigger, the reachability instrument | a per-course modal off the courses table | no new surface; a counted fact inside the existing answer | **NO - NOT DISPATCHABLE** |
+| Section 7 - persistence and any `ta-` key | one new key, or none | none | **NO - NOT DISPATCHABLE** |
+| Section 10 - the wave plan | waves 1/2A/3 | waves 1/2B | wave 1's CONTENT only, with the caller caveat in 10.1 |
 
-**Conclusion for this section: this is NOT the "shipped, just unreachable"
-pattern this repo has hit twice before (per the brief) - there is no
-accumulator to make reachable.** What exists is raw material (one row per run,
-already durable, already scoped) and a single-run reducer
-(`computeClassTrends`). The thing this row is named for - a reducer over
-MULTIPLE runs, plus a surface that reads multiple reviewed rows back - has to
-be built. That is different from A16's finding (a fully-built library with no
-render site) and should not be scoped as if it were. It is, however, cheaper
-than "build persistence from nothing": the corpus already exists and is
-already private per-owner; the gap is entirely in the read-back and the
-reduction.
+**Wave 1's content is settled under either answer; wave 2 is not, and is marked
+NOT DISPATCHABLE throughout.** Wave 1 is not, however, independently compliant
+with this repo's caller rule - both its new exports are called only by the
+surface - so section 10.1 recommends merging waves 1 and 2 once the answer
+arrives, and states what landing wave 1 alone does and does not buy. Section 10
+states per branch what changes.
 
 ---
 
-## 2. The data
+## 1. Disposition of revision 1
 
-### 2.1 What's stored today
+Revision 1 is `docs/a25-scope.md` at commit b26e072
+(`git log --all --oneline -- docs/a25-scope.md` returns exactly one commit,
+b26e072). This is a restructuring, so `iteration-caps.md` entry gate 3 requires
+the table below before anything else. Every prior requirement, recommendation
+and residual is mapped to kept / handed over / withdrawn.
 
-| Shape | Where | Per-run fields relevant to a trend |
+| Revision 1 item | Disposition | Detail |
 |---|---|---|
-| `GradingRunEntry` | `src/lib/grade/types.ts:353-362` | `courseName` (free string), `assignmentName`, `run.results[].rubricAreas[]` (area + score string) |
-| `GradingDraftPayload` | `src/lib/grading-drafts.ts:32-39` | `runs: GradingRunEntry[]` (one or more, usually one per draft in practice - `wc -l` on the two call sites that build multi-entry `runs` arrays, `steps.grading-run.ts:426` and `steps.grading-cartridge.ts:45`, shows they loop over a `plan` of possibly several assignments in one workflow run) |
-| `grading_drafts` table row | `supabase/migrations/20260811000000_create_grading_drafts.sql:8-15` | `id, user_id, status, summary, payload jsonb, workflow_id, workflow_name, source, created_at, updated_at` - confirmed by reading the migration plus the two later ALTERs (`20260818000000_drafts_workflow_ref.sql`, `20260827000000_grading_drafts_source.sql`); no other migration touches this table (`grep -rln "grading_drafts" supabase/migrations/`, 4 files, all read) |
+| Sec 0: correct the row's own `GradingRunEntry` citation | **KEPT, re-measured** | Row says `types.ts:320-338`; revision 1 said `:353-362`; measured today `grep -n "^export interface GradingRunEntry" src/lib/grade/types.ts` -> `362`, body closes at `371`. See section 2. |
+| Sec 1: no cross-assignment reducer exists | **KEPT** | Re-verified with a widened absence search and canaries, section 3.1. |
+| Sec 1: a reviewed draft is a durable, growing history | **KEPT, with a corrected premise** | The conclusion holds; two of the three facts revision 1 gave for it are false. Section 3.2. |
+| Sec 1: `deleteGradingDraft`'s "one caller ... wired only to an explicit user discard button - never called automatically" | **WITHDRAWN as false** | Measured: two callers of the lib function, and `deleteGradingDraftAction` is called automatically by an unattended step. Section 3.2. It protected no enforcer - no test asserted it. |
+| Sec 1: "nothing reads a reviewed row back" | **WITHDRAWN as overstated** | `getGradingDraft` has no status filter, so a reviewed row IS readable by id. What does not exist is any ENUMERATION. Section 3.2. |
+| Sec 2.1: the stored shapes table | **KEPT, re-measured** | Section 2. |
+| Sec 2.2: "no stable course identifier on a stored run", Option A / Option B, recommend A | **WITHDRAWN** | RULING 61. A stable id is recoverable at zero type cost, and `src/lib/course-canvas-url-match.ts:3` rules against Option A's mechanism in its own header. Replaced by REQ-1..REQ-4, section 4. Enforcer it protected: none. |
+| Sec 2.3: the over-fetch finding | **KEPT and strengthened into REQ-7** | The allowlist also keeps `student`; section 5.3. |
+| Sec 2.4: the privacy foreclosure | **WITHDRAWN by RULING 59** | Persistence is available. `docs/owner-decisions-2026-09-23.md` DECISION 10 settles it. Section 7 states what IS binding, and does not replace the foreclosure with a better-cited one. |
+| Sec 3.1: Candidate 1, Drafted Grades, gated on `effectiveCourseFilter !== "all"`, RECOMMENDED | **WITHDRAWN by RULING 60** | The gate is computed from the pending-only population, so the panel never renders in the state the feature exists for. Section 6.1. |
+| Sec 3.1: Candidate 2, RecordingTab's sub-tab strip | **WITHDRAWN** | Not chosen, and its three cited gate line numbers were wrong by 11 (RULING 62 / check M2). Correct values in section 6.1. |
+| Sec 3.1: "the 1000-line ceiling (`file-size-ceiling.structure.test.ts:41`)" applied to `RecordingTab.tsx` | **WITHDRAWN as misattributed** | `RecordingTab.tsx` is listed in `COVERED_BY_RECORDING_SPLIT_CHECK` at `:52`; its real gate is `recording-split.structure.test.ts:58`. Section 6.1. |
+| Sec 3.2: the reducer is a new file under `src/lib/grade/`, not an edit to `class-trends.ts` | **KEPT** | Section 10, wave 1. |
+| Sec 3.2: import types through `@/lib/grade/types`, never the barrel | **KEPT as REQ-10** | Section 9. |
+| Sec 4: no new `ta-` key required; no exact-key-set canary exists | **HANDED OVER to the wave-2 architect** | The claim was measured for `drafted-grades/`, which is no longer the host. Section 7 re-measures it for the new host directory. Receiver: the wave-2 architect, whose obligation is to state which key-set canary covers the host it picks, measured. |
+| Sec 4: "DraftedGradesTab's own three" `ta-drafts` keys | **WITHDRAWN as wrong** | Four, not three: `ta-drafts-collapsed` at `DraftedGradesTab.tsx:68`. Moot under the new host but recorded so the count is not inherited. |
+| Sec 5: CORPUS is EARNED, conditionally; thin until N13b | **WITHDRAWN by RULING 63** | Automatic population is REMOVED SETUP, the struck click-cost branch. Replaced by section 8's narrower claim. |
+| Sec 5: sequence A25's reducer AFTER N13b | **WITHDRAWN** | RULING 63: N13b enriches the per-area signal and does nothing to convert removed setup into an advantage. `blocked_by: []` stands. |
+| Sec 6: wave plan, 3 waves | **KEPT, restructured per branch** | Section 10. |
+| Sec 6: "every wave includes the file that CALLS the new export" | **KEPT, and revision 1 violated it** | Check M5: nothing in revision 1's wave 1 called the reducer. Fixed in section 10 by putting the reducer's caller in wave 1. |
+| R-A25-1, UI reachability in a browser | **KEPT, narrowed** | RES-1. Most of what it covered is now an executing instrument (REQ-5, REQ-6). |
+| R-A25-2, course-identity collision | **WITHDRAWN as a residual, PROMOTED to REQ-2/REQ-3/REQ-4** | Its instrument was an event ("reported by the owner") and its step was "only if/when reported". RULING 61. The narrower judgement that remains is RES-2, with an executing count behind it. |
+| R-A25-3, row-count growth | **KEPT** | RES-3. Revision 1's version satisfied four of five fields; the step is now unconditional. |
+| R-A25-4, data minimization | **WITHDRAWN as a residual, PROMOTED to REQ-7** | Two owners and two remedies-as-instrument. The part that genuinely cannot be measured here is folded into RES-3. |
+| R-A25-5, is a coarse trend worth reading | **KEPT, re-instrumented** | RES-4. Its instrument was a backlog row (a document); it is now a count the panel renders. |
+| R-A25-6, removal-test buildability | **WITHDRAWN as a residual, PROMOTED to REQ-8** | Check B5: the proposed test was unchanged by the deletion it was meant to detect. REQ-8 changes KIND (a transitive-import ban, not a pure-function assertion), as cap 1 requires. It protected no existing enforcer. |
+| R-A25-7, UI/keyboard reachability | **WITHDRAWN as a duplicate, replaced by REQ-11 + RES-1** | Its instrument was "reading claims only" and its direction of failure silently changed the object from the panel to the wording of a later document. |
 
-### 2.2 The quantity this feature must display that is NOT cleanly derivable today
-
-**There is no stable course identifier on a stored run.** `GradingRunEntry`
-carries `courseName: string` and an optional `institution?: string` - never a
-`courseId`. The app's own `Course` type DOES have a stable id
-(`id: string`, `src/lib/supabase/courses.types.ts:63`) and even a `term:
-string | null` field (`:65`) that would make "trends over a term" literal
-rather than inferred - but that id is never threaded onto a `GradingRunEntry`
-or into the `grading_drafts` row. Traced to where it is dropped: at
-`steps.grading-run.ts:398` the workflow's own `PlanRow` interface DOES carry
-`courseId: string`, and at `:533` the code reads `tileMap.get(offlineRow.courseId)`
-- so the id is in hand at construction time - but the `GradingRunEntry` built
-from that row (`:426` onward) never copies it in. `grep -n "courseId"
-src/lib/grade/types.ts` (run this pass) returns nothing.
-
-**Consequence, and the two real options, neither of which this scope decides:**
-
-- **Option A - reuse the existing string-match precedent.** The app already
-  groups by course using `courseName` string equality, nowhere else: `grep
-  -rn "entry.courseName ===" src/lib/grading-draft-view.ts` shows
-  `gradeMatchesFilters` (`grading-draft-view.ts:44`) and `collectCourseNames`
-  (`:53-60`) both key on the raw string. This is the SAME mechanism the
-  Drafted Grades course filter already uses for the pending list today, so
-  extending it to a multi-run accumulation is consistent with precedent, costs
-  no migration, and inherits precedent's own known fragility: a renamed
-  course silently splits its own history in two, and two course sections that
-  happen to share a name would be merged. No bug against this has been filed
-  in this repo as of this measurement (`grep -rn "courseName" docs/backlog.yml`
-  returns no open row naming it a defect) - it is a live risk, not a live bug.
-- **Option B - add `courseId` to `GradingRunEntry` and thread it through.**
-  Correct join key, zero collision risk, but real cost: a new optional field
-  on `GradingRunEntry` (cheap, `types.ts`), a one-line change at the
-  `steps.grading-run.ts:426` construction site to copy `row.courseId` in
-  (cheap - the value is already in scope there), but EVERY OTHER PRODUCER of a
-  `GradingRunEntry` needs the same field threaded or the new accumulator gets
-  silent gaps for that source: `steps.grading-cartridge.ts:45`,
-  `steps.grading-draft-flow.ts:224`, and any repo-grading or grading-recording
-  path that builds its own cohort (`classTrendsRunCohort.ts`,
-  `classTrendsFolderEntry.ts`) would need auditing for whether a courseId is
-  even available at that call site - not measured in this pass, and named
-  here as unmeasured rather than assumed. No schema migration is required
-  UNLESS the query needs to filter server-side by course id inside the jsonb
-  (see 2.3) rather than fetching all of a user's reviewed drafts and filtering
-  client-side.
-
-**This scope does not pick one.** It is exactly the kind of "state a rule
-against every other bound on the same quantity" question the AC seat's
-checklist asks (`seats.md:123-135`) turned into a data-identity question
-instead of a numeric one, and it belongs to the architect wave with the
-recommendation stated plainly: **Option A first** (ship the coarser, string-
-keyed version, consistent with the app's own existing precedent and zero
-schema cost), with Option B recorded as a residual (register, item R-A25-2)
-if the string-collision risk is ever reported as a real defect rather than a
-theoretical one.
-
-### 2.3 Cost of querying the data that DOES exist
-
-No caller today reads more than one draft's payload at a time by id
-(`getGradingDraft`, `grading-drafts.ts:284-300`) or a small pending list
-(`listPendingGradingDraftsAction`, `actions/grading.ts:355-370`). A
-cross-assignment view needs a NEW query: every reviewed (and pending) draft
-row for one user, filtered client-side to one course's `courseName`, across
-however many runs a term has produced. Two real costs, neither measurable
-locally (`this-repo.md` section 6: no live database in this checkout):
-
-- **Row count**: `grading_drafts` has no cap and no cleanup path other than
-  the manual "discard" button (section 1 above) - a full term of daily
-  workflow runs could be dozens to low hundreds of rows per course. Unmeasured
-  here; residual R-A25-3 below.
-- **Payload size per row**: `stripGradingRunEntriesForDraft`
-  (`src/lib/workflows/grading-review-rows.ts:95-97`) strips `rawBase64` but
-  keeps every result's `overallComment`, `strengths`, `improvements`,
-  `feedback`, and `rubricAreas` (`src/lib/grade/types.ts:212-241`, the shared
-  fields every `GradeResultBase` carries) - i.e. the FULL per-student text a
-  trend does not need. `computeClassTrends` itself only reads
-  `result.rubricAreas` (`class-trends.ts:282-304`) - area name and score
-  string, nothing else, and never a student name at the layer-A level this
-  scope recommends (section 5). **A term-trend query that fetches whole
-  `payload` blobs to extract only `rubricAreas` pulls every student's full
-  written feedback into memory for every assignment in the term, unused.**
-  This is a real, checkable data-minimization finding for the security/data
-  seat, not a blocking one for THIS scope pass: the fix is either a
-  server-side JSON projection (`payload->'runs'->...->'rubricAreas'` in the
-  Supabase query) or accepting the over-fetch as a first cut and shrinking it
-  later. Recorded as residual R-A25-4.
-
-### 2.4 The privacy rule that constrains the obvious cheap fix
-
-The obvious cheap fix - cache the computed term-trend client-side in
-`localStorage` so the panel reopens instantly - is **foreclosed by existing
-precedent, not by a new rule this scope invents**. Two citations:
-
-- `src/app/components/repo-grades/index.tsx:170-176`: per-cell edited scores
-  are explicitly kept in React state only, "never persisted to localStorage (a
-  typed but un-posted score surviving a reload would be surprising, and this
-  codebase's own precedent - GradingResults.tsx's `edits`/`postStatus` - does
-  not persist these either)."
-- `src/app/components/accommodations/accommodations.structure.test.ts:83-93`:
-  a structure-test canary asserts the data-access module `src/lib/accommodations.ts`
-  "never references localStorage or sessionStorage" at all (Ruling N4-L,
-  in-memory only for anything that is student/grading data rather than UI
-  chrome).
-
-**The rule this scope draws from those two instances, stated for the
-implementer**: any control this feature adds (a course selector, an
-expand/collapse toggle) may use a `ta-` localStorage key exactly like every
-other UI control in this repo, but the COMPUTED TREND DATA ITSELF - scores,
-rubric-area names as tied to a specific run, anything that is graded content
-rather than a UI preference - must be re-fetched from Supabase on each view,
-never cached into `localStorage`. This matches the existing single-run
-`ClassTrendsPanel`, which recomputes `computeClassTrends` from `entry` on
-every render (`ClassTrendsPanel.tsx` takes `entry` as a prop, never reads a
-cache) rather than persisting a report.
+Count: 8 kept, 2 handed over, 11 withdrawn, 4 promoted from residual to
+requirement. No revision-1 item had an executing test behind it, so nothing in
+the withdrawn column removes an enforcer.
 
 ---
 
-## 3. The surface
+## 2. Measurement basis
 
-### 3.1 Where a control could reach this, and the line cost of each
+Commands run 2026-09-27 in this checkout. `git log --oneline -1` -> `e25e56d`.
 
-Two live candidates, both measured, neither decided here:
+**The type every later section keys on.** `grep -n "^export interface
+GradingRunEntry" src/lib/grade/types.ts` -> `362`. Canary: the same grep for
+`GradingRunEntryZZZ` exits 1. `sed -n '362,371p'` shows the body, unchanged in
+shape from revision 1:
 
-**Candidate 1: `DraftedGradesTab.tsx`.** Already the host of the single-run
-`ClassTrendsPanel` (mounted at `DraftedGradesTab.tsx:655`, one JSX line, plus
-one import line at `:27` - the existing precedent for how cheaply a leaf panel
-mounts). Already has a course-scoped selector wired to a persisted key:
-`courseFilter` (`useState`, `:124-127`, seeded from
-`localStorage.getItem("ta-drafts-course")`, `:126`) and
-`collectCourseNames`/`resolveEffectiveCourseFilter`
-(`src/lib/grading-draft-view.ts:53-60,72-76`). A cross-assignment panel gated
-on "a specific course is selected" would reuse this control with **zero new
-persisted keys** - the panel would simply read the same `effectiveCourseFilter`
-value DraftedGradesTab already computes at `:368`, and fetch its own history
-independently (new server action, new leaf component) the same way
-`ClassTrendsPanel` computes its own report from a prop today.
-- **File-size headroom**: `DraftedGradesTab.tsx` is **898 lines**, measured
-  two ways, both run this pass: `wc -l src/app/components/DraftedGradesTab.tsx`
-  -> 898; PowerShell `@(Get-Content src/app/components/DraftedGradesTab.tsx).Count`
-  -> 898. Both instruments agree here (unlike the 42-line disagreement
-  `this-repo.md` documents on a different file - re-measured, not assumed).
-  Against the 1000-line ceiling (`src/file-size-ceiling.structure.test.ts:41`,
-  `LIMIT = 1000`), that is **102 lines of headroom**. The mount pattern
-  above (2 lines: one import, one render call for a new leaf component) fits
-  easily inside that headroom **only if the new panel does its own data
-  fetching and rendering in its own file**, the same discipline
-  `ClassTrendsPanel` already follows. If an architect instead chooses to
-  inline the history logic into `DraftedGradesTab.tsx` itself, it will not
-  fit: 102 lines is not enough room for a new query, a new loading/error
-  state, and a rendered history view.
+    export interface GradingRunEntry {
+      courseName: string;
+      assignmentName: string;
+      canvasUrl: string;
+      run: GradingRun;
+      institution?: string;
+      assignmentId?: string;
+      pointsPossible?: number | null;
+      offline?: boolean;
+    }
 
-**Candidate 2: the recording "tools" tab strip, where A16 places single-run
-trends** (`RecordingTab.tsx`, per A16's row, `docs/backlog.yml:352-361`).
-Measured this pass, NOT inherited from A16's note: `wc -l
-src/app/components/RecordingTab.tsx` -> 917; PowerShell `@(Get-Content
-src/app/components/RecordingTab.tsx).Count` -> 917. Against the 1000-line
-ceiling, that is **83 lines of headroom** - tighter than Candidate 1, and this
-file is ALSO covered by a second, stricter, non-recursive gate:
-`src/app/components/recording/recording-split.structure.test.ts`, which pins
-an EXACT count of tab-strip entries (12, `:132`), an exact count of
-`role="tabpanel"` occurrences (11, `:187`), and `panelTargets.size === 11`
-(`:219`) - all three break the moment a sub-tab or panel is added, per
-`this-repo.md:149`, which documents this exact failure mode ("adding a
-sub-tab breaks three of those and passes the fourth falsely"). Placing a
-cross-assignment view here would need it to NOT be a new sub-tab (to avoid
-the three-count break) or would need all three counts bumped in the same
-commit as a deliberate, checked change.
+`grep -n "courseId" src/lib/grade/types.ts` exits 1 with no output; canary
+`grep -c "courseName" src/lib/grade/types.ts` -> `1`, so the file was read and
+the negative is real. **There is no `courseId` field.**
 
-**This scope recommends Candidate 1** (Drafted Grades, course-filter-gated),
-for three measured reasons: more headroom (102 vs 83 lines), no
-non-recursive structural gate with hardcoded counts to bump, and it already
-owns the course-grouping mechanism this feature needs (section 2.2, Option A)
-- reuse over reinvention, per the architect seat's own standing question
-(`seats.md:169-171`). This is a recommendation for the architect wave to
-accept or override, not a decision this scope pass is authorized to make
-final.
+**Line counts, both mandated instruments, every file this scope's design
+touches or measures headroom against.** `wc -l` from the Bash tool and
+`@(Get-Content <file>).Count` from PowerShell, run separately:
 
-### 3.2 New module, not an extension of an existing 1000-line-adjacent file
+| File | `wc -l` | `@(Get-Content).Count` |
+|---|---|---|
+| `src/app/actions/grading.ts` | 941 | 941 |
+| `src/app/api/course-intel/ask/route.ts` | 976 | 976 |
+| `src/app/components/CoursesTab.tsx` | 474 | 474 |
+| `src/app/components/courses/CoursesTable.tsx` | 792 | 792 |
+| `src/app/components/courses/CourseRow.tsx` | 694 | 694 |
+| `src/app/components/courses/AskAiModal.tsx` | 152 | 152 |
+| `src/app/components/DraftedGradesTab.tsx` | 898 | 898 |
+| `src/app/components/RecordingTab.tsx` | 917 | 917 |
+| `src/app/components/drafted-grades/ClassTrendsPanel.tsx` | 212 | 212 |
+| `src/app/components/ui/ModalShell.tsx` | 108 | 108 |
+| `src/lib/grading-drafts.ts` | 377 | 377 |
+| `src/lib/grading-draft-view.ts` | 174 | 174 |
+| `src/lib/grade/class-trends.ts` | 355 | 355 |
+| `src/lib/grade/class-trends-insight.ts` | 270 | 270 |
+| `src/lib/grade/class-trends-draft.ts` | 228 | 228 |
+| `src/lib/canvas-url.ts` | 128 | 128 |
+| `src/lib/course-canvas-url-match.ts` | 372 | 372 |
+| `src/lib/course-intel/concern.ts` | 277 | 277 |
+| `src/lib/course-intel/engagement.ts` | 906 | 906 |
+| `src/lib/course-intel/types.ts` | 663 | 663 |
+| `src/lib/course-intel/context-block.ts` | 429 | 429 |
+| `src/lib/course-intel/offline-assembly.ts` | 758 | 758 |
+| `src/lib/course-intel/offline-payload.ts` | 354 | 354 |
+| `src/lib/canvas/submissions-grid.ts` | 264 | 264 |
 
-Whichever host is chosen, the reduction logic itself (a new
-`computeCrossAssignmentTrends`-shaped function, analogous to
-`computeClassTrends` but folding N `GradingRunEntry` reads into one
-per-course, per-area time series) belongs in a new file under `src/lib/grade/`
-- e.g. `src/lib/grade/class-trends-history.ts` - not inside `class-trends.ts`
-(355 lines, `wc -l src/lib/grade/class-trends.ts`, comfortable headroom, but a
-change of scope this size deserves its own file per this repo's own layering:
-`class-trends.ts` is layer A for ONE run, `class-trends-insight.ts` (270
-lines) is layer B, `class-trends-draft.ts` (228 lines) is layer C - each a
-separate file for a separate concern, and "layer A across N runs" is a fourth
-concern, not a modification of the first). This also sidesteps the
-`@/lib/grade` barrel client-bundle hazard `classTrendsRunCohort.ts`'s own
-header warns about (`src/app/components/grading-recording/classTrendsRunCohort.ts:24-27`):
-any new client-side cohort builder must import types through
-`@/lib/grade/types`, never the barrel.
+Both instruments agree on all 24. `docs/loop/this-repo.md` opens by recording
+that they have disagreed by 15 to 138 elsewhere and that 42 is the smallest
+recorded gap, not a bound - so agreement here is a measurement, not an
+assumption, and `Measure-Object -Line` was not used.
 
----
+**The ceiling that binds them.** `grep -n "LIMIT = 1000"
+src/file-size-ceiling.structure.test.ts` -> `41`. Canary: `grep -n "LIMIT =
+9999"` on the same file exits 1. `grep -n "RecordingTab"
+src/file-size-ceiling.structure.test.ts` -> `31` (a comment) and `52`, the
+latter inside `COVERED_BY_RECORDING_SPLIT_CHECK`, whose own comment says
+re-failing those paths "would be a duplicate report" - so that file is
+deliberately exempt here and its ceiling is enforced by
+`src/app/components/recording/recording-split.structure.test.ts:58` ("should
+keep RecordingTab.tsx under 1000 lines", via `countLines` imported at `:18`).
+`src/app/actions/grading.ts` is NOT in `ALLOWED_OVERAGE`
+(read in full at `:76-92`), so at 941 lines it has **59 lines of headroom**
+against the repo-wide gate. That is a wave-1 constraint, section 10.
 
-## 4. Persistence
-
-**No new `ta-` key is required if Candidate 1 (section 3.1) is accepted as
-scoped** - the panel reads the host's existing `effectiveCourseFilter`
-(`DraftedGradesTab.tsx:368`) and computes its own report from a server
-fetch on each mount, with no new textbox, select, or checkbox of its own.
-
-**If the architect wave adds a control anyway** (e.g. a "show last N
-assignments" selector, or an expand/collapse for the history panel), it needs
-a `ta-` prefixed key exactly like `DraftedGradesTab`'s own three
-(`ta-drafts-search`, `ta-drafts-sort`, `ta-drafts-course`, all confirmed live
-at `DraftedGradesTab.tsx:118,122,126`).
-
-**The exact-key-set canary that would need bumping: there is none.** Checked
-with a canary proving the search method itself works, then applied to the
-real question:
-
-```
-grep -rn "ta-rec-" src/app/components/recording/recording-split.structure.test.ts | wc -l
--> 90   (proves this grep style finds a REAL exact-key-set canary when one exists)
-
-grep -rln "ta-drafts" src/app/components/drafted-grades/     -> (no output, exit 1)
-find src/app/components/drafted-grades -name "*.test.ts" | xargs grep -l "ta-drafts"  -> (no output, exit 1)
-grep -rl "ta-drafts" src --include=*.test.ts                 -> (no output, exit 1)
-```
-
-All three commands were run this pass, none piped through `head`. The
-recording tab's own canary (`recording-split.structure.test.ts`) is scanned
-NON-recursively and by name (`this-repo.md:149`: "Scans
-`src/app/components/recording/` non-recursively plus `RecordingTab.tsx` and
-`TabShell.tsx` by name") and does not reach `drafted-grades/` at all. No other
-structure or wiring test anywhere in the repo asserts an exact set of
-`ta-drafts-*` keys (`grep -rl "ta-drafts" src --include=*.test.ts` returns
-nothing, confirmed above). **Consequence: a new key added under
-`drafted-grades/` today has no canary to bump, and also gets none for free -
-if the architect wants one, it must be written new, not "bumped."** State
-this to the implementer explicitly rather than letting them search for a
-canary that does not exist and conclude (wrongly) that its absence means no
-test covers this area at all - `DraftedGradesTab.tsx`'s existing 898 lines are
-otherwise covered by ordinary vitest unit tests on its extracted pure helpers
-(`grading-draft-view.ts`, `grading-draft-checklist.ts`, etc.), just not by a
-key-set canary.
+**Source-text instrument population, re-measured rather than quoted.**
+`find src -name "*.wiring.test.ts" | wc -l` -> **79**;
+`find src -name "*.structure.test.ts" | wc -l` -> **22**. Canary:
+`find src -name "*.wiringZZZ.test.ts" | wc -l` -> `0`.
+`docs/loop/this-repo.md` section 2 prints 68 and 17 and tells the reader to
+measure rather than quote it; those figures are stale and are not used here.
 
 ---
 
-## 5. The leverage question, answered against the mechanism
+## 3. What exists, traced from the control to the code
 
-**Class claimed: CORPUS, and it is EARNED, not inherited - conditionally.**
-Per `docs/loop/leverage.md`'s own struck-class table, "persistence (generic)"
-is explicitly NOT enough (262 files already hold a Supabase client; every
-server module gets that for free). What CORPUS requires, and what section 1
-established does not exist yet, is a LATER act reading the record back
-(`leverage.md:37`). Today, a reviewed `grading_drafts` row is written and then
-read by NOTHING (section 1: `listPendingGradingDrafts` never sees it, no
-other reader exists). Building the read-back - a query across N runs for one
-course, reduced into a term trend - is what would EARN this class; it is not
-free from the platform the way plain persistence is.
+### 3.1 There is no cross-assignment reducer. Widened search, with canaries.
 
-**What this specifically gives an instructor that a chat cannot, stated as a
-mechanism and checked against the two assumptions this repo's own research
-pass just falsified** (`leverage.md` is explicit that a chat CAN persist
-across sessions via Projects, and CAN write back to Canvas via an MCP
-server + PAT - so neither "it remembers" nor "it can act in Canvas" is an
-automatic win here):
+`grep -n "export function computeClassTrends" src/lib/grade/class-trends.ts` ->
+`259:export function computeClassTrends(entry: GradingRunEntry):
+ClassTrendsReport`. It takes **exactly one** entry. Canary: the same grep for
+`computeClassTrendsZZZ` exits 1.
 
-- The mechanism is not that the app remembers and a chat does not - a chat
-  with Projects memory also remembers. The mechanism is that **the app's
-  memory is populated automatically by the instructor's own ordinary use of
-  the grading tools already in this app**, with no separate re-entry step: a
-  graded run is written to `grading_drafts` the moment it is drafted
-  (`createGradingDraft`, called from the grade-to-draft workflow step), before
-  the instructor does anything else. A chat's memory of a prior assignment's
-  scores exists only if the instructor manually pastes or uploads that
-  assignment's rubric results into it, every time, for every assignment, and
-  nothing enforces that they did so completely or accurately.
-- The mechanism that survives review is **GUARANTEED, not CORPUS alone**:
-  `computeClassTrends` makes no model call today (`class-trends.ts`'s own
-  header, `:4-15`, "no model call, no network, no storage") and a
-  cross-assignment reducer built the same way inherits that property - the
-  term trend is a COUNT over stored, typed `rubricAreas` scores, not a
-  language model's summary of pasted history. A chat asked "how has this
-  class trended on X over the term" answers in prose assembled from whatever
-  was pasted into it, with no guarantee the count is complete or that nothing
-  drifted between paraphrase and fact. This app's version, built the way
-  layer A already is, would carry a stated denominator per area exactly the
-  way `class-trends.ts:207-243`'s `buildAreaSummary` already does for one run
-  - "N of M runs graded so far covered this area" - extended across
-  assignments instead of across students in one assignment.
+The absence was searched wider than one pattern:
 
-**Honest limit, stated rather than oversold**: this is a genuinely THIN
-version of CORPUS until N13b lands. `docs/backlog.yml:150-160` (N13b, also
-`unscoped`) is what turns a bare high/low direction into something with a
-named subset of struggling students - without it, a cross-assignment view can
-only say "this area was low in assignments 2 and 4, high in 3" with the SAME
-literal-consistency weakness `class-trends.ts:184-205`'s `classifyDirection`
-already has for one run (a realistically mixed set of scores across
-assignments will often classify as "mixed" and render nothing useful, the
-same failure N13b's own note describes for one run). A25's own row already
-says its shape "depends on... N13b, which is what makes a trend worth
-reading at all" (`docs/backlog.yml:461`) - this scope confirms that
-dependency independently rather than repeating it, and recommends the wave
-plan (section 6) sequence A25's reduction logic AFTER N13b's subset signal
-lands, so the cross-assignment view is built against the richer per-area
-signal from the start rather than needing a second pass to add it.
+    grep -rn "GradingRunEntry\[\]" src --include=*.ts --include=*.tsx | grep -v "\.test\."   -> 8 lines
+    grep -rn "Array<GradingRunEntry" src                                                     -> no output, exit 1
 
-**If the honest answer were "not much"**: it is not "not much," but it is
-"real once N13b exists, thin before it." The correct disposal per
-`leverage.md`'s own worked negative example is neither silent overselling nor
-rejection - it is the "Accept the cost explicitly" branch: ship the coarse
-high/low-only version if the owner wants it now, with the criteria stating
-plainly that its leverage is CORPUS-without-subset-attribution until N13b
-ships, or wait and build both together. That choice is the owner's / AC
-seat's, not this scope's.
+The 8 are `actions/grading.ts:282`, `grading-drafts.ts:33`,
+`grading-review-rows.ts:95,109,154`, `steps.grading-cartridge.ts:45`,
+`steps.grading-draft-flow.ts:224`, `steps.grading-run.ts:426` - every one is a
+single session's runs array being built, stripped, or turned into review rows.
+None reduces runs from different points in time. `grep -rln "trend\|Trend"
+src/lib/course-intel/` exits 1 with no output; canary `grep -rln "supabase"
+src/lib/course-intel/ | head -3` returns three files, so the directory is
+greppable and the negative is not a path artefact.
+
+**Conclusion, unchanged from revision 1 and re-verified:** this is not the
+"already built, merely unreachable" pattern. The reducer and the read-back both
+have to be built. What exists is the corpus and a single-run reducer.
+
+### 3.2 The corpus: durable, but NOT for the reasons revision 1 gave
+
+`grading_drafts` stores one row per grading run with `payload jsonb` holding
+`{ runs: GradingRunEntry[] }` (`src/lib/grading-drafts.ts:32-41`;
+`supabase/migrations/20260811000000_create_grading_drafts.sql:7-15`, read in
+full). RLS is on (`:20`) with four per-user policies - select at `:23`, insert
+at `:28`, update at `:33`, delete at `:38` - and the only index is
+`grading_drafts_user_created_idx on (user_id, created_at)` (`:17-18`) -
+**there is no index on `status`**, which matters to RES-3.
+`grep -rln "grading_drafts" supabase/migrations/ | wc -l` -> `4`; the fourth,
+`20261004000000_generated_artifacts.sql`, mentions the table only in a comment
+and alters nothing (opened).
+
+Every function in `grading-drafts.ts` scopes by user: `grep -n '\.eq("user_id"'
+src/lib/grading-drafts.ts` -> `254, 280, 302, 344, 361, 373`. Only two carry a
+status filter: `grep -n '\.eq("status"' src/lib/grading-drafts.ts` -> `255,
+281`, i.e. `listPendingGradingDrafts` (`:248`) and
+`findPendingGradingDraftForWorkflow` (`:272`).
+
+**Three corrections to revision 1, all measured.**
+
+1. **`deleteGradingDraft` has two callers, not one.** `grep -rn
+   "deleteGradingDraft\b" src --include=*.ts --include=*.tsx | grep -v
+   "\.test\." | grep -v "deleteGradingDraftAction"` returns
+   `actions/grading.ts:430` (inside `deleteGradingDraftAction`, `:424`) and
+   **`src/app/components/DraftedGradesTab.tsx:193`**, which calls the lib
+   function directly with the browser client. Canary: the same grep for
+   `deleteGradingDraftZZ\b` exits 1.
+
+2. **A draft IS deleted automatically, by an unattended step.** `grep -rn
+   "deleteGradingDraftAction" src --include=*.ts --include=*.tsx | grep -v
+   "\.test\."` returns, besides the declaration,
+   `steps.grading-repos.grade-repo.ts:127` and `steps.grading-repos.ts:133`.
+   The first is inside `findEquivalentOrReplaceableDraft` (`:112-140`, read in
+   full): an unattended repo-grading re-run looks up its own prior draft and
+   **deletes it** when the fresh results differ. The second is the
+   attended-only "Discard a grading draft" step (`:120-142`), which deletes by
+   id with no status check. So revision 1's "never called automatically after
+   review" is false.
+
+   **The conclusion survives, for a different reason.** The automatic delete
+   resolves its target through `findPendingGradingDraftForWorkflowAction(...,
+   "repos")`, and `findPendingGradingDraftForWorkflow` carries
+   `.eq("status", "pending")` at `:281` - so a REVIEWED row is never its
+   target. The one path that can erase a reviewed row is the attended
+   "Discard a grading draft" step, invoked with that row's id. That is the
+   honest answer to "what deletes this data": a reviewed draft is durable
+   against every automatic path and erasable by one explicit attended step and
+   by the tab's own discard button.
+
+3. **A reviewed row is readable, just not enumerable.** `getGradingDraft`
+   (`:295`) has no status filter - `.eq("user_id", userId)` at `:302` is its
+   only filter - and `getGradingDraftAction` (`actions/grading.ts:374`) returns
+   `status: "pending" | "reviewed"` (`:380`). So the review workflow already
+   reads reviewed rows by id. `grep -rn "listReviewedGradingDrafts" src` exits
+   1 with no output; canary `grep -rln "listPendingGradingDrafts" src | wc -l`
+   -> `5`. **What is missing is an enumeration, not a read.**
+
+### 3.3 Reuse survey: the comparable subsystem revision 1 missed
+
+RULING 63. `src/lib/course-intel/` already holds a cross-assignment,
+course-scoped reducer. Every citation opened:
+
+- `src/lib/canvas/submissions-grid.ts` (264 lines), header at `:1-3`:
+  "Course-wide submission grid: every submission in a course, in ONE paginated
+  read, independent of assignment count."
+- `src/lib/course-intel/types.ts:189`: `byAssignmentId: Readonly<Record<string,
+  StudentSubmissionFact>>` on a per-student record - a cross-assignment
+  structure.
+- `src/lib/course-intel/engagement.ts:435`: `export function
+  computeEngagementSet(args: ComputeEngagementArgs): EngagementSet`, in a
+  906-line module that reduces across assignments.
+  `src/lib/course-intel/types.ts:555` documents the rendered fact
+  "3 of 7 assignments missing", built in code - a cross-assignment aggregate
+  with a stated denominator.
+- `src/lib/course-intel/concern.ts` (277 lines), header at `:1-2`: "THE
+  CONCERN SET. This file is the security control, not a helper" - a pure
+  reducer over typed numbers, computed in TypeScript before any model call
+  (`src/app/api/course-intel/ask/route.ts:777`, `computeConcernSet`), with a
+  receipt over the model's answer at `:868`
+  (`unexplainedStudentIndices`). `docs/loop/leverage.md:42` cites these as
+  `:773-781` and `:864-871`; both have drifted and the values above are today's.
+- **It keys on the same parsed Canvas course id A25 needs.**
+  `src/app/api/course-intel/ask/route.ts:525`:
+  `const canvasCourseId = parseCanvasCourseId(course.canvasUrl ?? "");`
+- It is reachable: `src/app/components/course-intel/index.tsx` is rendered by
+  `src/app/page.tsx:662`, imported at `:20`.
+
+**What it does NOT have, measured.** `grep -rln "trend\|Trend"
+src/lib/course-intel/` exits 1. `grep -rln "grading_drafts\|grading-drafts"
+src/lib/course-intel/ src/app/api/course-intel/` exits 1; canary
+`grep -rln "supabase" src/lib/course-intel/ | head -3` returns three files. So
+the subsystem has no trend vocabulary and never reads the grading-draft table.
+
+**And one thing it deliberately refuses, quoted with its scope stated.**
+`src/lib/course-intel/offline-payload.ts` is that subsystem's wire boundary for
+the offline path. Its header (`:11-18`) states: "DATA MINIMISATION IS
+STRUCTURAL HERE, NOT A CONVENTION (D7). `mapOfflineAssemblyInputs` reads
+exactly six fields off a `GradingRow` ... Nothing else is accepted here." And
+at `:207-210` it sets `rubricAreas: []` with the reason "This offline mapping
+has no rubric-area source of its own".
+
+**What that passage forbids, and what it does not.** It fixes the six fields
+the OFFLINE path's Route-Handler wire accepts off a browser grading row. It is
+scoped to that one function and that one path. It does **not** forbid rubric
+areas anywhere else, it is not an owner decision, and it says nothing about
+`grading_drafts`, which is server-side and never crosses that wire. It is
+therefore a **cost stated for branch (B)** in section 13, not a foreclosure -
+per `docs/loop/traps-spec.md:123-129`, a comment is not a ruling.
+
+A second related measurement, so nobody later mistakes the on-device grading
+table for A25's corpus: `src/app/components/grading-recording/grading-row-serialization.ts:308-317`
+states that `rubricAreas` "never reaches storage" under `ta-rec-grade-table`,
+because "this run's cohort is `useState` and does not survive a reload", and
+`fromWire` "emits `[]` UNCONDITIONALLY". So the durable rubric-area corpus in
+this app is `grading_drafts.payload`, and only that.
 
 ---
 
-## 6. Wave plan
+## 4. The join key (RULING 61), and the remainder measured across every producer
 
-This is a scope, not the architect's plan - the wave breakdown below is a
-proposal the architect wave should accept, adjust, or replace, but every wave
-below deliberately includes the file that CALLS or RENDERS the new export, per
-the standing rule this repo keeps relearning (`seats.md:161-163`,
-`AGENTS.md` "assignment must include the wiring file").
+### 4.1 The key
 
-**Wave 1 - data and reduction (no UI).**
-- `src/lib/grade/class-trends-history.ts` (new) - the pure reducer, analogous
-  to `computeClassTrends` but over `GradingRunEntry[]` grouped by
-  `courseName` (Option A, section 2.2) with each area's per-assignment
-  direction plus a stated denominator per assignment.
-- `src/lib/grading-drafts.ts` - add `listReviewedGradingDrafts` (or a combined
-  `listGradingDraftsForCourse`) alongside the existing `listPendingGradingDrafts`,
-  same `.eq("user_id", userId)` scoping discipline as every function in this
-  file already follows (`grading-drafts.ts:246,262` etc.).
-- `src/app/actions/grading.ts` - a new server action wrapping the new list
-  function (`requireOwner()` + `createServiceClient()`, the pattern every
-  existing action in this file already follows, e.g. `:355-370`).
-- File-set is disjoint from any other chunk touching `class-trends.ts`,
-  `class-trends-insight.ts`, or `class-trends-draft.ts` (layers A/B/C for a
-  SINGLE run) - this wave adds a new file and two new functions, it does not
-  edit those three.
+A stable course identifier IS recoverable from a stored entry at zero type
+cost, by the function the app already uses for exactly this:
 
-**Wave 2 - surface (depends on Wave 1's action and reducer).**
-- A new leaf component, e.g.
-  `src/app/components/drafted-grades/ClassTrendsHistoryPanel.tsx` - fetches
-  via Wave 1's action, renders using Wave 1's reducer output.
-- `src/app/components/DraftedGradesTab.tsx` - the two-line mount (import +
-  render, following the exact precedent at `:27` and `:655` for
-  `ClassTrendsPanel`), gated on `effectiveCourseFilter !== "all"`
-  (`:368`) so the panel appears once a specific course is selected - THIS is
-  the file list entry that makes Wave 1's export reachable; a wave list
-  without it ships the reducer dead, exactly the failure mode this repo has
-  shipped twice before.
-- Re-measure `DraftedGradesTab.tsx`'s line count with both `wc -l` and
-  `@(Get-Content ...).Count` after this wave, before calling it done - the 102
-  lines of headroom (section 3.1) is a pre-wave measurement, not a promise.
+- `src/lib/canvas-url.ts:87`: `export function parseCanvasCourseId(url:
+  string): string | null`, body `url.match(/\/courses\/(\d+)/)` at `:88-89`.
+- `grep -rn "parseCanvasCourseId(entry.canvasUrl" src --include=*.ts
+  --include=*.tsx` returns three live sites:
+  `src/app/components/DraftedGradesTab.tsx:390`,
+  `src/lib/workflows/registry/steps.grading-draft-flow.ts:458`,
+  `src/lib/workflows/registry/steps.grading-run.ts:676`. Canary: the same grep
+  for `parseCanvasCourseIdZZZ(entry.canvasUrl` exits 1.
+- `grep -rn "parseCanvasCourseId" src --include=*.ts --include=*.tsx | grep -v
+  "\.test\." | wc -l` -> **94** non-test occurrences, so this is the app's
+  ordinary way of getting a course id out of a stored URL.
 
-**Wave 3 - UX/visual/accessibility passes** against the as-built Wave 2 diff,
-per the standing wave-3 trigger table (`seats.md:50,54,56` - any change a user
-can see, click, or hear read aloud; any new surface; any change to markup,
-focus, or keyboard behaviour).
+**And the repo holds a rule against the string key revision 1 recommended.**
+`src/lib/course-canvas-url-match.ts:3` (header, opened): "on
+parseCanvasCourseId(url) AND host, **never raw string equality**", and the
+matching rule at `:180`: "COURSE ID must match on both sides
+(parseCanvasCourseId), full stop."
 
-**Sequencing note, not a hard blocker**: `blocked_by: []` on the A25 row is
-accurate in the mechanical sense (nothing prevents Wave 1 from starting), but
-section 5 above recommends the reduction logic in Wave 1 be designed against
-N13b's subset signal rather than only today's high/low direction, to avoid a
-second pass. If N13b has not landed when this row is picked up, Wave 1 should
-still ship the high/low-only version with the criteria stating that
-limitation explicitly (section 5's "accept the cost" branch), rather than
-waiting.
+**REQ-1.** The reducer groups entries by `parseCanvasCourseId(entry.canvasUrl)`
+and by nothing else. **Object:** the grouping key the reducer computes.
+**Instrument:** a unit test on the reducer that feeds two entries with
+identical `courseName` and different `canvasUrl` course ids and asserts two
+groups, plus two entries with different `courseName` and the same
+`canvasUrl` course id and asserts one group. **Direction of failure:** RED if
+either pair lands in the wrong number of groups - i.e. red the moment the
+implementation falls back to `courseName` equality.
+
+### 4.2 Do NOT reuse `findCourseForCanvasUrl` as the join. Measured reason.
+
+`findCourseForCanvasUrl` (`src/lib/course-canvas-url-match.ts:292`) is generic
+over `T extends { canvasUrl: string | null; institution?: string | null }`, so
+a `Course` satisfies it, and calling it with a one-element array looks like the
+right reuse. **It is not**, and the reason is in its own body, read in full at
+`:300-371`:
+
+- Step 1 (`:316`, the comment; the filter follows) keeps only rows whose parsed
+  id equals the passed URL's.
+- Step 2 (`:324` comment, `:328` the `if (tabHost) {` branch) returns a match
+  only when the stored side's host AND the passed URL's host are both non-null
+  and equal.
+- Otherwise step 3 (`:336` comment, `:339` the filter) runs, and branch (a) -
+  the unique, host-inconclusive case at `:345` - opens
+  `if (!normalizedAcronym) return null;` at **`:351`**
+  (`grep -n "normalizedAcronym) return null" src/lib/course-canvas-url-match.ts`
+  returns `351` and `369`, the second being branch (b) at `:364`).
+- The module's own header at `:50-55` records that no current caller supplies
+  `knownAcronyms` and describes the acronym argument as optional.
+
+So a call with no acronym returns **null** for every entry whose stored URL is
+the host-less `/courses/<id>` shape that the doc comment at `:193` says
+"LmsCell.tsx/CoursePicker.tsx actually emit". Reusing it would silently drop
+those entries from every course's history. `hostOf`, the host half, is
+module-private (`grep -n "function hostOf" src/lib/course-canvas-url-match.ts`
+-> `106`, with no `export`), so the host clause is not separately reusable
+either.
+
+**REQ-2.** `src/lib/course-canvas-url-match.ts` appears on the do-not-reuse
+list with the reason above; the reducer reuses `parseCanvasCourseId` from
+`@/lib/canvas-url` directly, applied to BOTH sides of the comparison.
+**Object:** the reducer's import list. **Instrument:** a source-text assertion
+that the reducer imports `parseCanvasCourseId` from `@/lib/canvas-url` and does
+not import `course-canvas-url-match`. **Direction of failure:** RED if the
+reducer imports the matcher, or if it compares a raw `canvasUrl` string.
+
+### 4.3 The remainder is NOT distinguished by `offline`. RULING 61 corrected.
+
+RULING 61 says offline runs are "a NAMED remainder with a distinguishing flag".
+That is true of one producer and false of four. Measured:
+
+    grep -rn 'canvasUrl: ""' src --include=*.ts --include=*.tsx | grep -v "\.test\."
+    grep -rn "offline: true" src --include=*.ts --include=*.tsx | grep -v "\.test\."
+
+Of the sites that build a `GradingRunEntry` which reaches a `grading_drafts`
+row:
+
+| Producer site | `canvasUrl` | `offline` |
+|---|---|---|
+| `steps.grading-run.ts:497-505` (online) | `row.canvasUrl ?? ""` | absent |
+| `steps.grading-run.ts:554-560` (offline) | `""` (`:557`) | `true` (`:559`) |
+| `steps.grading-cartridge.ts:216-223` | `""` (`:219`) | `true` (`:221`) |
+| `steps.grading-repos.grade-repo.ts:462-469` | `""` (`:465`) | **absent** |
+| `steps.grading-repos.helpers.ts:339-347` | `assignmentUrl` (`:342`), which the unattended caller passes as `""` at `:428` | **absent** |
+| `steps.grading-repos.ts:271-277` | `""` (`:274`) | **absent** |
+| `steps.grading-repos.ts:321-327` | `""` (`:324`) | **absent** |
+| `actions/grading.ts:312-320` (`buildZeroGradingEntry`) | `${baseUrl}/courses/${courseId}/assignments/${assignmentId}` (`:315`) | absent |
+
+`grep -c "offline" src/lib/workflows/registry/steps.grading-repos.ts` -> `0`
+(exit 1); canary `grep -c "GradingRunEntry"` on the same file -> `4`, so the
+file was read. **Four draft-reaching producer sites emit an empty `canvasUrl`
+with `offline` undefined**, so `offline?: boolean` does not name the remainder.
+
+**Worse for the withdrawn Option A, on two independently measured counts.**
+First, two of those sites set `courseName: r.fullName`
+(`steps.grading-repos.ts:272` and `:322`), and `r.fullName` is the value passed
+as `repo:` to `buildRepoGradingLogEntry` at `:264` - a repository identifier,
+not the instructor's course name - while the other two repo sites use
+`tile.name`. So the string key would split one course's repo-graded history
+across two spellings, on top of the collision hazard revision 1 deferred.
+Second, `actions/grading.ts:313` sets `courseName: "Course"` - a literal string,
+identical for every course the zero-drafting path ever touches, so a string key
+would merge every one of them into a single fictitious course. That same
+producer's `canvasUrl` IS parseable (`:315`), so REQ-1 groups those rows
+correctly and REQ-3 never counts them as unkeyable: the parsed-id key is not
+merely tidier here, it is the difference between right and silently wrong.
+
+**And Option B (thread `courseId` through) has its own measured gap:**
+`steps.grading-run.ts:110` sets `courseId: ""` with the comment "no local
+tile", so the field revision 1 proposed to thread is already empty on one of
+its own populate paths (`grep -n "courseId:"
+src/lib/workflows/registry/steps.grading-run.ts` -> `62, 110, 200, 223, 398`).
+
+**REQ-3.** The reducer returns a counted `unkeyableEntryCount` (entries for
+which `parseCanvasCourseId(entry.canvasUrl)` is null), and never silently drops
+them. **Object:** the reducer's return value on a mixed input. **Instrument:** a
+unit test feeding three entries - two keyable to the same id, one with
+`canvasUrl: ""` and `offline` undefined - asserting one group of two and
+`unkeyableEntryCount === 1`. **Direction of failure:** RED if the third entry
+is dropped without being counted, and RED if the count is derived from
+`entry.offline` rather than from the parse result.
+
+**REQ-4.** The surface renders `unkeyableEntryCount` whenever it is non-zero,
+in the same sentence as the denominator. **Object:** the rendered summary.
+**Instrument:** a source-text wiring assertion that the surface's render path
+reads `unkeyableEntryCount`. **Direction of failure:** RED if the field is
+computed and never read, which is how "a term with no history" and "a term
+whose history could not be keyed" become indistinguishable on screen.
 
 ---
 
-## 7. Residual register
+## 5. The corpus read
 
-Every entry: owner, instrument, object, direction of failure, step.
+### 5.1 The population requirement - this is where round 1's blocker lived
+
+Check B2 / RULING 60: revision 1 gated the feature on a value derived from the
+pending-only population. The fix is not only a different surface; it is a
+stated requirement about the population, with an executing instrument.
+
+`listPendingGradingDrafts` (`grading-drafts.ts:248-260`) is
+`.select("*").eq("user_id", userId).eq("status", "pending").order("created_at",
+{ ascending: true })`. A25's subject is REVIEWED runs, so the new function must
+not carry that filter.
+
+**REQ-5.** The new list function's query carries `.eq("user_id", userId)` and
+does **not** carry `.eq("status", "pending")`. **Object:** the sequence of
+`.eq(column, value)` pairs the function sends. **Instrument:** an executing
+unit test using the fake-Supabase idiom this repo already has at
+`src/lib/grading-drafts.test.ts:269-334` (a hand-built object whose `from`/
+`insert`/`select`/`single` chain records what it was called with), extended so
+`select()` returns a recorder whose `eq()` appends `[column, value]` and whose
+`order()` resolves to `{ data: [...], error: null }`. Assert the recorded pairs
+contain `["user_id", <id>]` and do not contain `["status", "pending"]`.
+**Direction of failure:** RED if the recorded pairs include
+`["status", "pending"]`, and RED if `["user_id", ...]` is absent.
+
+That assertion is the thing revision 1 had no instrument for. It fails on the
+exact edit that would reintroduce the blocker, and it executes under this
+repo's node-env vitest with no database.
+
+### 5.2 Read path: no new server action is needed
+
+`DraftedGradesTab.tsx` reads `grading_drafts` **from the browser** with the
+provider's client: `useSupabase()` imported at `:6`, destructured at `:91`,
+`listPendingGradingDrafts(supabase, user.id)` at `:151` and `:173`, inside the
+async-IIFE-plus-`cancelled`-flag effect at `:140-167`, and
+`deleteGradingDraft(supabase, user!.id, draft.id)` at `:193`. RLS is on the
+table (`20260811000000_create_grading_drafts.sql:20-30`), so the browser client
+is sufficient and is the established pattern for this table.
+
+**REQ-6.** The new read reuses that client-side pattern; no new export is added
+to `src/app/actions/grading.ts`. **Object:** wave 1's write set. **Instrument:**
+`git status --short` against the wave's file list at the wave gate, plus
+`@(Get-Content src/app/actions/grading.ts).Count` unchanged at 941.
+**Direction of failure:** the wave fails if `src/app/actions/grading.ts`
+appears in `git status --short`.
+
+This is not only tidiness: that file is at **941 lines with 59 of headroom**
+(section 2), it is not in `ALLOWED_OVERAGE`, and it is the file a concurrent
+agent is most likely to be in. If branch (B) is chosen the read must instead be
+reachable server-side - see section 10.2, where REQ-6 is the one requirement
+that changes.
+
+### 5.3 What the read must not carry
+
+`stripGradeResultForDraft` (`src/lib/workflows/grading-review-rows.ts:40`)
+keeps, explicitly enumerated from `:47` (`const shared = {`): `student` (`:48`),
+`overallComment` (`:49`), `strengths` (`:56`), `improvements` (`:57`),
+`resubmitNotice` (`:58`), `rubricAreas` (`:59`), `totalScore` (`:60`),
+`feedback` (`:61`), `mergedFileCount` (`:62`), `gradedRepo`, `gradedRef`. So
+the stored payload carries every student's name and full written feedback.
+Revision 1's over-fetch list omitted `student`, which is the field that turns
+this from a memory note into a data-minimization finding.
+
+`computeClassTrends` reads only `result.rubricAreas` (`grep -n "rubricAreas"
+src/lib/grade/class-trends.ts` -> `267, 269, 284, 288`; the only read is
+`for (const rubricArea of result.rubricAreas)` at `:288`).
+
+A server-side JSON projection is the ideal fix and **cannot be verified in this
+checkout** - `docs/loop/this-repo.md` section 6: no live database, no `.env`.
+So the over-fetch is ACCEPTED explicitly for wave 1, and what is required
+instead is a bound on what the aggregate can carry:
+
+**REQ-7.** The reducer reads no field of a `GradeResult` other than
+`rubricAreas`, and the criteria state the accepted over-fetch in those words.
+**Object:** the reducer's source text. **Instrument:** a source-text assertion
+over the reducer file, comment-stripped with the `stripComments` helper the
+existing wiring tests use (`src/app/components/drafted-grades/classTrends.wiring.test.ts:37`),
+that it contains none of `.student`, `.overallComment`, `.feedback`,
+`.strengths`, `.improvements`, `.submissionText`; with a canary asserting the
+same checker DOES fire on an inline fixture string containing `result.student`.
+**Direction of failure:** RED if the reducer's source reads any of those
+fields; and RED (canary) if the checker reports clean on the fixture, which
+would mean the negative is a spelling artefact.
+
+### 5.4 The denominators, stated rather than inferred
+
+Layer A's denominator is per-SUBMISSION, not per-run. `buildAreaSummary`
+(`src/lib/grade/class-trends.ts:207`) builds
+`"${trend.resultsWithArea} of ${trend.totalResults} submissions graded so far
+covered ..."` at `:208`. Revision 1 paraphrased this as "N of M runs", which is
+a different quantity. `AreaTrend` (`:124-153`) carries `resultsWithArea`,
+`totalResults`, `scoredCount`, `unscoredCount`, `percentValues`, `rawValues`,
+`averagePercent`, `averageRaw`, `direction`; `ClassTrendsReport` (`:155-174`)
+carries `totalResults`, `ungraded: { notAttempted, gradingFailed }`, `areas`,
+`strengths`, `struggles`, `summaryLines`. `classifyDirection` is at `:184`, with
+`HIGH_PERCENT_THRESHOLD = 70` (`:114`) and `LOW_PERCENT_THRESHOLD = 60`
+(`:115`).
+
+**REQ-8a (denominators).** The term report states two denominators, both
+computed from the input and neither hardcoded: **how many of the term's
+assignments carried this area** (the cross-assignment denominator A25 adds) and
+**how many submissions each of those assignments graded** (layer A's own,
+carried through). **Object:** the two numbers in the rendered summary.
+**Instrument:** a unit test feeding three entries, two of which carry the area,
+asserting the area's assignment denominator is 3 and its covered count is 2,
+and that adding a fourth entry changes the denominator to 4.
+**Direction of failure:** RED if either number is constant across inputs of
+different length - the shape a hardcoded denominator takes.
+
+One further honest note on the denominator's meaning: `class-trends.ts:18`
+says "engine.ts:126 slices to DEFAULT_MAX_SUBMISSIONS (5)". That parenthetical
+is stale - `grep -n "DEFAULT_MAX_SUBMISSIONS" src/lib/gemini.ts` -> `32:const
+DEFAULT_MAX_SUBMISSIONS = 40`. The per-run cohort is therefore capped at 40
+submissions, not 5, and a term denominator inherits that cap. (`src/lib/grade/engine.ts`
+is being edited by a concurrent agent as this is written, so its own line
+number for the `.slice` is not cited here; the value is read from `gemini.ts`,
+which is untouched.)
+
+---
+
+## 6. The surface
+
+### 6.1 Why Drafted Grades is withdrawn, and the two figures revision 1 got wrong
+
+**Drafted Grades cannot host this.** All four facts from `grep -n` on
+`src/app/components/DraftedGradesTab.tsx` at HEAD:
+
+1. `:151` and `:173` - the only loader is `listPendingGradingDrafts`, the
+   pending-only list.
+2. `:362` - `const courseNames = collectCourseNames(drafts || []);`
+3. `:368` - `const effectiveCourseFilter =
+   resolveEffectiveCourseFilter(courseFilter, courseNames);`
+4. `:485-490` - the course `<MenuItem>` options are exactly `courseNames`, plus
+   a hardcoded `"all"` at `:485`.
+
+`collectCourseNames` (`src/lib/grading-draft-view.ts:53-62`) adds
+`entry.courseName` at `:57` for every entry of every loaded draft, and
+`resolveEffectiveCourseFilter` (`:78-81`) returns `"all"` unless the stored
+value is in that list. Its own doc comment at `:71-77` says why: "Falls back to
+'all' when the persisted course filter no longer matches any loaded draft (e.g.
+that draft was reviewed and left the pending list)". A course whose runs are all
+reviewed contributes no name, is not selectable, and the panel never renders.
+Nothing here catches that - `docs/loop/this-repo.md` section 2: no component is
+rendered by any test. **Drafted Grades is the pending surface by construction.**
+
+For the record, and because revision 1's figures must not be inherited: the
+RecordingTab candidate's three gate counts are at
+`recording-split.structure.test.ts:143` (`toHaveLength(12)`), `:198`
+(`toHaveLength(11)`) and `:230` (`panelTargets.size).toBe(11)`) - measured by
+`grep -n "toHaveLength(12)\|toHaveLength(11)\|panelTargets.size"` on that file;
+canary `grep -n "toHaveLength(9999)"` exits 1. Revision 1 printed `132`, `187`
+and `219`, which are `docs/loop/this-repo.md` section 3's stale figures, all
+three low by 11.
+
+### 6.2 Branch (A) surface: a per-course window off the courses table
+
+**NOT DISPATCHABLE until the owner answers section 13.**
+
+Recommended host: the Courses tab's per-course row, hosted by
+`src/app/components/CoursesTab.tsx`, following the `AskAiModal` precedent
+exactly. The whole chain was opened:
+
+| Hop | Site | What is there |
+|---|---|---|
+| 1 | `src/app/components/courses/CourseRow.tsx:687` | `<button type="button" className={styles.linkButton} onClick={() => onAskAi(course)}>` - the trigger, in the row |
+| 2 | `CourseRow.tsx:82` / `:126` | `onAskAi: (course: Course) => void;` in the props type, destructured |
+| 3 | `src/app/components/courses/CoursesTable.tsx:160` / `:203` / `:734` | prop type, destructure, pass-through |
+| 4 | `src/app/components/CoursesTab.tsx:88` / `:367` / `:448` | `useState<Course \| null>`, `onAskAi={(course) => setAskAiCourse(course)}`, and the mount `{askAiCourse && <AskAiModal course={askAiCourse} onClose={() => setAskAiCourse(null)} />}` |
+
+**Why this host and not the one revision 1 chose - the reachability condition,
+stated as the requirement RULING 60 asks for.** A course row exists whenever
+the course exists. Nothing about its presence is derived from draft status, so
+the trigger is reachable for a course whose runs are all reviewed - the exact
+state the feature exists for. `CoursesTab.tsx:448`'s guard contains one
+identifier, the modal-open state, and the same file mounts two further
+per-course modals the same way (`RecommendTextbooksModal` at `:450`,
+`TextbookPhotoModal` at `:457`), so this is the established shape.
+
+**Cost, counted from the precedent rather than estimated:** 3 lines in
+`CourseRow.tsx`, 3 in `CoursesTable.tsx`, 4 in `CoursesTab.tsx` (import,
+state, handler, mount) = **10 lines across three existing files**, at 694, 792
+and 474 lines - none within 200 lines of the ceiling. Plus one new leaf
+component file.
+
+**Click cost, counted twice as the UX seat's brief requires.** First use:
+Courses tab -> the course's row -> the trigger = the same count `AskAiModal`
+costs today from the same row. Repeat use: identical, because nothing is
+persisted that would shortcut it. It is NOT cheaper than Drafted Grades'
+zero-click inline panel, and that is the price of reachability; it is stated
+here rather than discovered at Verify.
+
+**Reuse for the shell.** `AskAiModal.tsx:14` imports `ModalShell` from
+`../ui/ModalShell`, and `:70-74` passes `label` (`:71`), `onDismiss`,
+`restoreFocusRef` (`:73`) and `fallbackFocusRefs` (`:74`).
+`src/app/components/ui/ModalShell.tsx:77`
+declares it; `:93-95` render `role="dialog"`, `aria-modal="true"`,
+`aria-label={label}`, and `:86` wires `useModalDismiss({ open: true, onDismiss,
+restoreFocusRef, fallbackFocusRefs })`. So Escape, the accessible name and
+focus restoration come from a shared component, not from new code.
+
+**Zero new CSS.** `AskAiModal.tsx` adds no stylesheet: `:12-13` import
+`../../page.module.css` and `./CoursesTable.module.css` and every `className`
+(8 occurrences, `grep -c "className"`) reuses an existing class. That matters
+because `src/app/components/courses/page-module-css-orphan-classes.test.ts:290`
+pins `const PINNED_ORPHAN_CEILING = 120` as a ratchet (canary: the same grep
+for `PINNED_ORPHAN_CEILING_ZZZ` exits 1), and
+`page-module-css-classes.test.ts:342` requires every `styles.<name>` reference
+to resolve in the stylesheet its own import points at.
+
+**REQ-11 (reachability, with an executing instrument).** A wiring test in
+`src/app/components/courses/` asserts the whole chain, in the idiom
+`src/app/components/courses/FilesCell.wiring.test.ts` already uses - whose own
+header at `:9` says it guards "reachability, not just correctness" - and in the
+idiom `src/app/components/drafted-grades/classTrends.wiring.test.ts:44` uses,
+titled "DraftedGradesTab mounts ClassTrendsPanel (reachability, not merely
+rendering)". **Object:** the four hops above, in the three existing files plus
+the new panel. **Instrument:** `readFileSync` over the four files with
+`stripComments` applied first (the existing tests' own helper), asserting: the
+trigger's `onClick` calling the new prop exists in `CourseRow.tsx`; the prop
+name appears in the props type and the pass-through in `CoursesTable.tsx`; the
+mount in `CoursesTab.tsx` exists and its guard expression contains only the
+modal-open state identifier; and the new panel imports `ModalShell` and the
+reducer. Each checker is proven against an inline canary fixture before being
+run against the real file, exactly as `FilesCell.wiring.test.ts` does.
+**Direction of failure:** RED if any hop is missing, and RED if the mount's
+guard expression names any identifier other than the modal-open state - which
+is what would reintroduce round 1's blocker in a new location.
+
+Pinning the guard's identifier rather than its spelling is deliberate:
+`docs/loop/traps-spec.md`'s own record, and this repo's memory of source-text
+tests over-specifying, both say pin the fact and the ordering, never the prose.
+
+### 6.3 Branch (B) surface
+
+**NOT DISPATCHABLE.** Under (B) there is no new surface at all: the reducer's
+output becomes a counted fact family inside `src/lib/course-intel/`'s context
+assembly, surfaced in the existing answer and history
+(`src/app/components/course-intel/index.tsx:114-139`). The trigger is the
+existing textbox; the tab has no course picker by design (`index.tsx:3-14`).
+REQ-11's object becomes the fact family's presence in the assembled context and
+the receipt over the answer, not a mount; REQ-9 (section 8) becomes
+load-bearing rather than belt-and-braces. Two measured costs are in section 13.
+
+---
+
+## 7. Persistence
+
+**RULING 59: the foreclosure revision 1 built is WITHDRAWN, and is not replaced
+with a better-cited one.** `docs/owner-decisions-2026-09-23.md` DECISION 10
+(`:247-250`) settles the question: "A stored rubric persists on the
+instructor's own device. Accepted. The rubric is the instructor's own material
+on the instructor's own machine, and it is the same class of data the app
+already persists there under other keys." Per
+`docs/loop/traps-spec.md:123-129`, where a decision bears on the question the
+seat does not reason from inferred precedent at all. **On-device persistence is
+available to this design.** Revision 1's section 2.4 is deleted, not softened.
+
+What IS binding, quoted with its scope:
+
+- **DECISION 3** (`docs/owner-decisions-2026-09-23.md:99-100`): "Every new
+  control persists under a `ta-` prefixed key, and the relevant exact-key-set
+  canary tests must be bumped in the same commit." That is an obligation, not a
+  preference - revision 1 rendered it as the architect's choice (check M4).
+- **DECISION 9** (`:237-244`) supplies the transition rule when no exact-set
+  canary exists: "when a SIXTH key lands in that directory, the exact-set canary
+  is written then, covering all of them. Without that clause this is a permanent
+  hole rather than a deferral." Its stated subject is A39's own directory. It is
+  used below as the MODEL for a deferral, and the trigger for a different
+  directory is stated in that directory's own measured terms rather than
+  inherited.
+
+**Measured for the branch-(A) host directory.** `grep -rnoE 'const [A-Z_]+ =
+"ta-[a-z0-9-]+"' src/app/components/courses/` returns **9** declarations:
+`CoursesTable.tsx:50,51,52` (`ta-courses-sort`, `ta-courses-columns`,
+`ta-courses-column-order`), `WeeklyChecklistCell.tsx:160`
+(`ta-weekly-checklist-new-item-kind`), and
+`WeeklyChecklistOverviewModal.tsx:84-88` (the five
+`ta-weekly-checklist-overview-*` keys). Canary: the same pattern with prefix
+`"zz-` returns 0.
+
+**And no exact-key-set canary covers that directory.** `grep -rn
+"ta-courses\|ta-weekly-checklist" src --include=*.test.ts` returns exactly one
+line, `src/app/components/home/useAppNavigation.test.ts:102`, and it pins
+`ta-courses-section` - a navigation key, not a key of this directory. Canary
+that the literals are greppable: `grep -rln "ta-courses-sort" src` returns
+`CoursesTable.tsx`, `AutomationsPanel.tsx` and `courses-table-helpers.ts`.
+`src/app/components/courses/weekly-checklist-overview-window.test.ts` asserts
+geometry, not key sets (`grep -n "it("` over it, 19 assertions, none naming a
+key).
+
+**REQ-12.** If the wave-2 architect adds any control to the branch-(A) panel it
+persists under a `ta-` prefixed key, and the commit states - measured, with the
+command - that no exact-key-set canary covers
+`src/app/components/courses/`, together with the trigger at which one is
+written. **Object:** the new key and the set of tests naming it. **Instrument:**
+`grep -rn "<the new key>" src --include=*.test.ts`, plus the two commands above
+re-run at that commit. **Direction of failure:** the wave fails if a new
+control persists nothing, if it persists under a key without the `ta-` prefix,
+or if the commit asserts a canary bump without the grep that shows which test
+was bumped.
+
+**Recommendation, so the architect is not handed an open question:** ship the
+branch-(A) panel with **no control of its own** - it takes the `Course` it was
+opened for and renders the whole term. That is zero new keys, and it is what
+makes REQ-12 vacuous rather than deferred. A "last N assignments" selector is a
+follow-up worth its own row, not part of this one.
+
+---
+
+## 8. The leverage claim, corrected
+
+**RULING 63.** Revision 1 claimed CORPUS and rested it on "the app's memory is
+populated automatically by the instructor's own ordinary use ... with no
+separate re-entry step". That is REMOVED SETUP, which
+`docs/loop/leverage.md:64` strikes as inherited - "Click cost ... Free to any
+feature with a UI at all ... it is not a categorical advantage over a chat" -
+and revision 1 then blamed the thinness on N13b's absence, which is the wrong
+remedy for the wrong diagnosis.
+
+**The claim this scope makes, and defends now:**
+
+> **Class: GUARANTEED** (`docs/loop/leverage.md:42`). A25 renders a COUNT over
+> typed `rubricAreas` values already stored in `grading_drafts.payload`, folded
+> across a term's assignments for one Canvas course id, with a stated
+> denominator on both axes (how many of the term's assignments carried the
+> area; how many submissions each of those graded) and **no model call at any
+> point in the computation**. What the instructor does instead today: paste
+> each assignment's rubric results into a chat and ask for a trend. That
+> answer is prose assembled from whatever was pasted; nothing downstream of it
+> can tell a counted fact from a plausible-sounding one, and nothing states
+> what fraction of the term the answer actually covered. A25's number is the
+> count or it is red.
+
+This inherits the property `computeClassTrends` already has -
+`src/lib/grade/class-trends.ts:8`, in its own header: "No model call, no
+network, no storage" - and it is adjacent to the surviving word in
+`docs/a39-research.md` section 5.3 (`:554`, titled "One rubric held constant
+across a class - DOES NOT SURVIVE AS STATED", whose `:566` reads "What survives
+is narrower and worth more: **provenance.**"), which is what RULING 63
+restates. It
+does **not** claim CORPUS, does not claim that the app remembers and a chat
+does not, and does not depend on N13b. N13b would enrich the per-area signal;
+it is not load-bearing for this claim, and `blocked_by: []` on the row is
+correct.
+
+**REQ-8 (the removal test, changed in KIND per cap 1).** Revision 1's proposed
+removal test was a pure-function assertion that the report reflects both
+entries; check B5 showed it is unchanged by deleting the multi-row read, so it
+could only go red when the test itself was rewritten. The replacement is a
+different instrument, and it is the one this repo has sabotage-proven:
+
+> A transitive-import ban over the new reducer and the new surface, in the
+> shape `src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts`
+> already implements. Its `FORBIDDEN_PATH_PREFIXES` is at `:58` and today reads
+> `["app/actions", "lib/canvas", "lib/lms-generation", "lib/llm", "lib/gemini"]`;
+> `isForbiddenPath` is at `:67`, the walker at `:119`, and it carries three
+> canaries of its own (`:185` a real known-bad fixture at depth 1, `:198` a
+> synthetic depth-2 fixture proving the walk recurses, plus `:151`/`:173`
+> positive and negative checks on the path predicate).
+
+**Object:** the transitive import graph rooted at the new reducer and the new
+surface. **Instrument:** that walker, run over the new roots.
+**Direction of failure:** RED the moment any path under `lib/llm` or
+`lib/gemini` becomes reachable from those roots - which is exactly the edit
+that removes the advantage. `docs/loop/leverage.md:151-165` records that this
+guard was sabotage-checked by adding a real `import { X } from "../llm"` and
+watching it go from 5 passing to 4 passed / 1 failed, so the instrument is
+known to depend on the prefixes it lists.
+
+State the deletion, then trace the assertion, as `leverage.md:146-149`
+requires: delete the reducer's counting and replace the aggregate with a model
+summary, and the summary needs a client from `lib/llm` or `lib/gemini`; the
+walker's observed violation list goes from empty to non-empty. The assertion's
+value changes. It is a removal test.
+
+**REQ-9.** The counted aggregate is computed in TypeScript and rendered from
+the typed reducer output; no rendered number is produced by, or paraphrased
+through, a model. **Object:** the number on screen. **Instrument:** REQ-8's
+walker, plus a source-text assertion that the surface reads the reducer's
+typed fields rather than a free-text field. **Direction of failure:** RED if a
+model-authored string can occupy the position a counted number occupies. This
+is belt-and-braces under branch (A) and load-bearing under branch (B), where
+the aggregate becomes a fact inside a prompt whose answer is prose - the case
+`src/lib/course-intel/concern.ts` and the receipt at
+`src/app/api/course-intel/ask/route.ts:868` already solve, and the pattern (B)
+must follow.
+
+---
+
+## 9. Requirements register
+
+Each names the object under comparison, the instrument producing each quantity,
+and the direction of failure. Stated in full in the sections cited.
+
+| ID | Requirement | Where stated | Branch |
+|---|---|---|---|
+| REQ-1 | Group by `parseCanvasCourseId(entry.canvasUrl)` and nothing else | 4.1 | both |
+| REQ-2 | `course-canvas-url-match.ts` is do-not-reuse; parse both sides directly | 4.2 | both |
+| REQ-3 | Count, never drop, entries with no parseable course id | 4.3 | both |
+| REQ-4 | Render that count beside the denominator | 4.3 | both |
+| REQ-5 | The query carries `user_id` and NOT `status = pending` | 5.1 | both |
+| REQ-6 | Read via the browser client; `actions/grading.ts` stays out of the write set | 5.2 | (A) only - see 10.2 |
+| REQ-7 | The reducer reads only `rubricAreas`; the over-fetch is stated as accepted | 5.3 | both |
+| REQ-8 | The removal test is a transitive-import ban on `lib/llm` / `lib/gemini` | 8 | both |
+| REQ-8a | Two denominators, both computed from the input | 5.4 | both |
+| REQ-9 | No rendered number is model-produced | 8 | both, load-bearing in (B) |
+| REQ-10 | Import types through `@/lib/grade/types`, never the `@/lib/grade` barrel | below | both |
+| REQ-11 | The reachability chain, asserted by a wiring test | 6.2 | (A); restated in (B) per 6.3 |
+| REQ-12 | Any new control persists under a `ta-` key, with the canary state measured | 7 | (A) only |
+
+**REQ-10 in full.** `src/app/components/grading-recording/classTrendsRunCohort.ts`
+(181 lines) warns in its own header, at `:24-27`, that a client-side cohort
+builder must import types through `@/lib/grade/types` rather than the
+`@/lib/grade` barrel. **Object:** the new panel's import statements.
+**Instrument:** a source-text assertion that no file under the new surface
+imports from `@/lib/grade` without a subpath; the registry-client-bundle guard
+idiom this repo already uses. **Direction of failure:** RED if a bare
+`from "@/lib/grade"` appears in a client component.
+
+---
+
+## 10. Wave plan
+
+A scope proposes; the plan seat decides. Every wave below includes the file
+that CALLS each new export - `docs/loop/seats.md:160-164`, and revision 1
+violated it (check M5: nothing in its wave 1 called the reducer).
+
+### 10.1 Wave 1 - corpus and reduction. Its CONTENT is settled under either answer; see the caller note before dispatching it alone.
+
+Write set:
+
+- `src/lib/grade/class-trends-history.ts` (new) - the pure reducer: group
+  `GradingRunEntry[]` by `parseCanvasCourseId(entry.canvasUrl)` (REQ-1, REQ-2),
+  fold each group's per-area `AreaTrend` values across assignments, emit both
+  denominators (REQ-8a) and `unkeyableEntryCount` (REQ-3). A new file rather
+  than an edit to `class-trends.ts` (355 lines): that file is layer A for ONE
+  run, `class-trends-insight.ts` (270) is layer B, `class-trends-draft.ts`
+  (228) is layer C, and "layer A across N runs" is a fourth concern.
+- `src/lib/grading-drafts.ts` (377 lines) - add the reviewed-inclusive list
+  function, same `.eq("user_id", userId)` discipline as the six existing
+  queries (`:254, 280, 302, 344, 361, 373`), and without
+  `.eq("status", "pending")` (REQ-5).
+- `src/lib/grade/class-trends-history.test.ts` (new) - REQ-1, REQ-3, REQ-7,
+  REQ-8a.
+- `src/lib/grading-drafts.test.ts` (334 lines) - the recorder test for REQ-5,
+  extending the fake-Supabase idiom already at `:269-334`.
+- **THE CALLER RULE, and why this wave does not satisfy it on its own.** Both
+  of wave 1's new exports - the reducer and the list function - have exactly one
+  production caller, and it is the surface, which is branch-dependent and
+  therefore in wave 2. Their only wave-1 caller is their own test, and a test is
+  not a caller for the purposes of `docs/loop/seats.md:160-164`. Neither is a
+  type-only module, so that rule's single legal exception does not apply, and
+  claiming it would be exactly the escape the rule names. Revision 1 asserted
+  that "every wave below deliberately includes the file that CALLS or RENDERS
+  the new export" while its wave 1 did not (check M5); this revision does not
+  repeat the assertion.
+
+  **Two honest dispositions, and a recommendation.** (i) **Merge waves 1 and 2
+  once the owner answers** - the recommendation, and the only one that satisfies
+  the rule outright. (ii) If wave 1 must land alone, it lands with REQ-8's
+  import-ban test rooted at the reducer and with REQ-5's recorder test, both of
+  which execute against the new files, and the wave's report says in those words
+  that two exports are shipping ahead of their callers with the calling wave
+  named. What is NOT available is landing wave 1 alone and calling the caller
+  rule satisfied.
+- Disjointness: the write set does not intersect `class-trends.ts`,
+  `class-trends-insight.ts`, `class-trends-draft.ts`, or any file listed as
+  modified in this pass's `git status --short`, with one exception to check at
+  dispatch time - `src/lib/grade/engine.ts` and
+  `src/app/components/grading-recording/grading-rows.test.ts` are currently
+  held by other agents and are NOT in this write set, but
+  `src/lib/grading-drafts.test.ts` must be intersected mechanically against
+  whatever is live at dispatch (`sort | uniq -d`, per
+  `docs/loop/parallel-disjointness.md`), not eyeballed.
+
+### 10.2 Wave 2 - the surface. NOT DISPATCHABLE until section 13 is answered.
+
+**Under branch (A):** `src/app/components/courses/ClassTrendsHistoryModal.tsx`
+(new leaf, wrapping `ModalShell`), plus the ten lines across
+`CourseRow.tsx` / `CoursesTable.tsx` / `CoursesTab.tsx` enumerated in 6.2, plus
+`src/app/components/courses/classTrendsHistory.wiring.test.ts` (new) for
+REQ-11. REQ-6 holds: `src/app/actions/grading.ts` stays out of the write set.
+Re-measure all three existing files with both instruments after the wave.
+
+**Under branch (B):** no component wave. The write set moves into
+`src/lib/course-intel/` - the context assembly and the answer's receipt - and
+**REQ-6 inverts**: the read must be reachable from
+`src/app/api/course-intel/ask/route.ts`, which is at **976 lines, 24 of
+headroom** against the 1000 ceiling, so the seam must be a new lib module that
+the route imports in one or two lines, never logic added to the route.
+REQ-11's object becomes the fact family's presence in the assembled context;
+REQ-12 is vacuous (no new control); REQ-9 becomes load-bearing.
+
+### 10.3 Wave 3 - experience passes
+
+Against the as-built wave-2 diff, per `docs/loop/seats.md:50,52,56`. Under
+branch (A) all three wave-3 seats fire (a new surface, new markup, a new
+keyboard path). Under branch (B) the visual and accessibility triggers do not
+fire - no new markup - and the UX seat still does, because the answer's copy
+changes. Every finding is a reading claim: no component is rendered by any test
+here (`docs/loop/this-repo.md` section 2).
+
+---
+
+## 11. Residual register
+
+Five fields each: object, owner, instrument, direction of failure, step. Per
+`docs/loop/iteration-caps.md`'s anti-gaming rule, an instrument that is a remedy
+is not an instrument, and a residual missing any of the three is a deletion.
+Four of revision 1's seven residuals were promoted to requirements above
+precisely because they could not meet this bar.
 
 | ID | Object | Owner | Instrument | Direction of failure | Step |
 |---|---|---|---|---|---|
-| R-A25-1 | Whether the recommended surface (Candidate 1, section 3.1) actually reads well and is reachable in a real browser | Repo owner | A real browser against the deployed app (nothing renders under vitest here - `this-repo.md` section 6) | Fails if the gated panel does not appear when a course is selected, or appears in a confusing place | The next owner verification pass after Wave 2 ships |
-| R-A25-2 | Course-identity collision risk from string-keyed `courseName` matching (section 2.2, Option A accepted over Option B) | Architect wave, revisited only if reported | A real instance of two same-named courses or a renamed course, reported by the owner or found in `grading_drafts` data | Fails if a term's trend silently merges two different courses or drops history after a rename | Only if/when reported - not before, per this scope's recommendation to accept Option A first |
-| R-A25-3 | Row-count growth of `grading_drafts` over a real term (no cleanup path exists beyond manual discard, section 1) | Repo owner, with production access | A query against the live Supabase table (`select count(*) from grading_drafts where status = 'reviewed'`), unavailable in this checkout (no `.env`, `this-repo.md` section 6) | Fails if a real course's history query becomes slow or expensive because rows are never pruned | Before or during Wave 1's query design, once a production tick is available |
-| R-A25-4 | Data-minimization: a term-trend query over whole `payload` jsonb blobs pulls every student's full feedback text into memory for a computation that only needs `rubricAreas` (section 2.3) | Wave 1 implementer or a follow-up security pass | A server-side JSON projection in the new Supabase query (`payload->'runs'->...->'rubricAreas'`), OR an explicit acceptance of the over-fetch as a first cut | Fails (as a finding, not a blocking defect) if the shipped Wave 1 query fetches full payloads with no projection and no accepted-cost note in the criteria | Wave 1's own build, or the security pass triggered by "any new network egress" (`seats.md:54`) |
-| R-A25-5 | Whether a cross-assignment reduction over today's literal `classifyDirection` (high/low only, no subset) is "worth reading" per the owner's own N13b complaint about the single-run version | Repo owner / AC seat | The N13b row itself (`docs/backlog.yml:150-160`), and the AC seat's explicit "accept the cost" statement in A25's own criteria if built before N13b lands | Fails if A25 ships with no stated limitation and the owner reports the same "renders nothing useful on a realistically mixed history" complaint N13b already recorded for one run | A25's own AC round, before Wave 1 starts |
-| R-A25-6 | Removal test buildability for the CORPUS/GUARANTEED leverage claim (section 5) | Test seat | A pure-function test on the new reducer: feed it two `GradingRunEntry` fixtures for the same course with contrasting scores in one area across two assignments, assert the term report reflects BOTH (not just the latest) - deleting the multi-row read (feeding it only the latest entry) must make that assertion fail | Fails if the "removal test" only asserts a single-run property that would still pass with the multi-run read deleted | Test seat's oracle-construction pass, after Wave 1's reducer signature is fixed |
-| R-A25-7 | UI/click-path and keyboard reachability of the new panel and its course-filter gating | Accessibility / UX seats (Wave 3) | Reading claims only - no component renders under vitest (`this-repo.md` section 6, restated per this document's own rule) | Fails if a reading-only claim is presented as verified rather than labeled as a reading claim | Wave 3, explicitly labeled as reading claims routed to the owner for real-browser confirmation (folds into R-A25-1) |
+| RES-1 | Whether the shipped surface READS well - layout, placement in the row, whether the two denominators are legible side by side | Repo owner | A real browser against the deployed app. Nothing in this checkout renders a component (`this-repo.md` section 6), so this cannot be executed here at any effort | Fails if the owner opens the surface for a course with reviewed runs and cannot tell, from the panel alone, which areas moved and over how many assignments | The owner verification pass on the wave-2 diff, immediately after it ships. REQ-11 already proves the surface is REACHED, so this residual is about legibility only |
+| RES-2 | Whether repo- and cartridge-sourced drafts should carry a course id at all: four producer sites emit `canvasUrl: ""` with `offline` undefined (section 4.3), so those runs join no course's term history | Repo owner (it is a product call about whether repo grading belongs in a Canvas-course trend) | `unkeyableEntryCount`, the number REQ-3 makes the reducer compute and REQ-4 makes the panel render, read by the owner against their own data | Fails if that number is non-zero for a course the owner expects history for - i.e. the history is silently missing the repo-graded half of a term | The same owner pass as RES-1. Its output is either "zero, close this" or a new backlog row naming the four producer sites (`steps.grading-repos.grade-repo.ts:465`, `steps.grading-repos.helpers.ts:342`, `steps.grading-repos.ts:274` and `:324`) |
+| RES-3 | Row-count growth and read cost of a reviewed-inclusive query over `grading_drafts`, including the accepted whole-payload over-fetch (REQ-7) and the absence of any index on `status` (`20260811000000_create_grading_drafts.sql:17-18`) | Repo owner, with production access | `select count(*) from grading_drafts where status = 'reviewed'` plus the panel's own load time, run against the live database. Unavailable here: no `.env` (`this-repo.md` section 6) | Fails if the panel's first load for a full term is slow enough to be noticed, or if the payload volume is large enough that the projection REQ-7 defers becomes necessary | The same owner pass as RES-1, which is the first production tick after wave 2. Not before - there is nothing here to run it against |
+| RES-4 | Whether a cross-assignment fold over `classifyDirection`'s three-value vocabulary (`class-trends.ts:184`, thresholds 70/60 at `:114-115`) says anything useful on a real term, or collapses to "mixed" everywhere - the same complaint the N13b row records for one run (`docs/backlog.yml:151`) | Repo owner, with the AC seat carrying the wording either way | The count of areas the panel classifies `mixed` against the count it classifies `high` or `low` - both computed by the reducer and rendered, read by the owner on their own term | Fails if every area in a real term comes back `mixed` and the panel therefore states a denominator and no direction | The same owner pass as RES-1. Its output is either acceptance or a `Reduce` disposal on the claim in section 8 - never a further round of this scope |
+| RES-5 | Whether branch (B)'s fact family can reach `src/lib/course-intel/`'s offline path without widening the six-field wire boundary at `offline-payload.ts:11-18` | Repo owner, if and only if branch (B) is chosen | Reading `offline-payload.ts`'s `buildGradingRow` (`:178-219`) against the fact family the reducer emits, plus the wave-2 security seat's trigger ("any new network egress", `seats.md:54`) | Fails if branch (B) ships by adding fields to that wire shape without the owner being told that a stated structural data-minimization control was widened | Branch (B)'s wave-2 security pass. Void under branch (A) |
 
 ---
 
-## Verification of this document's own write set
+## 12. What this scope could not determine
 
-```
-git status --short
-```
-Expected and required: the only path this document's authoring touched is
-`docs/a25-scope.md` itself (new, untracked before this commit). Other paths
-appearing in `git status --short` at authoring time
-(`docs/css-orphans.md`, `package.json`, `src/tools/backlog/cli.ts`,
-`src/tools/backlog/round-ledger.ts`, observed modified/untracked when this
-pass ran its own `git status --short`) belong to concurrently running agents
-per this repo's stated operating mode (`AGENTS.md`, "many agents working
-concurrently") and were not touched, read for content, or relied upon by any
-claim in this document.
+Stated rather than filled in, per `docs/loop/this-repo.md` section 6.
 
-## Closing gate command and result
+- **Anything about real query behaviour.** No `.env`, no live database. Row
+  counts, payload sizes, index use and the viability of a PostgREST JSON
+  projection over `payload->runs` are all unverifiable here. RES-3.
+- **Anything a browser would show.** No component is rendered by any test in
+  this repo, so the surface's legibility, its focus order and its keyboard path
+  are reading claims. RES-1, and `ModalShell` is reused precisely so fewer of
+  them are new.
+- **Whether `assignmentUrl` is ever non-empty on the attended repo-grading
+  path.** `steps.grading-repos.helpers.ts:342` reads a parameter; the one
+  caller measured (`:428`) passes `""`. Whether an attended caller passes a
+  real URL was not traced, and REQ-3's count is what makes the answer visible
+  rather than assumed.
+- **Whether the owner wants repo-graded runs in a Canvas-course trend at all.**
+  RES-2. This is a product question, not a measurement.
 
-Command actually run (multi-file, per this repo's standing rule - never a raw
-multi-path `vitest run`), output redirected to a file and the exit code
-captured to a second file rather than read from a pipe:
+---
 
-```
-npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts > /tmp/a25-gate-out.txt 2>&1
-echo $? > /tmp/a25-gate-exit.txt
-```
+## 13. To the owner: one question, gating nothing
 
-Exit code, read from `/tmp/a25-gate-exit.txt`: **0**.
+Restated from `docs/a25-rulings.md` in the owner's terms, with what this pass
+measured added. Wave 1 (section 10.1) is dispatchable whichever way this goes.
 
-Tail of `/tmp/a25-gate-out.txt`:
+> A25 would fold your stored grading runs into a per-course, per-rubric-area
+> trend over a term. This app already has a cross-assignment reducer for a
+> course - `src/lib/course-intel/` - keyed on the same parsed Canvas course id
+> (`ask/route.ts:525`), already rendering stated denominators
+> (`course-intel/types.ts:555`, "3 of 7 assignments missing"), already
+> computing its set in TypeScript before any model call
+> (`concern.ts`, `ask/route.ts:777`) with a receipt over the answer (`:868`),
+> and already reachable from its own tab (`page.tsx:662`). What it does not
+> have is any rubric-area breakdown: `grep -rln "trend\|Trend"
+> src/lib/course-intel/` exits 1, and that subsystem never reads the
+> grading-draft table (`grep -rln "grading_drafts\|grading-drafts"
+> src/lib/course-intel/ src/app/api/course-intel/` exits 1).
+>
+> **(A)** Build A25 as its own layer over your stored grading drafts, keyed on
+> the parsed Canvas course id, with unkeyable runs counted and named, opened
+> from a course's row in the Courses tab - the same place "Ask AI" opens from
+> today; **or (B)** add rubric-area history as an additional signal inside
+> Course Intel, reusing its course id, its denominators and its answer.
+>
+> **Recommendation: (A).** Three costs of (B), measured this pass and not in
+> the round-1 material: `src/app/api/course-intel/ask/route.ts` is **976
+> lines**, 24 from the repo-wide 1000-line ceiling
+> (`file-size-ceiling.structure.test.ts:41`), so the work would have to be
+> squeezed through a file already at the wall; Course Intel's offline path has
+> a deliberate six-field wire boundary that sets `rubricAreas: []` on purpose
+> (`offline-payload.ts:11-18, 207-210`), so (B) means widening a stated
+> data-minimization control; and (B)'s answer is model prose, so the counted
+> number only stays counted if it is rendered as a receipt (REQ-9), which is
+> extra work (A) does not need.
+>
+> **Cost of being wrong about (A):** a second per-course trend surface the
+> instructor reaches differently from the first, and two subsystems that could
+> disagree about which runs belong to a course - though both would now compute
+> that answer with the SAME function on the SAME field
+> (`parseCanvasCourseId` on a stored `canvasUrl`), which is the one thing that
+> keeps the disagreement bounded.
 
-```
- RUN  v4.1.9 C:/Users/alexa/OneDrive/Documents/Projects/teaching-assistant
+Either answer ends this activity. Under (A) the scope ships as written and
+wave 2 unblocks. Under (B) sections 6.3 and 10.2's branch-(B) paragraph replace
+section 6.2, REQ-6 inverts, REQ-12 goes vacuous, REQ-9 becomes load-bearing,
+and RES-5 activates. Nothing else in this document changes, and nothing in it
+needs re-deciding to apply either answer.
 
- YES src/source-bytes.structure.test.ts (3 tests) 579ms
-     YES contains no NUL or other stray control bytes  357ms
- YES src/lib/no-emojis.test.ts (18 tests) 9ms
+---
 
- Test Files  2 passed (2)
-      Tests  21 passed (21)
+## 14. Verification of this document's own write set
 
-COVERED src/lib/no-emojis.test.ts files=1 passed=18
-COVERED src/source-bytes.structure.test.ts files=1 passed=3
-```
+    git status --short
 
-Both paths were credited COVERED by the `test:paths` wrapper (no path was
-silently dropped). No test in this repo asserts on `docs/a25-scope.md` by
-name, but `src/lib/no-emojis.test.ts` scans `roots = ["src", "docs"]`
-including `.md` files (per `this-repo.md`'s own citation of that scan), so
-this run exercises the repo-wide emoji ban and the source-byte structural gate
-over the whole tree INCLUDING the file this document adds - consistent with
-`seats.md:29-38`'s note that a documentation-only chunk is still gated by
-both. 18 of 18 no-emoji assertions and all 3 source-bytes assertions passed
-with this file present in the tree.
+The only path this document's authoring touched is `docs/a25-scope.md`. Every
+other path in that output belongs to the concurrently running agents named in
+this pass's brief, and none was written or relied on by a load-bearing claim
+here.
+
+**The tree moved DURING this pass, which is worth recording rather than
+smoothing over.** At the start, `git status --short` listed
+`docs/css-orphans.md`, `GradingRecordingPanel.tsx`, `grading-rows.test.ts`,
+three `ppt-design` files, `src/lib/grade/engine.ts`, `src/lib/supabase/types.ts`
+and four untracked paths. At the end it lists `docs/a25-scope.md` (this file),
+`docs/css-orphans.md`, `deck-template-files.ts`, `ppt-design/GeneratePanel.tsx`,
+six `walkthrough-announcement` files, two `lib/decks` files and two untracked
+`lib/decks` files - a different set. `docs/css-orphans.md` is in both because
+`src/app/components/courses/page-module-css-orphan-classes.test.ts:354` writes
+it as part of its own run, so any full suite run modifies it. None of the files
+in either set is cited in a load-bearing claim above; the one exception is
+flagged where it appears (`src/lib/grade/engine.ts`, section 5.4, which is why
+`DEFAULT_MAX_SUBMISSIONS` is read from `src/lib/gemini.ts:32` instead). This is
+also the concrete reason section 10.1 requires wave 1's disjointness to be
+intersected mechanically at dispatch time rather than against this document's
+snapshot.
+
+ASCII check on this file:
+
+    tr -d -c '\000' < docs/a25-scope.md | wc -c
+
+Closing gate, multi-path and therefore through the wrapper, never a raw
+multi-path `vitest run`, with the exit code read from the command rather than
+from a pipe:
+
+    npm run test:paths -- src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts
+
+Both files reach this document: `src/lib/no-emojis.test.ts:254` sets
+`roots = ["src", "docs"]` and `:237` sets
+`SCAN_EXTENSIONS = /\.(ts|tsx|css|md)$/`, so the emoji ban covers `docs/*.md`;
+`src/source-bytes.structure.test.ts` is the NUL/BOM gate. Results are recorded
+in this seat's report to its caller.

@@ -234,7 +234,17 @@ describe("AddKnowledgePages.tsx wiring", () => {
 
 const DISC_PANEL_PATH = join(process.cwd(), "src/app/components/recording/DiscussionRepliesPanel.tsx");
 const discPanelSource = stripComments(readFileSync(DISC_PANEL_PATH, "utf8"));
-const GRADING_PANEL_PATH = join(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx");
+// RE-POINTED (wave 3a-ii, docs/a39-waves.md section 8.1, RULING 34): the
+// knowledgeContext && gate and the <AddKnowledgePages> mount both moved out
+// of GradingRecordingPanel.tsx into this new leaf, GradingRecordingContextPanel.
+// tsx, once the panel was pressing on file-size-ceiling.structure.test.ts's
+// 1000-line ceiling. The assertion below is unchanged - AddKnowledgePages
+// still must sit outside (after) the knowledgeContext && block - only the
+// file it reads from moved with the markup.
+const GRADING_PANEL_PATH = join(
+  process.cwd(),
+  "src/app/components/grading-recording/GradingRecordingContextPanel.tsx"
+);
 const gradingPanelSource = stripComments(readFileSync(GRADING_PANEL_PATH, "utf8"));
 
 /** Given source text and the index of a `{COND && (` JSX gate's own `&&`,
@@ -272,7 +282,7 @@ describe("DiscussionRepliesPanel.tsx mounts <AddKnowledgePages> unconditionally"
   });
 });
 
-describe("GradingRecordingPanel.tsx mounts <AddKnowledgePages> unconditionally", () => {
+describe("GradingRecordingContextPanel.tsx (extracted from GradingRecordingPanel.tsx) mounts <AddKnowledgePages> unconditionally", () => {
   it("SABOTAGE TARGET: <AddKnowledgePages sits OUTSIDE the `knowledgeContext &&` block, never nested inside it", () => {
     const gateIdx = gradingPanelSource.indexOf("{knowledgeContext &&");
     expect(gateIdx, "the knowledgeContext && gate was not found").toBeGreaterThan(-1);

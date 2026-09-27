@@ -74,28 +74,20 @@ import RunLogRow from "../recording/RunLogRow";
 // parameterised sentence/hook DiscussionRepliesPanel.tsx's own file-local
 // versions were extracted from.
 import { composeCaptureLiveSentence, useThrottledLiveSentence } from "../recording/captureLiveRegion";
-import { visuallyHidden } from "../ui/visuallyHidden";
 import {
   RECORDING_LAUNCH_EVENT,
   parseRecordingLaunch,
   takeRecordingKnowledgeContext,
   type RecordingKnowledgeContext,
 } from "@/lib/recording-launch";
-import { returnToKnowledge } from "@/lib/knowledge-return";
-import { returnTargetPageId } from "./grading-context-display";
-// AC3 (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
-// shared with DiscussionRepliesPanel.tsx - supersedes this panel's own former
-// static formatContextPagesList line with an interactive, removable list.
-// That formatter was deleted rather than left exported once this replaced its
-// only caller; see grading-context-display.ts's header for why a tested
-// export with no consumer is worse than no export at all.
-import CarriedKnowledgePages from "../recording/CarriedKnowledgePages";
-// AC3/4b (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
-// "add" - shared with DiscussionRepliesPanel.tsx. Rendered unconditionally,
-// unlike the label/CarriedKnowledgePages block below - an instructor
-// carrying nothing yet (no Knowledge-base launch at all) is this feature's
-// primary case, not an edge case of an already-launched run.
-import AddKnowledgePages from "../recording/AddKnowledgePages";
+// AC3/AC3/4b (docs/knowledge-recording-handoff-acceptance-criteria.md section
+// 4): the carried-Knowledge-Base-pages notice and the always-mounted "add a
+// page" control - moved into this NEW leaf once this file was pressing on
+// file-size-ceiling.structure.test.ts's 1000-line ceiling (wave 3a-ii,
+// docs/a39-waves.md section 8.1). See that leaf's own header for the full
+// reasoning and the sibling precedent (wave 3a-i's SnapshotGradingPanel.tsx
+// extraction).
+import GradingRecordingContextPanel from "./GradingRecordingContextPanel";
 import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 // The sibling GRADING action - coded against the exact signature this task's
 // brief pinned, before this file's own path (src/app/actions/grading-
@@ -128,6 +120,12 @@ import GradingCaptureSettings from "./GradingCaptureSettings";
 import { useGradingAssessmentDeclarations } from "./useGradingAssessmentDeclarations";
 import GradingAssessmentDeclarationControls from "./GradingAssessmentDeclarationControls";
 import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
+// The run's post-capture status block (hint, timer/count/extracting status
+// row, throttled live region, stalled notice, merged-readings line) - moved
+// into this NEW leaf for the same file-size-ceiling reason as
+// GradingRecordingContextPanel above. No hook moved with it; see that
+// leaf's own header.
+import GradingRecordingCaptureStatus from "./GradingRecordingCaptureStatus";
 import { checkGradingReadiness } from "./grading-dispatch";
 import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { classifyGradingResult } from "./grading-rows";
@@ -183,12 +181,6 @@ const STORAGE_KEY_ASSESSMENT = "ta-rec-grade-assessment";
 
 interface Notice extends GradingExtractionOutcome {
   id: string;
-}
-
-function fmt(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export default function GradingRecordingPanel({ active }: { active: boolean }) {
@@ -810,39 +802,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         </p>
       </fieldset>
 
-      <fieldset className={controls.section}>
-        <legend className={controls.sectionLegend}>Context</legend>
-        {/* AC2/AC3/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
-            extends this existing notice (already the reference implementation
-            the sibling "discussions" destination is matched against) with the
-            carried pages, individually removable, and a way back to where they
-            were selected - without touching the label sentence or its
-            placement. `pages` is ALREADY filtered to only what the budget
-            included (AC1 - KnowledgeTab.tsx's includedContextPages, before this
-            ever launches); CarriedKnowledgePages.tsx re-derives inclusion fresh
-            on every removal (never assumes the original filter still holds -
-            see that file's own header). Renders nothing when knowledgeContext
-            is null (AC2's "carrying nothing renders nothing") - unchanged. */}
-        {knowledgeContext && (
-          <div className={styles.field}>
-            <p className={styles.fieldHint}>
-              {`Grading with Knowledge Base context: ${knowledgeContext.label ?? "selected pages"}.`}{" "}
-              <button
-                type="button"
-                className={styles.linkButton}
-                onClick={() => returnToKnowledge(returnTargetPageId(knowledgeContext.pages))}
-              >
-                Back to Knowledge
-              </button>
-            </p>
-            <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
-          </div>
-        )}
-        {/* AC3/4b: rendered OUTSIDE the `knowledgeContext &&` gate above -
-            unlike the label/CarriedKnowledgePages block, this must still offer
-            something when nothing is carried yet at all. */}
-        <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
-      </fieldset>
+      <GradingRecordingContextPanel knowledgeContext={knowledgeContext} setKnowledgeContext={setKnowledgeContext} />
 
       {/* CC1: the run row - the primary is the next step, and a live capture
           beats everything (Stop capture is primary while capturing). Grading
@@ -871,64 +831,18 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           {gradingBusy ? "Grading…" : "Grade submissions"}
         </Button>
       </div>
-      {!capturing && gradingRows.totalCount > 0 && !canGrade && (
-        <p className={styles.fieldHint}>Add a rubric to grade.</p>
-      )}
-      <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
-
-      {/* CC12: only the <video> stays aria-hidden - the status column (timer,
-          submission count, extracting/catching-up lines) now renders in the
-          open, and a throttled, visually hidden live region announces the
-          same facts for assistive tech. */}
-      <div className={controls.statusRow}>
-        {/* Rendered unconditionally, never `{capturing && <video ...>}` - same
-            reasoning as DiscussionRepliesPanel.tsx/LegibilityProbeModal.tsx's
-            own identical comment: useDiscussionCapture's start() assigns
-            previewRef.current.srcObject synchronously, BEFORE it sets
-            capturing true, so a conditionally-mounted element would still be
-            null at that exact moment. */}
-        <video
-          ref={previewRef}
-          className={`${controls.previewVideo} ${capturing ? "" : controls.previewVideoHidden}`}
-          aria-hidden="true"
-          autoPlay
-          muted
-          playsInline
-        />
-        {capturing && (
-          <div className={controls.statusText}>
-            <span>{fmt(elapsedSec)}</span>
-            <span>
-              {gradingRows.totalCount === 0
-                ? "Capturing - 0 submissions so far."
-                : `${gradingRows.totalCount} submission${gradingRows.totalCount === 1 ? "" : "s"} found`}
-            </span>
-            {extracting && <span>Reading the screen…</span>}
-            {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
-          </div>
-        )}
-      </div>
-      <span role="status" aria-live="polite" style={visuallyHidden}>
-        {throttledLiveSentence}
-      </span>
-      {stalled && (
-        <p className={`${controls.notice} ${controls.noticeWarning}`} role="status">
-          Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window while you scroll.
-        </p>
-      )}
-      {/* FIX 1: ordinary information, not danger (styles.fieldHint, no
-          role="alert") - a fold is the expected, normal outcome of reading
-          overlapping frames. The point is that the NUMBER stays visible for
-          the whole session (not gated on `capturing`, same as the dropped-
-          frames notice above) so an unexpectedly low submission count -
-          fewer rows than students actually recorded - stands out on its own,
-          without this line itself trying to sound alarmed. */}
-      {totalReadingsCount > 0 && (
-        <p className={styles.fieldHint}>
-          {totalReadingsCount} reading{totalReadingsCount === 1 ? "" : "s"} merged into {gradingRows.totalCount}{" "}
-          submission{gradingRows.totalCount === 1 ? "" : "s"} so far.
-        </p>
-      )}
+      <GradingRecordingCaptureStatus
+        capturing={capturing}
+        extracting={extracting}
+        pendingFrames={pendingFrames}
+        elapsedSec={elapsedSec}
+        totalCount={gradingRows.totalCount}
+        canGrade={canGrade}
+        stalled={stalled}
+        totalReadingsCount={totalReadingsCount}
+        throttledLiveSentence={throttledLiveSentence}
+        previewRef={previewRef}
+      />
       {/* A16-3 (docs/a16-plan.md 5.5/9.3, ruling 21): the SAME
           ClassTrendsPanel GradingResults.tsx already mounts for the LMS
           grading surfaces - a run over THIS table becomes an OUTPUT of the

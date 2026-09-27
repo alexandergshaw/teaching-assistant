@@ -53,10 +53,7 @@ function isSnapshotRole(v: unknown): v is SnapshotRole {
 // written or read by this codec. This mirrors GradingRow's own precedent,
 // which carries the identical risk with the identical cast.
 // ---------------------------------------------------------------------------
-function toWire(
-  row: NoPostableIdentity<SnapshotAssessmentRow>,
-  opts: { dropBulk: boolean }
-): Record<string, unknown> {
+function toWire(row: NoPostableIdentity<SnapshotAssessmentRow>, opts: { dropBulk: boolean }) {
   const r = row as unknown as SnapshotAssessmentRow;
   // Mirrors GradingRow's own write-side normalization: nothing is ever
   // "in flight" immediately after a reload.
@@ -118,6 +115,34 @@ function toWire(
     cohortKey: r.cohortKey,
   };
 }
+
+// ---------------------------------------------------------------------------
+// A39 (docs/a39-build-rulings.md, "DECISION 4's safety net does not exist"):
+// the row-level exhaustiveness guard the owner was told existed and did not.
+// `toWire` above enumerates its return as an explicit object literal (never
+// `...row`), so its INFERRED return type carries exactly the keys that
+// literal actually writes - no annotation, no separate hand-maintained list.
+// `SnapshotRowWireShape` names that inferred type; snapshot-row-
+// serialization.test.ts compares `keyof SnapshotAssessmentRow` against it, so
+// a field added to the row type that is not ALSO added to the return literal
+// above fails `npx tsc --noEmit --incremental false` at that comparison,
+// never merely at a hand-maintained array a developer could bump without
+// touching this function.
+//
+// This deliberately diverges from grade-result-allowlist-coverage.test.ts's
+// `Exclude<keyof GradingRun, (typeof ALL_GRADING_RUN_FIELDS)[number]>`
+// idiom, which that file mirrors for GradeResult too. That idiom only proves
+// the row type's keys are named in a maintained array; closing the "reaches
+// the serializer" gap for GradingRun is left to a SEPARATE runtime sentinel
+// round-trip through the real coerce/parse functions (vitest, not tsc). This
+// task's own brief rules vitest out for this class of defect (it bundles
+// rolldown/Oxc, which erases types without reading them) - a guard that is
+// only enforced by a hand-maintained array, bumpable without ever touching
+// `toWire`, would not satisfy "a TYPE ERROR" for a forgotten serializer
+// field. Deriving the check from `ReturnType<typeof toWire>` instead removes
+// the maintained array entirely: there is nothing to bump but the function
+// itself.
+export type SnapshotRowWireShape = ReturnType<typeof toWire>;
 
 // ---------------------------------------------------------------------------
 // fromWire: NEVER throws. A defensive typeof/Array.isArray/Set.has guard on

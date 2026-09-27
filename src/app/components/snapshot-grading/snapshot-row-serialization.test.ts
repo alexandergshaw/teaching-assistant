@@ -1,6 +1,40 @@
 import { describe, it, expect } from "vitest";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
+import type { SnapshotRowWireShape } from "./snapshot-row-serialization";
 import type { SnapshotAssessmentRow } from "./snapshot-row";
+import type { AssessmentRowCore } from "../assessment-shared/assessment-row";
+
+// ---------------------------------------------------------------------------
+// A39 (docs/a39-build-rulings.md, "DECISION 4's safety net does not exist"):
+// the row-level exhaustiveness guard. `SnapshotRowWireShape` is `toWire`'s
+// own INFERRED return type (snapshot-row-serialization.ts) - not a
+// hand-maintained list - so `keyof SnapshotRowWireShape` is exactly the set
+// of keys the codec's return literal actually writes today. `keyof
+// AssessmentRowCore` is subtracted rather than named field-by-field because
+// AssessmentRowCore carries a private `unique symbol` key (`NOT_POSTABLE`,
+// declared but not exported from assessment-row.ts) that a string-literal
+// array could never name - the one place the GradingRun idiom
+// (grade-result-allowlist-coverage.test.ts's `Exclude<keyof GradingRun,
+// (typeof ALL_GRADING_RUN_FIELDS)[number]>`) does not transfer cleanly onto
+// an AssessmentRowCore-extending row.
+//
+// If a field is added to SnapshotAssessmentRow (directly, or via
+// AssessmentRowCore) without also adding it to `toWire`'s return literal,
+// `MissingWireFields` below stops being `never` and this file fails to
+// compile - `npx tsc --noEmit --incremental false` catches it even though
+// this test never runs that field through anything at runtime. This is
+// stricter than the GradingRun idiom it is modeled on: that idiom only
+// proves a hand-maintained array names every row key, and relies on a
+// SEPARATE runtime sentinel round-trip (vitest) to catch the array being
+// bumped without `toWire` itself being touched. This task's own gate
+// ordering rules vitest out for this class of defect, so this guard is
+// wired directly to the serializer's actual output type instead of to a
+// list a developer could update without opening this function at all.
+type MissingWireFields = Exclude<keyof SnapshotAssessmentRow, keyof AssessmentRowCore | keyof SnapshotRowWireShape>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _exhaustiveSnapshotRowFieldCheck: MissingWireFields extends never
+  ? true
+  : ["toWire (snapshot-row-serialization.ts) does not write the field(s) below - add them to its return literal", MissingWireFields] = true;
 
 // ---------------------------------------------------------------------------
 // Oracle A: the codec. Every case goes through snapshotRowCodec.toWire/

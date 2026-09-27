@@ -154,6 +154,16 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
  * regex; anything else (`)`, `]`, `}`, a closing quote) is treated as
  * division/ambiguous.
  *
+ * JSX FIX: a `/` glued directly onto a preceding `<` with no whitespace
+ * between them - i.e. `</` - is a JSX closing tag (`</legend>`), never a
+ * regex opener, even though `<` is otherwise an operand-introducing
+ * punctuation character (`a < /re/` is valid JS). Checked by requiring the
+ * `<` to be the LAST character of `outSoFar`, not merely the last non-
+ * whitespace one, so a real comparison like `a < /re/` (whitespace between
+ * `<` and `/`) still allows a regex. Without this, `</legend>` immediately
+ * followed by `//` swallows the comment marker's first `/` as the phantom
+ * regex's own closing delimiter, leaving the comment unstripped.
+ *
  * KNOWN LIMITATION: `)` and `}` are genuinely ambiguous in real JS
  * (`(a+b)/c` is division; `if (x) /re/.test(y)` is a regex) and resolving the
  * general case needs full expression-grammar context this scanner does not
@@ -161,10 +171,12 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
  * this codebase today (verified by grep - no regex literal in src/app
  * immediately follows a bare `)`/`}`). Revisit if one is ever added. */
 function regexAllowedHere(outSoFar: string): boolean {
-  let j = outSoFar.length - 1;
+  const lastIdx = outSoFar.length - 1;
+  let j = lastIdx;
   while (j >= 0 && /\s/.test(outSoFar[j])) j--;
   if (j < 0) return true;
   const c = outSoFar[j];
+  if (c === "<" && j === lastIdx) return false;
   if ("([{,;:=!&|?+-*%^~<>".includes(c)) return true;
   if (/[A-Za-z0-9_$]/.test(c)) {
     const wordMatch = /[A-Za-z_$][A-Za-z0-9_$]*$/.exec(outSoFar.slice(0, j + 1));

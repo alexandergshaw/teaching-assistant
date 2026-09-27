@@ -164,6 +164,27 @@ describe("the classification predicates (canaries first, per entry 239 check 10)
     expect(stripComments(src)).toBe(src);
   });
 
+  // Live defect fixed post-712aa42: regexAllowedHere treated the `/` in a
+  // JSX closing tag `</legend>` as a regex opener (`<` is an operand-
+  // introducing character), which then consumed the following `//`
+  // comment marker's own first `/` as the phantom regex's closing
+  // delimiter - so a trailing comment right after a closing tag leaked.
+  it("removes a trailing // comment immediately after a JSX closing tag, with no preceding text", () => {
+    expect(stripComments("  </legend> // SECRET_MARKER")).toBe("  </legend> ");
+  });
+
+  it("removes a trailing // comment immediately after a JSX closing tag, with preceding text", () => {
+    expect(stripComments("<legend>Video script draft</legend> // SECRET_MARKER")).toBe("<legend>Video script draft</legend> ");
+  });
+
+  it("removes a trailing // comment after a self-closing JSX tag (a different `/` position than a closing tag)", () => {
+    expect(stripComments("<br /> // SECRET_MARKER")).toBe("<br /> ");
+  });
+
+  it("removes a trailing /* */ block comment immediately after a JSX closing tag", () => {
+    expect(stripComments("</legend> /* SECRET_MARKER */")).toBe("</legend> ");
+  });
+
   it("does not classify a component as a dialog site from a comment alone", () => {
     const src = [
       "// RENDERS NO MODAL, DIALOG, POPOVER OR FIXED-POSITION OVERLAY, on purpose:",

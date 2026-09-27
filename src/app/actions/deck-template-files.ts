@@ -32,8 +32,9 @@ import { parseOfficeParagraphs } from "@/lib/office-edit";
 import {
   fillOfficeTemplate,
   groupOfficeTemplateParagraphsBySlide,
-  type OfficeTemplateReplacement,
+  planSlideTemplateFill,
 } from "@/lib/decks/office-template-fill";
+import { describeFitReport } from "@/lib/decks/fit-report";
 
 type DeckTemplateFilesTable = Database["public"]["Tables"]["deck_template_files"];
 
@@ -131,11 +132,15 @@ export async function deleteDeckTemplateFileAction(id: string): Promise<{ ok: tr
  * Fill an uploaded .pptx template from an already-generated deck, mapping
  * each generated slide onto the template's corresponding slide by position:
  * a slide's first paragraph becomes the title, its remaining paragraphs
- * become bullets in order. Wave T1 is fixed-length (docs/a43-scope.md
- * section 11.3): when the deck has more slides than the template, the extra
- * generated slides are simply not written anywhere - wave T3's clone path is
- * what removes that limit, and wave T2's refusal is what reports the
- * mismatch instead of this silent drop.
+ * become bullets in order. The mapping and the slide-count refusal both live
+ * in planSlideTemplateFill (src/lib/decks/office-template-fill.ts, wave T2,
+ * docs/a43-scope.md section 11.4) - this action is only the I/O wrapper.
+ *
+ * Wave T2 (this call): when the deck needs more slides than the template
+ * has, planSlideTemplateFill REFUSES rather than silently mapping only the
+ * first N generated slides and discarding the rest - that silent discard
+ * was this action's wave-T1 behaviour and is the exact defect this wave
+ * closes. Wave T3's clone path is what removes the limit itself.
  */
 export async function fillDeckTemplateFileAction(
   templateFileId: string,
@@ -160,20 +165,12 @@ export async function fillDeckTemplateFileAction(
       return { error: "Could not read any slides from that template." };
     }
 
-    const replacements: OfficeTemplateReplacement[] = [];
-    const slideCount = Math.min(groups.length, deck.slides.length);
-    for (let i = 0; i < slideCount; i += 1) {
-      const templateParas = groups[i].paragraphs;
-      const genSlide = deck.slides[i];
-      if (templateParas.length === 0) continue;
-      replacements.push({ id: templateParas[0].id, text: genSlide.title });
-      for (let b = 1; b < templateParas.length; b += 1) {
-        const bulletText = genSlide.bullets[b - 1];
-        if (bulletText !== undefined) replacements.push({ id: templateParas[b].id, text: bulletText });
-      }
+    const plan = planSlideTemplateFill(groups, deck.slides);
+    if (!plan.ok) {
+      return { error: describeFitReport(plan.fitReport).join(" ") };
     }
 
-    const out = await fillOfficeTemplate("pptx", buffer, replacements);
+    const out = await fillOfficeTemplate("pptx", buffer, plan.replacements);
     return { base64: out.toString("base64"), name: deck.presentationTitle.trim() || row.name };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not fill the template." };

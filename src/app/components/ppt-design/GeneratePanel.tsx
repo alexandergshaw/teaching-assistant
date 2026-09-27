@@ -417,6 +417,28 @@ export default function GeneratePanel({
             })}
           </div>
 
+          {generateError && (
+            // The fit report's refusal (docs/a43-scope.md section 7.3/11.4):
+            // a slide-count mismatch is caught only once the deck exists and
+            // Download/Save is clicked (onDownloadPptx/onSaveToFiles route
+            // through fillDeckTemplateFileAction), so it must render here,
+            // beside those buttons - the Generate-time block above never
+            // reaches this branch, since generatedDeck is already set here.
+            <div
+              style={{
+                padding: "var(--space-3)",
+                backgroundColor: "var(--danger-surface)",
+                border: "1px solid var(--danger-border)",
+                borderRadius: "var(--radius-md)",
+                fontSize: "var(--font-size-sm)",
+                color: "var(--danger)",
+                marginBottom: "var(--space-4)",
+              }}
+            >
+              {generateError}
+            </div>
+          )}
+
           {draftNote && (
             <div
               style={{

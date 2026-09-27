@@ -1,5 +1,6 @@
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
+import { buildSlideCountAdjustment, type FitReport } from "@/lib/decks/fit-report";
 
 /**
  * The pure middle of an owner-uploaded-template fill, extracted from
@@ -23,6 +24,16 @@ import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
  * equals paragraphs.length on every call, unconditionally. There is no
  * exported function in this module that accepts a caller-built section list,
  * so a caller cannot omit a paragraph even by mistake.
+ *
+ * WAVE T2 (docs/a43-scope.md section 11.4): {@link planSlideTemplateFill}
+ * adds the slide-count REFUSAL. Wave T1's positional mapping (a slide's
+ * first paragraph is the title, the rest are bullets) silently mapped only
+ * the first `groups.length` generated slides and threw the rest away with
+ * no signal at all when the deck needed more slides than the template had.
+ * planSlideTemplateFill refuses that case outright via
+ * {@link buildSlideCountAdjustment} instead of producing a partial,
+ * silently-truncated replacement list - wave T3's clone path is what removes
+ * the limit; until it lands, this is a refusal, not a clone.
  */
 
 /** One paragraph's replacement text, keyed to its OfficeParagraph.id. */
@@ -133,4 +144,57 @@ export async function groupOfficeTemplateParagraphsBySlide(
   return [...bySlide.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([slide, ps]) => ({ slide, paragraphs: ps }));
+}
+
+/** A generated slide's content, in the shape both deck paths already emit. */
+export interface GeneratedSlideContent {
+  title: string;
+  bullets: string[];
+}
+
+export type SlideTemplateFillPlan =
+  | { ok: true; replacements: OfficeTemplateReplacement[]; fitReport: FitReport }
+  | { ok: false; fitReport: FitReport };
+
+/**
+ * Map a generated deck's slides onto an uploaded .pptx template's own slides
+ * by position: a slide's first paragraph becomes the title, its remaining
+ * paragraphs become bullets in order (docs/a43-scope.md section 11.3's
+ * fillDeckTemplateFileAction, moved here per section 11.4's "office-template-
+ * fill.ts - CALLER" - office-template-fill.ts is the pure middle, so the
+ * refusal decision belongs beside the mapping it gates, not in the action's
+ * I/O wrapper).
+ *
+ * PLAN, NOT WRITE: this never touches a buffer. When the deck needs more
+ * slides than the template has, this REFUSES (docs/a43-scope.md section 7.3,
+ * "Before wave T3: a REFUSAL") rather than silently mapping only the first
+ * `groups.length` generated slides and discarding the rest - that silent
+ * discard is the exact defect wave T2 exists to close (section 11.4).
+ *
+ * When the template has slides to spare, the extra template slides are left
+ * alone - H1 (office-template-fill.ts's own module header) means an
+ * untouched template paragraph is never a candidate for deletion, so there
+ * is nothing to refuse there.
+ */
+export function planSlideTemplateFill(
+  groups: Array<{ slide: number; paragraphs: OfficeParagraph[] }>,
+  deckSlides: GeneratedSlideContent[]
+): SlideTemplateFillPlan {
+  const refusal = buildSlideCountAdjustment(groups.length, deckSlides.length);
+  if (refusal) {
+    return { ok: false, fitReport: { adjustments: [refusal] } };
+  }
+
+  const replacements: OfficeTemplateReplacement[] = [];
+  for (let i = 0; i < deckSlides.length; i += 1) {
+    const templateParas = groups[i].paragraphs;
+    const genSlide = deckSlides[i];
+    if (templateParas.length === 0) continue;
+    replacements.push({ id: templateParas[0].id, text: genSlide.title });
+    for (let b = 1; b < templateParas.length; b += 1) {
+      const bulletText = genSlide.bullets[b - 1];
+      if (bulletText !== undefined) replacements.push({ id: templateParas[b].id, text: bulletText });
+    }
+  }
+  return { ok: true, replacements, fitReport: { adjustments: [] } };
 }

@@ -5,6 +5,7 @@ import {
   buildOfficeTemplateParagraphList,
   fillOfficeTemplate,
   groupOfficeTemplateParagraphsBySlide,
+  planSlideTemplateFill,
   type OfficeTemplateReplacement,
 } from "./office-template-fill";
 
@@ -252,5 +253,95 @@ describe("office-template-fill: groupOfficeTemplateParagraphsBySlide", () => {
     const buffer = await buildDocxFixture([docxParagraph("Docx text")]);
     const groups = await groupOfficeTemplateParagraphsBySlide("docx", buffer);
     expect(groups).toEqual([]);
+  });
+});
+
+describe("office-template-fill: planSlideTemplateFill (wave T2, docs/a43-scope.md section 11.4)", () => {
+  it("WATCHED RED before this wave: a template with fewer slides than the deck needs must not silently drop the rest", async () => {
+    // This is the exact shape of the bug docs/a43-scope.md's wave T2 exists
+    // to close: src/app/actions/deck-template-files.ts's fillDeckTemplateFileAction
+    // used to compute slideCount = Math.min(groups.length, deck.slides.length)
+    // and simply never look at the remaining deck slides - no error, no
+    // count, nothing. Before planSlideTemplateFill existed, there was no
+    // function in this module a caller could ask "does this fit?", so this
+    // test failed to even compile/import (TS2305: no exported member
+    // 'planSlideTemplateFill') - that import failure IS the red result this
+    // wave's watched failure requires; pasted verbatim in the wave report.
+    const buffer = await buildPptxFixture([
+      `${pptxParagraph("Slide 1 title")}${pptxParagraph("Slide 1 body")}`,
+      `${pptxParagraph("Slide 2 title")}`,
+    ]);
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
+    expect(groups).toHaveLength(2);
+
+    const fiveGeneratedSlides = [
+      { title: "Gen 1", bullets: ["a"] },
+      { title: "Gen 2", bullets: [] },
+      { title: "Gen 3", bullets: [] },
+      { title: "Gen 4", bullets: [] },
+      { title: "Gen 5", bullets: [] },
+    ];
+
+    const plan = planSlideTemplateFill(groups, fiveGeneratedSlides);
+
+    // The defect this wave closes: three of the five generated slides
+    // (indices 2-4) have nowhere to go in a 2-slide template. A plan that
+    // silently maps only the first two and says nothing about the other
+    // three is exactly today's bug. The fix must refuse outright and name
+    // both counts, not produce a partial, silently-truncated fill.
+    expect(plan.ok).toBe(false);
+    if (plan.ok) throw new Error("expected a refusal");
+    expect(plan.fitReport.adjustments).toHaveLength(1);
+    expect(plan.fitReport.adjustments[0]).toEqual({
+      class: "slide-count-refusal",
+      templateSlideCount: 2,
+      requiredSlideCount: 5,
+      reason: "Your template has 2 slides and this deck needs 5. Pick a shorter shape or a longer template.",
+    });
+  });
+
+  it("produces a full, correct replacement list with no refusal when the deck fits the template", async () => {
+    const buffer = await buildPptxFixture([
+      `${pptxParagraph("Slide 1 title")}${pptxParagraph("Slide 1 body")}`,
+      `${pptxParagraph("Slide 2 title")}`,
+    ]);
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
+
+    const plan = planSlideTemplateFill(groups, [
+      { title: "Gen 1", bullets: ["Gen 1 body"] },
+      { title: "Gen 2", bullets: [] },
+    ]);
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error("expected a fill plan");
+    expect(plan.fitReport.adjustments).toHaveLength(0);
+    expect(plan.replacements).toEqual([
+      { id: groups[0].paragraphs[0].id, text: "Gen 1" },
+      { id: groups[0].paragraphs[1].id, text: "Gen 1 body" },
+      { id: groups[1].paragraphs[0].id, text: "Gen 2" },
+    ]);
+  });
+
+  it("does not refuse when the template has slides to spare - the untouched slides keep their own text (H1)", async () => {
+    const buffer = await buildPptxFixture([
+      `${pptxParagraph("Slide 1 title")}`,
+      `${pptxParagraph("Slide 2 title")}`,
+      `${pptxParagraph("Slide 3 title")}`,
+    ]);
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
+
+    const plan = planSlideTemplateFill(groups, [{ title: "Gen 1", bullets: [] }]);
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error("expected a fill plan");
+    expect(plan.replacements).toEqual([{ id: groups[0].paragraphs[0].id, text: "Gen 1" }]);
+  });
+
+  it("skips a template slide with no paragraphs at all, rather than throwing", async () => {
+    const buffer = await buildPptxFixture([`${pptxParagraph("Slide 1 title")}`]);
+    const groups = await groupOfficeTemplateParagraphsBySlide("pptx", buffer);
+
+    const plan = planSlideTemplateFill(groups, [{ title: "Gen 1", bullets: [] }]);
+    expect(plan.ok).toBe(true);
   });
 });

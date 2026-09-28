@@ -32,10 +32,17 @@
 // passed.
 //
 // Same mocking approach as github-repos.grading.test.ts: a "use server"
-// action with heavy runtime dependencies (requireOwner -> Supabase auth,
+// action with heavy runtime dependencies (requireAppOwner -> Supabase auth,
 // ingestRepo -> live GitHub fetches, gradeEntries/generateRubric -> an LLM
 // call) - every one of them is mocked so the test exercises gradeReposAction's
 // own orchestration, not a real network/model call.
+//
+// R2 wave 1, sub-wave 3 (docs/r2-wave1-subwaves.md section 4, row SW3):
+// gradeReposAction's guard moved from the permissive requireOwner() alias to
+// requireAppOwner() (github.ts). This mock's export name is updated to match
+// - a mock still keyed on `requireOwner` would leave `requireAppOwner()`
+// undefined and every case below would throw "requireAppOwner is not a
+// function" instead of exercising the orchestration this file means to test.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const ingestRepo = vi.fn();
@@ -47,7 +54,7 @@ const renderRubricText = vi.fn();
 const attachCodeRuns = vi.fn();
 const rememberRubric = vi.fn();
 
-vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
 
 vi.mock("@/lib/github", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/github")>();

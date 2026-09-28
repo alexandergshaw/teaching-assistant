@@ -9,7 +9,7 @@ import { rememberRubric } from "@/lib/research/rubric-bank";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, isScaffoldingFile, excludeInstructionsFromDigest, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
 import { listGithubModels, chatWithGithubModel, type GithubModel, type ModelUsage, type ChatMessage } from "@/lib/github-models";
-import { requireOwner, requireAppOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
 import { studentRepoName } from "@/lib/student-repo-names";
 import { fetchJUnitSummary, testWorkflowYaml } from "@/lib/github-test-workflow";
@@ -24,7 +24,7 @@ export async function extractTopicsFromRepoAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ topics: string[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
 
@@ -97,7 +97,7 @@ export async function extractTopicsFromRepoAction(
  */
 export async function setRepoTopicsAction(repoRef: string, topics: string[]): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await setRepoTopics(parsed.owner, parsed.repo, topics);
@@ -117,7 +117,7 @@ export async function githubConfiguredAction(): Promise<{ configured: boolean }>
 /** List the repos the configured token can see (for repo pickers). */
 export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     return { repos: await listRepos() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list GitHub repositories." };
@@ -135,7 +135,7 @@ export async function deleteOrgReposAction(
   names: string[]
 ): Promise<{ results: Array<{ name: string; error?: string }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!org.trim()) return { error: "Choose an organization." };
     const list = names.map((n) => n.trim()).filter(Boolean);
     if (list.length === 0) return { error: "Choose at least one repository." };
@@ -179,7 +179,7 @@ export async function setupStudentRepoAction(
   permission: RepoPermission
 ): Promise<ClassroomRowResult | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!org.trim()) return { error: "Choose an organization." };
     if (!templateRepo.trim()) return { error: "Choose a template repository." };
     if (!student.trim() && !username.trim()) return { error: "Empty row." };
@@ -219,7 +219,7 @@ export async function setupStudentRepoAction(
 /** List the orgs the token owns, for the "Import from org" dropdown. */
 export async function listMyOrgsAction(): Promise<{ orgs: string[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     return { orgs: await listOwnedOrgs() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list organizations." };
@@ -232,7 +232,7 @@ export async function listOrgReposAction(
   prefix?: string
 ): Promise<{ repos: GithubRepo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!org.trim()) return { error: "Choose an organization." };
     return { repos: await listOrgRepos(org.trim(), prefix?.trim() || undefined) };
   } catch (err) {
@@ -245,7 +245,7 @@ export async function listGithubBranchesAction(
   repoRef: string
 ): Promise<{ branches: string[]; defaultBranch: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return await listBranches(parsed.owner, parsed.repo);
@@ -282,7 +282,7 @@ export async function createRepoAction(
   isTemplate: boolean
 ): Promise<{ repo: GithubRepo } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
     if (!clean) return { error: "Enter a repository name." };
     return {
@@ -311,7 +311,7 @@ export async function createRepoFromTemplateAction(
   markTemplate: boolean
 ): Promise<{ repo: { fullName: string; htmlUrl: string } } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(templateRepoRef);
     if (!parsed) return { error: "Choose a source repository as owner/name." };
     const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
@@ -343,7 +343,7 @@ export async function createCopilotRepoAction(
   description?: string
 ): Promise<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
     if (!clean) return { error: "Enter a repository name." };
     if (!prompt.trim()) return { error: "Generate the Copilot prompt first." };
@@ -389,7 +389,7 @@ export async function createCopilotTaskAction(
   body: string
 ): Promise<{ issueUrl: string; issueNumber: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!title.trim()) return { error: "Enter a task title." };
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
@@ -404,7 +404,7 @@ export async function listCopilotTasksAction(
   repoRef: string
 ): Promise<{ tasks: CopilotTask[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return { tasks: await listCopilotTasks(parsed.owner, parsed.repo) };
@@ -421,7 +421,7 @@ export async function bulkDeletePathsAction(
   message?: string
 ): Promise<{ deleted: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     if (!branch.trim()) return { error: "Pick a branch." };
@@ -441,7 +441,7 @@ export async function bulkMovePathsAction(
   message?: string
 ): Promise<{ moved: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     if (!branch.trim()) return { error: "Pick a branch." };
@@ -461,7 +461,7 @@ export async function bulkMovePathsAction(
 /** List the GitHub Models available to the account (for the file-editor chat). */
 export async function listGithubModelsAction(): Promise<{ models: GithubModel[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     return { models: await listGithubModels() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list GitHub models." };
@@ -474,7 +474,7 @@ export async function copilotChatAction(
   messages: ChatMessage[]
 ): Promise<{ content: string; usage: ModelUsage } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!model.trim()) return { error: "Choose a model." };
     if (!messages || messages.length === 0) return { error: "Enter a message." };
     return await chatWithGithubModel(model, messages);
@@ -489,7 +489,7 @@ export async function checkStudentActivityAction(
   prefix?: string
 ): Promise<{ rows: Array<{ repo: string; lastCommit: string | null; htmlUrl: string }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!org.trim()) return { error: "Provide a GitHub organization." };
     const repos = await listOrgRepos(org.trim(), prefix?.trim() || undefined);
     const rows = await Promise.all(
@@ -532,7 +532,7 @@ export async function registerOrgPushWebhookAction(
 > {
   const url = `${publicWebhookBaseUrl()}/api/github/webhook`;
   try {
-    await requireOwner();
+    await requireAppOwner();
     const cleanOrg = org.trim();
     if (!cleanOrg) return { ok: false, url, error: "Provide a GitHub organization." };
     if (!githubConfigured()) {
@@ -558,7 +558,7 @@ export async function generateRubricFromRepoAction(
   gradingFolder?: string
 ): Promise<{ rubric: string; fullName: string; fileCount: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
@@ -639,7 +639,7 @@ export async function gradeReposAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireAppOwner();
     // One common folder scopes every repo in the queue for this run (AC A2),
     // not a per-repo value - normalized once, outside the loop.
     const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
@@ -770,7 +770,7 @@ export async function listWorkflowsAction(
   repoRef: string
 ): Promise<{ workflows: WorkflowInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return { workflows: await listWorkflows(parsed.owner, parsed.repo) };
@@ -786,7 +786,7 @@ export async function dispatchWorkflowAction(
   inputs?: Record<string, string>
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     if (!workflowRef || !ref) return { error: "Choose a workflow and a branch to run." };
@@ -808,7 +808,7 @@ export async function dispatchTestsAction(
   workflowRef?: string
 ): Promise<{ since: string; ref: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const ref = branch?.trim() || (await getRepo(parsed.owner, parsed.repo)).defaultBranch;
@@ -838,7 +838,7 @@ export async function getTestRunStatusAction(
   sinceIso: string
 ): Promise<{ run: WorkflowRunInfo | null; summary: TestSummary | null } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const run = await findWorkflowRunSince(parsed.owner, parsed.repo, ref, sinceIso);
@@ -868,7 +868,7 @@ export async function setupTestsWorkflowAction(
   customCommand = ""
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const yaml = testWorkflowYaml(template, customCommand);

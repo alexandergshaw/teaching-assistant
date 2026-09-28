@@ -19,6 +19,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 import { type TaskAttachment } from "@/lib/course-task-attachments";
+import { isOwnCourseFilesStoragePath } from "@/lib/course-files";
 
 /** The row shape actually selected - a subset of the full table row (no
  * user_id: every query below is already scoped to one owner, so the caller
@@ -180,9 +181,26 @@ const REMOVE_CHUNK_SIZE = 100;
  * failing chunk: never removes past a failure and never swallows the error,
  * so a caller can still rely on "a thrown error means every row is safe to
  * leave in place for a retry."
+ *
+ * RULING 127 (PC3, defence in depth): every path is checked against
+ * `userId`'s own prefix with isOwnCourseFilesStoragePath BEFORE any
+ * `remove()` call is issued - refuses (throws) the whole batch rather than
+ * removing the in-prefix paths and skipping the rest, so a caller can still
+ * rely on "no error means every listed path was this course's own." This is
+ * the sink half of Finding 1's fix: createTaskAttachmentRow's own validation
+ * (below) is what should stop a foreign path from ever reaching a row in the
+ * first place, but this is the last line of defence if some future writer
+ * ever bypasses that - the exact shape Finding 1 itself was.
  */
 export const taskAttachmentStorageSweep = {
-  async remove(supabase: SupabaseClient<Database>, storagePaths: string[]): Promise<void> {
+  async remove(supabase: SupabaseClient<Database>, userId: string, storagePaths: string[]): Promise<void> {
+    for (const path of storagePaths) {
+      if (!isOwnCourseFilesStoragePath(userId, path)) {
+        throw new Error(
+          `Refusing to remove "${path}": it is not one of this course's own attachment objects. The course was not deleted.`
+        );
+      }
+    }
     for (let i = 0; i < storagePaths.length; i += REMOVE_CHUNK_SIZE) {
       const chunk = storagePaths.slice(i, i + REMOVE_CHUNK_SIZE);
       const { error } = await supabase.storage.from(ATTACHMENT_STORAGE_BUCKET).remove(chunk);
@@ -210,12 +228,27 @@ export interface CreateTaskAttachmentRowInput {
 
 /** Insert one attachment row. Called AFTER the object has already been
  * uploaded to Storage (AC2 item 12) - this function does no Storage I/O of
- * its own, matching upsertTaskInstruction's pure-persistence shape. */
+ * its own, matching upsertTaskInstruction's pure-persistence shape.
+ *
+ * RULING 127 (Finding 1): `input.storagePath` reaches this function as
+ * browser-supplied metadata, and once recorded it is read back only by
+ * deleteCourse's service-role Storage sweep (taskAttachmentStorageSweep.remove,
+ * above) - which bypasses the bucket's own RLS entirely. Before this fix the
+ * only check here was non-emptiness, so a caller could register ANY other
+ * tenant's object path against their own task cell and have it swept and
+ * deleted the next time they deleted one of their own courses. Validated
+ * BEFORE any database call, mirroring insertInstitutionPageAttachmentRow
+ * (src/lib/institution-page-attachments.ts) - a mismatched path is refused
+ * outright, with no insert attempted. */
 export async function createTaskAttachmentRow(
   supabase: SupabaseClient<Database>,
   userId: string,
   input: CreateTaskAttachmentRowInput
 ): Promise<TaskAttachment> {
+  if (!isOwnCourseFilesStoragePath(userId, input.storagePath)) {
+    throw new Error("That attachment's storage path is invalid.");
+  }
+
   const insertRow: Database["public"]["Tables"]["course_task_attachments"]["Insert"] = {
     id: input.id,
     user_id: userId,

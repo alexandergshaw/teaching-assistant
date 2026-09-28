@@ -24,7 +24,7 @@ import type { Database } from "@/lib/supabase/types";
 import { getRun, listRunSteps, type WorkflowRunRecord } from "@/lib/workflow-runs";
 import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listCourseHubAction, appendCourseMaterialFileAction } from "@/app/actions";
-import { uploadCourseZip, downloadCourseZipBlob, removeCourseZip } from "@/lib/course-files";
+import { uploadCourseZip, downloadCourseZipBlob, removeCourseZip, isOwnCourseFilesStoragePath } from "@/lib/course-files";
 import { joinStepErrorDetail } from "./run-detail";
 import type { SavedCourseZipRef } from "./run-logging";
 
@@ -170,6 +170,19 @@ export async function completeCourseZipRunLog(
     const entry = tile.materialsFiles.find((f) => f.name === ref.fileName);
     if (!entry) return { ok: false, reason: "The saved zip was not found on the course tile." };
 
+    // RULING 127 (Finding 3): `entry.path` is read back off a row this
+    // caller's own append actions wrote - now validated at write time
+    // (src/app/actions/course-hub-core.ts's appendCourseMaterialFileAction),
+    // so it should never be foreign. Checked again here anyway (defence in
+    // depth, same posture as taskAttachmentStorageSweep.remove's PC3 check):
+    // this function calls downloadCourseZipBlob on the SERVICE-ROLE client,
+    // which bypasses the bucket's RLS entirely, so a future writer that
+    // bypasses the write-time check would otherwise reach a cross-tenant
+    // read through this path with no defence left at all.
+    if (!isOwnCourseFilesStoragePath(userId, entry.path)) {
+      return { ok: false, reason: "That saved zip's storage path is invalid." };
+    }
+
     const existingBlob = await downloadCourseZipBlob(supabase, { path: entry.path });
     const { default: JSZip } = await import("jszip");
     // BUG FIX (docs/REGRESSION.md entry 241 check 13): this is the READ
@@ -211,8 +224,18 @@ export async function completeCourseZipRunLog(
       await removeCourseZip(supabase, path);
       return { ok: false, reason: r.error };
     }
-    if (r.replacedPath) {
+    // RULING 127 (Finding 3, the actual defect this finding names): the
+    // second cross-tenant DELETE - `r.replacedPath` is the path
+    // appendCourseMaterialFile is about to (or just did) swap out, and it
+    // comes from whatever the CALLER'S OWN append action originally wrote for
+    // this file name. removeCourseZip is a service-role delete on the
+    // "course-files" bucket, bypassing RLS - refuse rather than remove an
+    // out-of-prefix path, which is exactly what an attacker's own injected
+    // entry (pre-Finding-2-fix) would have been.
+    if (r.replacedPath && isOwnCourseFilesStoragePath(userId, r.replacedPath)) {
       await removeCourseZip(supabase, r.replacedPath);
+    } else if (r.replacedPath) {
+      return { ok: false, reason: "The replaced file's storage path is invalid; it was not removed." };
     }
     return { ok: true };
   } catch (err) {

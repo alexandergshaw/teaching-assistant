@@ -121,7 +121,7 @@ export async function updateCourse(userId: string, id: string, input: CourseInpu
 export async function deleteCourse(userId: string, id: string): Promise<void> {
   const supabase = createServiceClient();
   const storagePaths = await listTaskAttachmentStoragePathsForCourse(supabase, userId, id);
-  await taskAttachmentStorageSweep.remove(supabase, storagePaths);
+  await taskAttachmentStorageSweep.remove(supabase, userId, storagePaths);
   const { error } = await table().delete().eq("user_id", userId).eq("id", id);
   if (error) {
     throw new Error(`Could not delete the course: ${error.message}`);

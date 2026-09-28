@@ -14,7 +14,13 @@
 // so an empty fixture is enough to read it back and stays correct even if
 // PAGE_SIZE is ever retuned.
 import { describe, it, expect, beforeAll } from "vitest";
-import { listTaskAttachments, listTaskAttachmentStoragePathsForCourse, mapTaskAttachment } from "./course-task-attachments";
+import {
+  listTaskAttachments,
+  listTaskAttachmentStoragePathsForCourse,
+  mapTaskAttachment,
+  createTaskAttachmentRow,
+  taskAttachmentStorageSweep,
+} from "./course-task-attachments";
 import { indexTaskAttachments, taskAttachmentsAt } from "@/lib/course-task-attachments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
@@ -301,5 +307,161 @@ describe("listTaskAttachmentStoragePathsForCourse", () => {
       { from: PAGE_SIZE, to: 2 * PAGE_SIZE - 1 },
     ]);
     expect(paths).toEqual(rows.map((r) => r.storage_path));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D. createTaskAttachmentRow - RULING 127, Finding 1 (the write half).
+//
+// docs/service-role-predicate-audit.md Finding 1: before this fix,
+// `input.storagePath` was checked for non-emptiness only, so a caller could
+// register a victim's own object path against their own task cell. The
+// RED/GREEN pair below is that exact defect: the "before" behaviour
+// (documented, not re-run - this file only ever exercises the current
+// source) would have resolved and inserted a row for a victim-prefixed path;
+// the fix refuses it outright, with no database call at all.
+// ---------------------------------------------------------------------------
+
+function makeInsertFakeClient(insertResponse: { data: unknown; error: unknown }) {
+  const calls: RecordedCall[] = [];
+  interface RecordedCall {
+    method: string;
+    args: unknown[];
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chain: any = {
+    insert: (...args: unknown[]) => {
+      calls.push({ method: "insert", args });
+      return chain;
+    },
+    select: (...args: unknown[]) => {
+      calls.push({ method: "select", args });
+      return chain;
+    },
+    single: () => {
+      calls.push({ method: "single", args: [] });
+      return Promise.resolve(insertResponse);
+    },
+  };
+  const client = {
+    from: (table: string) => {
+      calls.push({ method: "from", args: [table] });
+      return chain;
+    },
+  };
+  return { client: client as unknown as SupabaseClient<Database>, calls };
+}
+
+describe("createTaskAttachmentRow: storagePath is validated before any database call (RULING 127, Finding 1)", () => {
+  it.each([
+    ["a different user entirely", "victim-user/course-9/materials.zip"],
+    ["a prefix that merely starts with userId rather than equalling it", "user-12/course-9/materials.zip"],
+    ["a traversal segment walking back out of the caller's own prefix", "user-1/course-1/../../victim-user/x.pdf"],
+    ["nothing after the userId segment", "user-1"],
+  ])("refuses a storagePath belonging to %s, making NO database call at all", async (_label, storagePath) => {
+    const { client, calls } = makeInsertFakeClient({ data: null, error: null });
+
+    await expect(
+      createTaskAttachmentRow(client, "user-1", {
+        id: "attach-new",
+        courseId: "course-1",
+        taskId: "task-1",
+        fileName: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 10,
+        storagePath,
+      })
+    ).rejects.toThrow();
+
+    expect(calls).toEqual([]);
+  });
+
+  it("accepts a path under the caller's own prefix and proceeds to insert (positive control)", async () => {
+    const insertedRow = {
+      id: "attach-new",
+      course_id: "course-1",
+      task_id: "task-1",
+      file_name: "notes.txt",
+      mime_type: "text/plain",
+      size_bytes: 10,
+      storage_path: "user-1/course-1/task-attachments/attach-new.txt",
+      created_at: "2026-08-01T00:00:00Z",
+    };
+    const { client, calls } = makeInsertFakeClient({ data: insertedRow, error: null });
+
+    const attachment = await createTaskAttachmentRow(client, "user-1", {
+      id: "attach-new",
+      courseId: "course-1",
+      taskId: "task-1",
+      fileName: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 10,
+      storagePath: "user-1/course-1/task-attachments/attach-new.txt",
+    });
+
+    expect(attachment.id).toBe("attach-new");
+    expect(calls.some((c) => c.method === "insert")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E. taskAttachmentStorageSweep.remove - RULING 127, Finding 1 (PC3, the
+// sink half - defence in depth alongside createTaskAttachmentRow above).
+// ---------------------------------------------------------------------------
+
+function makeStorageSweepFakeClient(removeResponse: { error: unknown } = { error: null }) {
+  const removeArgs: string[][] = [];
+  const client = {
+    storage: {
+      from: () => ({
+        remove: (paths: string[]) => {
+          removeArgs.push(paths);
+          return Promise.resolve(removeResponse);
+        },
+      }),
+    },
+  };
+  return { client: client as unknown as SupabaseClient<Database>, removeArgs };
+}
+
+describe("taskAttachmentStorageSweep.remove: every path is checked against the caller's own prefix before any remove() call (RULING 127, Finding 1 PC3)", () => {
+  it("throws and makes NO remove() call when even one path is outside the caller's own prefix - mixed batch", async () => {
+    const { client, removeArgs } = makeStorageSweepFakeClient();
+
+    await expect(
+      taskAttachmentStorageSweep.remove(client, "user-1", [
+        "user-1/course-1/task-attachments/a.pdf",
+        "victim-user/course-1/task-attachments/b.pdf",
+      ])
+    ).rejects.toThrow();
+
+    expect(removeArgs).toEqual([]);
+  });
+
+  it("throws on a lone out-of-prefix path", async () => {
+    const { client, removeArgs } = makeStorageSweepFakeClient();
+
+    await expect(
+      taskAttachmentStorageSweep.remove(client, "user-1", ["victim-user/course-1/task-attachments/b.pdf"])
+    ).rejects.toThrow();
+
+    expect(removeArgs).toEqual([]);
+  });
+
+  it("removes a batch of paths that are ALL the caller's own (positive control) - a course delete must still sweep the caller's real attachments", async () => {
+    const { client, removeArgs } = makeStorageSweepFakeClient();
+    const ownPaths = ["user-1/course-1/task-attachments/a.pdf", "user-1/course-1/task-attachments/b.pdf"];
+
+    await taskAttachmentStorageSweep.remove(client, "user-1", ownPaths);
+
+    expect(removeArgs).toEqual([ownPaths]);
+  });
+
+  it("makes no call at all for an empty array", async () => {
+    const { client, removeArgs } = makeStorageSweepFakeClient();
+
+    await taskAttachmentStorageSweep.remove(client, "user-1", []);
+
+    expect(removeArgs).toEqual([]);
   });
 });

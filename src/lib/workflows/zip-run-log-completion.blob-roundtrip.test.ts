@@ -39,11 +39,20 @@ vi.mock("@/app/actions", () => ({
   appendCourseMaterialFileAction: vi.fn(),
 }));
 
-vi.mock("@/lib/course-files", () => ({
-  downloadCourseZipBlob: vi.fn(),
-  uploadCourseZip: vi.fn(),
-  removeCourseZip: vi.fn(),
-}));
+// RULING 127: isOwnCourseFilesStoragePath is kept as the REAL implementation
+// (pure logic, dedicated coverage in course-files.test.ts) - completeCourseZipRunLog
+// now calls it on both `entry.path` and `r.replacedPath` (defence in depth
+// for Finding 3), and this file's own fixtures below already use a genuine
+// `${userId}/...` path shape, so the real check should pass them through.
+vi.mock("@/lib/course-files", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/course-files")>();
+  return {
+    ...actual,
+    downloadCourseZipBlob: vi.fn(),
+    uploadCourseZip: vi.fn(),
+    removeCourseZip: vi.fn(),
+  };
+});
 
 // Deliberately NO jszip mock here.
 

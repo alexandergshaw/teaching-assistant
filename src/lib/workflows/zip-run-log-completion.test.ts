@@ -37,11 +37,19 @@ vi.mock("@/app/actions", () => ({
   appendCourseMaterialFileAction: vi.fn(),
 }));
 
-vi.mock("@/lib/course-files", () => ({
-  downloadCourseZipBlob: vi.fn(),
-  uploadCourseZip: vi.fn(),
-  removeCourseZip: vi.fn(),
-}));
+// isOwnCourseFilesStoragePath is kept as the REAL implementation (RULING 127)
+// rather than mocked - it is pure logic with its own dedicated coverage in
+// course-files.test.ts, and this suite's own new cases below exercise it for
+// real against completeCourseZipRunLog's actual call sites.
+vi.mock("@/lib/course-files", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/course-files")>();
+  return {
+    ...actual,
+    downloadCourseZipBlob: vi.fn(),
+    uploadCourseZip: vi.fn(),
+    removeCourseZip: vi.fn(),
+  };
+});
 
 // In-memory fake archive: {path: content} serialized as JSON text inside a
 // Blob, so loadAsync can parse it back out and generateAsync can re-emit it -
@@ -394,6 +402,54 @@ describe("completeCourseZipRunLog", () => {
     expect(removeCourseZip).not.toHaveBeenCalledWith(fakeSupabase, "u1/course-1/existing.zip");
   });
 
+  // -------------------------------------------------------------------------
+  // RULING 127 (docs/service-role-predicate-audit.md Finding 3,
+  // docs/ruling-127.md): before this fix, neither the read of `entry.path`
+  // nor the removal of `r.replacedPath` checked the path against `userId`'s
+  // own "course-files" prefix - both are SERVICE-ROLE storage calls
+  // (downloadCourseZipBlob, removeCourseZip), bypassing the bucket's RLS.
+  // Defence in depth alongside Finding 2's write-time fix
+  // (appendCourseMaterialFileAction, src/app/actions/course-hub-core.ts): if
+  // a foreign path ever reached the tile's materials list anyway, this is
+  // the last line before a cross-tenant read or delete.
+  // -------------------------------------------------------------------------
+  it("RULING 127 Finding 3 (read half): refuses to read a materials-list entry whose path is outside the caller's own prefix, and never calls downloadCourseZipBlob", async () => {
+    stubTileWithFile("victim-user/course-1/existing.zip");
+
+    const result = await completeCourseZipRunLog(fakeSupabase, "u1", ref, "TEXT");
+
+    expect(result.ok).toBe(false);
+    expect(downloadCourseZipBlob).not.toHaveBeenCalled();
+    expect(uploadCourseZip).not.toHaveBeenCalled();
+  });
+
+  it("RULING 127 Finding 3 (delete half): refuses to remove a replacedPath outside the caller's own prefix, even after the append itself succeeded", async () => {
+    stubTileWithFile();
+    vi.mocked(downloadCourseZipBlob).mockResolvedValue(fakeArchiveBlob({ "Course-Wide/Run Log.txt": "old" }));
+    vi.mocked(uploadCourseZip).mockResolvedValue({ path: "u1/course-1/new-object.zip" });
+    // The exact shape Finding 3 describes: the entry the append call replaced
+    // points outside the caller's own prefix (e.g. an attacker's own earlier
+    // injected entry, from before Finding 2's write-time fix existed).
+    vi.mocked(appendCourseMaterialFileAction).mockResolvedValue({ replacedPath: "victim-user/course-1/x.zip" });
+
+    const result = await completeCourseZipRunLog(fakeSupabase, "u1", ref, "TEXT");
+
+    expect(result.ok).toBe(false);
+    expect(removeCourseZip).not.toHaveBeenCalledWith(fakeSupabase, "victim-user/course-1/x.zip");
+  });
+
+  it("RULING 127 positive control: an own-prefix replacedPath is still removed normally", async () => {
+    stubTileWithFile();
+    vi.mocked(downloadCourseZipBlob).mockResolvedValue(fakeArchiveBlob({ "Course-Wide/Run Log.txt": "old" }));
+    vi.mocked(uploadCourseZip).mockResolvedValue({ path: "u1/course-1/new-object.zip" });
+    vi.mocked(appendCourseMaterialFileAction).mockResolvedValue({ replacedPath: "u1/course-1/existing.zip" });
+
+    const result = await completeCourseZipRunLog(fakeSupabase, "u1", ref, "TEXT");
+
+    expect(result).toEqual({ ok: true });
+    expect(removeCourseZip).toHaveBeenCalledWith(fakeSupabase, "u1/course-1/existing.zip");
+  });
+
   it("U9-AC5: idempotent - completing the same zip twice ends with one entry, not a duplicate or a nested archive", async () => {
     stubTileWithFile();
     // First pass: the snapshot.
@@ -440,8 +496,8 @@ describe("completeCourseZipRunLogs (multi-ref orchestrator)", () => {
     vi.mocked(listRunSteps).mockResolvedValue([step()]);
     vi.mocked(listCourseHubAction).mockResolvedValue({
       courses: [
-        { id: "c1", materialsFiles: [{ name: "a.zip", path: "p1", size: 1, addedAt: "" }] },
-        { id: "c2", materialsFiles: [{ name: "b.zip", path: "p2", size: 1, addedAt: "" }] },
+        { id: "c1", materialsFiles: [{ name: "a.zip", path: "u1/c1/p1", size: 1, addedAt: "" }] },
+        { id: "c2", materialsFiles: [{ name: "b.zip", path: "u1/c2/p2", size: 1, addedAt: "" }] },
       ] as never,
     });
     vi.mocked(downloadCourseZipBlob).mockImplementation(async () => fakeArchiveBlob({}));
@@ -482,7 +538,7 @@ describe("completeCourseZipRunLogs (multi-ref orchestrator)", () => {
     // than the override text keeps the two assertions below unambiguous.
     vi.mocked(listRunSteps).mockResolvedValue([step({ stepIndex: 0, status: "error", error: "per-step error text" })]);
     vi.mocked(listCourseHubAction).mockResolvedValue({
-      courses: [{ id: "c1", materialsFiles: [{ name: "a.zip", path: "p1", size: 1, addedAt: "" }] }] as never,
+      courses: [{ id: "c1", materialsFiles: [{ name: "a.zip", path: "u1/c1/p1", size: 1, addedAt: "" }] }] as never,
     });
     vi.mocked(downloadCourseZipBlob).mockImplementation(async () => fakeArchiveBlob({}));
     vi.mocked(uploadCourseZip).mockResolvedValue({ path: "new" });
@@ -514,7 +570,7 @@ describe("completeCourseZipRunLogs (multi-ref orchestrator)", () => {
     vi.mocked(getRun).mockResolvedValue(baseRun());
     vi.mocked(listRunSteps).mockResolvedValue([step()]);
     vi.mocked(listCourseHubAction).mockResolvedValue({
-      courses: [{ id: "c2", materialsFiles: [{ name: "b.zip", path: "p2", size: 1, addedAt: "" }] }] as never,
+      courses: [{ id: "c2", materialsFiles: [{ name: "b.zip", path: "u1/c2/p2", size: 1, addedAt: "" }] }] as never,
       // "c1" is deliberately absent, so its own completion fails while c2's succeeds.
     });
     vi.mocked(downloadCourseZipBlob).mockImplementation(async () => fakeArchiveBlob({}));

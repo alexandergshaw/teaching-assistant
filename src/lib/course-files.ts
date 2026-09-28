@@ -61,6 +61,85 @@ function attemptWord(n: number): string {
   return `${n} attempt${n === 1 ? "" : "s"}`;
 }
 
+// ---------------------------------------------------------------------------
+// RULING 127: the shared "course-files" bucket object-path validator.
+//
+// Root cause (docs/service-role-predicate-audit.md Findings 1-3): this
+// bucket's RLS policy contains an object to its owner by checking ONLY that
+// the first path segment equals the caller's uid
+// (supabase/migrations/20260722000000_course_materials.sql:31-33,
+// `(storage.foldername(name))[1] = auth.uid()::text`). A service-role client
+// bypasses that policy entirely, so every write/persist site and every
+// removal sink that hands a caller-supplied path to a SERVICE-ROLE storage
+// call must re-enforce the same prefix itself - nothing else does.
+//
+// This is used at every point this bucket's object path is persisted or
+// acted on: src/lib/supabase/course-task-attachments.ts's
+// createTaskAttachmentRow (write) and taskAttachmentStorageSweep.remove
+// (delete sink); the four append*File actions in
+// src/app/actions/course-hub-core.ts (write, both `path` and every entry of
+// `parts`); src/lib/workflows/zip-run-log-completion.ts's read of an
+// already-recorded entry and its removal of a replaced object.
+//
+// Refuses rather than sanitises (RULING 127): a caller that fails this check
+// gets an outright rejection, never a rewritten "safe" path - rewriting would
+// hide the same bug or attack a refusal makes visible.
+//
+// Checked, not just "starts with the prefix" (the mistake this audit found in
+// this bucket's sibling module, src/lib/institution-page-attachments.ts's
+// isInstitutionAttachmentStoragePath - see that function's own module for the
+// docs/service-role-predicate-audit.md RES-C hole `"<me>/<page>/../../<victim>/x"`
+// exploits: `startsWith(`${userId}/${pageId}/`)` alone does not reject a `..`
+// segment that walks back out of that prefix. This validator is stricter:
+// - the FIRST segment must EQUAL userId exactly, never merely start with it
+//   (so "user-12" can never satisfy a check meant for "user-1");
+// - there must be at least one segment after it (a bare "user-1" or
+//   "user-1/" names no object);
+// - no segment may be empty (rejects a leading/trailing/doubled "/", and
+//   therefore any absolute-looking path, since splitting a leading "/"
+//   yields an empty first segment);
+// - no segment may be "." or ".." (rejects a traversal attempt outright,
+//   independent of whatever Supabase Storage itself does with one - see
+//   RES-C: this repo cannot observe that against a live bucket, so the
+//   defensive half is added unconditionally);
+// - no segment may contain a literal backslash, and no segment's
+//   percent-decoding may introduce a "/", "\\", "." or ".." it did not
+//   already spell out literally - closing the "encode the separator/dot to
+//   slip past a literal-string check" class of bypass.
+// ---------------------------------------------------------------------------
+
+/** True if `segment` is (or, once percent-decoded, becomes) a path-traversal
+ * or separator character sequence a naive literal-string check would miss -
+ * see the validator's own doc comment above for the exact bypasses this
+ * closes. Malformed percent-encoding (a `decodeURIComponent` throw) is
+ * treated as suspicious and refused rather than guessed at. */
+function isTraversalOrSeparatorSegment(segment: string): boolean {
+  if (segment === "." || segment === "..") return true;
+  if (segment.includes("\\")) return true;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return true;
+  }
+  if (decoded === segment) return false;
+  return decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\");
+}
+
+/**
+ * Whether `storagePath` is an object path `userId` is allowed to write to or
+ * act on in the "course-files" bucket: exactly `${userId}/<something>`, with
+ * no empty, ".", ".." or separator-hiding segment anywhere in it. See the
+ * module header above for why this exists and what it is stricter than.
+ */
+export function isOwnCourseFilesStoragePath(userId: string, storagePath: string): boolean {
+  if (!userId || !storagePath) return false;
+  const segments = storagePath.split("/");
+  if (segments.length < 2) return false;
+  if (segments[0] !== userId) return false;
+  return segments.every((segment) => segment.length > 0 && !isTraversalOrSeparatorSegment(segment));
+}
+
 export async function uploadCourseFile(
   supabase: SupabaseClient<Database>,
   userId: string,

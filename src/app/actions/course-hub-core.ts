@@ -4,6 +4,19 @@ import { listCourses as listCourseHubRows, createCourse as createCourseRow, upda
 import { requireOwner } from "@/lib/supabase/auth";
 import { coerceRepoModulePairing, type RepoModulePairing } from "@/lib/repo-module-pairing";
 import { coerceExportModuleAdditions, type ExportModuleAdditions } from "@/lib/export-module-additions";
+import { isOwnCourseFilesStoragePath } from "@/lib/course-files";
+
+// RULING 127 (Finding 2): the message every append*FileAction below returns
+// when `file.path` (or, for the export action, any entry of `file.parts`)
+// does not belong to the signed-in caller's own "course-files" prefix. Before
+// this fix these four actions validated nothing about the caller-supplied
+// path/parts, so an attacker could persist another tenant's object path into
+// their own course tile and later have it read back through a service-role
+// signed URL (appendCourseExportFileAction, read via
+// src/app/api/lms-export/selection/route.ts) or deleted (the workflow
+// zip-run-log-completion path, src/lib/workflows/zip-run-log-completion.ts).
+// Refused here, before the path is ever persisted - never sanitised.
+const INVALID_STORAGE_PATH_ERROR = "That file's storage path is invalid.";
 
 // ── Course hub (bundle a course's resources: codebase, syllabus, textbook, Canvas) ──
 // Named "CourseHub" to avoid collision with the Canvas listCoursesAction above.
@@ -163,6 +176,7 @@ export async function appendCourseMaterialFileAction(
   try {
     const user = await requireOwner();
     if (!courseId.trim()) return { error: "Choose a course." };
+    if (!isOwnCourseFilesStoragePath(user.id, file.path)) return { error: INVALID_STORAGE_PATH_ERROR };
     const replacedPath = await appendCourseMaterialFile(user.id, courseId, {
       ...file,
       addedAt: new Date().toISOString(),
@@ -196,6 +210,7 @@ export async function appendCourseCastletopFileAction(
   try {
     const user = await requireOwner();
     if (!courseId.trim()) return { error: "Choose a course." };
+    if (!isOwnCourseFilesStoragePath(user.id, file.path)) return { error: INVALID_STORAGE_PATH_ERROR };
     const replacedPath = await appendCourseCastletopFile(user.id, courseId, {
       ...file,
       addedAt: new Date().toISOString(),
@@ -229,6 +244,7 @@ export async function appendCourseMiscFileAction(
   try {
     const user = await requireOwner();
     if (!courseId.trim()) return { error: "Choose a course." };
+    if (!isOwnCourseFilesStoragePath(user.id, file.path)) return { error: INVALID_STORAGE_PATH_ERROR };
     const replacedPath = await appendCourseMiscFile(user.id, courseId, {
       ...file,
       addedAt: new Date().toISOString(),
@@ -262,6 +278,15 @@ export async function appendCourseExportFileAction(
   try {
     const user = await requireOwner();
     if (!courseId.trim()) return { error: "Choose a course." };
+    // Finding 2's own read sink (readExportCourseContentById ->
+    // downloadCourseZipBlob) prefers `file.parts` over `file.path` whenever
+    // `parts` is present (src/lib/course-files.ts's downloadCourseZipBlob),
+    // so validating `path` alone would leave the hole open through `parts` -
+    // every entry must be checked, not just the first.
+    if (!isOwnCourseFilesStoragePath(user.id, file.path)) return { error: INVALID_STORAGE_PATH_ERROR };
+    if (file.parts?.some((p) => !isOwnCourseFilesStoragePath(user.id, p))) {
+      return { error: INVALID_STORAGE_PATH_ERROR };
+    }
     const replacedPaths = await appendCourseExportFile(user.id, courseId, {
       ...file,
       addedAt: new Date().toISOString(),

@@ -8,9 +8,86 @@
 // top of what this file names - the object path).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getCourseZipUrl, downloadCourseZipBlob } from "./course-files";
+import { getCourseZipUrl, downloadCourseZipBlob, isOwnCourseFilesStoragePath } from "./course-files";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+
+// ---------------------------------------------------------------------------
+// RULING 127 (docs/service-role-predicate-audit.md Findings 1-3, docs/ruling-127.md):
+// the shared "course-files" bucket object-path validator. This is the FIX
+// under test for the cross-tenant Storage delete/read - see
+// src/lib/supabase/course-task-attachments.test.ts, course-hub-core's own
+// storage-path test, and zip-run-log-completion.test.ts for the executing
+// write-site/sink coverage that USES this validator; this describe block
+// covers the pure predicate itself.
+// ---------------------------------------------------------------------------
+describe("isOwnCourseFilesStoragePath", () => {
+  it("accepts a path under the caller's own prefix", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/course-1/file.zip")).toBe(true);
+  });
+
+  it("accepts a deeply nested path, e.g. a task-attachment shape", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/course-1/task-attachments/attach-1.pdf")).toBe(true);
+  });
+
+  it("rejects a path under a different user's prefix entirely", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "victim-user/course-1/file.zip")).toBe(false);
+  });
+
+  it("rejects a prefix that merely STARTS WITH userId rather than equalling it", () => {
+    // "user-1" must not satisfy a check meant for "user-12" (or vice versa) -
+    // startsWith(`${userId}/`) style checks are the trap this codebase's own
+    // institution-page-attachments.ts predicate falls into for a different
+    // reason (RES-C); this covers the segment-equality half specifically.
+    expect(isOwnCourseFilesStoragePath("user-1", "user-12/course-1/file.zip")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("user-12", "user-1/course-1/file.zip")).toBe(false);
+  });
+
+  it("rejects a bare userId with nothing after it", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/")).toBe(false);
+  });
+
+  it("rejects a '..' segment that walks back out of the caller's own prefix - RES-C's hole, closed here", () => {
+    // docs/service-role-predicate-audit.md RES-C: the sibling module's own
+    // predicate (isInstitutionAttachmentStoragePath) accepts exactly this
+    // shape because it only checks startsWith(prefix). This validator must
+    // not repeat that mistake.
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/course-1/../../victim-user/file.zip")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/../victim-user/file.zip")).toBe(false);
+  });
+
+  it("rejects a lone '.' segment", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/./file.zip")).toBe(false);
+  });
+
+  it("rejects an absolute-looking path (leading slash yields an empty first segment)", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "/user-1/course-1/file.zip")).toBe(false);
+  });
+
+  it("rejects a path with an empty segment (doubled slash)", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1//file.zip")).toBe(false);
+  });
+
+  it("rejects a segment that percent-decodes to a traversal or separator - the encoded-bypass class", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/%2e%2e/victim-user/file.zip")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/a%2fb")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/%2e")).toBe(false);
+  });
+
+  it("rejects a segment containing a literal backslash", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/..\\victim-user/file.zip")).toBe(false);
+  });
+
+  it("rejects malformed percent-encoding rather than guessing at it", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "user-1/%zz")).toBe(false);
+  });
+
+  it("rejects an empty storagePath or an empty userId", () => {
+    expect(isOwnCourseFilesStoragePath("user-1", "")).toBe(false);
+    expect(isOwnCourseFilesStoragePath("", "user-1/course-1/file.zip")).toBe(false);
+  });
+});
 
 function fakeSupabase(createSignedUrl: (path: string) => Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }>) {
   return {

@@ -29,7 +29,17 @@ import {
 
 export type PrepareGradingRunResult =
   | { readonly mode: "whole-run"; readonly reason: string }
+  | { readonly mode: "refused"; readonly reason: string }
   | { readonly mode: "incremental"; readonly plan: IncrementalRunPlan };
+
+// RULING 118: every refusal message collisionRefusal.ts's buildRefusalMessage
+// emits starts with this exact prefix (collisionRefusal.ts:128,
+// `` `Refused: ${group.paths.length} files...` ``) - the only textual signal
+// available here, since extraction.ts (out of this ticket's write set) throws
+// a plain Error rather than a dedicated error class. Used ONLY to route a
+// refusal to its own `mode` below; the refusal's own wording and conditions
+// are untouched (collisionRefusal.ts is not in this write set either).
+const REFUSAL_MESSAGE_PREFIX = "Refused: ";
 
 /**
  * Builds the ticket list for the incremental pool, or hands back a reason to
@@ -105,12 +115,27 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
       plan: { tickets, assignmentInstructions, rubric, provider, pointsPossible },
     };
   } catch (err) {
-    // Includes A44's collision refusal. Routed to whole-run rather than
-    // re-thrown: the whole-run path's own extraction hits the SAME refusal
-    // and returns the SAME message via gradeAction's existing try/catch, so
-    // no information is lost - it is simply not this action's job to
-    // surface a grading-run error, since it never starts a run.
+    // Includes A44's collision refusal (decideCollisionRefusal, thrown from
+    // inside extractStudentEntries - see this file's header comment). RULING
+    // 118: a refusal is a DECISION the app has already made, not an ordinary
+    // extraction failure, so it must not fall back into `mode: "whole-run"` -
+    // that branch's only consumer (useIncrementalGradingRun.ts's startReview)
+    // answers it by calling the existing whole-run gradeAction, which pays
+    // for generateRubric/synthesizeFullCreditChecklist/generateSampleAnswer
+    // in the same Promise.all as the (again-)throwing gradeSubmissions call,
+    // already dispatched and not cancelled by that second rejection - the
+    // exact spend this refusal exists to prevent. `mode: "refused"` is a
+    // dead end: its own consumer surfaces the reason and starts nothing.
+    //
+    // Every other error caught here (a Canvas fetch failure, a malformed
+    // single-file upload, ...) is an ORDINARY error, not a refusal, and still
+    // falls back to `mode: "whole-run"` exactly as before - the whole-run
+    // path's own extraction hits the same error and reports it via
+    // gradeAction's existing try/catch, so no information is lost there.
     const message = err instanceof Error ? err.message : "Could not prepare this run.";
+    if (message.startsWith(REFUSAL_MESSAGE_PREFIX)) {
+      return { mode: "refused", reason: message };
+    }
     return { mode: "whole-run", reason: message };
   }
 }

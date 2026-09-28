@@ -46,7 +46,17 @@ function formDataFor(file: File): FormData {
 }
 
 describe("prepareGradingRunAction - the refusal fires before any ticket exists (W-A46-1)", () => {
-  it("returns mode:'whole-run' for a genuine flat collision, and NEVER calls the model seam", async () => {
+  // NOTE (RULING 118): asserting mockCallLlm was never called here is
+  // NECESSARY AND NOT SUFFICIENT - this module has no model-call site at all
+  // (grep 'callLlm|gradeEntries|gradeSubmissions|generateRubric|
+  // generateSampleAnswer|synthesizeFullCredit' src/app/actions/grading-
+  // incremental.ts returns one hit, a comment), so the assertion is true by
+  // construction and proves nothing about what happens to a refusal AFTER
+  // this action returns. The real claim - that a refusal never reaches the
+  // whole-run gradeAction's paying seam - is proven in
+  // useIncrementalGradingRun.lifecycle.test.ts, the only place that spend is
+  // observable.
+  it("returns mode:'refused' (RULING 118) for a genuine flat collision, and NEVER calls the model seam", async () => {
     const file = await zipFileOf([
       { path: "Homework Final.txt", content: "final draft" },
       { path: "Homework Draft.txt", content: "earlier draft" },
@@ -54,8 +64,8 @@ describe("prepareGradingRunAction - the refusal fires before any ticket exists (
 
     const result = await prepareGradingRunAction(formDataFor(file));
 
-    expect(result.mode).toBe("whole-run");
-    if (result.mode === "whole-run") {
+    expect(result.mode).toBe("refused");
+    if (result.mode === "refused") {
       expect(result.reason).toContain('Refused: 2 files resolve to the same student name "Homework"');
     }
     // THE OBJECT of W-A46-1: zero model-seam invocations. A refusal that
@@ -92,6 +102,30 @@ describe("prepareGradingRunAction - the refusal fires before any ticket exists (
     // "was some auth function called" assertion would stay green either way.
     expect(mockRequireAppOwner).toHaveBeenCalledTimes(1);
     expect(mockRequireUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepareGradingRunAction - RULING 118: an ORDINARY (non-refusal) thrown error still falls back to whole-run", () => {
+  it("a caught error whose message does not start with the collision refusal's 'Refused: ' prefix returns mode:'whole-run', not mode:'refused'", async () => {
+    // No file, no canvasUrl mock: extractCanvasEntries's own fetch is blocked
+    // by vitest.setup.ts (docs/loop/tests-are-network-blocked.md), which
+    // throws an ordinary Error unrelated to the collision refusal - this is
+    // the negative case that proves the "Refused: " prefix check discriminates
+    // in both directions, not just the collision direction the test above
+    // covers.
+    const fd = new FormData();
+    fd.set("canvasUrl", "https://canvas.example.edu/courses/1/assignments/2");
+    fd.set("provider", "gemini");
+    fd.set("rubric", "1. Correctness (10 pts)");
+    fd.set("assignmentInstructions", "Write an essay.");
+
+    const result = await prepareGradingRunAction(fd);
+
+    expect(result.mode).toBe("whole-run");
+    if (result.mode === "whole-run") {
+      expect(result.reason.startsWith("Refused: ")).toBe(false);
+    }
+    expect(mockCallLlm).not.toHaveBeenCalled();
   });
 });
 

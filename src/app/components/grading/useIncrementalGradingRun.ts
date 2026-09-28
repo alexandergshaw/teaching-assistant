@@ -150,6 +150,19 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
         submitWholeRun(fd);
         return;
       }
+      // RULING 118: a refusal is a decision, not an ordinary fallback reason -
+      // it must NOT reach submitWholeRun, or the whole-run gradeAction pays
+      // for generateRubric/synthesizeFullCreditChecklist/generateSampleAnswer
+      // (dispatched in the same Promise.all as the again-throwing
+      // gradeSubmissions call, and not cancelled by that rejection) on a run
+      // the app has already decided to refuse. This branch is a dead end: it
+      // surfaces the reason via the same incrementalError banner
+      // GradingTab.tsx already renders, and starts nothing else.
+      if (prepared.mode === "refused") {
+        setIncrementalRunning(false);
+        setIncrementalError(prepared.reason);
+        return;
+      }
 
       const { plan } = prepared;
       setIncrementalTotal(plan.tickets.length);

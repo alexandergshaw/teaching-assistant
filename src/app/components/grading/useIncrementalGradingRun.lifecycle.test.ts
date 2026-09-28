@@ -267,6 +267,54 @@ describe("useIncrementalGradingRun - RULING 40: the server-decided whole-run bra
   });
 });
 
+describe("useIncrementalGradingRun - RULING 118: a refusal never reaches the paying whole-run seam", () => {
+  // THE REAL CLAIM (RULING 118, moved here from grading-incremental.test.ts
+  // per the iteration-caps rule - that file's own "not called" assertion is
+  // vacuous, since grading-incremental.ts has no model-call site at all).
+  // submitWholeRun IS the seam: it is the one call site that dispatches the
+  // paying whole-run gradeAction (useIncrementalGradingRun.ts's own header
+  // comment). This describe block is the only place in the repo where "did a
+  // refusal cost money" is observable at all.
+  //
+  // Positive control for the SAME mock: the "RULING 40" describe block above
+  // already proves submitWholeRunMock IS reachable from this exact hook, for
+  // an ordinary `mode: 'whole-run'` result ("calls the injected
+  // submitWholeRun when prepareGradingRunAction returns mode:'whole-run'" and
+  // the two tests after it) - so a "not called" assertion below is not
+  // trivially true of a mock that can never fire.
+  it("mode:'refused' surfaces the reason via incrementalError and NEVER calls submitWholeRun or fetch", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce({
+      mode: "refused",
+      reason: 'Refused: 2 files resolve to the same student name "Homework", so they would have been graded together as one row.',
+    });
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    const fd = fdWithCanvasUrl();
+
+    await render1.startReview(fd);
+
+    expect(submitWholeRunMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.incrementalError).toBe(
+      'Refused: 2 files resolve to the same student name "Homework", so they would have been graded together as one row.'
+    );
+    expect(after.incrementalRunning).toBe(false);
+  });
+
+  // SABOTAGE PROOF: with the Defect-1 fix reverted (a refusal routed back
+  // into the whole-run branch, exactly as production code did before this
+  // ruling), the test above must fail RED. Verified manually per this
+  // ticket's instructions by temporarily changing this hook's
+  // `if (prepared.mode === "refused")` branch to
+  // `if (prepared.mode === "whole-run" || prepared.mode === "refused")`
+  // (merged into the existing whole-run branch, the exact shape of the
+  // pre-fix defect) after backing up useIncrementalGradingRun.ts to a
+  // directory OUTSIDE the repo with `cp`, then restoring the backup - see
+  // docs/ruling-118.md for the verbatim RED output and the restore command.
+});
+
 describe("useIncrementalGradingRun - cancellation", () => {
   it("cancel() stops further dispatch once the pool is at capacity; already-dispatched calls still land", async () => {
     // FOUR tickets against INCREMENTAL_CONCURRENCY=3: the pool opens exactly

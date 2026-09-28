@@ -15,6 +15,15 @@
  * against - never on a value read back from rubric-memory's store - so the
  * pair on the returned run always describes THIS run, never whatever a
  * caller separately persisted.
+ *
+ * A39 incremental-fill W2: src/lib/grade/run-header.ts's resolveRunHeader
+ * adds a seventh caller (six real call sites above this addition: engine.ts's
+ * three, index.ts's, discussion.ts's, grading-run-mapping.ts's). It is not a
+ * GradingRun producer - it stamps the pair for a run-level header, not for a
+ * rendered run - so gradeAction (the whole-run route) must not apply that
+ * header's pair to its own returned run: the run engine.ts already stamped
+ * would end up carrying two stamps of one fact, with spread order silently
+ * deciding which wins.
  */
 
 import { rubricFingerprint } from "../research/rubric-fingerprint";

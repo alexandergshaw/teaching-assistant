@@ -16,6 +16,7 @@ import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGrad
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
 import { gradingApiToRun } from "./grading-run-mapping";
+import { resolveRunHeader } from "@/lib/grade/run-header";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import {
@@ -811,15 +812,14 @@ export async function gradeAction(
         };
       }
 
-      if (!assignmentInstructions.trim()) {
-        return { run: null, error: "Please provide assignment instructions." };
-      }
+      const header = await resolveRunHeader(assignmentInstructions, rubric, provider, { synthesizeRubricWhenBlank: false });
+      if (header.kind === "refused") return { run: null, error: header.error };
       // No rubric synthesis on the Canvas path: grade with whatever rubric was
       // retrieved from Canvas (may be empty), using the instructions otherwise.
       const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-        gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider, gradingRunOptions),
-        synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
-        generateSampleAnswer(assignmentInstructions, rubric, provider),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, header.effectiveRubric, provider, gradingRunOptions),
+        synthesizeFullCreditChecklist(assignmentInstructions, header.effectiveRubric, provider),
+        generateSampleAnswer(assignmentInstructions, header.effectiveRubric, provider),
       ]);
       return { run: { ...run, fullCreditChecklist, sampleAnswer, speedGraderUrl }, error: null };
     }
@@ -883,14 +883,9 @@ export async function gradeAction(
     }
 
     // Gemini path.
-    if (!assignmentInstructions.trim()) {
-      return { run: null, error: "Please provide assignment instructions." };
-    }
-
-    const effectiveRubric = rubric.trim()
-      ? rubric
-      : await generateRubric(assignmentInstructions, provider);
-    const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
+    const header = await resolveRunHeader(assignmentInstructions, rubric, provider, { synthesizeRubricWhenBlank: true });
+    if (header.kind === "refused") return { run: null, error: header.error };
+    const { effectiveRubric, generatedRubric } = header;
 
     // A39 wave 1: a single non-zip upload grades via gradeEntries (the same
     // per-entry path gradeOneSubmissionAction uses) instead of gradeSubmissions.

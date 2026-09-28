@@ -367,6 +367,26 @@ export interface GradingRun {
   rubricFingerprint?: StampedRubricText;
 }
 
+// A39 incremental-fill W2 (RULING 133): everything that is per-RUN rather
+// than per-ITEM, resolved once by src/lib/grade/run-header.ts's
+// resolveRunHeader before any item is dispatched. A discriminated union, not
+// a struct with a nullable error, so the refusal branch is
+// unrepresentable-if-unhandled. `rubricUsed`/`rubricFingerprint` are spelled
+// to match stampRubricProvenance's return; gradeAction (src/app/actions/
+// grading.ts) must read only effectiveRubric/generatedRubric from the "ok"
+// branch and must not apply the other three - see run-header.ts's own doc
+// comment for why.
+export type GradingRunHeader =
+  | { readonly kind: "refused"; readonly error: string }
+  | {
+      readonly kind: "ok";
+      readonly effectiveRubric: string;
+      readonly generatedRubric: string | undefined;
+      readonly criteriaNames: readonly string[];
+      readonly rubricUsed: string;
+      readonly rubricFingerprint: string;
+    };
+
 /**
  * One assignment's grading run in workflow context: the GradingRun plus the
  * course/assignment/institution/canvasUrl metadata needed to link back to

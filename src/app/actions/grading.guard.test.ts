@@ -53,6 +53,8 @@
 // proving the guard fires before any of it - not merely that the return
 // value happens to match.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "fs";
+import path from "path";
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
@@ -409,5 +411,29 @@ describe("grading.ts permissive sites stay requireUser()", () => {
   // this file's admit tests, observe them go red, then restore).
   it("the same non-owner session all 16 permissive actions admit is refused by requireAppOwner() - proves the permissive/restrictive distinction is real, not vacuous", async () => {
     await expect(requireAppOwner()).rejects.toThrow(OWNER_ONLY_MESSAGE);
+  });
+});
+
+// A39 incremental-fill W2, F26 (RULING 133, docs/a39-fill-waves.md's ruling
+// on this file as F26's host): gradeAction reads exactly two of
+// resolveRunHeader's five "ok" fields (effectiveRubric, generatedRubric) and
+// must apply neither of the run-level provenance pair, because engine.ts's
+// gradeStudentEntries already stamps the run gradeAction returns - applying
+// the header's pair too would double-stamp the same fact, with spread order
+// silently deciding which value wins. A plain, UNSTRIPPED readFileSync (not
+// postable.test.ts's comment-stripping reader) so a mention of either field
+// in a comment also fails this: the pass condition is a count of ZERO.
+describe("grading.ts does not apply the run-header provenance pair - F26", () => {
+  it("names neither rubricUsed nor rubricFingerprint anywhere in the file, comments included", () => {
+    const source = readFileSync(path.join(__dirname, "grading.ts"), "utf8");
+    expect((source.match(/rubricUsed/g) ?? []).length).toBe(0);
+    expect((source.match(/rubricFingerprint/g) ?? []).length).toBe(0);
+  });
+
+  // Canary: proves the two assertions above fire on the real names and are
+  // not vacuously zero because the pattern never matches anything.
+  it("canary - the same reader would find a name that is actually present", () => {
+    const source = readFileSync(path.join(__dirname, "grading.ts"), "utf8");
+    expect((source.match(/resolveRunHeader/g) ?? []).length).toBeGreaterThan(0);
   });
 });

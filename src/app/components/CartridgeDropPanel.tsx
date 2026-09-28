@@ -31,8 +31,10 @@ import styles from "../page.module.css";
 
 // A39 wave 2, path H: this surface's own ta- key for rubric-memory.ts,
 // scoped per "cartridge:<course>|<assignment>" - never a global slot.
-// DECISION 9: ships with no exact-set canary; write one when a sixth ta- key
-// lands in this directory, covering all of them.
+// DECISION 9 / RULING 109: the exact-set canary for src/app/components/'s
+// own (non-recursive) ta- prefixed keys lives at
+// componentStorageKeys.structure.test.ts, covering this file's keys and
+// every other top-level file's in this directory.
 const RUBRIC_MEMORY_STORAGE_KEY = "ta-cartridge-rubric";
 
 function cartridgeRubricScope(course: string, assignment: string): string {
@@ -273,6 +275,11 @@ export default function CartridgeDropPanel() {
       // Reset form
       setRubricText("");
       setSniffHint(null);
+      // RULING 111: the caption sits directly above the file input (last
+      // read before the next upload fires) and must never outlive the
+      // rubric it names - clear it wherever its sibling setSniffHint(null)
+      // clears.
+      setRubricOrigin(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -281,6 +288,9 @@ export default function CartridgeDropPanel() {
       console.error("Archive sniffing error:", err);
       setError(err instanceof Error ? err.message : "Could not upload cartridge.");
       setSniffHint(null);
+      // RULING 111: same clear on the error path - the failed upload also
+      // ends this rubric's lifetime.
+      setRubricOrigin(null);
     } finally {
       setLoading(false);
     }
@@ -381,22 +391,9 @@ export default function CartridgeDropPanel() {
       )}
 
       <div className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="cartridge-file">Submissions Archive</label>
-          <div className={styles.fileField}>
-            <input
-              ref={fileInputRef}
-              id="cartridge-file"
-              type="file"
-              accept=".zip,.imscc,application/zip"
-              onChange={handleFileSelect}
-              disabled={loading}
-            />
-            <p>Upload a .zip or .imscc archive of student submissions.</p>
-          </div>
-          {sniffHint && <p className={styles.fieldHint}>{sniffHint}</p>}
-        </div>
-
+        {/* A40 wave 1 (RULING 106): all five non-file fields render above the
+            file input, so the natural top-to-bottom fill order and any
+            after-the-fact edit both land before the upload fires. */}
         <div className={styles.field}>
           <label htmlFor="cartridge-course">Course</label>
           <TextField
@@ -470,6 +467,22 @@ export default function CartridgeDropPanel() {
             disabled={loading}
           />
           {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="cartridge-file">Submissions Archive</label>
+          <div className={styles.fileField}>
+            <input
+              ref={fileInputRef}
+              id="cartridge-file"
+              type="file"
+              accept=".zip,.imscc,application/zip"
+              onChange={handleFileSelect}
+              disabled={loading}
+            />
+            <p>Upload a .zip or .imscc archive of student submissions.</p>
+          </div>
+          {sniffHint && <p className={styles.fieldHint}>{sniffHint}</p>}
         </div>
       </div>
 

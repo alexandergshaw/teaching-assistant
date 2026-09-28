@@ -21,6 +21,9 @@ import CartridgeDropPanel from "./CartridgeDropPanel";
 import RubricProvenance from "./grading-results/RubricProvenance";
 import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
 import { isCanvasCredentialRequiredError, CANVAS_CREDENTIAL_CTA_HREF, CANVAS_CREDENTIAL_CTA_LABEL } from "@/lib/canvas-credential-cta";
+// A39 wave 4c (docs/a39-waves.md 8.4.3): every DECISION lives in this .ts
+// hook; this file only wires startReview/submitWholeRun (step S5).
+import { useIncrementalGradingRun } from "./grading/useIncrementalGradingRun";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -170,6 +173,23 @@ export default function GradingTab({
 
   const run = state.run;
 
+  // A39 wave 4c, step S5: both whole-run routes call this SAME function
+  // (RULING 40), so A5's `formAction(` count stays at exactly two.
+  const submitWholeRun = (fd: FormData) => {
+    startTransition(() => {
+      formAction(fd);
+    });
+  };
+  const {
+    startReview,
+    cancel: cancelIncrementalRun,
+    incrementalRunning,
+    incrementalResults,
+    incrementalDone,
+    incrementalTotal,
+    incrementalError,
+  } = useIncrementalGradingRun({ provider: selectedProvider, submitWholeRun });
+
   // Live Feed "Auto Grade": grade a queue row through the very same pipeline as
   // the Single Assignment form. Set canvasUrl so a later "Post grades" targets
   // this assignment, then dispatch the grade action with the row's context.
@@ -259,9 +279,9 @@ export default function GradingTab({
         </div>
       )}
 
-      {state.error && (
+      {(state.error || incrementalError) && (
         <p role="alert" className={styles.error}>
-          {state.error}
+          {state.error || incrementalError}
         </p>
       )}
 
@@ -295,16 +315,18 @@ export default function GradingTab({
       ) : (
       <form
         className={styles.form}
-        action={formAction}
-        onSubmit={() => {
-          // A39 wave 2: save under the same scope the restore handler
-          // reads. Does not call preventDefault, so formAction still runs.
+        onSubmit={(event) => {
+          // A39 wave 4c, step S5: action={formAction} deleted (W4-9b);
+          // startReview decides whole-run vs incremental itself.
+          event.preventDefault();
+          // A39 wave 2: save under the same scope the restore handler reads.
           if (source === "zip" && uploadFileName) {
             saveRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, `upload:${uploadFileName}`, {
               rubric,
               instructions: assignmentInstructions,
             });
           }
+          void startReview(new FormData(event.currentTarget));
         }}
       >
         <input type="hidden" name="provider" value={selectedProvider} />
@@ -431,9 +453,9 @@ export default function GradingTab({
           variant="contained"
           size="small"
           type="submit"
-          disabled={pending || (source === "canvas" && !canvasRetrieved)}
+          disabled={pending || incrementalRunning || (source === "canvas" && !canvasRetrieved)}
         >
-          {pending ? (
+          {pending || incrementalRunning ? (
             <>
               <span className={styles.btnSpinner} aria-hidden="true" />
               Grading…
@@ -443,6 +465,16 @@ export default function GradingTab({
           )}
         </Button>
       </form>
+      )}
+
+      {/* W4-8: before the results table; a sibling of the `pending &&` span
+          above (A6 requires no `||` there). */}
+      {source !== "livefeed" && incrementalRunning && (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <p className={styles.loadingTitle}>{incrementalDone} of {incrementalTotal} submissions graded.</p>
+          <Button variant="outlined" size="small" onClick={cancelIncrementalRun}>Stop grading</Button>
+        </div>
       )}
 
       {testState.result && (
@@ -558,6 +590,28 @@ export default function GradingTab({
           }
         />
         </>
+      )}
+
+      {/* A39 wave 4c: each row renders as its own call returns (RES-W4C-1:
+          rubricAreaNames here is a union, not reconcileRun's full merge). */}
+      {source !== "livefeed" && incrementalResults.length > 0 && (
+        <GradingResults
+          run={{
+            results: [...incrementalResults],
+            rubricAreaNames: incrementalResults[0]?.rubricAreas.map((a) => a.area) ?? [],
+            fullCreditChecklist: [],
+          }}
+          canvasUrl={canvasUrl}
+          editsSurface="canvas"
+          assignmentName=""
+          copiedKey={copiedKey}
+          onCopy={onCopy}
+          onOpenPreview={onOpenPreview}
+          onPosted={() => {
+            refreshCounts();
+            setQueueRefreshSignal((n) => n + 1);
+          }}
+        />
       )}
 
       <CartridgeDropPanel />

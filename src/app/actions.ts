@@ -46,6 +46,7 @@ export * from "./actions/github-content";
 export * from "./actions/github-student-repos";
 export * from "./actions/grading";
 export * from "./actions/grading-inbox";
+export * from "./actions/grading-incremental";
 export * from "./actions/institution-page-attachments";
 export * from "./actions/institutions";
 export * from "./actions/instructor-notes";

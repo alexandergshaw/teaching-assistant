@@ -15,6 +15,11 @@ export { truncateSubmission, sleep, getBaseFileName, removeLastExtension, toPrev
 
 export { gradeSubmissions, gradeEntries, gradeCanvasUrl, type GradingRunOptions } from "./grade/engine";
 
+// A39 wave 4b: reconcileRun is a PURE leaf (imports only ./grade/types and
+// ./grade/rubric), so re-exporting it here cannot widen this barrel's
+// runtime reach into server-only code - see reconcile.ts's own header.
+export { reconcileRun, type ReconcileRunResult } from "./grade/reconcile";
+
 // The draft strip helpers (stripGradeResultForDraft / stripGradingRunForDraft /
 // stripGradingRunEntriesForDraft) live in src/lib/workflows/grading-review-rows.ts
 // - a client-safe module - because this file (grade.ts) transitively imports

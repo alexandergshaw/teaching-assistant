@@ -17,14 +17,17 @@ import {
   type UngradedOutcome,
   type GradingRun,
   type StudentSubmissionEntry,
-  type RubricAreaResult,
   type SubmittedFileInfo,
 } from "./types";
 import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
-import { buildSystemPrompt, normalizeAreaName, extractRubricCriteria } from "./rubric";
+import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
 import { buildSubmittedFileNamesBlock } from "./prompts";
+// A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
+// that used to be inline here is now a PURE projection (reconcile.ts),
+// called once after the loop closes - this is a call, not the logic itself.
+import { reconcileRun } from "./reconcile";
 // A39 wave 2 (docs/a39-architecture.md 5.2), tightened by RULING 57/58: the
 // stamp itself (never a raw rubricFingerprint() call plus an inline literal)
 // so every producer of a GradingRun - not only this file's three - stamps
@@ -339,70 +342,16 @@ async function gradeStudentEntries(
 
   // Pin every student to ONE shared set of criteria so the results table never
   // splits. Canonical = the rubric's parsed criteria; if the rubric had none to
-  // parse, fall back to the student the model gave the most areas (so independent
-  // per-student calls still line up on a common set).
-  let canonical = criteria.map((c) => c.name);
-  if (canonical.length === 0) {
-    let richest: RubricAreaResult[] = [];
-    for (const result of results) {
-      const real = result.rubricAreas.filter((a) => a.area && a.area !== "Overall");
-      if (real.length > richest.length) richest = real;
-    }
-    canonical = richest.map((a) => a.area);
-  }
-
-  if (canonical.length > 0) {
-    // Force each student's areas onto the canonical columns: rename a normalized
-    // match to the canonical name, fill a missing criterion blank, and fold any
-    // unmatched area the model invented into the overall comment so the columns
-    // stay aligned without dropping feedback.
-    for (const result of results) {
-      const byNorm = new Map<string, RubricAreaResult>();
-      for (const area of result.rubricAreas) {
-        const key = normalizeAreaName(area.area);
-        if (key && !byNorm.has(key)) byNorm.set(key, area);
-      }
-      const reconciled: RubricAreaResult[] = [];
-      for (const name of canonical) {
-        const key = normalizeAreaName(name);
-        const match = byNorm.get(key);
-        if (match) {
-          reconciled.push({ ...match, area: name });
-          byNorm.delete(key);
-        } else {
-          reconciled.push({ area: name, score: "", comment: "" });
-        }
-      }
-      const strays = [...byNorm.values()].filter((a) => a.comment.trim());
-      if (strays.length > 0) {
-        const extra = strays.map((a) => `${a.area}: ${a.comment.trim()}`).join(" ");
-        result.overallComment = result.overallComment ? `${result.overallComment} ${extra}` : extra;
-      }
-      result.rubricAreas = reconciled;
-    }
-  }
-
-  // Columns are the canonical set when we have one; otherwise the union of
-  // whatever areas came back (last resort when nothing parsed and no results).
-  let rubricAreaNames: string[];
-  if (canonical.length > 0) {
-    rubricAreaNames = canonical;
-  } else {
-    rubricAreaNames = [];
-    const seenAreas = new Set<string>();
-    for (const result of results) {
-      for (const area of result.rubricAreas) {
-        if (!seenAreas.has(area.area)) {
-          seenAreas.add(area.area);
-          rubricAreaNames.push(area.area);
-        }
-      }
-    }
-  }
+  // parse, reconcileRun falls back to the student the model gave the most
+  // areas (so independent per-student calls still line up on a common set).
+  // A39 wave 4b: this used to be ~60 lines of inline mutation here; it is now
+  // a call into the pure projection reconcile.ts holds, so the incremental
+  // seam (wave 4c) can reconcile the same way one item at a time.
+  const reconciled = reconcileRun(results, criteria.map((c) => c.name));
 
   return {
-    results,
-    rubricAreaNames,
+    results: reconciled.results,
+    rubricAreaNames: reconciled.rubricAreaNames,
     fullCreditChecklist: [],
     // A39 wave 2: every run stamps the rubric it actually graded against and
     // that rubric's content fingerprint, read from THIS call's own `rubric`

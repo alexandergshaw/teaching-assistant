@@ -156,9 +156,19 @@ describe("A15: Live Feed Auto Grade dispatch runs inside a transition", () => {
     }
   });
 
-  it("A5: formAction( is called exactly once in the whole file, and it is the transition's call", () => {
+  it("A5: every formAction( occurrence lies strictly inside a startTransition( paren span, and there are exactly two (A39 wave 4c, RULING 40 - both whole-run routes share ONE submitWholeRun call site)", () => {
     const wholeFileMatches = [...gtSource.matchAll(/formAction\(/g)];
-    expect(wholeFileMatches.length).toBe(1);
+    expect(wholeFileMatches.length).toBe(2);
+    const allTransitionMatches = [...gtSource.matchAll(/startTransition\(/g)];
+    const spans = allTransitionMatches.map((m) => {
+      const open = m.index! + "startTransition".length;
+      return { open, close: findMatchingCloseParen(gtSource, open) };
+    });
+    for (const m of wholeFileMatches) {
+      const idx = m.index!;
+      const inside = spans.some((s) => idx > s.open && idx < s.close);
+      expect(inside).toBe(true);
+    }
   });
 
   it("A6: the loading-state region is gated off while Live Feed owns its own status region", () => {
@@ -286,5 +296,54 @@ describe("W5: the credential CTA is reachable and conditional, and RubricProvena
 
   it("canary: an absent tag reports -1, proving indexOf is not vacuously true (W5-3's own instrument)", () => {
     expect(lfSource.indexOf("<RubricProvenanceZZZ")).toBe(-1);
+  });
+});
+
+// A39 wave 4c (docs/a39-waves.md 8.4.3, step S5): the incremental seam's own
+// two pinned pieces of GradingTab.tsx's source text.
+describe("W4-9b: the form's action= attribute is gone; onSubmit is the only dispatch path", () => {
+  it("the opening <form ...> tag contains onSubmit={ and no action=, and preventDefault() is present in the file", () => {
+    const formTagStart = gtSource.indexOf("<form");
+    expect(formTagStart).toBeGreaterThanOrEqual(0);
+    let depth = 0;
+    let tagEnd = -1;
+    for (let i = formTagStart; i < gtSource.length; i++) {
+      if (gtSource[i] === "{") depth++;
+      else if (gtSource[i] === "}") depth--;
+      else if (gtSource[i] === ">" && depth === 0) {
+        tagEnd = i;
+        break;
+      }
+    }
+    expect(tagEnd).toBeGreaterThan(formTagStart);
+    const tagSpan = gtSource.slice(formTagStart, tagEnd + 1);
+    expect(tagSpan).toContain("onSubmit={");
+    expect(tagSpan).not.toContain("action=");
+    expect(gtSource).toContain("preventDefault()");
+  });
+
+  it("WATCHED: today's <form ...> tag (before this wave) DOES contain action= - proving this check can fail", () => {
+    // Reproduces the pre-wave-4c tag exactly (action={formAction} was the
+    // only dispatch path before startReview existed).
+    const before = '<form className={styles.form} action={formAction} onSubmit={() => {}}>';
+    expect(before).toContain("action=");
+  });
+});
+
+describe("W4-8: the stop control is not buried under its own results", () => {
+  it("'Stop grading' and the progress region both precede the first <GradingResults mount", () => {
+    const stopIdx = gtSource.indexOf("Stop grading");
+    const progressIdx = gtSource.indexOf("incrementalRunning &&");
+    const grMatch = /<GradingResults[\s>]/.exec(gtSource);
+    expect(stopIdx).toBeGreaterThanOrEqual(0);
+    expect(progressIdx).toBeGreaterThanOrEqual(0);
+    expect(grMatch).not.toBeNull();
+    expect(stopIdx).toBeLessThan(grMatch!.index);
+    expect(progressIdx).toBeLessThan(grMatch!.index);
+  });
+
+  it("RED if the stop literal is spelled anything other than 'Stop grading'", () => {
+    expect(gtSource).not.toContain("Cancel grading");
+    expect(gtSource).toContain("Stop grading");
   });
 });

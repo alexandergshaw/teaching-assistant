@@ -81,6 +81,24 @@ export function estimateEntryWireBytes(entry: StudentSubmissionEntry): number {
 }
 
 /**
+ * RULING 116 (docs/ruling-116.md): the incremental route is a THINNER
+ * surface than the whole-run path it would otherwise displace by default -
+ * it does not go through gradeAction, so it has no RubricProvenance mount
+ * (GradingTab.tsx has exactly one, on the whole-run branch), no rubric
+ * auto-generation (grading.ts's `rubric.trim() ? rubric :
+ * await generateRubric(...)` has no incremental-route counterpart, so a
+ * blank rubric there grades against NO rubric at all), and no
+ * blank-instructions refusal ("Please provide assignment instructions.").
+ * None of that is being added here - fixing the incremental route's shape is
+ * an owner decision that has not been made. This flag only keeps the
+ * incremental route from being reached BY DEFAULT until that decision lands.
+ * It is a module-private constant, not an env var, so it behaves identically
+ * in every environment (local, preview, prod) rather than varying by
+ * deployment config while the shape question is still open.
+ */
+export const INCREMENTAL_ROUTE_ENABLED = false;
+
+/**
  * PURE and SYNCHRONOUS (S4 step 2): decides whether a submitted form should
  * go through the incremental pool or the existing whole-run Server Action,
  * from nothing but the picked file's size and the selected provider -
@@ -93,8 +111,15 @@ export function estimateEntryWireBytes(entry: StudentSubmissionEntry): number {
  * to gain. A Canvas URL has no client-side file size to gate on - the
  * per-item budget is enforced server-side, in prepareGradingRunAction, once
  * the entries are actually extracted (W4-12 clause 2).
+ *
+ * RULING 116: gated behind INCREMENTAL_ROUTE_ENABLED above. All of the
+ * routing logic below stays exactly as it was - this is a reachability
+ * change, not a revert - but with the flag off, every gemini request that
+ * would otherwise have pooled now falls through to "whole-run" instead.
  */
 export function routeGradingRun(fd: FormData, provider: LlmProvider): "whole-run" | "incremental" {
+  if (!INCREMENTAL_ROUTE_ENABLED) return "whole-run";
+
   if (provider !== "gemini") return "whole-run";
 
   const canvasUrl = ((fd.get("canvasUrl") as string | null) ?? "").trim();

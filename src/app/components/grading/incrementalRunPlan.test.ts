@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   INCREMENTAL_CONCURRENCY,
+  INCREMENTAL_ROUTE_ENABLED,
   ITEM_REQUEST_BYTE_BUDGET,
   routeGradingRun,
   buildRunItemRequests,
@@ -45,9 +46,18 @@ describe("INCREMENTAL_CONCURRENCY (W4-11)", () => {
 // W4-12 clause 1 - routeGradingRun by WIRE size and provider, pure/sync.
 // ---------------------------------------------------------------------------
 describe("routeGradingRun (W4-12 clause 1, S4 step 2: PURE and SYNCHRONOUS)", () => {
-  it("routes a picked file under the wire budget to 'incremental' on the gemini provider", () => {
+  // RULING 116: the incremental route is a thinner surface than whole-run
+  // (no RubricProvenance mount, no rubric auto-generation, no
+  // blank-instructions refusal) and stays unreachable by default until the
+  // owner settles that shape question. Flipping INCREMENTAL_ROUTE_ENABLED on
+  // is the only thing that changes these two cases back to "incremental".
+  it("RULING 116: INCREMENTAL_ROUTE_ENABLED is off - turning it on must be a deliberate, visible, test-breaking act", () => {
+    expect(INCREMENTAL_ROUTE_ENABLED).toBe(false);
+  });
+
+  it("RULING 116: with the flag off, a gemini request with a picked file under the wire budget routes to 'whole-run', not 'incremental'", () => {
     const file = new File(["short content"], "a.txt", { type: "text/plain" });
-    expect(routeGradingRun(fd({ studentSubmissions: file }), "gemini")).toBe("incremental");
+    expect(routeGradingRun(fd({ studentSubmissions: file }), "gemini")).toBe("whole-run");
   });
 
   it("routes a picked file whose WIRE size exceeds the budget to 'whole-run'", () => {
@@ -64,9 +74,9 @@ describe("routeGradingRun (W4-12 clause 1, S4 step 2: PURE and SYNCHRONOUS)", ()
     expect(routeGradingRun(fd({ studentSubmissions: file }), "embedded")).toBe("whole-run");
   });
 
-  it("routes a Canvas URL (no file) to 'incremental' on gemini - the per-item budget is enforced server-side once entries are extracted", () => {
+  it("RULING 116: with the flag off, a gemini request with a Canvas URL (no file) routes to 'whole-run', not 'incremental'", () => {
     expect(routeGradingRun(fd({ canvasUrl: "https://example.instructure.com/courses/1/assignments/2" }), "gemini")).toBe(
-      "incremental"
+      "whole-run"
     );
   });
 

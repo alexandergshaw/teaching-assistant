@@ -53,6 +53,24 @@ vi.mock("@/app/actions/grading-incremental", () => ({
   prepareGradingRunAction: (...args: unknown[]) => prepareGradingRunActionMock(...args),
 }));
 
+// RULING 117: this file proves the POOL's own behaviour (the press-twice
+// lock, cancellation, early-arrival rendering), which is a different
+// question from RULING 116's routing default. RULING 116 set
+// INCREMENTAL_ROUTE_ENABLED to false in incrementalRunPlan.ts, so the REAL
+// routeGradingRun now always returns "whole-run" - which would make every
+// pool assertion below vacuous regardless of which way that flag is set.
+// Stubbed here, as a PARTIAL mock (the idiom already in this repo, see
+// src/app/actions/grading-incremental.test.ts:15's `{ ...actual, callLlm:
+// vi.fn() }`), so INCREMENTAL_CONCURRENCY, buildRunItemRequests,
+// mergeArrivedResults and classifyItemFailure all stay REAL and this file's
+// claims survive RULING 116's flag flipping in either direction. Whether the
+// flag itself is off is incrementalRunPlan.test.ts's claim, not this file's.
+const routeGradingRunMock = vi.fn();
+vi.mock("./incrementalRunPlan", async () => {
+  const actual = await vi.importActual<typeof import("./incrementalRunPlan")>("./incrementalRunPlan");
+  return { ...actual, routeGradingRun: (...args: unknown[]) => routeGradingRunMock(...args) };
+});
+
 import { useIncrementalGradingRun } from "./useIncrementalGradingRun";
 import type { IncrementalRunPlan } from "./incrementalRunPlan";
 import type { GradeResult } from "@/lib/grade/types";
@@ -115,6 +133,11 @@ beforeEach(() => {
   h0.reset();
   prepareGradingRunActionMock.mockReset();
   fetchMock.mockReset();
+  routeGradingRunMock.mockReset();
+  // Default: the pool branch, regardless of INCREMENTAL_ROUTE_ENABLED - see
+  // the header comment above the mock declaration. Individual tests of the
+  // whole-run branch override this per-call.
+  routeGradingRunMock.mockReturnValue("incremental");
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -213,6 +236,10 @@ describe("useIncrementalGradingRun - RULING 40: the server-decided whole-run bra
   });
 
   it("the client-side synchronous whole-run route (non-gemini provider) also calls the SAME injected submitWholeRun, never prepareGradingRunAction", async () => {
+    // routeGradingRun is stubbed (see header comment); this test exercises
+    // the hook's OWN branch on the "whole-run" return, not routeGradingRun's
+    // real non-gemini logic (that belongs to incrementalRunPlan.test.ts).
+    routeGradingRunMock.mockReturnValueOnce("whole-run");
     const submitWholeRunMock = vi.fn();
     h0.begin();
     const hook = useIncrementalGradingRun({ provider: "other", submitWholeRun: submitWholeRunMock });
@@ -223,6 +250,20 @@ describe("useIncrementalGradingRun - RULING 40: the server-decided whole-run bra
 
     expect(submitWholeRunMock).toHaveBeenCalledTimes(1);
     expect(prepareGradingRunActionMock).not.toHaveBeenCalled();
+  });
+
+  it("RULING 116/117: with routeGradingRun returning 'whole-run', the hook takes the whole-run branch and never calls prepareGradingRunAction - pinning the gate from this side too, so this file proves both branches", async () => {
+    routeGradingRunMock.mockReturnValueOnce("whole-run");
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    const fd = fdWithCanvasUrl();
+
+    await render1.startReview(fd);
+
+    expect(submitWholeRunMock).toHaveBeenCalledTimes(1);
+    expect(submitWholeRunMock).toHaveBeenCalledWith(fd);
+    expect(prepareGradingRunActionMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

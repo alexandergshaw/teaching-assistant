@@ -7,7 +7,7 @@ import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } f
 import { getAccessibilityItem, saveAccessibilityItemHtml } from "@/lib/canvas-modules";
 import { downloadRepoZipball, getRepoTree, parseRepoRef, putFile, getFileText } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { assignmentSlug, extractAssignmentContentBundle, extractJsonObject, findAssignmentsPrefix, listAssignmentFolders } from "./shared";
 import type { AssignmentContentBundle } from "./shared";
 
@@ -25,7 +25,7 @@ export async function generateSchedulePlanFromRepoAction(
   courseDescription?: string
 ): Promise<{ courseTitle: string; schedule: ScheduleWeekPlan[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     // Parse and validate repo reference
     const parsed = parseRepoRef(repoRef);
@@ -207,7 +207,7 @@ export async function fillAssignmentReadmesAction(
   context?: string
 ): Promise<{ written: string[]; repoUrl: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     // Parse and validate repo reference
     const parsed = parseRepoRef(repoRef);
@@ -406,7 +406,7 @@ export async function getAssignmentSyncStateAction(
   { title: string; canvasMarkdown: string; repoMarkdown: string | null; path: string } | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const ref = parseAssignmentRef(assignmentUrl, repoRef);
     if ("error" in ref) return ref;
     const item = await getAccessibilityItem(assignmentUrl, "assignment", ref.assignmentId, acronym);
@@ -433,7 +433,7 @@ export async function syncAssignmentToRepoAction(
   branch?: string
 ): Promise<{ ok: true; path: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const ref = parseAssignmentRef(assignmentUrl, repoRef);
     if ("error" in ref) return ref;
     const item = await getAccessibilityItem(assignmentUrl, "assignment", ref.assignmentId, acronym);
@@ -456,7 +456,7 @@ export async function syncAssignmentFromRepoAction(
   branch?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const ref = parseAssignmentRef(assignmentUrl, repoRef);
     if ("error" in ref) return ref;
     if (!path.trim()) return { error: "Specify the repo file path to pull from." };

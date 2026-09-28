@@ -8,8 +8,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// R2 SW4 (docs/r2-wave1-subwaves.md section 4, row SW4): auditVisualizerCoverageAction's
+// guard moved from requireOwner() to requireAppOwner() - this module mock must
+// name both, or a stale mock naming only the old guard breaks the moment
+// production calls the new one ("requireAppOwner is not a function").
 vi.mock("@/lib/supabase/auth", () => ({
   requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/lecture-concepts", () => ({

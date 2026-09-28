@@ -42,7 +42,7 @@
 // scheduled run can never silently open an issue through this step even if a
 // future preset tried to wire it that way.
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import type { LlmProvider } from "@/lib/llm";
 import type { ScheduleWeekPlan } from "../actions-types";
 import { planWeekConcepts } from "@/lib/lecture-concepts";
@@ -118,7 +118,7 @@ export async function auditVisualizerCoverageAction(
   provider: LlmProvider
 ): Promise<AuditVisualizerCoverageResult | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     const weeks = Array.isArray(schedule) ? schedule : [];
     if (weeks.length === 0) {

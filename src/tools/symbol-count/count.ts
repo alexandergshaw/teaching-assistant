@@ -61,12 +61,31 @@
 // bound and to grep the file by hand for the pieces (`"require"`, `"User"`)
 // as a separate, manual step - this tool does not attempt it.
 //
-// LIMITATION, stated rather than hidden: the scanner is run in
-// `LanguageVariant.Standard` mode, so it does not specially re-scan JSX text
-// runs in a `.tsx` file (`reScanJsxToken` is never called). Every fixture
-// proven against this tool (count.test.ts) is a plain `.ts` action/lib file
-// with no JSX; a `.tsx` file with a symbol occurrence inside literal JSX text
-// (not an attribute expression) could be misclassified by the lexical scan.
+// LIMITATION, stated rather than hidden, RE-EXAMINED under RULING 136 and
+// KEPT OPEN AS A SEPARATE, NARROWER GAP (not fixed here - see docs/ruling-136
+// .md for why only the template defect was fixed in this pass): a `.tsx`
+// file's scanner runs in `LanguageVariant.JSX` (see the `variant` selection
+// in scanCommentsAndStrings), but this tool still never calls
+// `reScanJsxToken()`, so literal JSX child text (`<p>hello {x}</p>`'s
+// "hello ") is walked as ordinary code tokens rather than a single JsxText
+// token. RULING 136 asked whether this is "the same defect wearing a
+// different hat" as the template bug it fixes. It decided NO, on the
+// mechanism, not the symptom: the template bug corrupted the token STREAM
+// itself (a stray backtick from a misread `}` swallows everything up to the
+// next backtick, including real code, into a false string/comment count -
+// false POSITIVES). The JSX gap does not corrupt the stream the same way -
+// `<` and `>` are still their own tokens and JSX text still scans as
+// ordinary identifiers/punctuation/whitespace with no runaway consumption -
+// so a symbol inside literal JSX text is simply never bucketed as a comment
+// or a string (it is not an Identifier either, so the AST walk does not see
+// it as code); the result is an UNDER-count for that one occurrence, not a
+// cascading MIS-count of unrelated code the way the template bug was. Fixing
+// it properly needs its own tokenizing loop (mirroring `reScanJsxToken`'s own
+// open/close-tag state machine) and its own `.tsx` fixtures, which is out of
+// this ruling's write set (count.ts, count.test.ts, docs/ruling-136.md) and
+// is recorded as a residual there rather than attempted here. Every fixture
+// proven against this tool remains a plain `.ts` file with no JSX; a `.tsx`
+// file's comment/string separation should still be treated as provisional.
 // The AST walk (instrument 1) is unaffected by this - `ts.createSourceFile`
 // parses JSX correctly regardless of scanner mode - so a `.tsx` file's CODE
 // occurrences remain trustworthy; only the comment/string SEPARATION for such
@@ -102,9 +121,25 @@ export interface SymbolOccurrenceReport {
    * decision; that is the exact mistake this tool exists to stop. */
   readonly naiveGrepLineCount: number;
   /** True when codeOccurrences + excludedAsComment + excludedAsString exactly
-   * accounts for every raw substring occurrence the two instruments found
-   * combined. False means the two instruments disagree about the same file -
-   * report it, do not average it away. */
+   * accounts for every raw whole-word occurrence the naive scan finds in the
+   * file. False means the AST walk and the lexical scan disagree about how
+   * many total occurrences exist - report it, do not average it away.
+   *
+   * NARROWED CLAIM (RULING 136): this flag verifies only the TOTAL - it
+   * cannot verify the SPLIT between excludedAsComment and excludedAsString.
+   * A defect that counts the right total but puts an occurrence in the wrong
+   * one of those two buckets (a comment mention misclassified as a string,
+   * or vice versa) leaves this sum unchanged and instrumentsReconcile stays
+   * true - there is no independent instrument for the comment/string split
+   * the way the AST walk is independent of the lexical scan for the code/not
+   * -code split. This is exactly what happened before RULING 136's fix: a
+   * comment mention swallowed into a runaway mis-scanned string token still
+   * summed to the right total, so this flag was true while
+   * excludedAsComment/excludedAsString were each wrong. Treat this flag as
+   * "the two instruments' TOTAL agrees", not as "the comment/string split is
+   * correct" - the latter is only as trustworthy as the lexical scanner's own
+   * token classification, which RULING 136 fixed but which this flag does not
+   * and cannot independently check. */
   readonly instrumentsReconcile: boolean;
   /** Fixed statement of what no source-level scan can see. Always present, so
    * a caller reading only this report (not the module header) still gets the
@@ -222,7 +257,36 @@ const STRING_LIKE_KINDS = new Set<import("typescript").SyntaxKind>([
  * own scanner - not a hand-rolled comment stripper - and counts whole-word
  * occurrences of `symbol` inside comment tokens and inside string/template/
  * regex tokens separately. See the module header for the `.tsx` JSX-text
- * limitation of this instrument specifically. */
+ * limitation of this instrument specifically.
+ *
+ * RULING 136: a plain `scanner.scan()` loop leaves template mode as soon as
+ * it sees a substitution's `${` and never re-enters it, because the
+ * TypeScript scanner does not automatically know that a `}` closes a
+ * template substitution rather than an object literal or block - that
+ * requires calling `reScanTemplateToken()` at exactly that `}`, the same way
+ * a JSX `>` requires `reScanJsxToken()` and a `/` requires
+ * `reScanSlashToken()`. Without it, the `}` comes back as a plain
+ * CloseBraceToken, scanning continues in "code" mode, and the template's own
+ * closing backtick is then misread as the OPENING delimiter of a brand new
+ * string/template token - swallowing everything up to the next backtick (or
+ * EOF) in the file, real code included, into what this instrument reports as
+ * a string. See docs/ruling-136.md and docs/r2-overtightening-audit.md
+ * finding F1 for how this was found (a real `requireAppOwner()` call
+ * reported as a string exclusion on `src/app/actions/github.ts`).
+ *
+ * The fix below uses the same stack shape TypeScript's own fast import
+ * scanner uses for this exact problem (`processImports` in
+ * `node_modules/typescript/lib/typescript.js`, used to find `import(...)`
+ * calls inside template literals without a full parse): push `TemplateHead`
+ * when one is seen, push `OpenBraceToken` for a nested code brace pair while
+ * inside a substitution (so `${ {a: 1} }`'s own braces don't get mistaken
+ * for the substitution's closing brace), and on `CloseBraceToken` pop - if
+ * the popped marker was `TemplateHead`, call `reScanTemplateToken()` instead
+ * of accepting the plain token, which returns `TemplateMiddle` (another
+ * substitution follows - stay in the same template context) or
+ * `TemplateTail` (the template ends here). This also correctly handles a
+ * template nested inside another template's substitution, because each
+ * nesting level gets its own `TemplateHead` entry on the stack. */
 function scanCommentsAndStrings(
   source: string,
   fileName: string,
@@ -235,8 +299,32 @@ function scanCommentsAndStrings(
 
   let comment = 0;
   let string = 0;
+  // Stack of markers for "what does the next matching CloseBraceToken close":
+  // ts.SyntaxKind.TemplateHead means it closes a template substitution (so
+  // the `}` must be re-scanned as TemplateMiddle/TemplateTail);
+  // ts.SyntaxKind.OpenBraceToken means it closes an ordinary nested brace
+  // pair inside that substitution's expression (block, object literal, ...)
+  // and should be accepted as a plain CloseBraceToken.
+  const templateStack: import("typescript").SyntaxKind[] = [];
   let kind = scanner.scan();
   while (kind !== ts.SyntaxKind.EndOfFileToken) {
+    if (kind === ts.SyntaxKind.TemplateHead) {
+      templateStack.push(kind);
+    } else if (kind === ts.SyntaxKind.OpenBraceToken) {
+      if (templateStack.length > 0) templateStack.push(kind);
+    } else if (kind === ts.SyntaxKind.CloseBraceToken && templateStack.length > 0) {
+      if (templateStack[templateStack.length - 1] === ts.SyntaxKind.TemplateHead) {
+        kind = scanner.reScanTemplateToken(/* isTaggedTemplate */ false);
+        if (kind === ts.SyntaxKind.TemplateTail) {
+          templateStack.pop();
+        }
+        // else TemplateMiddle: another `${...}` follows in the same
+        // template, so the TemplateHead marker stays on top of the stack.
+      } else {
+        templateStack.pop();
+      }
+    }
+
     if (COMMENT_KINDS.has(kind)) {
       comment += countWholeWordOccurrences(scanner.getTokenText(), symbol);
     } else if (STRING_LIKE_KINDS.has(kind)) {
@@ -273,7 +361,10 @@ export function countSymbolOccurrences(source: string, fileName: string, symbol:
   // file, expected to agree on the split between "in real code" and "not."
   // A mismatch means an Identifier the AST sees was not found as a plain
   // word-token by the scanner (or vice versa) - a real disagreement to
-  // surface, not paper over.
+  // surface, not paper over. RULING 136: this equality is blind to a
+  // misclassification WITHIN "not code" (comment counted as string or vice
+  // versa) - see instrumentsReconcile's own doc comment above for why that is
+  // a narrower guarantee than the field's name suggests.
   const totalWholeWordInFile = countWholeWordOccurrences(source, symbol);
   const instrumentsReconcile = codeOccurrences + comment + string === totalWholeWordInFile;
 

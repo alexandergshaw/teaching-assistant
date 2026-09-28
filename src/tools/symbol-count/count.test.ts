@@ -276,6 +276,81 @@ describe("synthesized area-slug instance (instance 4 - a comment explaining what
   });
 });
 
+describe("RULING 136 - the lexical scan must re-enter template mode after a ${...} substitution", () => {
+  // RULING 135's own tool shipped with this hole: not one fixture above
+  // contains a `${` (grep -n '\$\{' on this file returned nothing before this
+  // block was added), and F1 in docs/r2-overtightening-audit.md found it
+  // within an hour of the tool landing. scanCommentsAndStrings never called
+  // reScanTemplateToken(), so the scanner left template mode after a
+  // substitution's `}` and read the rest of the file as one giant
+  // string/template token - swallowing real code (including guard calls)
+  // into excludedAsString. Every fixture in this block is RED against the
+  // pre-fix scanner; see this file's own report for the pasted failures.
+
+  it("does not swallow a real call AFTER a substituting template into excludedAsString (RULING 136 F1's own fixture)", () => {
+    const source = "const msg = `hello ${x} world`;\nasync function run() { await guardFn(); }\n";
+    const report = countSymbolOccurrences(source, "fixture.ts", "guardFn");
+    // FAILED before the fix: excludedAsString was 1 (the call text got
+    // swallowed into the unterminated template token that started at the
+    // stray backtick the mis-scan produced) and instrumentsReconcile was
+    // false (codeOccurrences=1 + comment=0 + string=1 = 2, but the file has
+    // only one whole-word "guardFn").
+    expect(report.callCount).toBe(1);
+    expect(report.excludedAsString).toBe(0);
+    expect(report.instrumentsReconcile).toBe(true);
+  });
+
+  it("handles a template nested inside another template's substitution (nested substitutions)", () => {
+    const source = "const msg = `outer ${`inner ${x}`} end`;\nasync function run() { await guardFn(); }\n";
+    const report = countSymbolOccurrences(source, "fixture.ts", "guardFn");
+    // FAILED before the fix, same shape as the first fixture but exercising
+    // the stack (two open TemplateHead contexts, inner closes first).
+    expect(report.callCount).toBe(1);
+    expect(report.excludedAsString).toBe(0);
+    expect(report.instrumentsReconcile).toBe(true);
+  });
+
+  it("handles a complete (non-substituting) template literal nested inside a substitution", () => {
+    const source = "const msg = `outer ${`plain-inner`} end`;\nasync function run() { await guardFn(); }\n";
+    const report = countSymbolOccurrences(source, "fixture.ts", "guardFn");
+    // FAILED before the fix: the outer template's own closing `}` was never
+    // re-scanned, so the outer tail's backtick was misread as opening a new
+    // string that ran to EOF and swallowed the call.
+    expect(report.callCount).toBe(1);
+    expect(report.excludedAsString).toBe(0);
+    expect(report.instrumentsReconcile).toBe(true);
+  });
+
+  it("counts a call INSIDE a ${...} substitution as a call, never as string content", () => {
+    const source = "const msg = `before ${guardFn()} after`;\n";
+    const report = countSymbolOccurrences(source, "fixture.ts", "guardFn");
+    // This one already passed before the fix (the corruption only swallows
+    // text AFTER the mis-scanned brace, and the call sits before it here) -
+    // kept as a named regression guard, not a claim that it was broken.
+    expect(report.callCount).toBe(1);
+    expect(report.excludedAsString).toBe(0);
+    expect(report.codeOccurrences).toBe(1);
+    expect(report.instrumentsReconcile).toBe(true);
+  });
+
+  it("does not let a comment mention after a substituting template get misclassified as a string - and shows instrumentsReconcile cannot catch a comment/string swap", () => {
+    const source = "const msg = `before ${guardFn()} after`;\n// guardFn also mentioned here\n";
+    const report = countSymbolOccurrences(source, "fixture.ts", "guardFn");
+    // FAILED before the fix in the classification (excludedAsComment was 0
+    // and excludedAsString was 1 - the comment text was swallowed into the
+    // same runaway string token), but instrumentsReconcile was ALREADY true
+    // before the fix too: codeOccurrences(1) + comment(0) + string(1) = 2,
+    // which equals the file's true total of 2 whole-word occurrences either
+    // way. The flag cannot distinguish "right total, wrong bucket" from a
+    // correct split - see this tool's report on instrumentsReconcile's
+    // narrowed claim.
+    expect(report.callCount).toBe(1);
+    expect(report.excludedAsComment).toBe(1);
+    expect(report.excludedAsString).toBe(0);
+    expect(report.instrumentsReconcile).toBe(true);
+  });
+});
+
 describe("countSymbolOccurrences - relational (non-frozen) checks against real, live files in this tree", () => {
   // These two tests read REAL files and assert a STRUCTURAL INEQUALITY, never
   // an exact count - per RULING 135's instruction not to pin a count that a

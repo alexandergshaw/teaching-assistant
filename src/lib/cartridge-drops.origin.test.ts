@@ -89,13 +89,17 @@ describe("R1: the new migration is additive-only and idempotent on re-apply", ()
     expect(newMigrationRaw.includes("-- Written idempotently.")).toBe(true);
   });
 
-  it("R1e: the filename sorts after 20261021000000_create_deck_template_files.sql", () => {
-    const files = fs
-      .readdirSync(MIGRATIONS_DIR)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
+  // RULING 122 (BL3): the original assertion's subject was
+  // files[files.length - 1] - whatever file sorts last in the directory -
+  // not the new migration's own name. On a tree with many later-dated
+  // migrations, that is true by construction regardless of what this
+  // migration is called; a rename to a lower counter (sorting 53 files
+  // earlier, per the check) still passed it. The subject must be the new
+  // migration's OWN basename, compared directly against the reference.
+  it("R1e: the new migration's own filename sorts after 20261021000000_create_deck_template_files.sql", () => {
+    const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql"));
     expect(files).toContain(path.basename(NEW_MIGRATION_PATH));
-    expect(files[files.length - 1] >= "20261021000000_create_deck_template_files.sql").toBe(true);
+    expect(path.basename(NEW_MIGRATION_PATH) > "20261021000000_create_deck_template_files.sql").toBe(true);
   });
 });
 
@@ -253,7 +257,7 @@ describe("R3e: the producer executes end to end - decider -> real saveCartridgeD
       file,
       baseMeta({ assignmentLabel: "HW2", rubricText: "R", rubricOriginScope: originScope })
     );
-    const disclosure = describeDropRubricOrigin(drop.rubricOriginScope);
+    const disclosure = describeDropRubricOrigin(drop.rubricOriginScope, Boolean(drop.rubricText));
     expect(disclosure.text).toContain("HW1");
     expect(disclosure.text).not.toContain("HW2");
   });
@@ -274,8 +278,77 @@ describe("R3e: the producer executes end to end - decider -> real saveCartridgeD
       file,
       baseMeta({ assignmentLabel: "HW2", rubricText: null, rubricOriginScope: originScope })
     );
-    const disclosure = describeDropRubricOrigin(drop.rubricOriginScope);
+    const disclosure = describeDropRubricOrigin(drop.rubricOriginScope, Boolean(drop.rubricText));
     expect(disclosure.present).toBe(false);
     expect(disclosure.text).toBe("No rubric was included with this upload.");
+  });
+
+  // RULING 120: the C9 path (rubric-origin.test.ts's own oracle case C9 -
+  // rubricText "TYPED", currentScope "" because the assignment label is
+  // blank at upload time) resolves to a null origin, but the drop DOES
+  // carry rubric text. Rendered end to end, this must be the THIRD state
+  // (unrecorded origin), never the no-rubric sentence - C9's scope
+  // resolution itself is unchanged (still null; the assertion in
+  // rubric-origin.test.ts's R3 table is correct), only the RENDER of that
+  // null differs depending on rubricPresent.
+  it("C9 end to end: a typed rubric with a blank assignment label renders the unrecorded-origin sentence, not the no-rubric one", async () => {
+    const { client } = makeCapturingClient();
+    const originScope = resolveRubricOriginScope({
+      rubricText: "TYPED",
+      currentScope: "",
+      restored: null,
+      sniffedRubric: null,
+      archiveName: "hw2.zip",
+    });
+    expect(originScope).toBeNull();
+    const file = new File([new Uint8Array(9)], "hw2.zip");
+    const drop = await saveCartridgeDrop(
+      client,
+      "u1",
+      file,
+      baseMeta({ assignmentLabel: "", rubricText: "TYPED", rubricOriginScope: originScope })
+    );
+    const disclosure = describeDropRubricOrigin(drop.rubricOriginScope, Boolean(drop.rubricText));
+    expect(disclosure.present).toBe(true);
+    expect(disclosure.text).toBe("A rubric was included with this upload, but its source was not recorded.");
+    expect(disclosure.text).not.toBe("No rubric was included with this upload.");
+  });
+
+  // RULING 120 instance (b): every pre-migration row. The column was added
+  // nullable with no backfill, so a historical row has rubric_text set (it
+  // carried a rubric before this column existed) and rubric_origin_scope
+  // null. Modelled directly as a listed row - never through saveCartridgeDrop,
+  // since no writer ever produces this combination going forward - to prove
+  // the READ path (mapCartridgeDrop -> describeDropRubricOrigin) renders the
+  // true sentence for data that already exists in production.
+  it("pre-migration row shape end to end: rubric_text present, rubric_origin_scope null, renders the unrecorded-origin sentence", async () => {
+    const historicalRow = {
+      id: "d1",
+      user_id: "u1",
+      name: "hw1.zip",
+      storage_path: "u1/hw1.zip",
+      course_label: "CS101",
+      assignment_label: "HW1",
+      points_possible: null,
+      rubric_text: "A HISTORICAL RUBRIC",
+      rubric_origin_scope: null,
+      lms: "canvas",
+      status: "graded",
+      error: null,
+      csv_storage_path: null,
+      csv_name: null,
+      size_bytes: 9,
+      created_at: "2026-08-26T00:00:00Z",
+      updated_at: "2026-08-26T00:00:00Z",
+      graded_at: "2026-08-26T00:00:00Z",
+    };
+    const listClient = makeListingClient(historicalRow);
+    const listed = await listCartridgeDrops(listClient, "u1");
+    expect(listed[0].rubricOriginScope).toBeNull();
+    expect(listed[0].rubricText).toBe("A HISTORICAL RUBRIC");
+    const disclosure = describeDropRubricOrigin(listed[0].rubricOriginScope, Boolean(listed[0].rubricText));
+    expect(disclosure.present).toBe(true);
+    expect(disclosure.text).toBe("A rubric was included with this upload, but its source was not recorded.");
+    expect(disclosure.text).not.toBe("No rubric was included with this upload.");
   });
 });

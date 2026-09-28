@@ -7,7 +7,12 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
-import { resolveRubricOriginScope, describeDropRubricOrigin, FROZEN_NO_RUBRIC } from "./rubric-origin";
+import {
+  resolveRubricOriginScope,
+  describeDropRubricOrigin,
+  FROZEN_NO_RUBRIC,
+  FROZEN_RUBRIC_ORIGIN_UNKNOWN,
+} from "./rubric-origin";
 
 const PANEL_SOURCE = fs.readFileSync(
   path.join(process.cwd(), "src/app/components/CartridgeDropPanel.tsx"),
@@ -101,26 +106,83 @@ describe("R3h: saveScope still reaches saveRubricMemory unchanged (regression ca
 });
 
 // ---------------------------------------------------------------------------
-// R4: describeDropRubricOrigin - the no-rubric state renders, the two states
-// are distinguishable, and there is one humaniser.
+// RULING 121 (BL1): the CONSUMER callsite, pinned the same way R3g pins the
+// PRODUCER callsite - a block-anchored slice with a both-ends validity
+// check, so the disclosure <p> cannot be deleted (with its import dropped
+// to keep no-unused-vars quiet) while every other panel-reading clause in
+// this item stays green. Anchored on the drops-table row's course/
+// assignment cell ({drop.courseLabel}, unique in this file - verified by
+// R-CONSUMER-1 below, not assumed), ending at that cell's own closing </td>.
+// ---------------------------------------------------------------------------
+
+describe("RULING 121 (BL1): the describeDropRubricOrigin consumer callsite in the drops table row", () => {
+  const start = PANEL_SOURCE.indexOf("{drop.courseLabel}");
+  const end = PANEL_SOURCE.indexOf("</td>", start);
+  const block = start > -1 && end > start ? PANEL_SOURCE.slice(start, end) : "";
+
+  it("R-CONSUMER-1: both anchors resolve, in order, and {drop.courseLabel} is unique in the file (a check over -1 proves nothing)", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(PANEL_SOURCE.indexOf("{drop.courseLabel}", start + 1)).toBe(-1);
+  });
+
+  it("R-CONSUMER-2: the slice is one table cell, not most of the file", () => {
+    expect(block.length).toBeGreaterThan(0);
+    expect(block.length).toBeLessThan(400);
+  });
+
+  it("R-CONSUMER-3: the slice calls describeDropRubricOrigin(drop.rubricOriginScope, ...) exactly once", () => {
+    const matches = block.match(/describeDropRubricOrigin\(\s*drop\.rubricOriginScope\s*,/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it("R-CONSUMER-4: the render reads .text off that call, inside a rendered element (not merely referenced)", () => {
+    expect(block).toMatch(/describeDropRubricOrigin\([\s\S]*?\)\.text/);
+    expect(block).toMatch(/<p[^>]*>[\s\S]*describeDropRubricOrigin/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R4: describeDropRubricOrigin - THREE states (RULING 120), not two: no
+// rubric, rubric with a known origin, rubric with an unrecorded origin
+// (every pre-migration row, plus the C9 path where the course/assignment
+// labels are blank at upload time). rubricPresent is the second argument.
 // ---------------------------------------------------------------------------
 
 describe("R4: describeDropRubricOrigin", () => {
-  it("R4a/R4b: null input is the FROZEN no-rubric literal, and present is false", () => {
-    const result = describeDropRubricOrigin(null);
+  it("R4a/R4b: no rubric text is the FROZEN no-rubric literal, and present is false (regardless of originScope)", () => {
+    const result = describeDropRubricOrigin(null, false);
     expect(result.text).toBe(FROZEN_NO_RUBRIC);
     expect(result.present).toBe(false);
   });
 
-  it("R4c: every scoped input is present", () => {
+  // RULING 120 state 3: rubric text present, origin not recorded. This is
+  // the pre-migration shape and the C9 shape - the precondition for
+  // FROZEN_NO_RUBRIC is now rubricPresent, not originScope, so this must NOT
+  // collapse onto the no-rubric sentence.
+  it("R4a2: rubric text present with no recorded origin is the FROZEN unknown-origin literal, and present is true", () => {
+    const result = describeDropRubricOrigin(null, true);
+    expect(result.text).toBe(FROZEN_RUBRIC_ORIGIN_UNKNOWN);
+    expect(result.present).toBe(true);
+    expect(result.text).not.toBe(FROZEN_NO_RUBRIC);
+  });
+
+  it("R4c: every scoped input, with rubric text present, is present", () => {
     for (const scope of ["cartridge:CS101|HW1", "cartridge:CS101|HW2", "upload:hw2.zip"]) {
-      expect(describeDropRubricOrigin(scope).present).toBe(true);
+      expect(describeDropRubricOrigin(scope, true).present).toBe(true);
     }
   });
 
-  it("R4d: no scoped output collapses onto the no-rubric sentence", () => {
+  // R4d is NON-DISCRIMINATING on its own: with rubricPresent=true the
+  // FROZEN_NO_RUBRIC branch is structurally unreachable (see the function's
+  // own if/else), so no single-string-swap mutant on the scoped text can
+  // make this fail without also failing R4e/R4j. Kept as the explicit
+  // statement of "distinguishable", per MI4's labelling rule - unchanged by
+  // RULING 120, since the three-state branch does not alter why this one is
+  // non-discriminating.
+  it("R4d (non-discriminating on its own; see R4e/R4j): no scoped output collapses onto the no-rubric sentence", () => {
     for (const scope of ["cartridge:CS101|HW1", "cartridge:CS101|HW2", "upload:hw2.zip"]) {
-      expect(describeDropRubricOrigin(scope).text).not.toBe(FROZEN_NO_RUBRIC);
+      expect(describeDropRubricOrigin(scope, true).text).not.toBe(FROZEN_NO_RUBRIC);
     }
   });
 
@@ -134,7 +196,7 @@ describe("R4: describeDropRubricOrigin", () => {
       "upload:hw2.zip": 'your upload of "hw2.zip"',
     };
     for (const [scope, expectedSubstring] of Object.entries(frozen)) {
-      expect(describeDropRubricOrigin(scope).text).toContain(expectedSubstring);
+      expect(describeDropRubricOrigin(scope, true).text).toContain(expectedSubstring);
     }
   });
 
@@ -142,21 +204,24 @@ describe("R4: describeDropRubricOrigin", () => {
   // the R3 case table (C5, C8). Kept as an explicit statement, not banked as
   // an independent kill.
   it("R4f (non-discriminating at this level; see R3 C5/C8): the fallback names HW1, not HW2", () => {
-    const text = describeDropRubricOrigin("cartridge:CS101|HW1").text;
+    const text = describeDropRubricOrigin("cartridge:CS101|HW1", true).text;
     expect(text).toContain("HW1");
     expect(text).not.toContain("HW2");
   });
 
   // R4g: NON-DISCRIMINATING. Kept as a cheap anchor only - it is the
-  // assertion that let MUT_P and MUT_Q through in round 1.
-  it("R4g (non-discriminating; kept as a cheap anchor): the four outputs are pairwise distinct", () => {
+  // assertion that let MUT_P and MUT_Q through in round 1. Now five outputs:
+  // the two rubric-absent/unrecorded-origin states plus the three scoped
+  // ones.
+  it("R4g (non-discriminating; kept as a cheap anchor): the five outputs are pairwise distinct", () => {
     const outputs = [
-      describeDropRubricOrigin(null).text,
-      describeDropRubricOrigin("cartridge:CS101|HW1").text,
-      describeDropRubricOrigin("cartridge:CS101|HW2").text,
-      describeDropRubricOrigin("upload:hw2.zip").text,
+      describeDropRubricOrigin(null, false).text,
+      describeDropRubricOrigin(null, true).text,
+      describeDropRubricOrigin("cartridge:CS101|HW1", true).text,
+      describeDropRubricOrigin("cartridge:CS101|HW2", true).text,
+      describeDropRubricOrigin("upload:hw2.zip", true).text,
     ];
-    expect(new Set(outputs).size).toBe(4);
+    expect(new Set(outputs).size).toBe(5);
   });
 
   // R4h: an IDENTITY, not a comparison (RULING 115) - a function cannot
@@ -170,7 +235,7 @@ describe("R4: describeDropRubricOrigin", () => {
   // greedy on the first group, so a course label containing "|" absorbs the
   // inner bar. A second, independent parse will not reproduce this quirk.
   it("R4j: a course label containing a bar renders via the greedy first group", () => {
-    expect(describeDropRubricOrigin("cartridge:A|B|C").text).toContain("A|B / C");
+    expect(describeDropRubricOrigin("cartridge:A|B|C", true).text).toContain("A|B / C");
   });
 });
 
@@ -196,8 +261,44 @@ describe("R4i: the drops table gains no column", () => {
 
 describe("R5: zero added interactions (source-text proxy; see A40-D1)", () => {
   const FROZEN_ON_HANDLERS: Record<string, number> = { onChange: 6, onClick: 4 };
-  const FROZEN_ELEMENT_TOKENS: Record<string, number> = { Button: 4, MenuItem: 4, TextField: 5, input: 1 };
   const FROZEN_STYLE_CLASS_COUNT = 14;
+
+  // RULING 123 MA1: R5b's own framing claimed it catches "any NEW token, of
+  // any kind ... rather than a list of banned things", but the shipped
+  // instrument was a four-name enumeration - a native <details>/<summary>
+  // disclosure (which adds a click, the exact thing RULING 100 forbids) is
+  // outside that list and passes it. The fix is a KIND change: tally EVERY
+  // "<Identifier" token in the source (the check's own suggested regex),
+  // which also catches the file's few TS-generic angle-bracket tokens
+  // (useState<CartridgeDrop[]>, useRef<HTMLInputElement>, etc.) and one
+  // angle-bracket pair inside a comment (":34, "cartridge:<course>|
+  // <assignment>") - that is over-inclusive relative to "JSX tag" in name
+  // only; it makes the instrument MORE sensitive, never less, because any
+  // one of those tokens changing also fails the test. A denylist can never
+  // do that; a multiset of everything can.
+  const FROZEN_ALL_ANGLE_TOKENS: Record<string, number> = {
+    course: 1,
+    assignment: 1,
+    CartridgeDrop: 1,
+    string: 5,
+    WorkflowTrigger: 1,
+    HTMLInputElement: 2,
+    div: 16,
+    h2: 1,
+    p: 15,
+    label: 6,
+    TextField: 5,
+    MenuItem: 4,
+    input: 1,
+    Button: 4,
+    span: 2,
+    table: 1,
+    thead: 1,
+    tr: 2,
+    th: 5,
+    tbody: 1,
+    td: 5,
+  };
 
   it("R5a: the exact multiset of on[A-Z]...= handlers matches the frozen set", () => {
     const found = PANEL_SOURCE.match(/\bon[A-Z][A-Za-z]*=/g) ?? [];
@@ -209,18 +310,55 @@ describe("R5: zero added interactions (source-text proxy; see A40-D1)", () => {
     expect(tally).toEqual(FROZEN_ON_HANDLERS);
   });
 
-  it("R5b: the exact multiset of interactive element tokens matches the frozen set", () => {
-    const found = PANEL_SOURCE.match(/<(Button|MenuItem|TextField|input)/g) ?? [];
+  it("R5b: the exact multiset of EVERY <Identifier token (JSX tags and TS generics alike) matches the frozen set - a new token of any kind, including <details>/<summary>, fails this", () => {
+    const found = PANEL_SOURCE.match(/<[A-Za-z][A-Za-z0-9]*/g) ?? [];
     const tally: Record<string, number> = {};
     for (const raw of found) {
       const name = raw.slice(1);
       tally[name] = (tally[name] ?? 0) + 1;
     }
-    expect(tally).toEqual(FROZEN_ELEMENT_TOKENS);
+    expect(tally).toEqual(FROZEN_ALL_ANGLE_TOKENS);
   });
 
-  it("R5c: the styles.* class names used are exactly the frozen 14", () => {
+  it("R5b-mutation-witness: adding a <details><summary> disclosure changes the tally (proof the instrument now sees it)", () => {
+    const mutated = PANEL_SOURCE.replace(
+      "{sniffHint && <p className={styles.fieldHint}>{sniffHint}</p>}",
+      "{sniffHint && <details><summary>{sniffHint}</summary></details>}"
+    );
+    expect(mutated).not.toBe(PANEL_SOURCE);
+    const found = mutated.match(/<[A-Za-z][A-Za-z0-9]*/g) ?? [];
+    const tally: Record<string, number> = {};
+    for (const raw of found) {
+      const name = raw.slice(1);
+      tally[name] = (tally[name] ?? 0) + 1;
+    }
+    expect(tally).not.toEqual(FROZEN_ALL_ANGLE_TOKENS);
+  });
+
+  // Shipped as a cardinality check only (found.size === 14), which a
+  // same-count swap (drop one class, add a different one) would pass. The
+  // notes specify SET membership, not a count, so this asserts the actual
+  // frozen 14 names, not merely their number.
+  const FROZEN_STYLE_CLASSES = [
+    "styles.card",
+    "styles.courseScheduleTable",
+    "styles.error",
+    "styles.field",
+    "styles.fieldHint",
+    "styles.fileField",
+    "styles.form",
+    "styles.ghBadgeAccent",
+    "styles.ghBadgeDanger",
+    "styles.ghBadgeSuccess",
+    "styles.ghBadgeWarning",
+    "styles.loadingState",
+    "styles.loadingTitle",
+    "styles.spinner",
+  ];
+
+  it("R5c: the styles.* class names used are exactly the frozen set of 14 (set membership, not just a count)", () => {
     const found = new Set(PANEL_SOURCE.match(/styles\.[A-Za-z0-9_]*/g) ?? []);
     expect(found.size).toBe(FROZEN_STYLE_CLASS_COUNT);
+    expect([...found].sort()).toEqual([...FROZEN_STYLE_CLASSES].sort());
   });
 });

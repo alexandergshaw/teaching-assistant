@@ -21,6 +21,20 @@ import { describeRubricScope } from "./rubric-memory";
 export const FROZEN_NO_RUBRIC = "No rubric was included with this upload.";
 
 /**
+ * RULING 120: `rubric_origin_scope` being null is ambiguous - it means
+ * either "no rubric was included" or "a rubric was included but its origin
+ * was not recorded" (every pre-migration row, plus the C9 path where the
+ * course/assignment labels are blank at upload time). The two states read a
+ * FALSE sentence onto real data if collapsed onto FROZEN_NO_RUBRIC, so this
+ * third frozen sentence exists to be true of the second state specifically -
+ * it asserts presence AND the absence of a recorded source, and promises
+ * nothing about why the source is missing. Pinned by string equality, same
+ * as FROZEN_NO_RUBRIC.
+ */
+export const FROZEN_RUBRIC_ORIGIN_UNKNOWN =
+  "A rubric was included with this upload, but its source was not recorded.";
+
+/**
  * Decides which scope the rubric text actually carried at upload time.
  * Order matters: the falsy guard runs BEFORE the restored check (a drop
  * with no rubric text must never be attributed to a scope, even when a
@@ -53,10 +67,29 @@ export function resolveRubricOriginScope(input: {
  * The drop-row copy. Says what the form caption already says (the COPY
  * PRINCIPLE), in the caption's own vocabulary, via the SAME humaniser
  * (RULING 115) - so the row can never drift into a second parse.
+ *
+ * RULING 120: THREE states, not two - `originScope` alone cannot tell "no
+ * rubric" apart from "a rubric with an unrecorded origin", so the caller
+ * must pass whether the drop actually carries rubric text (`rubricPresent`,
+ * from `CartridgeDrop.rubricText`). The precondition for FROZEN_NO_RUBRIC is
+ * now the fact it asserts - rubric absence - rather than origin absence.
+ *
+ * `present` in the return value tracks `rubricPresent` (true whenever the
+ * drop carries rubric text, regardless of whether its origin is known). It
+ * has no production consumer today - the render at CartridgeDropPanel.tsx
+ * reads only `.text` - and is kept solely so tests can assert the presence
+ * branch without parsing prose (RULING 123 MI6). It is not load-bearing for
+ * rendering.
  */
-export function describeDropRubricOrigin(originScope: string | null): { present: boolean; text: string } {
-  if (!originScope) {
+export function describeDropRubricOrigin(
+  originScope: string | null,
+  rubricPresent: boolean
+): { present: boolean; text: string } {
+  if (!rubricPresent) {
     return { present: false, text: FROZEN_NO_RUBRIC };
+  }
+  if (!originScope) {
+    return { present: true, text: FROZEN_RUBRIC_ORIGIN_UNKNOWN };
   }
   return { present: true, text: `Rubric from ${describeRubricScope(originScope)}.` };
 }

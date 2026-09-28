@@ -479,7 +479,7 @@ export default function CartridgeDropPanel() {
             id="cartridge-rubric"
             value={rubricText}
             onChange={(e) => setRubricText(e.target.value)}
-            placeholder="Paste a rubric or grading criteria. If blank, the workflow will generate one."
+            placeholder="Paste a rubric or grading criteria."
             disabled={loading}
           />
           {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
@@ -576,7 +576,7 @@ export default function CartridgeDropPanel() {
                       {drop.courseLabel}
                       {drop.assignmentLabel ? ` / ${drop.assignmentLabel}` : ""}
                       <p className={styles.fieldHint}>
-                        {describeDropRubricOrigin(drop.rubricOriginScope).text}
+                        {describeDropRubricOrigin(drop.rubricOriginScope, Boolean(drop.rubricText)).text}
                       </p>
                     </td>
                     <td>

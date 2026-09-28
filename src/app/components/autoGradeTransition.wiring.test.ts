@@ -123,16 +123,20 @@ describe("A15: Live Feed Auto Grade dispatch runs inside a transition", () => {
     expect(hasStartTransitionImport || hasUseTransition).toBe(true);
   });
 
-  it("A2: startTransition( appears exactly once in the handler, and formAction( is called exactly once, strictly inside it", () => {
+  it("A2 (A39 incremental-fill W5, F11): startTransition( appears exactly once in the handler, and beginWholeRun( - the ONE door (architecture 5.4) - is called exactly once, strictly inside it", () => {
     expect(startTransitionMatches.length).toBe(1);
     expect(startTransitionOpenIdx).toBeGreaterThanOrEqual(0);
     expect(startTransitionCloseIdx).toBeGreaterThan(startTransitionOpenIdx);
 
-    const formActionMatches = [...HANDLER.matchAll(/formAction\(/g)];
-    expect(formActionMatches.length).toBe(1);
-    const formActionIdx = formActionMatches[0].index!;
-    expect(formActionIdx).toBeGreaterThan(startTransitionOpenIdx);
-    expect(formActionIdx).toBeLessThan(startTransitionCloseIdx);
+    // WATCHED: written first against today's file, this goes RED on the
+    // presence clause below while A3's setGradingTarget clause (below) stays
+    // GREEN - proving the handler span is found rather than the whole
+    // assertion failing for want of an anchor.
+    const beginWholeRunMatches = [...HANDLER.matchAll(/beginWholeRun\(/g)];
+    expect(beginWholeRunMatches.length).toBe(1);
+    const beginWholeRunIdx = beginWholeRunMatches[0].index!;
+    expect(beginWholeRunIdx).toBeGreaterThan(startTransitionOpenIdx);
+    expect(beginWholeRunIdx).toBeLessThan(startTransitionCloseIdx);
   });
 
   it("A3: setGradingTarget( is inside the transition, setCanvasUrl( stays outside it", () => {
@@ -156,9 +160,11 @@ describe("A15: Live Feed Auto Grade dispatch runs inside a transition", () => {
     }
   });
 
-  it("A5: every formAction( occurrence lies strictly inside a startTransition( paren span, and there are exactly two (A39 wave 4c, RULING 40 - both whole-run routes share ONE submitWholeRun call site)", () => {
+  it("A5 (A39 incremental-fill W5, F10): every formAction( occurrence lies strictly inside a startTransition( paren span, and there is exactly ONE (architecture 5.4 - beginWholeRun is now the ONE door both whole-run routes share, so handleAutoGrade no longer calls formAction directly)", () => {
+    // WATCHED: change this to 1 and run it against TODAY's unchanged file -
+    // it must go RED at 2, proving the count is the thing discriminating.
     const wholeFileMatches = [...gtSource.matchAll(/formAction\(/g)];
-    expect(wholeFileMatches.length).toBe(2);
+    expect(wholeFileMatches.length).toBe(1);
     const allTransitionMatches = [...gtSource.matchAll(/startTransition\(/g)];
     const spans = allTransitionMatches.map((m) => {
       const open = m.index! + "startTransition".length;
@@ -361,5 +367,108 @@ describe("F9 clause 2: GradingResults' reset guard uses runResetKey, not a bare 
     const runResetKeyMatches = [...grSource.matchAll(/runResetKey\(/g)];
     expect(runResetKeyMatches.length).toBe(1);
     expect(grSource).not.toContain("run !== prevRun");
+  });
+});
+
+// A39 incremental-fill W5 (docs/a39-fill-waves.md; docs/a39-incremental-fill-
+// architecture.md 5.2, 5.6, 7.2): F5, F6, F13, F25 - "one machine, one mount,
+// one door" and the terminal sentence's own region.
+import { readdirSync, statSync } from "fs";
+
+const GRADING_RESULTS_MATCH = /<GradingResults(?=[\s/>])/g;
+
+function walkTsxFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    if (name === "node_modules" || name.startsWith(".")) continue;
+    const full = join(dir, name);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      out.push(...walkTsxFiles(full));
+    } else if (name.endsWith(".tsx") && !name.includes(".test.")) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+describe("F5: GradingTab.tsx has exactly one <GradingResults mount, not inside a .map(", () => {
+  it("the lookahead-anchored match count is 1 (a bare \\b would also match <GradingResultsHandle>)", () => {
+    const matches = [...gtSource.matchAll(GRADING_RESULTS_MATCH)];
+    expect(matches.length).toBe(1);
+  });
+
+  it("its innermost enclosing brace span contains no .map(", () => {
+    const m = /<GradingResults(?=[\s/>])/.exec(gtSource);
+    expect(m).not.toBeNull();
+    const span = innermostEnclosingBraceSpan(gtSource, m!.index);
+    expect(span).not.toBeNull();
+    const spanText = gtSource.slice(span!.start, span!.end + 1);
+    expect(spanText).not.toContain(".map(");
+  });
+});
+
+describe("F6 (docs/a39-incremental-fill-architecture.md 5.6): the edits-surface exclusivity GUARD, at REPO scope", () => {
+  it("F6a: the set of src/app/**/*.tsx files containing editsSurface=\"canvas\" is exactly GradingTab.tsx and LiveFeedPanel.tsx", () => {
+    const root = join(process.cwd(), "src", "app");
+    const matches = walkTsxFiles(root)
+      .filter((f) => stripComments(readFileSync(f, "utf8")).includes('editsSurface="canvas"'))
+      .map((f) => f.split(process.cwd())[1].replace(/\\/g, "/").replace(/^\//, ""));
+    expect(matches.sort()).toEqual(["src/app/components/GradingTab.tsx", "src/app/components/LiveFeedPanel.tsx"]);
+  });
+
+  it("F6b: the one <GradingResults mount's guard text is conjunctive on source !== \"livefeed\", with no || and nothing before the tag", () => {
+    const m = /<GradingResults(?=[\s/>])/.exec(gtSource);
+    expect(m).not.toBeNull();
+    const span = innermostEnclosingBraceSpan(gtSource, m!.index);
+    expect(span).not.toBeNull();
+    const spanText = gtSource.slice(span!.start, span!.end + 1);
+    const firstLt = spanText.indexOf("<");
+    const guardText = spanText.slice(0, firstLt);
+    const guardIsConjunctive =
+      /source !== "livefeed"\s*&&/.test(guardText) || /&&\s*source !== "livefeed"/.test(guardText);
+    expect(guardIsConjunctive).toBe(true);
+    expect(guardText).not.toContain("||");
+  });
+
+  it("F6c: LiveFeedPanel is reached only from the source === \"livefeed\" ternary", () => {
+    const lfMatches = [...gtSource.matchAll(/<LiveFeedPanel(?=[\s/>])/g)];
+    expect(lfMatches.length).toBe(1);
+    const lfIdx = lfMatches[0].index!;
+    const lastTernaryIdx = gtSource.lastIndexOf('source === "livefeed"', lfIdx);
+    expect(lastTernaryIdx).toBeGreaterThanOrEqual(0);
+    const between = gtSource.slice(lastTernaryIdx, lfIdx);
+    expect(between).not.toContain("{");
+  });
+});
+
+describe("F13 (architecture 7.2): the terminal sentence's OWN region, gated on the sentence existing, not on a row existing", () => {
+  it("terminalLine's innermost enclosing brace span contains no results.length and no <GradingResults, and precedes the one mount", () => {
+    const idx = gtSource.indexOf("terminalLine &&");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const span = innermostEnclosingBraceSpan(gtSource, idx);
+    expect(span).not.toBeNull();
+    const spanText = gtSource.slice(span!.start, span!.end + 1);
+    expect(spanText).not.toContain("results.length");
+    expect(spanText).not.toContain("<GradingResults");
+
+    const grMatch = /<GradingResults(?=[\s/>])/.exec(gtSource);
+    expect(grMatch).not.toBeNull();
+    expect(span!.start).toBeLessThan(grMatch!.index);
+  });
+});
+
+describe("F25 (architecture 10, M6): the scroll effect fires at most once per run, not once per arrival", () => {
+  it("the scrollIntoView effect's dependency array contains runResetKey(, not a bare displayRun or state.run", () => {
+    const idx = gtSource.indexOf("scrollIntoView(");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const depsStart = gtSource.indexOf("}, [", idx);
+    expect(depsStart).toBeGreaterThan(idx);
+    const depsEnd = gtSource.indexOf(")", depsStart);
+    const deps = gtSource.slice(depsStart, depsEnd + 1);
+    expect(deps).toContain("runResetKey(");
+    expect(deps).not.toMatch(/\[\s*displayRun\s*\]/);
+    expect(deps).not.toMatch(/\[\s*run\s*\]/);
+    expect(deps).not.toMatch(/\[\s*state\.run\s*\]/);
   });
 });

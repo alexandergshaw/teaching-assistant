@@ -8,10 +8,17 @@ import {
   mergeArrivedResults,
   classifyItemFailure,
   estimateEntryWireBytes,
+  isTerminal,
+  canonicalColumns,
+  buildIncrementalRun,
+  selectDisplayRun,
+  selectRunKey,
   type IncrementalRunPlan,
+  type IncrementalPhase,
+  type ArrivedItemResult,
 } from "./incrementalRunPlan";
 import { UPLOAD_WIRE_BUDGET_BYTES, wireBytesForFile } from "@/lib/upload-budget";
-import type { GradeResult, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 
 function entry(overrides: Partial<StudentSubmissionEntry> = {}): StudentSubmissionEntry {
   return { student: "Student", content: "content", mergedFileCount: 1, submittedFiles: [], ...overrides };
@@ -157,11 +164,48 @@ describe("mergeArrivedResults (W4-5, RULING 30: a row never moves, it only appea
   it("returns an empty array when nothing has arrived yet", () => {
     expect(mergeArrivedResults(5, [])).toEqual([]);
   });
+
+  // F22 (docs/a39-fill-waves.md W5): round 1's F14 required merged.length ===
+  // arrived.length AND a duplicate case, which cannot both hold - this file
+  // states the two clauses separately instead.
+  it("F22(a): an arrived index AT OR ABOVE totalTicketCount is kept, not dropped", () => {
+    const merged = mergeArrivedResults(2, [
+      { sourceIndex: 0, result: graded("Alice") },
+      { sourceIndex: 5, result: graded("OutOfRange") },
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((r) => r.student)).toEqual(["Alice", "OutOfRange"]);
+  });
+
+  it("F22(b): two arrived rows sharing a sourceIndex - LAST-WINS, by identity", () => {
+    const first = graded("First");
+    const second = graded("Second");
+    const merged = mergeArrivedResults(3, [
+      { sourceIndex: 0, result: first },
+      { sourceIndex: 0, result: second },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toBe(second);
+  });
+
+  it("WATCHED: a first-wins implementation (`if (!has) set`) would keep `first` here - this test goes RED against that mutation", () => {
+    const first = graded("First");
+    const second = graded("Second");
+    const merged = mergeArrivedResults(3, [
+      { sourceIndex: 0, result: first },
+      { sourceIndex: 0, result: second },
+    ]);
+    expect(merged[0]).not.toBe(first);
+  });
 });
 
 describe("classifyItemFailure (per-item isolation: one transport failure is one ordinary ungraded row)", () => {
+  function failingEntry(overrides: Partial<StudentSubmissionEntry> = {}): StudentSubmissionEntry {
+    return { student: "Dana", content: "x", mergedFileCount: 1, submittedFiles: [], ...overrides };
+  }
+
   it("maps an Error to a grading-failed row carrying GRADING_FAILURE_PREFIX and the sourceIndex", () => {
-    const row = classifyItemFailure(3, "Dana", new Error("network timeout"));
+    const row = classifyItemFailure(3, failingEntry({ student: "Dana" }), new Error("network timeout"));
     expect(row.ungraded).toEqual({
       kind: "grading-failed",
       sourceIndex: 3,
@@ -172,8 +216,29 @@ describe("classifyItemFailure (per-item isolation: one transport failure is one 
   });
 
   it("falls back to a generic message for a non-Error rejection", () => {
-    const row = classifyItemFailure(0, "Alice", "not an Error instance");
+    const row = classifyItemFailure(0, failingEntry({ student: "Alice" }), "not an Error instance");
     expect(row.ungraded?.message).toBe("This submission could not be graded: The grading service did not respond.");
+  });
+
+  // F19's M4 clause (docs/a39-fill-waves.md W5): a failure row must not empty
+  // the ticket's own file list.
+  it("M4: the failure row carries the TICKET's own mergedFileCount and submittedFiles, not a hardcoded 0/[]", () => {
+    const row = classifyItemFailure(
+      0,
+      failingEntry({
+        student: "Dana",
+        mergedFileCount: 2,
+        submittedFiles: [{ name: "a.png", extension: "png", previewContent: "", previewTruncated: false }],
+      }),
+      new Error("timeout")
+    );
+    expect(row.mergedFileCount).toBe(2);
+    expect(row.submittedFiles).toEqual([{ name: "a.png", extension: "png", previewContent: "", previewTruncated: false }]);
+  });
+
+  it("WATCHED: hardcoding mergedFileCount: 0 / submittedFiles: [] would fail the M4 assertion above", () => {
+    const row = classifyItemFailure(0, failingEntry({ mergedFileCount: 4, submittedFiles: [] }), new Error("x"));
+    expect(row.mergedFileCount).not.toBe(0);
   });
 });
 
@@ -189,5 +254,207 @@ describe("estimateEntryWireBytes", () => {
       })
     );
     expect(bytes).toBe(5 + 4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A39 incremental-fill W5 (docs/a39-fill-waves.md; docs/a39-incremental-fill-
+// architecture.md section 5.3, 6.2, 6.3, 7.2): the phase machine and the
+// run-assembly leaf.
+// ---------------------------------------------------------------------------
+
+const ALL_PHASES: IncrementalPhase[] = ["idle", "running", "stopping", "stopped", "complete", "refused"];
+
+function okHeader(overrides: Partial<Extract<GradingRunHeader, { kind: "ok" }>> = {}): Extract<
+  GradingRunHeader,
+  { kind: "ok" }
+> {
+  return {
+    kind: "ok",
+    effectiveRubric: "",
+    generatedRubric: undefined,
+    criteriaNames: [],
+    rubricUsed: "",
+    rubricFingerprint: "",
+    ...overrides,
+  };
+}
+
+function areaRow(sourceIndex: number, student: string, areas: string[]): ArrivedItemResult {
+  return {
+    sourceIndex,
+    result: {
+      student,
+      overallComment: "",
+      strengths: "",
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: areas.map((area) => ({ area, score: "8/10", comment: "" })),
+      totalScore: "",
+      feedback: "",
+      mergedFileCount: 1,
+      submittedFiles: [],
+    },
+  };
+}
+
+function stubRun(tag: string): GradingRun {
+  return { results: [], rubricAreaNames: [tag], fullCreditChecklist: [] };
+}
+
+describe("isTerminal", () => {
+  it("is true for exactly complete and stopped, over all six phases", () => {
+    const expected: Record<IncrementalPhase, boolean> = {
+      idle: false,
+      running: false,
+      stopping: false,
+      stopped: true,
+      complete: true,
+      refused: false,
+    };
+    for (const phase of ALL_PHASES) expect(isTerminal(phase)).toBe(expected[phase]);
+  });
+});
+
+describe("selectDisplayRun (F7): total over all six phases x (incremental null/non-null) x (whole null/non-null)", () => {
+  const incRun = stubRun("incremental");
+  const wholeRun = stubRun("whole");
+
+  it("returns wholeRun for idle and incrementalRun for every other phase - all 24 combinations", () => {
+    for (const phase of ALL_PHASES) {
+      for (const inc of [incRun, null]) {
+        for (const whole of [wholeRun, null]) {
+          const expected = phase === "idle" ? whole : inc;
+          expect(selectDisplayRun(phase, inc, whole)).toBe(expected);
+        }
+      }
+    }
+  });
+
+  it("WATCHED: `incrementalRun ?? wholeRun` would show a stale incremental run while idle - RED against that mutation", () => {
+    expect(selectDisplayRun("idle", incRun, wholeRun)).not.toBe(incRun);
+  });
+
+  it("WATCHED: a default branch returning wholeRun would break the refused row", () => {
+    expect(selectDisplayRun("refused", incRun, wholeRun)).not.toBe(wholeRun);
+  });
+});
+
+describe("selectRunKey (F8): undefined for exactly idle, stable in runId", () => {
+  it("is undefined only for idle; every other phase returns 'incremental-<runId>'", () => {
+    for (const phase of ALL_PHASES) {
+      const key = selectRunKey(phase, 7);
+      if (phase === "idle") expect(key).toBeUndefined();
+      else expect(key).toBe("incremental-7");
+    }
+  });
+
+  it("is stable across a phase change within the SAME runId, and changes when runId changes", () => {
+    expect(selectRunKey("running", 7)).toBe(selectRunKey("complete", 7));
+    expect(selectRunKey("running", 7)).not.toBe(selectRunKey("running", 8));
+  });
+
+  it("WATCHED: returning a key for idle too would break the whole-run path's reference comparison (5.7 obligation 1)", () => {
+    expect(selectRunKey("idle", 7)).not.toBe("incremental-7");
+  });
+});
+
+// describeRunProgress and shouldShowEmptyState (F12) moved to
+// runProgressCopy.test.ts (RES-P-4: incrementalRunPlan.ts exceeded its -le
+// 300 bound, and the design names this exact extraction for that case).
+
+describe("canonicalColumns / buildIncrementalRun (F20, RULING 132): prefix stability during the run, determinism at the end", () => {
+  const header = okHeader();
+  const rowClarity = areaRow(0, "Alice", ["Clarity"]);
+  const rowStructure = areaRow(1, "Bob", ["Structure"]);
+  const rowGrammar = areaRow(2, "Chen", ["Grammar"]);
+
+  function build(arrived: ArrivedItemResult[], phase: IncrementalPhase): GradingRun {
+    return buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 3, arrived, phase, tier2: null });
+  }
+
+  it("branch 1: non-empty criteriaNames is returned verbatim, frozen for the whole run, regardless of phase or arrivals", () => {
+    const withCriteria = okHeader({ criteriaNames: ["Alpha", "Beta"] });
+    expect(canonicalColumns(withCriteria, [], [], "running")).toEqual(["Alpha", "Beta"]);
+    expect(canonicalColumns(withCriteria, [rowClarity], [], "complete")).toEqual(["Alpha", "Beta"]);
+  });
+
+  it("(a) the TERMINAL rubricAreaNames is deep-equal across two different arrival orders", () => {
+    const orderA = [rowClarity, rowStructure, rowGrammar];
+    const orderB = [rowGrammar, rowClarity, rowStructure];
+    const terminalA = build(orderA, "complete").rubricAreaNames;
+    const terminalB = build(orderB, "complete").rubricAreaNames;
+    expect(terminalA).toEqual(terminalB);
+    expect(terminalA).toEqual(["Clarity", "Structure", "Grammar"]); // dense, ascending sourceIndex
+  });
+
+  it("(b) within EACH order, every intermediate rubricAreaNames is a PREFIX of the next", () => {
+    const order = [rowStructure, rowGrammar, rowClarity]; // arrival order != sourceIndex order
+    let soFar: ArrivedItemResult[] = [];
+    let previous: string[] = [];
+    for (const item of order) {
+      soFar = [...soFar, item];
+      const current = build(soFar, "running").rubricAreaNames;
+      expect(current.slice(0, previous.length)).toEqual(previous);
+      previous = current;
+    }
+    expect(previous).toEqual(["Structure", "Grammar", "Clarity"]);
+  });
+
+  it("WATCHED (a): dropping the terminal normalisation (arrival order survives to completion) makes the two orders disagree", () => {
+    const orderA = [rowClarity, rowStructure, rowGrammar];
+    const orderB = [rowGrammar, rowClarity, rowStructure];
+    const nonTerminalA = build(orderA, "running").rubricAreaNames;
+    const nonTerminalB = build(orderB, "running").rubricAreaNames;
+    expect(nonTerminalA).not.toEqual(nonTerminalB);
+  });
+
+  it("WATCHED (b): sorting by ascending sourceIndex DURING the run lets a later-arriving lower index jump ahead of an already-read column", () => {
+    const afterTwo = build([rowStructure, rowGrammar], "running").rubricAreaNames;
+    expect(afterTwo).toEqual(["Structure", "Grammar"]);
+    // Alice (sourceIndex 0) arrives LAST. Prefix-stable (arrival order): the
+    // already-read Structure/Grammar prefix must not move.
+    const aliceArrivesLast = build([rowStructure, rowGrammar, rowClarity], "running").rubricAreaNames;
+    expect(aliceArrivesLast.slice(0, 2)).toEqual(afterTwo);
+    // A sourceIndex-sorted implementation would instead put Clarity FIRST.
+    expect(aliceArrivesLast).not.toEqual(["Clarity", "Structure", "Grammar"]);
+  });
+});
+
+// Freezes IN PLACE and returns the SAME reference with its original static
+// type - unlike Object.freeze's own `Readonly<T>` return type, which would
+// force every nested array in the fixture below to widen to `readonly`.
+function deepFreeze<T>(value: T): T {
+  Object.freeze(value);
+  return value;
+}
+
+describe("buildIncrementalRun (F21): never consumes its own reconciled output; arrived stays raw for the life of the run", () => {
+  const header = okHeader();
+  const rowClarity = areaRow(0, "Alice", ["Clarity"]);
+  const rowStructure = areaRow(1, "Bob", ["Structure"]);
+
+  it("accepts a deep-frozen arrived array and rows without throwing (it never writes back into them)", () => {
+    const frozenResult = deepFreeze({ ...rowClarity.result, rubricAreas: deepFreeze([...rowClarity.result.rubricAreas]) });
+    const frozenArrived = deepFreeze([deepFreeze({ sourceIndex: 0, result: frozenResult })]);
+    expect(() =>
+      buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 1, arrived: frozenArrived, phase: "running", tier2: null })
+    ).not.toThrow();
+  });
+
+  it("two successive calls with a GROWING canonical set produce the same output as two INDEPENDENT first calls over the same raw rows", () => {
+    const grown = [rowClarity, rowStructure];
+    const first = buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 2, arrived: [rowClarity], phase: "running", tier2: null });
+    expect(first.rubricAreaNames).toEqual(["Clarity"]);
+
+    const second = buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 2, arrived: grown, phase: "running", tier2: null });
+    const independentFirst = buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 2, arrived: grown, phase: "running", tier2: null });
+
+    expect(second).toEqual(independentFirst);
+    // WATCHED: if `second` had consumed `first`'s own (already-reconciled)
+    // output as its raw input, Bob's Structure score would have been folded
+    // into a stray comment on Alice's row instead of appearing as its own
+    // column (6.3's true mechanism) - this equality would then fail.
+    expect(second.rubricAreaNames).toEqual(["Clarity", "Structure"]);
   });
 });

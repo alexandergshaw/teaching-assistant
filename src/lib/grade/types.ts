@@ -387,6 +387,17 @@ export type GradingRunHeader =
       readonly rubricFingerprint: string;
     };
 
+// A39 incremental-fill W5 (docs/a39-fill-waves.md, step S1): the non-blocking
+// half of the run header (design section 4.3's TIER 2) - the full-credit
+// checklist and the sample answer, both already generated concurrently with
+// grading on the whole-run path (grading.ts's Promise.all). Landing with its
+// first consumer, buildIncrementalRun (incrementalRunPlan.ts), which is
+// called with `tier2: null` until W6 wires completeGradingRunHeaderAction.
+export interface GradingRunTier2 {
+  readonly fullCreditChecklist: string[];
+  readonly sampleAnswer: string;
+}
+
 /**
  * One assignment's grading run in workflow context: the GradingRun plus the
  * course/assignment/institution/canvasUrl metadata needed to link back to

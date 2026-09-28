@@ -13,9 +13,14 @@
  * row never moves, it only appears" (a39-architecture.md, RULING 30).
  */
 import type { LlmProvider } from "@/lib/llm";
-import type { GradeResult, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeResult, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
 import { GRADING_FAILURE_PREFIX } from "@/lib/grade/types";
 import { UPLOAD_WIRE_BUDGET_BYTES, wireBytesForFile } from "@/lib/upload-budget";
+// A39 incremental-fill W5 (design 6.4): reconcile.ts is a genuinely pure leaf
+// as of W1's import move (./prompts, not ./rubric), so importing it here does
+// NOT reach lib/supabase from this "use client"-rooted module - see
+// canvas-client-boundary.runtime-graph.test.ts (F14), which already runs.
+import { reconcileRun, unionAreaNames } from "@/lib/grade/reconcile";
 
 /**
  * Matches BULK_GRADE_CONCURRENCY (repoGradesBulkGrade.ts:143) - the same
@@ -152,10 +157,17 @@ export function buildRunItemRequests(plan: IncrementalRunPlan): GradeRunItemRequ
 }
 
 /**
- * The dense, sourceIndex-ordered projection of arrived rows ONLY - a row
- * never moves, it only appears (RULING 30). A pending or not-yet-dispatched
- * ticket produces NO ROW AT ALL here, never a placeholder; the caller's own
- * progress line (done/total) carries the outstanding count instead.
+ * The sourceIndex-ordered projection of arrived rows ONLY - a row never
+ * moves, it only appears (RULING 30). A pending or not-yet-dispatched ticket
+ * produces NO ROW AT ALL here, never a placeholder; the caller's own progress
+ * line (done/total) carries the outstanding count instead.
+ *
+ * F22 (docs/a39-fill-waves.md W5): `totalTicketCount` is NOT a filter bound.
+ * An arrived index at or above it is still kept - dropping it would silently
+ * lose a row for an input this pure function cannot rule out, even though the
+ * pool's own cursor cannot produce one today. Duplicate `sourceIndex` entries
+ * are LAST-WINS, because `Map.set` overwrites - written down here rather than
+ * left as an accident of the data structure.
  */
 export function mergeArrivedResults(
   totalTicketCount: number,
@@ -164,12 +176,9 @@ export function mergeArrivedResults(
   const bySourceIndex = new Map<number, GradeResult>();
   for (const item of arrived) bySourceIndex.set(item.sourceIndex, item.result);
 
-  const dense: GradeResult[] = [];
-  for (let i = 0; i < totalTicketCount; i += 1) {
-    const result = bySourceIndex.get(i);
-    if (result !== undefined) dense.push(result);
-  }
-  return dense;
+  return [...bySourceIndex.keys()]
+    .sort((a, b) => a - b)
+    .map((sourceIndex) => bySourceIndex.get(sourceIndex)!);
 }
 
 /**
@@ -179,12 +188,18 @@ export function mergeArrivedResults(
  * (engine.ts:257-279) - so one item's failure is an ordinary ungraded row,
  * isolated from every other item in the pool, never something that aborts
  * the run.
+ *
+ * F19's M4 clause (docs/a39-fill-waves.md W5): the failure row carries the
+ * TICKET's own file list (`mergedFileCount`/`submittedFiles`) rather than a
+ * hardcoded 0/[] - a transport failure at index 0 must not empty the header
+ * that a downstream reader (e.g. a "files submitted" column) expects every
+ * row to carry.
  */
-export function classifyItemFailure(sourceIndex: number, student: string, error: unknown): GradeResult {
+export function classifyItemFailure(sourceIndex: number, entry: StudentSubmissionEntry, error: unknown): GradeResult {
   const message = error instanceof Error ? error.message : "The grading service did not respond.";
   const strengths = `${GRADING_FAILURE_PREFIX}${message}`;
   return {
-    student,
+    student: entry.student,
     overallComment: strengths,
     strengths,
     improvements: "",
@@ -192,8 +207,93 @@ export function classifyItemFailure(sourceIndex: number, student: string, error:
     rubricAreas: [],
     totalScore: "",
     feedback: strengths,
-    mergedFileCount: 0,
-    submittedFiles: [],
-    ungraded: { kind: "grading-failed", sourceIndex, student, message: strengths },
+    mergedFileCount: entry.mergedFileCount,
+    submittedFiles: entry.submittedFiles,
+    ungraded: { kind: "grading-failed", sourceIndex, student: entry.student, message: strengths },
   };
 }
+
+// A39 incremental-fill W5: the phase machine and run-assembly leaf behind
+// "one machine, one mount, one door" (architecture 5.3, 6, 7.2). Pure/sync.
+
+/** `idle` = no incremental run owns the display; selectDisplayRun/
+ * selectRunKey special-case it so the whole-run path's reference comparison
+ * stays byte-identical (architecture 5.7 obligation 1). */
+export type IncrementalPhase = "idle" | "running" | "stopping" | "stopped" | "complete" | "refused";
+
+/** The two phases at which rows are re-projected in DENSE (ascending
+ * sourceIndex) order rather than arrival order (RULING 132). */
+export function isTerminal(phase: IncrementalPhase): boolean {
+  return phase === "complete" || phase === "stopped";
+}
+
+/**
+ * RULING 134 on the client: the SAME union reconcile.ts's empty-canonical
+ * fallback uses. Frozen `criteriaNames` when non-empty; otherwise a
+ * first-seen union in ARRIVAL order while running (RULING 132, prefix-
+ * stable - an existing column never moves or is renamed under a reader), or
+ * over the dense rows once terminal (deterministic column order).
+ */
+export function canonicalColumns(
+  header: Pick<Extract<GradingRunHeader, { kind: "ok" }>, "criteriaNames">,
+  arrived: readonly ArrivedItemResult[],
+  rows: readonly GradeResult[],
+  phase: IncrementalPhase
+): string[] {
+  if (header.criteriaNames.length > 0) return [...header.criteriaNames];
+  return isTerminal(phase) ? unionAreaNames(rows) : unionAreaNames(arrived.map((a) => a.result));
+}
+
+/** Assembles the ONE object the merged mount renders (architecture 6.1),
+ * recomputed from RAW arrived rows every call - never from a previously
+ * projected output (F21; reconcileRun's stray-fold cannot recover a dropped
+ * score, 6.3). */
+export interface BuildIncrementalRunParams {
+  readonly header: Extract<GradingRunHeader, { kind: "ok" }>;
+  readonly speedGraderUrl: string | null;
+  readonly totalTicketCount: number;
+  readonly arrived: readonly ArrivedItemResult[];
+  readonly phase: IncrementalPhase;
+  readonly tier2: GradingRunTier2 | null;
+}
+
+export function buildIncrementalRun(params: BuildIncrementalRunParams): GradingRun {
+  const { header, speedGraderUrl, totalTicketCount, arrived, phase, tier2 } = params;
+  const rows = mergeArrivedResults(totalTicketCount, arrived);
+  const canonical = canonicalColumns(header, arrived, rows, phase);
+  const projected = reconcileRun(rows, canonical);
+  return {
+    results: projected.results,
+    rubricAreaNames: projected.rubricAreaNames,
+    fullCreditChecklist: tier2?.fullCreditChecklist ?? [],
+    sampleAnswer: tier2?.sampleAnswer,
+    speedGraderUrl,
+    // The header's plain `string` (possibly "" when unstamped) passing
+    // through as the already-stamped BRANDED value - never a fresh string.
+    rubricUsed: header.rubricUsed as StampedRubricText,
+    rubricFingerprint: header.rubricFingerprint as StampedRubricText,
+  };
+}
+
+/** Precedence between the two run objects (architecture 5.3) - total by
+ * construction, a ternary rather than a switch with a default branch. */
+export function selectDisplayRun(
+  phase: IncrementalPhase,
+  incrementalRun: GradingRun | null,
+  wholeRun: GradingRun | null
+): GradingRun | null {
+  return phase === "idle" ? wholeRun : incrementalRun;
+}
+
+/** The run IDENTITY GradingResults.tsx's runResetKey compares (RULING 131,
+ * architecture 5.7) - `undefined` for EXACTLY `idle`, so a whole-run
+ * dispatch that failed to reset the phase would carry a stale incremental
+ * key onto the new whole-run object and suppress the seven resets. */
+export function selectRunKey(phase: IncrementalPhase, runId: number): string | undefined {
+  return phase === "idle" ? undefined : `incremental-${runId}`;
+}
+
+// describeRunProgress and shouldShowEmptyState (F12) moved to
+// ./runProgressCopy.ts (RES-P-4, docs/a39-fill-waves.md W5 3.1): this file
+// would otherwise land at about 365 against its -le 300 bound. Neither is
+// re-exported here - GradingTab.tsx imports the copy leaf directly.

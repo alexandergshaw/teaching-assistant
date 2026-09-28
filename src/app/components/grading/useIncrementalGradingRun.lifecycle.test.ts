@@ -73,7 +73,7 @@ vi.mock("./incrementalRunPlan", async () => {
 
 import { useIncrementalGradingRun } from "./useIncrementalGradingRun";
 import type { IncrementalRunPlan } from "./incrementalRunPlan";
-import type { GradeResult } from "@/lib/grade/types";
+import type { GradeResult, GradingRunHeader } from "@/lib/grade/types";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
   let resolve!: (v: T) => void;
@@ -113,6 +113,30 @@ function twoTicketPlan(): IncrementalRunPlan {
     provider: "gemini",
     pointsPossible: null,
   };
+}
+
+// A39 incremental-fill W5 (docs/a39-fill-waves.md): `mode: "incremental"`
+// now carries a resolved header and a speedGraderUrl (design section 4.3) -
+// buildIncrementalRun reads both. An empty criteriaNames keeps
+// canonicalColumns on its arrival-order union branch, same as before this
+// wave for every existing case here.
+function resolvedHeader(overrides: Partial<Extract<GradingRunHeader, { kind: "ok" }>> = {}): Extract<
+  GradingRunHeader,
+  { kind: "ok" }
+> {
+  return {
+    kind: "ok",
+    effectiveRubric: "1. Correctness",
+    generatedRubric: undefined,
+    criteriaNames: [],
+    rubricUsed: "",
+    rubricFingerprint: "",
+    ...overrides,
+  };
+}
+
+function incrementalPrepared(plan: IncrementalRunPlan) {
+  return { mode: "incremental" as const, plan, header: resolvedHeader(), speedGraderUrl: null };
 }
 
 function fdWithCanvasUrl(): FormData {
@@ -158,7 +182,7 @@ describe("useIncrementalGradingRun - W4-9: the press-twice instrument", () => {
     // render, no tick, no await - exactly A26b's shape.
     const p2 = render1.startReview(fdWithCanvasUrl());
 
-    prepareDeferred.resolve({ mode: "incremental", plan: twoTicketPlan() });
+    prepareDeferred.resolve(incrementalPrepared(twoTicketPlan()));
     await flushMicrotasks();
     await Promise.all([p1, p2]);
 
@@ -182,7 +206,7 @@ describe("useIncrementalGradingRun - W4-9: the press-twice instrument", () => {
     const render1b = useTestRender(submitWholeRunMock);
     expect(render1b.incrementalRunning).toBe(true);
 
-    prepareDeferred.resolve({ mode: "incremental", plan: { ...twoTicketPlan(), tickets: [] } });
+    prepareDeferred.resolve(incrementalPrepared({ ...twoTicketPlan(), tickets: [] }));
     await p1;
   });
 
@@ -195,7 +219,7 @@ describe("useIncrementalGradingRun - W4-9: the press-twice instrument", () => {
     // action twice - proving prepareGradingRunActionMock is capable of
     // being called more than once, so the "exactly 1" assertion above is
     // not vacuously satisfied by a mock that can only ever be called once.
-    prepareGradingRunActionMock.mockResolvedValue({ mode: "incremental", plan: { ...twoTicketPlan(), tickets: [] } });
+    prepareGradingRunActionMock.mockResolvedValue(incrementalPrepared({ ...twoTicketPlan(), tickets: [] }));
     const submitWholeRunMock = vi.fn();
     const renderA = useTestRender(submitWholeRunMock);
     // A REAL second instance (not a re-render of the same one): h0.reset()
@@ -331,7 +355,7 @@ describe("useIncrementalGradingRun - cancellation", () => {
       provider: "gemini",
       pointsPossible: null,
     };
-    prepareGradingRunActionMock.mockResolvedValueOnce({ mode: "incremental", plan: fourTicketPlan });
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(fourTicketPlan));
     const blocked = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
     fetchMock.mockReturnValue(blocked.promise);
 
@@ -355,7 +379,7 @@ describe("useIncrementalGradingRun - cancellation", () => {
 
 describe("useIncrementalGradingRun - row 1 renders while row 7 is still running (the wave's own motivation)", () => {
   it("incrementalResults contains an early arrival BEFORE a later ticket has resolved at all - never all-or-nothing", async () => {
-    prepareGradingRunActionMock.mockResolvedValueOnce({ mode: "incremental", plan: twoTicketPlan() });
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(twoTicketPlan()));
     const bobDeferred = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
     fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("Alice") }) })
@@ -378,6 +402,124 @@ describe("useIncrementalGradingRun - row 1 renders while row 7 is still running 
 
     bobDeferred.resolve({ ok: true, json: async () => ({ sourceIndex: 1, result: gradedRow("Bob") }) });
     await p1;
+  });
+});
+
+describe("F4 (docs/a39-fill-waves.md W5): tier 1 completes before any ticket is dispatched - ORDER at the consumer", () => {
+  it("the prepare call-log entry precedes every fetch entry, and every fetch body's rubric equals the resolved header's effectiveRubric", async () => {
+    const log: string[] = [];
+    const effectiveRubric = "1. Correctness (resolved by tier 1)";
+    prepareGradingRunActionMock.mockImplementationOnce(async () => {
+      log.push("prepare");
+      return {
+        mode: "incremental" as const,
+        plan: { ...twoTicketPlan(), rubric: effectiveRubric },
+        header: resolvedHeader({ effectiveRubric }),
+        speedGraderUrl: null,
+      };
+    });
+    fetchMock.mockImplementation(async (_url: string, init: { body: string }) => {
+      log.push("fetch");
+      const body = JSON.parse(init.body) as { rubric: string; sourceIndex: number };
+      return { ok: true, json: async () => ({ sourceIndex: body.sourceIndex, result: gradedRow(`S${body.sourceIndex}`) }) };
+    });
+
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    await render1.startReview(fdWithCanvasUrl());
+
+    // DIRECTION OF FAILURE: dispatching the pool before awaiting
+    // prepareGradingRunAction (useIncrementalGradingRun.ts's own
+    // `await prepareGradingRunAction(fd)` ahead of `buildRunItemRequests`/
+    // `runPool`) would invert this order - the log would open with a "fetch".
+    expect(log[0]).toBe("prepare");
+    expect(log.slice(1)).toEqual(["fetch", "fetch"]);
+
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse((call[1] as { body: string }).body) as { rubric: string };
+      expect(body.rubric).toBe(effectiveRubric);
+      expect(body.rubric.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("the phase machine (docs/a39-fill-waves.md W5, architecture 5.3)", () => {
+  it("idle -> running the instant the route is decided incremental, before prepareGradingRunAction resolves", async () => {
+    const prepareDeferred = deferred<unknown>();
+    prepareGradingRunActionMock.mockReturnValueOnce(prepareDeferred.promise);
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    expect(render1.phase).toBe("idle");
+
+    const p1 = render1.startReview(fdWithCanvasUrl());
+    const render1b = useTestRender(submitWholeRunMock);
+    expect(render1b.phase).toBe("running");
+
+    prepareDeferred.resolve(incrementalPrepared(twoTicketPlan()));
+    await p1;
+  });
+
+  it("running -> complete once every ticket has arrived", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(twoTicketPlan()));
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("Alice") }) });
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    await render1.startReview(fdWithCanvasUrl());
+
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.phase).toBe("complete");
+  });
+
+  it("running -> stopping -> stopped when cancelled with tickets still outstanding", async () => {
+    const fourTicketPlan: IncrementalRunPlan = {
+      tickets: [0, 1, 2, 3].map((i) => ({
+        sourceIndex: i,
+        entry: { student: `S${i}`, content: "x", mergedFileCount: 1, submittedFiles: [] },
+      })),
+      assignmentInstructions: "Grade it.",
+      rubric: "1. Correctness",
+      provider: "gemini",
+      pointsPossible: null,
+    };
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(fourTicketPlan));
+    const blocked = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    fetchMock.mockReturnValue(blocked.promise);
+
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    const p1 = render1.startReview(fdWithCanvasUrl());
+    await flushMicrotasks();
+
+    render1.cancel();
+    const afterCancel = useTestRender(submitWholeRunMock);
+    expect(afterCancel.phase).toBe("stopping");
+
+    blocked.resolve({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("S0") }) });
+    await p1;
+
+    const afterStop = useTestRender(submitWholeRunMock);
+    expect(afterStop.phase).toBe("stopped");
+  });
+
+  it("running -> refused surfaces via mode:'refused', never reaching complete", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce({ mode: "refused", reason: "Refused: test" });
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    await render1.startReview(fdWithCanvasUrl());
+
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.phase).toBe("refused");
+  });
+
+  it("beginWholeRun (the ONE door) resets the phase to idle - architecture 5.4/5.7 obligation 1", async () => {
+    routeGradingRunMock.mockReturnValueOnce("whole-run");
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    await render1.startReview(fdWithCanvasUrl());
+
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.phase).toBe("idle");
+    expect(submitWholeRunMock).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -18,17 +18,24 @@
 // onSubmit, so eslint's react-hooks/set-state-in-effect rule never applies.
 import { useRef, useState } from "react";
 import { prepareGradingRunAction } from "@/app/actions/grading-incremental";
-import type { GradeResult } from "@/lib/grade/types";
+import type { GradeResult, GradingRun, GradingRunHeader } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import {
   routeGradingRun,
   buildRunItemRequests,
+  buildIncrementalRun,
   mergeArrivedResults,
   classifyItemFailure,
   INCREMENTAL_CONCURRENCY,
   type ArrivedItemResult,
   type GradeRunItemRequestBody,
+  type IncrementalPhase,
 } from "./incrementalRunPlan";
+
+// A39 incremental-fill W5 (docs/a39-fill-waves.md, S1): the header shape
+// prepareGradingRunAction's `mode: "incremental"` branch carries and
+// buildIncrementalRun consumes - only the "ok" branch ever reaches here.
+type ResolvedRunHeader = Extract<GradingRunHeader, { kind: "ok" }>;
 
 export interface UseIncrementalGradingRunParams {
   provider: LlmProvider;
@@ -44,7 +51,16 @@ export interface UseIncrementalGradingRunParams {
 export interface UseIncrementalGradingRunResult {
   startReview: (fd: FormData) => Promise<void>;
   cancel: () => void;
+  // A39 incremental-fill W5 (architecture 5.4): the ONE door for every
+  // whole-run dispatch, injected callers included (GradingTab.tsx's
+  // handleAutoGrade) - resets the phase to `idle` BEFORE calling the
+  // injected submitWholeRun, which is what hands the whole-run path back its
+  // reference-comparison identity (5.7 obligation 1).
+  beginWholeRun: (fd: FormData) => void;
+  phase: IncrementalPhase;
   incrementalRunning: boolean;
+  incrementalRun: GradingRun | null;
+  runId: number;
   incrementalResults: readonly GradeResult[];
   incrementalDone: number;
   incrementalTotal: number;
@@ -78,21 +94,68 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
   // render a real refusal rather than a race.
   const startLockRef = useRef(false);
   const cancelledRef = useRef(false);
+  // A39 incremental-fill W5 (architecture 6.3): RAW arrived rows for the life
+  // of the run. Only ever APPENDED to; buildIncrementalRun reads it and
+  // returns a new object - nothing writes a projected result back into it
+  // (F21). A ref, not state: runIdRef below needs the same "read the live
+  // value inside an already-running closure" property this already has.
+  const arrivedRef = useRef<ArrivedItemResult[]>([]);
+  // Increments once per run that actually reaches `running` (never on a
+  // whole-run dispatch) - selectRunKey's `runId`, so two different
+  // GradingRun objects belonging to the SAME run share one identity
+  // (RULING 131, architecture 5.7).
+  const runIdRef = useRef(0);
 
-  const [incrementalRunning, setIncrementalRunning] = useState(false);
+  const [phase, setPhase] = useState<IncrementalPhase>("idle");
+  const [incrementalRun, setIncrementalRun] = useState<GradingRun | null>(null);
   const [incrementalResults, setIncrementalResults] = useState<readonly GradeResult[]>([]);
   const [incrementalDone, setIncrementalDone] = useState(0);
   const [incrementalTotal, setIncrementalTotal] = useState(0);
   const [incrementalError, setIncrementalError] = useState<string | null>(null);
+  const incrementalRunning = phase === "running" || phase === "stopping";
 
-  const cancel = () => {
-    cancelledRef.current = true;
+  // A39 incremental-fill W5 (architecture 5.4, 5.5): the ONE door. Every
+  // whole-run dispatch - both of startReview's own branches below, AND
+  // GradingTab.tsx's handleAutoGrade - now calls this instead of the
+  // injected submitWholeRun directly, so a whole-run object can never travel
+  // with a stale incremental runKey (selectRunKey("idle", n) === undefined
+  // is what hands the whole-run path back its reference comparison).
+  const beginWholeRun = (fd: FormData) => {
+    setPhase("idle");
+    setIncrementalRun(null);
+    submitWholeRun(fd);
   };
 
-  const runPool = async (requests: readonly GradeRunItemRequestBody[]) => {
-    const arrived: ArrivedItemResult[] = [];
+  const cancel = () => {
+    // 7.3: a state transition, not an AbortController - the in-flight
+    // handler calls cannot be stopped and have already been paid for. Not
+    // gated on the currently-rendered `phase` value: GradingTab.tsx only
+    // renders the Stop control while `incrementalRunning` is true, so this
+    // is only ever reachable during a real run.
+    cancelledRef.current = true;
+    setPhase("stopping");
+  };
+
+  const runPool = async (
+    requests: readonly GradeRunItemRequestBody[],
+    header: ResolvedRunHeader,
+    speedGraderUrl: string | null
+  ) => {
     let cursor = 0;
     let doneCount = 0;
+
+    const rebuild = (forPhase: IncrementalPhase) => {
+      setIncrementalRun(
+        buildIncrementalRun({
+          header,
+          speedGraderUrl,
+          totalTicketCount: requests.length,
+          arrived: arrivedRef.current,
+          phase: forPhase,
+          tier2: null, // W6 wires completeGradingRunHeaderAction's result here.
+        })
+      );
+    };
 
     const runWorker = async (): Promise<void> => {
       for (;;) {
@@ -103,21 +166,29 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
         const request = requests[index];
         try {
           const response = await postGradeRunItem(request);
-          arrived.push({ sourceIndex: response.sourceIndex, result: response.result });
+          arrivedRef.current.push({ sourceIndex: response.sourceIndex, result: response.result });
         } catch (err) {
-          arrived.push({
+          arrivedRef.current.push({
             sourceIndex: request.sourceIndex,
-            result: classifyItemFailure(request.sourceIndex, request.entry.student, err),
+            result: classifyItemFailure(request.sourceIndex, request.entry, err),
           });
         }
         doneCount += 1;
         setIncrementalDone(doneCount);
-        setIncrementalResults(mergeArrivedResults(requests.length, arrived));
+        setIncrementalResults(mergeArrivedResults(requests.length, arrivedRef.current));
+        rebuild(cancelledRef.current ? "stopping" : "running");
       }
     };
 
     const workerCount = Math.min(INCREMENTAL_CONCURRENCY, requests.length);
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+    // 5.3: `running`/`stopping` both end at `complete` when every ticket
+    // arrived, `stopped` otherwise - the terminal normalisation (RULING 132)
+    // happens on THIS rebuild, via canonicalColumns' isTerminal(phase).
+    const finalPhase: IncrementalPhase = arrivedRef.current.length === requests.length ? "complete" : "stopped";
+    setPhase(finalPhase);
+    rebuild(finalPhase);
   };
 
   const startReview = async (fd: FormData): Promise<void> => {
@@ -131,11 +202,16 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
     try {
       const route = routeGradingRun(fd, provider);
       if (route === "whole-run") {
-        submitWholeRun(fd);
+        beginWholeRun(fd);
         return;
       }
 
-      setIncrementalRunning(true);
+      // 5.3: idle -> running. A NEW run identity, and the raw arrived set
+      // starts empty for it.
+      runIdRef.current += 1;
+      arrivedRef.current = [];
+      setPhase("running");
+      setIncrementalRun(null);
       setIncrementalResults([]);
       setIncrementalDone(0);
       setIncrementalTotal(0);
@@ -146,8 +222,7 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
       // synchronous route already calls - two routes, one call site, A5
       // stays at exactly two `formAction(` occurrences.
       if (prepared.mode === "whole-run") {
-        setIncrementalRunning(false);
-        submitWholeRun(fd);
+        beginWholeRun(fd);
         return;
       }
       // RULING 118: a refusal is a decision, not an ordinary fallback reason -
@@ -159,31 +234,37 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
       // surfaces the reason via the same incrementalError banner
       // GradingTab.tsx already renders, and starts nothing else.
       if (prepared.mode === "refused") {
-        setIncrementalRunning(false);
+        setPhase("refused");
         setIncrementalError(prepared.reason);
         return;
       }
 
-      const { plan } = prepared;
+      const { plan, header, speedGraderUrl } = prepared;
       setIncrementalTotal(plan.tickets.length);
       const requests = buildRunItemRequests(plan);
-      await runPool(requests);
+      await runPool(requests, header, speedGraderUrl);
     } catch (err) {
       setIncrementalError(err instanceof Error ? err.message : "Could not start this run.");
+      // No tickets were ever dispatched down this path (the throw happens at
+      // or before prepareGradingRunAction) - back to idle rather than
+      // fabricating a "stopped" run with a terminal sentence nothing earned.
+      setPhase("idle");
     } finally {
       // Released on EVERY exit, same discipline as
       // useRepoGradesBulkGrade.ts's own finally - a rejecting prepare call
-      // or a rejecting pool must never leave the lock, or `incrementalRunning`,
-      // stuck.
+      // or a rejecting pool must never leave the lock stuck.
       startLockRef.current = false;
-      setIncrementalRunning(false);
     }
   };
 
   return {
     startReview,
     cancel,
+    beginWholeRun,
+    phase,
     incrementalRunning,
+    incrementalRun,
+    runId: runIdRef.current,
     incrementalResults,
     incrementalDone,
     incrementalTotal,

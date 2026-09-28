@@ -9,7 +9,7 @@ import {
 } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CanvasQueueItem } from "@/lib/canvas";
-import { parseGeneratedRubric } from "../utils/rubric";
+import GeneratedRubricCard from "./grading-results/GeneratedRubricCard";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -24,6 +24,12 @@ import { isCanvasCredentialRequiredError, CANVAS_CREDENTIAL_CTA_HREF, CANVAS_CRE
 // A39 wave 4c (docs/a39-waves.md 8.4.3): every DECISION lives in this .ts
 // hook; this file only wires startReview/submitWholeRun (step S5).
 import { useIncrementalGradingRun } from "./grading/useIncrementalGradingRun";
+// A39 incremental-fill W5 (docs/a39-fill-waves.md): the pure precedence,
+// identity and copy leaf behind "one machine, one mount, one door" -
+// GradingTab only wires these, every DECISION lives in incrementalRunPlan.ts.
+import { selectDisplayRun, selectRunKey, isTerminal } from "./grading/incrementalRunPlan";
+import { describeRunProgress, shouldShowEmptyState } from "./grading/runProgressCopy";
+import { runResetKey } from "./grading-results/gradingResultsHelpers";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -173,8 +179,10 @@ export default function GradingTab({
 
   const run = state.run;
 
-  // A39 wave 4c, step S5: both whole-run routes call this SAME function
-  // (RULING 40), so A5's `formAction(` count stays at exactly two.
+  // A39 wave 4c, step S5 (RULING 40); A39 incremental-fill W5 (architecture
+  // 5.4): every whole-run dispatch now goes through beginWholeRun (the hook's
+  // ONE door) before reaching here, so this is the file's only remaining
+  // direct formAction( call site - A5's count is now exactly one.
   const submitWholeRun = (fd: FormData) => {
     startTransition(() => {
       formAction(fd);
@@ -183,12 +191,23 @@ export default function GradingTab({
   const {
     startReview,
     cancel: cancelIncrementalRun,
+    beginWholeRun,
+    phase,
     incrementalRunning,
-    incrementalResults,
+    incrementalRun,
+    runId,
     incrementalDone,
     incrementalTotal,
     incrementalError,
   } = useIncrementalGradingRun({ provider: selectedProvider, submitWholeRun });
+
+  // A39 incremental-fill W5 (architecture 5.3): the ONE object the merged
+  // mount renders, and the identity that distinguishes "a new run" from "the
+  // same run, one row longer" (RULING 131).
+  const displayRun = selectDisplayRun(phase, incrementalRun, run);
+  const runKey = selectRunKey(phase, runId);
+  const progressLine = describeRunProgress(phase, incrementalDone, incrementalTotal);
+  const terminalLine = isTerminal(phase) ? describeRunProgress(phase, incrementalDone, incrementalTotal) : null;
 
   // Live Feed "Auto Grade": grade a queue row through the very same pipeline as
   // the Single Assignment form. Set canvasUrl so a later "Post grades" targets
@@ -203,17 +222,27 @@ export default function GradingTab({
     fd.set("institution", row.institution);
     startTransition(() => {
       setGradingTarget({ title: row.title, courseName: row.courseName, key: `${row.kind}-${row.id}` });
-      formAction(fd);
+      // A39 incremental-fill W5 (architecture 5.4): the ONE door - every
+      // whole-run dispatch goes through it, so a whole-run object can never
+      // travel with a stale incremental runKey.
+      beginWholeRun(fd);
     });
   };
 
   // Scroll the results into view when a new grading run arrives (so Auto Grade
   // from the tall queue lands you on the results instead of leaving you scrolled up).
+  // A39 incremental-fill W5 (architecture 10, M6): the dependency is the run
+  // IDENTITY, not the run reference - reusing RULING 131's own construction -
+  // so this fires at most once per run rather than once per arrival.
   useEffect(() => {
-    if (run && resultsRef.current) {
+    if (displayRun && resultsRef.current) {
       resultsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [run]);
+    // The dependency is the run IDENTITY (F25), deliberately not `displayRun`
+    // itself: that object changes on every arrival, and firing on each one
+    // would scroll-jack the reader (architecture 10, M6).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runResetKey(runKey, displayRun)]);
 
   const handleAssignmentInstructionsChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -472,9 +501,17 @@ export default function GradingTab({
       {source !== "livefeed" && incrementalRunning && (
         <div className={styles.loadingState} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
-          <p className={styles.loadingTitle}>{incrementalDone} of {incrementalTotal} submissions graded.</p>
-          <Button variant="outlined" size="small" onClick={cancelIncrementalRun}>Stop grading</Button>
+          <p className={styles.loadingTitle}>{progressLine}</p>
+          <Button variant="outlined" size="small" onClick={cancelIncrementalRun} disabled={phase === "stopping"}>Stop grading</Button>
         </div>
+      )}
+
+      {/* A39 incremental-fill W5 (architecture 7.2, F13): the terminal
+          "stopped" sentence's OWN region, a sibling of the region above -
+          gated on the SENTENCE EXISTING, never on a row existing, so it
+          survives after the pool ends even when zero rows ever arrived. */}
+      {source !== "livefeed" && terminalLine && (
+        <p className={styles.emptyState} role="status" aria-live="polite">{terminalLine}</p>
       )}
 
       {testState.result && (
@@ -484,7 +521,11 @@ export default function GradingTab({
         <p style={{ marginTop: "var(--space-2)", color: "var(--danger)" }}>Gemini error: {testState.error}</p>
       )}
 
-      {source !== "livefeed" && run && run.results.length === 0 && (
+      {/* F12 (docs/a39-fill-waves.md W5): total over all six phases - false
+          while a run is in progress or just stopped (that state has its own
+          sentence above), true only for idle/complete with a zero-result
+          non-null run. */}
+      {source !== "livefeed" && shouldShowEmptyState(phase, displayRun) && (
         <p className={styles.emptyState}>
           {source === "zip"
             ? "No supported submission files were found in the zip archive."
@@ -492,44 +533,9 @@ export default function GradingTab({
         </p>
       )}
 
-      {state.generatedRubric && (() => {
-        const rows = parseGeneratedRubric(state.generatedRubric);
-        return (
-          <details className={styles.generatedRubricCard}>
-            <summary>Rubric was auto-generated from assignment instructions</summary>
-            {rows ? (
-              <table className={styles.generatedRubricTable}>
-                <thead>
-                  <tr>
-                    <th>Criterion</th>
-                    <th>Weight</th>
-                    <th>Performance Levels</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.area}>
-                      <td>{row.area}</td>
-                      <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
-                      <td>
-                        {row.subcategories.length > 0 ? (
-                          <ul className={styles.rubricSubcategoryList}>
-                            {row.subcategories.map((sub) => (
-                              <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
-                            ))}
-                          </ul>
-                        ) : row.description}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <pre className={styles.generatedRubricBody}>{state.generatedRubric}</pre>
-            )}
-          </details>
-        );
-      })()}
+      {/* A39 incremental-fill W5 (architecture 10): extracted to
+          GeneratedRubricCard.tsx - see that file's own header for why. */}
+      {state.generatedRubric && <GeneratedRubricCard generatedRubric={state.generatedRubric} />}
 
       {state.warnings && state.warnings.length > 0 && (
         <section className={styles.checklistCard}>
@@ -542,11 +548,25 @@ export default function GradingTab({
         </section>
       )}
 
-      {source !== "livefeed" && run && run.results.length > 0 && (
-        <>
+      {/* A39 incremental-fill W5 (owner-walk item 6): RubricProvenance is NOT
+          wired to the incremental route by this fill - that remains an
+          owner-walk claim (docs/a39-incremental-fill-architecture.md section
+          12, item 6). Gated on `phase === "idle"` so its behaviour for the
+          whole-run path is unchanged. */}
+      {source !== "livefeed" && phase === "idle" && run && run.results.length > 0 && (
         <RubricProvenance run={run} />
+      )}
+
+      {/* A39 incremental-fill W5 (architecture 2, 5.2, 5.5): ONE mount for
+          BOTH routes - the merged run and its identity key (RULING 131),
+          selected by selectDisplayRun/selectRunKey. Two tables inside one
+          GradingTab are unrepresentable by construction; F6b's guard text
+          below must stay conjunctive with `source !== "livefeed"` and carry
+          no `||` and no `<` comparison. */}
+      {source !== "livefeed" && displayRun && displayRun.results.length > 0 && (
         <GradingResults
-          run={run}
+          run={displayRun}
+          runKey={runKey}
           canvasUrl={canvasUrl}
           // A36: this mount and LiveFeedPanel.tsx's own GradingResults mount
           // intentionally share GradingTab's `canvasUrl` state and are
@@ -588,29 +608,6 @@ export default function GradingTab({
               </div>
             ) : undefined
           }
-        />
-        </>
-      )}
-
-      {/* A39 wave 4c: each row renders as its own call returns (RES-W4C-1:
-          rubricAreaNames here is a union, not reconcileRun's full merge). */}
-      {source !== "livefeed" && incrementalResults.length > 0 && (
-        <GradingResults
-          run={{
-            results: [...incrementalResults],
-            rubricAreaNames: incrementalResults[0]?.rubricAreas.map((a) => a.area) ?? [],
-            fullCreditChecklist: [],
-          }}
-          canvasUrl={canvasUrl}
-          editsSurface="canvas"
-          assignmentName=""
-          copiedKey={copiedKey}
-          onCopy={onCopy}
-          onOpenPreview={onOpenPreview}
-          onPosted={() => {
-            refreshCounts();
-            setQueueRefreshSignal((n) => n + 1);
-          }}
         />
       )}
 

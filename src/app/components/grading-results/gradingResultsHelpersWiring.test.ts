@@ -114,6 +114,7 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./ResultsTableHeaderRow.tsx",
     "./FeedbackExpandModal.tsx",
     "./FilesCell.tsx", // A16-1: the Files-column cell moved out to its own file.
+    "./GeneratedRubricCard.tsx", // A39 incremental-fill W5 (RES-P-4-adjacent): GradingTab.tsx's own line-budget extraction, landing here per the design's named target path.
     "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
     "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
     "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.

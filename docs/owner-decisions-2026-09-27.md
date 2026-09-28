@@ -102,3 +102,41 @@ fallback to an owner-owned residual with the caption as its instrument. Under (b
 the origin field IS that instrument, and it is in the product rather than in a
 row. The separate B4 question - whether the fallback should exist at all - is
 unchanged by this decision and stays open.
+
+## DECISION 17 - the incremental grading run is a FILL of the existing surface.
+
+Asked repeatedly from 2026-09-27; answered 2026-09-28 with one word, "fill".
+
+So the incremental route produces the SAME `GradingRun` the whole-run path does -
+same rubric provenance, same rubric auto-generation, same blank-instructions
+refusal, same checklist and sample answer - arriving progressively. One table, one
+state machine. Not a second, narrower live view that hands off at the end.
+
+**What this settles, and it is four of the five blockers in the wave-4 build
+check.** Two of them exist only because two state machines share one surface today:
+both tables can render stacked, each claiming to be the editable one. A second
+surface would have made that duality permanent. The fill also structurally prevents
+the worst defect the check found - that on the incremental route a blank rubric
+graded against NO rubric, because rubric auto-generation lives in the whole-run
+action the incremental path bypasses.
+
+**What it costs, stated because the owner should not have to discover it:** the
+fill is the bigger build, and the per-item path needs the cross-item column merge
+it currently skips - today the incremental table's rubric columns come from
+whichever row arrived first rather than a union. Rubric generation also happens
+once per RUN, so it must complete before the first item dispatches, which adds
+latency before the first result appears. That tradeoff is inherent to the fill and
+is not a defect in it.
+
+**The flag stays off until the fill lands.** `INCREMENTAL_ROUTE_ENABLED = false`
+gates the route (RULING 116); it flips when the fill's stated conditions are met,
+not on a schedule.
+
+**A process note that belongs with this decision.** Twenty-five commits passed
+between this fork appearing and the owner answering it, while I restated the
+question every turn instead of starting my own recommended reading. The owner
+identified the cause: AGENTS.md's fork clause forbids GATING but not DEFERRING, and
+"while other work continues" was satisfied every turn by an unrelated queue. That
+is recorded as SHAPE 5 in AGENTS.md with a control that reuses the existing backlog
+machinery, and the design pass was started before the answer arrived rather than
+after.

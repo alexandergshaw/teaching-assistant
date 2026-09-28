@@ -230,6 +230,70 @@ during the turn that is ending, and its block message names the escape for the
 one legitimate stop (every remaining item owner-blocked). The prose below
 stays because it explains WHY; the detector is what enforces it.
 
+**SHAPE 5 - DISPLACEMENT, measured 2026-09-28. The one that defeats the stall
+detector completely, because every turn passes it.**
+
+A product fork appeared: whether a new grading surface should be a FILL of the
+existing one or a SECOND surface. I stated a recommendation, asked the owner, and
+then restated the same question at the end of turn after turn. **TWENTY-FIVE
+COMMITS passed before the owner answered it.** Work was running every single one
+of those turns, so the Stop hook never fired, and no rule above was violated as
+written.
+
+**The rule as written forbids GATING, not DEFERRING.** "Ask it as ONE batched
+question while other work continues" is satisfied by ANY other work continuing. I
+had ten well-specified sub-waves queued, each low-risk and independently
+dispatchable, so "other work continues" was cheaply true every turn while the
+recommended reading was never begun. The hard item was never blocked - it was
+DISPLACED, over and over, by work that was easier to start.
+
+**Why it felt like compliance rather than avoidance, which is the dangerous part:**
+
+- The question WAS riding alongside. I restated it every turn, and restating a
+  question feels like carrying it. **REPETITION SIMULATES PROGRESS.** Six
+  restatements moved the item exactly as far as zero would have.
+- The stall detector asks "was a subagent dispatched". It cannot distinguish
+  working the queue from avoiding the item, and it never will, because both look
+  identical to it.
+- My MEMORY carried a stronger paraphrase - "even a product fork gets a
+  recommended choice acted on NOW" - than AGENTS.md actually said. So I could
+  recite the strong version in prose while complying with the weak version in
+  practice, and feel consistent doing it. **When a memory is stronger than the
+  rule it summarises, the rule is what gets followed.**
+- Deferring a fork that is genuinely expensive to get wrong feels like prudence.
+  It is only prudence if the deferral is BOUNDED.
+
+**THE CONTROL, and it deliberately reuses machinery that already exists rather
+than adding prose that can be recited and not followed:**
+
+> **A RECOMMENDATION ON AN OPEN FORK IS A BACKLOG ITEM. File it as a row, in the
+> same turn you state it, with yourself as owner and the recommended reading as
+> its `owns`. Then every existing mechanism applies to it - the row count, the
+> shipped-but-uncited guard, and the stall detector - and "is work running" stops
+> being answerable with something else.**
+
+An unfiled recommendation is a queue that has quietly stopped while looking full,
+which is exactly what this file already says about owner-only entries. The row is
+what makes the displacement countable.
+
+**Plus a hard cap on restatement, because the row does not stop me talking:**
+
+> **A recommendation may be restated ONCE without work started on it. The SECOND
+> time you are about to restate the same recommendation, start it instead.**
+
+That is mechanically checkable against the transcript, and it triggers long before
+twenty-five commits. If starting the recommended reading would waste real work
+should the owner disagree, say THAT in the question - "I am starting X; answering
+Y costs me this much rework" - which gives the owner a reason to answer promptly
+instead of a question they can leave open at no visible cost.
+
+**What this does NOT license:** starting the recommended reading is not the same
+as deciding the fork. Record it as YOUR reading acted on, not as an owner ruling,
+and say so in the artifact - so that when the owner answers, the record shows
+which parts were theirs. When the owner does answer, that is a DECISION and it
+ends the activity; the work already started either continues or is discarded, and
+neither outcome is a reason to have waited.
+
 **THE CONTROL, tightened to close both.** The test above asks whether work is
 running. Both failures answered "no" honestly and ended the turn anyway,
 because the turn had an obvious non-backlog purpose. So the test now has a
@@ -280,7 +344,10 @@ Two corollaries, both learned the same day:
 - Keep working while background agents run; their results arrive on their own.
 - Reserve a blocking question for a genuine fork where proceeding under any
   assumption would be unsafe or would waste the work if wrong. Ask it as ONE
-  batched question while other work continues — never as a gate.
+  batched question while other work continues - never as a gate. **AND START THE
+  WORK ON YOUR OWN RECOMMENDED READING IN THE SAME TURN.** See SHAPE 5: "while
+  other work continues" is satisfied by ANY work, so on its own this clause
+  forbids gating without requiring progress on the thing you recommended.
 
 The user redirects if they disagree. That costs one message. Stalling costs a
 whole round trip and stops everything.

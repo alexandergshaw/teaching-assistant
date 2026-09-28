@@ -294,6 +294,54 @@ which parts were theirs. When the owner does answer, that is a DECISION and it
 ends the activity; the work already started either continues or is discarded, and
 neither outcome is a reason to have waited.
 
+**SHAPE 5's CONTROL WAS NOT ENOUGH EITHER. Tightened 2026-09-28 on the owner's
+instruction, the same day it was written.**
+
+Both halves of it were SELF-REPORTED, and one of them was stored in the one place
+that gets erased. Nothing checks that the row was filed. And the restatement cap -
+"once, then start it" - counts across turns using a tally held in CONTEXT, which is
+COMPACTED. After a summary the count silently resets to zero, so six restatements
+present themselves as the first one, every time. **A cap I cannot remember is not a
+cap, it is a suggestion that feels like a cap.** That is not a hypothetical: it is
+the precise mechanism that let twenty-five commits pass.
+
+So the control moves out of my head and into the two artifacts that survive
+compaction - the backlog file and the git log:
+
+> **1. THE TALLY LIVES IN THE ROW.** The fork row's note carries the date it was
+> filed and the number of times the recommendation has been restated. Incrementing
+> that number is PART OF restating it - if you are about to say it again and the
+> row does not get touched, you are not allowed to say it again. A tally in the
+> file reads the same after a compaction as before one.
+>
+> **2. "STARTED" HAS A DEFINITION, and it is a commit.** Work is started on a fork
+> row when a commit's diff touches a path in that row's `owns`. FILING THE ROW IS
+> NOT STARTING IT. Dispatching an agent to think about it is not starting it.
+> Writing a design document about the fork is not starting it, because that is the
+> artifact the deferral was already producing.
+>
+> **3. THE CAP IS IN COMMITS, NOT IN RESTATEMENTS.** A fork row with no commit
+> touching its `owns` within TWO commits of being filed is overdue, and the next
+> commit is that one. Commits are countable by anyone from the log, which is what
+> makes this checkable at all; restatements were only ever countable by me.
+>
+> **4. THE QUESTION SAYS WHAT IS ALREADY RUNNING.** A fork put to the owner names
+> the reading already started and what answering the other way would cost in
+> rework. A fork with nothing started attached to it is a gate wearing a question's
+> clothes, and the owner cannot tell the difference from the outside.
+>
+> **5. IF THE RECOMMENDED READING CANNOT BE STARTED AT ALL, IT IS NOT A FORK ROW.**
+> It is owner-blocked. Say so in those words and list what it needs. What is
+> forbidden is the third thing - a row that looks startable, is never started, and
+> is restated instead.
+
+**Why the tally and not a better rule.** Every version of this failure has been
+defeated by prose, six times now. The difference here is not that the wording is
+firmer; it is that steps 1 and 3 are answerable by READING TWO FILES rather than
+by trusting my account of my own turns. When the enforcement and the thing being
+enforced both live in my context, the context is the single point of failure, and
+this session proved it fails silently.
+
 **THE CONTROL, tightened to close both.** The test above asks whether work is
 running. Both failures answered "no" honestly and ended the turn anyway,
 because the turn had an obvious non-backlog purpose. So the test now has a

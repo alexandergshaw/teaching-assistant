@@ -140,3 +140,38 @@ identified the cause: AGENTS.md's fork clause forbids GATING but not DEFERRING, 
 is recorded as SHAPE 5 in AGENTS.md with a control that reuses the existing backlog
 machinery, and the design pass was started before the answer arrived rather than
 after.
+
+## DECISION 18 - the Tools > Grading sub-tab is a container with INNER NAVIGATION.
+
+Asked 2026-09-28 as the moved-versus-linked fork on the consolidation request;
+answered the same day with "sub-tab with inner navigation".
+
+The owner's request, verbatim, because the scope survey turns on its wording:
+"the new concurrent tool should live under the Tools tab, under a new sub tab
+called 'Grading'. All other grading related tools should also be pulled into this
+new subtab".
+
+So Grading is a sub-tab that owns a second level of navigation across the grading
+surfaces, rather than one long scrolling screen with sections, and rather than a
+landing page of links out to where those tools live today. The surfaces MOVE into
+it; they are not mirrored from it.
+
+**What the decision makes harder rather than easier, and it is the reason the
+scope pass is not a formality.** Inner navigation turns the survey's boundary into
+a product surface: every tool judged grading-related becomes an item in that nav,
+so an over-inclusive reading produces a cluttered second-level nav instead of
+merely a long page. The scope owes an explicit LINE between a grading tool and a
+surface that merely mentions grades, and if the honest reading of "all other
+grading related tools" is wider than one nav should hold, it owes a first landing
+set rather than everything in one commit.
+
+It also owes an inner-selection persistence story. This repo persists UI control
+state under `ta-` keys, and a nav that forgets where the user was on every visit
+is worse than today's arrangement. The first-load-with-nothing-stored case has to
+be named, and so does the fate of the old location's persisted view id - a stored
+pointer at a view that no longer exists is the failure mode that ships silently.
+
+**Sequencing is unchanged by this decision and still binds.** Fill waves 6 and 7
+touch `GradingTab.tsx`, which sits at 617 lines against a recorded bound of 620.
+The navigation work either waits for the fill to land or is cut so it does not
+touch those files. This decision does not license a concurrent write set.

@@ -6,22 +6,54 @@
  * SAME way a whole run does, one item at a time, without duplicating this
  * logic a second time.
  *
- * Imports only ./types and ./rubric (W4-1/W4-2's own constraint, section
- * 3.3 of docs/a39-waves.md): reconcileRun must stay a pure leaf so
- * re-exporting it from src/lib/grade.ts cannot widen that barrel's reach
- * into server-only code (runtime-import-graph.test.ts, W2-5).
+ * Imports only ./types and ./prompts (A39 W1, RULING 134): reconcileRun must
+ * stay a pure leaf so re-exporting it from src/lib/grade.ts cannot widen
+ * that barrel's reach into server-only code (runtime-import-graph.test.ts).
+ * ./prompts, not ./rubric, is deliberate - normalizeAreaName is defined in
+ * ./prompts and only re-exported by ./rubric, and importing the barrel-
+ * adjacent ./rubric would pull this leaf one hop closer to server-only code
+ * for no reason.
  *
  * THE INVARIANT (W4-1): gradeStudentEntries must return results
- * byte-identical to what the old inline block produced, before and after
- * this extraction - reconcile.test.ts's frozen literal is the oracle for
- * that.
+ * byte-identical to what the old inline block produced for the
+ * PARSEABLE-CRITERIA case. For the no-parseable-criteria fallback the
+ * invariant is DELIBERATELY SUPERSEDED by RULING 134 (docs/a39-fill-waves.md
+ * W1): the fallback now unions every result's areas instead of taking the
+ * single richest result's areas, so both the whole-run route and the
+ * incremental route converge on the same column set. See
+ * reconcile.test.ts's frozen literal and its own header comment.
  */
 import type { GradeResult, RubricAreaResult } from "./types";
-import { normalizeAreaName } from "./rubric";
+import { normalizeAreaName } from "./prompts";
 
 export interface ReconcileRunResult {
   readonly results: GradeResult[];
   readonly rubricAreaNames: string[];
+}
+
+/**
+ * First-seen union of real area names over `rows` IN THE ORDER GIVEN, deduped
+ * by normalizeAreaName, keeping the first-seen raw spelling, excluding the
+ * empty area and the "Overall" placeholder - the same two exclusions the old
+ * richest-single-result fallback applied. The CALLER owns the order: the
+ * whole-run path and the incremental route's terminal normalisation pass
+ * dense, ascending-sourceIndex rows; the incremental route passes arrival
+ * order while the run is in progress (RULING 134, RULING 132).
+ */
+export function unionAreaNames(rows: readonly GradeResult[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    for (const area of row.rubricAreas) {
+      if (!area.area || area.area === "Overall") continue;
+      const key = normalizeAreaName(area.area);
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        names.push(area.area);
+      }
+    }
+  }
+  return names;
 }
 
 /**
@@ -31,9 +63,10 @@ export interface ReconcileRunResult {
  *
  * `criteriaNames` is the rubric's own parsed criteria names (extraction
  * happens once, before this is called, by extractRubricCriteria). When the
- * rubric had none to parse, the canonical set falls back to the single
- * richest result's own areas (excluding the "Overall" placeholder) - the
- * same fallback the inline block used.
+ * rubric had none to parse, the canonical set falls back to a first-seen
+ * UNION over every result's own areas (excluding the "Overall" placeholder) -
+ * RULING 134: both the whole-run route and the incremental route use this
+ * same union, so the two routes provably agree on the same column set.
  *
  * PURE and idempotent under a STABLE canonical set: calling this twice with
  * the same `criteriaNames` on its own output is a no-op, because every
@@ -48,14 +81,7 @@ export function reconcileRun(
   criteriaNames: readonly string[]
 ): ReconcileRunResult {
   let canonical: string[] = [...criteriaNames];
-  if (canonical.length === 0) {
-    let richest: RubricAreaResult[] = [];
-    for (const result of results) {
-      const real = result.rubricAreas.filter((a) => a.area && a.area !== "Overall");
-      if (real.length > richest.length) richest = real;
-    }
-    canonical = richest.map((a) => a.area);
-  }
+  if (canonical.length === 0) canonical = unionAreaNames(results);
 
   let reconciledResults: GradeResult[] = results as GradeResult[];
   if (canonical.length > 0) {

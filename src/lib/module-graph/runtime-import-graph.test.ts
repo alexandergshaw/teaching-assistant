@@ -641,10 +641,7 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
   // (a dynamic import, -> the Canvas credential chain, which itself reaches
   // rubric-bank.ts a second way through lib/grade.ts's barrel), and "../canvas"
   // (also a dynamic import, inside gradeCanvasUrl, duplicating the same Canvas
-  // chain one hop shorter) - ten trails in total as of A39 wave 4b, which
-  // added an eleventh direct edge's own independent walk (../reconcile,
-  // itself importing ./rubric - see FROZEN_TRAILS' own comment below).
-  // engine.ts's fourth relevant
+  // chain one hop shorter) - nine trails in total. engine.ts's fourth relevant
   // direct edge today, ../research/rubric-fingerprint, walks to ZERO
   // violations (it depends on nothing but node:crypto and a text helper) -
   // that is the leaf the sabotage below swaps out from under this list. A
@@ -654,6 +651,23 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
   // deep-equal goes red on it because that edge now gets its OWN independent
   // walk instead of being memoized away (confirmed empirically: this exact
   // mutation raised the list from 9 to 10 trails and failed the deep-equal).
+  //
+  // A39 wave 4b added a fifth direct edge, ../reconcile, whose own
+  // independent walk used to add a TENTH trail
+  // ("lib/grade/engine.ts -> lib/grade/reconcile.ts -> lib/grade/rubric.ts ->
+  // lib/research/rubric-bank.ts -> lib/research/db.ts") because reconcile.ts
+  // imported ./rubric for normalizeAreaName. A39 W1 (RULING 134) moved that
+  // import to ./prompts, which reaches nothing under lib/supabase
+  // (`src/lib/grade/prompts.ts` imports only ./types and ./utils) - so
+  // reconcile.ts's own independent walk now finds ZERO violations and
+  // contributes no trail at all, and the list is back to nine, not ten.
+  // Verified by S0's own experiment (this wave's brief): mutating
+  // extraction.ts to import ./rubric ABOVE its ../canvas import at :8 makes
+  // THIS deep-equal go red (a shorter trail through extraction.ts pre-empts
+  // the frozen one below), and moving it BELOW leaves this list untouched -
+  // confirming each direct edge's walk finds the shortest path to a given
+  // violated node in edge-scan order, and a node already visited within that
+  // walk is not re-recorded under a different trail.
   const FROZEN_TRAILS = [
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts",
     "lib/grade/engine.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
@@ -663,15 +677,6 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/discussions.ts -> lib/canvas-core.ts -> lib/canvas-credentials.ts -> lib/lms-credentials.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/inbox.ts",
     "lib/grade/engine.ts -> lib/grade/extraction.ts -> lib/canvas.ts -> lib/canvas/listings.ts -> lib/canvas/auto-zero.ts -> lib/grade-zeros.ts -> lib/grade.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
-    // A39 wave 4b: engine.ts now imports ./reconcile (the pure canonical-
-    // column projection, docs/a39-waves.md 8.4.2), which itself imports
-    // ./rubric for normalizeAreaName - an independent walk from THIS direct
-    // edge, one hop shorter than the pre-existing "lib/grade/engine.ts ->
-    // lib/grade/rubric.ts -> ..." trail below because reconcile.ts sits
-    // between them. reconcile.ts imports nothing else (its own header:
-    // "imports only ./types and ./rubric"), so this is the only new trail
-    // this wave adds - ten in total, not nine.
-    "lib/grade/engine.ts -> lib/grade/reconcile.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
     "lib/grade/engine.ts -> lib/grade/rubric.ts -> lib/research/rubric-bank.ts -> lib/research/db.ts",
   ];
 

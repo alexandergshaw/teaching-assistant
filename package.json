@@ -18,7 +18,8 @@
     "backlog:round-bump": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts round-bump",
     "backlog:round-status": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts round-status",
     "backlog:questions": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts questions",
-    "test:paths": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/vitest-paths/cli.ts"
+    "test:paths": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/vitest-paths/cli.ts",
+    "docs:gate": "npm run test:paths src/lib/no-emojis.test.ts src/source-bytes.structure.test.ts src/tools/vitest-paths/gate-commands.structure.test.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

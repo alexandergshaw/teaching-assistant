@@ -177,6 +177,22 @@ one session, all from the same cause.
 4. An area slug taken from a grep hit that sat inside a comment stating what an area
    must NOT be named - filed as a live row against a name nothing in the code used.
 
+**A constraint stated in a brief is not a gate; if it matters, it needs a
+command.** RULING 139: a brief for `docs/ruling-136.md` said, in words, "no
+vitest arrow glyphs in any doc." The doc was written with two pasted arrow
+glyphs anyway, the orchestrator committed it, and a sibling agent working on
+an unrelated file found the break - `src/lib/no-emojis.test.ts` flagged it,
+and it cascaded into `src/tools/backlog/closure-runner.test.ts`, which spawns
+`no-emojis.test.ts` as a real subprocess and expects exit 0. One pasted glyph
+failed two test files. The gate existed and worked; nobody ran it before the
+commit. `npm run docs:gate` now packages the checks a docs-only or
+docs-touching commit needs (`no-emojis.test.ts`,
+`source-bytes.structure.test.ts`, `gate-commands.structure.test.ts`, via the
+`test:paths` wrapper) into one command with no judgement in it - see
+`docs/ruling-139.md` for the membership reasoning and the documented gap (it
+does not run `closure-runner.test.ts`, so it surfaces the direct emoji
+failure but not that cascade).
+
 **The reliable instrument in every case turned out to be a SECOND, INDEPENDENT
 ONE, not a better regex.** A comment-stripping regex only encodes half the lesson
 (instance 3's defect is an arithmetic mistake across two clean greps, not a comment

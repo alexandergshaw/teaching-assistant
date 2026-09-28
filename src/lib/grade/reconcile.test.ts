@@ -4,9 +4,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // TODAY's gradeStudentEntries (via the exported gradeEntries), over a
 // fixture whose rubric parses to NO criteria and whose two students
 // disagree on rubric area names/casing - engine.ts's own canonical-column
-// fallback branch. This is the oracle wave 4b's extraction (reconcile.ts)
-// must not move: gradeStudentEntries must return results byte-identical to
-// what the old inline reconciliation block produced (W4-1).
+// fallback branch. This was originally the oracle wave 4b's extraction
+// (reconcile.ts) must not move: gradeStudentEntries must return results
+// byte-identical to what the old inline reconciliation block produced
+// (W4-1).
+//
+// A39 W1 / RULING 134 DELIBERATELY SUPERSEDES that invariant for exactly
+// this fallback case: the empty-canonical fallback now unions every
+// result's areas (unionAreaNames) instead of taking the single richest
+// result's own areas, so the whole-run route and the incremental route
+// converge on the same column set. The literal below was RE-CAPTURED by
+// running this fixture against the union implementation
+// (`npx vitest run src/lib/grade/reconcile.test.ts`, reading the RECEIVED
+// value out of the failed run) rather than hand-predicted.
 //
 // Same mocking shape as engine.test.ts (not imported from it -
 // no-cross-test-file-imports: importing a helper from another *.test.ts
@@ -28,7 +38,7 @@ vi.mock("../code-runner", () => ({
 
 import { callLlm } from "../llm";
 import { gradeEntries } from "./engine";
-import { reconcileRun } from "./reconcile";
+import { reconcileRun, unionAreaNames } from "./reconcile";
 import type { GradeResult, StudentSubmissionEntry } from "./types";
 
 const mockCallLlm = vi.mocked(callLlm);
@@ -84,29 +94,27 @@ describe("gradeStudentEntries canonical-column reconciliation (frozen literal, W
       [entry({ student: "Alice" }), entry({ student: "Bob" })],
       "Grade the assignment.",
       // Blank rubric: extractRubricCriteria("") parses to zero criteria, so
-      // the canonical set falls back to the richest single result's own
-      // areas (Alice's two: "Clarity" and "Grammar" - richer than Bob's own
-      // two only by insertion order, both are length 2, and richest keeps
-      // the FIRST result seen with the max length, i.e. Alice's).
+      // the canonical set falls back to unionAreaNames (RULING 134): a
+      // first-seen union of every result's areas, in results order - Alice's
+      // "Clarity"/"Grammar" first, then Bob's "Structure".
       "",
       "gemini"
     );
 
-    // FROZEN LITERAL - captured by actually running this exact fixture
-    // (`npx vitest run src/lib/grade/reconcile.test.ts`) against the
-    // implementation on today's tree, immediately after wave 4b's
-    // extraction landed (reconcile.ts's reconcileRun is now the call site;
-    // its logic is a verbatim port of the block that used to be inline in
-    // engine.ts, so this is the same oracle W4-1 requires - see this file's
-    // own header). Two corrections from a first hand-guess, both confirmed
-    // by the real run rather than assumed: (1) parseRubricResponse's
+    // FROZEN LITERAL - RE-CAPTURED for A39 W1 / RULING 134 by running this
+    // exact fixture (`npx vitest run src/lib/grade/reconcile.test.ts`)
+    // against the union-fallback implementation, seeing it go RED first
+    // against the OLD (richest-single-result) literal below, and then
+    // reading the RECEIVED value out of that failure output - never
+    // hand-written. Under the union fallback, the canonical set is the
+    // first-seen union of every result's areas in the order given
+    // (Alice's "Clarity"/"Grammar" first, then Bob's "Structure"), so both
+    // students now carry a "Structure" column: Bob's own "Structure"
+    // ("6/10") is no longer un-mapped, and Alice's is filled blank because
+    // her response never mentioned it. As before, parseRubricResponse's
     // toRubricAreaResult (parsing.ts:42-46) ALWAYS sets `comment: ""` on a
-    // parsed area, discarding whatever comment text the model returned, so
-    // no stray ever carries a comment and the "fold a stray into
-    // overallComment" branch (reconcile.ts) never fires for a
-    // model-produced result - Bob's un-mapped "Structure" area is simply
-    // dropped, not folded; (2) both students lost points here (17/20,
-    // 11/20), so composeOverallComment appends RESUBMIT_NOTICE to every row.
+    // parsed area, and both students lost points here (17/20, 11/20), so
+    // composeOverallComment appends RESUBMIT_NOTICE to every row.
     const FROZEN_RESULTS: Array<Pick<GradeResult, "student" | "overallComment" | "rubricAreas" | "totalScore">> = [
       {
         student: "Alice",
@@ -114,26 +122,27 @@ describe("gradeStudentEntries canonical-column reconciliation (frozen literal, W
         rubricAreas: [
           { area: "Clarity", score: "8/10", comment: "" },
           { area: "Grammar", score: "9/10", comment: "" },
+          { area: "Structure", score: "", comment: "" },
         ],
         totalScore: "17/20",
       },
       {
         student: "Bob",
-        // Bob's "clarity" normalizes onto the canonical "Clarity" column;
-        // "Structure" has no canonical column ("Clarity"/"Grammar" only,
-        // from Alice's richer response) and carries no comment to fold
-        // (see the note above), so it is simply absent from this row's
-        // rubricAreas; the canonical "Grammar" column Bob never mentioned
+        // Bob's "clarity" normalizes onto the union's "Clarity" column;
+        // his own "Structure" area is now ALSO part of the union (it is no
+        // longer un-mapped, so it is not folded into overallComment as a
+        // stray); the union's "Grammar" column, which Bob never mentioned,
         // is filled blank.
         overallComment: "Bob needs improvement. You are welcome to resubmit this assignment, and I will regrade it with no late penalty.",
         rubricAreas: [
           { area: "Clarity", score: "5/10", comment: "" },
           { area: "Grammar", score: "", comment: "" },
+          { area: "Structure", score: "6/10", comment: "" },
         ],
         totalScore: "11/20",
       },
     ];
-    const FROZEN_AREA_NAMES = ["Clarity", "Grammar"];
+    const FROZEN_AREA_NAMES = ["Clarity", "Grammar", "Structure"];
 
     expect(
       run.results.map((r) => ({
@@ -144,6 +153,76 @@ describe("gradeStudentEntries canonical-column reconciliation (frozen literal, W
       }))
     ).toEqual(FROZEN_RESULTS);
     expect(run.rubricAreaNames).toEqual(FROZEN_AREA_NAMES);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A39 W1 / RULING 134 - unionAreaNames itself, direct and pure (no mocks,
+// no gradeEntries round-trip). This is the function both routes now call,
+// so it is exercised directly rather than only through reconcileRun's
+// fallback above.
+// ---------------------------------------------------------------------------
+describe("unionAreaNames (A39 W1, RULING 134)", () => {
+  function areaResult(overrides: Partial<GradeResult> = {}): GradeResult {
+    return {
+      student: "Student",
+      overallComment: "",
+      strengths: "",
+      improvements: "",
+      resubmitNotice: "",
+      rubricAreas: [],
+      totalScore: "",
+      feedback: "",
+      mergedFileCount: 1,
+      submittedFiles: [],
+      ...overrides,
+    };
+  }
+
+  it("returns a first-seen union, in the order rows are given, keeping the first-seen raw spelling", () => {
+    const rows: GradeResult[] = [
+      areaResult({
+        student: "Alice",
+        rubricAreas: [
+          { area: "Clarity", score: "8/10", comment: "" },
+          { area: "Grammar", score: "9/10", comment: "" },
+        ],
+      }),
+      areaResult({
+        student: "Bob",
+        rubricAreas: [
+          { area: "clarity", score: "5/10", comment: "" },
+          { area: "Structure", score: "6/10", comment: "" },
+        ],
+      }),
+    ];
+    expect(unionAreaNames(rows)).toEqual(["Clarity", "Grammar", "Structure"]);
+  });
+
+  it("excludes the empty area and the Overall placeholder, the same two exclusions the old richest fallback applied", () => {
+    const rows: GradeResult[] = [
+      areaResult({
+        rubricAreas: [
+          { area: "Overall", score: "17/20", comment: "" },
+          { area: "", score: "", comment: "" },
+          { area: "Clarity", score: "8/10", comment: "" },
+        ],
+      }),
+    ];
+    expect(unionAreaNames(rows)).toEqual(["Clarity"]);
+  });
+
+  it("is pure - it does not mutate its input rows", () => {
+    const rows: GradeResult[] = [
+      areaResult({ rubricAreas: [{ area: "Clarity", score: "8/10", comment: "" }] }),
+    ];
+    const snapshot = JSON.parse(JSON.stringify(rows));
+    unionAreaNames(rows);
+    expect(rows).toEqual(snapshot);
+  });
+
+  it("returns an empty array over an empty row list", () => {
+    expect(unionAreaNames([])).toEqual([]);
   });
 });
 

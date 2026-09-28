@@ -192,3 +192,23 @@ mechanical ceiling in the tree is `LIMIT = 1000` in
 actually near the edge is `GradingRecordingPanel.tsx` at 977 lines. So the
 conclusion stands - prefer a cut that does not write `GradingTab.tsx` - while the
 reason I gave for it did not.
+
+## DECISION 19 - take the recommended path on every open grading/RLS fork.
+
+Owner, 2026-09-28: "ignore qa - continue on all else", then "recommended paths".
+QA seats are dropped (the plan and its review stay recorded at
+docs/loop/qa-roles-plan.md but nothing proceeds). On everything else, act on the
+stated recommendation rather than asking again. Concretely:
+
+- **A11Y-RLS = A1 (deny-all).** Enable RLS on accessibility_scans with ZERO
+  policies, one migration, no foreign key, DDL deleted, citation repointed, three
+  instruments. The only accessor is the service-role client, which bypasses RLS,
+  so deny-all closes the exposure while the feature keeps working. This is a
+  PRODUCTION migration (auto-applies on push); the push is flagged before it
+  lands, and the post-apply confirmation that RLS is on is an owner-only step.
+- **GRAD-SUBTAB = all five surfaces.** The scope call (close on two shipped waves
+  vs derive all five) is answered: all five. Wave 3 (Drafted Grades) proceeds.
+- **Standing for this run:** any fork inside the in-flight work takes its
+  recommended option without a new question (e.g. wave 2's ta-rec-view migration
+  = SKIP per its derivation; wave 3's forks = the derivation's recommendations).
+  A fork rides alongside as a recorded recommendation acted on, never as a gate.

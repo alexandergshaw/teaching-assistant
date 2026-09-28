@@ -1,16 +1,22 @@
 "use server";
 
-// A39 wave 4c (docs/a39-waves.md 8.4.3): everything the incremental run must
-// not do N times, done once, before the pool ever opens. Building this
-// ticket list is the SAME ingestion the existing whole-run gradeAction uses
-// (extractStudentEntries / buildSingleFileEntry / extractCanvasEntries) -
-// this action does not re-implement extraction, it only stops short of ever
-// calling the model.
+// A39 wave 4 fill (docs/a39-fill-waves.md W4; docs/a39-incremental-fill-
+// architecture.md section 4.3): everything the incremental run must not do
+// N times, done once, before the pool ever opens - including, since this
+// wave, the two per-RUN model calls (the filename inference, and rubric
+// synthesis when the rubric is blank) the whole-run path already pays
+// before it grades anybody (engine.ts:390; grading.ts:890-892) - parity,
+// not a new cost. This action does not re-implement extraction or rubric
+// resolution: it reuses gradeAction's own ingestion functions
+// (extractStudentEntries / buildSingleFileEntry / extractCanvasEntries) and
+// resolveRunHeader (RULING 133), and it never dispatches a per-item grade
+// call itself.
 //
 // A44's collision refusal (decideCollisionRefusal, called from inside
 // extractStudentEntries at extraction.ts:145, strictly before grouping at
-// :149) therefore fires HERE, before a single ticket exists, before the
-// pool starts, before any grade-run-item fetch is issued - inherited
+// :149 and strictly before item #9's filename inference this wave inserts
+// between them) therefore fires HERE, before a single ticket exists, before
+// the pool starts, before any grade-run-item fetch is issued - inherited
 // automatically, with no extra code (docs/a46-scope.md section 3). W-A46-1
 // (this file's own test) proves that executably rather than arguing it from
 // source order.
@@ -19,7 +25,9 @@ import { normalizeProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
-import type { StudentSubmissionEntry } from "@/lib/grade/types";
+import { resolveRunHeader } from "@/lib/grade/run-header";
+import { getSpeedGraderUrl } from "@/lib/canvas";
+import type { StudentSubmissionEntry, GradingRunHeader } from "@/lib/grade/types";
 import {
   estimateEntryWireBytes,
   ITEM_REQUEST_BYTE_BUDGET,
@@ -30,7 +38,15 @@ import {
 export type PrepareGradingRunResult =
   | { readonly mode: "whole-run"; readonly reason: string }
   | { readonly mode: "refused"; readonly reason: string }
-  | { readonly mode: "incremental"; readonly plan: IncrementalRunPlan };
+  | {
+      readonly mode: "incremental";
+      readonly plan: IncrementalRunPlan;
+      // RULING 133: the effective rubric and its provenance, resolved once.
+      readonly header: Extract<GradingRunHeader, { kind: "ok" }>;
+      // Best-effort Canvas deep link (design 4.4); null on the zip path and
+      // on any Canvas lookup failure.
+      readonly speedGraderUrl: string | null;
+    };
 
 // RULING 118: every refusal message collisionRefusal.ts's buildRefusalMessage
 // emits starts with this exact prefix (collisionRefusal.ts:128,
@@ -43,11 +59,14 @@ const REFUSAL_MESSAGE_PREFIX = "Refused: ";
 
 /**
  * Builds the ticket list for the incremental pool, or hands back a reason to
- * fall back to the existing whole-run Server Action. Never calls a model:
- * this function only extracts already-in-hand submissions into entries and
- * checks their size, exactly the work gradeAction already does before its
- * first gradeEntries/gradeSubmissions call - just done ONCE, up front,
- * rather than implicitly re-derivable per item.
+ * fall back to the existing whole-run Server Action. Makes AT MOST TWO model
+ * calls itself (the filename inference on a zip's raw names, and rubric
+ * synthesis when the rubric is blank) - both already paid by the whole-run
+ * path before it grades anybody (engine.ts:390; grading.ts:890-892), so this
+ * is parity, not a new cost, and it never dispatches a per-item grade call.
+ * Everything else here is the same ingestion/sizing work gradeAction already
+ * does before its first gradeEntries/gradeSubmissions call - just done ONCE,
+ * up front, rather than implicitly re-derivable per item.
  *
  * `mode: "whole-run"` is not decoration: two of the states below are
  * knowable ONLY after this action has run server-side and opened the
@@ -63,14 +82,31 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
   const rubric = (formData.get("rubric") as string | null) ?? "";
   const provider = normalizeProvider(formData.get("provider") as string | null);
 
+  // Tier 1 step 1 (design 4.3): free, and it must precede every step below
+  // that spends - byte-identical to resolveRunHeader's own refusal message
+  // (F2), checked here directly so a blank-instructions run never reaches
+  // step 3's filename inference or step 5's rubric generation.
+  if (!assignmentInstructions.trim()) {
+    return { mode: "refused", reason: "Please provide assignment instructions." };
+  }
+
   try {
     let entries: StudentSubmissionEntry[];
     let pointsPossible: number | null = null;
+    let speedGraderUrl: string | null = null;
 
     if (canvasUrl) {
-      const extracted = await extractCanvasEntries(canvasUrl);
+      // Tier 1 step 6 (design 4.4): a best-effort deep link, Promise.all-ed
+      // alongside extraction so it adds no serial latency, and swallowed on
+      // failure - a rejection here must never demote an otherwise-gradable
+      // run to whole-run (F24).
+      const [extracted, resolvedSpeedGraderUrl] = await Promise.all([
+        extractCanvasEntries(canvasUrl),
+        getSpeedGraderUrl(canvasUrl).catch(() => null),
+      ]);
       entries = extracted.entries;
       pointsPossible = extracted.pointsPossible;
+      speedGraderUrl = resolvedSpeedGraderUrl;
     } else {
       const file = formData.get("studentSubmissions") as File | null;
       if (!file || file.size === 0) {
@@ -88,7 +124,11 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
       } else {
         // A44's collision refusal throws from inside this call, strictly
         // before any ticket is built - see this file's own header comment.
-        entries = await extractStudentEntries(await file.arrayBuffer());
+        // Tier 1 step 3 (item #9): the same filename-convention inference
+        // the whole-run path already pays for at engine.ts:390 - parity,
+        // not a new cost - so the incremental route derives student names
+        // the way the route beside it does.
+        entries = await extractStudentEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
       }
     }
 
@@ -109,10 +149,28 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
       }
     }
 
+    // Tier 1 step 5 (RULING 133): one owner for the effective rubric and its
+    // provenance, shared with the whole-run path's own resolveRunHeader
+    // calls (grading.ts:815, :886). The zip path may synthesize a blank
+    // rubric from the instructions; the Canvas path never does - the same
+    // asymmetry grading.ts itself preserves, not flattened here.
+    const header = await resolveRunHeader(assignmentInstructions, rubric, provider, {
+      synthesizeRubricWhenBlank: !canvasUrl,
+    });
+    if (header.kind === "refused") {
+      // Unreachable in practice - step 1 above already refused a blank
+      // assignmentInstructions - but GradingRunHeader is a discriminated
+      // union, so this branch is a compile-time obligation, not an
+      // assumption.
+      return { mode: "refused", reason: header.error };
+    }
+
     const tickets: GradingItemTicket[] = entries.map((entry, sourceIndex) => ({ sourceIndex, entry }));
     return {
       mode: "incremental",
-      plan: { tickets, assignmentInstructions, rubric, provider, pointsPossible },
+      plan: { tickets, assignmentInstructions, rubric: header.effectiveRubric, provider, pointsPossible },
+      header,
+      speedGraderUrl,
     };
   } catch (err) {
     // Includes A44's collision refusal (decideCollisionRefusal, thrown from

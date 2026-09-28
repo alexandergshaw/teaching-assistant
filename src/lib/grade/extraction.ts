@@ -6,6 +6,12 @@ import {
   getFileExtension,
 } from "../office-extract";
 import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "../canvas";
+// A39 wave 4 (item #9): placed AFTER the ../canvas import above, not before
+// it - docs/a39-fill-waves.md's W1 step S0 ran this exact import both above
+// and below and measured runtime-import-graph.test.ts:703's frozen trail go
+// RED above and GREEN below (F15 clause 3).
+import { inferFileNameConvention } from "./rubric";
+import type { LlmProvider } from "../llm";
 import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel } from "./utils";
@@ -128,12 +134,20 @@ export async function extractSubmissions(
 }
 
 /**
- * Group a submissions zip into per-student entries WITHOUT any LLM call (uses the
- * deterministic filename-convention parsing only). Feeds the Embedded
- * Deterministic Engine, which must never depend on a model.
+ * Group a submissions zip into per-student entries. No LLM call unless the
+ * caller passes `inferFileNamesWith` (item #9, RES-FILL-10) - the Embedded
+ * Deterministic Engine's own caller (src/app/actions/grading.ts:859) never
+ * does, so it keeps today's deterministic-only behaviour unchanged; the
+ * incremental route's caller (src/app/actions/grading-incremental.ts:91)
+ * does, so it derives student names the same way the whole-run path already
+ * does at engine.ts:390. src/lib/grade/extraction.inference.test.ts is the
+ * executed enforcer of this contract, and
+ * `grep -c "inferFileNamesWith" src/app/actions/grading.ts` -> 0 is its
+ * backstop.
  */
 export async function extractStudentEntries(
-  zipBuffer: ArrayBuffer
+  zipBuffer: ArrayBuffer,
+  options?: { readonly inferFileNamesWith?: LlmProvider }
 ): Promise<StudentSubmissionEntry[]> {
   const { submissions, rawData, zipParents } = await extractSubmissions(zipBuffer);
   // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
@@ -141,12 +155,17 @@ export async function extractStudentEntries(
   // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
   // 6.2: the first fires on the diagnostic-only testGeminiAction caller,
   // which grades nothing; the second breaks a frozen row-count
-  // characterisation 28 pinned tests depend on).
+  // characterisation 28 pinned tests depend on). Strictly before the
+  // filename inference below too, so a colliding zip never pays a model
+  // call (design section 4.3 step 2 before step 3; instrument notes M4).
   const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
   if (collisionMessage) {
     throw new Error(collisionMessage);
   }
-  return groupSubmissionsByStudent(submissions, undefined, rawData, zipParents);
+  const inferredLookup = options?.inferFileNamesWith
+    ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
+    : undefined;
+  return groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
 }
 
 /**

@@ -2,7 +2,7 @@
 
 import { getCourseName } from "@/lib/canvas";
 import { listModules, createModule, updateModule, deleteModule, createModuleItem, updateModuleItem, deleteModuleItem, listAssignmentGroups, createAssignment, uploadFileToModule, listPages, type CanvasModule, type CanvasModuleItem, type CanvasPageSummary, type NewModuleItem, type NewAssignment } from "@/lib/canvas-modules";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 
 // ── Course Content (modules & pages) ─────────────────────────────────────────
 //
@@ -17,7 +17,7 @@ export async function listCourseContentAction(
   acronym?: string
 ): Promise<{ courseName: string; modules: CanvasModule[]; pages: CanvasPageSummary[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     const [courseName, modules, pages] = await Promise.all([
       getCourseName(courseUrl, acronym),
       listModules(courseUrl, acronym),
@@ -46,7 +46,7 @@ export async function placeSyllabusInModuleAction(
   acronym?: string
 ): Promise<{ ok: true; item?: CanvasModuleItem } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const item = await uploadFileToModule(courseUrl, base64, fileName, DOCX, moduleId, position, acronym);
     return { ok: true, item };
@@ -63,7 +63,7 @@ export async function createModuleAction(
   acronym?: string
 ): Promise<{ module: CanvasModule } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { module: await createModule(courseUrl, name, position, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the module." };
@@ -78,7 +78,7 @@ export async function updateModuleAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await updateModule(courseUrl, moduleId, fields, acronym);
     return { ok: true };
   } catch (err) {
@@ -93,7 +93,7 @@ export async function deleteModuleAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await deleteModule(courseUrl, moduleId, acronym);
     return { ok: true };
   } catch (err) {
@@ -109,7 +109,7 @@ export async function createModuleItemAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await createModuleItem(courseUrl, moduleId, item, acronym);
     return { ok: true };
   } catch (err) {
@@ -180,7 +180,7 @@ export async function createCourseAssignmentAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     const created = await createAssignment(courseUrl, fields, acronym);
     let addedToModule = false;
     let linkError: string | undefined;
@@ -219,7 +219,7 @@ export async function listAssignmentGroupsAction(
   acronym?: string
 ): Promise<{ groups: Array<{ id: number; name: string }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { groups: await listAssignmentGroups(courseUrl, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load assignment groups." };
@@ -242,7 +242,7 @@ export async function updateModuleItemAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await updateModuleItem(courseUrl, moduleId, itemId, fields, acronym);
     return { ok: true };
   } catch (err) {
@@ -258,7 +258,7 @@ export async function deleteModuleItemAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await deleteModuleItem(courseUrl, moduleId, itemId, acronym);
     return { ok: true };
   } catch (err) {

@@ -17,11 +17,19 @@
 // and nesting (docs/carry-module-pattern-forward-acceptance-criteria.md).
 //
 // A handful of the file's other simple wrapper actions are covered too, at
-// the same requireOwner-guard/try-catch depth every other action test file
-// in this directory uses (canvas-discussions.test.ts is the template).
+// the same guard/try-catch depth every other action test file in this
+// directory uses (canvas-discussions.test.ts is the template).
+//
+// R2 wave 1, sub-wave 9: canvas-modules.ts's guard moved from the deprecated
+// requireOwner() alias to requireUser() directly - all 10 actions here are
+// permissive (contained by resolveCanvasCredential; see
+// canvas-modules.guard.test.ts and action-guard-coverage-github-cohort.test.ts's
+// GITHUB_NOT_OWNER_ONLY entries). The mock/import names below follow the
+// rename so this file keeps executing the real guard rather than silently
+// no-op-ing on an undefined mock export.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn() }));
+vi.mock("@/lib/supabase/auth", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/canvas", () => ({ getCourseName: vi.fn() }));
 vi.mock("@/lib/canvas-modules", () => ({
   listModules: vi.fn(),
@@ -37,7 +45,7 @@ vi.mock("@/lib/canvas-modules", () => ({
   listPages: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { createAssignment, createModuleItem, createModule, updateModule, deleteModule } from "@/lib/canvas-modules";
 import type { NewAssignment } from "@/lib/canvas-modules";
 import {
@@ -58,7 +66,7 @@ const FIELDS: NewAssignment = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
+  vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
 });
 
 describe("createCourseAssignmentAction - C5: create/link are two failure domains, not one", () => {
@@ -122,8 +130,8 @@ describe("createCourseAssignmentAction - C5: create/link are two failure domains
     expect(typeof result.linkError).toBe("string");
   });
 
-  it("never calls createAssignment when requireOwner rejects", async () => {
-    vi.mocked(requireOwner).mockRejectedValue(new Error("Not signed in."));
+  it("never calls createAssignment when requireUser rejects", async () => {
+    vi.mocked(requireUser).mockRejectedValue(new Error("Not signed in."));
 
     const result = await createCourseAssignmentAction("course", FIELDS, 5, "acr");
 
@@ -175,7 +183,7 @@ describe("createCourseAssignmentAction - C3: position/indent are threaded into t
   });
 });
 
-describe("createModuleAction / updateModuleAction / deleteModuleAction - requireOwner guard and error shape", () => {
+describe("createModuleAction / updateModuleAction / deleteModuleAction - requireUser guard and error shape", () => {
   it("createModuleAction returns the created module on success", async () => {
     vi.mocked(createModule).mockResolvedValue({ id: 1, name: "Week 1", position: 1, published: false, itemsCount: 0, items: [] });
 

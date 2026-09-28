@@ -3,7 +3,7 @@
 import { getCourseNotifications } from "@/lib/canvas";
 import { CANVAS_INSTITUTIONS } from "@/lib/canvas-core";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { listLmsCredentials } from "@/lib/lms-credentials";
 import { getCredentials, deleteCredentials } from "@/lib/google-credentials";
 import { loadInstitutionFields, saveInstitutionFields, listAllInstitutionFields, type InstitutionField } from "@/lib/institution-fields";
@@ -15,7 +15,7 @@ export async function getGoogleCalendarStatusAction(): Promise<
   { connected: boolean } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const creds = await getCredentials(user.id);
     return { connected: !!creds && !!creds.refreshToken };
   } catch (err) {
@@ -28,7 +28,7 @@ export async function disconnectGoogleCalendarAction(): Promise<
   { ok: true } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     await deleteCredentials(user.id);
     return { ok: true };
   } catch (err) {
@@ -41,7 +41,7 @@ export async function disconnectGoogleCalendarAction(): Promise<
 /** E1: Fetch an ICS feed from a URL (calendar export). */
 export async function fetchIcsFeedAction(url: string): Promise<{ ics: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     const parsedUrl = new URL(url);
     if (!parsedUrl.protocol.match(/^https?:$/)) {
@@ -77,7 +77,7 @@ export async function saveInstitutionFieldsAction(
   fields: InstitutionField[]
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await saveInstitutionFields(supabase, user.id, acronym, fields);
     return { ok: true };
@@ -93,7 +93,7 @@ export async function listInstitutionsWithFeedsAction(): Promise<
   { institutions: Array<{ acronym: string; feedUrls: string[] }> } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const allInstitutions = await listAllInstitutionFields(supabase, user.id);
 
@@ -121,7 +121,7 @@ export async function listInstitutionFeedUrlsAction(acronym: string): Promise<
   { feedUrls: string[] } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const fields = await loadInstitutionFields(supabase, user.id, acronym);
 
@@ -166,7 +166,7 @@ export async function checkInstitutionsAction(
   | { error: string }
 > {
   try {
-    const identity = await requireOwner();
+    const identity = await requireUser();
     const isOwner = identity.role === "owner";
     const ownInstitutions = new Set(
       (await listLmsCredentials(identity.id)).map((cred) => cred.institution)
@@ -209,7 +209,7 @@ export async function listConfiguredInstitutionsAction(): Promise<
   { acronyms: string[] } | { error: string }
 > {
   try {
-    const identity = await requireOwner();
+    const identity = await requireUser();
     const acronyms = new Set<string>();
     if (identity.role === "owner") {
       for (const key of Object.keys(process.env)) {
@@ -245,7 +245,7 @@ export async function getCourseNotificationsAction(
   institution?: string
 ): Promise<{ needsGrading: number; unread: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     const match = canvasUrl.match(/\/courses\/(\d+)/);
     if (!match) return { error: "Course URL must look like .../courses/123." };
     const code = institution?.trim();
@@ -263,7 +263,7 @@ export async function exportCourseCartridgeAction(
 ): Promise<{ fileName: string; base64: string } | { error: string }> {
   try {
     const { exportCourseCartridge } = await import("@/lib/canvas");
-    await requireOwner();
+    await requireUser();
     return await exportCourseCartridge(courseUrl, acronym?.trim());
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not export the course from the LMS." };

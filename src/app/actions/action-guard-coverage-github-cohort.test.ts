@@ -518,6 +518,76 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
     "previews the weekly-announcement plan via loadWeeklyAnnouncementPlan, whose Canvas read-back (listAnnouncements) is contained by resolveCourse -> resolveCanvasCredential and whose Supabase reads are scoped to the caller's own user.id - never reaches the GitHub PAT",
   scheduleWeeklyAnnouncementsAction:
     "schedules/reschedules weekly announcements via the same contained loadWeeklyAnnouncementPlan read-back plus createScheduledAnnouncementResilient/updateAnnouncementSchedule/getAnnouncementById (all contained by resolveCourse -> resolveCanvasCredential), writing only Supabase rows scoped to the caller's own user.id - never reaches the GitHub PAT",
+  // R2 wave 1, sub-wave 9 (docs/r2-wave1-subwaves.md section 4, row SW9;
+  // docs/owner-private-secrets.md sections 4.1/5): course-hub-integrations.ts's
+  // 10 requireOwner() call sites, re-derived rather than inherited - the
+  // commissioning brief claimed 13, but `grep -cE "await requireOwner\(\)"
+  // src/app/actions/course-hub-integrations.ts` gives 10, matching the plan's
+  // original figure. This file is 0 restrictive / 10 permissive. Neither
+  // Google Calendar (google-credentials.ts) nor institution-fields.ts row is
+  // ever anything but the caller's own (scoped on user_id); fetchIcsFeedAction
+  // fetches a caller-supplied URL with no owner secret behind it at all.
+  // checkInstitutionsAction and listConfiguredInstitutionsAction are BODY-
+  // contained, not guard-contained (docs/owner-private-secrets.md section 5
+  // step 5, "fixed in the BODY, not the guard") - their
+  // `identity.role === "owner"` checks are untouched by this sub-wave, and
+  // course-hub-integrations.test.ts's executing tests already prove a
+  // non-owner never sees the env-derived institution list while an owner
+  // does. getCourseNotificationsAction and exportCourseCartridgeAction reach
+  // Canvas via getCourseNotifications/exportCourseCartridge, both contained
+  // by resolveInstitutionByCode/resolveCourse -> resolveCanvasCredential
+  // (src/lib/canvas-credentials.ts:189), the same path SW5-SW8 established.
+  getGoogleCalendarStatusAction:
+    "reads only the caller's own Google credential row via getCredentials(user.id) (google-credentials.ts, scoped on user_id) - no GitHub or Canvas import",
+  disconnectGoogleCalendarAction:
+    "deletes only the caller's own Google credential row via deleteCredentials(user.id) (google-credentials.ts, scoped on user_id) - no GitHub or Canvas import",
+  fetchIcsFeedAction:
+    "fetches a caller-supplied URL and returns its text - no owner secret is reached at all, GitHub or Canvas",
+  saveInstitutionFieldsAction:
+    "writes only the caller's own institution_fields row via saveInstitutionFields(user.id, acronym, ...) - no GitHub or Canvas import",
+  listInstitutionsWithFeedsAction:
+    "reads only the caller's own institution_fields rows via listAllInstitutionFields(user.id) - no GitHub or Canvas import",
+  listInstitutionFeedUrlsAction:
+    "reads only the caller's own institution_fields row via loadInstitutionFields(user.id, acronym) - no GitHub or Canvas import",
+  checkInstitutionsAction:
+    "the env-derived canvasConfigured/llmConfigured status is gated in the BODY on identity.role === 'owner' (not the guard) - a non-owner sees only their own stored lms-credentials rows, proven by course-hub-integrations.test.ts",
+  listConfiguredInstitutionsAction:
+    "the env-scanned acronym list is gated in the BODY on identity.role === 'owner' (not the guard) - a non-owner sees only their own stored lms-credentials rows, proven by course-hub-integrations.test.ts",
+  getCourseNotificationsAction:
+    "fetches per-course notification counts via getCourseNotifications, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  exportCourseCartridgeAction:
+    "exports a course cartridge via exportCourseCartridge, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  // R2 wave 1, sub-wave 9, continued: canvas-modules.ts's 10 requireOwner()
+  // call sites (verified both ways: 10 non-comment `await requireOwner()`
+  // occurrences and 10 `^export async function` lines - a 1:1 guard-per-
+  // action file, unlike the seven cohort files flagged in
+  // docs/r2-wave1-subwaves.md section 1). This file is 0 restrictive / 10
+  // permissive: every action reaches Canvas only through @/lib/canvas-modules,
+  // whose functions all resolve their course context via resolveCourse
+  // (src/lib/canvas-core.ts) -> resolveCanvasCredential
+  // (src/lib/canvas-credentials.ts:189) - the same contained path as this
+  // cohort's other Canvas-reaching actions. None imports anything from
+  // "@/lib/github" or a GitHub-reaching sibling module.
+  listCourseContentAction:
+    "loads a course's name/modules/pages via getCourseName/listModules/listPages, all contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  placeSyllabusInModuleAction:
+    "uploads a generated syllabus into a course module via uploadFileToModule, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  createModuleAction:
+    "creates a module via createModule, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  updateModuleAction:
+    "updates a module via updateModule, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  deleteModuleAction:
+    "deletes a module via deleteModule, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  createModuleItemAction:
+    "adds an item to a module via createModuleItem, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  createCourseAssignmentAction:
+    "creates an assignment (and optionally links it into a module) via createAssignment/createModuleItem, both contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listAssignmentGroupsAction:
+    "lists a course's assignment groups via listAssignmentGroups, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  updateModuleItemAction:
+    "updates a module item via updateModuleItem, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  deleteModuleItemAction:
+    "removes a module item via deleteModuleItem, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -567,7 +637,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(49);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(69);
     }
   );
 

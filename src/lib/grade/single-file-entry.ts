@@ -64,7 +64,7 @@ function studentLabelFromFileName(name: string): string {
 
 /**
  * Builds the one StudentSubmissionEntry a non-zip upload represents, for
- * `gradeEntries` (engine.ts:457) - the same per-entry grading path
+ * `gradeEntries` (engine.ts:481, re-pinned 2026-09-27 after A44 wave 2 inserted above it) - the same per-entry grading path
  * `gradeOneSubmissionAction` already uses. Returns null when the file's text
  * could not be extracted (e.g. an unreadable document), so the caller can
  * refuse with a named reason instead of grading empty content.

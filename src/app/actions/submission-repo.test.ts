@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// fetchSubmissionRepoAction calls requireOwner() (auth) and the GitHub REST
-// client (network) - both are mocked so the action's own wiring (URL parsing,
-// ref/sha resolution, error messages, and the shape of the successful
-// result) runs for real without a Supabase session or hitting GitHub. The
-// underlying pure logic (URL parsing, bounds, file selection) is unit-tested
-// directly in src/lib/submission-repo.test.ts.
+// fetchSubmissionRepoAction calls requireAppOwner() (auth) and the GitHub
+// REST client (network) - both are mocked so the action's own wiring (URL
+// parsing, ref/sha resolution, error messages, and the shape of the
+// successful result) runs for real without a Supabase session or hitting
+// GitHub. The underlying pure logic (URL parsing, bounds, file selection) is
+// unit-tested directly in src/lib/submission-repo.test.ts. The guard itself
+// (requireAppOwner(), mocked away here) is executed for real in the sibling
+// submission-repo.guard.test.ts (RULING 137).
 vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));

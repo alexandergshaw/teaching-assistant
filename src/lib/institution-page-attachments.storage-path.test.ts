@@ -25,6 +25,7 @@ import {
   uploadInstitutionPageAttachment,
   buildAttachmentStoragePath,
   emptyAttachmentMessage,
+  isInstitutionAttachmentStoragePath,
   type InstitutionPageAttachment,
 } from "./institution-page-attachments";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -90,6 +91,11 @@ describe("insertInstitutionPageAttachmentRow: storagePath is validated before an
     ["a different page under the same user", "user-1/page-2/attach-new.txt"],
     ["a different user entirely", "user-2/page-1/attach-new.txt"],
     ["nothing after the prefix", "user-1/page-1/"],
+    // RULING 128 - the traversal hole the bare prefix check let through: this
+    // starts with "user-1/page-1/" and is longer than it, so the OLD
+    // startsWith-only check accepted it. See this file's RED/GREEN block
+    // below for the same case verified against the actually-reverted source.
+    ["a traversal segment walking back out to a victim's own prefix", "user-1/page-1/../../user-2/x.pdf"],
   ])("refuses a storagePath belonging to %s, making NO database call at all", async (_label, storagePath) => {
     const { client, calls } = makeSupabase();
 
@@ -119,6 +125,69 @@ describe("insertInstitutionPageAttachmentRow: storagePath is validated before an
     });
 
     expect(calls.some((c) => c.method === "from")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isInstitutionAttachmentStoragePath, unit-tested directly (RULING 128).
+//
+// Mirrors the shape of the sibling course-files.test.ts coverage for
+// isOwnCourseFilesStoragePath (RULING 127): the traversal case is the
+// defect this ruling closes; the rest are the sibling shapes the shipped
+// "course-files" validator already handles, checked here against this
+// module's own (two-segment-prefix) validator so the two dialects agree on
+// substance even though their prefixes differ in shape. Each case below
+// says in its own label whether the OLD (bare startsWith) check already
+// refused it or whether this is newly refused - see docs/ruling-128.md for
+// the same claim made in prose, reconciled against this table.
+// ---------------------------------------------------------------------------
+describe("isInstitutionAttachmentStoragePath", () => {
+  it("accepts a legitimate userId/pageId/file path - ALREADY accepted, still accepted", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/attach-1.txt")).toBe(true);
+  });
+
+  it("accepts a legitimate userId/pageId/file path with no extension - ALREADY accepted, still accepted", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/attach-1")).toBe(true);
+  });
+
+  it("accepts a path with an extra segment after the fixed prefix - deeper nesting is not produced by buildAttachmentStoragePath today, but nothing in this module forbids it and the reference validator (isOwnCourseFilesStoragePath) does not cap depth after its own fixed segment either", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/sub/attach-1.txt")).toBe(true);
+  });
+
+  it("refuses a `..` traversal segment walking back out of the prefix - NEWLY refused (this ruling's own fix; the old bare startsWith check accepted this)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/../../user-2/x.pdf")).toBe(false);
+  });
+
+  it("refuses an empty segment (a doubled slash) - NEWLY refused (the old check accepted it: it still starts with the prefix and is longer than it)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1//attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a bare `.` segment - NEWLY refused (same reason: the old check is a pure prefix test with no segment parsing)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/./attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a percent-encoded `..` segment (%2e%2e) - NEWLY refused (the old check never decodes anything)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/%2e%2e/attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a percent-encoded separator (%2f) hiding an extra path segment - NEWLY refused", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/a%2fb/attach-1.txt")).toBe(false);
+  });
+
+  it("refuses malformed percent-encoding (a lone `%`) rather than guessing at it - NEWLY refused; the old check would have accepted this as an ordinary-looking literal segment", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1/%/attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a userId that merely STARTS WITH the real userId - ALREADY refused (the old prefix string simply never matched)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-12/page-1/attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a pageId that merely STARTS WITH the real pageId - ALREADY refused (same reason)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-12/attach-1.txt")).toBe(false);
+  });
+
+  it("refuses a bare userId/pageId with nothing after it - ALREADY refused (the old check required length > prefix.length)", () => {
+    expect(isInstitutionAttachmentStoragePath("user-1", "page-1", "user-1/page-1")).toBe(false);
   });
 });
 

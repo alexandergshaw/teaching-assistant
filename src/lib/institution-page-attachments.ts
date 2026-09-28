@@ -243,12 +243,46 @@ export function buildAttachmentStoragePath(
 }
 
 /**
- * Whether `storagePath` looks like a path buildAttachmentStoragePath could
- * have produced for this (userId, pageId) pair: `${userId}/${pageId}/...`.
- * `storagePath` reaches insertInstitutionPageAttachmentRow as browser-
- * supplied metadata (the browser already wrote the object before this row is
- * recorded - see uploadInstitutionPageAttachmentAction), and once recorded it
- * is read back by getInstitutionPageAttachmentUrlAction and
+ * True if `segment` is (or, once percent-decoded, becomes) a path-traversal
+ * or separator character sequence a naive literal-string prefix check would
+ * miss. Malformed percent-encoding (a `decodeURIComponent` throw) is treated
+ * as suspicious and refused rather than guessed at.
+ *
+ * DUPLICATED, not imported, from `isTraversalOrSeparatorSegment` in
+ * src/lib/course-files.ts (RULING 127's shared validator for the sibling
+ * "course-files" bucket) - see RULING 128 (docs/ruling-128.md) for why: that
+ * module also carries this feature's upload/download/retry orchestration
+ * (chunked-upload constants, a fetch-based download-with-retry loop, etc.),
+ * none of which this module has any use for, so importing it here would drag
+ * in real code weight for one 15-line primitive. The two copies must be kept
+ * in lockstep by hand - if you change the traversal rules in one, change
+ * them in the other, and search for this comment in both files when you do.
+ */
+function isTraversalOrSeparatorSegment(segment: string): boolean {
+  if (segment === "." || segment === "..") return true;
+  if (segment.includes("\\")) return true;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return true;
+  }
+  if (decoded === segment) return false;
+  return decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\");
+}
+
+/**
+ * Whether `storagePath` is an object path buildAttachmentStoragePath could
+ * have produced for this exact (userId, pageId) pair: the first segment must
+ * EQUAL userId exactly (never merely start with it), the second must EQUAL
+ * pageId exactly, and there must be at least one more segment after them -
+ * with no segment anywhere in the path that is empty, ".", "..", or a
+ * separator/dot hiding behind percent-encoding (see
+ * isTraversalOrSeparatorSegment above). `storagePath` reaches
+ * insertInstitutionPageAttachmentRow as browser-supplied metadata (the
+ * browser already wrote the object before this row is recorded - see
+ * uploadInstitutionPageAttachmentAction), and once recorded it is read back
+ * by getInstitutionPageAttachmentUrlAction and
  * deleteInstitutionPageAttachmentAction, both against createServiceClient()
  * (src/lib/supabase/server.ts), which bypasses RLS entirely - so an
  * unvalidated path recorded here would let a later signed-URL or delete call
@@ -261,10 +295,26 @@ export function buildAttachmentStoragePath(
  * the delete-on-blank rule inside upsertTaskInstruction
  * (src/lib/supabase/task-institution-instructions.ts) rather than its
  * callers.
+ *
+ * RULING 128: this used to be a bare `startsWith(`${userId}/${pageId}/`)`
+ * check with no segment parsing, which a `"<userId>/<pageId>/../../<victim>/x"`
+ * path satisfies (it starts with the prefix and is longer than it) - see
+ * docs/ruling-128.md for the RED/GREEN pair and the full accounting of what
+ * this exposed. Segments after the fixed (userId, pageId) prefix are not
+ * capped in count or depth, mirroring isOwnCourseFilesStoragePath's own
+ * choice not to cap what follows its one fixed segment -
+ * buildAttachmentStoragePath itself only ever produces exactly one segment
+ * after the prefix, so deeper nesting is unexercised by any real caller
+ * today, but nothing about this module's intent forbids it and the reference
+ * validator does not add a count cap either, so this does not invent one.
  */
 export function isInstitutionAttachmentStoragePath(userId: string, pageId: string, storagePath: string): boolean {
-  const prefix = `${userId}/${pageId}/`;
-  return storagePath.startsWith(prefix) && storagePath.length > prefix.length;
+  if (!userId || !pageId || !storagePath) return false;
+  const segments = storagePath.split("/");
+  if (segments.length < 3) return false;
+  if (segments[0] !== userId) return false;
+  if (segments[1] !== pageId) return false;
+  return segments.every((segment) => segment.length > 0 && !isTraversalOrSeparatorSegment(segment));
 }
 
 // Exported so the row -> attachment mapping is unit-testable without a live

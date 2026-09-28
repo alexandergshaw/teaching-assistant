@@ -9,6 +9,7 @@ import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork 
 import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
 import { toPreviewContent, groupSubmissionsByStudent } from "./utils";
+import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { looksLikeGithubUrl } from "../submission-repo";
 import { fetchGradableRepoContent } from "./repo-content";
 
@@ -135,6 +136,16 @@ export async function extractStudentEntries(
   zipBuffer: ArrayBuffer
 ): Promise<StudentSubmissionEntry[]> {
   const { submissions, rawData, zipParents } = await extractSubmissions(zipBuffer);
+  // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
+  // before grouping - the same seam Wave 1's fold lives in - and NOT inside
+  // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
+  // 6.2: the first fires on the diagnostic-only testGeminiAction caller,
+  // which grades nothing; the second breaks a frozen row-count
+  // characterisation 28 pinned tests depend on).
+  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
+  if (collisionMessage) {
+    throw new Error(collisionMessage);
+  }
   return groupSubmissionsByStudent(submissions, undefined, rawData, zipParents);
 }
 

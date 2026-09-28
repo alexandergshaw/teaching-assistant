@@ -144,6 +144,35 @@ function a44Encode(parts: string[]): string {
 }
 
 /**
+ * A44 wave 2: the decoder for `a44Encode`'s length-prefixed join. Returns the
+ * original parts array in order, or `null` when `key` is not validly encoded
+ * (never throws - a caller gets an explicit signal instead of a corrupt
+ * partial parse). Exists so `collisionRefusal.ts` can recover a group's
+ * arity (one part = no folder, two parts = `[dir, stem]`) from the identity
+ * key it already has, rather than re-deriving the folder from the raw path a
+ * second time - see docs/a44-waves.md 6.3 for why the arity is what the
+ * refusal's amnesty predicate needs and `reachedStemFallback` below is why
+ * arity alone cannot distinguish every case that matters.
+ */
+export function a44DecodeKey(key: string): string[] | null {
+  const parts: string[] = [];
+  let rest = key;
+  while (rest.length > 0) {
+    const colonIndex = rest.indexOf(":");
+    if (colonIndex <= 0) return null;
+    const lengthStr = rest.slice(0, colonIndex);
+    if (!/^[0-9]+$/.test(lengthStr)) return null;
+    const length = Number(lengthStr);
+    const partStart = colonIndex + 1;
+    const partEnd = partStart + length;
+    if (partEnd > rest.length) return null;
+    parts.push(rest.slice(partStart, partEnd));
+    rest = rest.slice(partEnd);
+  }
+  return parts;
+}
+
+/**
  * Wrap an identity produced by a non-fallback step (1-4) in the same
  * length-prefixed encoding the folded fallback steps (5-6) use, so every one
  * of the six return sites emits an encoded key and none can be mistaken for
@@ -164,8 +193,13 @@ function a44Wrap(id: { studentKey: string; studentDisplay: string }): {
  * Returns "" when the file sits directly in its container (no folder to
  * fold). Case-preserving: RULE D's display fold uses this verbatim; RULE K's
  * key fold lower-cases it itself.
+ *
+ * Exported for A44 wave 2's refusal copy only (`collisionRefusal.ts`), which
+ * is the one caller that needs the case-preserving path rather than the
+ * lower-cased form `a44DecodeKey` recovers from the identity key - see
+ * docs/a44-waves.md 6.3's condition on this export.
  */
-function a44ContainerRelativeDir(filePath: string, zipChain: string[]): string {
+export function a44ContainerRelativeDir(filePath: string, zipChain: string[]): string {
   const segments = filePath.replace(/\\/g, "/").split("/");
   let startIndex = 0;
   if (zipChain.length > 0) {
@@ -261,6 +295,16 @@ export function parseSubmissionFileName(
   studentDisplay: string;
   citationFileName: string;
   extension: string;
+  /**
+   * A44 wave 2: whether THIS return came from step 5 or step 6 - the two
+   * stem-fallback steps RULE K/D fold a directory into - as opposed to a
+   * ground-truth model inference (1, 4) or a convention match (2, 3). A
+   * decoded key's arity alone cannot make this distinction: a convention
+   * match at step 2/3 and a directory-less stem fallback at step 6 both
+   * decode to one part (docs/a44-waves.md 3.3). `collisionRefusal.ts`'s
+   * amnesty predicate needs exactly this population, not "every file".
+   */
+  reachedStemFallback: boolean;
 } {
   const baseName = getBaseFileName(filePath);
 
@@ -273,6 +317,7 @@ export function parseSubmissionFileName(
       studentDisplay: rawInferred.studentDisplay,
       citationFileName: rawInferred.citationFileName,
       extension: getFileExtension(baseName) || getFileExtension(rawInferred.citationFileName) || "(none)",
+      reachedStemFallback: false,
     };
   }
 
@@ -283,6 +328,7 @@ export function parseSubmissionFileName(
       ...a44Wrap(identityFromConventionMatch(leafMatch)),
       citationFileName: leafMatch.filePart,
       extension: getFileExtension(leafMatch.filePart) || "(none)",
+      reachedStemFallback: false,
     };
   }
 
@@ -300,6 +346,7 @@ export function parseSubmissionFileName(
         ...a44Wrap(identityFromConventionMatch(crossingMatch)),
         citationFileName: baseName,
         extension: getFileExtension(baseName) || "(none)",
+        reachedStemFallback: false,
       };
     }
   }
@@ -314,6 +361,7 @@ export function parseSubmissionFileName(
       studentDisplay: baseInferred.studentDisplay,
       citationFileName: baseInferred.citationFileName,
       extension: getFileExtension(baseName) || getFileExtension(baseInferred.citationFileName) || "(none)",
+      reachedStemFallback: false,
     };
   }
 
@@ -331,6 +379,7 @@ export function parseSubmissionFileName(
       ...a44Fold(fallback, relDir5, false),
       citationFileName: baseName,
       extension: getFileExtension(baseName) || "(none)",
+      reachedStemFallback: true,
     };
   }
 
@@ -346,6 +395,7 @@ export function parseSubmissionFileName(
     ...a44Fold(fallback, relDir6, true),
     citationFileName: baseName,
     extension: getFileExtension(baseName) || "(none)",
+    reachedStemFallback: true,
   };
 }
 

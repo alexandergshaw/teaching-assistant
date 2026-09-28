@@ -423,9 +423,19 @@ export async function gradeSubmissions(
   const { extractSubmissions } = await import("./extraction");
   const { inferFileNameConvention } = await import("./rubric");
   const { groupSubmissionsByStudent } = await import("./utils");
+  const { decideCollisionRefusal, describeCollisionRefusal } = await import("./collisionRefusal");
 
   const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles, zipParents } =
     await extractSubmissions(zipBuffer);
+
+  // A44 wave 2: refuse before the model call rather than after (no zero-spend
+  // guarantee is claimed either way - inferFileNameConvention below is a
+  // separate ground-truth-only concern - but there is no reason to spend one
+  // when the parse itself already cannot distinguish the students).
+  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
+  if (collisionMessage) {
+    throw new Error(collisionMessage);
+  }
 
   const rawFileNames = Object.keys(submissions);
   const inferredFileNameLookup = await inferFileNameConvention(rawFileNames, provider);

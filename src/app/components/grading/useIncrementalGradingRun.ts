@@ -17,8 +17,8 @@
 // (that file's own header comment): startReview only ever runs from a real
 // onSubmit, so eslint's react-hooks/set-state-in-effect rule never applies.
 import { useRef, useState } from "react";
-import { prepareGradingRunAction } from "@/app/actions/grading-incremental";
-import type { GradeResult, GradingRun, GradingRunHeader } from "@/lib/grade/types";
+import { prepareGradingRunAction, completeGradingRunHeaderAction } from "@/app/actions/grading-incremental";
+import type { GradeResult, GradingRun, GradingRunHeader, GradingRunTier2 } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import {
   routeGradingRun,
@@ -30,6 +30,7 @@ import {
   type ArrivedItemResult,
   type GradeRunItemRequestBody,
   type IncrementalPhase,
+  type IncrementalRunPlan,
 } from "./incrementalRunPlan";
 
 // A39 incremental-fill W5 (docs/a39-fill-waves.md, S1): the header shape
@@ -105,6 +106,10 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
   // GradingRun objects belonging to the SAME run share one identity
   // (RULING 131, architecture 5.7).
   const runIdRef = useRef(0);
+  // W6 (F16-F18): the non-blocking Tier 2 payload, for the run currently
+  // owning runIdRef.current. A ref, not useState - a useState slot's captured
+  // closure would rebuild with the stale pre-arrival value (F17).
+  const tier2Ref = useRef<GradingRunTier2 | null>(null);
 
   const [phase, setPhase] = useState<IncrementalPhase>("idle");
   const [incrementalRun, setIncrementalRun] = useState<GradingRun | null>(null);
@@ -139,7 +144,8 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
   const runPool = async (
     requests: readonly GradeRunItemRequestBody[],
     header: ResolvedRunHeader,
-    speedGraderUrl: string | null
+    speedGraderUrl: string | null,
+    plan: IncrementalRunPlan
   ) => {
     let cursor = 0;
     let doneCount = 0;
@@ -152,10 +158,29 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
           totalTicketCount: requests.length,
           arrived: arrivedRef.current,
           phase: forPhase,
-          tier2: null, // W6 wires completeGradingRunHeaderAction's result here.
+          tier2: tier2Ref.current,
         })
       );
     };
+
+    // W6 (design 4.3, F16-F18): fired here, on the incremental path only,
+    // NEVER awaited - it must not sit on the critical path to row 1. myRunId
+    // is the SAME identity token selectRunKey reads (RULING 131): a late
+    // Tier 2 promise from a superseded run must not write into its successor.
+    const myRunId = runIdRef.current;
+    completeGradingRunHeaderAction(plan.assignmentInstructions, plan.rubric, plan.provider)
+      .then((tier2) => {
+        if (runIdRef.current !== myRunId) return;
+        tier2Ref.current = tier2;
+        rebuild(arrivedRef.current.length === requests.length ? "complete" : cancelledRef.current ? "stopping" : "running");
+      })
+      .catch((err) => {
+        if (runIdRef.current !== myRunId) return;
+        // F18: caught and OBSERVABLE, but never stops the run.
+        setIncrementalError(
+          `${err instanceof Error ? err.message : "Could not load the full-credit checklist or sample answer."} Grades are unaffected.`
+        );
+      });
 
     const runWorker = async (): Promise<void> => {
       for (;;) {
@@ -210,6 +235,7 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
       // starts empty for it.
       runIdRef.current += 1;
       arrivedRef.current = [];
+      tier2Ref.current = null;
       setPhase("running");
       setIncrementalRun(null);
       setIncrementalResults([]);
@@ -242,7 +268,7 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
       const { plan, header, speedGraderUrl } = prepared;
       setIncrementalTotal(plan.tickets.length);
       const requests = buildRunItemRequests(plan);
-      await runPool(requests, header, speedGraderUrl);
+      await runPool(requests, header, speedGraderUrl, plan);
     } catch (err) {
       setIncrementalError(err instanceof Error ? err.message : "Could not start this run.");
       // No tickets were ever dispatched down this path (the throw happens at

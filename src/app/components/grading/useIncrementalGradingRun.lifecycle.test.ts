@@ -49,8 +49,11 @@ vi.mock("react", () => ({
 }));
 
 const prepareGradingRunActionMock = vi.fn();
+// W6: resolves empty by default so pre-existing tests need no stub for it.
+const completeGradingRunHeaderActionMock = vi.fn().mockResolvedValue({ fullCreditChecklist: [], sampleAnswer: "" });
 vi.mock("@/app/actions/grading-incremental", () => ({
   prepareGradingRunAction: (...args: unknown[]) => prepareGradingRunActionMock(...args),
+  completeGradingRunHeaderAction: (...args: unknown[]) => completeGradingRunHeaderActionMock(...args),
 }));
 
 // RULING 117: this file proves the POOL's own behaviour (the press-twice
@@ -156,6 +159,7 @@ function useTestRender(submitWholeRunMock: (fd: FormData) => void) {
 beforeEach(() => {
   h0.reset();
   prepareGradingRunActionMock.mockReset();
+  completeGradingRunHeaderActionMock.mockClear();
   fetchMock.mockReset();
   routeGradingRunMock.mockReset();
   // Default: the pool branch, regardless of INCREMENTAL_ROUTE_ENABLED - see
@@ -520,6 +524,87 @@ describe("the phase machine (docs/a39-fill-waves.md W5, architecture 5.3)", () =
     const after = useTestRender(submitWholeRunMock);
     expect(after.phase).toBe("idle");
     expect(submitWholeRunMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("W6 (docs/a39-fill-waves.md, design 4.3 TIER 2): F16 - dispatched on mode:'incremental' ONLY", () => {
+  it("calls completeGradingRunHeaderAction exactly once, with the resolved plan's own fields, on the incremental path", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(twoTicketPlan()));
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("Alice") }) });
+    const submitWholeRunMock = vi.fn();
+    await useTestRender(submitWholeRunMock).startReview(fdWithCanvasUrl());
+    expect(completeGradingRunHeaderActionMock).toHaveBeenCalledTimes(1);
+    expect(completeGradingRunHeaderActionMock).toHaveBeenCalledWith("Grade it.", "1. Correctness", "gemini");
+  });
+
+  it("WATCHED FAILURE: never calls it when prepareGradingRunAction returns mode:'whole-run'", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce({ mode: "whole-run", reason: "too large" });
+    const submitWholeRunMock = vi.fn();
+    await useTestRender(submitWholeRunMock).startReview(fdWithCanvasUrl());
+    expect(completeGradingRunHeaderActionMock).not.toHaveBeenCalled();
+  });
+
+  it("WATCHED FAILURE: never calls it when prepareGradingRunAction returns mode:'refused'", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce({ mode: "refused", reason: "Refused: test" });
+    const submitWholeRunMock = vi.fn();
+    await useTestRender(submitWholeRunMock).startReview(fdWithCanvasUrl());
+    expect(completeGradingRunHeaderActionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("F17 (design 4.3): Tier 2 SURVIVES every later arrival - storage is a REF, not state", () => {
+  it("a Tier 2 payload that resolves before the SECOND ticket arrives is still on the run once every ticket is in", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(twoTicketPlan()));
+    const tier2Deferred = deferred<{ fullCreditChecklist: string[]; sampleAnswer: string }>();
+    completeGradingRunHeaderActionMock.mockReturnValueOnce(tier2Deferred.promise);
+    const bobDeferred = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("Alice") }) })
+      .mockReturnValueOnce(bobDeferred.promise);
+
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    const p1 = render1.startReview(fdWithCanvasUrl());
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // Tier 2 lands while Bob (the LATER arrival) is still outstanding.
+    tier2Deferred.resolve({ fullCreditChecklist: ["Cite sources"], sampleAnswer: "A model answer." });
+    await flushMicrotasks();
+    bobDeferred.resolve({ ok: true, json: async () => ({ sourceIndex: 1, result: gradedRow("Bob") }) });
+    await p1;
+
+    // WATCHED FAILURE: useState instead of a ref rebuilds from a stale closure.
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.incrementalRun?.fullCreditChecklist).toEqual(["Cite sources"]);
+    expect(after.incrementalRun?.sampleAnswer).toBe("A model answer.");
+  });
+});
+
+describe("F18 (design 4.3): a Tier 2 rejection is caught, OBSERVABLE, and never stops the run", () => {
+  it("every row arrives, phase reaches complete, incrementalError reports the failure", async () => {
+    prepareGradingRunActionMock.mockResolvedValueOnce(incrementalPrepared(twoTicketPlan()));
+    // Rejects AFTER "complete" - catches mutation (b): a rejection landing
+    // earlier would let the run's own finalPhase silently overwrite it.
+    let rejectTier2!: (err: unknown) => void;
+    const tier2Promise = new Promise<never>((_resolve, reject) => (rejectTier2 = reject));
+    tier2Promise.catch(() => {});
+    completeGradingRunHeaderActionMock.mockReturnValueOnce(tier2Promise);
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ sourceIndex: 0, result: gradedRow("Alice") }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ sourceIndex: 1, result: gradedRow("Bob") }) });
+
+    const submitWholeRunMock = vi.fn();
+    await useTestRender(submitWholeRunMock).startReview(fdWithCanvasUrl());
+    expect(useTestRender(submitWholeRunMock).phase).toBe("complete");
+
+    rejectTier2(new Error("checklist synthesis exploded"));
+    await flushMicrotasks();
+    const after = useTestRender(submitWholeRunMock);
+    expect(after.incrementalResults.map((r) => r.student).sort()).toEqual(["Alice", "Bob"]); // (a)
+    expect(after.phase).toBe("complete"); // (b) never diverted by the Tier 2 failure
+    expect(after.incrementalError).toContain("checklist synthesis exploded"); // (c)
+    expect(after.incrementalError).toContain("Grades are unaffected");
   });
 });
 

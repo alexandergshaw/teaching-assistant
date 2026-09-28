@@ -22,12 +22,14 @@
 // source order.
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
+import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
 import { resolveRunHeader } from "@/lib/grade/run-header";
+import { synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade/rubric";
 import { getSpeedGraderUrl } from "@/lib/canvas";
-import type { StudentSubmissionEntry, GradingRunHeader } from "@/lib/grade/types";
+import type { StudentSubmissionEntry, GradingRunHeader, GradingRunTier2 } from "@/lib/grade/types";
 import {
   estimateEntryWireBytes,
   ITEM_REQUEST_BYTE_BUDGET,
@@ -196,4 +198,33 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
     }
     return { mode: "whole-run", reason: message };
   }
+}
+
+/**
+ * W6 (docs/a39-fill-waves.md, design 4.3 TIER 2): the full-credit checklist
+ * and the sample answer, resolved AFTER prepareGradingRunAction has already
+ * handed the incremental pool its tickets - never on the path to row 1. The
+ * SAME two calls the whole-run path already pays for in its own Promise.all
+ * (grading.ts:821-822, :899-900, :908-909), just made independently callable
+ * so the client-driven pool (useIncrementalGradingRun.ts's runPool) can fire
+ * them without blocking a single grade-run-item request.
+ *
+ * Neither synthesizeFullCreditChecklist nor generateSampleAnswer throws on an
+ * LLM or parsing failure - both degrade internally (rubric.ts's own doc
+ * comments) - so a rejection from this action means something upstream of
+ * those two calls failed (e.g. the owner guard). The hook's own `.catch`
+ * (F18) is what makes that failure observable without stopping the run.
+ */
+export async function completeGradingRunHeaderAction(
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider
+): Promise<GradingRunTier2> {
+  await requireAppOwner();
+
+  const [fullCreditChecklist, sampleAnswer] = await Promise.all([
+    synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
+    generateSampleAnswer(assignmentInstructions, rubric, provider),
+  ]);
+  return { fullCreditChecklist, sampleAnswer };
 }

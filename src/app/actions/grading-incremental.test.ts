@@ -28,20 +28,32 @@ vi.mock("@/lib/canvas", async () => {
   const actual = await vi.importActual<typeof import("@/lib/canvas")>("@/lib/canvas");
   return { ...actual, getSpeedGraderUrl: vi.fn() };
 });
+// W6: completeGradingRunHeaderAction's own two calls, mocked directly rather
+// than through callLlm - synthesizeFullCreditChecklist/generateSampleAnswer
+// already degrade internally on any LLM failure (rubric.ts's own doc
+// comments), so mocking callLlm here would only prove their existing
+// degrade-on-failure behaviour, not this action's own wiring.
+vi.mock("@/lib/grade/rubric", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/grade/rubric")>("@/lib/grade/rubric");
+  return { ...actual, synthesizeFullCreditChecklist: vi.fn(), generateSampleAnswer: vi.fn() };
+});
 
 import JSZip from "jszip";
 import { requireAppOwner, requireUser } from "@/lib/supabase/auth";
 import { callLlm } from "@/lib/llm";
 import { extractCanvasEntries } from "@/lib/grade/extraction";
 import { getSpeedGraderUrl } from "@/lib/canvas";
-import { prepareGradingRunAction } from "./grading-incremental";
+import { prepareGradingRunAction, completeGradingRunHeaderAction } from "./grading-incremental";
 import { estimateEntryWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "../components/grading/incrementalRunPlan";
+import { synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade/rubric";
 
 const mockRequireAppOwner = vi.mocked(requireAppOwner);
 const mockRequireUser = vi.mocked(requireUser);
 const mockCallLlm = vi.mocked(callLlm);
 const mockExtractCanvasEntries = vi.mocked(extractCanvasEntries);
 const mockGetSpeedGraderUrl = vi.mocked(getSpeedGraderUrl);
+const mockSynthesizeFullCreditChecklist = vi.mocked(synthesizeFullCreditChecklist);
+const mockGenerateSampleAnswer = vi.mocked(generateSampleAnswer);
 
 // The item #9 fixture (docs/a39-inference-instrument-notes.md section 4.1),
 // duplicated rather than imported from extraction.inference.test.ts
@@ -299,5 +311,47 @@ describe("prepareGradingRunAction - Tier 1 step 6 swallows a getSpeedGraderUrl f
     if (result.mode === "incremental") {
       expect(result.speedGraderUrl).toBeNull();
     }
+  });
+});
+
+describe("completeGradingRunHeaderAction (W6, design 4.3 TIER 2)", () => {
+  it("returns the resolved checklist and sample answer from its own two calls", async () => {
+    mockSynthesizeFullCreditChecklist.mockResolvedValueOnce(["Cite two sources", "State a thesis"]);
+    mockGenerateSampleAnswer.mockResolvedValueOnce("A model answer.");
+
+    const result = await completeGradingRunHeaderAction("Write an essay.", "1. Correctness", "gemini");
+
+    expect(result).toEqual({
+      fullCreditChecklist: ["Cite two sources", "State a thesis"],
+      sampleAnswer: "A model answer.",
+    });
+    expect(mockSynthesizeFullCreditChecklist).toHaveBeenCalledWith("Write an essay.", "1. Correctness", "gemini");
+    expect(mockGenerateSampleAnswer).toHaveBeenCalledWith("Write an essay.", "1. Correctness", "gemini");
+  });
+
+  it("is guarded by the OWNER-ONLY requireAppOwner, never the permissive requireUser", async () => {
+    mockSynthesizeFullCreditChecklist.mockResolvedValueOnce([]);
+    mockGenerateSampleAnswer.mockResolvedValueOnce("");
+
+    await completeGradingRunHeaderAction("Write an essay.", "1. Correctness", "gemini");
+
+    // DIRECTION OF FAILURE: RED if the guard call is removed from this
+    // action's body - see the sabotage note below for the verified mutation.
+    expect(mockRequireAppOwner).toHaveBeenCalledTimes(1);
+    expect(mockRequireUser).not.toHaveBeenCalled();
+    // SABOTAGE PROOF (verified manually, cp-backup outside the repo, restore
+    // verified by diff): commenting out this action's own
+    // `await requireAppOwner();` made the assertion above fail with
+    // "expected mockRequireAppOwner to have been called 1 times, but it was
+    // called 0 times" - the RED output this test exists to guard against.
+  });
+
+  it("propagates a rejection from either call rather than swallowing it - the hook's own .catch (F18) is what makes it non-fatal, not this action", async () => {
+    mockSynthesizeFullCreditChecklist.mockRejectedValueOnce(new Error("checklist synthesis exploded"));
+    mockGenerateSampleAnswer.mockResolvedValueOnce("A model answer.");
+
+    await expect(completeGradingRunHeaderAction("Write an essay.", "1. Correctness", "gemini")).rejects.toThrow(
+      "checklist synthesis exploded"
+    );
   });
 });

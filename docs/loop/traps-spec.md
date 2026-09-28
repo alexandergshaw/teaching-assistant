@@ -156,3 +156,40 @@ single-line grep against multi-line export blocks, and a census grep blind to fi
 already migrated off a deprecated alias. The general rule: **when a count appears to
 settle a question, ask whether the instrument can even observe the thing it is being
 read as settling.**
+
+**`grep -c` counts lines that contain the word, not real occurrences of the symbol -
+and every brief that cites a call-site count for a boundary or a bound is trusting
+that difference away.** RULING 135: four wrong numbers went into sub-wave briefs in
+one session, all from the same cause.
+
+1. `src/app/actions/repo-grades.ts`, guard family `{requireUser, requireAppOwner}`:
+   `grep -cE "requireUser|requireAppOwner"` reports **3**; the real guard call-site
+   count is **2** - the third line is the `import { requireUser, requireAppOwner }`
+   statement, which mentions both names and calls neither.
+2. `src/app/actions/course-hub-integrations.ts`, guard family `{requireUser,
+   requireAppOwner, requireOwner}`: the combined `grep -cE` reports **15**; the real
+   count is **10** - the gap is the import line plus four comment lines discussing
+   `requireOwner()`, a deprecated alias the file's own JSDoc names and never calls.
+3. `src/app/actions/grading.ts`, same guard family, counted per symbol and SUMMED
+   (`grep -c "requireUser"` = 18, `grep -c "requireAppOwner"` = 4, added by hand to
+   22): the real count is **20** - both guards are imported on one shared line, so
+   summing two single-symbol greps counts that one line twice.
+4. An area slug taken from a grep hit that sat inside a comment stating what an area
+   must NOT be named - filed as a live row against a name nothing in the code used.
+
+**The reliable instrument in every case turned out to be a SECOND, INDEPENDENT
+ONE, not a better regex.** A comment-stripping regex only encodes half the lesson
+(instance 3's defect is an arithmetic mistake across two clean greps, not a comment
+leaking through one). `src/tools/symbol-count/count.ts` runs two instruments that do
+not share a failure mode - a TypeScript AST walk (`ts.createSourceFile`, the same
+parser `src/lib/module-graph/runtime-import-graph.ts` already uses, never a pattern
+over raw text) that classifies every real Identifier as a declaration, a call, or a
+bare reference, and a lexical scan (`ts.createScanner`, the compiler's own tokenizer,
+not a fourth hand-rolled comment stripper) that separately counts occurrences inside
+comments and inside string/template literals - and reports where the two disagree
+instead of collapsing them into one number. Proven against all three files above in
+`src/tools/symbol-count/count.test.ts`'s header comment and this ruling's own report:
+the tool's call-site count matches the real count in every instance; `grep -c` does
+not, in any of them. The tool also states, in its own output, what no source-level
+scan can see - a symbol assembled by string concatenation or built inside a template
+literal's `${...}` - because that requires running the program, not reading it.

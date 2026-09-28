@@ -23,6 +23,7 @@ import {
   saveRubricMemory,
   describeRubricOrigin,
 } from "@/lib/grade/rubric-memory";
+import { resolveRubricOriginScope, describeDropRubricOrigin } from "@/lib/grade/rubric-origin";
 import { formatRelative } from "@/app/utils/time";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -73,7 +74,10 @@ export default function CartridgeDropPanel() {
   // A39 wave 2: the visible rubric-memory origin label, and what THIS
   // component last restored (so a later edit is never overwritten).
   const [rubricOrigin, setRubricOrigin] = useState<string | null>(null);
-  const lastRestoredRubricRef = useRef<string | null>(null);
+  // A40 S2: retains the restored rubric's ACTUAL scope alongside its text,
+  // so resolveRubricOriginScope can attribute an untouched upload to the
+  // scope it was really restored from (not the scope requested now).
+  const lastRestoredRubricRef = useRef<{ rubric: string; scope: string } | null>(null);
   const [sniffHint, setSniffHint] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [lmsChosen, setLmsChosen] = useState(() => {
@@ -127,14 +131,14 @@ export default function CartridgeDropPanel() {
       if (!scope) return;
       const loaded = loadRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, scope);
       if (!loaded) return;
-      const untouched = rubricText === "" || rubricText === lastRestoredRubricRef.current;
+      const untouched = rubricText === "" || rubricText === lastRestoredRubricRef.current?.rubric;
       if (!untouched) return;
       // react-hooks/set-state-in-effect (docs' set-state-in-effect-idiom):
       // every setState below must follow an await.
       await Promise.resolve();
       if (cancelled) return;
       if (loaded.entry.rubric !== rubricText) setRubricText(loaded.entry.rubric);
-      lastRestoredRubricRef.current = loaded.entry.rubric;
+      lastRestoredRubricRef.current = { rubric: loaded.entry.rubric, scope: loaded.scope };
       setRubricOrigin(describeRubricOrigin(loaded, scope));
     })();
     return () => {
@@ -262,6 +266,17 @@ export default function CartridgeDropPanel() {
         saveRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, saveScope, { rubric: effective.rubricText });
       }
 
+      // A40 DECISION 16 / RULING 105: the origin the row will disclose,
+      // computed from what actually put text in the field - never from the
+      // scope this upload requested (see rubric-origin.ts).
+      const rubricOriginScope = resolveRubricOriginScope({
+        rubricText: effective.rubricText,
+        currentScope: saveScope,
+        restored: lastRestoredRubricRef.current,
+        sniffedRubric: sniffResult.rubricText ?? null,
+        archiveName: file.name,
+      });
+
       // Upload with effective values (passed directly, not relying on state which hasn't updated yet)
       const drop = await saveCartridgeDrop(supabase, user.id, file, {
         courseLabel: effective.courseLabel,
@@ -269,6 +284,7 @@ export default function CartridgeDropPanel() {
         pointsPossible: effective.pointsPossible,
         rubricText: effective.rubricText,
         lms: effective.lms,
+        rubricOriginScope,
       });
       setDrops((prev) => [drop, ...prev]);
 
@@ -559,6 +575,9 @@ export default function CartridgeDropPanel() {
                     <td>
                       {drop.courseLabel}
                       {drop.assignmentLabel ? ` / ${drop.assignmentLabel}` : ""}
+                      <p className={styles.fieldHint}>
+                        {describeDropRubricOrigin(drop.rubricOriginScope).text}
+                      </p>
                     </td>
                     <td>
                       <span className={getStatusBadgeClass(drop.status)}>

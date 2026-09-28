@@ -131,6 +131,7 @@ export interface CartridgeDropsRow {
   graded_at: string | null;
   created_at: string;
   updated_at: string;
+  rubric_origin_scope: string | null;
 }
 
 export interface CartridgeDropsInsert {
@@ -151,6 +152,7 @@ export interface CartridgeDropsInsert {
   graded_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  rubric_origin_scope?: string | null;
 }
 
 export interface CartridgeDropsUpdate {
@@ -171,6 +173,7 @@ export interface CartridgeDropsUpdate {
   graded_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  rubric_origin_scope?: string | null;
 }
 
 export interface ClassSessionTranscriptsRow {

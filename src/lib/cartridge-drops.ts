@@ -22,6 +22,10 @@ export interface CartridgeDrop {
   sizeBytes: number;
   gradedAt: string | null;
   createdAt: string;
+  // A40 DECISION 16: the scope (course/assignment pair, or upload) the
+  // persisted rubric text actually came from - null when no rubric was
+  // carried. Populated by mapCartridgeDrop from the new column below.
+  rubricOriginScope: string | null;
 }
 
 export async function saveCartridgeDrop(
@@ -34,6 +38,7 @@ export async function saveCartridgeDrop(
     pointsPossible: number | null;
     rubricText: string | null;
     lms: "canvas" | "brightspace" | "blackboard" | "moodle";
+    rubricOriginScope: string | null;
   }
 ): Promise<CartridgeDrop> {
   const id = crypto.randomUUID();
@@ -62,6 +67,7 @@ export async function saveCartridgeDrop(
       status: "new",
       storage_path: path,
       size_bytes: file.size,
+      rubric_origin_scope: meta.rubricOriginScope,
     })
     .select()
     .single();
@@ -147,5 +153,6 @@ function mapCartridgeDrop(row: Database["public"]["Tables"]["cartridge_drops"]["
     sizeBytes: row.size_bytes,
     gradedAt: row.graded_at,
     createdAt: row.created_at,
+    rubricOriginScope: row.rubric_origin_scope,
   };
 }

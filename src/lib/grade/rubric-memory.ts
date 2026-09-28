@@ -131,13 +131,18 @@ export function loadRubricMemory(storageKey: string, scope: string): LoadedRubri
  *  branch names a scope and a time. */
 export function describeRubricOrigin(loaded: LoadedRubricMemory, requestedScope: string): string {
   const when = formatSavedAt(loaded.entry.savedAt);
-  const from = describeScope(loaded.scope);
+  const from = describeRubricScope(loaded.scope);
   return loaded.scope === requestedScope
     ? `Rubric restored from ${from}, saved ${when}.`
     : `Rubric restored from your last saved rubric (${from}), saved ${when}.`;
 }
 
-function describeScope(scope: string): string {
+// A40 (RULING 115): exported so the drop-row disclosure (src/lib/grade/
+// rubric-origin.ts) uses this SAME humaniser rather than parsing the scope
+// string a second time. `describeScope` is already exported, with an
+// incompatible signature, from src/lib/knowledge-overview-scope.ts - this
+// name is deliberately different so the two are never confused.
+export function describeRubricScope(scope: string): string {
   const uploadMatch = /^upload:(.*)$/.exec(scope);
   if (uploadMatch) return `your upload of "${uploadMatch[1]}"`;
   const cartridgeMatch = /^cartridge:(.*)\|(.*)$/.exec(scope);

@@ -43,7 +43,7 @@ const rememberRubric = vi.fn();
 const listBranches = vi.fn();
 const getRepoTreeWithMeta = vi.fn();
 
-vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
 
 vi.mock("@/lib/github", async (importOriginal) => {
   // Partial mock: everything gradeRepoAction actually calls that hits the

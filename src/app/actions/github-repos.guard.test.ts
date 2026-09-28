@@ -5,6 +5,18 @@
 // Rank-1 basis in that document's section 2), so each reaches the owner's
 // single-owner GitHub personal access token.
 //
+// Sub-wave 2 (row SW2) extends this same file with the remaining 18 sites
+// (sites 20-37) rather than creating a second file, per that document's
+// section 4 note that SW1/SW2 split ONE file across two sub-waves. Every one
+// of these 18 also calls a PAT-spending function imported from "@/lib/github"
+// directly in its own body (getRepoTree, getFileText, putFile,
+// listOrgMembers, inviteOrgMember, setOrgMemberRole, listRepoCollaborators,
+// setRepoCollaborator, createPullRequest, setBranchProtection, updateRepo,
+// listRunArtifacts, getArtifactDownloadUrl, getRunLogsDownloadUrl,
+// listPendingDeployments, reviewPendingDeployments, downloadRepoZipball) or,
+// for gradeRepoAction, calls ingestRepo directly - so all 18 are restrictive
+// and none is added to GITHUB_NOT_OWNER_ONLY.
+//
 // Executes the REAL guard: mocks the client ("@/lib/supabase/server") and the
 // app-users lookup ("@/lib/supabase/app-users"), the idiom already landed at
 // src/app/actions/github.test.ts and src/lib/supabase/auth.test.ts:432-444 -
@@ -17,10 +29,8 @@
 // (ghFetch etc.) - none of that runs here because a non-owner is refused
 // before any action reaches parseRepoRef or any @/lib/github call.
 //
-// Table-driven over all 19 converted sites rather than one `it` block per
-// site (docs/r2-wave1-subwaves.md section 3's per-case cost note), so this
-// file both proves the swap behaviourally and stands as the sibling SW2 adds
-// its own 18 rows to.
+// Table-driven over all 19 (then 37) converted sites rather than one `it`
+// block per site (docs/r2-wave1-subwaves.md section 3's per-case cost note).
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -54,8 +64,26 @@ import {
   cancelWorkflowRunAction,
   rerunFailedJobsAction,
   setWorkflowEnabledAction,
+  listRunArtifactsAction,
+  getArtifactDownloadUrlAction,
+  getRunLogsDownloadUrlAction,
+  listPendingDeploymentsAction,
+  reviewPendingDeploymentsAction,
+  getRepoTreeAction,
+  getFileTextAction,
+  commitFileAction,
+  listOrgMembersAction,
+  inviteOrgMemberAction,
+  setOrgMemberRoleAction,
+  listRepoCollaboratorsAction,
+  setRepoCollaboratorAction,
+  createPullRequestAction,
+  setBranchProtectionAction,
+  updateRepoAction,
+  gradeRepoAction,
+  getRepoZipAction,
 } from "./github-repos";
-import type { CopyRepoOptions, CopyPathsOptions } from "@/lib/github";
+import type { CopyRepoOptions, CopyPathsOptions, BranchProtectionOptions, UpdateRepoPatch } from "@/lib/github";
 
 function fakeAppUserRow(overrides: Partial<AppUserRow> = {}): AppUserRow {
   return {
@@ -114,6 +142,18 @@ const copyPathsOptions: CopyPathsOptions = {
   paths: ["a.txt"],
 };
 
+const branchProtectionOptions: BranchProtectionOptions = {
+  requirePullRequestReviews: true,
+  requiredApprovingReviewCount: 1,
+  requireStatusChecks: false,
+  statusCheckContexts: [],
+  strictStatusChecks: false,
+  enforceAdmins: true,
+  requireLinearHistory: false,
+};
+
+const updateRepoPatch: UpdateRepoPatch = { description: "updated" };
+
 const cases: Array<[string, () => Promise<unknown>]> = [
   ["forkRepoAction", () => forkRepoAction("owner/repo")],
   ["copyRepoAction", () => copyRepoAction("owner/repo", copyRepoOptions)],
@@ -138,6 +178,40 @@ const cases: Array<[string, () => Promise<unknown>]> = [
 
 describe("github-repos.ts sites 1-19 - R2 SW1 guard swap", () => {
   it.each(cases)(
+    "%s rejects an active, signed-in non-owner with the owner-only message - the guard actually runs, not a mocked stub",
+    async (_name, run) => {
+      const result = await run();
+      expect(result).toEqual(OWNER_ONLY_ERROR);
+    }
+  );
+});
+
+const sw2Cases: Array<[string, () => Promise<unknown>]> = [
+  ["listRunArtifactsAction", () => listRunArtifactsAction("owner/repo", 1)],
+  ["getArtifactDownloadUrlAction", () => getArtifactDownloadUrlAction("owner/repo", 1)],
+  ["getRunLogsDownloadUrlAction", () => getRunLogsDownloadUrlAction("owner/repo", 1)],
+  ["listPendingDeploymentsAction", () => listPendingDeploymentsAction("owner/repo", 1)],
+  [
+    "reviewPendingDeploymentsAction",
+    () => reviewPendingDeploymentsAction("owner/repo", 1, [1], "approved", "comment"),
+  ],
+  ["getRepoTreeAction", () => getRepoTreeAction("owner/repo")],
+  ["getFileTextAction", () => getFileTextAction("owner/repo", "README.md")],
+  ["commitFileAction", () => commitFileAction("owner/repo", "README.md", "content", "message", "main")],
+  ["listOrgMembersAction", () => listOrgMembersAction("org")],
+  ["inviteOrgMemberAction", () => inviteOrgMemberAction("org", "someone", "member")],
+  ["setOrgMemberRoleAction", () => setOrgMemberRoleAction("org", "someone", "member")],
+  ["listRepoCollaboratorsAction", () => listRepoCollaboratorsAction("owner/repo")],
+  ["setRepoCollaboratorAction", () => setRepoCollaboratorAction("owner/repo", "someone", "push")],
+  ["createPullRequestAction", () => createPullRequestAction("owner/repo", "title", "head", "base", "body")],
+  ["setBranchProtectionAction", () => setBranchProtectionAction("owner/repo", "main", branchProtectionOptions)],
+  ["updateRepoAction", () => updateRepoAction("owner/repo", updateRepoPatch)],
+  ["gradeRepoAction", () => gradeRepoAction("owner/repo", "instructions", "rubric")],
+  ["getRepoZipAction", () => getRepoZipAction("owner/repo")],
+];
+
+describe("github-repos.ts sites 20-37 - R2 SW2 guard swap", () => {
+  it.each(sw2Cases)(
     "%s rejects an active, signed-in non-owner with the owner-only message - the guard actually runs, not a mocked stub",
     async (_name, run) => {
       const result = await run();

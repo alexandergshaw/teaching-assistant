@@ -22,7 +22,7 @@ const gradeEntries = vi.fn();
 const listBranches = vi.fn();
 const getRepoTreeWithMeta = vi.fn();
 
-vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "owner" })) }));
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
 
 vi.mock("@/lib/github", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/github")>();

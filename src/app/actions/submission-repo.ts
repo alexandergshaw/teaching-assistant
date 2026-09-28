@@ -1,6 +1,6 @@
 "use server";
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { getRepo, getRepoTree, getFileText, listCommits } from "@/lib/github";
 import {
   parseSubmissionGithubUrl,
@@ -32,7 +32,7 @@ export type FetchSubmissionRepoResult =
  */
 export async function fetchSubmissionRepoAction(submissionUrl: string): Promise<FetchSubmissionRepoResult> {
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     const parsed = parseSubmissionGithubUrl(submissionUrl);
     if ("error" in parsed) return parsed;

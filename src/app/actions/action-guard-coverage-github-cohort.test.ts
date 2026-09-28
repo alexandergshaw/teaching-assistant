@@ -39,6 +39,47 @@ const APP_DIR = path.join(process.cwd(), "src", "app");
 const SRC_ROOT = path.join(process.cwd(), "src");
 const GUARD_CALL = /\brequire(Owner|User|AppOwner)\s*\(/;
 const BARE_REQUIRE_USER_CALL = /\brequireUser\s*\(/;
+const REQUIRE_APP_OWNER_CALL = /\brequireAppOwner\s*\(/;
+
+/**
+ * RULING 124, closing two proven holes in the M4b check below (both
+ * demonstrated by execution, docs/ruling-124.md):
+ *
+ *   W1: the check asserted requireUser() was PRESENT and never that
+ *   requireAppOwner() was ABSENT, so a body calling both passed while being
+ *   owner-only in effect.
+ *   W2: the collector never stripped comments, so a flip to
+ *   requireAppOwner() that left the old call behind as `// requireUser()`
+ *   still satisfied the presence check.
+ *
+ * Duplicated, not imported, from guard-overtightening.test.ts's own
+ * `stripComments` (which that file's own header says is itself duplicated
+ * from this file's collector, for the same "no cross-test-file imports"
+ * reason) - importing a helper from another `*.test.ts` file re-runs that
+ * file's describe blocks (a recorded hazard in this repo). Block comments
+ * first (an inner JSDoc on a parameter sits inside the body slice), then line
+ * comments with the UNANCHORED `/\/\/.*$/` form - the anchored
+ * `/^[ \t]*\/\/.*$/` variant is blind to a trailing comment, which is exactly
+ * the bypass shape this ruling closes. No `/s` flag anywhere: it passes
+ * vitest and fails tsc with TS1501.
+ *
+ * WHAT THIS STRIPPER STILL CANNOT SEE, stated once so this file does not
+ * claim more than it measures: it strips `//` and `/* *\/` lexically, with no
+ * awareness of string or template-literal boundaries, so a `//` or `/*`
+ * embedded inside a STRING that itself contains a real guard call on the
+ * same or a following text region could in principle be misread. The
+ * positive control below proves the one shape that actually occurs in this
+ * codebase - a URL literal on its own line followed by a real call on a LATER
+ * line - is not eaten; it does not prove every conceivable string shape is
+ * safe.
+ */
+function stripComments(body: string): string {
+  const withoutBlocks = body.replace(/\/\*[\s\S]*?\*\//g, "");
+  return withoutBlocks
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
 
 interface ActionExport {
   file: string;
@@ -435,20 +476,77 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   // R4 (docs/r4-scope.md M4b), modelled on the media cohort's own converse
   // check in action-guard-coverage.test.ts: the check just above catches only
   // silent OVER-PERMISSIVENESS (an action that should be reviewed but is not
-  // listed). Nothing previously caught silent OVER-TIGHTENING - a later
-  // sweep flipping one of these nine reviewed-safe actions to
-  // requireAppOwner() while its "reviewed safe, stays permissive" reason
-  // keeps reading as current, with every other gate here still green.
-  it("every GITHUB_NOT_OWNER_ONLY action still calls requireUser() directly - a silent over-tightening would leave a stale reviewed-safe reason", () => {
+  // listed). This check catches silent OVER-TIGHTENING - a later sweep
+  // flipping one of these reviewed-safe actions to requireAppOwner() while
+  // its "reviewed safe, stays permissive" reason keeps reading as current,
+  // with every other gate here still green.
+  //
+  // RULING 124 CLOSED TWO PROVEN HOLES HERE, both demonstrated by execution
+  // (docs/ruling-124.md has the verbatim red/green): a body could hold BOTH
+  // guard names and still pass a presence-only check (W1), and a flip that
+  // left the old call behind as a comment still satisfied a check that never
+  // stripped comments (W2). Combined, appending four words to a tightened
+  // call site defeated the old version of this check while its
+  // GITHUB_NOT_OWNER_ONLY reason stayed present and false. This version
+  // strips comments before classifying, and fails on requireAppOwner() being
+  // PRESENT as well as on requireUser() being ABSENT.
+  //
+  // WHAT THIS CANNOT SEE, stated so it is not claimed as more than it is: a
+  // source scan proves which guard IDENTIFIER a body calls, never that the
+  // guard's rejection is honoured at runtime (a call inside a swallowed `try`
+  // or behind a condition that is never true would still read as permissive
+  // here), and it cannot see the two guard FUNCTIONS themselves being made to
+  // agree - that is `src/app/actions/guard-overtightening.test.ts`'s
+  // executing describe, a separate instrument, not duplicated here.
+  it("every GITHUB_NOT_OWNER_ONLY action still calls requireUser() and never requireAppOwner(), once comments are stripped - a silent over-tightening, even one with a stale comment, would leave the reviewed-safe reason false", () => {
     const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    const overTightened: string[] = [];
     for (const name of Object.keys(GITHUB_NOT_OWNER_ONLY)) {
       const action = byName.get(name);
       expect(action, `${name} is listed in GITHUB_NOT_OWNER_ONLY but is not an action export`).toBeTruthy();
-      expect(
-        BARE_REQUIRE_USER_CALL.test(action!.body),
-        `${action!.file}:${action!.line} ${name} should still call requireUser() directly, having been reviewed as safe to stay permissive`
-      ).toBe(true);
+      const codeBody = stripComments(action!.body);
+      const callsUser = BARE_REQUIRE_USER_CALL.test(codeBody);
+      const callsOwner = REQUIRE_APP_OWNER_CALL.test(codeBody);
+      if (!callsUser || callsOwner) {
+        const posture = callsOwner && callsUser ? "both guards - owner-only in effect" : callsOwner ? "owner-only" : "neither guard";
+        overTightened.push(
+          `${action!.file}:${action!.line} ${name} reads as "${posture}" once comments are stripped, but was reviewed as safe to stay permissive on requireUser() alone`
+        );
+      }
     }
+    expect(
+      overTightened,
+      "these GITHUB_NOT_OWNER_ONLY actions no longer read as permissive-only once comments are stripped from " +
+        "their bodies. Either they were tightened to requireAppOwner() (possibly leaving a stale comment behind, " +
+        "which a presence-only check cannot see), or a body now calls both guards, which is owner-only in effect. " +
+        "If the reclassification is deliberate, remove the entry from GITHUB_NOT_OWNER_ONLY, lower the count pin " +
+        "above in the same commit, and say which capability was withdrawn - do not make this pass by widening it"
+    ).toEqual([]);
+  });
+
+  // Positive control (RULING 124): proves the comment stripper above still
+  // sees a REAL guard call, on the two shapes most likely to defeat a naive
+  // stripper - a guard call that follows a comment line, and a guard call
+  // that follows a line holding a URL in a string (a bare `//` inside a
+  // string must not be read as a line-comment opener by anything upstream of
+  // this regex, and the line-splitting form here never sees inside the
+  // string in the first place, so the real risk is the NEXT line's call
+  // being swallowed by an unanchored strip - it is not).
+  it("the comment stripper still sees a real guard call after a comment line and after a URL-bearing line", () => {
+    const afterLineComment = stripComments("  // reviewed safe, stays permissive\n  await requireUser();");
+    expect(BARE_REQUIRE_USER_CALL.test(afterLineComment)).toBe(true);
+
+    const afterBlockComment = stripComments("  /** reviewed safe, stays permissive */\n  await requireUser();");
+    expect(BARE_REQUIRE_USER_CALL.test(afterBlockComment)).toBe(true);
+
+    const afterUrlLine = stripComments('  const u = "https://x.test/a";\n  await requireUser();');
+    expect(BARE_REQUIRE_USER_CALL.test(afterUrlLine)).toBe(true);
+
+    // And the negative shape this whole check exists for: a guard call that
+    // is ONLY inside a comment must not read as present.
+    const onlyInComment = stripComments("  await requireAppOwner(); // was requireUser()");
+    expect(BARE_REQUIRE_USER_CALL.test(onlyInComment)).toBe(false);
+    expect(REQUIRE_APP_OWNER_CALL.test(onlyInComment)).toBe(true);
   });
 
   it("GITHUB_FILES tracks the live import-graph closure - a floor, not a trusted final list (RULING 80/84)", () => {

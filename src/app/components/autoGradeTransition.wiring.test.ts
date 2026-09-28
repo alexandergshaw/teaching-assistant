@@ -347,3 +347,19 @@ describe("W4-8: the stop control is not buried under its own results", () => {
     expect(gtSource).toContain("Stop grading");
   });
 });
+
+// A39 W3 (docs/a39-fill-waves.md, F9 clause 2; RULING 131,
+// docs/a39-incremental-fill-architecture.md 5.7): GradingResults.tsx's reset
+// guard now decides "a new run arrived" from the run IDENTITY (runResetKey),
+// not the run REFERENCE. A third source reader, comments stripped like the
+// two above it, so a comment cannot satisfy or defeat either clause.
+const GRADING_RESULTS_PATH = join(process.cwd(), "src/app/components/GradingResults.tsx");
+const grSource = stripComments(readFileSync(GRADING_RESULTS_PATH, "utf8"));
+
+describe("F9 clause 2: GradingResults' reset guard uses runResetKey, not a bare run reference", () => {
+  it("runResetKey( appears exactly once, and the file contains no run !== prevRun", () => {
+    const runResetKeyMatches = [...grSource.matchAll(/runResetKey\(/g)];
+    expect(runResetKeyMatches.length).toBe(1);
+    expect(grSource).not.toContain("run !== prevRun");
+  });
+});

@@ -30,6 +30,7 @@ import {
   persistGradingResultsEdits,
   parseEarnedPoints,
   recomputeTotal,
+  runResetKey,
   speedGraderHref,
   type AreaEdit,
   type FeedbackField,
@@ -111,6 +112,15 @@ export type GradingResultsProps = {
   run: GradingRun;
   /** Canvas assignment/discussion URL grades post back to. */
   canvasUrl: string;
+  /** RULING 131 (docs/a39-incremental-fill-architecture.md 5.7): the value
+   * that decides "a new run arrived" in place of a reference comparison
+   * against `run`, needed because the incremental fill hands this component a
+   * NEW object per row landed - a reference check would reset the seven
+   * pieces of local state below on every arrival, not just on a new run.
+   * Optional: a caller that produces one whole object per run (this file's
+   * three existing render sites) passes nothing and keeps today's reference
+   * comparison, byte-identical (runResetKey(undefined, run) === run). */
+  runKey?: string;
   /** A36: which mount is rendering this (e.g. "canvas" for the classic
    * zip/canvas flow and LiveFeedPanel.tsx, which intentionally share
    * GradingTab's own canvasUrl state and are mutually exclusive in the UI;
@@ -180,6 +190,7 @@ export interface GradingResultsHandle {
  */
 const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(function GradingResults({
   run,
+  runKey,
   canvasUrl,
   editsSurface,
   assignmentName,
@@ -201,7 +212,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [edits, setEdits] = useState<Record<string, RowEdit>>(() =>
     correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run, editsSurface))
   );
-  const [prevRun, setPrevRun] = useState(run);
+  const identity = runResetKey(runKey, run);
+  const [prevIdentity, setPrevIdentity] = useState<unknown>(identity);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   const [posting, setPosting] = useState(false);
@@ -217,8 +229,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Loads from storage (not a bare re-seed) so edits already persisted for
   // this canvasUrl survive a run refresh; loadGradingResultsEdits degrades to
   // the seeded map for a student the new run doesn't have.
-  if (run !== prevRun) {
-    setPrevRun(run);
+  if (identity !== prevIdentity) {
+    setPrevIdentity(identity);
     setEdits(correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run, editsSurface)));
     setPostStatus({});
     setPostSummary("");

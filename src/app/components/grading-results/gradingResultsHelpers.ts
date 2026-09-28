@@ -726,3 +726,12 @@ export function fanOutGradingPostResult(
   }
   return next;
 }
+
+/** The value GradingResults compares to decide a NEW run arrived, as opposed
+ *  to the same run one row longer. A caller that can extend a run in place
+ *  (GradingTab's incremental fill) passes a runKey that is stable for the life
+ *  of that run; a caller that produces one whole object per run passes
+ *  undefined and gets today's reference comparison, byte-identical. */
+export function runResetKey(runKey: string | undefined, run: unknown): unknown {
+  return runKey ?? run;
+}

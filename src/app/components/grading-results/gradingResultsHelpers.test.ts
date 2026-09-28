@@ -42,6 +42,7 @@ import {
   parseEarnedPoints,
   parseScoreValue,
   recomputeTotal,
+  runResetKey,
   seedEdits,
   sortColumnKey,
   type AreaEdit,
@@ -559,3 +560,29 @@ describe("buildCsvContent", () => {
 // check for it) live in their own file, gradingResultsPostOutcome.test.ts -
 // this file was already close to the repo's 1000-line-per-file ceiling
 // (docs/DEV_LOOP.md) and adding them here would have pushed it over.
+
+// F9 clause 1 (docs/a39-incremental-fill-architecture.md 5.7, RULING 131):
+// the measurable half of "GradingResults decides a new run arrived from the
+// run IDENTITY, not the run REFERENCE." Two different run objects sharing a
+// runKey are ONE identity; two different run objects with no runKey are two
+// identities, exactly like today's `run !== prevRun` reference comparison.
+describe("runResetKey (F9 clause 1, RULING 131)", () => {
+  it("two different run objects carrying the SAME runKey are one identity", () => {
+    const runA = { results: [] } as unknown as GradingRun;
+    const runB = { results: [] } as unknown as GradingRun;
+    expect(runA).not.toBe(runB);
+    expect(runResetKey("incremental-7", runA)).toBe(runResetKey("incremental-7", runB));
+  });
+
+  it("with no runKey, two different run objects are two identities (today's reference comparison, preserved)", () => {
+    const runA = { results: [] } as unknown as GradingRun;
+    const runB = { results: [] } as unknown as GradingRun;
+    expect(runA).not.toBe(runB);
+    expect(runResetKey(undefined, runA)).not.toBe(runResetKey(undefined, runB));
+  });
+
+  it("with no runKey, the identity IS the run object itself", () => {
+    const run = { results: [] } as unknown as GradingRun;
+    expect(runResetKey(undefined, run)).toBe(run);
+  });
+});

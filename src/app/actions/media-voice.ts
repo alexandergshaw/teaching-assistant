@@ -4,6 +4,7 @@ import { splitNarrationText } from "@/lib/narration-chunks";
 import { saveRecordingFile, getRecordingFileUrl } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/supabase/auth";
+import type { AppUserRole } from "@/lib/supabase/app-users";
 import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 
@@ -245,9 +246,27 @@ export async function getVoiceSampleUrlAction(): Promise<{ url: string } | { err
 
 /**
  * Resolve the narration voice ID for the given user.
- * Resolution order: voiceIdOverride -> user_style.voice_id -> env ELEVENLABS_VOICE_ID -> stock.
+ * Resolution order: voiceIdOverride -> user_style.voice_id -> env
+ * ELEVENLABS_VOICE_ID (owner only) -> stock.
+ *
+ * RULING 125: `ELEVENLABS_VOICE_ID` is the owner's own cloned voice
+ * (src/lib/supabase/auth.ts:295 names "the cloned voice/avatar" as an
+ * owner-private capability alongside Canvas and GITHUB_TOKEN). The env
+ * fallback is therefore gated on `role === "owner"`, the same shape
+ * `resolveCanvasCredential` uses in src/lib/canvas-credentials.ts:220 -
+ * contained at the read site, not by tightening either caller's guard. A
+ * non-owner with no stored voice of their own, and any owner with no stored
+ * voice, both fall through to the same hard-coded stock voice id
+ * ("21m00Tcm4TlvDq8ikWAM", ElevenLabs' public "Rachel" voice - see the doc
+ * comment on synthesizeNarrationAction below) that was already the default
+ * here before this ruling; nothing about that default changes for anyone.
+ * A caller-supplied override still wins for both roles, unchanged.
  */
-async function resolveNarrationVoiceId(userId: string, voiceIdOverride?: string): Promise<string> {
+async function resolveNarrationVoiceId(
+  userId: string,
+  role: AppUserRole | undefined,
+  voiceIdOverride?: string
+): Promise<string> {
   if (voiceIdOverride?.trim()) {
     return voiceIdOverride.trim();
   }
@@ -258,7 +277,14 @@ async function resolveNarrationVoiceId(userId: string, voiceIdOverride?: string)
     return style.voiceId;
   }
 
-  return process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+  if (role === "owner") {
+    const envVoiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
+    if (envVoiceId) {
+      return envVoiceId;
+    }
+  }
+
+  return "21m00Tcm4TlvDq8ikWAM";
 }
 
 /**
@@ -299,7 +325,7 @@ export async function synthesizeNarrationAction(
     const t = text.trim();
     if (!t) return { error: "Nothing to synthesize." };
     if (t.length > 4000) return { error: "That segment is too long for one synthesis call." };
-    const voiceId = await resolveNarrationVoiceId(user.id, voiceIdOverride);
+    const voiceId = await resolveNarrationVoiceId(user.id, user.role, voiceIdOverride);
     const buf = await synthesizeSegment(key, voiceId, t);
     return { base64: buf.toString("base64"), mimeType: "audio/mpeg" };
   } catch (err) {
@@ -325,7 +351,7 @@ export async function synthesizeLongNarrationAction(
     if (!t) return { error: "Nothing to synthesize." };
     // 10-chunk ceiling keeps the call inside the platform's 60s function cap.
     if (t.length > 38_000) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
-    const voiceId = await resolveNarrationVoiceId(user.id, voiceIdOverride);
+    const voiceId = await resolveNarrationVoiceId(user.id, user.role, voiceIdOverride);
     const chunks = splitNarrationText(t);
     if (chunks.length > 10) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
     const buffers: Buffer[] = [];

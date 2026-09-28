@@ -8,7 +8,7 @@
 // src/lib/student-repo-status.ts instead. This file is orchestration only:
 // it fetches the facts from GitHub and hands them to that pure module.
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { rosterToRows } from "@/lib/courses-tab-helpers";
 import { studentRepoName } from "@/lib/student-repo-names";
 import {
@@ -115,7 +115,7 @@ export async function studentRepoInvitationStatusAction(
   rosterText: string
 ): Promise<{ rows: StudentRepoInvitationRow[]; checkedAt: number; notChecked: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const trimmedOrg = org.trim();
     if (!trimmedOrg) return { error: "Choose an organization." };
 
@@ -202,7 +202,7 @@ export async function resendStudentRepoInviteAction(
   permission: RepoPermission
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const trimmedOrg = org.trim();
     const trimmedRepo = repo.trim();
     const user = normalizeHandle(username);
@@ -236,7 +236,7 @@ export async function revokeStudentRepoInviteAction(
   invitationId: number
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const trimmedOrg = org.trim();
     const trimmedRepo = repo.trim();
     if (!trimmedOrg) return { error: "Choose an organization." };

@@ -11,7 +11,12 @@ const listRepoCollaborators = vi.fn();
 const setRepoCollaborator = vi.fn();
 const deleteRepoInvitation = vi.fn();
 
-vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "owner" })) }));
+// R2 wave 1, sub-wave 5: all three actions in this file moved from the
+// permissive requireOwner() alias to requireAppOwner() (each reaches the
+// shared GitHub PAT directly in its own body). This mock is a stub of the
+// auth module, not an execution of the real guard - see
+// github-student-repos.guard.test.ts for the executing test.
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
 
 vi.mock("@/lib/github", () => ({
   listOrgRepos: (...args: unknown[]) => listOrgRepos(...args),

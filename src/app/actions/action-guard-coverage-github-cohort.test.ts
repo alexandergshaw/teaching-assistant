@@ -320,6 +320,15 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
     "calls only callLlm/prompt builders - never calls createAnnouncementFromMarkdown, the file's one Canvas call site",
   postWalkthroughAnnouncementAction:
     "its one call to createAnnouncementFromMarkdown reaches resolveCanvasCredential, which only touches the owner's env pair when the CALLING identity's own role is 'owner' - a non-owner caller gets CANVAS_CREDENTIAL_REQUIRED_MESSAGE, never the owner's Canvas token",
+  // R2 wave 1, sub-wave 5 (docs/r2-wave1-subwaves.md section 4, row SW5):
+  // extractDeckConceptsAction (actions/visualizer.ts) calls only callLlm and
+  // the pure helpers clampDeckConcepts/parseDeckConcepts/conceptsFromSlideTitles
+  // - never getFileText or putFile, the two names this file imports from
+  // "@/lib/github" and the only calls its sibling actions
+  // (findVisualizerConceptAction, createVisualizerConceptAction) make. Those
+  // two moved to requireAppOwner(); this one stays requireUser().
+  extractDeckConceptsAction:
+    "calls only callLlm and the pure deck-concepts helpers - never getFileText/putFile, the file's only GitHub PAT calls, which its sibling actions make instead",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live

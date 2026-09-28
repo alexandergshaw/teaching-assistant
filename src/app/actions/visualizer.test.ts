@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// extractDeckConceptsAction / createVisualizerConceptAction call requireOwner()
-// (auth), callLlm() (network) and getFileText/putFile (GitHub REST) - all three
+// extractDeckConceptsAction calls requireUser(), createVisualizerConceptAction
+// calls requireAppOwner() (auth), callLlm() (network) and getFileText/putFile
+// (GitHub REST) - all three
 // are mocked so the pipeline logic itself (clamping, JSON parsing, the
 // slide-title fallback, topic routing, component validation/retry, and the
 // three-file commit) runs for real without hitting Supabase, Gemini, or
@@ -9,8 +10,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // conceptsFromSlideTitles) live in src/lib/workflows/deck-concepts.test.ts;
 // insertNavLeaf/insertTopicPageCase/creatableTopics/topicByKey live in
 // src/lib/visualizer.test.ts.
+// R2 wave 1, sub-wave 5: createVisualizerConceptAction moved to
+// requireAppOwner() (reaches getFileText/putFile, the file's GitHub PAT
+// calls, directly). extractDeckConceptsAction stays on requireUser()
+// (permissive - calls only callLlm and pure helpers, never getFileText or
+// putFile). This mock is a stub of the auth module, not an execution of the
+// real guard - see visualizer.guard.test.ts for the executing test.
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireUser: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/llm", async () => {
@@ -31,7 +39,7 @@ vi.mock("@/lib/github", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner, requireUser } from "@/lib/supabase/auth";
 import { getFileText, putFile } from "@/lib/github";
 import { extractDeckConceptsAction, createVisualizerConceptAction } from "./visualizer";
 
@@ -68,7 +76,7 @@ describe("extractDeckConceptsAction", () => {
     // value it queued would otherwise leak the leftover queued value into
     // whichever test runs next. resetAllMocks clears the queue too.
     vi.resetAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
   it("returns an error for an empty/whitespace-only deck without calling the LLM", async () => {
@@ -202,8 +210,8 @@ describe("extractDeckConceptsAction", () => {
     expect(prompt.length - sliceStart).toBe(CAP);
   });
 
-  it("a requireOwner rejection yields an error result, not a thrown exception", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("not signed in"));
+  it("a requireUser rejection yields an error result, not a thrown exception", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("not signed in"));
     const result = await extractDeckConceptsAction("some deck text", 8, "gemini");
     expect(result).toEqual({ error: "not signed in" });
   });
@@ -217,7 +225,7 @@ describe("createVisualizerConceptAction - topic routing", () => {
     // value it queued would otherwise leak the leftover queued value into
     // whichever test runs next. resetAllMocks clears the queue too.
     vi.resetAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireAppOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
   it("the topic-selection prompt lists only creatable topics, excluding the five UnderConstruction stubs", async () => {

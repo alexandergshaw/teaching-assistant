@@ -8,7 +8,7 @@
 // importing findVisualizerConceptAction / createVisualizerConceptAction from
 // "@/app/actions" unchanged.
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner, requireUser } from "@/lib/supabase/auth";
 import { putFile, getFileText } from "@/lib/github";
 import {
   TOPIC_ROUTES,
@@ -40,7 +40,7 @@ export async function findVisualizerConceptAction(
   { error: string }
 > {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!concept.trim()) {
       return { found: false };
     }
@@ -98,7 +98,7 @@ export async function createVisualizerConceptAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ url: string; slug: string; topic: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     if (provider === "embedded") {
       return { error: "Creating visualizer pages requires an LLM provider." };
@@ -272,7 +272,7 @@ export async function extractDeckConceptsAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ concepts: DeckConcept[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     const trimmedDeck = deckText.trim();
     if (!trimmedDeck) {

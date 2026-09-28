@@ -64,13 +64,11 @@ import {
 
 export default function ContentTab({
   view,
-  grading,
   announcements,
   inbox,
   versionControl,
 }: {
   view: ContentView;
-  grading?: ReactNode;
   announcements?: ReactNode;
   inbox?: ReactNode;
   versionControl?: ReactNode;
@@ -569,7 +567,7 @@ export default function ContentTab({
       (selection.source === "export" ? !!selection.courseId : !!courseId),
     [loadState.status, selection, courseId, liveSelectionNeedsInstitution]
   );
-  // Subtabs that act on the course loaded here. The rest (Grading, Announcements,
+  // Subtabs that act on the course loaded here. The rest (Announcements,
   // Inbox) carry their own course picker / are institution-scoped, so they work
   // without loading a course in this tab.
   //
@@ -769,9 +767,7 @@ export default function ContentTab({
             </p>
           )}
 
-          {view === "grading" ? (
-            grading
-          ) : view === "announcements" ? (
+          {view === "announcements" ? (
             announcements
           ) : view === "inbox" ? (
             inbox

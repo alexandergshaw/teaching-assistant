@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VIEW_KEY, type ContentView } from "../content-tab/constants";
-import { isManualViewType } from "../manual/manual-rail";
+import { isManualViewType, type GradingView } from "../manual/manual-rail";
 import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "../knowledge/knowledge-helpers";
 import {
   type ActiveTab,
@@ -19,6 +19,7 @@ import {
   normalizeWorkflowsView,
   normalizeBuildView,
   normalizeContentView,
+  normalizeGradingView,
   normalizeDraftsView,
   normalizeTasksView,
   normalizeKbInstitution,
@@ -26,6 +27,7 @@ import {
   parseUrlState,
   buildUrlSearch,
   resolveTabDestination,
+  resolveGradingPointer,
 } from "../../url-state";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 
@@ -42,11 +44,13 @@ export type ManualView =
   | "recording"
   | "ppt-design"
   | "artifact-design"
-  | "repo-grades";
+  | "grading";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 export type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
+// The Grading sub-tab's own inner selection (GRAD-SUBTAB wave 1).
+const GRADING_VIEW_KEY = "ta-grading-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades and Messages as subtabs.
@@ -162,6 +166,16 @@ export function useAppNavigation() {
       localStorage.setItem(VIEW_KEY, "modules");
       return "version-control";
     }
+    // GRAD-SUBTAB wave 1 (docs/tools-grading-subtab-architecture.md section
+    // 5.5, the "content-view:grading" retired pointer): a user whose last LMS
+    // content view was Grading (VIEW_KEY === "grading", now retired from
+    // ContentView - see content-tab/constants.ts) lands on the new Grading
+    // sub-tab instead of being silently dropped to Modules within LMS.
+    // Mirrors the version-control migration immediately above.
+    if (localStorage.getItem(VIEW_KEY) === "grading") {
+      localStorage.setItem(VIEW_KEY, "modules");
+      return "grading";
+    }
     // The URL wins over localStorage, but only when it actually names the
     // Tools tab's Manual section - a manualView param is meaningless (and
     // ignored) on a "?tab=courses" URL, and equally so on a "?tab=manual&
@@ -170,9 +184,29 @@ export function useAppNavigation() {
     // below already applies.
     const { params: urlParams, urlHasTab, destination } = readNavSource();
     if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {
+      // GRAD-SUBTAB wave 1 fix: a bookmark that predates this consolidation
+      // carries the OLD raw pointer value ("?manualView=repo-grades", or
+      // "?manualView=content&contentView=grading") rather than "grading",
+      // so normalizeManualView alone rejects it and silently falls back to
+      // "course-planning"/"modules" (isManualViewType/normalizeContentView
+      // do not know this alias). parseUrlState already resolves this exact
+      // alias for the popstate/Back-Forward path (url-state.ts); this mirrors
+      // it via the shared resolveGradingPointer helper so the INITIAL load
+      // from a raw URL gets the same redirect instead of bypassing it.
+      const gradingPointer = resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView"));
+      if (gradingPointer) return gradingPointer.manualView;
       return normalizeManualView(urlParams.get("manualView"));
     }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
+    // GRAD-SUBTAB wave 1 (the "repo-grades" retired pointer, M10): a stored
+    // ta-manual-view of "repo-grades" - the standalone subtab this
+    // consolidation absorbed - is no longer a member of ManualViewType, so
+    // isManualViewType would reject it and fall through to the ta-active-tab
+    // checks below, silently bouncing the user to Build Courses. Checked
+    // before isManualViewType for exactly that reason.
+    if (savedManual === "repo-grades") {
+      return "grading";
+    }
     // Validated against manual-rail.ts's authoritative MANUAL_VIEW_ORDER
     // (via isManualViewType) rather than a hand-restated list of literals,
     // so a subtab added to that order is accepted here automatically. A
@@ -185,7 +219,11 @@ export function useAppNavigation() {
     if (saved === "recording") return "recording";
     if (saved === "version-control") return "version-control";
     if (saved === "ppt-design") return "ppt-design";
-    if (saved === "content" || saved === "grading" || saved === "canvas") return "content";
+    // GRAD-SUBTAB wave 1 (the "active-tab:grading" retired pointer): this used
+    // to land on "content" (the LMS Grading destination); it now lands on the
+    // Grading sub-tab directly.
+    if (saved === "grading") return "grading";
+    if (saved === "content" || saved === "canvas") return "content";
     return "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
@@ -289,6 +327,38 @@ export function useAppNavigation() {
       return normalizeTasksView(urlParams.get("tasksView"));
     }
     return normalizeTasksView(localStorage.getItem(TASKS_VIEW_KEY));
+  });
+  // The Grading sub-tab's own inner selection (GRAD-SUBTAB wave 1): which of
+  // its two surfaces - Submissions or Repo Grades - is showing. Placed after
+  // tasksView, deliberately outside the isolated slice
+  // topLevelTabs.wiring.test.ts pins between the contentView initializer and
+  // `const [workflowsView` (a positional guard on that URL-sync effect's
+  // first-sync block, not this one - see this file's own popstate/URL-sync
+  // code below for the actual guarded window).
+  const [gradingView, setGradingView] = useState<GradingView>(() => {
+    if (typeof window === "undefined") return "run";
+    // The URL wins over localStorage, but only when it actually named Tools >
+    // Manual > Grading as the branch being restored into - see the matching
+    // comment on buildView above.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "grading") {
+      // GRAD-SUBTAB wave 1 fix: when the URL named a retired pointer (see the
+      // matching comment on the manualView initializer above), the pointer's
+      // own target names the inner view too ("repo-grades" means Repo Grades
+      // specifically, not the "run" default) - the URL has no "gradingView"
+      // param on an old bookmark, so normalizeGradingView(null) alone would
+      // land on the wrong inner surface even though manualView itself is now
+      // correct.
+      const gradingPointer = resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView"));
+      if (gradingPointer) return gradingPointer.gradingView;
+      return normalizeGradingView(urlParams.get("gradingView"));
+    }
+    // A stored ta-manual-view of "repo-grades" (retired - see
+    // manual-rail.ts's RETIRED_GRADING_POINTERS) means the Repo Grades inner
+    // item specifically. Consulted here directly because normalizeGradingView
+    // has no way to see the OLD manualView key at all.
+    if (localStorage.getItem(MANUAL_VIEW_KEY) === "repo-grades") return "repos";
+    return normalizeGradingView(localStorage.getItem(GRADING_VIEW_KEY));
   });
   // Which course the Courses tab should scroll to and highlight on arrival,
   // or null for "no pending focus". Set two ways: by InSessionBanner's
@@ -409,6 +479,10 @@ export function useAppNavigation() {
   }, [tasksView]);
 
   useEffect(() => {
+    localStorage.setItem(GRADING_VIEW_KEY, gradingView);
+  }, [gradingView]);
+
+  useEffect(() => {
     localStorage.setItem(COURSES_SECTION_KEY, coursesSection);
   }, [coursesSection]);
 
@@ -480,6 +554,7 @@ export function useAppNavigation() {
       workflowsView,
       buildView,
       contentView,
+      gradingView,
       draftsView,
       tasksView,
       kbInstitution,
@@ -516,6 +591,7 @@ export function useAppNavigation() {
     workflowsView,
     buildView,
     contentView,
+    gradingView,
     draftsView,
     tasksView,
     kbInstitution,
@@ -580,6 +656,7 @@ export function useAppNavigation() {
           setManualView(parsed.manualView);
           if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
           if (parsed.manualView === "content") setContentView(parsed.contentView);
+          if (parsed.manualView === "grading") setGradingView(parsed.gradingView);
         }
         if (parsed.toolsSection === "workflows") {
           setWorkflowsView(parsed.workflowsView);
@@ -619,6 +696,8 @@ export function useAppNavigation() {
     setBuildView,
     contentView,
     setContentView,
+    gradingView,
+    setGradingView,
     workflowsView,
     setWorkflowsView,
     draftsView,

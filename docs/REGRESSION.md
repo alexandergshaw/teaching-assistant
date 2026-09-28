@@ -44881,3 +44881,61 @@ missing one of the three would be a deletion, so it is not listed.
 | BL435-2 | Whether a real browser writes the file, on either stop path or on a second download in one tab | Repo owner | A real browser: the Downloads folder, `chrome://downloads`, and the `lastSessionAutoDownload` line as the discriminator | `docs/a20-owner-check.md` Section 0, cases 1-4 |
 | BL435-3 | Whether the auto-download checkboxes rehydrate after a reload | Repo owner | A real browser reload with `ta-rec-disc-auto-download` / `ta-rec-msg-auto-download` already set to `"1"` | `docs/a20-scope.md` Section 9, residual R3 - deliberately side-stepped by the owner check rather than answered |
 | BL435-4 | Whether a non-webm container is ever negotiated in practice, which is the only way the mkv/mov/ogv branches of `videoExtensionFromMimeType` are reached outside a unit fixture | Repo owner | The extension on the file that actually lands, plus `recorder.mimeType` in DevTools | Any owner-check capture run on a non-Chromium browser; not in the minimum set |
+
+## 436. GRAD-SUBTAB wave 1 as-shipped - Grading is a Tools inner-nav container, and old pointers redirect on all three read paths
+
+Written as the baseline for GRAD-SUBTAB waves 2 and 3, which will add the
+Recording and Drafts grading surfaces to the same inner nav. This entry is an
+oracle of what wave 1 DOES at HEAD, read from source; a later wave that moves a
+line below without being filed to move it is a regression. This repo's vitest is
+node-env and renders no component (docs/loop/this-repo.md section 2), so every
+statement about what the instructor SEES is a READING claim from JSX/source,
+never an observation of a rendered screen; the visible half is owner-walk
+OW-A1..A4 in docs/tools-grading-subtab-waves.md section 7.
+
+Wave 1 landed after a clean gate chain: scope, criteria (rejected, relocated),
+architecture (clean check), wave plan (clean check), build, verify (one blocker),
+fix, round-2 verify (clean). The blocker and its fix are recorded below because
+the fix is the invariant most likely to rot.
+
+**The re-grouping.** ManualViewType's `repo-grades` member became `grading`
+(manual-rail.ts). A single INNER_NAV table drives both getInnerDestinations and
+the new getInnerNavAriaLabel across course-planning / content / grading. The
+grading destination group holds two items: `grading-run` labelled "Submissions"
+and `grading-repos` labelled "Repo Grades". The old standalone `lms-grading`
+destination and the standalone `repo-grades` group are gone; LMS_VIEW_PRESENCE /
+LMS_VIEWS dropped `grading` (8 to 7) and ContentView dropped `"grading"`.
+
+**GradingTab.tsx was never opened.** Its mount JSX relocated within
+page.tsx to a `manualView === "grading"` branch rendering
+`gradingView === "repos" ? <RepoGradesTab/> : <GradingTab .../>` with the same 8
+props (all page.tsx locals) it received before. The frozen two-path
+`editsSurface="canvas"` set (autoGradeTransition.wiring.test.ts:412-417) and the
+path pin (:16) are intact. A wave that opens GradingTab.tsx has regressed this.
+
+**Three invariants that no rendered test guards here, so they are the oracle:**
+- The inner-nav accessible name for the grading view is the literal
+  "Grading tools" (manual-rail.ts INNER_NAV ariaLabel), NOT the old hardcoded
+  "LMS views". getInnerNavAriaLabel returns it; ManualRail.tsx feeds the tablist
+  from that function, not a ternary.
+- The `gradingView` URL param round-trips: UrlNavState.gradingView is required,
+  parseUrlState reads it, buildUrlSearch WRITES it (only under
+  manualView==="grading", non-default). A param parsed but never written, or
+  written but never parsed, is the defect the criteria version shipped.
+- Retired pointers redirect to the Grading surface on ALL THREE read paths:
+  localStorage (ta-content-view="grading", ta-manual-view="repo-grades",
+  ta-active-tab="grading"), popstate (via parseUrlState), AND initial-load-from-URL
+  (via resolveGradingPointer wired into both useAppNavigation lazy initializers).
+  The initial-load path was BLOCKER 1: it was missed because parseUrlState's only
+  non-test caller is onPopState, so a fresh browser opening an old bookmark
+  (?manualView=repo-grades or ?manualView=content&contentView=grading) bypassed
+  the alias and landed on Build Courses / LMS Modules. The green suite hid it
+  because the url-state tests exercise parseUrlState directly, which is NOT on the
+  initial-load path. The alias rule now lives once, in resolveGradingPointer
+  (url-state.ts), called by parseUrlState and both initializers - a second copy is
+  a drift hazard.
+
+**Precedence (RES-V2, owner-settled residual):** the localStorage
+VIEW_KEY==="grading" migration runs before the URL branch in the manualView
+initializer, mirroring the version-control migration precedent; unchanged by the
+fix and not a defect.

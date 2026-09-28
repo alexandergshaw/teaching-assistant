@@ -8,7 +8,9 @@ import {
   LMS_VIEWS,
   MANUAL_VIEW_ORDER,
   MANUAL_VIEW_LABELS,
+  GRADING_VIEWS,
   getInnerDestinations,
+  getInnerNavAriaLabel,
   isManualViewType,
 } from "./manual-rail";
 
@@ -31,7 +33,6 @@ describe("manual-rail", () => {
       expect(getDestinationById("lms-quizzes")).toBeDefined();
       expect(getDestinationById("lms-pages")).toBeDefined();
       expect(getDestinationById("lms-files")).toBeDefined();
-      expect(getDestinationById("lms-grading")).toBeDefined();
       expect(getDestinationById("lms-announcements")).toBeDefined();
       expect(getDestinationById("lms-inbox")).toBeDefined();
     });
@@ -39,96 +40,99 @@ describe("manual-rail", () => {
 
   describe("getActiveDestinationId", () => {
     it("should return build-new when manualView is course-planning and buildView is new", () => {
-      const id = getActiveDestinationId("course-planning", "new", "modules");
+      const id = getActiveDestinationId("course-planning", "new", "modules", "run");
       expect(id).toBe("build-new");
     });
 
     it("should return build-prebuilt when manualView is course-planning and buildView is prebuilt", () => {
-      const id = getActiveDestinationId("course-planning", "prebuilt", "modules");
+      const id = getActiveDestinationId("course-planning", "prebuilt", "modules", "run");
       expect(id).toBe("build-prebuilt");
     });
 
     it("should return lms-{view} when manualView is content", () => {
-      expect(getActiveDestinationId("content", "new", "modules")).toBe("lms-modules");
-      expect(getActiveDestinationId("content", "new", "assignments")).toBe("lms-assignments");
-      expect(getActiveDestinationId("content", "new", "quizzes")).toBe("lms-quizzes");
-      expect(getActiveDestinationId("content", "new", "pages")).toBe("lms-pages");
-      expect(getActiveDestinationId("content", "new", "grading")).toBe("lms-grading");
+      expect(getActiveDestinationId("content", "new", "modules", "run")).toBe("lms-modules");
+      expect(getActiveDestinationId("content", "new", "assignments", "run")).toBe("lms-assignments");
+      expect(getActiveDestinationId("content", "new", "quizzes", "run")).toBe("lms-quizzes");
+      expect(getActiveDestinationId("content", "new", "pages", "run")).toBe("lms-pages");
     });
 
     it("should return version-control when manualView is version-control", () => {
-      const id = getActiveDestinationId("version-control", "new", "modules");
+      const id = getActiveDestinationId("version-control", "new", "modules", "run");
       expect(id).toBe("version-control");
     });
 
     it("should return recording when manualView is recording", () => {
-      const id = getActiveDestinationId("recording", "new", "modules");
+      const id = getActiveDestinationId("recording", "new", "modules", "run");
       expect(id).toBe("recording");
     });
 
     it("should return ppt-design when manualView is ppt-design", () => {
-      const id = getActiveDestinationId("ppt-design", "new", "modules");
+      const id = getActiveDestinationId("ppt-design", "new", "modules", "run");
       expect(id).toBe("ppt-design");
     });
   });
 
   describe("resolveStateFromDestinationId", () => {
     it("should resolve build-new to course-planning + new", () => {
-      const state = resolveStateFromDestinationId("build-new", "content", "prebuilt", "modules");
+      const state = resolveStateFromDestinationId("build-new", "content", "prebuilt", "modules", "run");
       expect(state.manualView).toBe("course-planning");
       expect(state.buildView).toBe("new");
     });
 
     it("should resolve build-prebuilt to course-planning + prebuilt", () => {
-      const state = resolveStateFromDestinationId("build-prebuilt", "content", "new", "modules");
+      const state = resolveStateFromDestinationId("build-prebuilt", "content", "new", "modules", "run");
       expect(state.manualView).toBe("course-planning");
       expect(state.buildView).toBe("prebuilt");
     });
 
     it("should resolve lms-{view} to content + view", () => {
-      const state = resolveStateFromDestinationId("lms-pages", "recording", "new", "modules");
+      const state = resolveStateFromDestinationId("lms-pages", "recording", "new", "modules", "run");
       expect(state.manualView).toBe("content");
       expect(state.contentView).toBe("pages");
     });
 
     it("should resolve lms-assignments and lms-quizzes to content + their view", () => {
-      const assignments = resolveStateFromDestinationId("lms-assignments", "recording", "new", "modules");
+      const assignments = resolveStateFromDestinationId("lms-assignments", "recording", "new", "modules", "run");
       expect(assignments.manualView).toBe("content");
       expect(assignments.contentView).toBe("assignments");
 
-      const quizzes = resolveStateFromDestinationId("lms-quizzes", "recording", "new", "modules");
+      const quizzes = resolveStateFromDestinationId("lms-quizzes", "recording", "new", "modules", "run");
       expect(quizzes.manualView).toBe("content");
       expect(quizzes.contentView).toBe("quizzes");
     });
 
     it("should resolve version-control to version-control", () => {
-      const state = resolveStateFromDestinationId("version-control", "content", "new", "modules");
+      const state = resolveStateFromDestinationId("version-control", "content", "new", "modules", "run");
       expect(state.manualView).toBe("version-control");
     });
 
     it("should preserve current state for non-matching ids", () => {
-      const state = resolveStateFromDestinationId("invalid", "recording", "new", "modules");
+      const state = resolveStateFromDestinationId("invalid", "recording", "new", "modules", "run");
       expect(state.manualView).toBe("recording");
       expect(state.buildView).toBe("new");
       expect(state.contentView).toBe("modules");
     });
 
-    it("should resolve lms-grading correctly", () => {
-      const state = resolveStateFromDestinationId("lms-grading", "course-planning", "new", "modules");
-      expect(state.manualView).toBe("content");
-      expect(state.contentView).toBe("grading");
-    });
-
     it("should resolve lms-announcements correctly", () => {
-      const state = resolveStateFromDestinationId("lms-announcements", "course-planning", "new", "modules");
+      const state = resolveStateFromDestinationId("lms-announcements", "course-planning", "new", "modules", "run");
       expect(state.manualView).toBe("content");
       expect(state.contentView).toBe("announcements");
     });
 
     it("should resolve lms-inbox correctly", () => {
-      const state = resolveStateFromDestinationId("lms-inbox", "course-planning", "new", "modules");
+      const state = resolveStateFromDestinationId("lms-inbox", "course-planning", "new", "modules", "run");
       expect(state.manualView).toBe("content");
       expect(state.contentView).toBe("inbox");
+    });
+
+    it("should resolve grading-run and grading-repos to grading + their inner view", () => {
+      const run = resolveStateFromDestinationId("grading-run", "content", "new", "modules", "repos");
+      expect(run.manualView).toBe("grading");
+      expect(run.gradingView).toBe("run");
+
+      const repos = resolveStateFromDestinationId("grading-repos", "content", "new", "modules", "run");
+      expect(repos.manualView).toBe("grading");
+      expect(repos.gradingView).toBe("repos");
     });
   });
 
@@ -139,7 +143,7 @@ describe("manual-rail", () => {
     });
 
     it("should list all LMS views", () => {
-      expect(LMS_VIEWS).toEqual(["modules", "assignments", "quizzes", "pages", "files", "grading", "announcements", "inbox"]);
+      expect(LMS_VIEWS).toEqual(["modules", "assignments", "quizzes", "pages", "files", "announcements", "inbox"]);
     });
 
     it("should have all LMS views represented in rail", () => {
@@ -185,6 +189,9 @@ describe("manual-rail", () => {
     it("should list the seven subtabs in display order", () => {
       // Seven, not eight: "course-intel" left this rail entirely when it was
       // promoted to a top-level tab (D24a). See the removal block below.
+      // "grading" occupies the slot "repo-grades" used to (GRAD-SUBTAB wave 1):
+      // it absorbed both the old LMS Grading destination and the standalone
+      // Repo Grades subtab into one container with its own inner nav.
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -192,7 +199,7 @@ describe("manual-rail", () => {
         "recording",
         "ppt-design",
         "artifact-design",
-        "repo-grades",
+        "grading",
       ]);
     });
 
@@ -222,16 +229,52 @@ describe("manual-rail", () => {
         "lms-quizzes",
         "lms-pages",
         "lms-files",
-        "lms-grading",
         "lms-announcements",
         "lms-inbox",
       ]);
+    });
+
+    it("should return the Grading destinations for grading", () => {
+      const inner = getInnerDestinations("grading");
+      expect(inner?.map((d) => d.id)).toEqual(["grading-run", "grading-repos"]);
     });
 
     it("should return null for single-view subtabs", () => {
       expect(getInnerDestinations("version-control")).toBeNull();
       expect(getInnerDestinations("recording")).toBeNull();
       expect(getInnerDestinations("ppt-design")).toBeNull();
+    });
+  });
+
+  // I1 (docs/tools-grading-subtab-architecture.md section 6.1): a view has
+  // inner destinations if and only if it has an accessible name for them, and
+  // no two inner navs share a name - both readers derive from the SAME
+  // INNER_NAV table, so there is no second list either could fall out of sync
+  // with. This is what stands in for "the Grading inner nav is announced
+  // correctly" in an environment where no component is ever rendered.
+  describe("getInnerDestinations / getInnerNavAriaLabel parity (I1)", () => {
+    it("agree on which views have an inner nav, for every registered Manual view", () => {
+      for (const view of MANUAL_VIEW_ORDER) {
+        const hasDestinations = getInnerDestinations(view) !== null;
+        const hasLabel = getInnerNavAriaLabel(view) !== null;
+        expect(
+          hasDestinations,
+          `"${view}": getInnerDestinations() !== null was ${hasDestinations} but getInnerNavAriaLabel() !== null was ${hasLabel}`
+        ).toBe(hasLabel);
+      }
+    });
+
+    it("gives every inner nav a distinct accessible name", () => {
+      const labels = MANUAL_VIEW_ORDER.map((view) => getInnerNavAriaLabel(view)).filter(
+        (label): label is string => label !== null
+      );
+      expect(new Set(labels).size).toBe(labels.length);
+    });
+
+    it("labels the Grading inner nav distinctly from the LMS inner nav it used to sit inside", () => {
+      expect(getInnerNavAriaLabel("grading")).toBe("Grading tools");
+      expect(getInnerNavAriaLabel("content")).toBe("LMS views");
+      expect(getInnerNavAriaLabel("grading")).not.toBe(getInnerNavAriaLabel("content"));
     });
   });
 });
@@ -255,7 +298,7 @@ describe("manual-rail", () => {
 describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard over every LMS_VIEWS member", () => {
   it("resolves 'lms-<view>' to manualView 'content' and contentView <view>, for every member of LMS_VIEWS", () => {
     for (const view of LMS_VIEWS) {
-      const state = resolveStateFromDestinationId(`lms-${view}`, "recording", "new", "modules");
+      const state = resolveStateFromDestinationId(`lms-${view}`, "recording", "new", "modules", "run");
       expect(state.manualView).toBe("content");
       expect(state.contentView).toBe(view);
     }
@@ -263,16 +306,35 @@ describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard
 
   it("round-trips every LMS_VIEWS member through getActiveDestinationId back to 'lms-<view>'", () => {
     for (const view of LMS_VIEWS) {
-      expect(getActiveDestinationId("content", "new", view)).toBe(`lms-${view}`);
+      expect(getActiveDestinationId("content", "new", view, "run")).toBe(`lms-${view}`);
+    }
+  });
+});
+
+// AC2/hops 7-8 (docs/tools-grading-subtab-architecture.md section 8): the
+// same derived-guard shape as the LMS_VIEWS loop above, over the Grading
+// sub-tab's own two-member inner selection.
+describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard over every GRADING_VIEWS member", () => {
+  it("resolves 'grading-<view>' to manualView 'grading' and gradingView <view>, for every member of GRADING_VIEWS", () => {
+    for (const view of GRADING_VIEWS) {
+      const state = resolveStateFromDestinationId(`grading-${view}`, "recording", "new", "modules", "run");
+      expect(state.manualView).toBe("grading");
+      expect(state.gradingView).toBe(view);
+    }
+  });
+
+  it("round-trips every GRADING_VIEWS member through getActiveDestinationId back to 'grading-<view>'", () => {
+    for (const view of GRADING_VIEWS) {
+      expect(getActiveDestinationId("grading", "new", "modules", view)).toBe(`grading-${view}`);
     }
   });
 });
 
 describe("artifact-design subtab", () => {
   it("is reachable from its destination id and reports itself as active", () => {
-    const resolved = resolveStateFromDestinationId("artifact-design", "content", "new", "modules");
+    const resolved = resolveStateFromDestinationId("artifact-design", "content", "new", "modules", "run");
     expect(resolved.manualView).toBe("artifact-design");
-    expect(getActiveDestinationId("artifact-design", "new", "modules")).toBe("artifact-design");
+    expect(getActiveDestinationId("artifact-design", "new", "modules", "run")).toBe("artifact-design");
   });
 
   it("has a rail destination with a label and description", () => {
@@ -287,34 +349,74 @@ describe("artifact-design subtab", () => {
   });
 });
 
-// New top-level Manual subtab (AC1 of
-// docs/repo-grades-view-acceptance-criteria.md): navigation-shell wave only,
-// modeled directly on the artifact-design subtab block above.
-describe("repo-grades subtab", () => {
+// The Grading sub-tab (GRAD-SUBTAB wave 1,
+// docs/tools-grading-subtab-architecture.md): a container with its own inner
+// navigation, absorbing the old LMS Grading destination and the standalone
+// Repo Grades subtab (docs/repo-grades-view-acceptance-criteria.md) into one
+// Manual-family chip.
+describe("grading subtab", () => {
   it("is reachable from its destination id and reports itself as active", () => {
-    const resolved = resolveStateFromDestinationId("repo-grades", "content", "new", "modules");
-    expect(resolved.manualView).toBe("repo-grades");
-    expect(getActiveDestinationId("repo-grades", "new", "modules")).toBe("repo-grades");
+    const resolved = resolveStateFromDestinationId("grading-run", "content", "new", "modules", "run");
+    expect(resolved.manualView).toBe("grading");
+    expect(getActiveDestinationId("grading", "new", "modules", "run")).toBe("grading-run");
   });
 
   it("has a rail destination with a label and description", () => {
-    const dest = getDestinationById("repo-grades");
+    const dest = getDestinationById("grading-run");
     expect(dest).toBeDefined();
-    expect(dest!.label).toBe("Repo Grades");
+    expect(dest!.label).toBe("Submissions");
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has no inner destinations (it is a single-destination subtab)", () => {
-    expect(getInnerDestinations("repo-grades")).toBeNull();
+  it("has two inner destinations: Submissions and Repo Grades", () => {
+    expect(getInnerDestinations("grading")?.map((d) => d.id)).toEqual(["grading-run", "grading-repos"]);
+    expect(getInnerDestinations("grading")?.map((d) => d.label)).toEqual(["Submissions", "Repo Grades"]);
   });
 
   it("is in MANUAL_VIEW_ORDER with a matching label", () => {
-    expect(MANUAL_VIEW_ORDER).toContain("repo-grades");
-    expect(MANUAL_VIEW_LABELS["repo-grades"]).toBe("Repo Grades");
+    expect(MANUAL_VIEW_ORDER).toContain("grading");
+    expect(MANUAL_VIEW_LABELS["grading"]).toBe("Grading");
   });
 
   it("is accepted by isManualViewType", () => {
-    expect(isManualViewType("repo-grades")).toBe(true);
+    expect(isManualViewType("grading")).toBe(true);
+  });
+});
+
+// AC7/M10 (docs/tools-grading-subtab-architecture.md section 5.5): every
+// pointer at a grading surface this consolidation retired must redirect to
+// the new container rather than silently bouncing. Modeled directly on the
+// course-intel/live-class removal blocks below - this project has removed a
+// subtab before, and that shape is what caught the leftovers last time.
+describe("retired grading pointers (AC7/M10)", () => {
+  it("is gone from the rail destinations under its old ids", () => {
+    expect(getDestinationById("lms-grading")).toBeUndefined();
+    expect(getDestinationById("repo-grades")).toBeUndefined();
+    const allDests = destinations.flatMap((g) => g.destinations).map((d) => d.id);
+    expect(allDests).not.toContain("lms-grading");
+    expect(allDests).not.toContain("repo-grades");
+  });
+
+  it("is gone from LMS_VIEWS, MANUAL_VIEW_ORDER and MANUAL_VIEW_LABELS", () => {
+    expect(LMS_VIEWS).not.toContain("grading");
+    expect(MANUAL_VIEW_ORDER).not.toContain("repo-grades");
+    expect(Object.keys(MANUAL_VIEW_LABELS)).not.toContain("repo-grades");
+  });
+
+  it("is rejected by isManualViewType, so a persisted 'repo-grades' manualView cannot restore into it directly", () => {
+    expect(isManualViewType("repo-grades")).toBe(false);
+  });
+
+  it("a persisted/legacy 'lms-grading' destination id resolves to the Grading sub-tab's Submissions surface, not a dead view", () => {
+    const state = resolveStateFromDestinationId("lms-grading", "recording", "new", "modules", "repos");
+    expect(state.manualView).toBe("grading");
+    expect(state.gradingView).toBe("run");
+  });
+
+  it("a persisted/legacy 'repo-grades' destination id resolves to the Grading sub-tab's Repo Grades surface, not a dead view", () => {
+    const state = resolveStateFromDestinationId("repo-grades", "recording", "new", "modules", "run");
+    expect(state.manualView).toBe("grading");
+    expect(state.gradingView).toBe("repos");
   });
 });
 
@@ -353,12 +455,12 @@ describe("course-intel subtab removal (promoted to a top-level tab)", () => {
     // "course-intel" is no longer a member of ManualViewType, so every
     // remaining subtab must resolve to an id other than "course-intel".
     for (const view of MANUAL_VIEW_ORDER) {
-      expect(getActiveDestinationId(view, "new", "modules")).not.toBe("course-intel");
+      expect(getActiveDestinationId(view, "new", "modules", "run")).not.toBe("course-intel");
     }
   });
 
   it("a persisted/legacy 'course-intel' destination id falls back to the current subtab rather than resolving to a dead view", () => {
-    const state = resolveStateFromDestinationId("course-intel", "recording", "new", "modules");
+    const state = resolveStateFromDestinationId("course-intel", "recording", "new", "modules", "run");
     expect(state.manualView).toBe("recording");
     expect(state.manualView).not.toBe("course-intel");
   });
@@ -382,7 +484,7 @@ describe("live-class subtab removal", () => {
     // "live-class" is no longer a member of ManualViewType, so every
     // remaining subtab must resolve to an id other than "live-class".
     for (const view of MANUAL_VIEW_ORDER) {
-      expect(getActiveDestinationId(view, "new", "modules")).not.toBe("live-class");
+      expect(getActiveDestinationId(view, "new", "modules", "run")).not.toBe("live-class");
     }
   });
 
@@ -390,7 +492,7 @@ describe("live-class subtab removal", () => {
     // Mirrors the migration guard in page.tsx's manualView restore: an id
     // resolveStateFromDestinationId no longer recognizes must leave the
     // current view untouched, never resolve to the removed subtab.
-    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules");
+    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules", "run");
     expect(state.manualView).toBe("recording");
     expect(state.manualView).not.toBe("live-class");
   });
@@ -431,7 +533,7 @@ describe("isManualViewType", () => {
 
   it("preserves the existing legacy-value fallback: a value isManualViewType rejects still resolves safely through resolveStateFromDestinationId rather than onto a dead view", () => {
     expect(isManualViewType("live-class")).toBe(false);
-    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules");
+    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules", "run");
     expect(state.manualView).toBe("recording");
     expect(state.manualView).not.toBe("live-class");
   });

@@ -33,7 +33,13 @@
 // listener.
 
 import { isManualViewType, type ManualViewType, type BuildViewType } from "./components/manual/manual-rail";
-import { LMS_VIEWS } from "./components/manual/manual-rail";
+import {
+  LMS_VIEWS,
+  isGradingView,
+  type GradingView,
+  type GradingPointerTarget,
+  RETIRED_GRADING_POINTERS,
+} from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
 import {
@@ -212,6 +218,10 @@ export function normalizeContentView(value: string | null): ContentView {
   return isContentView(value) ? value : "modules";
 }
 
+export function normalizeGradingView(value: string | null): GradingView {
+  return isGradingView(value) ? value : "run";
+}
+
 const DRAFTS_VIEW_VALUES: ReadonlySet<string> = new Set<DraftsView>(["grades", "messages"]);
 
 export function isDraftsView(value: unknown): value is DraftsView {
@@ -262,6 +272,7 @@ const DEFAULT_BUILD_VIEW = normalizeBuildView(null);
 const DEFAULT_CONTENT_VIEW = normalizeContentView(null);
 const DEFAULT_DRAFTS_VIEW = normalizeDraftsView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
+const DEFAULT_GRADING_VIEW = normalizeGradingView(null);
 
 const TAB_PARAM = "tab";
 // The three merged tabs' section params were NEW at D25; every param below
@@ -282,6 +293,7 @@ const MANUAL_VIEW_PARAM = "manualView";
 const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
+const GRADING_VIEW_PARAM = "gradingView";
 const DRAFTS_VIEW_PARAM = "draftsView";
 const TASKS_VIEW_PARAM = "tasksView";
 const KB_INSTITUTION_PARAM = "kbInstitution";
@@ -300,6 +312,7 @@ export interface UrlNavState {
   workflowsView: WorkflowsView;
   buildView: BuildViewType;
   contentView: ContentView;
+  gradingView: GradingView;
   draftsView: DraftsView;
   tasksView: TasksView;
   // null means "no page/institution named in the URL" - there is no fixed
@@ -320,6 +333,31 @@ export interface UrlNavState {
 // contentView/draftsView), so a param only takes effect when every level
 // above it in the chain also matches, regardless of what parseUrlState
 // returns for it.
+// GRAD-SUBTAB wave 1's migration (docs/tools-grading-subtab-architecture.md
+// section 5.5): two retired pointers arrive as OTHER params' values rather
+// than their own param, so they cannot be caught by normalizeManualView
+// alone. "?manualView=content&contentView=grading" named the old LMS
+// Grading destination; "?manualView=repo-grades" named the old standalone
+// Repo Grades subtab. Both now mean the Grading sub-tab.
+//
+// Exported as its own helper (rather than left inline in parseUrlState) so
+// every caller that resolves a manualView/gradingView pair from RAW URL
+// params - not just parseUrlState's popstate path, but useAppNavigation.ts's
+// initial-load initializers too - applies the exact same alias rule. Two
+// copies of this lookup is exactly the kind of drift this repo has already
+// paid for once (see manual-rail.ts's isManualViewType comment).
+export function resolveGradingPointer(
+  rawManualView: string | null,
+  rawContentView: string | null
+): GradingPointerTarget | undefined {
+  return (
+    (rawManualView === "content" && rawContentView !== null
+      ? RETIRED_GRADING_POINTERS[`content-view:${rawContentView}`]
+      : undefined) ??
+    (rawManualView !== null ? RETIRED_GRADING_POINTERS[rawManualView] : undefined)
+  );
+}
+
 export function parseUrlState(search: string): UrlNavState {
   const params = new URLSearchParams(search);
   // The tab value resolves to a whole destination first, because a RETIRED
@@ -334,15 +372,19 @@ export function parseUrlState(search: string): UrlNavState {
   const rawCoursesSection = params.get(COURSES_SECTION_PARAM);
   const rawToolsSection = params.get(TOOLS_SECTION_PARAM);
   const rawLibrarySection = params.get(LIBRARY_SECTION_PARAM);
+  const rawManualView = params.get(MANUAL_VIEW_PARAM);
+  const rawContentView = params.get(CONTENT_VIEW_PARAM);
+  const gradingPointer = resolveGradingPointer(rawManualView, rawContentView);
   return {
     tab: destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
     toolsSection: isToolsSection(rawToolsSection) ? rawToolsSection : destination.toolsSection,
     librarySection: isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection,
-    manualView: normalizeManualView(params.get(MANUAL_VIEW_PARAM)),
+    manualView: gradingPointer ? gradingPointer.manualView : normalizeManualView(rawManualView),
     workflowsView: normalizeWorkflowsView(params.get(WORKFLOWS_VIEW_PARAM)),
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
-    contentView: normalizeContentView(params.get(CONTENT_VIEW_PARAM)),
+    contentView: normalizeContentView(rawContentView),
+    gradingView: gradingPointer ? gradingPointer.gradingView : normalizeGradingView(params.get(GRADING_VIEW_PARAM)),
     draftsView: normalizeDraftsView(params.get(DRAFTS_VIEW_PARAM)),
     tasksView: normalizeTasksView(params.get(TASKS_VIEW_PARAM)),
     kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),
@@ -388,6 +430,9 @@ export function buildUrlSearch(state: UrlNavState): string {
       }
       if (state.manualView === "content" && state.contentView !== DEFAULT_CONTENT_VIEW) {
         params.set(CONTENT_VIEW_PARAM, state.contentView);
+      }
+      if (state.manualView === "grading" && state.gradingView !== DEFAULT_GRADING_VIEW) {
+        params.set(GRADING_VIEW_PARAM, state.gradingView);
       }
     }
     if (state.toolsSection === "workflows") {

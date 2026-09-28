@@ -284,6 +284,27 @@ describe("the merged tabs are one navigation level deep", () => {
     expect(source.split('role="tablist"').length - 1).toBe(1);
   });
 
+  // I2 (docs/tools-grading-subtab-architecture.md section 6.1): the inner
+  // nav's accessible name must be FED FROM getInnerNavAriaLabel, not a
+  // hand-written literal or ternary - that is exactly what let a third inner
+  // nav (Grading) go out announced as "LMS views" with every other gate
+  // green. This is a source-text claim, not a render claim: it proves the
+  // attribute is wired to the function, not what assistive technology
+  // actually announces (see the owner walk, OW-A1).
+  it("feeds ManualRail's inner-nav aria-label from getInnerNavAriaLabel, never a hand-written literal", () => {
+    const source = readWithoutComments(MANUAL_RAIL);
+    expect(
+      source,
+      "ManualRail.tsx's aria-label is not fed from getInnerNavAriaLabel(...) - a hand-written " +
+        "literal or ternary here is exactly how a new inner nav goes out announced under the " +
+        "wrong name with every other gate green."
+    ).toContain("aria-label={getInnerNavAriaLabel(");
+    expect(
+      source,
+      'ManualRail.tsx still hard-codes "LMS views" - the label must come from getInnerNavAriaLabel'
+    ).not.toContain("LMS views");
+  });
+
   it("has taken the Workflows/Automations/Drafts subnav out of WorkflowsPanel, leaving only the Drafts subnav", () => {
     const source = readWithoutComments(WORKFLOWS_PANEL);
     expect(source.length, "WorkflowsPanel.tsx could not be read").toBeGreaterThan(200);

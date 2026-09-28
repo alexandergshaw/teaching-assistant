@@ -39,6 +39,7 @@ const DEFAULT_STATE: UrlNavState = {
   workflowsView: "workflows",
   buildView: "prebuilt",
   contentView: "modules",
+  gradingView: "run",
   draftsView: "grades",
   tasksView: "term",
   kbInstitution: null,
@@ -269,7 +270,7 @@ describe("url-state", () => {
     it("accepts a valid Manual subtab", () => {
       expect(normalizeManualView("content")).toBe("content");
       expect(normalizeManualView("artifact-design")).toBe("artifact-design");
-      expect(normalizeManualView("repo-grades")).toBe("repo-grades");
+      expect(normalizeManualView("grading")).toBe("grading");
     });
 
     it("falls back to course-planning for an unknown or missing value", () => {
@@ -301,7 +302,6 @@ describe("url-state", () => {
       expect(normalizeContentView("modules")).toBe("modules");
       expect(normalizeContentView("pages")).toBe("pages");
       expect(normalizeContentView("files")).toBe("files");
-      expect(normalizeContentView("grading")).toBe("grading");
       expect(normalizeContentView("announcements")).toBe("announcements");
       expect(normalizeContentView("inbox")).toBe("inbox");
     });
@@ -458,11 +458,11 @@ describe("url-state", () => {
     });
 
     it("parses contentView nested under manual + content", () => {
-      expect(parseUrlState("?tab=manual&manualView=content&contentView=grading")).toEqual({
+      expect(parseUrlState("?tab=manual&manualView=content&contentView=assignments")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         manualView: "content",
-        contentView: "grading",
+        contentView: "assignments",
       });
     });
 
@@ -533,10 +533,10 @@ describe("url-state", () => {
         buildView: "new",
       });
       // contentView present but manualView is "course-planning", not "content".
-      expect(parseUrlState("?tab=manual&contentView=grading")).toEqual({
+      expect(parseUrlState("?tab=manual&contentView=assignments")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
-        contentView: "grading",
+        contentView: "assignments",
       });
       // draftsView present but workflowsView is "automations", not "drafts".
       expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations&draftsView=messages")).toEqual(
@@ -668,8 +668,8 @@ describe("url-state", () => {
 
     it("includes contentView only when manual + content, and only when non-default", () => {
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "grading" })
-      ).toBe("?tab=manual&manualView=content&contentView=grading");
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "assignments" })
+      ).toBe("?tab=manual&manualView=content&contentView=assignments");
       expect(
         buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "modules" })
       ).toBe("?tab=manual&manualView=content");
@@ -677,7 +677,7 @@ describe("url-state", () => {
 
     it("drops contentView when manualView is not content", () => {
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", contentView: "grading" })
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", contentView: "assignments" })
       ).toBe("?tab=manual");
     });
 
@@ -759,9 +759,9 @@ describe("url-state", () => {
           ...DEFAULT_STATE,
           tab: "manual",
           manualView: "content",
-          contentView: "grading",
+          contentView: "assignments",
         })
-      ).toBe("?tab=manual&manualView=content&contentView=grading");
+      ).toBe("?tab=manual&manualView=content&contentView=assignments");
 
       expect(
         buildUrlSearch({
@@ -802,12 +802,15 @@ describe("url-state", () => {
   describe("no pre-existing view param was renamed", () => {
     it("still emits manualView, buildView, contentView, workflowsView, draftsView, tasksView, kbInstitution and kbPage", () => {
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "grading" })
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "assignments" })
       ).toContain("manualView=");
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "grading" })
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "assignments" })
       ).toContain("contentView=");
       expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", buildView: "new" })).toContain("buildView=");
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" })
+      ).toContain("gradingView=");
 
       const drafts = buildUrlSearch({
         ...DEFAULT_STATE,
@@ -871,29 +874,83 @@ describe("url-state", () => {
       };
       expect(parseUrlState(buildUrlSearch(recurringState))).toEqual(recurringState);
     });
+
+    // I3 (docs/tools-grading-subtab-architecture.md section 6.2): the
+    // directional round trip for gradingView. Necessary but not sufficient on
+    // its own - it catches an absent emit branch and a param emitted at the
+    // default or leaked onto a non-Grading branch, but not a THIRTEENTH param
+    // emitted under some other name (that is I4's job, the frozen-oracle
+    // extension in tab-rails.test.ts). Both are required.
+    it("preserves a non-default gradingView through Grading, and drops it elsewhere (I3)", () => {
+      const reposState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" };
+      const url = buildUrlSearch(reposState);
+      expect(url).toBe("?tab=manual&manualView=grading&gradingView=repos");
+      expect(parseUrlState(url)).toEqual(reposState);
+
+      // At the default, the param is omitted entirely.
+      const runState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "run" };
+      expect(buildUrlSearch(runState)).toBe("?tab=manual&manualView=grading");
+      expect(parseUrlState(buildUrlSearch(runState))).toEqual(runState);
+
+      // A non-default gradingView must never leak onto a branch it does not
+      // belong to - the manualView param is still written (it is non-default
+      // in its own right), but no gradingView param appears alongside it.
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", gradingView: "repos" })).toBe(
+        "?tab=manual&manualView=content"
+      );
+    });
   });
 
-  // AC1 item 4 (docs/repo-grades-view-acceptance-criteria.md): the
-  // "repo-grades" Manual subtab needs no special-casing in buildUrlSearch -
-  // normalizeManualView already accepts it (via isManualViewType, which is
-  // derived from manual-rail's MANUAL_VIEW_ORDER) and buildUrlSearch only
-  // special-cases "course-planning"/"content" for their nested sub-views.
-  // This pins that the round trip actually works rather than assuming it.
-  describe("repo-grades subtab round trip (AC1 item 4)", () => {
-    it("builds ?tab=manual&manualView=repo-grades and parses it back to the same state", () => {
-      const state: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "repo-grades" };
-      const url = buildUrlSearch(state);
-      expect(url).toBe("?tab=manual&manualView=repo-grades");
-      expect(parseUrlState(url)).toEqual(state);
+  // GRAD-SUBTAB wave 1, M10 (docs/tools-grading-subtab-architecture.md
+  // section 5.5): "repo-grades" is a RETIRED manualView pointer now - the
+  // standalone Repo Grades subtab it named was absorbed into the Grading
+  // sub-tab's inner navigation. An old "?manualView=repo-grades" link (or a
+  // hand-typed one) must resolve to the Grading chip with its Repo Grades
+  // inner item selected, and the canonical value must be written back - an
+  // alias is a redirect, not a synonym (tab-sections.ts's own rule for every
+  // other retired pointer).
+  describe("the retired 'repo-grades' manualView pointer resolves to the Grading sub-tab (M10)", () => {
+    it("resolves ?tab=manual&manualView=repo-grades to Grading with its Repo Grades inner item selected", () => {
+      const parsed = parseUrlState("?tab=manual&manualView=repo-grades");
+      expect(parsed.manualView).toBe("grading");
+      expect(parsed.gradingView).toBe("repos");
     });
 
-    it("never leaks manualView=repo-grades into the query string for a non-manual tab", () => {
-      expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", manualView: "repo-grades" })
-      ).toBe("?tab=courses");
-      expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "files", manualView: "repo-grades" })
-      ).toBe("?tab=files");
+    it("writes the canonical value back - an alias is a redirect, not a synonym", () => {
+      expect(buildUrlSearch(parseUrlState("?tab=manual&manualView=repo-grades"))).toBe(
+        "?tab=manual&manualView=grading&gradingView=repos"
+      );
+    });
+
+    it("is idempotent: the canonical URL parses and rebuilds to itself", () => {
+      const canonical = buildUrlSearch(parseUrlState("?tab=manual&manualView=repo-grades"));
+      expect(buildUrlSearch(parseUrlState(canonical))).toBe(canonical);
+    });
+
+    it("never leaks the retired manualView=repo-grades value into the query string for a non-manual tab", () => {
+      expect(parseUrlState("?tab=courses&manualView=repo-grades").tab).toBe("courses");
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", manualView: "grading", gradingView: "repos" })).toBe(
+        "?tab=courses"
+      );
+    });
+  });
+
+  // The other half of M10: the old LMS Grading destination
+  // (?manualView=content&contentView=grading, the "content-view:grading"
+  // pointer) also resolves to the Grading sub-tab rather than silently
+  // falling back to Modules within LMS once "grading" leaves ContentView.
+  describe("the retired 'content-view:grading' pointer resolves to the Grading sub-tab", () => {
+    it("resolves ?tab=manual&manualView=content&contentView=grading to Grading with its Submissions inner item selected", () => {
+      const parsed = parseUrlState("?tab=manual&manualView=content&contentView=grading");
+      expect(parsed.manualView).toBe("grading");
+      expect(parsed.gradingView).toBe("run");
+      expect(parsed.contentView).toBe("modules");
+    });
+
+    it("writes the canonical value back", () => {
+      expect(buildUrlSearch(parseUrlState("?tab=manual&manualView=content&contentView=grading"))).toBe(
+        "?tab=manual&manualView=grading"
+      );
     });
   });
 });

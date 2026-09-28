@@ -29,8 +29,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { LMS_VIEWS } from "../manual/manual-rail";
-import { normalizeContentView, isContentView } from "../../url-state";
+import { LMS_VIEWS, MANUAL_VIEW_ORDER, getInnerDestinations } from "../manual/manual-rail";
+import { normalizeContentView, isContentView, resolveGradingPointer } from "../../url-state";
 
 const SOURCE_PATH = join(process.cwd(), "src/app/components/home/useAppNavigation.ts");
 const source = readFileSync(SOURCE_PATH, "utf8");
@@ -152,6 +152,7 @@ describe("the view each rail chip writes persists under its own ta- key", () => 
     { constant: "MANUAL_VIEW_KEY", value: "ta-manual-view" },
     { constant: "WORKFLOWS_VIEW_KEY", value: "ta-workflows-view" },
     { constant: "TASKS_VIEW_KEY", value: "ta-tasks-view" },
+    { constant: "GRADING_VIEW_KEY", value: "ta-grading-view" },
   ];
 
   it("declares one ta- key per view family in the rails", () => {
@@ -177,5 +178,147 @@ describe("the view each rail chip writes persists under its own ta- key", () => 
     expect(source).toContain('urlParams.get("manualView")');
     expect(source).toContain('urlParams.get("workflowsView")');
     expect(source).toContain('urlParams.get("tasksView")');
+  });
+});
+
+// I5 (docs/tools-grading-subtab-architecture.md section 6.3): Back/Forward
+// must not silently lose an inner-nav selection. The popstate ladder is
+// hand-written (RES-ARCH-3 declines making it derived, since that would
+// change the restore path for buildView/contentView as a side effect of
+// adding a third inner nav), so this pins - by source text, the only
+// instrument available in an environment where no component is ever
+// rendered - that every view with an inner nav has its own popstate branch,
+// and that the URL-sync effect's dependency array actually lists the new
+// state so a history entry is pushed at all.
+describe("the popstate ladder restores every inner-nav view's own state (I5)", () => {
+  const popStateStart = source.indexOf("const onPopState = () => {");
+  const popStateEnd = source.indexOf('window.addEventListener("popstate"', popStateStart);
+  const popStateSlice = source.slice(popStateStart, popStateEnd);
+
+  it("finds the popstate handler", () => {
+    expect(popStateStart).toBeGreaterThan(-1);
+    expect(popStateEnd).toBeGreaterThan(popStateStart);
+  });
+
+  it("has its own 'parsed.manualView === \"<view>\"' branch for every Manual view with an inner nav", () => {
+    // Derived from getInnerDestinations rather than a restated list, so a
+    // future inner nav is covered automatically - the same discipline every
+    // other derived guard in this file's siblings uses.
+    for (const view of MANUAL_VIEW_ORDER) {
+      if (getInnerDestinations(view) === null) continue;
+      expect(
+        popStateSlice,
+        `"${view}" has an inner nav but no 'parsed.manualView === "${view}"' branch in the popstate ` +
+          "handler, so pressing Back/Forward onto it silently loses the inner selection"
+      ).toContain(`parsed.manualView === "${view}"`);
+    }
+  });
+
+  it("reads parsed.gradingView inside the popstate handler, so the new branch actually restores it", () => {
+    expect(popStateSlice).toContain("parsed.gradingView");
+  });
+
+  it("lists gradingView in the URL-sync effect's dependency array, so picking an inner Grading item pushes a history entry", () => {
+    const syncEffectStart = source.indexOf("useEffect(() => {\n    const target = buildUrlSearch({");
+    expect(syncEffectStart, "expected to find the URL-sync effect").toBeGreaterThan(-1);
+    const depsStart = source.indexOf("}, [", syncEffectStart);
+    const depsEnd = source.indexOf("]);", depsStart);
+    const deps = source.slice(depsStart, depsEnd);
+    expect(
+      deps,
+      "gradingView is missing from the URL-sync effect's dependency array - exhaustive-deps " +
+        "would flag this, and until then, picking a Grading inner item never pushes a history entry"
+    ).toContain("gradingView");
+  });
+});
+
+// GRAD-SUBTAB wave 1 verify BLOCKER 1: parseUrlState (via RETIRED_GRADING_POINTERS)
+// is what redirects an old "?manualView=content&contentView=grading" or
+// "?manualView=repo-grades" bookmark to the new Grading sub-tab, but
+// parseUrlState's only non-test caller is the popstate handler above - never
+// the initial mount. A fresh/incognito load's manualView/gradingView state
+// comes ONLY from the lazy useState initializers, which read the raw URL
+// params through normalizeManualView/normalizeContentView directly and have
+// no idea the alias table exists, so the redirect silently never fires on the
+// one path that matters for a bookmark: the first load.
+//
+// This is deliberately NOT a test of parseUrlState or of
+// RETIRED_GRADING_POINTERS/resolveGradingPointer in isolation - both already
+// had passing coverage while this bug was live (url-state.test.ts exercises
+// parseUrlState; RETIRED_GRADING_POINTERS is plain data). A test at that seam
+// proves nothing about the initializers. Since no component is ever rendered
+// in this suite (useAppNavigation is a hook - see this file's header comment)
+// and the initializer closures cannot be invoked outside a real render, the
+// available instrument is the same one every other initializer-internal guard
+// in this file above uses: pin the initializer's OWN SOURCE TEXT to prove it
+// actually calls the shared alias lookup before falling back to the plain
+// normalizer, paired with a direct (genuinely behavioral, not source-text)
+// call of resolveGradingPointer itself to pin what that lookup returns for
+// exactly the bookmarked shapes in play. Together they prove both halves: the
+// alias resolves to "grading"/"repos" as the pointer table intends, AND the
+// initializer is wired to actually consult it - which is the half that was
+// missing.
+describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grading pointer (verify BLOCKER 1)", () => {
+  it("resolveGradingPointer resolves both bookmarked shapes to the Grading sub-tab (the behavioral half)", () => {
+    // "?manualView=content&contentView=grading" - the old LMS Grading URL.
+    expect(resolveGradingPointer("content", "grading")).toEqual({ manualView: "grading", gradingView: "run" });
+    // "?manualView=repo-grades" - the old standalone Repo Grades subtab.
+    expect(resolveGradingPointer("repo-grades", null)).toEqual({ manualView: "grading", gradingView: "repos" });
+    // A manualView of "content" with any OTHER contentView, or any other
+    // manualView entirely, is not a retired pointer and must not redirect.
+    expect(resolveGradingPointer("content", "modules")).toBeUndefined();
+    expect(resolveGradingPointer("course-planning", null)).toBeUndefined();
+  });
+
+  it("the manualView initializer's URL branch consults resolveGradingPointer before falling back to normalizeManualView (the wiring half)", () => {
+    const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
+    expect(start, "expected to find the manualView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [buildView", start);
+    expect(end, "expected to find the next useState block after manualView's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    const urlBranchStart = block.indexOf(
+      'if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {'
+    );
+    expect(urlBranchStart, "expected to find the manualView URL restore branch").toBeGreaterThan(-1);
+    const urlBranchEnd = block.indexOf("const savedManual", urlBranchStart);
+    expect(urlBranchEnd, "expected to find the next statement after the URL branch").toBeGreaterThan(urlBranchStart);
+    const urlBranch = block.slice(urlBranchStart, urlBranchEnd);
+
+    expect(
+      urlBranch,
+      "BLOCKER 1: the manualView initializer's URL branch must call " +
+        'resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView")) and return its ' +
+        "manualView when it matches, BEFORE falling back to normalizeManualView - otherwise a bookmarked " +
+        '"?manualView=repo-grades" or "?manualView=content&contentView=grading" is normalized straight past ' +
+        "the alias table (normalizeManualView/normalizeContentView know nothing about it) and lands on " +
+        "Build Courses/LMS Modules instead of Grading, on the one path (initial mount) that parseUrlState's " +
+        "own redirect never runs on."
+    ).toMatch(/resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\)\s*\)/);
+
+    // Must actually be used to redirect, not merely called and discarded.
+    expect(urlBranch, "the resolved gradingPointer must be returned as manualView").toMatch(
+      /if\s*\(gradingPointer\)\s*return\s+gradingPointer\.manualView/
+    );
+  });
+
+  it("the gradingView initializer's URL branch also consults resolveGradingPointer, so the pointer's inner view survives (repo-grades -> repos, not the 'run' default)", () => {
+    const start = source.indexOf("const [gradingView, setGradingView] = useState<GradingView>(");
+    expect(start, "expected to find the gradingView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [focusCourseId", start);
+    expect(end, "expected to find the next useState block after gradingView's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(
+      block,
+      "BLOCKER 1 (inner view half): once the manualView fix above lands, the gradingView initializer's " +
+        '"manualView === \\"grading\\"" branch will run for a bookmarked "?manualView=repo-grades" URL too - ' +
+        'but that URL carries no "gradingView" param, so normalizeGradingView(null) alone returns the "run" ' +
+        "default instead of the pointer's actual target (\"repos\"). The initializer must consult " +
+        "resolveGradingPointer here as well and prefer its gradingView when it matches."
+    ).toMatch(/resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\)\s*\)/);
+    expect(block, "the resolved gradingPointer must be returned as gradingView").toMatch(
+      /if\s*\(gradingPointer\)\s*return\s+gradingPointer\.gradingView/
+    );
   });
 });

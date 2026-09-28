@@ -3,7 +3,9 @@
 import {
   getActiveDestinationId,
   getInnerDestinations,
+  getInnerNavAriaLabel,
   type BuildViewType,
+  type GradingView,
   type ManualViewType,
 } from "./manual-rail";
 import styles from "../../page.module.css";
@@ -11,8 +13,8 @@ import type { ContentView } from "../content-tab/constants";
 
 /**
  * The INNER destinations of whichever Manual view is showing: Build Courses'
- * two modes, LMS's eight views, and nothing at all for the five Manual views
- * that are a single destination.
+ * two modes, LMS's seven views, Grading's two surfaces, and nothing at all
+ * for the Manual views that are a single destination.
  *
  * IT USED TO RENDER A ROW ABOVE THIS ONE - the seven-item rail that chose the
  * Manual view itself. D26 deleted that row: those seven are chips in the Tools
@@ -23,30 +25,35 @@ import type { ContentView } from "../content-tab/constants";
  * way to reach one. The `manualView` prop stays because this row's CONTENT
  * still depends on it; only `onManualViewClick` is gone, since nothing here
  * changes it any more.
+ *
+ * The accessible name comes from `getInnerNavAriaLabel`, the same table
+ * `getInnerDestinations` reads - see that function's comment
+ * (manual-rail.ts). A hand-written ternary here is exactly what let a third
+ * inner nav (Grading) go out announced as "LMS views"
+ * (docs/tools-grading-subtab-architecture.md section 6.1).
  */
 export function ManualRail({
   manualView,
   buildView,
   contentView,
+  gradingView,
   onDestinationClick,
 }: {
   manualView: ManualViewType;
   buildView: BuildViewType;
   contentView: ContentView;
+  gradingView: GradingView;
   onDestinationClick: (destId: string) => void;
 }) {
-  const activeId = getActiveDestinationId(manualView, buildView, contentView);
+  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView);
   const innerDestinations = getInnerDestinations(manualView);
+  const ariaLabel = getInnerNavAriaLabel(manualView);
 
-  if (!innerDestinations) return null;
+  if (!innerDestinations || !ariaLabel) return null;
 
   return (
     <div className={styles.manualSubnav}>
-      <div
-        className={styles.lessonInnerTabs}
-        role="tablist"
-        aria-label={manualView === "course-planning" ? "Course build modes" : "LMS views"}
-      >
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label={getInnerNavAriaLabel(manualView) ?? undefined}>
         {innerDestinations.map((dest) => (
           <button
             key={dest.id}

@@ -58,7 +58,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "manual:recording",
       "manual:ppt-design",
       "manual:artifact-design",
-      "manual:repo-grades",
+      "manual:grading",
       "workflows:workflows",
       "workflows:automations",
       "workflows:drafts",
@@ -180,8 +180,8 @@ describe("the highlighted Tools chip is derived from the params, never stored", 
     // Both families always have a remembered view; only the section says which
     // one is on screen. This is the reason the section value survived D26 even
     // though the control that set it did not.
-    expect(toolsRailItemFor("manual", "repo-grades", "automations")).toBe("manual:repo-grades");
-    expect(toolsRailItemFor("workflows", "repo-grades", "automations")).toBe("workflows:automations");
+    expect(toolsRailItemFor("manual", "grading", "automations")).toBe("manual:grading");
+    expect(toolsRailItemFor("workflows", "grading", "automations")).toBe("workflows:automations");
   });
 });
 
@@ -276,6 +276,7 @@ const DEFAULT_STATE: UrlNavState = {
   workflowsView: "workflows",
   buildView: "prebuilt",
   contentView: "modules",
+  gradingView: "run",
   draftsView: "grades",
   tasksView: "term",
   kbInstitution: null,
@@ -294,6 +295,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     "workflowsView",
     "buildView",
     "contentView",
+    "gradingView",
     "draftsView",
     "tasksView",
     "kbInstitution",
@@ -307,6 +309,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       { ...DEFAULT_STATE, tab: "courses" },
       { ...DEFAULT_STATE, tab: "courses", coursesSection: "tasks", tasksView: "recurring" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "pages" },
+      { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", buildView: "new" },
       {
         ...DEFAULT_STATE,

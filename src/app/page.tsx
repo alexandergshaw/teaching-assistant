@@ -70,7 +70,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -502,11 +502,13 @@ export default function Home() {
                   manualView={manualView}
                   buildView={buildView}
                   contentView={contentView}
+                  gradingView={gradingView}
                   onDestinationClick={(destId) => {
-                    const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
+                    const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView, gradingView);
                     if (resolved.manualView !== manualView) setManualView(resolved.manualView);
                     if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
                     if (resolved.contentView !== contentView) setContentView(resolved.contentView);
+                    if (resolved.gradingView !== gradingView) setGradingView(resolved.gradingView);
                   }}
                 />
 
@@ -539,18 +541,6 @@ export default function Home() {
                   <TabShell>
                     <ContentTab
                       view={contentView}
-                      grading={
-                        <GradingTab
-                          formAction={formAction}
-                          pending={pending}
-                          state={state}
-                          testState={testState}
-                          copiedKey={copiedKey}
-                          onCopy={handleCopy}
-                          onOpenPreview={handleOpenPreview}
-                          resultsSectionFallbackRef={resultsSectionFallbackRef}
-                        />
-                      }
                       announcements={<CanvasTab view="announcements" />}
                       inbox={<CanvasTab view="inbox" />}
                     />
@@ -575,9 +565,22 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "repo-grades" && (
+                {manualView === "grading" && (
                   <TabShell>
-                    <RepoGradesTab />
+                    {gradingView === "repos" ? (
+                      <RepoGradesTab />
+                    ) : (
+                      <GradingTab
+                        formAction={formAction}
+                        pending={pending}
+                        state={state}
+                        testState={testState}
+                        copiedKey={copiedKey}
+                        onCopy={handleCopy}
+                        onOpenPreview={handleOpenPreview}
+                        resultsSectionFallbackRef={resultsSectionFallbackRef}
+                      />
+                    )}
                   </TabShell>
                 )}
               </>

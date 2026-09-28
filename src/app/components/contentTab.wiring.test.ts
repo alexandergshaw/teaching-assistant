@@ -27,13 +27,20 @@ import { LMS_VIEWS } from "./manual/manual-rail";
 const CONTENT_TAB_PATH = path.join(__dirname, "ContentTab.tsx");
 const source = readFileSync(CONTENT_TAB_PATH, "utf8");
 
-// Three views are self-hosting (their own course picker / institution scope
-// - see ContentTab.tsx's comment directly above `courseTab`): they are
+// Two views are self-hosting (their own course picker / institution scope -
+// see ContentTab.tsx's comment directly above `courseTab`): they are
 // DELIBERATELY absent from `courseTab` and must stay that way. Handled
 // explicitly here, by name, with the reason stated - rather than weakening
 // the loop below to silently skip whichever views happen not to match, which
 // would blunt the exact guard this test exists to add.
-const SELF_HOSTING_VIEWS: ReadonlySet<string> = new Set(["grading", "announcements", "inbox"]);
+//
+// "grading" left this set (and LMS_VIEWS entirely) when the Grading sub-tab
+// absorbed the old LMS Grading destination (GRAD-SUBTAB wave 1,
+// docs/tools-grading-subtab-architecture.md). It is silent here - the count
+// assertion below still holds without it - which is exactly why it must be
+// named rather than left: LMS_VIEWS.length and courseTabEligible.length both
+// moved by one, and only re-deriving both catches that.
+const SELF_HOSTING_VIEWS: ReadonlySet<string> = new Set(["announcements", "inbox"]);
 
 function extractCourseTabExpression(src: string): string {
   const match = src.match(/const courseTab =([\s\S]*?);/);
@@ -47,7 +54,7 @@ function extractCourseTabExpression(src: string): string {
 }
 
 function extractRenderChain(src: string): string {
-  const start = src.indexOf('view === "grading" ? (');
+  const start = src.indexOf('view === "announcements" ? (');
   const end = src.indexOf('view === "version-control" && versionControl');
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
@@ -69,7 +76,7 @@ describe("ContentTab registration points (D4r courseTab, D5r render branch)", ()
     // count here moves and flags that a decision is needed, rather than the
     // new view silently falling into whichever bucket the loop below assumes.
     const courseTabEligible = LMS_VIEWS.filter((v) => !SELF_HOSTING_VIEWS.has(v));
-    expect(LMS_VIEWS.length).toBe(8);
+    expect(LMS_VIEWS.length).toBe(7);
     expect(courseTabEligible.length).toBe(5);
     expect(courseTabEligible.sort()).toEqual(["assignments", "files", "modules", "pages", "quizzes"]);
   });

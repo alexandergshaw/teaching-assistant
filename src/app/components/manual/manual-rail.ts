@@ -18,8 +18,23 @@ export type ManualViewType =
   | "recording"
   | "ppt-design"
   | "artifact-design"
-  | "repo-grades";
+  | "grading";
 export type BuildViewType = "new" | "prebuilt";
+
+// The Grading sub-tab's own inner selection: which of its two surfaces is
+// showing. Lives here, not in url-state.ts, for the same reason WorkflowsView
+// and TasksView do (see url-state.ts's own comment on that) - the ordered
+// member list belongs in the leaf module, and declaring it in url-state.ts
+// and importing it back would be a cycle this repo has already paid for once.
+export type GradingView = "run" | "repos";
+
+const GRADING_VIEW_PRESENCE: Record<GradingView, true> = { run: true, repos: true };
+export const GRADING_VIEWS: readonly GradingView[] = Object.keys(GRADING_VIEW_PRESENCE) as GradingView[];
+
+const GRADING_VIEW_SET: ReadonlySet<string> = new Set(GRADING_VIEWS);
+export function isGradingView(value: unknown): value is GradingView {
+  return typeof value === "string" && GRADING_VIEW_SET.has(value);
+}
 
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
 const LMS_VIEW_PRESENCE: Record<Exclude<ContentView, "version-control">, true> = {
@@ -28,7 +43,6 @@ const LMS_VIEW_PRESENCE: Record<Exclude<ContentView, "version-control">, true> =
   quizzes: true,
   pages: true,
   files: true,
-  grading: true,
   announcements: true,
   inbox: true,
 };
@@ -53,7 +67,6 @@ export const destinations: DestinationGroup[] = [
       { id: "lms-quizzes", label: "Quizzes", description: "List and bulk-manage every quiz in the course" },
       { id: "lms-pages", label: "Pages", description: "Create and manage course pages" },
       { id: "lms-files", label: "Files", description: "Upload and organize course files" },
-      { id: "lms-grading", label: "Grading", description: "View and manage student submissions" },
       { id: "lms-announcements", label: "Announcements", description: "Post course announcements" },
       { id: "lms-inbox", label: "Inbox", description: "View course messages" },
     ],
@@ -83,9 +96,10 @@ export const destinations: DestinationGroup[] = [
     ],
   },
   {
-    name: null,
+    name: "Grading",
     destinations: [
-      { id: "repo-grades", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
+      { id: "grading-run", label: "Submissions", description: "Grade student submissions and post results to Canvas" },
+      { id: "grading-repos", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
     ],
   },
 ];
@@ -107,6 +121,11 @@ export function getDestinationById(id: string): Destination | undefined {
 // components/tabs/tab-rails.ts. The list itself did not change - the order it
 // declares is still the order the chips appear in, and "manualView" is still
 // the param each one writes.
+//
+// "grading" sits where "repo-grades" used to (GRAD-SUBTAB wave 1): the
+// Grading sub-tab absorbs both the LMS "Grading" destination and the
+// standalone Repo Grades subtab into one container with its own inner
+// navigation (docs/tools-grading-subtab-architecture.md section 2).
 export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "course-planning",
   "content",
@@ -114,7 +133,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "recording",
   "ppt-design",
   "artifact-design",
-  "repo-grades",
+  "grading",
 ];
 
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
@@ -124,7 +143,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
-  "repo-grades": "Repo Grades",
+  grading: "Grading",
 };
 
 // Single source of truth for "is this a valid persisted/restored Manual
@@ -139,28 +158,52 @@ export function isManualViewType(value: unknown): value is ManualViewType {
   return typeof value === "string" && MANUAL_VIEW_TYPE_SET.has(value);
 }
 
+// The inner-nav views: the subset of ManualViewType that has a second row of
+// destinations below its rail chip. ONE table drives both the destinations a
+// view has and the accessible name announced for them, so a view with inner
+// destinations and a view with an accessible name are the same set BY
+// CONSTRUCTION - there is no second list either reader could fall out of sync
+// with (docs/tools-grading-subtab-architecture.md section 6.1).
+type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading">;
+
+const INNER_NAV: Record<InnerNavViewType, { groupName: string; ariaLabel: string }> = {
+  "course-planning": { groupName: "Build", ariaLabel: "Course build modes" },
+  content: { groupName: "LMS", ariaLabel: "LMS views" },
+  grading: { groupName: "Grading", ariaLabel: "Grading tools" },
+};
+
 // The active Manual view's inner destinations, or null when that view has no
-// inner views (Version Control, Recording, PowerPoint Design, Artifact
-// Templates, and Repo Grades are each a single destination with nothing to
-// switch between).
+// inner views (Version Control, Recording, PowerPoint Design, and Artifact
+// Templates are each a single destination with nothing to switch between).
 //
 // This is the level BELOW a rail chip and D26 deliberately kept it: it is
 // where a chip leads, not a second way to choose one. It is the only row
 // ManualRail.tsx still renders.
+//
+// SIGNATURE UNCHANGED, deliberately: existing call sites in
+// manual-rail.test.ts use `getInnerDestinations(x)?.map(...)` and
+// `.toBeNull()`, and changing the return shape would churn all of them for no
+// safety gain.
 export function getInnerDestinations(manualView: ManualViewType): Destination[] | null {
-  if (manualView === "course-planning") {
-    return destinations.find((g) => g.name === "Build")?.destinations ?? null;
-  }
-  if (manualView === "content") {
-    return destinations.find((g) => g.name === "LMS")?.destinations ?? null;
-  }
-  return null;
+  const entry = (INNER_NAV as Record<string, { groupName: string; ariaLabel: string }>)[manualView];
+  if (!entry) return null;
+  return destinations.find((g) => g.name === entry.groupName)?.destinations ?? null;
+}
+
+// The accessible name for the inner nav's tablist, read from the SAME table
+// getInnerDestinations reads - see that function's comment. Replaces
+// ManualRail.tsx's own hand-written ternary, which could (and did) fall out
+// of sync with the set of views that actually have inner destinations.
+export function getInnerNavAriaLabel(manualView: ManualViewType): string | null {
+  const entry = (INNER_NAV as Record<string, { groupName: string; ariaLabel: string }>)[manualView];
+  return entry ? entry.ariaLabel : null;
 }
 
 export function getActiveDestinationId(
   manualView: ManualViewType,
   buildView: BuildViewType,
   contentView: ContentView,
+  gradingView: GradingView,
 ): string {
   if (manualView === "course-planning") {
     return buildView === "new" ? "build-new" : "build-prebuilt";
@@ -174,18 +217,59 @@ export function getActiveDestinationId(
     return "ppt-design";
   } else if (manualView === "artifact-design") {
     return "artifact-design";
-  } else if (manualView === "repo-grades") {
-    return "repo-grades";
+  } else if (manualView === "grading") {
+    return `grading-${gradingView}`;
   }
   return "build-new";
 }
+
+// A retired grading pointer's target: the place a pointer this consolidation
+// retired now means. Modelled on RETIRED_TAB_DESTINATIONS
+// (tabs/tab-sections.ts) - an alias is a REDIRECT, not a synonym: the
+// canonical value is written back, never left in its legacy shape.
+export interface GradingPointerTarget {
+  manualView: Extract<ManualViewType, "grading">;
+  gradingView: GradingView;
+}
+
+// Every pointer at a grading surface this consolidation retires, with the
+// place it now means. Keyed by the RAW stored/URL value, because that is the
+// only thing an old link or an old localStorage entry carries.
+export const RETIRED_GRADING_POINTERS: Record<string, GradingPointerTarget> = {
+  // ta-content-view = "grading" (paired with a stored/URL manualView of
+  // "content"), and ?manualView=content&contentView=grading.
+  "content-view:grading": { manualView: "grading", gradingView: "run" },
+  // The rail destination id, for a persisted or hand-typed destination.
+  "lms-grading": { manualView: "grading", gradingView: "run" },
+  // ta-manual-view = "repo-grades", and ?manualView=repo-grades.
+  "repo-grades": { manualView: "grading", gradingView: "repos" },
+  // ta-active-tab = "grading", the pre-merge top-level tab value still
+  // handled by useAppNavigation.ts's manualView initializer.
+  "active-tab:grading": { manualView: "grading", gradingView: "run" },
+};
 
 export function resolveStateFromDestinationId(
   id: string,
   currentManualView: ManualViewType,
   currentBuildView: BuildViewType,
   currentContentView: ContentView,
-): { manualView: ManualViewType; buildView: BuildViewType; contentView: ContentView } {
+  currentGradingView: GradingView,
+): {
+  manualView: ManualViewType;
+  buildView: BuildViewType;
+  contentView: ContentView;
+  gradingView: GradingView;
+} {
+  const alias = RETIRED_GRADING_POINTERS[id];
+  if (alias) {
+    return {
+      manualView: alias.manualView,
+      buildView: currentBuildView,
+      contentView: currentContentView,
+      gradingView: alias.gradingView,
+    };
+  }
+
   const manualView: ManualViewType = (() => {
     if (id.startsWith("build-")) return "course-planning";
     if (id.startsWith("lms-")) return "content";
@@ -193,7 +277,7 @@ export function resolveStateFromDestinationId(
     if (id === "recording") return "recording";
     if (id === "ppt-design") return "ppt-design";
     if (id === "artifact-design") return "artifact-design";
-    if (id === "repo-grades") return "repo-grades";
+    if (id.startsWith("grading-")) return "grading";
     return currentManualView;
   })();
 
@@ -209,13 +293,18 @@ export function resolveStateFromDestinationId(
     if (id === "lms-quizzes") return "quizzes";
     if (id === "lms-pages") return "pages";
     if (id === "lms-files") return "files";
-    if (id === "lms-grading") return "grading";
     if (id === "lms-announcements") return "announcements";
     if (id === "lms-inbox") return "inbox";
     return currentContentView;
   })();
 
-  return { manualView, buildView, contentView };
+  const gradingView: GradingView = (() => {
+    if (id === "grading-run") return "run";
+    if (id === "grading-repos") return "repos";
+    return currentGradingView;
+  })();
+
+  return { manualView, buildView, contentView, gradingView };
 }
 
 export function validateLmsViewsCompleteness(): string[] {

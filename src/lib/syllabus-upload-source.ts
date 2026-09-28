@@ -71,17 +71,58 @@ export const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads"] as co
 export type UploadPathSegment = (typeof UPLOAD_PATH_SEGMENTS)[number];
 
 /**
+ * DUPLICATED, not imported, from `isTraversalOrSeparatorSegment` in
+ * src/lib/course-files.ts (RULING 127's shared validator for the sibling
+ * "course-files" bucket - the same bucket this module writes into) and
+ * src/lib/institution-page-attachments.ts (RULING 128, which duplicated it a
+ * second time for the same stated reason). `course-files.ts` carries this
+ * feature's own unrelated weight - chunked-upload constants, a fetch-based
+ * download-with-retry loop instrumented for production incidents, and
+ * Supabase Storage upload/download orchestration - none of which this
+ * module (a small, dependency-free lifecycle contract deliberately kept
+ * importable from a server action, a client component, and a plain node-env
+ * test with no mocking, per the module header above) has any use for.
+ * Importing it here to reach a 15-line segment-check primitive would drag
+ * that weight into a module whose entire point is staying light. This is now
+ * the THIRD copy in this codebase (see RULING 130, docs/ruling-130.md) - a
+ * named drift risk: if you change the traversal rules in any one of the
+ * three, search for "DUPLICATED, not imported" in the other two and change
+ * them together.
+ */
+function isTraversalOrSeparatorSegment(segment: string): boolean {
+  if (segment === "." || segment === "..") return true;
+  if (segment.includes("\\")) return true;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return true;
+  }
+  if (decoded === segment) return false;
+  return decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\");
+}
+
+/**
  * Whether `storagePath` looks like a path THIS lifecycle could have written -
  * `${userId}/${segment}/...` for one of `UPLOAD_PATH_SEGMENTS` (see
- * syllabusUploadStoragePath below). `storagePath` arrives here as
- * browser-supplied metadata (the object was already uploaded client-side
- * before the action ever runs), and withUploadedSyllabusFile both DOWNLOADS
- * and DELETES whatever path it is handed against the service-role client the
- * server action uses - so an unvalidated path would let a malformed or
- * hostile call point this download-and-delete lifecycle at any other object
- * in the "course-files" bucket under the same user prefix, e.g. a course's
- * materials zip (`${userId}/${courseId}/...`, src/lib/course-files.ts) or a
- * Tasks-cell attachment (`${userId}/${courseId}/task-attachments/...`,
+ * syllabusUploadStoragePath below), checked segment by segment rather than
+ * with a bare prefix test: the first segment must equal `userId` exactly,
+ * the second must be an EXACT member of `UPLOAD_PATH_SEGMENTS` (not merely
+ * start with one), there must be at least one more segment after them, and
+ * no segment anywhere in the path may be empty, ".", "..", or a
+ * separator/dot hiding behind percent-encoding (see
+ * isTraversalOrSeparatorSegment above). Malformed percent-encoding is
+ * refused rather than guessed at.
+ *
+ * `storagePath` arrives here as browser-supplied metadata (the object was
+ * already uploaded client-side before the action ever runs), and
+ * withUploadedSyllabusFile both DOWNLOADS and DELETES whatever path it is
+ * handed against the service-role client the server action uses - so an
+ * unvalidated path would let a malformed or hostile call point this
+ * download-and-delete lifecycle at any other object in the "course-files"
+ * bucket under the same user prefix, e.g. a course's materials zip
+ * (`${userId}/${courseId}/...`, src/lib/course-files.ts) or a Tasks-cell
+ * attachment (`${userId}/${courseId}/task-attachments/...`,
  * src/lib/course-task-attachments.ts). Checked here, inside the one function
  * every caller of this lifecycle (uploadSyllabusAction,
  * extractSyllabusTextAction) calls, rather than in each caller separately,
@@ -95,12 +136,23 @@ export type UploadPathSegment = (typeof UPLOAD_PATH_SEGMENTS)[number];
  * accepts more than one feature's segment - a name that only mentioned
  * syllabus would misdescribe what it actually checks the moment a second
  * segment existed.
+ *
+ * RULING 130: this used to be a bare `startsWith(`${userId}/${segment}/`)`
+ * check with no segment parsing per candidate segment, which a
+ * `"<userId>/<segment>/../../<victim>/x"` path satisfies (it starts with the
+ * prefix and is longer than it) - see docs/ruling-130.md for the RED/GREEN
+ * pair and the full accounting of what this exposed. Segments after the
+ * fixed (userId, segment) prefix are not capped in count or depth, mirroring
+ * isOwnCourseFilesStoragePath's and isInstitutionAttachmentStoragePath's own
+ * choice not to cap what follows their fixed prefix.
  */
 export function isKnownUploadPath(userId: string, storagePath: string): boolean {
-  return UPLOAD_PATH_SEGMENTS.some((segment) => {
-    const prefix = `${userId}/${segment}/`;
-    return storagePath.startsWith(prefix) && storagePath.length > prefix.length;
-  });
+  if (!userId || !storagePath) return false;
+  const segments = storagePath.split("/");
+  if (segments.length < 3) return false;
+  if (segments[0] !== userId) return false;
+  if (!UPLOAD_PATH_SEGMENTS.includes(segments[1] as UploadPathSegment)) return false;
+  return segments.every((segment) => segment.length > 0 && !isTraversalOrSeparatorSegment(segment));
 }
 
 /**

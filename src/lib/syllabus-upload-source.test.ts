@@ -257,6 +257,64 @@ describe("isKnownUploadPath", () => {
     expect(isKnownUploadPath("user-1", "user-1/attachment-uploads/abc.pdf")).toBe(false);
     expect(isKnownUploadPath("user-1", "user-1/rubric-uploads-extra/abc.pdf")).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // RULING 130: isKnownUploadPath used to be a bare startsWith prefix test
+  // with no segment parsing - identical in shape to the hole RULING 127 fixed
+  // in isOwnCourseFilesStoragePath and RULING 128 fixed in
+  // isInstitutionAttachmentStoragePath, and the exact "second entry point"
+  // RULING 128 found and reported rather than fixed (docs/ruling-128.md,
+  // "Second entry point found"). See docs/ruling-130.md for the RED/GREEN
+  // pair and the newly-vs-already-refused table these cases feed.
+  // -------------------------------------------------------------------------
+
+  it("REGRESSION (RULING 130): rejects a traversal path that escapes this user's own prefix", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/../../user-2/x.pdf")).toBe(false);
+  });
+
+  it("REGRESSION (RULING 130): rejects an empty segment after the prefix", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads//abc.docx")).toBe(false);
+  });
+
+  it("REGRESSION (RULING 130): rejects a bare '.' segment after the prefix", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/./abc.docx")).toBe(false);
+  });
+
+  it("REGRESSION (RULING 130): rejects a percent-encoded '..' segment", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/%2e%2e/abc.docx")).toBe(false);
+  });
+
+  it("REGRESSION (RULING 130): rejects a percent-encoded separator hidden inside a segment", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/a%2fb/abc.docx")).toBe(false);
+  });
+
+  it("REGRESSION (RULING 130): rejects malformed percent-encoding rather than guessing at it", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/%/abc.docx")).toBe(false);
+  });
+
+  it("already refused: a userId that merely starts with this user's id", () => {
+    expect(isKnownUploadPath("user-1", "user-12/syllabus-uploads/abc.docx")).toBe(false);
+  });
+
+  it("already refused: a second segment that merely starts with an allowed segment", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads-extra/abc.docx")).toBe(false);
+  });
+
+  // Positive controls: one legitimate path per member of UPLOAD_PATH_SEGMENTS,
+  // plus the nested shape a real caller could produce, must keep being
+  // accepted - the fix must not break syllabus or rubric uploads for every
+  // instructor while closing the traversal hole.
+  it("positive control: a legitimate syllabus-uploads path is still accepted", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/abc.docx")).toBe(true);
+  });
+
+  it("positive control: a legitimate rubric-uploads path is still accepted", () => {
+    expect(isKnownUploadPath("user-1", "user-1/rubric-uploads/abc.pdf")).toBe(true);
+  });
+
+  it("positive control: a nested uploadId shape is still accepted", () => {
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/sub/abc.docx")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

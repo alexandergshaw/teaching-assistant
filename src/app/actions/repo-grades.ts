@@ -4,9 +4,9 @@
 // This file is the client/server boundary the view's later UI wave must go
 // through: src/lib/github*.ts reads process.env.GITHUB_TOKEN and is
 // server-only, so nothing client-side may import it directly (AC6 item 33) -
-// every action below is the only door in. Every action is owner-gated
-// (`requireOwner()`, first line, before anything else runs) and returns a
-// discriminated `{...} | { error: string }` rather than throwing, matching
+// every action below is the only door in. Every action is guarded (first
+// line, before anything else runs) and returns a discriminated
+// `{...} | { error: string }` rather than throwing, matching
 // every other action module in this codebase (see src/app/actions/github-repos.ts,
 // src/app/actions/course-tasks.ts).
 //
@@ -21,7 +21,7 @@
 // src/lib/repo-grade-tree-scan.ts, which this file only wires real fetchers
 // into.
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { listOrgRepos, getRepoTree } from "@/lib/github";
 import { listAssignments, type CanvasAssignmentBrief } from "@/lib/canvas";
 import { scanOrgRepoTrees, type OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
@@ -35,7 +35,7 @@ export async function listCourseAssignmentsAction(
   courseId: string
 ): Promise<{ assignments: CanvasAssignmentBrief[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!institution.trim()) return { error: "Choose an institution." };
     if (!courseId.trim()) return { error: "Choose a course." };
     const assignments = await listAssignments(institution.trim().toUpperCase(), courseId.trim());
@@ -63,7 +63,7 @@ export async function loadOrgRepoTreesAction(
   repoLimit: number | undefined
 ): Promise<OrgRepoTreesResult | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!org.trim()) return { error: "Provide a GitHub organization." };
     return await scanOrgRepoTrees(org.trim(), prefix?.trim() || undefined, repoLimit, {
       listRepos: (o, p) => listOrgRepos(o, p),

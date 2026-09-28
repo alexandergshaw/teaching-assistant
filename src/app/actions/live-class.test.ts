@@ -3,11 +3,16 @@ import { emptyCourseProject } from "@/lib/course-project";
 import { exportModuleValue } from "@/lib/workflows/module-value";
 import type { Course } from "@/lib/supabase/courses";
 
-// requireOwner (auth) and callLlm (network) are mocked so the action logic
-// itself runs for real without needing a Supabase session or hitting Gemini -
-// same pattern as current-events.test.ts.
+// requireUser/requireAppOwner (auth) and callLlm (network) are mocked so the
+// action logic itself runs for real without needing a Supabase session or
+// hitting Gemini - same pattern as current-events.test.ts. R2 wave 1, sub-wave
+// 6 split this mock across both guards: production converted requireOwner()
+// (an alias for requireUser()) to requireUser() on three actions and
+// requireAppOwner() on loadVisualizerIndexAction - see live-class.ts's own
+// header comment and docs/r2-wave1-subwaves.md section 4, row SW6.
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireUser: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/llm", async () => {
@@ -95,7 +100,7 @@ vi.mock("@/lib/knowledge-base", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { getFileText } from "@/lib/github";
 import { listCourseHubAction } from "./course-hub-core";
 import {
@@ -186,7 +191,7 @@ const failResponse = { ok: false as const, status: 500, body: "server error" };
 describe("transcribeLiveAudioAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
   it("returns an error for an empty payload without calling the LLM", async () => {
@@ -262,8 +267,8 @@ describe("transcribeLiveAudioAction", () => {
     expect("error" in result).toBe(true);
   });
 
-  it("returns an error when requireOwner rejects", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+  it("returns an error when requireUser rejects", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized."));
     const result = await transcribeLiveAudioAction("ZmFrZQ==");
     expect(result).toEqual({ error: "Not authorized." });
     expect(callLlm).not.toHaveBeenCalled();
@@ -273,7 +278,7 @@ describe("transcribeLiveAudioAction", () => {
 describe("answerLiveQuestionAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
   it("returns an error for an empty question without calling the LLM", async () => {
@@ -428,8 +433,8 @@ describe("answerLiveQuestionAction", () => {
     expect("error" in result).toBe(true);
   });
 
-  it("returns an error when requireOwner rejects", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+  it("returns an error when requireUser rejects", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized."));
     const result = await answerLiveQuestionAction("What is a hash map?", {});
     expect(result).toEqual({ error: "Not authorized." });
     expect(callLlm).not.toHaveBeenCalled();
@@ -535,7 +540,7 @@ export const pythonNavItems: SidebarItem[] = [
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireAppOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
   it("fetches navItems.ts once and returns the parsed entries", async () => {
@@ -561,8 +566,8 @@ export const pythonNavItems: SidebarItem[] = [
     expect("error" in result).toBe(true);
   });
 
-  it("returns an error when requireOwner rejects, without fetching", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+  it("returns an error when requireAppOwner rejects, without fetching", async () => {
+    vi.mocked(requireAppOwner).mockRejectedValueOnce(new Error("Not authorized."));
     const result = await loadVisualizerIndexAction();
     expect(result).toEqual({ error: "Not authorized." });
     expect(getFileText).not.toHaveBeenCalled();
@@ -572,11 +577,11 @@ export const pythonNavItems: SidebarItem[] = [
 describe("buildLiveSessionContextAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
-  it("returns an error when requireOwner rejects", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+  it("returns an error when requireUser rejects", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized."));
     const result = await buildLiveSessionContextAction("course-1", "");
     expect(result).toEqual({ error: "Not authorized." });
     expect(listCourseHubAction).not.toHaveBeenCalled();

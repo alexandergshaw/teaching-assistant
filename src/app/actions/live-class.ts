@@ -44,7 +44,7 @@
 // with server-runner.ts's identical need.
 
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { listCourseHubAction } from "./course-hub-core";
 import { gatherModuleMaterials } from "@/lib/workflows/registry-helpers.sources";
@@ -144,7 +144,7 @@ export async function transcribeLiveAudioAction(
   opts?: { hintTerms?: string; provider?: LlmProvider }
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     if (!wavBase64 || !wavBase64.trim()) {
       return { error: "No audio was captured to transcribe." };
@@ -403,7 +403,7 @@ export async function answerLiveQuestionAction(
   opts?: { provider?: LlmProvider; maxWords?: number }
 ): Promise<{ answer: string; grounded: boolean; sources: string[]; links: AnswerLink[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     if (!question.trim()) {
       return { error: "No question was provided to answer." };
@@ -589,7 +589,7 @@ export async function buildLiveSessionContextAction(
   | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
 
     const id = hubCourseId.trim();
     if (!id) {
@@ -687,7 +687,7 @@ export async function loadVisualizerIndexAction(): Promise<
   { entries: VisualizerIndexEntry[] } | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const source = await getFileText(
       "alexandergshaw",
       "programming-concept-visualizer",

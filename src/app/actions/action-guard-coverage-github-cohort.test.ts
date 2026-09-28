@@ -329,6 +329,34 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
   // two moved to requireAppOwner(); this one stays requireUser().
   extractDeckConceptsAction:
     "calls only callLlm and the pure deck-concepts helpers - never getFileText/putFile, the file's only GitHub PAT calls, which its sibling actions make instead",
+  // R2 wave 1, sub-wave 6 (docs/r2-wave1-subwaves.md section 4, row SW6):
+  // live-class.ts's transcribeLiveAudioAction and answerLiveQuestionAction
+  // call only callLlm plus pure/local helpers (buildAnswerPrompt,
+  // parseAnswerResponse, resolveDocsLinks, resolveVisualizerLinks against an
+  // already-loaded index) - neither reaches getFileText, this file's only
+  // GitHub PAT call, which loadVisualizerIndexAction alone makes.
+  transcribeLiveAudioAction:
+    "calls only callLlm and pure transcript helpers - never getFileText, this file's only GitHub PAT call, which loadVisualizerIndexAction alone makes",
+  answerLiveQuestionAction:
+    "calls only callLlm plus pure/local link helpers (resolveDocsLinks, resolveVisualizerLinks against an already-loaded index) - never getFileText, this file's only GitHub PAT call, which loadVisualizerIndexAction alone makes",
+  // buildLiveSessionContextAction reaches Canvas (via gatherModuleMaterials's
+  // "live-lms" source) and Supabase Storage (buildServerMaterialLoaders's
+  // course-export path) but never GitHub: it does not import getFileText/
+  // putFile, and every Canvas read it triggers funnels through
+  // resolveCanvasCredential (src/lib/canvas-credentials.ts:189), which reads a
+  // non-owner CALLER's own stored credential first and only falls through to
+  // the owner's env pair when the calling identity's own role is "owner" -
+  // the same containment RULING 83's postWalkthroughAnnouncementAction entry
+  // above relies on for Canvas.
+  buildLiveSessionContextAction:
+    "reaches Canvas only through resolveCanvasCredential, which touches the owner's env pair solely when the CALLING identity's own role is 'owner' - never getFileText/putFile, this file's only GitHub PAT calls",
+  // repo-grades.ts's listCourseAssignmentsAction reaches Canvas via
+  // listAssignments -> resolveInstitutionByCode -> resolveCanvasCredential -
+  // the same contained path as buildLiveSessionContextAction above. It never
+  // imports listOrgRepos/getRepoTree, this file's only GitHub PAT calls,
+  // which loadOrgRepoTreesAction alone makes.
+  listCourseAssignmentsAction:
+    "reaches Canvas only through resolveCanvasCredential, which touches the owner's env pair solely when the CALLING identity's own role is 'owner' - never listOrgRepos/getRepoTree, this file's only GitHub PAT calls",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -366,6 +394,22 @@ const GITHUB_FILES_PENDING_ENUMERATION = new Set([
 ]);
 
 describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () => {
+  // RES-1 / W4, closed 2026-09-28. Nothing pinned this set's SIZE, so an entry
+  // could be deleted in the SAME commit that flips its site to owner-only: the
+  // loop below would then have nothing to check for it, the cohort's own
+  // owner-only default would accept the tightened site, and no instrument would
+  // record that a capability was removed. The media cohort has pinned its own
+  // count since it was written; this one did not.
+  //
+  // Bump this number in the SAME commit that adds or removes an entry, and only
+  // ever deliberately - never to make a red go away.
+  it(
+    "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
+    () => {
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(14);
+    }
+  );
+
   it("every GITHUB_NOT_OWNER_ONLY entry names a real action export with a stated reason", () => {
     const byName = new Map(collectActionExports().map((a) => [a.name, a]));
     for (const [name, reason] of Object.entries(GITHUB_NOT_OWNER_ONLY)) {

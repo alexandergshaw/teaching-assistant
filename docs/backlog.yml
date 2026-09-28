@@ -712,6 +712,50 @@
   instrument: 'the frozen unsound-count integer in the A44 suite must fall from 2159 toward 0 on the mixed-per-student-plus-shared-folder shape, measured with the A44 test notes republished generator and its declared-owner oracle, with the conservative false-refusal rate on the resubmit shape staying at or below the 6.4% A44 achieves - both numbers reported together, since the whole point of this row is that no file-path-only rule can improve one without worsening the other'
   from: 'A44 RULING 89, the soundness hole cap 1 forbids a third attempt at'
   note: 'Filed by me under RULING 89, which ships A44 refined mechanism with the 2159 FROZEN AS AN EXACT INTEGER in the suite. That integer is the point of this row: an exact pin can only go DOWN, and any change that raises it fails loudly - whereas accepting the hole without filing the fix would keep the cost and delete the reason to look, which is the shape this loop keeps catching. WHAT A SCOPE HERE MUST NOT REDO. The oracle exists: A44 test notes carry 23 frozen fixtures across eleven shapes with a republished generator calibrated to A41 baseline, distinguishing BLEND from MERGE from SPLIT by declared owners rather than by comparing two implementations. Reuse it. Two metrics are FORBIDDEN and the reason is measured: rows-less-than-files fires on sets containing zero harm, and its A44-shaped successor (more rows after than before) is worse still, because splitBefore equals splitAfter at 74.2% on one shape, so the after-value alone blames this work for a pre-existing 74.2%. THE KNOWN TRAP IN THIS ROW OWN DIRECTION: the roster-to-GitHub-username link already lives in TWO unsynced course fields in this app, and only one of them is read by the binder. A corroboration rule that picks the wrong field will look correct on a seeded course and fail on a real one, so name which field is authoritative and prove the other is not read. Also inherited: the display-keyed census is 43 sites across three files, not the 30 both earlier A44 artifacts used - the smaller number came from a regex enumerating identifier names that cannot see the row-dot-student family - and the post-to-Canvas collision IS testable through an exported pure function, which both of those artifacts had called untestable.'
+- id: 'A40-D1'
+  state: 'verification'
+  kind: 'chore'
+  area: 'grading-setup-interaction-cost'
+  title: 'Owner walk: is the drop-row rubric disclosure actually visible and legible after the auto-grade navigation'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'The two-upload browser walk - once with the rubric box empty, once with a rubric restored from a DIFFERENT assignment - then return to the panel and read the drop row, counting interactions against docs/a39-census.md path H. The zero-interaction guard in CartridgeDropPanel.reorder.test.ts is a SOURCE PROXY and is labelled as one: it cannot see legibility or whether the line sits below the fold.'
+  from: 'docs/a40-disclosure-test-notes.md residual A40-D1, carried unverified through three artifacts; shipped 8708009 and 19cf77b.'
+  note: 'THE LARGEST UNVERIFIED PREMISE IN A40, and it is owner-only because NOTHING RENDERS under this vitest. RULING 105 put the disclosure on the drop row rather than in the panel form area because the panel is unmounted in the same handler chain that fires the auto-grade - so a form-area disclosure would pass lint, tsc, the build, every test path and all five whole-tree walkers while the instructor never saw it. THAT UNMOUNT CHAIN IS ARGUED, NOT TRACED: docs/a40-check.md B3 asserts it, the test notes label it argued, the notes check read its endpoints without tracing it, and no agent has verified it. If the chain is wrong the placement may be wrong in either direction. This row also absorbs the pre-migration state - rubric text present with no recorded origin, which EVERY row that existed before 20261025000000 hits - because that state renders a THIRD sentence added by RULING 120 that no human has ever seen.'
+- id: 'A40-D5'
+  state: 'unscoped'
+  kind: 'chore'
+  area: 'grading-setup-interaction-cost'
+  title: 'The rubric origin column shares the upload: namespace with GradingTab''s rubric-memory storage keys'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'A guard asserting no reader of cartridge_drops.rubric_origin_scope passes it to loadRubricMemory or any rubric-memory reader. Today the column is write-then-render only, so such a guard CANNOT FAIL - which is why this is filed and not built.'
+  from: 'docs/a40-disclosure-test-notes.md residual A40-D5, round 2.'
+  note: 'LATENT, NOT LIVE, and filed before the harmful callsite exists rather than after. The origin column records scopes like upload:<archiveName>, and GradingTab.tsx (:232, :324) uses that same namespace for rubric-memory STORAGE keys. Nothing reads the column back into a loader today, so nothing breaks. If anything later feeds the column value into loadRubricMemory it will read GradingTab own namespace and SILENTLY RESTORE THE WRONG RUBRIC - the exact class of defect A40 exists to make visible. The honest reason this is a row and not a test: an instrument written now cannot fail, and this repo ruled twice on 2026-09-27 that an assertion which cannot fail is not an instrument. It becomes buildable the moment a reader exists.'
+- id: 'A40-D6'
+  state: 'unscoped'
+  kind: 'chore'
+  area: 'grading-setup-interaction-cost'
+  title: 'A column on a Row type that the insert never writes is invisible to every instrument here, and tsc accepts it'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Add a field to CartridgeDropsRow without adding it to the insert payload in src/lib/cartridge-drops.ts and confirm nothing goes red. The insert-payload-versus-migration-columns assertion in cartridge-drops.origin.test.ts closes it FOR A40 only, because it inspects the INSERT PAYLOAD rather than the Row type.'
+  from: 'docs/a40-disclosure-test-notes.md MINOR-2 generalised, plus residual A40-D6.'
+  note: 'A type-level hole with no type-level gate. A column declared on the Row type but never written is silently always null, and tsc cannot object because the insert type marks it optional. A40 is closed against it by construction - a sibling assertion forces the origin column into the insert - and nothing else is. Worth recording that this is the MIRROR of the defect RULING 120 fixed: there a column that WAS written still produced a false sentence, because null meant two different things. Both failures come from the same root - a nullable column carries a meaning the type system does not record - so whatever guard this row eventually gets should be designed against both directions, not just the unwritten one.'
+- id: 'A40-D7'
+  state: 'unscoped'
+  kind: 'chore'
+  area: 'loop-and-docs-maintenance'
+  title: 'An instrument whose stated claim is wider than what it scans - four instances in one day'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'For each guard that describes itself as catching anything of a kind, splice in an instance OUTSIDE its enumeration and confirm it goes red. The A40 case is closed: the tag guard in CartridgeDropPanel.reorder.test.ts now tallies every JSX tag token as a frozen multiset, with the details/summary mutation kept as a PERMANENT regression test rather than a one-off probe.'
+  from: 'docs/a40-disclosure-build-check.md MA1, found by EXECUTION rather than by reading.'
+  note: 'FILED AS A CLASS, not as an open A40 defect. The zero-interaction guard claimed in its own framing sentence to catch any new token of any kind rather than a list of banned things - and it was a FOUR-NAME LIST, so a details/summary disclosure added the click RULING 100 forbids and passed all three assertions. Fixed for that file at 19cf77b. The reason it earns a row: this was the FOURTH instrument on 2026-09-27 whose stated claim exceeded what it measured. The others: a disclosure deletable with eleven clauses green (RULING 121); a migration-ordering guard whose subject was the DIRECTORY last file rather than the new migration, so a file renamed 53 places earlier passed (RULING 122); and a refusal proof asserting a mock was not called in a module with no call site at all (RULING 118). The remedy is not more instruments - it is the habit of checking an instrument DESCRIPTION against what the instrument actually scans, and every one of these four was found by running the thing rather than reading it.'
 - id: 'A46'
   state: 'unscoped'
   kind: 'feature'

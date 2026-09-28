@@ -8,7 +8,7 @@ import {
 import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "../canvas";
 import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
-import { toPreviewContent, groupSubmissionsByStudent } from "./utils";
+import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel } from "./utils";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { looksLikeGithubUrl } from "../submission-repo";
 import { fetchGradableRepoContent } from "./repo-content";
@@ -165,7 +165,49 @@ export async function extractCanvasEntries(
   for (const work of students) {
     entries.push(await canvasWorkToEntry(work));
   }
-  return { entries, pointsPossible };
+  return { entries: disambiguateCanvasEntries(entries), pointsPossible };
+}
+
+/**
+ * RULING 129: Canvas hands over an authoritative numeric `userId` per entry,
+ * but `student` (the display shown to the instructor, and the bare-name key
+ * every layer below extraction - `seedEdits`, the results table, the Canvas
+ * post payload - keys on) is decorative and Canvas does not guarantee it is
+ * unique. Two enrolments with equal `sortable_name`/`display_name` strings
+ * (or two submissions whose `user_id` was not a number, which both fall back
+ * to the literal `"Unknown student"`) produce two `StudentSubmissionEntry`
+ * rows sharing one display, and everything downstream keyed on that display
+ * then collapses onto one slot - see docs/ruling-129.md for the full trace
+ * and what this function does and does not protect against.
+ *
+ * This is NOT a refusal: Canvas can always tell the two students apart via
+ * `userId`, so refusing would be a regression (that is the right response
+ * only when identity genuinely cannot be told apart, as the zip path's own
+ * `collisionRefusal.ts` is for). Instead this reuses the zip path's own
+ * terminal disambiguation mechanism (`assignUnclaimedLabel` above, extracted
+ * from `groupSubmissionsByStudent`'s identical pass) so the two paths never
+ * grow two dialects of the same fix.
+ *
+ * Pure: `userId` and every other field are passed through untouched, only
+ * `student` may change, and only on an entry whose display collided with an
+ * earlier one. Walked in ENTRY-ARRAY order - a function of the entries alone,
+ * never re-sorted here - so the result is deterministic for a given input
+ * and the first entry holding any given display always keeps it unchanged;
+ * later entries sharing that display get the first unclaimed
+ * "<display> (2)", "<display> (3)", etc. What the label SAYS is left as-is
+ * (RES-A46R2-6 in docs/a46-canvas-collision-scope.md): this does not invent
+ * new copy, such as folding `userId` into the label, because that is a
+ * product/UX decision this pass was told is the owner's to make.
+ */
+export function disambiguateCanvasEntries(
+  entries: readonly StudentSubmissionEntry[]
+): StudentSubmissionEntry[] {
+  const takenLabels = new Set<string>();
+  return entries.map((entry) => {
+    const label = assignUnclaimedLabel(entry.student, takenLabels);
+    takenLabels.add(label);
+    return label === entry.student ? entry : { ...entry, student: label };
+  });
 }
 
 /**

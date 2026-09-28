@@ -11,9 +11,10 @@ vi.mock("./repo-content", () => ({
   fetchGradableRepoContent: vi.fn(),
 }));
 
-import { canvasWorkToEntry, extractSubmissions, extractStudentEntries } from "./extraction";
+import { canvasWorkToEntry, extractSubmissions, extractStudentEntries, disambiguateCanvasEntries } from "./extraction";
 import { fetchGradableRepoContent } from "./repo-content";
 import type { CanvasStudentWork } from "../canvas/discussions";
+import type { StudentSubmissionEntry } from "./types";
 import JSZip from "jszip";
 
 const mockFetchGradableRepoContent = vi.mocked(fetchGradableRepoContent);
@@ -146,6 +147,64 @@ describe("canvasWorkToEntry - submission URL", () => {
     expect(entry.content).toContain("Could not read the linked GitHub repository: network exploded.");
     expect(entry.gradedRepo).toBeNull();
     expect(entry.repoReadNote).toContain("network exploded");
+  });
+});
+
+// RULING 129 (docs/ruling-129.md): Canvas's `student` display is not
+// guaranteed unique the way the zip path's identity key is - two enrolments
+// can share a `sortable_name`/`display_name`, or both fall back to the
+// literal "Unknown student". disambiguateCanvasEntries is the pure function
+// applied at extraction.ts's, engine.ts's and grading.ts's three
+// canvasWorkToEntry call sites so no two entries reaching the results/review
+// layer (seedEdits, GradingResults.tsx) ever share a display.
+describe("disambiguateCanvasEntries (RULING 129)", () => {
+  function buildEntry(student: string, userId: number): StudentSubmissionEntry {
+    return {
+      student,
+      content: `content for ${userId}`,
+      mergedFileCount: 1,
+      submittedFiles: [],
+      userId,
+    };
+  }
+
+  it("makes two Canvas entries sharing a display pairwise distinct, without touching userId, content, or entry count", () => {
+    const input = [buildEntry("Smith, John", 101), buildEntry("Smith, John", 102)];
+    const result = disambiguateCanvasEntries(input);
+
+    expect(result).toHaveLength(2);
+    // INVARIANT D, reused from the zip path's own oracle
+    // (identityInvariants.test.ts:505): no two returned entries share a
+    // display.
+    const displays = result.map((e) => e.student);
+    expect(new Set(displays).size).toBe(displays.length);
+    // userId is the authoritative identity and must never be touched or
+    // reordered by the relabeling.
+    expect(result.map((e) => e.userId)).toEqual([101, 102]);
+    // Only `student` may change - every other field passes through.
+    expect(result[0].content).toBe("content for 101");
+    expect(result[1].content).toBe("content for 102");
+  });
+
+  it("positive control: a single Canvas entry is returned unchanged (nothing to disambiguate)", () => {
+    const input = [buildEntry("Ada Lovelace", 7)];
+    const result = disambiguateCanvasEntries(input);
+    expect(result).toEqual(input);
+  });
+
+  it("positive control: two Canvas entries with different displays are returned unchanged - a disambiguator that renames when it does not need to is its own defect", () => {
+    const input = [buildEntry("Ada Lovelace", 7), buildEntry("Grace Hopper", 8)];
+    const result = disambiguateCanvasEntries(input);
+    expect(result).toEqual(input);
+    expect(result[0]).toBe(input[0]);
+    expect(result[1]).toBe(input[1]);
+  });
+
+  it("three entries sharing one display each get a distinct, first-unclaimed label, in entry order", () => {
+    const input = [buildEntry("Smith, John", 1), buildEntry("Smith, John", 2), buildEntry("Smith, John", 3)];
+    const result = disambiguateCanvasEntries(input);
+    expect(result.map((e) => e.student)).toEqual(["Smith, John", "Smith, John (2)", "Smith, John (3)"]);
+    expect(result.map((e) => e.userId)).toEqual([1, 2, 3]);
   });
 });
 

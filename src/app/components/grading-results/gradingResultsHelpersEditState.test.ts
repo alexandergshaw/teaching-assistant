@@ -24,6 +24,7 @@ import {
   type GradingRun,
   type RowEdit,
 } from "./gradingResultsHelpers";
+import { disambiguateCanvasEntries } from "../../../lib/grade/extraction";
 
 // ── A2/A3 additions (docs/grading-results-feedback-boxes-acceptance-criteria.md) ──
 
@@ -309,6 +310,96 @@ describe("loadPersistedEdits", () => {
 
     it("P4: the seeded map has exactly one slot per result, unaffected by folder-disambiguated displays", () => {
       expect(Object.keys(seedEdits(foldedRun)).length).toBe(foldedRun.results.length);
+    });
+  });
+
+  // RULING 129 (docs/ruling-129.md, docs/a46-canvas-collision-scope.md): P4
+  // above is the nearest existing one-slot-per-result assertion, and it
+  // cannot ever fail on the Canvas collision - its fixture's two results
+  // ("AlvarezMaria/essay", "BrownTom/essay") already have distinct displays.
+  // This is that same assertion given a fixture that CAN break it: two
+  // results sharing one display, exactly what two same-named Canvas
+  // enrolments produce before disambiguateCanvasEntries runs
+  // (extraction.ts). `seedEdits` itself is unchanged (RULING 129 does not
+  // re-key it) - the fix runs one layer upstream, at Canvas entry-build time,
+  // so results that share a display should never reach seedEdits in the
+  // first place once the three canvasWorkToEntry call sites are wired to
+  // disambiguateCanvasEntries.
+  describe("RULING 129 - the Canvas display collision seedEdits could not previously distinguish", () => {
+    it("without disambiguation, two Canvas-derived results sharing a display collapse to ONE seedEdits slot - the defect this ruling fixes, characterized directly against seedEdits (which this ruling does NOT change)", () => {
+      const collidedRun: GradingRun = {
+        results: [
+          {
+            student: "Smith, John",
+            userId: 101,
+            totalScore: "18/20",
+            overallComment: "",
+            strengths: "",
+            improvements: "",
+            resubmitNotice: "",
+            rubricAreas: [],
+          },
+          {
+            student: "Smith, John",
+            userId: 102,
+            totalScore: "12/20",
+            overallComment: "",
+            strengths: "",
+            improvements: "",
+            resubmitNotice: "",
+            rubricAreas: [],
+          },
+        ],
+      } as unknown as GradingRun;
+
+      // RED: this is what today's (pre-fix) Canvas path produces once two
+      // same-named submissions reach the results/review layer - ONE slot,
+      // not two. `seedEdits` has no way to tell these two results apart,
+      // because it keys on the bare display alone.
+      expect(Object.keys(seedEdits(collidedRun)).length).toBe(1);
+      expect(Object.keys(seedEdits(collidedRun)).length).not.toBe(collidedRun.results.length);
+    });
+
+    it("GREEN: run through the real fix (disambiguateCanvasEntries) before the results/review layer, the same two same-userId-bearing rows get exactly one seedEdits slot EACH", () => {
+      const disambiguated = disambiguateCanvasEntries([
+        {
+          student: "Smith, John",
+          content: "essay A",
+          mergedFileCount: 1,
+          submittedFiles: [],
+          userId: 101,
+        },
+        {
+          student: "Smith, John",
+          content: "essay B",
+          mergedFileCount: 1,
+          submittedFiles: [],
+          userId: 102,
+        },
+      ]);
+
+      const run: GradingRun = {
+        results: disambiguated.map((entry, i) => ({
+          student: entry.student,
+          userId: entry.userId,
+          totalScore: i === 0 ? "18/20" : "12/20",
+          overallComment: "",
+          strengths: "",
+          improvements: "",
+          resubmitNotice: "",
+          rubricAreas: [],
+        })),
+      } as unknown as GradingRun;
+
+      const seeded = seedEdits(run);
+      // THE ONE-SLOT-PER-RESULT INVARIANT, executing on a fixture that can
+      // actually break it (unlike P4's).
+      expect(Object.keys(seeded).length).toBe(run.results.length);
+      // Each slot carries the RIGHT score - the collapse this ruling closes
+      // was never "a row goes missing", it was "a row gets the OTHER row's
+      // score" (docs/ruling-129.md).
+      expect(seeded["Smith, John"].total).toBe("18/20");
+      expect(seeded["Smith, John (2)"].total).toBe("12/20");
     });
   });
 });

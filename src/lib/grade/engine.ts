@@ -451,7 +451,7 @@ export async function gradeCanvasUrl(
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
   const { fetchCanvasWork, fetchAssignmentPointsPossible } = await import("../canvas");
-  const { canvasWorkToEntry } = await import("./extraction");
+  const { canvasWorkToEntry, disambiguateCanvasEntries } = await import("./extraction");
 
   const [{ students }, pointsPossible] = await Promise.all([
     fetchCanvasWork(url),
@@ -472,5 +472,16 @@ export async function gradeCanvasUrl(
     entries.push(await canvasWorkToEntry(work));
   }
 
-  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible, options);
+  // RULING 129: this whole-run Canvas path is not behind
+  // INCREMENTAL_ROUTE_ENABLED - it is live today - so it needs the same
+  // display disambiguation extractCanvasEntries gets. See
+  // extraction.ts's disambiguateCanvasEntries for the full rationale.
+  return gradeStudentEntries(
+    disambiguateCanvasEntries(entries),
+    assignmentInstructions,
+    rubric,
+    provider,
+    pointsPossible,
+    options
+  );
 }

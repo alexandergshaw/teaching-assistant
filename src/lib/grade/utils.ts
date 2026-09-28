@@ -419,6 +419,28 @@ export function inferStudentPrefix(
 }
 
 /**
+ * RULING 129: the first UNCLAIMED label against `takenLabels`, never a
+ * counted suffix blindly appended - extracted out of
+ * `groupSubmissionsByStudent`'s own terminal disambiguation pass below so the
+ * Canvas path (`extraction.ts`'s `disambiguateCanvasEntries`) can reuse the
+ * exact same mechanism instead of writing a second dialect of it. Appending
+ * " (2)", " (3)" to the Nth claimant of a base label does not guarantee
+ * distinctness by itself, because a crafted or coincidental raw label can
+ * already look like a counted suffix (docs/a44-test-notes.md R15, fixture
+ * K4) - trying the base label first and only falling back to a suffix while
+ * it is taken is what makes this safe against that collision.
+ */
+export function assignUnclaimedLabel(baseLabel: string, takenLabels: ReadonlySet<string>): string {
+  let candidate = baseLabel;
+  let suffix = 2;
+  while (takenLabels.has(candidate)) {
+    candidate = `${baseLabel} (${suffix})`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+/**
  * `zipParents` (A14): per-file zip-crossing chains, keyed by the same file
  * path used in `submissions`/`rawData` - populated by extraction.ts's
  * collectFromZip. A file absent from `zipParents` (or the whole map being
@@ -475,20 +497,17 @@ export function groupSubmissionsByStudent(
   // crafted or coincidental RAW label (e.g. a leading space defeating
   // leafStemFallback's anchored regex, so a file's own stem IS "deep (2)")
   // can collide with a suffix a counting pass would also produce
-  // (docs/a44-test-notes.md R15, fixture K4).
+  // (docs/a44-test-notes.md R15, fixture K4). The label-assignment step
+  // itself is `assignUnclaimedLabel` below, extracted for RULING 129's reuse
+  // on the Canvas path (extraction.ts's disambiguateCanvasEntries) - this
+  // loop's own behavior is unchanged, only the inline `while` became a call.
   const sortedKeys = Array.from(grouped.keys()).sort();
   const takenLabels = new Set<string>();
   const displayByKey = new Map<string, string>();
   for (const key of sortedKeys) {
     const group = grouped.get(key);
     if (!group) continue;
-    const baseLabel = group.student;
-    let candidate = baseLabel;
-    let suffix = 2;
-    while (takenLabels.has(candidate)) {
-      candidate = `${baseLabel} (${suffix})`;
-      suffix += 1;
-    }
+    const candidate = assignUnclaimedLabel(group.student, takenLabels);
     takenLabels.add(candidate);
     displayByKey.set(key, candidate);
   }

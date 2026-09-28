@@ -9,9 +9,9 @@ export { normalizeAreaName, buildSystemPrompt, extractRubricCriteria, generateRu
 
 export { parseRubricResponse, parseEarnedPossibleScore, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./grade/parsing";
 
-export { extractSubmissions, extractStudentEntries, extractCanvasEntries, canvasWorkToEntry } from "./grade/extraction";
+export { extractSubmissions, extractStudentEntries, extractCanvasEntries, canvasWorkToEntry, disambiguateCanvasEntries } from "./grade/extraction";
 
-export { truncateSubmission, sleep, getBaseFileName, removeLastExtension, toPreviewContent, parseSubmissionFileName, getFileExtension, inferStudentPrefix, groupSubmissionsByStudent, buildCodeExecutionNote } from "./grade/utils";
+export { truncateSubmission, sleep, getBaseFileName, removeLastExtension, toPreviewContent, parseSubmissionFileName, getFileExtension, inferStudentPrefix, groupSubmissionsByStudent, assignUnclaimedLabel, buildCodeExecutionNote } from "./grade/utils";
 
 export { gradeSubmissions, gradeEntries, gradeCanvasUrl, type GradingRunOptions } from "./grade/engine";
 

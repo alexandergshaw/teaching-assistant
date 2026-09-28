@@ -1,7 +1,7 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
 import { runSubmittedCode, attachCodeRuns, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -618,7 +618,12 @@ export async function gradeOneSubmissionAction(
       contributionCount: Math.max(1, submission.files.length + (submission.text ? 1 : 0)),
       submissionUrl: submission.url,
     };
-    const entry = await canvasWorkToEntry(work);
+    // RULING 129: a single submission cannot collide with itself, but this
+    // is still routed through disambiguateCanvasEntries (a no-op on a
+    // one-element array) so a later caller here that grows to build several
+    // entries at once cannot forget the disambiguation - see
+    // extraction.ts's disambiguateCanvasEntries.
+    const [entry] = disambiguateCanvasEntries([await canvasWorkToEntry(work)]);
     const speedGraderUrl = await getSpeedGraderUrl(submission.canvasUrl);
     // The external "other" engine needs a zip; fall back to gemini for a single submission.
     const gradeProvider: LlmProvider = provider === "other" ? "gemini" : provider;

@@ -1648,7 +1648,7 @@ projection that 4b lands.
 #### 8.4.2 Commit 4b - reconciliation becomes a projection
 
 **Write set:** `src/lib/grade/reconcile.ts` (**new**, PURE `reconcileRun`,
-imports only `./types` and `./rubric`, **`-le 250`**),
+imports only `./types` and `./prompts` - CORRECTED 2026-09-28 by fill wave 1 at 0cb98bc: this said `./rubric`, and RULING 134 changed it to `./prompts`, where normalizeAreaName is actually DEFINED rather than re-exported. That removed reconcile.ts server-only reach entirely and took a frozen import-graph trail from ten back to NINE - a trail REMOVED, not added. The `-le 250` bound is unchanged and holds at a measured 132, **`-le 250`**),
 `src/lib/grade/engine.ts` (**edit, THE CALLER** - `:332-393` becomes a call;
 **must SHRINK**), `src/lib/grade.ts` (**edit**, barrel export), plus the owned
 readers.

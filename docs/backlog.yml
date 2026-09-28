@@ -756,6 +756,42 @@
   instrument: 'For each guard that describes itself as catching anything of a kind, splice in an instance OUTSIDE its enumeration and confirm it goes red. The A40 case is closed: the tag guard in CartridgeDropPanel.reorder.test.ts now tallies every JSX tag token as a frozen multiset, with the details/summary mutation kept as a PERMANENT regression test rather than a one-off probe.'
   from: 'docs/a40-disclosure-build-check.md MA1, found by EXECUTION rather than by reading.'
   note: 'FILED AS A CLASS, not as an open A40 defect. The zero-interaction guard claimed in its own framing sentence to catch any new token of any kind rather than a list of banned things - and it was a FOUR-NAME LIST, so a details/summary disclosure added the click RULING 100 forbids and passed all three assertions. Fixed for that file at 19cf77b. The reason it earns a row: this was the FOURTH instrument on 2026-09-27 whose stated claim exceeded what it measured. The others: a disclosure deletable with eleven clauses green (RULING 121); a migration-ordering guard whose subject was the DIRECTORY last file rather than the new migration, so a file renamed 53 places earlier passed (RULING 122); and a refusal proof asserting a mock was not called in a module with no call site at all (RULING 118). The remedy is not more instruments - it is the habit of checking an instrument DESCRIPTION against what the instrument actually scans, and every one of these four was found by running the thing rather than reading it.'
+- id: 'R2-PERM'
+  question: 'The permission classifier now refuses the guard conversion as security-weakening, blocking the last ~91 sites across seven sub-waves. Do you (a) adjust the rule so this category of edit is permitted, (b) leave the remaining sites on the permissive alias indefinitely, or (c) stop R2 here and close it as partially delivered? Every answer terminates: (a) resumes the sub-waves unchanged, (b) and (c) both mean the row records what is left and why.'
+  state: 'owner'
+  kind: 'chore'
+  area: 'owner-guard-call-sites'
+  title: 'R2 is blocked by the environment, not the code - the last ~91 guard sites cannot be converted'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'The denial itself: the classifier refused a call-site edit AND a plain grep for the guard name, so it is blocking the category rather than reacting to bulk edits. Reproducible by attempting any requireOwner-to-requireUser edit.'
+  from: 'SW10, 2026-09-28: the classifier denied the second call site and the implementer correctly did not route around it.'
+  note: '141 of ~254 sites are converted across thirteen files and every action that can spend the GitHub PAT is owner-only, so the delivered part is the highest-exposure part. THE REMAINING SITES ARE NOT A REGRESSION - they carry the deprecated alias, which is the status quo they have always had. What is lost by stopping is the per-site REVIEW, not a protection. I WILL NOT ROUTE AROUND THE DENIAL: SW10 asked that another session perform the edit, and a blocked edit handed to a second agent is still blocked. I also will not edit permission settings, which are the owner. SW10 analysis is COMPLETE and applies the moment the edit is permitted: 21 actions, zero restrictive, containment traced to line numbers, including the 8-calls-7-exports puzzle resolved as a call inside a non-exported helper already guarded by its caller.'
+- id: 'R2-HDR'
+  question: 'canvas-inbox.ts header now asserts the opposite of its code - it says every action below is owner-gated when all nineteen are permissive after 3eb2c8b. The same classifier denied the fix. Do you (a) tell me to correct it, (b) correct it yourself, or (c) leave it? Every answer terminates.'
+  state: 'owner'
+  kind: 'bug'
+  area: 'owner-guard-call-sites'
+  title: 'A file header asserts every action is owner-gated when all nineteen are permissive'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Read src/app/actions/canvas-inbox.ts''s header against its nineteen requireUser() call sites. The contradiction is plain on inspection; no test covers comment text.'
+  from: 'SW8, 2026-09-28: the implementer''s edit to correct it was denied as security-weakening and it did not route around the denial.'
+  note: 'A COMMENT, NOT BEHAVIOUR - the guards are correct and tested, and nineteen executing assertions prove each action admits a non-owner. But it is a comment asserting the opposite of the code, in a file about credentials, which is the shape that misleads the next reader worst. Recorded rather than fixed because the fix was DENIED to a subagent and performing it on that subagent behalf is the laundering pattern this project refuses. The denial is almost certainly a false positive - correcting a stale comment weakens nothing - which is exactly why it needs the owner rather than a workaround.'
+- id: 'SEC-F4'
+  question: 'The shared knowledge library is deletable by any approved account: deleteKnowledgeEntry runs on a table with no tenant column, and its guard is the permissive alias while the module titles itself owner curation. Is cross-tenant sharing of that library INTENDED? If yes, the guard should be owner-only for deletes and the name is right; if no, the table needs a tenant key. Either answer terminates.'
+  state: 'owner'
+  kind: 'bug'
+  area: 'owner-guard-call-sites'
+  title: 'Shared knowledge library: any approved account can delete entries a module calls owner-curated'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'src/lib/research/db.ts deleteKnowledgeEntry on knowledge_entries - no tenant column, correctly unscoped for a shared library. The defect is the CONTROL: both exports are guarded by the permissive alias while the module section and the action comment both say the owner curates.'
+  from: 'docs/service-role-predicate-audit.md finding F4, 2026-09-28.'
+  note: 'SHARED-STATE DESTRUCTION, not private-data disclosure - nobody reads another tenant rows here, but any approved account can delete what the module presents as owner-curated. That gap between the NAME and the GUARD is the whole finding: one of them is wrong and only the owner knows which. Deliberately NOT bundled with the storage-path fix (RULING 127), which is a straightforward tightening with no owner question in it. This one turns on intent, and guessing would either strip a capability instructors use or leave a shared library open. The two sibling shared tables, glossary_terms and rubric_bank, have the same shape and the same question.'
 - id: 'A46'
   state: 'unscoped'
   kind: 'feature'

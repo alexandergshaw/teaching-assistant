@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // the check added at gradeAction's file-branch entry, right after the
 // "please upload a zip" guard and before any provider branches.
 //
-// requireOwner is mocked (auth only - not the subject of this test). The
+// requireAppOwner is mocked (auth only - not the subject of this test). The
 // embedded-provider dependencies (extractStudentEntries, attachCodeRuns,
 // buildEmbeddedRubric, gradeEntriesEmbedded, rememberRubric) are mocked too,
 // so the "under budget still grades" case proves the guard does not refuse
@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // on any real fetch).
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/grade", async () => {
@@ -56,7 +56,7 @@ vi.mock("@/lib/research/rubric-bank", () => ({
   rememberRubric: vi.fn().mockResolvedValue(0),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { extractStudentEntries, gradeEntries, synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded } from "@/lib/embedded-grader";
 import { gradeAction } from "./grading";
@@ -106,7 +106,7 @@ function baseFormData(file: File): FormData {
 describe("gradeAction - zip wire budget (N15-rubric-picture-scope section 4.4)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
+    vi.mocked(requireAppOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
     vi.mocked(extractStudentEntries).mockResolvedValue([
       { student: "Student A", files: [{ name: "main.py", content: "x = 1" }] },
     ] as never);
@@ -164,7 +164,7 @@ describe("gradeAction - zip wire budget (N15-rubric-picture-scope section 4.4)",
 describe("gradeAction - single-file (non-zip) upload wire budget (A39 wave 1, W1-4)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
+    vi.mocked(requireAppOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" } as never);
     vi.mocked(gradeEntries).mockResolvedValue({
       results: [{ student: "essay", totalScore: "8/10", rubricAreas: [] }],
       rubricAreaNames: [],

@@ -11,7 +11,7 @@ import { resolveInstitution } from "@/lib/canvas-core";
 import { normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { gradeViaGradingEngine, detectRubricSource } from "@/lib/grading-engine";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
@@ -34,7 +34,7 @@ export async function findPendingGradingDraftForWorkflowAction(
   source: GradingDraftSource
 ): Promise<{ draft: GradingDraft | null } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const draft = await findPendingGradingDraftForWorkflow(supabase, user.id, workflowId, source);
     return { draft };
@@ -51,7 +51,7 @@ export async function fetchCanvasMetaAction(
   url: string
 ): Promise<{ description: string; rubricText: string; linkedFileIds: number[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     // Return Canvas's own rubric only; never synthesize one when Canvas has none.
     return await fetchCanvasMeta(url);
   } catch (err) {
@@ -82,7 +82,7 @@ export async function postCanvasGradesAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     return await postCanvasGrades(url, grades);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
@@ -94,9 +94,9 @@ export async function postCanvasGradesAction(
 // Persistence for the unattended grade-to-draft step's output and the
 // app-open review-grading-draft step's read/mark-reviewed calls. Every
 // action below is owner-gated and uses the service-role client + the
-// owner's own id (from requireOwner()) - the same pattern as the rest of
+// owner's own id (from the guard) - the same pattern as the rest of
 // this file's Supabase-backed actions - so it works identically whether
-// called from a signed-in browser session or, via requireOwner()'s
+// called from a signed-in browser session or, via the guard's
 // runAsOwner impersonation, from inside a headless cron run
 // (src/app/api/cron/run-schedules/route.ts). NONE of these actions post
 // anything to Canvas; posting only ever happens through
@@ -112,7 +112,7 @@ export async function saveGradingDraftAction(
   source?: GradingDraftSource
 ): Promise<{ id: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const draft = await createGradingDraft(supabase, user.id, { summary, payload, workflowId, workflowName, source });
     return { id: draft.id };
@@ -132,7 +132,7 @@ export async function listMissingSubmissionsAction(input: {
   assignmentId?: string;
 }): Promise<{ missing: MissingAssignmentReport[]; summary: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     // Resolve institution/token from course URL
     const { baseUrl, token, institution } = await resolveInstitution(input.courseUrl);
@@ -238,7 +238,7 @@ export async function draftZerosForMissingAction(input: {
   { draftId: string | null; assignmentsAffected: number; zeroed: number; summary: string } | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     const supabase = createServiceClient();
 
     // Resolve institution/token from course URL
@@ -332,7 +332,7 @@ export async function draftZerosForMissingAction(input: {
     }
 
     // Save the draft
-    const user = await requireOwner();
+    const user = await requireUser();
     const summary = `Drafted 0 for ${totalZeroed} missing submission(s) across ${entries.length} assignment(s).`;
     const draft = await createGradingDraft(supabase, user.id, {
       summary,
@@ -358,7 +358,7 @@ export async function listPendingGradingDraftsAction(): Promise<
   { drafts: Array<{ id: string; summary: string; createdAt: string }> } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const drafts = await listPendingGradingDrafts(supabase, user.id);
     return {
@@ -385,7 +385,7 @@ export async function getGradingDraftAction(
   | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const draft = await getGradingDraft(supabase, user.id, id);
     if (!draft) {
@@ -411,7 +411,7 @@ export async function markGradingDraftReviewedAction(
   id: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await markGradingDraftReviewed(supabase, user.id, id);
     return { ok: true };
@@ -425,7 +425,7 @@ export async function deleteGradingDraftAction(
   id: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await deleteGradingDraft(supabase, user.id, id);
     return { ok: true };
@@ -440,7 +440,7 @@ export async function updateGradingDraftPayloadAction(
   payload: GradingDraftPayload
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await updateGradingDraft(supabase, user.id, id, { payload });
     return { ok: true };
@@ -468,7 +468,7 @@ export async function deriveAssignmentChecklistAction(
   provider?: LlmProvider
 ): Promise<{ items: string[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Not authorized." };
   }
@@ -497,7 +497,7 @@ export async function postGradingDraftAction(
   id: string
 ): Promise<{ posted: number; failed: number; skipped: number; attempted: number } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const draft = await getGradingDraft(supabase, user.id, id);
     if (!draft) return { error: "That grading draft was not found." };
@@ -576,7 +576,7 @@ export async function runSubmissionCodeAction(
 ): Promise<CodeRunResult | null> {
   // Owner-gated like the rest of the file: this relays code execution through
   // the server's sandbox credentials.
-  await requireOwner();
+  await requireAppOwner();
   return runSubmittedCode(files, entryPoint);
 }
 
@@ -587,7 +587,7 @@ export async function pullSubmissionAction(
   userId: number
 ): Promise<{ submission: CanvasSubmissionDetail } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { submission: await fetchSubmissionDetail(code.trim().toUpperCase(), courseId, assignmentId, userId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not pull the submission." };
@@ -604,7 +604,7 @@ export async function gradeOneSubmissionAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ run: GradingRun; canvasUrl: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const c = code.trim().toUpperCase();
     const submission = await fetchSubmissionDetail(c, courseId, assignmentId, userId);
     const meta = await fetchCanvasMeta(submission.canvasUrl);
@@ -651,7 +651,7 @@ export async function generateModelAnswerAction(
   moduleContext: string = ""
 ): Promise<{ modelAnswer: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!instructions.trim()) return { error: "Provide the assignment instructions." };
     const answer = await generateSampleAnswer(instructions, rubric, provider, moduleContext);
     return { modelAnswer: typeof answer === "string" ? answer : String(answer) };
@@ -732,7 +732,7 @@ export async function gradeAction(
   const gradingRunOptions: GradingRunOptions = runDeadlineMs !== undefined ? { deadlineMs: runDeadlineMs } : {};
 
   try {
-    await requireOwner();
+    await requireAppOwner();
 
     // Canvas source: grade each student's discussion posts or assignment
     // submission (kind auto-detected from the URL). Routes by provider — the
@@ -930,7 +930,7 @@ export async function generateFullCreditChecklistAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ checklist: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!instructions.trim()) return { error: "Provide the assignment instructions." };
     const items = await synthesizeFullCreditChecklist(instructions, rubric, provider);
     const checklist = items.join("\n");

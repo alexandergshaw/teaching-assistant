@@ -398,6 +398,54 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
   // which loadOrgRepoTreesAction alone makes.
   listCourseAssignmentsAction:
     "reaches Canvas only through resolveCanvasCredential, which touches the owner's env pair solely when the CALLING identity's own role is 'owner' - never listOrgRepos/getRepoTree, this file's only GitHub PAT calls",
+  // R2 wave 1, sub-wave 7 (docs/r2-wave1-subwaves.md section 4, row SW7):
+  // actions/grading.ts's 20 requireOwner() call sites, re-derived rather than
+  // inherited - the plan predicted ~2 restrictive / ~18 permissive; this file
+  // is 3 restrictive (gradeAction, gradeOneSubmissionAction -
+  // canvasWorkToEntry's fetchGradableRepoContent reaches lib/github.repos.ts
+  // uncontained, the same GitHub-PAT path RULING 108's grading-incremental.ts
+  // precedent traces; runSubmissionCodeAction - relays code execution through
+  // the server's own PISTON_API_KEY/WANDBOX_API_URL, a shared server secret
+  // read directly from process.env in src/lib/code-runner.ts with no
+  // per-caller containment, the same shape as the GitHub PAT) and 16
+  // permissive (17 call sites - draftZerosForMissingAction alone has two).
+  // Every Canvas reach below is contained the same way SW5/SW6 established:
+  // resolveInstitution/resolveInstitutionByCode -> resolveCanvasCredential
+  // (src/lib/canvas-credentials.ts:189) reads the CALLING identity's own
+  // stored credential first and only falls through to the owner's env pair
+  // when that identity's own role is "owner".
+  findPendingGradingDraftForWorkflowAction:
+    "looks up the caller's own pending grading draft for a workflow+source via findPendingGradingDraftForWorkflow (grading-drafts.ts, scoped on user.id) - Supabase only, no GitHub or Canvas import",
+  fetchCanvasMetaAction:
+    "fetches one assignment/discussion's description+rubric via fetchCanvasMeta, contained by resolveInstitution -> resolveCanvasCredential (reads the CALLING identity's own stored Canvas credential first) - never reaches the GitHub PAT",
+  postCanvasGradesAction:
+    "posts grades/comments to Canvas via postCanvasGrades, contained the same way as fetchCanvasMetaAction - never reaches the GitHub PAT",
+  saveGradingDraftAction:
+    "creates a new grading draft row scoped to the caller's own user.id via createGradingDraft (grading-drafts.ts) - Supabase only, no GitHub or Canvas import",
+  listMissingSubmissionsAction:
+    "lists non-submitters for a Canvas course/assignment via the same contained resolveInstitution path plus listAssignmentBriefsWithDue/listAssignmentNonSubmitters - never reaches the GitHub PAT",
+  draftZerosForMissingAction:
+    "drafts zero grades for Canvas non-submitters via the same contained resolveInstitution path, then saves the draft under the caller's own user.id - never reaches the GitHub PAT",
+  listPendingGradingDraftsAction:
+    "lists only the caller's own pending drafts via listPendingGradingDrafts (grading-drafts.ts, scoped on user.id) - Supabase only",
+  getGradingDraftAction:
+    "reads one of the caller's own drafts via getGradingDraft (grading-drafts.ts, scoped on user.id) - Supabase only",
+  markGradingDraftReviewedAction:
+    "marks one of the caller's own drafts reviewed via markGradingDraftReviewed (grading-drafts.ts, scoped on user.id) - Supabase only",
+  deleteGradingDraftAction:
+    "deletes one of the caller's own drafts via deleteGradingDraft (grading-drafts.ts, scoped on user.id) - Supabase only",
+  updateGradingDraftPayloadAction:
+    "edits one of the caller's own drafts' payload via updateGradingDraft (grading-drafts.ts, scoped on user.id) - Supabase only",
+  deriveAssignmentChecklistAction:
+    "derives a full-credit checklist from instructions/rubric text via deriveFullCreditChecklist - calls only the LLM, no GitHub or Canvas import",
+  postGradingDraftAction:
+    "posts one of the caller's own drafts' gradable results to Canvas via postCanvasGradesAction, the same contained Canvas path - never reaches the GitHub PAT",
+  pullSubmissionAction:
+    "pulls one submission's detail via fetchSubmissionDetail, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  generateModelAnswerAction:
+    "generates a sample model answer from instructions/rubric via generateSampleAnswer - calls only the LLM, no GitHub or Canvas import",
+  generateFullCreditChecklistAction:
+    "synthesizes a full-credit checklist from instructions/rubric via synthesizeFullCreditChecklist - calls only the LLM, no GitHub or Canvas import",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -447,7 +495,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(14);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(30);
     }
   );
 

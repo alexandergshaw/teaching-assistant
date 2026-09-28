@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // A44 wave 2 (R5a, R5b, R6): drives the real gradeAction Server Action with a
-// real JSZip archive - requireOwner mocked (auth only), callLlm mocked
+// real JSZip archive - requireAppOwner mocked (auth only), callLlm mocked
 // (never fetch - vitest.setup.ts throws on any real fetch and that throw is
 // load-bearing), everything else (extraction, the identity fold, the
 // refusal predicate, gradeSubmissions/extractStudentEntries) real. This is
@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // refusal message verbatim as `error`, with `run: null`.
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireAppOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/llm", async () => {

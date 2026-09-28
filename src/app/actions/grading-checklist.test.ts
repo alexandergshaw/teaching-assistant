@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// deriveAssignmentChecklistAction calls requireOwner() (auth) and, via
+// deriveAssignmentChecklistAction calls requireUser() (auth) and, via
 // deriveFullCreditChecklist in src/lib/grade/rubric.ts, callLlm() (network) -
 // both mocked so the action's own logic (owner gate, blank-instructions
 // guard, pass-through of the shared checklist synthesis) runs for real
 // without a Supabase session or a live Gemini call. Mirrors the pattern in
 // src/app/actions/current-events.test.ts.
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+  requireUser: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
 }));
 
 vi.mock("@/lib/llm", async () => {
@@ -19,7 +19,7 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { deriveAssignmentChecklistAction } from "./grading";
 
 const checklistResponse = (items: string[]) => ({
@@ -32,11 +32,11 @@ const failResponse = { ok: false as const, status: 500, body: "server error" };
 describe("deriveAssignmentChecklistAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(requireUser).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
   });
 
-  it("returns an error rather than throwing when requireOwner rejects", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
+  it("returns an error rather than throwing when requireUser rejects", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
 
     const result = await deriveAssignmentChecklistAction("Write a binary search tree.", "Correctness (100%)");
 
@@ -67,7 +67,7 @@ describe("deriveAssignmentChecklistAction", () => {
       "Handles duplicate keys",
       "Includes unit tests",
     ]);
-    expect(requireOwner).toHaveBeenCalled();
+    expect(requireUser).toHaveBeenCalled();
   });
 
   it("returns an error and does not throw when the LLM call fails", async () => {

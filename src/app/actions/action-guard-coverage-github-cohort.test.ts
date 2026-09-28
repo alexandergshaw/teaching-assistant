@@ -446,6 +446,78 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
     "generates a sample model answer from instructions/rubric via generateSampleAnswer - calls only the LLM, no GitHub or Canvas import",
   generateFullCreditChecklistAction:
     "synthesizes a full-credit checklist from instructions/rubric via synthesizeFullCreditChecklist - calls only the LLM, no GitHub or Canvas import",
+  // R2 wave 1, sub-wave 8 (docs/r2-wave1-subwaves.md section 4, row SW8):
+  // actions/canvas-inbox.ts's 19 requireOwner() call sites, re-derived rather
+  // than inherited - the plan predicted ~2 restrictive / ~17 permissive; this
+  // file is 0 restrictive / 19 permissive. Every Canvas-reaching action here
+  // is contained the same way SW5-SW7 established: listCourses/
+  // listCourseRoster/listStudentGradeSummaries/listAssignmentTextSubmissions/
+  // listCourseAssignmentDueDates/listCoursesByTerm (src/lib/canvas/listings.ts)
+  // all resolve their credential via resolveInstitutionByCode ->
+  // resolveCanvasCredential (src/lib/canvas-credentials.ts:189); getCourseName/
+  // listAnnouncements/createAnnouncement/createScheduledAnnouncementResilient/
+  // updateAnnouncementSchedule/getAnnouncementById/resolveAnnouncementImage
+  // (src/lib/canvas/announcements.ts, announcement-image-upload.ts) resolve via
+  // resolveCourse -> resolveCanvasCredential; listConversations/getConversation/
+  // replyToConversation/setConversationWorkflowState (src/lib/canvas/inbox.ts)
+  // resolve via resolveDefaultInstitution/resolveInstitutionByCode ->
+  // resolveCanvasCredential; and the two actions that call resolveInstitution/
+  // resolveInstitutionByCode directly (listAssignmentDueDatesByUrlAction,
+  // listAssignmentBriefsByUrlAction) hand the already-resolved baseUrl/token to
+  // listAssignmentBriefsWithDue (auto-zero.ts), which makes no credential call
+  // of its own. Every one of these resolves via resolveCanvasCredential, which
+  // reads the CALLING identity's own stored credential first and only falls
+  // through to the owner's env pair when that identity's own role is "owner" -
+  // never the owner's Canvas token for anyone else. suggestAltTextAction and
+  // suggestLinkTextAction call only callLlm, the shared LLM key, no Canvas or
+  // GitHub import. planWeeklyAnnouncementsAction and
+  // scheduleWeeklyAnnouncementsAction additionally read/write Supabase via
+  // createServiceClient, but every row is scoped to the caller's own user.id
+  // (src/lib/supabase/weekly-announcement-schedule.ts:71-78,109-118,147-165,
+  // 176-189 - each query carries .eq("user_id", userId)), and their Canvas
+  // read-back (loadWeeklyAnnouncementPlan, src/lib/weekly-announcement-run.ts)
+  // calls listAnnouncements, the same contained path as listAnnouncementsAction
+  // above. None of the 19 imports anything from "@/lib/github" or a GitHub-
+  // reaching sibling module, and none reaches the HeyGen/Tavus likeness or the
+  // ElevenLabs voice id.
+  listCoursesAction:
+    "lists an institution's active teacher courses via listCourses, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listCourseRosterAction:
+    "lists one course's roster via listCourseRoster, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listCourseGradeSummariesAction:
+    "lists one course's grade summaries via listStudentGradeSummaries, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listAssignmentTextSubmissionsAction:
+    "reads one assignment's text submissions via listAssignmentTextSubmissions, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listCourseAssignmentDueDatesAction:
+    "lists one course's assignment due dates via listCourseAssignmentDueDates, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listAssignmentDueDatesByUrlAction:
+    "resolves the credential itself via resolveInstitution/resolveInstitutionByCode -> resolveCanvasCredential, then hands the resolved baseUrl/token to listAssignmentBriefsWithDue (auto-zero.ts), which makes no credential call of its own - never reaches the GitHub PAT",
+  listAssignmentBriefsByUrlAction:
+    "same contained path as listAssignmentDueDatesByUrlAction - never reaches the GitHub PAT",
+  listAnnouncementsAction:
+    "reads a course's name and announcements via getCourseName/listAnnouncements, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  createAnnouncementAction:
+    "posts an announcement (optionally with an image) via createAnnouncement/resolveAnnouncementImage, both contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  listCoursesByTermAction:
+    "lists an institution's courses for a term via listCoursesByTerm, contained by resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  createScheduledAnnouncementAction:
+    "creates a scheduled announcement via createAnnouncement, the same contained resolveCourse path as createAnnouncementAction - never reaches the GitHub PAT",
+  listConversationsAction:
+    "lists inbox conversations via listConversations, contained by resolveDefaultInstitution/resolveInstitutionByCode -> resolveCanvasCredential - never reaches the GitHub PAT",
+  getConversationAction:
+    "reads one conversation's thread via getConversation, the same contained path as listConversationsAction - never reaches the GitHub PAT",
+  replyToConversationAction:
+    "replies to a conversation via replyToConversation/getConversation, the same contained path as listConversationsAction - never reaches the GitHub PAT",
+  setConversationStateAction:
+    "marks a conversation read/unread/archived via setConversationWorkflowState, the same contained path as listConversationsAction - never reaches the GitHub PAT",
+  suggestAltTextAction:
+    "suggests alt text via callLlm (or a pure local HTML-derivation helper for the embedded provider) - calls only the LLM, no GitHub or Canvas import",
+  suggestLinkTextAction:
+    "suggests link text via callLlm (or a pure local HTML-derivation helper for the embedded provider) - calls only the LLM, no GitHub or Canvas import",
+  planWeeklyAnnouncementsAction:
+    "previews the weekly-announcement plan via loadWeeklyAnnouncementPlan, whose Canvas read-back (listAnnouncements) is contained by resolveCourse -> resolveCanvasCredential and whose Supabase reads are scoped to the caller's own user.id - never reaches the GitHub PAT",
+  scheduleWeeklyAnnouncementsAction:
+    "schedules/reschedules weekly announcements via the same contained loadWeeklyAnnouncementPlan read-back plus createScheduledAnnouncementResilient/updateAnnouncementSchedule/getAnnouncementById (all contained by resolveCourse -> resolveCanvasCredential), writing only Supabase rows scoped to the caller's own user.id - never reaches the GitHub PAT",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -495,7 +567,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(30);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(49);
     }
   );
 

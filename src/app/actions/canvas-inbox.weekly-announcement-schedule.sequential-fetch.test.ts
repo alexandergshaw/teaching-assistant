@@ -32,7 +32,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -78,7 +78,7 @@ vi.mock("@/lib/lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import {
   listScheduledAnnouncementRows,
   insertPendingScheduledAnnouncement,
@@ -118,7 +118,7 @@ describe("scheduleWeeklyAnnouncementsAction issues Canvas creates sequentially, 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
-    vi.mocked(requireOwner).mockReset().mockResolvedValue(OWNER as never);
+    vi.mocked(requireUser).mockReset().mockResolvedValue(OWNER as never);
     vi.mocked(listScheduledAnnouncementRows).mockReset().mockResolvedValue([]);
     vi.mocked(insertPendingScheduledAnnouncement)
       .mockReset()

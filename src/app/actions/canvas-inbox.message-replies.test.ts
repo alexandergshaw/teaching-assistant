@@ -12,14 +12,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/canvas", () => ({
   listConversations: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { listConversations } from "@/lib/canvas";
 import { listConversationsAction } from "./canvas-inbox";
 
@@ -27,13 +27,13 @@ const OWNER = { id: "owner-1", email: "owner@example.com" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
   vi.mocked(listConversations).mockResolvedValue([]);
 });
 
 describe("listConversationsAction", () => {
-  it("requires ownership - a rejected requireOwner is caught and returned as { error }, never thrown", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
+  it("requires sign-in - a rejected requireUser is caught and returned as { error }, never thrown", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
     await expect(listConversationsAction()).resolves.toEqual({
       error: "Not authorized. Sign in with an approved account.",
     });

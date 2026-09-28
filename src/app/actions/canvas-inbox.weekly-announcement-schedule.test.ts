@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -36,7 +36,7 @@ vi.mock("@/lib/canvas", () => ({
   getAnnouncementById: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import {
   listScheduledAnnouncementRows,
   insertPendingScheduledAnnouncement,
@@ -112,7 +112,7 @@ async function run(
 
 describe("scheduleWeeklyAnnouncementsAction", () => {
   beforeEach(() => {
-    vi.mocked(requireOwner).mockReset().mockResolvedValue(OWNER as never);
+    vi.mocked(requireUser).mockReset().mockResolvedValue(OWNER as never);
     vi.mocked(listScheduledAnnouncementRows).mockReset();
     vi.mocked(insertPendingScheduledAnnouncement).mockReset();
     vi.mocked(confirmScheduledAnnouncement).mockReset();
@@ -124,7 +124,7 @@ describe("scheduleWeeklyAnnouncementsAction", () => {
   });
 
   it("returns a clean error when the caller is not authorized", async () => {
-    vi.mocked(requireOwner).mockRejectedValue(new Error("Not authorized."));
+    vi.mocked(requireUser).mockRejectedValue(new Error("Not authorized."));
     const r = await run();
     expect(r).toEqual({ error: "Not authorized." });
   });

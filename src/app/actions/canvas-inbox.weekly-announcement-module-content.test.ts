@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -35,7 +35,7 @@ vi.mock("@/lib/canvas", () => ({
   getAnnouncementById: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import {
   listScheduledAnnouncementRows,
   insertPendingScheduledAnnouncement,
@@ -106,7 +106,7 @@ async function run(
 }
 
 beforeEach(() => {
-  vi.mocked(requireOwner).mockReset().mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockReset().mockResolvedValue(OWNER as never);
   vi.mocked(listScheduledAnnouncementRows).mockReset().mockResolvedValue([]);
   vi.mocked(listAnnouncements).mockReset().mockResolvedValue([]);
   vi.mocked(insertPendingScheduledAnnouncement)
@@ -423,7 +423,7 @@ describe("planWeeklyAnnouncementsAction (AC1 item 6)", () => {
   });
 
   it("is owner-gated like every other action in this file", async () => {
-    vi.mocked(requireOwner).mockRejectedValue(new Error("Not signed in."));
+    vi.mocked(requireUser).mockRejectedValue(new Error("Not signed in."));
 
     const r = await planWeeklyAnnouncementsAction("hub-1", COURSE_URL, "MCC", START_DATE, 1, 1, "", {
       planningNow: BEFORE_TERM,

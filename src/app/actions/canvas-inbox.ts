@@ -4,7 +4,7 @@ import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/ac
 import { getCourseName, listAnnouncements, createAnnouncement, createScheduledAnnouncementResilient, updateAnnouncementSchedule, getAnnouncementById, resolveAnnouncementImage, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
 import { resolveInstitution, resolveInstitutionByCode } from "@/lib/canvas-core";
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import {
   insertPendingScheduledAnnouncement,
@@ -72,7 +72,7 @@ export async function listCoursesAction(
   acronym: string
 ): Promise<{ courses: CanvasCourse[] } | { error: string; attemptedHost?: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { courses: await listCourses(acronym) };
   } catch (err) {
     return {
@@ -105,7 +105,7 @@ export async function listCourseRosterAction(
   courseId: string
 ): Promise<{ students: CanvasRosterEntry[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { students: await listCourseRoster(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the roster." };
@@ -122,7 +122,7 @@ export async function listCourseGradeSummariesAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     const summaries = await listStudentGradeSummaries(code.trim().toUpperCase(), courseId);
     return { students: summaries };
   } catch (err) {
@@ -136,7 +136,7 @@ export async function listAssignmentTextSubmissionsAction(
   assignmentId: string
 ): Promise<{ submissions: CanvasTextSubmission[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return {
       submissions: await listAssignmentTextSubmissions(
         code.trim().toUpperCase(),
@@ -154,7 +154,7 @@ export async function listCourseAssignmentDueDatesAction(
   courseId: string
 ): Promise<{ assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { assignments: await listCourseAssignmentDueDates(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load assignment due dates." };
@@ -166,7 +166,7 @@ export async function listAssignmentDueDatesByUrlAction(
   fallbackAcronym?: string
 ): Promise<{ assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }>; institution: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     // Check if the URL is absolute (parseable as a full URL)
     let isAbsolute = false;
@@ -218,7 +218,7 @@ export async function listAssignmentBriefsByUrlAction(
   fallbackAcronym?: string
 ): Promise<{ assignments: Array<{ name: string; pointsPossible: number | null; dueAt: string | null }>; institution: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     let isAbsolute = false;
     try {
@@ -263,7 +263,7 @@ export async function listAnnouncementsAction(
   acronym?: string
 ): Promise<{ courseName: string; announcements: CanvasAnnouncement[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     const [courseName, announcements] = await Promise.all([
       getCourseName(courseUrl, acronym),
       listAnnouncements(courseUrl, acronym),
@@ -291,7 +291,7 @@ export async function createAnnouncementAction(
   image?: { base64: string; mimeType: string; altText: string; fileName?: string }
 ): Promise<{ announcement: CanvasAnnouncement; imageError?: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
 
     if (!image) {
       const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
@@ -323,7 +323,7 @@ export async function listCoursesByTermAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     if (!institution.trim()) {
       return { error: "Enter an institution." };
     }
@@ -343,7 +343,7 @@ export async function createScheduledAnnouncementAction(
   acronym?: string
 ): Promise<{ id: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!title.trim()) return { error: "An announcement needs a title." };
     if (!message.trim()) return { error: "An announcement needs a message." };
     const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
@@ -365,7 +365,7 @@ export async function listConversationsAction(
   opts?: { courseId?: string; scope?: "unread" | "archived"; perPage?: number }
 ): Promise<{ conversations: CanvasConversationSummary[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { conversations: await listConversations(acronym, opts) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the inbox." };
@@ -378,7 +378,7 @@ export async function getConversationAction(
   acronym?: string
 ): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { conversation: await getConversation(id, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the conversation." };
@@ -392,7 +392,7 @@ export async function replyToConversationAction(
   acronym?: string
 ): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await replyToConversation(id, body, acronym);
     return { conversation: await getConversation(id, acronym) };
   } catch (err) {
@@ -407,7 +407,7 @@ export async function setConversationStateAction(
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     await setConversationWorkflowState(id, state, acronym);
     return { ok: true };
   } catch (err) {
@@ -422,7 +422,7 @@ export async function suggestAltTextAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     // Embedded Deterministic Engine: derive alt text from the image's file name.
     if (provider === "embedded") {
       const alt = deriveAltTextFromHtml(snippet);
@@ -455,7 +455,7 @@ export async function suggestLinkTextAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     // Embedded Deterministic Engine: derive readable link text from the URL.
     if (provider === "embedded") {
       const linkText = deriveLinkTextFromHtml(snippet);
@@ -521,7 +521,7 @@ export async function planWeeklyAnnouncementsAction(
   testOverrides?: { planningNow?: Date }
 ): Promise<{ weeks: Array<{ week: number; action: AnnouncementPlanAction }> } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
 
     if (!hubCourseId.trim()) return { error: "Choose a course tile." };
     if (!courseUrl.trim()) return { error: "The course tile has no LMS course linked." };
@@ -593,7 +593,7 @@ export async function scheduleWeeklyAnnouncementsAction(
   runOptions?: { drafts?: WeeklyAnnouncementDraft[] }
 ): Promise<{ result: AnnouncementScheduleRunResult } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
 
     if (!hubCourseId.trim()) return { error: "Choose a course tile." };
     if (!courseUrl.trim()) return { error: "The course tile has no LMS course linked." };

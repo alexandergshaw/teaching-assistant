@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/canvas", () => ({
@@ -29,7 +29,7 @@ vi.mock("@/lib/canvas", () => ({
   resolveAnnouncementImage: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { createAnnouncement, resolveAnnouncementImage } from "@/lib/canvas";
 import { createAnnouncementAction } from "./canvas-inbox";
 
@@ -48,7 +48,7 @@ const FAKE_ANNOUNCEMENT = {
 
 describe("createAnnouncementAction - optional image argument", () => {
   beforeEach(() => {
-    vi.mocked(requireOwner).mockReset().mockResolvedValue(OWNER as never);
+    vi.mocked(requireUser).mockReset().mockResolvedValue(OWNER as never);
     vi.mocked(createAnnouncement).mockReset().mockResolvedValue(FAKE_ANNOUNCEMENT);
     vi.mocked(resolveAnnouncementImage).mockReset();
   });

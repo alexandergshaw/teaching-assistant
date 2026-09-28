@@ -63,3 +63,42 @@ mechanism or a deck-specific operation set. The general one is reusable and much
 larger; the deck-specific one is smaller and will be re-implemented the next time
 this need appears. That is a real fork and the revised scope must argue it, with a
 recommendation, rather than defaulting to whichever is easier to write.
+
+## DECISION 16 - A40's disclosure ships PRESENCE PLUS ORIGIN, with the new column.
+
+Asked 2026-09-27 as A40's one terminating question. The owner answered **(b)**.
+
+So the drop row names WHICH course and assignment the rubric came from, not
+merely that one was present. Per the question as put, (b) carries the
+implementation with it: **a new column on `cartridge_drops` plus a migration**,
+not the render-time comparison against rubric-memory. The render-time variant was
+offered and is refused here for the reason stated when the question was asked -
+it is a disclosure that silently stops being true on reload, which is the same
+class of defect A40 exists to fix.
+
+Three things this decision settles, and the activity ends with them:
+
+- **The DECISION 3 conflict closes inside A40.** DECISION 3's own text calls
+  applying one assignment's rubric to another "a correctness defect wearing a
+  convenience feature's clothes". Presence-only would have left that defect
+  invisible on the row and deferred it to an owner-owned follow-up; origin makes
+  a fallback-sourced rubric permanently visible where the grade is.
+- **RULING 105 still holds and is not reopened.** The disclosure lives on the
+  DROP ROW, not inside the panel, because the panel is unmounted in the same
+  handler chain that fires the auto-grade - so built inside the panel it would
+  pass every gate in this repo and never be seen. The column makes that placement
+  the natural one rather than a workaround.
+- **Zero added interactions, as RULING 100 requires.** Neither content costs a
+  click. What (b) buys is a sentence that is true in every reachable state, which
+  A31 Ruling 1 already requires of confirm copy.
+
+**What it costs if the owner is wrong:** one migration and one column for a
+caption most instructors will never read. Migrations auto-apply on push to main
+here, so the migration is checked before push, additive only, and idempotent on
+re-apply.
+
+**A40-R6 is NOT filed.** Presence-only would have deferred the cross-assignment
+fallback to an owner-owned residual with the caption as its instrument. Under (b)
+the origin field IS that instrument, and it is in the product rather than in a
+row. The separate B4 question - whether the fallback should exist at all - is
+unchanged by this decision and stays open.

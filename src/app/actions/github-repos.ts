@@ -66,7 +66,7 @@ import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/l
 import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { type LlmProvider } from "@/lib/llm";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireOwner, requireAppOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED } from "@/lib/repo-grade-branch-scan";
 
@@ -77,7 +77,7 @@ type RepoDigest = { fullName: string; text: string; fileCount: number; files: Re
 
 export async function forkRepoAction(repoRef: string, org?: string): Promise<{ repo: GithubRepo } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const repo = await forkRepo(parsed.owner, parsed.repo, org?.trim());
@@ -92,7 +92,7 @@ export async function copyRepoAction(
   opts: CopyRepoOptions
 ): Promise<{ result: CopyRepoResult } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const result = await copyRepo(parsed.owner, parsed.repo, opts);
@@ -107,7 +107,7 @@ export async function copyPathsToRepoAction(
   opts: CopyPathsOptions
 ): Promise<{ result: CopyPathsResult } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const result = await copyPathsToRepo(parsed.owner, parsed.repo, opts);
@@ -119,7 +119,7 @@ export async function copyPathsToRepoAction(
 
 export async function detectRepoFrontendAction(fullName: string): Promise<{ frontend: { framework: string; devCommand: string } | null; backend: BackendInfo | null } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parts = fullName.split("/");
     if (parts.length !== 2) {
       return { frontend: null, backend: null };
@@ -150,7 +150,7 @@ export async function detectRepoFrontendAction(fullName: string): Promise<{ fron
 
 export async function createBranchAction(repoRef: string, newBranch: string, fromBranch: string): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!newBranch.trim()) return { error: "Enter a new branch name." };
     if (!fromBranch.trim()) return { error: "Select a source branch." };
     const parsed = parseRepoRef(repoRef);
@@ -164,7 +164,7 @@ export async function createBranchAction(repoRef: string, newBranch: string, fro
 
 export async function deleteBranchAction(repoRef: string, branch: string): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     if (!branch.trim()) return { error: "Select a branch to delete." };
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
@@ -178,7 +178,7 @@ export async function deleteBranchAction(repoRef: string, branch: string): Promi
 
 export async function listPullRequestsAction(repoRef: string, state: "open" | "closed" | "all" = "open"): Promise<{ pulls: PullRequestInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const pulls = await listPullRequests(parsed.owner, parsed.repo, state);
@@ -190,7 +190,7 @@ export async function listPullRequestsAction(repoRef: string, state: "open" | "c
 
 export async function mergePullRequestAction(repoRef: string, prNumber: number, method: "merge" | "squash" | "rebase" = "merge"): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await mergePullRequest(parsed.owner, parsed.repo, prNumber, method);
@@ -202,7 +202,7 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
 
 export async function markPullRequestReadyAction(repoRef: string, prNumber: number): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await markPullRequestReady(parsed.owner, parsed.repo, prNumber);
@@ -221,7 +221,7 @@ export async function getRepoAttentionAction(
   repoRef: string
 ): Promise<{ openPrs: number; agentPrs: number; runsNeedingApproval: number } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const [pulls, waiting, actionRequired] = await Promise.all([
@@ -248,7 +248,7 @@ export async function listPullRequestReviewsAction(
   prNumber: number
 ): Promise<{ reviews: PullRequestReviewInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return { reviews: await listPullRequestReviews(parsed.owner, parsed.repo, prNumber) };
@@ -263,7 +263,7 @@ export async function listPullRequestFilesAction(
   prNumber: number
 ): Promise<{ files: PullRequestFileInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     return { files: await listPullRequestFiles(parsed.owner, parsed.repo, prNumber) };
@@ -280,7 +280,7 @@ export async function reviewPullRequestAction(
   body?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     if (event !== "APPROVE" && !body?.trim()) {
@@ -299,7 +299,7 @@ export async function listWorkflowRunsAction(
   opts?: { status?: string; workflowId?: number }
 ): Promise<{ runs: WorkflowRunInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const runs = await listWorkflowRuns(parsed.owner, parsed.repo, {
@@ -315,7 +315,7 @@ export async function listWorkflowRunsAction(
 
 export async function listRunJobsAction(repoRef: string, runId: number): Promise<{ jobs: WorkflowJobInfo[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const jobs = await listRunJobs(parsed.owner, parsed.repo, runId);
@@ -327,7 +327,7 @@ export async function listRunJobsAction(repoRef: string, runId: number): Promise
 
 export async function rerunWorkflowRunAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await rerunWorkflowRun(parsed.owner, parsed.repo, runId);
@@ -339,7 +339,7 @@ export async function rerunWorkflowRunAction(repoRef: string, runId: number): Pr
 
 export async function cancelWorkflowRunAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await cancelWorkflowRun(parsed.owner, parsed.repo, runId);
@@ -351,7 +351,7 @@ export async function cancelWorkflowRunAction(repoRef: string, runId: number): P
 
 export async function rerunFailedJobsAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await rerunFailedJobs(parsed.owner, parsed.repo, runId);
@@ -363,7 +363,7 @@ export async function rerunFailedJobsAction(repoRef: string, runId: number): Pro
 
 export async function setWorkflowEnabledAction(repoRef: string, workflowId: number, enabled: boolean): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     await setWorkflowEnabled(parsed.owner, parsed.repo, workflowId, enabled);

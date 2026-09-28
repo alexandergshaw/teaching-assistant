@@ -35,7 +35,7 @@ before a second round is trusted.
 |---|---|---|---|
 | B1 / RULING 90 | NARROW-FILTER COHORT (repeat) | **FIXED.** Every walk in section 2 now runs against BOTH owner-private targets, published as one table per file; trail-prefix reasoning deleted | Section 2.0, 2.2, 2.4 |
 | B2 / RULING 91 | OUTER GUARD HARDENED, SIBLING LEFT OPEN | **FIXED per the ruling's answer (a).** Wave 1 also swaps `github.ts:260`; cost stated plainly, boundary of what is and is not touched stated plainly | Section 5, 6 |
-| B3 | WRITE SET OMITS THE PIN THE CHANGE INVALIDATES | **FIXED.** Write set now retires `action-guard-coverage.test.ts:852-859` | Section 6 |
+| B3 | WRITE SET OMITS THE PIN THE CHANGE INVALIDATES | **FIXED.** Write set now retires `action-guard-coverage.test.ts:852-859` (RULING 101 CORRECTION, 2026-09-27: I first re-pinned this to `action-guard-coverage-github-cohort.test.ts:309-316`, which was WRONG TWICE - that range holds a different block (a wave-0 finding comment), and the `it("GITHUB_NOT_OWNER_ONLY starts empty")` assertion this cites IS NOT IN `src` AT ALL, in the working tree or at HEAD: `grep -rn 'GITHUB_NOT_OWNER_ONLY starts empty' src` returns nothing, and `git grep` on HEAD returns nothing, so the only surviving copies are the two docs quoting it. So this write-set item is ALREADY SATISFIED - the block was deleted before R4 reached it - and no destination needs re-pinning. Cited by its `it()` title rather than a number from here on, because the extraction of this file was still in flight when I wrote the first pin) | Section 6 |
 | M1 | ASSERTION MISDESCRIBED AS EXECUTION | **FIXED.** Section 3/6 now specify the client-mock idiom verbatim from `auth.test.ts`, matching what the backlog row itself demanded, not the module-mock variant | Section 3, 6 |
 | M2.1 | CITATION THAT DOES NOT RESOLVE | **FIXED.** `gatherWalkthroughResourcesAction` is now walked and cited under `./learning-resources-generator`, the module `deriveResourceConcepts` is actually imported from | Section 2.4 |
 | M2.2 | CITATION THAT DOES NOT RESOLVE | **FIXED.** `extractDeckSourceFileAction`'s exoneration now cites its OWN two edges' isolation runs, not a cross-reference to the other file | Section 2.2 |
@@ -665,7 +665,15 @@ its diff against the tree the first one committed.
     non-empty, and needs no change.
   - **M4b, fixed: add a converse-ratchet loop for `GITHUB_NOT_OWNER_ONLY`**,
     modelled on the media block's own converse check
-    (`action-guard-coverage.test.ts:679-700`, which loops over every
+    (`action-guard-coverage.test.ts:679-700` at the time this was written;
+    RULING 101 (2026-09-27) split a sibling GitHub-cohort block out of the
+    same file, which SHIFTS this passage UP while leaving it in
+    `action-guard-coverage.test.ts`. NO NEW NUMBER IS WRITTEN HERE: the
+    extraction was still in flight, I wrote `:626-647` from arithmetic, and it
+    was off by two - the block opens at the `it("no media action outside
+    MEDIA_OWNER_ONLY_ACTIONS calls requireAppOwner` line, which is the anchor to
+    locate it by, and the range is read from there against the COMMITTED file.
+    The block itself) loops over every
     non-owner-only media action asserting it still calls `requireUser(`
     directly, guarding against silent over-tightening). The GitHub-cohort
     mirror: for every name in `GITHUB_NOT_OWNER_ONLY`, assert

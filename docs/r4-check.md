@@ -347,7 +347,7 @@ Section 6 instructs the implementer to "Add to `GITHUB_NOT_OWNER_ONLY` (`:817`,
 currently `{}`): one entry for `extractDeckSourceFileAction` ... and eight
 entries, one per `walkthrough-announcement.ts` action" - nine entries.
 
-`src/app/actions/action-guard-coverage.test.ts:852-859`:
+`src/app/actions/action-guard-coverage.test.ts:852-859` (RULING 101 CORRECTION, 2026-09-27: I first re-pinned this to `action-guard-coverage-github-cohort.test.ts:309-316`, which was WRONG TWICE - that range holds a different block (a wave-0 finding comment), and the `it("GITHUB_NOT_OWNER_ONLY starts empty")` assertion this cites IS NOT IN `src` AT ALL, in the working tree or at HEAD: `grep -rn 'GITHUB_NOT_OWNER_ONLY starts empty' src` returns nothing, and `git grep` on HEAD returns nothing, so the only surviving copies are the two docs quoting it. So this write-set item is ALREADY SATISFIED - the block was deleted before R4 reached it - and no destination needs re-pinning. Cited by its `it()` title rather than a number from here on, because the extraction of this file was still in flight when I wrote the first pin):
 
 ```
   it("GITHUB_NOT_OWNER_ONLY starts empty - no per-action review has run yet", () => {

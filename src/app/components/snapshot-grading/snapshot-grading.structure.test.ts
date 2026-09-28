@@ -58,52 +58,67 @@ describe("stripComments handles CRLF line endings (BLOCKER B canary)", () => {
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
 const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
 
+const PAGE_PATH = path.resolve(process.cwd(), "src/app/page.tsx");
+const pageSource = fs.readFileSync(PAGE_PATH, "utf-8");
+
 const SNAPSHOT_GRADING_DIR = path.resolve(process.cwd(), "src/app/components/snapshot-grading");
 
-describe("SnapshotGradingPanel is actually mounted by RecordingTab (reachability, entry point a)", () => {
-  it("RecordingTab.tsx imports the default export from ./snapshot-grading/SnapshotGradingPanel", () => {
-    expect(recordingTabSource).toMatch(
-      /import SnapshotGradingPanel from "\.\/snapshot-grading\/SnapshotGradingPanel"/
+// GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md 2.2):
+// re-parented from RecordingTab into page.tsx, always-mounted/display-toggled,
+// reached through gradingView rather than recView. SUBJECT unchanged (mounted,
+// reachable, never unmounted - the panel holds a live MediaStream a
+// conditional mount would kill); only the location pin moved.
+describe("SnapshotGradingPanel is actually mounted by page.tsx (reachability, entry point a)", () => {
+  it("page.tsx imports the default export from ./components/snapshot-grading/SnapshotGradingPanel", () => {
+    expect(pageSource).toMatch(
+      /import SnapshotGradingPanel from "\.\/components\/snapshot-grading\/SnapshotGradingPanel"/
     );
   });
 
-  it("RecordingTab.tsx actually renders <SnapshotGradingPanel - an import alone proves nothing", () => {
-    expect(recordingTabSource).toMatch(/<SnapshotGradingPanel\b/);
+  it("page.tsx actually renders <SnapshotGradingPanel - an import alone proves nothing", () => {
+    expect(pageSource).toMatch(/<SnapshotGradingPanel\b/);
   });
 
-  it('the rendered panel receives active={active && recView === "snapgrade"} - the same always-mounted, display:none-toggled idiom every sibling inner view uses, never unmounted on tab switch', () => {
-    expect(recordingTabSource).toMatch(/<SnapshotGradingPanel active=\{active && recView === "snapgrade"\}/);
+  it('the rendered panel is wrapped in an always-mounted, display:none-toggled element gated on manualView === "grading" && gradingView === "snapshots" - never unmounted on tab switch', () => {
+    // Exactly one render site, and the immediate wrapper must set `display`
+    // (never a conditional render) - mirrors topLevelTabs.wiring.test.ts's
+    // RecordingTab assertion.
+    const renderIndex = pageSource.indexOf("<SnapshotGradingPanel");
+    expect(renderIndex, "expected to find <SnapshotGradingPanel in page.tsx").toBeGreaterThan(-1);
+    expect(pageSource.indexOf("<SnapshotGradingPanel", renderIndex + 1)).toBe(-1);
+    expect(
+      pageSource,
+      "SnapshotGradingPanel is no longer wrapped in an element whose style sets `display` - a conditional render here destroys a live MediaStream on navigation."
+    ).toMatch(/style=\{\{[\s\S]{0,300}?display:[\s\S]{0,300}?"none"[\s\S]{0,120}?\}\}\s*>\s*<SnapshotGradingPanel/);
+
+    const wrapper = pageSource.slice(Math.max(0, renderIndex - 500), renderIndex);
+    expect(wrapper).toContain('activeTab === "manual"');
+    expect(wrapper).toContain('toolsSection === "manual"');
+    expect(wrapper).toContain('manualView === "grading"');
+    expect(wrapper).toContain('gradingView === "snapshots"');
   });
 });
 
-describe('"snapgrade" is wired into BOTH the recView union AND the SEPARATE restore guard (the trap)', () => {
-  it('"snapgrade" is a member of the recView useState union type', () => {
-    // Anchor on the union literal's own line - deliberately NOT a bare
-    // `source.includes('"snapgrade"')` check, which the restore guard's own
-    // occurrence would also satisfy and could never fail independently of
-    // it.
+// GRAD-SUBTAB wave 2: "snapgrade" is no longer a RecordingTab concept - it
+// moved to Tools > Grading's own GradingView member ("snapshots").
+// "snapshots" registration in manual-rail.ts is covered by
+// manual-rail.test.ts (getInnerDestinations exact-list, derived
+// GRADING_VIEWS guard) - not duplicated here.
+describe('"snapgrade" is fully retired from RecordingTab (recView union, restore guard, and the strip)', () => {
+  it('"snapgrade" is NOT in the recView union, NOT in the SEPARATE restore guard\'s v === chain, and NOT in the strip', () => {
     const unionLine = recordingTabSource
       .split("\n")
       .find((line) => line.includes('"record" | "discussions" | "speed"'));
     expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).toMatch(/"snapgrade"/);
-  });
+    expect(unionLine).not.toMatch(/"snapgrade"/);
 
-  it('"snapgrade" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
-    // Isolate JUST the restore-guard block - from its own
-    // `localStorage.getItem("ta-rec-view")` read to its own closing
-    // `: "record";` fallback - so this cannot be satisfied by the union
-    // line above happening to contain the same literal.
     const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
     expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
     const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
     expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
-    expect(guardBlock).toMatch(/v === "snapgrade"/);
-  });
+    expect(recordingTabSource.slice(guardStart, guardEnd)).not.toMatch(/v === "snapgrade"/);
 
-  it("the inner-view tab strip includes a snapgrade entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(recordingTabSource).toMatch(/\["snapgrade",\s*"[^"]+"\]/);
+    expect(recordingTabSource).not.toMatch(/\["snapgrade",\s*"[^"]+"\]/);
   });
 });
 

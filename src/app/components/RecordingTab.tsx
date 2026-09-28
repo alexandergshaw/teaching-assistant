@@ -27,12 +27,10 @@ import SpeedPanel from "./recording/SpeedPanel";
 import TakesPanel from "./recording/TakesPanel";
 import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
-import GradingRecordingPanel from "./grading-recording/GradingRecordingPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
 import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
 import WalkthroughAnnouncementPanel from "./walkthrough-announcement/WalkthroughAnnouncementPanel";
 import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
-import SnapshotGradingPanel from "./snapshot-grading/SnapshotGradingPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
@@ -53,14 +51,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // gating below (the block that used to render only for recView==="record")
   // for how both routes stay live at once.
   //
-  // "grading" (docs/grading-via-recording-acceptance-criteria.md): a NEW,
-  // independent inner view - grading-via-recording's own capture/extraction/
-  // table surface (GradingRecordingPanel.tsx), reached from the Knowledge
-  // base's "Grade via recording" bulk-bar button and the fab's own
-  // navigateToRecordingTool("grading") entry, exactly the same two entry
-  // points "discussions" already has.
+  // "grading"/"snapgrade" (docs/grading-via-recording-acceptance-criteria.md,
+  // docs/snapshot-grading-acceptance-criteria.md) MOVED OUT of this union
+  // (GRAD-SUBTAB wave 2, docs/tools-grading-subtab-wave2-architecture.md):
+  // GradingRecordingPanel and SnapshotGradingPanel are now always-mounted
+  // siblings of this tab, reached through Tools > Grading's own inner nav
+  // (gradingView), not through recView.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "walkannounce" | "messages" | "snapgrade"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "moduledeck" | "walkannounce" | "messages"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -70,11 +68,9 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "slides" ||
       v === "avatar" ||
       v === "announcement" ||
-      v === "grading" ||
       v === "moduledeck" ||
       v === "walkannounce" ||
-      v === "messages" ||
-      v === "snapgrade"
+      v === "messages"
       ? v
       : "record";
   });
@@ -102,6 +98,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
     const handler = (e: Event) => {
       const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
       if (!detail) return;
+      // GRAD-SUBTAB wave 2: "grading"/"snapgrade" launches no longer target
+      // this tab at all - page.tsx's own listener routes them to Tools >
+      // Grading instead, where GradingRecordingPanel/SnapshotGradingPanel's
+      // own listeners (unchanged) pick them up. Guarding here (rather than
+      // widening recView back to include them) is what lets recView's union
+      // actually shrink - tsc rejects setRecView(detail.view) otherwise,
+      // since detail.view still carries both values.
+      if (detail.view === "grading" || detail.view === "snapgrade") return;
       setRecView(detail.view);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
@@ -589,7 +593,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           points at the record panel's id rather than a non-existent
           announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["snapgrade", "Grading (from screenshots)"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
@@ -848,24 +852,12 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         <DiscussionRepliesPanel active={active && recView === "discussions"} />
       </div>
 
-      {/* Same always-mounted stack, same reason: an in-progress capture and
-          its extraction queue must survive the user switching to another
-          inner view - grading-via-recording's own capture loop (see
-          GradingRecordingPanel.tsx) needs exactly the guarantee
-          "discussions" needs above. */}
-      <div role="tabpanel" id="rec-panel-grading" aria-labelledby="rec-tab-grading" style={{ display: recView === "grading" ? undefined : "none" }}>
-        <GradingRecordingPanel active={active && recView === "grading"} />
-      </div>
-
-      {/* Same always-mounted stack, same reason: a live screen-share session
-          and its shot tray must survive the user switching to another inner
-          view - snapshot-grading's own capture surface (docs/snapshot-
-          grading-acceptance-criteria.md), a SIBLING of "grading" rather than
-          a mode of it, needs exactly the guarantee "grading" needs above.
-          WAVE 4 ships capture/tray only - no grading action yet. */}
-      <div role="tabpanel" id="rec-panel-snapgrade" aria-labelledby="rec-tab-snapgrade" style={{ display: recView === "snapgrade" ? undefined : "none" }}>
-        <SnapshotGradingPanel active={active && recView === "snapgrade"} />
-      </div>
+      {/* GradingRecordingPanel and SnapshotGradingPanel MOVED OUT of this
+          tab (GRAD-SUBTAB wave 2,
+          docs/tools-grading-subtab-wave2-architecture.md): both are now
+          always-mounted, display-toggled siblings of RecordingTab in
+          page.tsx, reached through Tools > Grading's own inner nav rather
+          than this tab's recView strip. */}
 
       {/* Same always-mounted stack, same reason: an in-progress screen-share
           capture, its frame queue and its in-flight vision extraction must

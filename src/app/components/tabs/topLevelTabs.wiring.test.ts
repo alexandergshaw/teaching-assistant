@@ -499,3 +499,89 @@ describe("the recording surface stays mounted while hidden", () => {
     expect(wrapper).toContain('manualView === "recording"');
   });
 });
+
+// GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md
+// section 2.2, instrument I-W2). The two Recording grading surfaces
+// (grading-via-recording, snapshot grading) re-parented into Tools > Grading
+// as always-mounted, display-toggled top-level siblings of RecordingTab -
+// modelled directly on "the recording surface stays mounted while hidden"
+// above. Each panel holds live capture (a MediaStream, or a
+// RECORDING_LAUNCH_EVENT listener) that a conditional mount destroys on
+// every navigation; a display toggle on an always-rendered element is the
+// only shape that preserves it. Proven red (named mutation): moving either
+// panel's div into the `manualView === "grading" &&` ternary instead of
+// being a top-level sibling makes the corresponding assertion below fail,
+// because a conditional render (`{guard && <Panel />}`) cannot satisfy the
+// immediate-wrapper display-toggle regex.
+describe("the two moved grading-capture panels stay mounted while hidden (I-W2)", () => {
+  function assertAlwaysMounted(componentTag: string, guardTerms: string[]) {
+    const source = read(PAGE);
+    const renderIndex = source.indexOf(`<${componentTag}`);
+    expect(renderIndex, `src/app/page.tsx does not render ${componentTag} at all`).toBeGreaterThan(-1);
+
+    // Exactly one render site - a second one would mean a stray conditional
+    // copy exists alongside the always-mounted one.
+    expect(source.indexOf(`<${componentTag}`, renderIndex + 1)).toBe(-1);
+
+    // Structural, not keyword-spotting: the element IMMEDIATELY wrapping the
+    // panel must carry a style that sets `display`, with nothing but that
+    // element's own closing bracket between the two. A conditional render
+    // cannot satisfy this, and neither can a comment that merely talks about
+    // display toggles.
+    expect(
+      source,
+      `${componentTag} is not wrapped in an element whose style sets \`display\`. If it became ` +
+        "a conditional render, navigating away from it destroys a live capture - a lost " +
+        "capture, not a blank pane."
+    ).toMatch(
+      new RegExp(`style=\\{\\{[\\s\\S]{0,300}?display:[\\s\\S]{0,300}?"none"[\\s\\S]{0,120}?\\}\\}\\s*>\\s*<${componentTag}`)
+    );
+
+    const wrapper = source.slice(Math.max(0, renderIndex - 500), renderIndex);
+    for (const term of guardTerms) {
+      expect(wrapper, `expected ${componentTag}'s wrapper guard to include "${term}"`).toContain(term);
+    }
+  }
+
+  it("GradingRecordingPanel is a display toggle on an always-rendered element, never a conditional render", () => {
+    assertAlwaysMounted("GradingRecordingPanel", [
+      'activeTab === "manual"',
+      'toolsSection === "manual"',
+      'manualView === "grading"',
+      'gradingView === "recording"',
+    ]);
+  });
+
+  it("SnapshotGradingPanel is a display toggle on an always-rendered element, never a conditional render", () => {
+    assertAlwaysMounted("SnapshotGradingPanel", [
+      'activeTab === "manual"',
+      'toolsSection === "manual"',
+      'manualView === "grading"',
+      'gradingView === "snapshots"',
+    ]);
+  });
+});
+
+// GRAD-SUBTAB wave 2 check residual R-1: without this guard,
+// gradingView === "recording" (or "snapshots") would render BOTH GradingTab
+// (the manualView === "grading" ternary's else arm) AND the new
+// always-mounted panel for the same chip - two surfaces answering one click.
+// Proven red (named mutation): dropping the `(gradingView === "run" ||
+// gradingView === "repos")` clause from the branch guard makes this
+// assertion fail.
+describe('the manualView === "grading" branch renders GradingTab/RepoGradesTab ONLY for gradingView run/repos (R-1)', () => {
+  it("the grading render branch is scoped to gradingView run/repos, excluding the two moved capture views", () => {
+    const source = read(PAGE);
+    const start = source.indexOf('manualView === "grading" &&');
+    expect(start, 'expected to find the manualView === "grading" render branch in page.tsx').toBeGreaterThan(-1);
+    const end = source.indexOf("</TabShell>", start);
+    expect(end).toBeGreaterThan(start);
+    const branch = source.slice(start, end);
+    expect(
+      branch,
+      "the grading branch guard does not restrict gradingView to run/repos - without this, " +
+        "gradingView === \"recording\"/\"snapshots\" would render GradingTab AND the new " +
+        "always-mounted capture panel at the same time"
+    ).toMatch(/gradingView === "run"[\s\S]{0,80}gradingView === "repos"/);
+  });
+});

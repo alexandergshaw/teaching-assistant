@@ -12,6 +12,8 @@ import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
+import GradingRecordingPanel from "./components/grading-recording/GradingRecordingPanel";
+import SnapshotGradingPanel from "./components/snapshot-grading/SnapshotGradingPanel";
 import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
@@ -139,17 +141,34 @@ export default function Home() {
   // KnowledgeTab or exposing setActiveTab to the fab (which lives outside
   // this component entirely, in layout.tsx, and cannot receive a prop from
   // here at all).
+  // GRAD-SUBTAB wave 2: view-aware. A "grading"/"snapgrade" launch (the
+  // Knowledge base's "Grade via recording" button, KnowledgeTab.tsx; the
+  // fab's grading entries) must land on Tools > Grading now that the two
+  // capture panels live there, not on Tools > Recording - every other launch
+  // view still lands on Recording exactly as before.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
       if (!detail) return;
-      setManualView("recording");
-      setToolsSection("manual");
-      setActiveTab("manual");
+      if (detail.view === "grading") {
+        setManualView("grading");
+        setGradingView("recording");
+        setToolsSection("manual");
+        setActiveTab("manual");
+      } else if (detail.view === "snapgrade") {
+        setManualView("grading");
+        setGradingView("snapshots");
+        setToolsSection("manual");
+        setActiveTab("manual");
+      } else {
+        setManualView("recording");
+        setToolsSection("manual");
+        setActiveTab("manual");
+      }
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, [setManualView, setToolsSection, setActiveTab]);
+  }, [setManualView, setToolsSection, setActiveTab, setGradingView]);
 
   // "Back to Knowledge" (docs/knowledge-recording-handoff-acceptance-criteria.md,
   // AC4): the other half of the same "this is the ONLY place that can call
@@ -565,7 +584,14 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "grading" && (
+                {/* GRAD-SUBTAB wave 2 (R-1): the two moved capture surfaces
+                    (grading-via-recording, snapshot grading) are now
+                    always-mounted siblings below (after RecordingTab's own
+                    always-mounted div) - this ternary must NOT also try to
+                    render something for those gradingView values, or both
+                    the (empty-else) GradingTab branch AND the always-mounted
+                    panel would be on screen for the same chip at once. */}
+                {manualView === "grading" && (gradingView === "run" || gradingView === "repos") && (
                   <TabShell>
                     {gradingView === "repos" ? (
                       <RepoGradesTab />
@@ -628,6 +654,43 @@ export default function Home() {
           }}
         >
           <RecordingTab active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"} />
+        </div>
+
+        {/* GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md
+            section 2.2): the two Recording grading surfaces re-parented into
+            Tools > Grading. Each holds live capture (a MediaStream, or a
+            RECORDING_LAUNCH_EVENT listener) that a conditional mount would
+            kill on every navigation - so, exactly like RecordingTab above,
+            these are always-rendered, display-toggled top-level siblings,
+            OUTSIDE the `activeTab === "manual"` block, never inside the
+            `manualView === "grading"` ternary. Do not move these into that
+            ternary - see this file's own I-W2 guard in
+            topLevelTabs.wiring.test.ts, which exists to catch exactly that
+            regression. */}
+        <div
+          style={{
+            display:
+              activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "recording"
+                ? undefined
+                : "none",
+          }}
+        >
+          <GradingRecordingPanel
+            active={activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "recording"}
+          />
+        </div>
+
+        <div
+          style={{
+            display:
+              activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "snapshots"
+                ? undefined
+                : "none",
+          }}
+        >
+          <SnapshotGradingPanel
+            active={activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "snapshots"}
+          />
         </div>
 
         {activeTab === "files" && (

@@ -44939,3 +44939,52 @@ path pin (:16) are intact. A wave that opens GradingTab.tsx has regressed this.
 VIEW_KEY==="grading" migration runs before the URL branch in the manualView
 initializer, mirroring the version-control migration precedent; unchanged by the
 fix and not a defect.
+
+## 437. GRAD-SUBTAB wave 2 as-shipped - the two Recording grading panels move into the Grading inner nav, always-mounted so live capture survives
+
+Baseline for GRAD-SUBTAB wave 3 (Drafted Grades). Oracle of what wave 2 does at
+HEAD, read from source; a later wave that moves a line below without being filed
+to move it is a regression. Nothing renders under this vitest (this-repo.md
+section 2), so every statement about what the instructor SEES or about a live
+capture surviving navigation is a READING claim; the visible/runtime half is
+owner walk OW-W2-1..4 in docs/tools-grading-subtab-wave2-architecture.md.
+
+Wave 2 landed after the full chain: derivation (which overturned the plan's
+"partly decomposition" estimate - the panel files are not edited at all),
+derivation check (clean), build with both check residuals folded in, verify
+(clean, lands as-is). Suite green at 23359.
+
+**The move.** GradingRecordingPanel ("Grading (from a recording)") and
+SnapshotGradingPanel ("Grading (from screenshots)") left the Recording strip and
+became two items in the Tools > Grading inner nav. GradingView widened to
+run|repos|recording|snapshots; two destinations and two resolver branches added
+in manual-rail.ts; the new members flow through the generic getActiveDestinationId
+(grading-${gradingView}) and the derived GRADING_VIEWS loop with no second copy.
+
+**The invariant wave 2 exists to hold, and the one most likely to rot:** both
+panels are ALWAYS-RENDERED, display-toggled siblings of RecordingTab in page.tsx
+(outside the activeTab==="manual" block, mirroring RecordingTab's own mount), NOT
+conditional mounts in the manualView==="grading" ternary. They hold a live
+MediaStream and a launch listener that must survive navigation; a conditional
+mount would unmount them on every tab switch and silently kill an in-progress
+capture, with every gate green. Enforced at source by instrument I-W2
+(topLevelTabs.wiring.test.ts), proven to go red on a conditional-render mutant.
+A wave that makes either panel a conditional mount has regressed this.
+
+**Two more invariants no rendered test guards:**
+- The manualView==="grading" branch renders the run/repos surfaces ONLY for
+  gradingView in {run, repos} (page.tsx guard). Without it, selecting the
+  recording/snapshots inner view renders both GradingTab and the new panel.
+  Pinned by a source-text assertion in topLevelTabs.wiring.test.ts.
+- The launch handoff is view-aware: page.tsx routes a "grading" launch to
+  gradingView=recording and "snapgrade" to gradingView=snapshots (full bodies:
+  setManualView/setGradingView/setToolsSection/setActiveTab), while
+  RecordingTab's own launch listener early-returns for those two views so the
+  launch is not double-handled. The recView union was shrunk to 10 members, which
+  is what tsc uses to force that early-return guard (dropping it is TS2345).
+  This branch has NO automated correctness assertion (RES-W2-4) - it is owner
+  walk OW-W2-3.
+
+**Ceiling note (RES-W2-5):** snapshot-grading.structure.test.ts landed at exactly
+1000 lines on both counters - the wall, zero headroom. The next added line trips
+the repo-wide ceiling; the next editor must extract, not append.

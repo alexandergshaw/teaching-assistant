@@ -236,7 +236,12 @@ describe("manual-rail", () => {
 
     it("should return the Grading destinations for grading", () => {
       const inner = getInnerDestinations("grading");
-      expect(inner?.map((d) => d.id)).toEqual(["grading-run", "grading-repos"]);
+      expect(inner?.map((d) => d.id)).toEqual([
+        "grading-run",
+        "grading-repos",
+        "grading-recording",
+        "grading-snapshots",
+      ]);
     });
 
     it("should return null for single-view subtabs", () => {
@@ -368,9 +373,19 @@ describe("grading subtab", () => {
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has two inner destinations: Submissions and Repo Grades", () => {
-    expect(getInnerDestinations("grading")?.map((d) => d.id)).toEqual(["grading-run", "grading-repos"]);
-    expect(getInnerDestinations("grading")?.map((d) => d.label)).toEqual(["Submissions", "Repo Grades"]);
+  it("has four inner destinations: Submissions, Repo Grades, Grading (from a recording), and Grading (from screenshots) (GRAD-SUBTAB wave 2)", () => {
+    expect(getInnerDestinations("grading")?.map((d) => d.id)).toEqual([
+      "grading-run",
+      "grading-repos",
+      "grading-recording",
+      "grading-snapshots",
+    ]);
+    expect(getInnerDestinations("grading")?.map((d) => d.label)).toEqual([
+      "Submissions",
+      "Repo Grades",
+      "Grading (from a recording)",
+      "Grading (from screenshots)",
+    ]);
   });
 
   it("is in MANUAL_VIEW_ORDER with a matching label", () => {

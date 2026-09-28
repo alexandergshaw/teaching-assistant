@@ -26,9 +26,13 @@ export type BuildViewType = "new" | "prebuilt";
 // and TasksView do (see url-state.ts's own comment on that) - the ordered
 // member list belongs in the leaf module, and declaring it in url-state.ts
 // and importing it back would be a cycle this repo has already paid for once.
-export type GradingView = "run" | "repos";
+// "recording"/"snapshots" (GRAD-SUBTAB wave 2,
+// docs/tools-grading-subtab-wave2-architecture.md): the two Recording-tab
+// grading surfaces (grading-via-recording, snapshot grading) re-parented into
+// this inner nav as two more Grading destinations.
+export type GradingView = "run" | "repos" | "recording" | "snapshots";
 
-const GRADING_VIEW_PRESENCE: Record<GradingView, true> = { run: true, repos: true };
+const GRADING_VIEW_PRESENCE: Record<GradingView, true> = { run: true, repos: true, recording: true, snapshots: true };
 export const GRADING_VIEWS: readonly GradingView[] = Object.keys(GRADING_VIEW_PRESENCE) as GradingView[];
 
 const GRADING_VIEW_SET: ReadonlySet<string> = new Set(GRADING_VIEWS);
@@ -100,6 +104,8 @@ export const destinations: DestinationGroup[] = [
     destinations: [
       { id: "grading-run", label: "Submissions", description: "Grade student submissions and post results to Canvas" },
       { id: "grading-repos", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
+      { id: "grading-recording", label: "Grading (from a recording)", description: "Grade submissions by narrating over a screen recording" },
+      { id: "grading-snapshots", label: "Grading (from screenshots)", description: "Grade submissions from screenshots of student work" },
     ],
   },
 ];
@@ -301,6 +307,8 @@ export function resolveStateFromDestinationId(
   const gradingView: GradingView = (() => {
     if (id === "grading-run") return "run";
     if (id === "grading-repos") return "repos";
+    if (id === "grading-recording") return "recording";
+    if (id === "grading-snapshots") return "snapshots";
     return currentGradingView;
   })();
 

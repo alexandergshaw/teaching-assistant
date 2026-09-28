@@ -171,7 +171,24 @@ is worse than today's arrangement. The first-load-with-nothing-stored case has t
 be named, and so does the fate of the old location's persisted view id - a stored
 pointer at a view that no longer exists is the failure mode that ships silently.
 
-**Sequencing is unchanged by this decision and still binds.** Fill waves 6 and 7
-touch `GradingTab.tsx`, which sits at 617 lines against a recorded bound of 620.
-The navigation work either waits for the fill to land or is cut so it does not
-touch those files. This decision does not license a concurrent write set.
+**Sequencing is unchanged by this decision and still binds** - but the mechanism
+I recorded here was WRONG, and the correction is kept in place rather than
+rewritten away, because a decision ledger that silently improves its own reasoning
+cannot be audited.
+
+What I wrote: fill waves 6 and 7 touch `GradingTab.tsx`, so the navigation work
+must wait or be cut. MEASURED AFTERWARDS: neither wave touches that file. W6's
+write set is `docs/a39-fill-waves.md:1253-1256` and W7's is `:1305-1310`; W5 was
+the wave that wrote `GradingTab.tsx` and it landed at `32af6aa`, with W6 landing
+at `de1e84e`. There is no write-set collision.
+
+The CONSTRAINT survives for a different and sharper reason. `GradingTab.tsx` is
+pinned BY PATH by existing tests - `autoGradeTransition.wiring.test.ts:16`, and a
+frozen exact two-path set at `:412-417` naming the only `.tsx` files carrying
+`editsSurface="canvas"` - so extracting any part of it that carries that attribute
+goes red. And the 620 bound I cited is enforced by NO TEST at all: the only
+mechanical ceiling in the tree is `LIMIT = 1000` in
+`src/file-size-ceiling.structure.test.ts:41`, against which the file that is
+actually near the edge is `GradingRecordingPanel.tsx` at 977 lines. So the
+conclusion stands - prefer a cut that does not write `GradingTab.tsx` - while the
+reason I gave for it did not.

@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { parseSubmissionFileName } from "./utils";
-import { generateShape, SHAPE_NAMES, type ShapeName } from "./submissionShapeGenerator";
+import {
+  generateShape,
+  SHAPE_NAMES,
+  DEFAULT_SEED,
+  DEFAULT_SWEEP_N,
+  type ShapeName,
+} from "./submissionShapeGenerator";
 
 /**
  * A44 wave 2 - RULING 87's refined collision refusal. Fixture ids and
@@ -233,6 +239,46 @@ describe("A44 R8 - the refusal copy, bound to emitted values by equality", () =>
   });
 });
 
+/**
+ * Shared by the property sweep below and the RULING 89 frozen-literal pins:
+ * for each generated set, ground truth (recovered by content MARKER, never
+ * by file name - K1's forgeries make name-based recovery provably wrong) is
+ * crossed with `decideCollisionRefusal`'s verdict. A set counts as
+ * unsound-and-allowed when some fallback-reaching group actually blends two
+ * or more distinct declared owners AND the refusal predicate said "ok".
+ */
+function countUnsoundAllows(
+  shape: ShapeName,
+  n: number,
+  seed: number
+): { sets: number; unsoundAllows: number } {
+  const sets = generateShape(shape, n, seed);
+  let unsoundAllows = 0;
+  for (const set of sets) {
+    const submissions: Record<string, string> = {};
+    const zipParents: Record<string, string[]> = {};
+    for (const f of set) {
+      submissions[f.path] = f.content;
+      if (f.zipChain.length > 0) zipParents[f.path] = f.zipChain;
+    }
+    const decision = decideCollisionRefusal(submissions, zipParents);
+
+    const groups = new Map<string, Set<string>>();
+    for (const f of set) {
+      const parsed = parseSubmissionFileName(f.path, undefined, f.zipChain);
+      if (!parsed.reachedStemFallback) continue;
+      const markerMatch = f.content.match(/^<<M\d+-\d+>> (.+)$/);
+      const owner = markerMatch ? markerMatch[1] : f.owner;
+      const existing = groups.get(parsed.studentKey) ?? new Set<string>();
+      existing.add(owner);
+      groups.set(parsed.studentKey, existing);
+    }
+    const trueBlend = Array.from(groups.values()).some((owners) => owners.size >= 2);
+    if (trueBlend && decision.status === "ok") unsoundAllows += 1;
+  }
+  return { sets: sets.length, unsoundAllows };
+}
+
 describe("A44 R2 - the soundness sweep over generated input (the shape generator, RULING 97)", () => {
   const SOUND_SHAPES: ShapeName[] = [
     "flat",
@@ -256,36 +302,8 @@ describe("A44 R2 - the soundness sweep over generated input (the shape generator
   });
 
   it.each(SOUND_SHAPES)("shape %s: zero fallback-caused blends are ever ALLOWED", (shape) => {
-    const sets = generateShape(shape, 5000, 20260927);
-    expect(sets.length).toBeGreaterThan(0);
-
-    let unsoundAllows = 0;
-    for (const set of sets) {
-      const submissions: Record<string, string> = {};
-      const zipParents: Record<string, string[]> = {};
-      for (const f of set) {
-        submissions[f.path] = f.content;
-        if (f.zipChain.length > 0) zipParents[f.path] = f.zipChain;
-      }
-      const decision = decideCollisionRefusal(submissions, zipParents);
-
-      // Ground truth: did any fallback-reaching group in this set actually
-      // blend two or more distinct declared owners? Recovered by content
-      // MARKER, never by file name.
-      const groups = new Map<string, Set<string>>();
-      for (const f of set) {
-        const parsed = parseSubmissionFileName(f.path, undefined, f.zipChain);
-        if (!parsed.reachedStemFallback) continue;
-        const markerMatch = f.content.match(/^<<M\d+-\d+>> (.+)$/);
-        const owner = markerMatch ? markerMatch[1] : f.owner;
-        const existing = groups.get(parsed.studentKey) ?? new Set<string>();
-        existing.add(owner);
-        groups.set(parsed.studentKey, existing);
-      }
-      const trueBlend = Array.from(groups.values()).some((owners) => owners.size >= 2);
-      if (trueBlend && decision.status === "ok") unsoundAllows += 1;
-    }
-
+    const { sets, unsoundAllows } = countUnsoundAllows(shape, 5000, 20260927);
+    expect(sets).toBeGreaterThan(0);
     expect(unsoundAllows).toBe(0);
   });
 
@@ -305,5 +323,33 @@ describe("A44 R2 - the soundness sweep over generated input (the shape generator
       }
       expect(refusals).toBe(0);
     }
+  });
+});
+
+describe("A44 RULING 89 - the accepted-unsound count is a FROZEN LITERAL, not a property (docs/a44-test-notes.md 1.5(d) and 0.8a)", () => {
+  // These pin the exact integers docs/a44-test-notes.md section 1.5(d) and
+  // 0.8a measured against THIS generator at its own SWEEP_N/seed - not the
+  // 5000-set sample the property assertions above use. A property
+  // ("unsoundAllows !== 0") passes whether the count is 287 or 4000; only a
+  // literal fails loudly when RULE K's amnesty widens. RULING 87's accepted
+  // cost is unchanged only if these two numbers do not move upward.
+  it("mixed-perstudent-plus-shared-dropbox: unsound-and-allowed is exactly 2254 of 19936 sets", () => {
+    const { sets, unsoundAllows } = countUnsoundAllows(
+      "mixed-perstudent-plus-shared-dropbox",
+      DEFAULT_SWEEP_N,
+      DEFAULT_SEED
+    );
+    expect(sets).toBe(19936);
+    expect(unsoundAllows).toBe(2254);
+  });
+
+  it("nested-shared-dropbox-subdirs: unsound-and-allowed is exactly 287 of 19990 sets", () => {
+    const { sets, unsoundAllows } = countUnsoundAllows(
+      "nested-shared-dropbox-subdirs",
+      DEFAULT_SWEEP_N,
+      DEFAULT_SEED
+    );
+    expect(sets).toBe(19990);
+    expect(unsoundAllows).toBe(287);
   });
 });

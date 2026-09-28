@@ -33,10 +33,34 @@
 // posting.
 
 import type { AnnouncementLogImageAttempt } from "./announcement-log";
-import { generateAnnouncementImageAction } from "@/app/actions/announcement-image";
+import { generateAnnouncementImageAction, type GenerateAnnouncementImageResult } from "@/app/actions/announcement-image";
 import { buildAnnouncementImagePrompt } from "@/lib/take-announcement";
 import { announcementImageFileName } from "./announcement-image-filename";
 import { triggerFileDownload } from "../course-planning/utils";
+import { raceWithTimeout } from "@/lib/bounded-race";
+
+// RULING 94/G5-2: this is the OUTER bound - the client caller's own patience
+// with generateAnnouncementImageAction, independent of that action's INNER
+// bound (announcement-image.ts, wave G5-1). The two are not the same bound:
+// this one applies regardless of whatever unmeasured platform ceiling the
+// Server Action transport itself runs under (RULING 94's whole reason for
+// existing), so the instructor sees a worded timeout here even if that
+// ceiling is shorter than the action's own inner wait.
+//
+// RULING 75's limit applies exactly as it does at the inner placement:
+// raceWithTimeout races a promise, it does not cancel one. Losing this race
+// bounds how long THIS CALLER waits on generateAnnouncementImageAction, not
+// how long that action (or the model call inside it) keeps running - the
+// underlying call is left to finish or fail on its own, unobserved.
+//
+// 30_000 ms strictly exceeds announcement-image.ts's inner MODEL_WAIT_MAX_MS
+// (24_000 ms) - docs/g5-waves.md section 1.3's ordering requirement - so a
+// call that is about to succeed at the inner clamp is never cut off first by
+// this outer one.
+export const CLIENT_PATIENCE_MS = 30_000;
+
+const OUTER_TIMEOUT_MESSAGE =
+  "The image request timed out before the server answered. The announcement text is unaffected - try the image again.";
 
 export interface AnnouncementImageDeps {
   subject: string;
@@ -66,7 +90,28 @@ export async function generateImage(deps: AnnouncementImageDeps): Promise<void> 
   deps.setImageState("generating");
   deps.setImageError(null);
   const prompt = buildAnnouncementImagePrompt(deps.subject, deps.body);
-  const result = await generateAnnouncementImageAction(prompt);
+  const outcome = await raceWithTimeout(generateAnnouncementImageAction(prompt), CLIENT_PATIENCE_MS);
+
+  // Branch on outcome.kind FIRST, before ever looking for an "error" key -
+  // the {kind:"failed", error: unknown} outcome ALSO carries an "error" key,
+  // so a reused `"error" in result` test on the raw outcome would silently
+  // capture that arm too (docs/g5-waves.md section 4.3's named typing
+  // hazard). generateAnnouncementImageAction never throws in practice (its
+  // own try/catch converts every failure to a {error} result), so "failed"
+  // is not reachable today - handled anyway because raceWithTimeout's return
+  // type requires it, and RULING 75 means losing the OUTER race must not be
+  // read as "the model failed".
+  let result: GenerateAnnouncementImageResult;
+  if (outcome.kind === "timedout") {
+    result = { error: OUTER_TIMEOUT_MESSAGE };
+  } else if (outcome.kind === "failed") {
+    result = {
+      error: outcome.error instanceof Error ? outcome.error.message : "Could not generate an image for this announcement.",
+    };
+  } else {
+    result = outcome.value;
+  }
+
   if ("error" in result) {
     deps.setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "failed", error: result.error }]);
     deps.setImageState("failed");

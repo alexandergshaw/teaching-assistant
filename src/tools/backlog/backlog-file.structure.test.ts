@@ -62,7 +62,11 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // RES-A39-3, and section 4 P7 / RES-A39-4).
 // 55 -> 56: A42 filed 2026-09-23, the stripComments source-text-instrument
 // defect found in passing while building 837f2e3 (see A42's own `from`).
-const EXPECTED_ROW_COUNT = 71;
+// 71 -> 84: RES-FILL-1 through RES-FILL-13 filed 2026-09-28, transcribed from
+// docs/a39-incremental-fill-architecture.md section 13's residual register
+// (round 2 of two) - the A39 grading feature flag's flip condition requires
+// these to exist as rows before the flag can turn on.
+const EXPECTED_ROW_COUNT = 84;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

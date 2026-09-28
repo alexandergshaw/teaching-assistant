@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { walkRuntimeGraph } from "@/lib/module-graph/runtime-import-graph";
+import { computeForbiddenReachability } from "@/lib/module-graph/runtime-import-graph";
 
 // EXTRACTION (RULING 101, docs/r2-wave1-subwaves.md section 6): split off
 // action-guard-coverage.test.ts, which was at 955 of the 1000-line ceiling
@@ -117,8 +117,25 @@ function collectActionExports(): ActionExport[] {
  * TypeScript-compiler-parsed closure walk - built for a different wall
  * (client-bundle vs server-only, docs/a23-architecture.md) but the walk
  * itself is exactly "can file X reach module Y transitively," which is this
- * question with a different forbidden target. No new walker is written here,
- * per Ruling 80's own instruction to look for one before writing one.
+ * question with a different forbidden target.
+ *
+ * Uses `computeForbiddenReachability`, not `walkRuntimeGraph` directly: this
+ * function calls the walk once per "use server" root (currently 100 of
+ * them), and a fresh per-root `walkRuntimeGraph` call re-reads and re-parses
+ * every shared file in the closure from scratch for every root that reaches
+ * it - measured at 12,781 total file visits across 100 separate walks
+ * against only 530 actually-unique files, an ~24x redundancy that was the
+ * dominant cost of this test under `npm test` (RULING 119). No new walker is
+ * written here, per Ruling 80's own instruction to look for one before
+ * writing one - `computeForbiddenReachability` lives beside `walkRuntimeGraph`
+ * in runtime-import-graph.ts and answers the identical reachability question
+ * for many roots at the read/parse cost of one shared graph, by memoizing
+ * "does this file's own closure reach the forbidden module" per file rather
+ * than per (root, file) pair - see that function's own doc comment for why
+ * this does not repeat the shared-visited-set hazard in
+ * docs/loop/traps-spec.md (a memoized per-node ANSWER, finalized only after
+ * all of that node's own edges are examined, is order-independent in a way a
+ * shared mutable `visited` set that returns early is not).
  *
  * `treatUseServerAsWall: false` is deliberate, not a default left alone: the
  * tool's "use server" wall exists to stop a walk from a CLIENT entry point at
@@ -136,22 +153,16 @@ function collectActionExports(): ActionExport[] {
  * above for why.
  */
 function githubReachingActionFiles(): Set<string> {
+  const roots = collectCandidateFiles(APP_DIR).filter((filePath) => isUseServerModule(fs.readFileSync(filePath, "utf8")));
+  const reachingAbs = computeForbiddenReachability(roots, {
+    srcRoot: SRC_ROOT,
+    forbiddenPathPrefixes: ["lib/github.repos.ts"],
+    browserSafeModules: [],
+    treatUseServerAsWall: false,
+  });
   const reaching = new Set<string>();
-  for (const filePath of collectCandidateFiles(APP_DIR)) {
-    const text = fs.readFileSync(filePath, "utf8");
-    if (!isUseServerModule(text)) continue;
-    const result = walkRuntimeGraph([filePath], {
-      srcRoot: SRC_ROOT,
-      forbiddenPathPrefixes: ["lib/github.repos.ts"],
-      browserSafeModules: [],
-      forbiddenBareSpecifiers: [],
-      allowedBareSpecifiers: [],
-      allowedAssetExtensions: [],
-      treatUseServerAsWall: false,
-    });
-    if (result.violations.length > 0) {
-      reaching.add(path.relative(APP_DIR, filePath).replace(/\\/g, "/"));
-    }
+  for (const abs of reachingAbs) {
+    reaching.add(path.relative(APP_DIR, abs).replace(/\\/g, "/"));
   }
   return reaching;
 }

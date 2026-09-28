@@ -285,6 +285,135 @@ export function walkRuntimeGraph(roots: string[], options: WalkOptions): WalkRes
   return { violations, unresolvable, unallowed, nodes: visited.size };
 }
 
+/**
+ * Whether ANY of `roots` closure-reaches a module under `forbiddenPathPrefixes`,
+ * answered independently and correctly for EACH root, while reading and
+ * parsing each unique file on disk at most once across the whole call - not
+ * once per root.
+ *
+ * A first version of this function memoized a single recursive DFS's answer
+ * per node ("does this node's own closure reach forbidden"), on the theory
+ * that reachability-to-a-fixed-target is a pure property of the node,
+ * independent of which root asks or in what order. That theory is correct
+ * for an acyclic graph and WRONG for a cyclic one: if node Q's only path to
+ * the target is `Q -> P -> ... -> Forbidden`, and Q's DFS call into P lands
+ * while P is still mid-exploration (P is an ancestor of Q on the same DFS
+ * stack, i.e. Q was reached FROM P), the naive approach answers `false` for
+ * that call (a cycle guard) and Q's frame completes and memoizes `false`
+ * PERMANENTLY - even though P, once ITS OWN frame later finishes exploring
+ * its remaining edges, correctly resolves to `true`. P's later correction is
+ * never propagated back to Q, because Q already returned. Caught by this
+ * function's own test before it shipped: `actions/canvas-inbox.ts` reaches
+ * `lib/github.repos.ts` only through a chain that closes a real cycle
+ * further down (`lib/canvas/auto-zero.ts` -> `lib/grade-zeros.ts` ->
+ * `lib/grade.ts` -> `lib/grade/extraction.ts` -> `lib/grade/repo-content.ts`
+ * -> `lib/github.ts` -> `./github.repos`), and the single-DFS-memo version
+ * silently dropped it from the detected set (41 files became 33) the moment
+ * more than one root was walked in the same call - exactly reproducing it
+ * required calling with ALL roots, not one, which is why a per-root smoke
+ * test alone would not have caught it.
+ *
+ * This version instead separates BUILDING the graph from PROPAGATING the
+ * answer, which sidesteps cycles entirely instead of trying to detect them
+ * mid-walk:
+ *
+ * 1. Build phase: a single traversal over the union of everything reachable
+ *    from any root (each file read and parsed at most once, tracked by a
+ *    plain `built` set - safe to share across roots because this phase
+ *    records STRUCTURE, not an answer, so there is nothing for one root to
+ *    leak into another) produces, per node, its list of outgoing module
+ *    edges and whether it has a DIRECT edge into a forbidden path.
+ * 2. Propagate phase: a worklist starts at every node with a direct forbidden
+ *    edge and walks the REVERSE edges outward (any node with an edge INTO a
+ *    node already known to reach the target also reaches it), which is the
+ *    standard cycle-safe way to compute reachability-to-a-target: a node's
+ *    membership is decided by whether it was ever enqueued, never by
+ *    "was its DFS frame still open when a cycle came back around," so the
+ *    order roots are supplied in cannot change the answer (see the "does not
+ *    depend on root order or count" case in runtime-import-graph.test.ts,
+ *    which pins this exact scenario).
+ *
+ * Only supports the subset of WalkOptions this reachability question needs:
+ * a module-kind edge landing under a forbidden prefix (and not exempted by
+ * browserSafeModules). forbiddenBareSpecifiers/allowedBareSpecifiers/
+ * allowedAssetExtensions do not participate in violations under this
+ * function's contract and are ignored - callers that need those must use
+ * `walkRuntimeGraph` per root instead.
+ */
+export function computeForbiddenReachability(
+  roots: string[],
+  options: Pick<WalkOptions, "srcRoot" | "forbiddenPathPrefixes" | "browserSafeModules" | "treatUseServerAsWall">
+): Set<string> {
+  const toRel = (abs: string): string => relative(options.srcRoot, abs).split(sep).join("/");
+  const isForbidden = (relPath: string): boolean =>
+    options.forbiddenPathPrefixes.some((prefix) => relPath.startsWith(prefix)) &&
+    !options.browserSafeModules.includes(relPath);
+
+  // Phase 1: build the graph structure (each unique file read/parsed once).
+  const outEdges = new Map<string, string[]>(); // abs -> abs[] (module edges only, excluding forbidden targets themselves)
+  const hasDirectForbiddenEdge = new Set<string>();
+  const built = new Set<string>();
+
+  function build(abs: string): void {
+    if (built.has(abs)) return;
+    built.add(abs);
+    let source: string;
+    try {
+      source = readFileSync(abs, "utf8");
+    } catch {
+      outEdges.set(abs, []);
+      return;
+    }
+    const scan = scanRuntimeEdges(source, abs);
+    const edges: string[] = [];
+    if (!(options.treatUseServerAsWall && scan.directives.includes("use server"))) {
+      for (const edge of scan.edges) {
+        const disposition = classifySpecifier(edge.specifier, abs, options.srcRoot);
+        if (disposition.kind !== "module") continue;
+        const relPath = toRel(disposition.resolved);
+        if (isForbidden(relPath)) {
+          hasDirectForbiddenEdge.add(abs);
+          continue; // matches walkRuntimeGraph: a forbidden edge is a violation, not itself followed
+        }
+        edges.push(disposition.resolved);
+        build(disposition.resolved);
+      }
+    }
+    outEdges.set(abs, edges);
+  }
+  for (const root of roots) build(root);
+
+  // Phase 2: propagate "reaches forbidden" backward along reverse edges,
+  // starting from every node with a direct forbidden edge. A worklist over
+  // the already-built graph is immune to traversal order/cycles because
+  // membership is settled by enqueue, not by DFS-frame completion.
+  const reverseEdges = new Map<string, string[]>();
+  for (const [from, tos] of outEdges) {
+    for (const to of tos) {
+      const preds = reverseEdges.get(to);
+      if (preds) preds.push(from);
+      else reverseEdges.set(to, [from]);
+    }
+  }
+  const reachesForbidden = new Set<string>(hasDirectForbiddenEdge);
+  const worklist = [...hasDirectForbiddenEdge];
+  while (worklist.length > 0) {
+    const node = worklist.pop()!;
+    for (const pred of reverseEdges.get(node) ?? []) {
+      if (!reachesForbidden.has(pred)) {
+        reachesForbidden.add(pred);
+        worklist.push(pred);
+      }
+    }
+  }
+
+  const reaching = new Set<string>();
+  for (const root of roots) {
+    if (reachesForbidden.has(root)) reaching.add(root);
+  }
+  return reaching;
+}
+
 /** The A22 root derivation, generalised: this directory's non-test .ts/.tsx files. */
 export function directoryRoots(absDir: string): string[] {
   return readdirSync(absDir)

@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 import {
   classifySpecifier,
+  computeForbiddenReachability,
   directoryRoots,
   scanRuntimeEdges,
   walkRuntimeGraph,
@@ -717,5 +718,55 @@ describe("R-16: engine.ts's own runtime closure is pinned per direct edge, by ex
       }
     }
     expect(total).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-17: computeForbiddenReachability does not depend on root order or count
+// (RULING 119). Regression for a real bug caught before it shipped: a first
+// version memoized a single recursive DFS's per-node answer, which is
+// correct on an acyclic graph and wrong on a cyclic one. `lib/canvas.ts` and
+// `lib/canvas/listings.ts` form a real cycle in THIS repo today
+// (listings.ts -> auto-zero.ts -> grade-zeros.ts -> grade.ts ->
+// extraction.ts -> canvas.ts -> back to listings.ts), and extraction.ts
+// separately reaches `lib/github.repos.ts` via repo-content.ts -> github.ts.
+// Walking `actions/accommodations.ts` FIRST (it reaches listings.ts via a
+// different route and starts exploring the cycle before extraction.ts's
+// OWN edge to repo-content.ts is found) used to permanently memoize
+// `lib/canvas.ts` as "does not reach forbidden" - a false frozen mid-cycle,
+// never corrected once the rest of the cycle proved true - so a LATER root,
+// `actions/canvas-inbox.ts`, which reaches the target only through
+// `lib/canvas.ts`, silently dropped out of the detected set the moment both
+// roots were walked in the same call. Single-root walks never exercised this
+// (each got a fresh, empty memo), which is why this must be asserted with
+// BOTH roots in the SAME call, in the order that triggers it.
+// ---------------------------------------------------------------------------
+describe("R-17: computeForbiddenReachability does not depend on root order or count (RULING 119)", () => {
+  const reachabilityOptions = {
+    srcRoot: SRC,
+    forbiddenPathPrefixes: ["lib/github.repos.ts"],
+    browserSafeModules: [],
+    treatUseServerAsWall: false,
+  };
+  const CANVAS_INBOX = join(SRC, "app", "actions", "canvas-inbox.ts");
+  const ACCOMMODATIONS = join(SRC, "app", "actions", "accommodations.ts");
+
+  it("canvas-inbox.ts alone reaches lib/github.repos.ts (positive control)", () => {
+    const result = computeForbiddenReachability([CANVAS_INBOX], reachabilityOptions);
+    expect(result.has(CANVAS_INBOX)).toBe(true);
+  });
+
+  it("canvas-inbox.ts still reaches it when walked AFTER accommodations.ts touches the same cycle first - the exact shape that broke the single-DFS-memo version", () => {
+    const result = computeForbiddenReachability([ACCOMMODATIONS, CANVAS_INBOX], reachabilityOptions);
+    expect(result.has(ACCOMMODATIONS)).toBe(true);
+    expect(result.has(CANVAS_INBOX)).toBe(true);
+  });
+
+  it("the answer for canvas-inbox.ts is identical regardless of how many OTHER roots are walked alongside it", () => {
+    const alone = computeForbiddenReachability([CANVAS_INBOX], reachabilityOptions);
+    const withSibling = computeForbiddenReachability([ACCOMMODATIONS, CANVAS_INBOX], reachabilityOptions);
+    const siblingFirst = computeForbiddenReachability([CANVAS_INBOX, ACCOMMODATIONS], reachabilityOptions);
+    expect(withSibling.has(CANVAS_INBOX)).toBe(alone.has(CANVAS_INBOX));
+    expect(siblingFirst.has(CANVAS_INBOX)).toBe(alone.has(CANVAS_INBOX));
   });
 });

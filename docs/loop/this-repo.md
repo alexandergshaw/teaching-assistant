@@ -269,12 +269,30 @@ Two things to know before acting on that row:
 - **It costs nothing.** Opus 4.8 and Opus 5 are both $5.00 / $25.00 per MTok
   with a 1M context, measured from the skill's model table the same day. This is
   not a downgrade for price.
-- **THE AGENT TOOL CANNOT PIN A VERSION.** Its `model` field takes only the
-  family aliases above, so a dispatch says `opus` and the harness resolves which
-  Opus that is. This table therefore records the INTENDED tier; it does not
-  enforce it. Making it effective is a session or settings-level choice the
-  owner makes, not something a brief can do. Do not write `claude-opus-4-8` into
-  an Agent call - it is not a legal value for that field.
+- **THE OWNER HAD TO GIVE THIS INSTRUCTION FOUR TIMES, and the reason is in the
+  old text of this bullet.** It said the Agent tool's `model` field takes only
+  family aliases, so this table recorded an INTENDED tier it could not enforce,
+  and making it effective was "a session or settings-level choice the owner makes,
+  not something a brief can do". That last clause is the defect: it handed the
+  instruction back to the person who gave it.
+- **WHAT WAS TRIED AND REVERTED on 2026-09-28.** Writing `model: claude-opus-4-8`
+  into the eight `.claude/agents/*.md` frontmatter files. A dispatch under it was
+  ACCEPTED - but acceptance is not resolution. A silently ignored invalid id and a
+  working pin are indistinguishable from here, and a pin that LOOKS enforced while
+  resolving to whatever the harness likes is worse than a bare alias, because the
+  next reader stops asking. Reverted to the aliases for exactly that reason. Do
+  not re-land it without an instrument that reads back the model a running agent
+  actually used.
+- **WHAT ACTUALLY SETS IT: the model picker in the app, owner-only.** Switching
+  the main session's own model from inside the session is refused by construction.
+  So say that in one line and stop building around it - which is what took four
+  restatements to get to.
+- **THE GENERAL LESSON, which is worth more than the pin.** An instruction about
+  WHICH MODEL RUNS was implemented as a change to the COMMIT TRAILER, because the
+  trailer was the visible artifact and the dispatch was not. A control aimed at
+  the visible symptom of an instruction, while the instruction's actual subject
+  goes untouched, reports compliance and delivers none. Before writing a control,
+  name the thing the instruction is ABOUT and check the control touches it.
 - **One behavioural difference matters if anything here ever calls the API
   directly** (nothing does today - `grep -rn "claude-opus" src/` returns
   nothing, and the app's model calls go to Gemini): on Opus 4.8, OMITTING

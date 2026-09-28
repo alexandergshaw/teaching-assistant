@@ -13,7 +13,7 @@
 // failure" describe block for the RED a copied literal produces once the
 // source message changes, reproduced there with a mocked module rather than
 // by editing canvas-credentials.ts (out of this wave's write set).
-import { CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "./canvas-credentials";
+import { CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "./canvas-credential-message";
 
 /**
  * Where the credential gets set. Same route LmsCredentialSection.tsx renders

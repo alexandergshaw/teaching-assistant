@@ -35,6 +35,7 @@
 // relocated rather than fixed.
 import { getEffectiveIdentity } from "./supabase/effective-identity";
 import { getLmsCredentialSecret, recordLmsCredentialFailure } from "./lms-credentials";
+import { CANVAS_CREDENTIAL_REQUIRED_MESSAGE as LEAF_CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "./canvas-credential-message";
 
 /**
  * What resolveCanvasCredential returns. `source` is not decoration - it is
@@ -74,8 +75,7 @@ export interface CanvasCredential {
  * state (E8) catches this message by `=== CANVAS_CREDENTIAL_REQUIRED_MESSAGE`,
  * never by copying the string literal, so the two can never drift apart.
  */
-export const CANVAS_CREDENTIAL_REQUIRED_MESSAGE =
-  "Connect your Canvas account for this institution in Settings.";
+export const CANVAS_CREDENTIAL_REQUIRED_MESSAGE = LEAF_CANVAS_CREDENTIAL_REQUIRED_MESSAGE;
 
 /**
  * E10 - the owner's existing deployment must keep working byte-for-byte.

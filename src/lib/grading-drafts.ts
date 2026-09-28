@@ -22,7 +22,7 @@ import type {
   RubricAreaResult,
   SubmittedFileInfo,
 } from "./grade";
-import { restoreStampedRubricText } from "./grade";
+import { restoreStampedRubricText } from "./grade/rubric-provenance-stamp";
 import { coerceGradeDetermination, coerceUngradedOutcome } from "./grade/types";
 import { coerceRepoGradingRunLog, type RepoGradingRunLog } from "./repo-grading-log";
 

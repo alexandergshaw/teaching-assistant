@@ -71,11 +71,16 @@ describe("W5-1: the predicate tracks the source constant by import, not by a cop
   });
 
   it("GREEN: the real, import-based predicate matches the changed message immediately", async () => {
-    vi.doMock("./canvas-credentials", () => ({
+    // docs/build-broken-2026-09-27.md defect 1: canvas-credential-cta.ts now
+    // imports CANVAS_CREDENTIAL_REQUIRED_MESSAGE from the zero-import leaf
+    // (./canvas-credential-message), not from ./canvas-credentials - moving
+    // it out of a client bundle's reach was the whole point of the fix. The
+    // by-identity claim this block exists to prove now tracks that leaf.
+    vi.doMock("./canvas-credential-message", () => ({
       CANVAS_CREDENTIAL_REQUIRED_MESSAGE: CHANGED_MESSAGE,
     }));
     const { isCanvasCredentialRequiredError: predicate } = await import("./canvas-credential-cta");
-    const { CANVAS_CREDENTIAL_REQUIRED_MESSAGE: changed } = await import("./canvas-credentials");
+    const { CANVAS_CREDENTIAL_REQUIRED_MESSAGE: changed } = await import("./canvas-credential-message");
     expect(predicate(changed)).toBe(true);
   });
 });

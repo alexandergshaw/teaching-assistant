@@ -18,7 +18,7 @@
 // for the component to call.
 
 import type { GradeResult, GradingRun, RubricAreaResult } from "@/lib/grade";
-import { restoreStampedRubricText } from "@/lib/grade";
+import { restoreStampedRubricText } from "@/lib/grade/rubric-provenance-stamp";
 import { coerceGradeDetermination, coerceUngradedOutcome } from "@/lib/grade/types";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 

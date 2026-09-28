@@ -87,10 +87,10 @@ RED (`npx vitest run src/tools/symbol-count/count.test.ts`, run against the
 tree before the fix in `count.ts` was applied, only the new fixtures added):
 
 ```
- ❯ src/tools/symbol-count/count.test.ts (24 tests | 3 failed) 185ms
-     × does not swallow a real call AFTER a substituting template into excludedAsString (RULING 136 F1's own fixture)
-     × handles a complete (non-substituting) template literal nested inside a substitution
-     × does not let a comment mention after a substituting template get misclassified as a string - and shows instrumentsReconcile cannot catch a comment/string swap
+ > src/tools/symbol-count/count.test.ts (24 tests | 3 failed) 185ms
+     x does not swallow a real call AFTER a substituting template into excludedAsString (RULING 136 F1's own fixture)
+     x handles a complete (non-substituting) template literal nested inside a substitution
+     x does not let a comment mention after a substituting template get misclassified as a string - and shows instrumentsReconcile cannot catch a comment/string swap
 
  Test Files  1 failed (1)
       Tests  3 failed | 21 passed (24)
@@ -117,10 +117,10 @@ the pre-fix behavior for the case that matters (a substitution's closing
 brace). Re-ran `npx vitest run src/tools/symbol-count/count.test.ts`:
 
 ```
- ❯ src/tools/symbol-count/count.test.ts (24 tests | 3 failed) 106ms
-     × does not swallow a real call AFTER a substituting template into excludedAsString (RULING 136 F1's own fixture)
-     × handles a complete (non-substituting) template literal nested inside a substitution
-     × does not let a comment mention after a substituting template get misclassified as a string - and shows instrumentsReconcile cannot catch a comment/string swap
+ > src/tools/symbol-count/count.test.ts (24 tests | 3 failed) 106ms
+     x does not swallow a real call AFTER a substituting template into excludedAsString (RULING 136 F1's own fixture)
+     x handles a complete (non-substituting) template literal nested inside a substitution
+     x does not let a comment mention after a substituting template get misclassified as a string - and shows instrumentsReconcile cannot catch a comment/string swap
 
  Test Files  1 failed (1)
       Tests  3 failed | 21 passed (24)

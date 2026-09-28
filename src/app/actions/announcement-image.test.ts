@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // generateAnnouncementImageAction calls requireOwner() (auth) and
 // generateGeminiImage() (network) - both mocked so the action's own
@@ -21,14 +21,32 @@ vi.mock("@/lib/llm", async () => {
   };
 });
 
+// The nine landed assertions below (I-4) run against the REAL raceWithTimeout
+// (vi.fn(actual.raceWithTimeout) below delegates to it by default) - that is
+// what makes them the enforcer of the {kind:"failed"} translation (two of
+// them rely on a generateGeminiImage REJECTION reaching the outer catch).
+// Only the I-1/I-3 describe blocks further down override the implementation,
+// and each one restores it in its own afterEach.
+vi.mock("@/lib/bounded-race", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/bounded-race")>("@/lib/bounded-race");
+  return { raceWithTimeout: vi.fn(actual.raceWithTimeout) };
+});
+
 import { generateGeminiImage } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
+import { raceWithTimeout } from "@/lib/bounded-race";
 import { generateAnnouncementImageAction } from "./announcement-image";
 
+async function restoreRealRaceWithTimeout(): Promise<void> {
+  const actual = await vi.importActual<typeof import("@/lib/bounded-race")>("@/lib/bounded-race");
+  vi.mocked(raceWithTimeout).mockImplementation(actual.raceWithTimeout);
+}
+
 describe("generateAnnouncementImageAction", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetAllMocks();
     vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    await restoreRealRaceWithTimeout();
   });
 
   it("rejects an empty prompt without ever calling generateGeminiImage", async () => {
@@ -109,5 +127,96 @@ describe("generateAnnouncementImageAction", () => {
 
     const result = await generateAnnouncementImageAction("a prompt");
     expect(result).toEqual({ error: "Could not generate an image for this announcement." });
+  });
+});
+
+// I-1/I-2 (RULING 76): the wait passed to raceWithTimeout is a function of
+// how much of the wall-clock budget the auth preamble already spent, never a
+// fixed literal - and it is read BEFORE requireOwner() runs, so the
+// preamble's own latency counts against it. Both are observed the same way:
+// raceWithTimeout is mocked so its second positional argument (the emitted
+// wait) can be read straight off mock.calls, while a stubbed Date.now lets
+// each test control how much time the mocked requireOwner() appears to
+// spend. generateGeminiImage must also be mocked to a never-settling promise
+// here - raceWithTimeout(generateGeminiImage(prompt), waitMs) evaluates the
+// inner call eagerly, and an unmocked one would hit vitest.setup.ts's
+// throwing fetch stub.
+describe("I-1/I-2: the emitted wait is a function of the preamble's elapsed time, read before requireOwner() runs", () => {
+  let nowMs = 1_000_000;
+  let dateNowSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    nowMs = 1_000_000;
+    dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    vi.mocked(raceWithTimeout).mockResolvedValue({ kind: "timedout" });
+    vi.mocked(generateGeminiImage).mockImplementation(() => new Promise(() => {}));
+  });
+
+  afterEach(() => {
+    dateNowSpy.mockRestore();
+  });
+
+  async function runWithPreambleElapsed(preambleElapsedMs: number): Promise<void> {
+    vi.mocked(requireOwner).mockImplementation(async () => {
+      nowMs += preambleElapsedMs;
+      return { id: "owner-1", email: "owner@example.com" };
+    });
+    await generateAnnouncementImageAction("a prompt");
+  }
+
+  // RULING 77's four constants, substituted into
+  // waitMs(e) = min(24_000, max(8_000, 48_000 - e)): R1 (at/above the MAX
+  // clamp), R3 (the linear, discriminating region below the clamp), R5 (the
+  // MIN clamp active), R6 (the remainder negative, MIN floor still holds).
+  // Hand-written decimal literals, not read from the implementation - the
+  // implementation cannot export them for the test to read (see the module
+  // header comment on announcement-image.ts).
+  const rows: Array<{ preambleElapsedMs: number; expectedWaitMs: number }> = [
+    { preambleElapsedMs: 0, expectedWaitMs: 24_000 },
+    { preambleElapsedMs: 30_000, expectedWaitMs: 18_000 },
+    { preambleElapsedMs: 42_000, expectedWaitMs: 8_000 },
+    { preambleElapsedMs: 60_000, expectedWaitMs: 8_000 },
+  ];
+
+  it.each(rows)(
+    "preamble elapsed $preambleElapsedMs ms emits a raceWithTimeout wait of $expectedWaitMs ms",
+    async ({ preambleElapsedMs, expectedWaitMs }) => {
+      await runWithPreambleElapsed(preambleElapsedMs);
+      expect(raceWithTimeout).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(raceWithTimeout).mock.calls[0][1]).toBe(expectedWaitMs);
+    }
+  );
+
+  it("emits a different wait at preamble 0 than at preamble 30_000 - the wait is a function of elapsed time, not a constant", async () => {
+    await runWithPreambleElapsed(0);
+    const first = vi.mocked(raceWithTimeout).mock.calls[0][1];
+
+    vi.mocked(raceWithTimeout).mockClear();
+    nowMs = 1_000_000;
+    await runWithPreambleElapsed(30_000);
+    const second = vi.mocked(raceWithTimeout).mock.calls[0][1];
+
+    expect({ first, second }).toEqual({ first: 24_000, second: 18_000 });
+  });
+});
+
+// I-3 (RULING 75/94): the wait bounds this action's own patience, not the
+// underlying generateGeminiImage call - losing the race must translate to a
+// specific, worded {error}, never a thrown exception or the generic catch
+// message.
+describe("I-3: the timeout branch returns the frozen timeout wording", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    vi.mocked(raceWithTimeout).mockResolvedValue({ kind: "timedout" });
+    vi.mocked(generateGeminiImage).mockImplementation(() => new Promise(() => {}));
+  });
+
+  it("resolves to the frozen timeout message when raceWithTimeout reports timedout", async () => {
+    const result = await generateAnnouncementImageAction("a prompt");
+    expect(result).toEqual({
+      error: "Image generation timed out. The announcement text is unaffected - try the image again.",
+    });
   });
 });

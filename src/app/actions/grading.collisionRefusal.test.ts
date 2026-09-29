@@ -65,6 +65,18 @@ function formDataFor(file: File, provider: "gemini" | "embedded"): FormData {
   return fd;
 }
 
+// RES-FILL-5: a blank rubric on the zip branch is exactly the population
+// resolveRunHeader's generateRubric call would otherwise spend on, before
+// the collision check ever runs.
+function formDataForBlankRubric(file: File): FormData {
+  const fd = new FormData();
+  fd.set("studentSubmissions", file);
+  fd.set("provider", "gemini");
+  fd.set("rubric", "");
+  fd.set("assignmentInstructions", "Write an essay.");
+  return fd;
+}
+
 describe("gradeAction - the A44 collision refusal reaches the returned GradeActionState (gemini provider, the default zip branch)", () => {
   it("returns { run: null, error: <the refusal, verbatim> } for a genuine flat collision, and spends no model call", async () => {
     const file = await zipFileOf([
@@ -114,6 +126,32 @@ describe("gradeAction - the A44 collision refusal reaches the returned GradeActi
     expect(bodies.some((b) => b.includes("alvarez's essay"))).toBe(true);
     expect(bodies.some((b) => b.includes("brown's essay"))).toBe(true);
     expect(bodies.some((b) => b.includes("chen's essay"))).toBe(true);
+  });
+});
+
+describe("gradeAction - RES-FILL-5: a blank-rubric zip that collision-refuses must not pay for generateRubric first", () => {
+  it("spends zero calls to callLlm when the rubric is blank and the zip collision-refuses", async () => {
+    const file = await zipFileOf([
+      { path: "Homework Final.txt", content: "final draft" },
+      { path: "Homework Draft.txt", content: "earlier draft" },
+    ]);
+
+    const result = await gradeAction({ run: null, error: null }, formDataForBlankRubric(file));
+
+    expect(result.run).toBeNull();
+    expect(result.error).toBe(
+      'Refused: 2 files resolve to the same student name "Homework", ' +
+        "so they would have been graded together as one row: Homework Draft.txt, Homework Final.txt. " +
+        "This archive has no other student folders, so the folder name is not enough to tell these apart. " +
+        "Put each student's files in their own folder inside the zip, or rename each file to studentname_date_time_filename, then upload again. No grades were produced."
+    );
+    // Before RES-FILL-5's reorder, resolveRunHeader's blank-rubric branch
+    // called generateRubric (one callLlm call) BEFORE gradeSubmissions ever
+    // extracted the zip or checked for the collision - so this fixture
+    // burned one model call it could never use. After the reorder, the
+    // extraction/collision check runs first and refuses before resolveRunHeader
+    // (and therefore generateRubric) is ever reached: zero calls, full stop.
+    expect(mockCallLlm).not.toHaveBeenCalled();
   });
 });
 

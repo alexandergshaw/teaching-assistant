@@ -1,7 +1,8 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractSubmissions, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
+import { decideCollisionRefusal, describeCollisionRefusal } from "@/lib/grade/collisionRefusal";
 import { runSubmittedCode, attachCodeRuns, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -883,13 +884,15 @@ export async function gradeAction(
     }
 
     // Gemini path.
-    const header = await resolveRunHeader(assignmentInstructions, rubric, provider, { synthesizeRubricWhenBlank: true });
-    if (header.kind === "refused") return { run: null, error: header.error };
-    const { effectiveRubric, generatedRubric } = header;
 
     // A39 wave 1: a single non-zip upload grades via gradeEntries (the same
     // per-entry path gradeOneSubmissionAction uses) instead of gradeSubmissions.
+    // No collision is possible on a single entry, so this branch skips the
+    // RES-FILL-5 check below entirely and keeps its original ordering.
     if (uploadKind === "single") {
+      const header = await resolveRunHeader(assignmentInstructions, rubric, provider, { synthesizeRubricWhenBlank: true });
+      if (header.kind === "refused") return { run: null, error: header.error };
+      const { effectiveRubric, generatedRubric } = header;
       const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()));
       if (!entry) {
         return { run: null, error: "Could not read that submission file. Upload a zip archive instead." };
@@ -902,7 +905,40 @@ export async function gradeAction(
       return { run: { ...run, fullCreditChecklist, sampleAnswer }, error: null, generatedRubric };
     }
 
+    // Tier 1 step 1 (design 4.3): free, and it must precede step 2's
+    // extraction/collision check below - byte-identical to resolveRunHeader's
+    // own refusal message (F2), checked here directly so a blank-instructions
+    // zip refuses on the same message it always has, rather than on whatever
+    // the collision check below would have said about the same archive.
+    // Mirrors grading-incremental.ts:91-93's identical guard.
+    if (!assignmentInstructions.trim()) {
+      return { run: null, error: "Please provide assignment instructions." };
+    }
+
+    // RES-FILL-5: extract and run A44's collision check BEFORE resolving the
+    // rubric, matching the incremental route's tier-1 ordering
+    // (prepareGradingRunAction extracts first, precisely so a run that will
+    // be collision-refused never pays for generateRubric - design 4.3 step 2
+    // before step 5). generateRubric depends only on assignmentInstructions
+    // (run-header.ts:45), never on the extracted submissions, so this
+    // extraction/collision check has no data dependency on the rubric and
+    // can move ahead of resolveRunHeader unconditionally. gradeSubmissions
+    // (engine.ts:365) still does its own extraction afterwards on the happy
+    // path - that duplicate parse is zero additional model calls, and this
+    // hoist deliberately does not restructure gradeSubmissions itself.
     const zipBuffer = await file.arrayBuffer();
+    {
+      const { submissions, zipParents } = await extractSubmissions(zipBuffer);
+      const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
+      if (collisionMessage) {
+        return { run: null, error: collisionMessage };
+      }
+    }
+
+    const header = await resolveRunHeader(assignmentInstructions, rubric, provider, { synthesizeRubricWhenBlank: true });
+    if (header.kind === "refused") return { run: null, error: header.error };
+    const { effectiveRubric, generatedRubric } = header;
+
     const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
       gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider, gradingRunOptions),
       synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),

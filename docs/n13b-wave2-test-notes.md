@@ -1,12 +1,27 @@
 # N13b Wave 2 test notes and frozen oracles (feature core, option X)
 
 Seat: `loop-test-author`. Round 1 of 2 (`docs/AGENTS.md` "Two rounds, then
-ask"). A fresh `loop-checker` gates this before any implementer writes test
-code. This document decides WHAT IS MEASURED and HOW IT FAILS for Wave 2 of
-N13b - the subset count + instructor named list under option X. It authors no
-production code and no test code; it authors the notes an implementer
-(`loop-implementer`) writes tests from, plus the frozen oracles and the
-sabotage design.
+ask") - REVISED 2026-09-29 to apply the round-1 check's accepted findings. A
+fresh `loop-checker` gates this before any implementer writes test code. This
+document decides WHAT IS MEASURED and HOW IT FAILS for Wave 2 of N13b - the
+subset count + instructor named list under option X. It authors no production
+code and no test code; it authors the notes an implementer (`loop-implementer`)
+writes tests from, plus the frozen oracles and the sabotage design.
+
+**What this revision changed (targeted; the checker validated the rest as sound
+and it is NOT reopened):** (1) BLOCKER - R-T2 PROMOTED to requirement per
+ORCHESTRATOR RULING 2026-09-29 (`docs/n13b-waves.md` R8, `docs/n13b-architecture.md`
+section 2/AC-8): W2-11 is now a COMPILE-ERROR `@ts-expect-error` proof against
+the narrowed `Omit<ClassTrendsReport, "instructorAttribution">` composer param
+(the old source-text token scan was self-contradictory - the Omit signature
+names the token - and is retired to optional body-only W2-11b); section 3, W2-11,
+W2-11b, and the R-T2 residual rewritten. (2) INFO-2 - the R-UX-1 gap filled:
+NEW W2-18 (distinct Copy labels) and W2-19 (three-way empty-state branch). (3)
+Minor: INFO-1 (W2-17 cross-file binding caveat), INFO-3 (per-result key is
+userId-or-index, not `.student`), INFO-4 (load-bearing substring coordination).
+UNCHANGED and NOT reopened: W2-1..W2-9 arithmetic oracles, the INFO-2
+`knownIdentifiers` guard W2-7/W2-13, W2-10, W2-12, W2-14..W2-17, the
+satisfiability proof (section 1), and the hygiene notes.
 
 Consumes, read in full this pass and re-pinned against the POST-WAVE-1 tree
 (commit `e1befd23`): `docs/n13b-acceptance-criteria.md` (AC-1..AC-12, R1-R4),
@@ -113,10 +128,12 @@ The reference is a THROWAWAY satisfiability witness, not the design; the
 implementer writes the real code against the real `class-trends.ts`. What it
 proves is that the red tests below are not contradictory or impossible.
 
-**What the reference could NOT prove (stated plainly):** it is pure TypeScript,
-so it does not exercise the SOURCE-TEXT / AST wiring requirements (W2-14..W2-17)
-or the static privacy scan (W2-11) - those depend on the real files existing
-and are ARGUED against the current tree, not executed here. See section 2.
+**What the reference could NOT prove (stated plainly):** it is pure TypeScript
+with an inline composer, so it does not exercise the SOURCE-TEXT / AST wiring
+requirements (W2-14..W2-19), the COMPILE-TIME privacy exclusion (W2-11, which
+needs the real narrowed composer signature and a `tsc` run) or the optional
+body-only scan (W2-11b) - those depend on the real files existing and are
+ARGUED against the current tree, not executed here. See section 2.
 
 ---
 
@@ -127,15 +144,20 @@ renders NO component. Nothing below that names a rendered pixel, focus order or
 contrast is machine-checkable; those are owner-verification (OV) items.
 
 **Executable here (proven satisfiable in section 1, and the implementer runs
-them for real against `class-trends.ts`/`class-trends-draft.ts`):** W2-1..W2-13.
+them for real against `class-trends.ts`/`class-trends-draft.ts`):** W2-1..W2-10,
+W2-12, W2-13. (W2-11 moved to compile-time - see below - and W2-11b is an
+optional source-text scan.)
 
 **Argued against the tree, not executed by me (the implementer's test code is
 what executes them; I reason they discriminate from the current source):**
-W2-14 (panel mounts leaf + `.student` ban), W2-15 (leaf reads the attribution
-content), W2-16 (8th canary-3 root), W2-17 (B1 repo-mount identity). W2-11 (the
-static "composer never reads `instructorAttribution`" source scan) is a
-source-text check the implementer runs; I argue its discrimination, I do not
-execute it.
+W2-11 (the COMPILE-TIME `@ts-expect-error` exclusion - its direction-of-failure
+is a `tsc` TS2578, not a vitest assertion; it needs the real narrowed composer
+signature, which does not exist yet, so it is RED-by-construction and argued),
+W2-11b (the optional body-only source scan), W2-14 (panel mounts leaf +
+`.student` ban), W2-15 (leaf reads the attribution content), W2-16 (8th canary-3
+root), W2-17 (B1 repo-mount identity), W2-18 (distinct Copy labels), W2-19
+(three-way empty-state branch, source-text half). I argue each one's
+discrimination; I do not execute them.
 
 **OV only (route to owner walk, never asserted machine-checkable):** the two
 Copy buttons read as visually distinct (OV-2/OV-5), tab order and focus of the
@@ -147,44 +169,67 @@ cannot honestly be one.
 
 ---
 
-## 3. The load-bearing privacy finding: "type separation" is PARTIAL, not a compile error
+## 3. The privacy boundary: the compile-time name exclusion is now REQUIRED (ORCHESTRATOR RULING 2026-09-29)
 
-The brief asks me to "prove the class clause cannot read names (type
-separation)." Measured against the architecture's chosen shape, it CANNOT be
-proven, and I will not assert it:
+Round 1 of this pass found that "type separation" was only PARTIAL under the
+composer's original signature: `composeClassTrendsDraft(report:
+ClassTrendsReport, ...)` (`class-trends-draft.ts:132-136`, opened) receives the
+whole report, and Wave 2 puts the names on
+`ClassTrendsReport.instructorAttribution` (architecture 4.3) - a SIBLING field
+of the type the composer already receives. So `report.instructorAttribution`
+was reachable inside the composer; reading it was NOT a compile error, and
+AC-8's "strongest form" / security R8 part (b) ("the excluded state must be a
+compile error") were NOT achieved by the original shape.
 
-- `composeClassTrendsDraft(report, observations, assignmentName)` receives
-  `report: ClassTrendsReport` (`class-trends-draft.ts:132-136`).
-- Wave 2 puts the names on `ClassTrendsReport.instructorAttribution`
-  (architecture 4.3) - a FIELD OF THE TYPE THE COMPOSER ALREADY RECEIVES.
-- Therefore `report.instructorAttribution` is reachable inside
-  `composeClassTrendsDraft`. Reading it is NOT a compile error. The
-  architecture's "the composer's iteration domain (`report.areas`) cannot
-  reach a name" (architecture section 2) is a DISCIPLINE claim about what the
-  code happens to iterate, not a TYPE guarantee. AC-8's "strongest form" (a
-  type the class composer cannot receive a name through) and the security
-  doc's BLOCKER-2/R8 ("the excluded state must be a compile error") are NOT
-  achieved by option (a) as designed.
+The orchestrator ruled on that finding (2026-09-29, recorded in
+`docs/n13b-waves.md` R8 and `docs/n13b-architecture.md` section 2 / AC-8):
+PROMOTE R-T2 into Wave 2. The composer's first parameter is NARROWED to
+`Omit<ClassTrendsReport, "instructorAttribution">` (or a dedicated
+`ClassTrendsDraftInput`), so ANY read of a name inside the composer is a
+compile error. The sole non-test caller (`ClassTrendsDraftPanel.tsx:46`,
+opened) passes a full `ClassTrendsReport`, assignable to the Omit view by
+structural subtyping, so the caller is unaffected and `.length` stays 3 (W2-12
+unchanged). Nothing the composer needs lives on that field - the subset CLAUSE
+the class draft renders is computed from `AreaTrend.missedSubset` (numbers
+only).
 
-So the privacy boundary for the NEW subset path rests on TWO instruments, both
-of which I make discriminating below, plus one residual:
+So the privacy boundary for the NEW subset path now rests on a compile-time
+instrument, plus one runtime instrument for defense-in-depth, plus one optional
+text tripwire:
 
-1. **W2-10 (runtime, load-bearing):** a name placed on
+1. **W2-11 (compile-time, PRIMARY, load-bearing):** with the composer's first
+   parameter narrowed, `report.instructorAttribution` inside a
+   composeClassTrendsDraft-typed context does NOT type-check. Proven by a
+   `@ts-expect-error` assertion that goes RED (a `tsc` TS2578
+   "unused '@ts-expect-error' directive" error, failing the type gate) the
+   moment the parameter is widened back to full `ClassTrendsReport`. This is the
+   "make the bad state unrepresentable" form the seat brief demands - not a
+   denylist over source text.
+2. **W2-10 (runtime, defense-in-depth):** a name placed on
    `report.instructorAttribution` never appears in the returned Markdown.
    Proven to discriminate the "composer renders `instructorAttribution`"
-   mutation (section 1, S-PRIV-LEAK RED). The seeded name MUST NOT also be in
+   mutation (section 1, S-PRIV-LEAK RED). Kept as-is: it catches a leak through
+   any indirection the type system cannot see (e.g. a cast to `any`), which the
+   compile-time assertion alone does not. The seeded name MUST NOT also be in
    `knownIdentifiers`, or Wave 1's substring filter masks the leak and the
    oracle passes on the broken code too (the "privacy oracle that can't fail"
    trap - see W2-10's construction).
-2. **W2-11 (static backstop):** `composeClassTrendsDraft`'s comment-stripped
-   source never contains the token `instructorAttribution`.
-3. **Residual R-T2 (extends R8/BLOCKER-2):** the true strongest form is to
-   NARROW the composer's parameter to a type that omits `instructorAttribution`
-   (e.g. pass `Omit<ClassTrendsReport, "instructorAttribution">`, or a distinct
-   `ClassTrendsDraftInput`), making a name read a compile error. Owner:
-   architect (shape) + test-author (prove it is a compile error). This is a
-   real hardening the current shape leaves on the table; W2-10 + W2-11 are the
-   enforcement until it lands. Recorded, not silently adopted.
+3. **W2-11b (source-text, OPTIONAL belt-and-braces):** a BODY-ONLY scan of the
+   composer (its function body, EXCLUDING its signature) never contains the
+   token `instructorAttribution`. See W2-11b's construction for why a
+   whole-source scan is now WRONG.
+
+**The self-contradiction round 1 surfaced, and why the instrument changed.**
+Once the parameter is `Omit<ClassTrendsReport, "instructorAttribution">`, the
+composer's SIGNATURE itself contains the literal token `instructorAttribution`
+(inside the `Omit<...>`). A pure "the token never appears in the composer's
+source" scan (the original W2-11) would therefore FALSE-POSITIVE on the very
+fix that closes the hole - the guard would go RED on correct code. That is
+exactly the "instrument that does not measure what it claims" class this seat
+exists to prevent. The compile-error assertion is immune to it (it measures
+type-reachability, not text), which is why it is now the primary instrument and
+the whole-source token scan is retired in favor of the body-only optional
+W2-11b.
 
 ---
 
@@ -210,9 +255,20 @@ Instrument for W2-1..W2-7 (single file):
 Fixture builder: DUPLICATE the existing `makeResult`/`makeEntry` in that file
 (`class-trends.test.ts:22-53`); they already build `GradeResult`/
 `GradingRunEntry`. A per-area result is `makeResult(name, [makeRubricArea(area,
-score)])`. Distinct students come from distinct `student` values on the
-per-result (default) identity - one graded result IS one distinct student
-(AC-1, Canvas invariant).
+score)])`.
+
+DISTINCT-STUDENT KEY, corrected per architecture 4.1 (`class-trends.ts` around
+:194-197, opened): under the DEFAULT `per-result` identity the distinct-student
+key is `userId != null ? "u:" + userId : "i:" + index`, NOT the `.student`
+string. So one graded result IS one distinct student (AC-1, Canvas invariant) -
+but distinctness is STRUCTURAL (each result is its own key by userId-or-index),
+NOT derived from distinct `.student` VALUES. Consequence for these fixtures: the
+count is over results, so N results on an area give N distinct keys even if two
+share a `.student` string; the `.student` string is only the source of the
+displayed name (W2-6's `displayName`), never the dedup key. The implementer's
+per-result fixtures may therefore leave `userId` unset (distinct by index) or
+set distinct `userId`s; either yields distinct keys. Only the `resolved` path
+(W2-5) collapses two results to one key, and only via its explicit `keyOf`.
 
 **W2-1 - `missedSubset.studentCount` counts DISTINCT STUDENTS who missed points
 (AC-1).**
@@ -336,8 +392,11 @@ roster key (AC-1/AC-2 identity basis, the seam Wave 3 will wire).**
 
 ### Group B - layer C draft, `src/lib/grade/class-trends-draft.test.ts`
 
-Instrument for W2-8..W2-12 (single file):
-`npm run test:paths src/lib/grade/class-trends-draft.test.ts`.
+Instrument for W2-8..W2-10, W2-11b, W2-12, W2-13 (single file, runtime):
+`npm run test:paths src/lib/grade/class-trends-draft.test.ts`. W2-11 lives in
+the SAME file but its direction-of-failure is the `tsc` type gate (the
+`@ts-expect-error` becoming an unused-directive error), NOT the vitest run - see
+W2-11's Instrument row.
 The existing `makeArea`/`makeReport` (`class-trends-draft.test.ts:15-52`) must
 be EXTENDED (same commit) to set the new REQUIRED fields: `makeArea` defaults
 `missedSubset: overrides.missedSubset ?? null`; `makeReport` defaults
@@ -388,6 +447,15 @@ motivating case.**
   Note the noun: the clause must read "N of M students" (the identity basis is
   distinct students), never "submissions" - pin "students" in the frozen
   substring so a submission-noun regression is caught.
+- COORDINATION (INFO-4): the substrings `"3 of 3"`, the connective `" of "`, and
+  the noun `"students"` are LOAD-BEARING here - this is the frozen-copy-literal
+  exception where the exact spelling IS the fact under test. The UX/implementer
+  MUST render the class-draft subset clause with that exact `"<N> of <M>
+  students"` shape, and the instructor named-list line (W2-19 / UX section 3,
+  `"<DisplayArea> - <N> students missed points: ..."`) MUST use the SAME
+  `"students"` noun for the SAME count, so the two counted outputs read as one
+  fact. If the UX changes this wording, W2-9 and W2-19's substrings change in the
+  same commit - they are not independent spellings.
 
 **W2-10 - PRIVACY (runtime, load-bearing): a name on
 `report.instructorAttribution` never reaches the returned Markdown.**
@@ -413,22 +481,85 @@ motivating case.**
   even on the broken renderer (filtered by Wave 1) - that version measures
   NOTHING and is banned by this construction.
 
-**W2-11 - PRIVACY (static backstop): `composeClassTrendsDraft` never reads
-`instructorAttribution`.**
-- Object: the comment-stripped source of `class-trends-draft.ts` versus the
-  token `instructorAttribution`.
-- Direction: RED if `instructorAttribution` appears in the composer's
-  code (not comments).
-- Construction: DUPLICATE the `stripComments` helper from
-  `classTrends.wiring.test.ts:37-39` verbatim (split + UNANCHORED `/\/\/.*$/`,
-  block-comment `/\/\*[\s\S]*?\*\//g`) - do NOT import it (no cross-test-file
-  imports) and do NOT use the anchored trailing-comment-blind form. Read
-  `class-trends-draft.ts`, strip, assert `not.toContain("instructorAttribution")`.
-- Sabotage: add `const names = report.instructorAttribution;` to the composer.
-  RED. GREEN on restore. **Discriminates.** Caveat (honest): this is a
-  source-text guard, weaker than the compile-time exclusion R-T2 recommends; it
-  catches the field being NAMED, not every conceivable indirection. Paired with
-  W2-10 (runtime) it is sufficient for this wave; R-T2 is the durable fix.
+**W2-11 - PRIVACY (compile-time, PRIMARY): a name is UNREACHABLE through the
+composer's input type (AC-8 / security R8 part (b); ORCHESTRATOR RULING
+2026-09-29, promoting R-T2 into Wave 2).**
+- Object: whether `instructorAttribution` is a property of
+  `composeClassTrendsDraft`'s first parameter type - i.e. whether reading it
+  inside a composer-typed context type-checks.
+- Instrument: `tsc` (the pre-push type gate), triggered from the `.test.ts`
+  file under `src/` (`class-trends-draft.test.ts`) so the assertion is in the
+  compiled set. The vitest run of that file is incidental; the direction-of-
+  failure signal is the tsc error, NOT a runtime `expect`.
+- Direction: RED (a `tsc` TS2578 "unused '@ts-expect-error' directive" error,
+  failing the type gate) if the parameter is widened back to `ClassTrendsReport`
+  (or otherwise made to carry `instructorAttribution`); GREEN (the directive is
+  used, tsc clean, vitest passes) under the
+  `Omit<ClassTrendsReport, "instructorAttribution">` parameter.
+- Construction (pins the FACT, tolerates the spelling of the param type):
+  reference the composer's ACTUAL first-parameter type via
+  `Parameters<typeof composeClassTrendsDraft>[0]` - which resolves to the Omit
+  view whether the implementer writes an inline `Omit<...>` or a named
+  `ClassTrendsDraftInput` alias - and attempt to read the banned field under the
+  directive:
+  ```
+  const draftInput = {} as Parameters<typeof composeClassTrendsDraft>[0];
+  // @ts-expect-error instructorAttribution must be unreachable via the composer
+  // input type (AC-8 / R8 part b): reading it here MUST be a compile error, so
+  // this directive MUST be "used".
+  void draftInput.instructorAttribution;
+  ```
+  When the parameter omits the field, `draftInput.instructorAttribution` is a
+  property-does-not-exist error, the directive is consumed, tsc is clean and
+  vitest passes. When the parameter is the full report, the read compiles, the
+  directive is UNUSED, and tsc emits TS2578 - the type gate goes RED. This is
+  RED-by-construction today (the narrowed type does not exist yet), the same
+  honest footing as every other Wave-2 assertion (section 0).
+- Sabotage: widen the composer's first parameter back to `ClassTrendsReport`.
+  RED (TS2578 at the directive; the type gate fails). GREEN on restore.
+  **Discriminates** - and it discriminates the EXACT hardening the ruling
+  requires, at the type level, which no source-text scan can.
+- Attack on my own guard (argued, since the narrowed type is not in the tree
+  yet): a naive version pinning `Parameters<...>[0]` to a hand-named type would
+  break if the implementer renames the alias, and a whole-source token scan
+  would break because the `Omit<..., "instructorAttribution">` signature NAMES
+  the token (section 3's self-contradiction). `Parameters<typeof
+  composeClassTrendsDraft>[0]` + the compile-error read avoids both, and the
+  `Parameters<...>` form drives the REAL exported signature (seat practice 3:
+  drive the production path, do not reach past the seam).
+- HONEST LIMIT: this is a compile-time property-reachability guard. It does NOT
+  catch a leak that first casts the value to `any`/`ClassTrendsReport` inside
+  the body - that indirection is caught by W2-10 (runtime). The two together
+  are the enforcement; neither alone is.
+
+**W2-11b - PRIVACY (source-text, OPTIONAL belt-and-braces): the composer BODY
+never names `instructorAttribution`.**
+- Object: the comment-stripped BODY of `composeClassTrendsDraft` (its statements
+  between the `{` that opens the function and its matching close), EXCLUDING the
+  signature, versus the token `instructorAttribution`.
+- Direction: RED if `instructorAttribution` appears in the body (not the
+  signature, not comments).
+- Construction (ANCHOR-RESOLVES AT BOTH ENDS, per the slice trap): DUPLICATE the
+  `stripComments` helper from `classTrends.wiring.test.ts:37-39` verbatim (split
+  + UNANCHORED `/\/\/.*$/` + block-comment `/\/\*[\s\S]*?\*\//g`) - do NOT
+  import it, do NOT use the anchored trailing-comment-blind form. Read
+  `class-trends-draft.ts`, strip. Locate the signature start
+  `sigIdx = stripped.indexOf("export function composeClassTrendsDraft(")` and
+  assert `sigIdx > -1`; find the body-opening brace - the first `{` AFTER the
+  return-type close `)` that follows `sigIdx` - and assert THAT anchor resolved
+  (`> -1`); find the END - the next top-level `export function` after the body
+  open, or end-of-string - and assert the end anchor resolved (NEVER
+  `slice(start, -1)` on an unresolved index, the widened-slice trap). Slice
+  body-open..end and assert the BODY slice does not contain
+  `instructorAttribution`.
+- Sabotage: add `const names = report.instructorAttribution;` to the composer
+  BODY. RED. GREEN on restore. **Discriminates.**
+- WHY OPTIONAL, and why NOT the primary: a whole-source scan is now WRONG (the
+  `Omit<..., "instructorAttribution">` signature names the token, so it
+  false-positives on the fix - section 3). A body-only scan avoids that but
+  needs the fragile signature/body slice above; W2-11 (compile-time) measures
+  the same property with NO slice and is immune to spelling. Ship W2-11b only if
+  the implementer wants the extra text-level tripwire; W2-11 is the requirement.
 
 **W2-12 - the composer signature stays 3-param (the subset clause reads
 `report`, not a new channel).**
@@ -553,12 +684,29 @@ stays green with the extra attribute).
   `identity` `JsxAttribute`; require its initializer to be a `JsxExpression`
   wrapping an `ObjectLiteralExpression` (inline) whose `kind` property is the
   string literal `"unavailable"`. If the implementer sources the identity from
-  a named binding/import instead of inlining, the test must resolve that binding
-  within `index.tsx` and assert the same `kind` - so pin the FACT (the mount
-  receives an `unavailable`-kinded identity), tolerating either spelling. A
-  coarse `INDEX_SOURCE.includes('"unavailable"')` is FORBIDDEN as the sole
-  check: it passes even when the literal is unconnected to the mount (a vacuous
-  guard); the attribute-to-value tie is what discriminates.
+  a named binding DECLARED within `index.tsx` (e.g. `const identity = { kind:
+  "unavailable", reason };`), the test must resolve that binding within
+  `index.tsx` and assert the same `kind` - so pin the FACT (the mount receives an
+  `unavailable`-kinded identity), tolerating either spelling. A coarse
+  `INDEX_SOURCE.includes('"unavailable"')` is FORBIDDEN as the sole check: it
+  passes even when the literal is unconnected to the mount (a vacuous guard); the
+  attribute-to-value tie is what discriminates.
+- INFO-1 (cross-file binding caveat, stated so the implementer does not ship a
+  vacuous guard): if the identity is IMPORTED from another module (e.g.
+  `classTrendsFolderEntry.ts`) rather than inlined or declared in `index.tsx`,
+  then resolving the binding WITHIN `index.tsx` reaches only the `import`
+  statement, not the object literal - the `kind: "unavailable"` value lives in
+  the OTHER file, and this AST test cannot tie attribute-to-value from
+  `index.tsx` alone. Two acceptable resolutions, and the implementer MUST pick
+  one, never leave it ambiguous: (a) PREFERRED and PRIMARY - inline the identity
+  at the mount (`identity={{ kind: "unavailable", reason }}`) or declare it as a
+  `const` in `index.tsx`, so the tie resolves in one file; (b) if the value is
+  genuinely defined cross-file, the test must FOLLOW the import to the defining
+  module and assert the `kind: "unavailable"` string literal THERE, tied to the
+  exported binding the mount's attribute references - a bare
+  `INDEX_SOURCE.includes` remains forbidden. The primary inline construction
+  above stands as the expected shape; (b) is the fallback only if the architect
+  moves the literal out of `index.tsx`.
 - Sabotage A: delete the `identity=` attribute from the mount. RED (no
   attribute). GREEN on restore. **Discriminates.**
 - Sabotage B: change the passed kind to `"per-result"`. RED (`kind` mismatch).
@@ -571,6 +719,127 @@ stays green with the extra attribute).
   SubsetIdentity` import add no forbidden VALUE import, so the not-postable
   guard stays green. Re-derive that file's reader set at the wave gate.
 
+**W2-18 - INFO-2 / R-UX-1(a): the two Copy controls carry DISTINCT labels -
+"Copy class announcement" (the renamed existing button) and "Copy student list"
+(the new instructor-list button) - and never both read "Copy".** Files:
+`src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts` (the
+renamed existing button, over `ClassTrendsDraftPanel.tsx`) and
+`src/app/components/drafted-grades/classTrends.wiring.test.ts` (the new button,
+over `ClassTrendsStudentListPanel.tsx`).
+- Object: the two Copy button label strings, versus each other and versus the
+  bare "Copy" both read today.
+- Instrument (TWO test files -> `test:paths`, never a raw multi-path vitest):
+  `npm run test:paths src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts src/app/components/drafted-grades/classTrends.wiring.test.ts`.
+- Direction: RED if `ClassTrendsDraftPanel.tsx` does not contain the exact label
+  `Copy class announcement` (the R-UX-5 rename did not land), OR the new leaf
+  does not contain the exact label `Copy student list`, OR the two label strings
+  are equal.
+- Construction (FROZEN-COPY-LITERAL exception - the labels ARE the fact under
+  test, so the exact spelling is pinned on purpose): in
+  `classTrendsDraft.wiring.test.ts`, over the already-read `strippedDraftPanel`,
+  assert `strippedDraftPanel.includes("Copy class announcement")`. NOTE the
+  ready-branch button today renders the child text `Copy` split across lines
+  (`ClassTrendsDraftPanel.tsx:100-102`, opened: `>` on 100, `Copy` on 101,
+  `</Button>` on 102), so `>Copy<` is NOT a contiguous substring and the
+  existing `:92` `not.toContain(">Copy<")` passes VACUOUSLY - do NOT reuse that
+  idiom to prove the rename; assert the POSITIVE full literal
+  `"Copy class announcement"` instead, which only the renamed button produces.
+  In `classTrends.wiring.test.ts`, over the leaf's stripped source (already read
+  for W2-15), assert `leafSource.includes("Copy student list")`. Then assert the
+  two literals differ (`"Copy class announcement" !== "Copy student list"`,
+  stated as the FACT that no two Copy buttons share a label).
+- Sabotage A: skip the rename (leave the child text `Copy` in the draft panel).
+  RED (the `"Copy class announcement"` literal is absent). GREEN on restore.
+  **Discriminates.**
+- Sabotage B: label the new leaf button `Copy` (or `Copy list`). RED (the
+  `"Copy student list"` literal is absent). GREEN on restore. **Discriminates.**
+- Attack on my own guard: a version asserting only that both files contain the
+  token `"Copy"` would pass on TWO identical bare "Copy" buttons - the exact
+  ambiguity R-UX-5 exists to forbid. Pinning the two FULL distinct literals is
+  what makes "never both read Copy" enforceable; the shared prefix is not
+  asserted.
+- OV BOUNDARY: that the two buttons READ as visually distinct on screen and are
+  spatially separated (the AC-8 direction: the class-announcement control sits
+  far from the names) is OV-2/OV-5 (`docs/n13b-ux.md` section 8) - source-text
+  proves the LABELS differ, never the pixels or the layout distance.
+- R-UX-5 coordination: the rename and the new button ship in the SAME commit
+  (R-UX-5, `docs/n13b-waves.md:626-631`); this requirement goes RED if either is
+  missing, so it is the machine enforcement of "the two labels never both read
+  Copy."
+
+**W2-19 - INFO-2 / R-UX-1(b): the three-way empty-state branch renders the right
+control in each state (source-text half; the render itself is OV).** File:
+`src/app/components/drafted-grades/classTrends.wiring.test.ts` (reads the leaf
+`ClassTrendsStudentListPanel.tsx` and the panel `ClassTrendsPanel.tsx` stripped
+sources).
+- The three states (from `docs/n13b-ux.md` section 4, lines 278-302):
+  1. `report.areas.length === 0`: the new section renders NOTHING - it shares the
+     panel's EXISTING `report.areas.length === 0 ? <no-results> : <sections>`
+     conditional (`ClassTrendsPanel.tsx:143`), so only ONE empty message shows.
+  2. areas exist but `instructorAttribution.length === 0` (no area cleared the
+     `>= 3` subset threshold): a `styles.fieldHint` line, NO heading, NO Copy
+     button.
+  3. `instructorAttribution.length > 0`: heading + per-area lines + the
+     "Copy student list" button.
+- Object / Instrument: the leaf's and panel's comment-stripped sources; single
+  file, `npm run test:paths src/app/components/drafted-grades/classTrends.wiring.test.ts`.
+- Direction: RED if (A) the leaf renders the "Copy student list" button
+  UNCONDITIONALLY (no emptiness branch on its attribution prop -> a heading with
+  nothing under it, the exact defect UX section 4 warns of), OR (B) the leaf
+  mount appears inside the panel's areas-EMPTY arm (-> two stacked empty
+  messages in state 1).
+- Construction (A) - STATE 2 vs 3, leaf owns the branch (it receives
+  `instructorAttribution` and renders the button, UX section 3 line 216-217).
+  The HONEST machine-checkable pair, and its limit:
+  (i) PRIMARY: assert the leaf's stripped source contains an emptiness test on
+  its attribution prop - a match for
+  `/instructorAttribution\b[\s\S]{0,60}\.length|\.length\s*===\s*0|\.length\s*>\s*0/`
+  (pin the FACT that an emptiness branch EXISTS; tolerate the prop being
+  destructured/renamed and the `=== 0` vs `> 0` vs `?`/`&&` spelling). (ii)
+  SUPPORT (best-effort slice, model on `classTrendsDraft.wiring.test.ts:82-93`):
+  `emptyIdx = leafSource.search(<the length-test regex>)`, assert `emptyIdx > -1`;
+  find the arm boundary after it (the next `:` / `)` / `return` that closes the
+  empty arm) and assert THAT anchor resolved (`> -1`, never `slice(start, -1)`);
+  assert the empty-arm slice contains NEITHER `"Copy student list"` NOR a
+  per-student `.map(`. (iii) assert the leaf DOES contain `"Copy student list"`
+  and a `.map(` somewhere (state 3 renders them).
+- Construction (B) - STATE 1, panel gates the mount: over the panel's stripped
+  source, locate `report.areas.length === 0` and assert `> -1`; slice the EMPTY
+  consequent (from the `?` after that test to its matching `:`, both anchors
+  asserted to resolve) and assert it does NOT contain `ClassTrendsStudentListPanel`
+  (the leaf is mounted only in the non-empty arm). The panel's areas-empty
+  consequent is a single short `<span>` today (`ClassTrendsPanel.tsx:143-144`,
+  opened), so this slice is robust.
+- Sabotage A (state 2/3): make the leaf render its heading + "Copy student list"
+  button UNCONDITIONALLY, deleting the emptiness branch entirely. RED - the
+  length-test anchor (i) no longer matches AND the (ii) slice `emptyIdx > -1`
+  fails; both go RED (anchor ABSENCE -> RED, the safe direction, never a
+  false-GREEN). GREEN on restore. **Discriminates** the "no branch at all" defect
+  - the one UX section 4 actually warns of.
+- Sabotage B (state 1): move the `<ClassTrendsStudentListPanel` mount into the
+  panel's areas-empty consequent (or mount it unconditionally). RED (the
+  empty-consequent slice now contains `ClassTrendsStudentListPanel`). GREEN on
+  restore. **Discriminates.**
+- ATTACK ON MY OWN GUARD, and the honest limit I will NOT overclaim: (i)+(iii)
+  discriminate the "unconditional render, no branch" defect (Sabotage A). But an
+  impl that KEEPS an emptiness branch yet routes the button into the WRONG arm -
+  or that has a STRAY unused `instructorAttribution.length` reference while
+  rendering the button unconditionally - can defeat (ii)'s heuristic arm-slice
+  and pass (i). So (ii) is SUPPORT, not load-bearing, and W2-19 does NOT claim to
+  prove the button sits in the CORRECT arm. That "right control in the right
+  state" fact is a RENDER fact and is OV (below). Asserting merely that the leaf
+  "references `instructorAttribution`" would measure NOTHING (the prop is
+  referenced either way); (i) is the minimum that ties "an emptiness branch
+  exists" to the RED-on-deletion behaviour, and I keep it as the primary.
+- OV BOUNDARY (per the seat rule: no requirement whose only honest enforcer is a
+  render): that each state ACTUALLY renders the right control on screen, that the
+  button sits in the non-empty arm, that exactly ONE empty message shows in state
+  1, and that the state-2 fieldHint reads as this app's voice, are OV (route to
+  OV-SUBSET-1 / `docs/n13b-ux.md` section 8). The exact empty-state PROSE is UX's
+  to own and is NOT pinned here (source-text over-specification trap); only the
+  existence of the emptiness branch, the button/list presence, and the panel
+  mount-gating are asserted machine-side.
+
 ### Multi-file gate command
 
 The Wave 2 gate runs all the above executable + argued files in ONE credited
@@ -582,7 +851,12 @@ npm run test:paths src/lib/grade/class-trends.test.ts src/lib/grade/class-trends
 ```
 
 Expect a `COVERED` line per path, all passing. `classTrendsRunCohort.test.ts`
-is in the set as a REGRESSION reader (its field bans must stay green).
+is in the set as a REGRESSION reader (its field bans must stay green). W2-18 and
+W2-19 land in `classTrends.wiring.test.ts` / `classTrendsDraft.wiring.test.ts`,
+both already in this set. W2-11's direction-of-failure is the SEPARATE `tsc`
+type gate (the `@ts-expect-error` unused-directive error), NOT this vitest run -
+a green vitest sweep here does NOT prove W2-11; the type gate must run and pass
+too.
 
 ---
 
@@ -601,7 +875,8 @@ is in the set as a REGRESSION reader (its field bans must stay green).
 | W2-8 | subset clauses `.filter(areaFullyCovered)` | W2-8 | yes | yes | argued (ref shows presence) |
 | W2-9 | denominator = `totalResults` | W2-9 | yes | yes | argued |
 | W2-10 | subset clause renders attribution names | W2-10 | yes | yes | RUN (S-PRIV-LEAK) |
-| W2-11 | composer reads `instructorAttribution` | W2-11 | yes | yes | argued |
+| W2-11 | widen composer 1st param back to full `ClassTrendsReport` | W2-11 (tsc TS2578 unused-directive) | yes | yes | argued (compile-time) |
+| W2-11b | composer BODY reads `instructorAttribution` | W2-11b | yes | yes | argued (optional) |
 | W2-12 | add 4th param to composer | W2-12 | yes | yes | argued |
 | W2-13 | INFO-2 gate (end-to-end) | W2-13 | yes | yes | argued (same mutation as W2-7) |
 | W2-14A | delete leaf mount from panel | W2-14 | yes | yes | argued |
@@ -610,12 +885,22 @@ is in the set as a REGRESSION reader (its field bans must stay green).
 | W2-16B | remove leaf from `roots` | W2-16 | yes | yes | argued |
 | W2-17A | delete `identity=` from mount | W2-17 | yes | yes | argued |
 | W2-17B | pass `kind:"per-result"` | W2-17 | yes | yes | argued |
+| W2-18A | skip the R-UX-5 rename (leave bare "Copy") | W2-18 | yes | yes | argued |
+| W2-18B | label new leaf button "Copy" not "Copy student list" | W2-18 | yes | yes | argued |
+| W2-19A | leaf renders heading+button unconditionally | W2-19 | yes | yes | argued |
+| W2-19B | mount leaf in panel's areas-empty arm | W2-19 | yes | yes | argued |
 
-No sabotage above is RED-in-both-directions or GREEN-in-both-directions. The
-one place I explicitly REFUSE a guard as non-discriminating is the naive
-privacy oracle that seeds the marker into `knownIdentifiers` too (W2-10's
-construction note): it passes on correct AND broken code because Wave 1's
-filter masks the leak - it measures nothing and must not be written.
+No sabotage above is RED-in-both-directions or GREEN-in-both-directions. Two
+places I explicitly bound a guard's honesty: (1) the naive privacy oracle that
+seeds the marker into `knownIdentifiers` too (W2-10's construction note) passes
+on correct AND broken code because Wave 1's filter masks the leak - it measures
+nothing and must not be written; and (2) W2-19's sub-assertion (ii) (the leaf
+empty-arm slice) is SUPPORT, not load-bearing - it can be defeated by a stray
+`instructorAttribution.length` reference, so W2-19 discriminates the "no branch
+at all" defect (via (i), Sabotage A) but does NOT claim to prove the button sits
+in the correct arm; that render fact is OV-SUBSET-1. Both rows in the table
+above for W2-19 (A/B) discriminate the DEFECT they name; the honest limit is on
+the CLAIM, not the discrimination.
 
 ---
 
@@ -625,16 +910,19 @@ Handed to the orchestrator to record under N13b in `docs/BACKLOG.md` at
 disposal/push (a residual not in the backlog does not exist -
 `iteration-caps.md` anti-gaming).
 
-- **R-T2 (extends R8 / BLOCKER-2) - the compile-time name exclusion the current
-  shape leaves undone.** Owner: architect (narrow `composeClassTrendsDraft`'s
-  parameter to omit `instructorAttribution`, e.g. `Omit<ClassTrendsReport,
-  "instructorAttribution">` or a `ClassTrendsDraftInput`) + test-author (prove
-  the excluded read is a `tsc` error, not merely absent). Instrument:
-  `class-trends-draft.ts:132-136` (the composer signature),
-  `class-trends-draft.ts:69-72` (the existing parameter-type-exclusion
-  precedent for `renderCountedClause`). Step: a follow-up hardening; until it
-  lands, W2-10 (runtime) + W2-11 (static) are the enforcement. NOT a blocker on
-  Wave 2 shipping - it is the strongest form, not the only form.
+- **R-T2 (extends R8 / BLOCKER-2) - PROMOTED to requirement W2-11 (compile-error
+  form) by ORCHESTRATOR RULING 2026-09-29.** No longer a deferred residual: the
+  compile-time name exclusion is now REQUIRED in Wave 2. The architect narrows
+  `composeClassTrendsDraft`'s first parameter to
+  `Omit<ClassTrendsReport, "instructorAttribution">` (or a `ClassTrendsDraftInput`)
+  and the test-author proves the excluded read is a `tsc` error via the
+  `@ts-expect-error` assertion of W2-11 (section 4, Group B). Instrument:
+  `class-trends-draft.ts:132-136` (the composer signature, narrowed),
+  `class-trends-draft.ts:69-72` (the existing parameter-type-exclusion precedent
+  for `renderCountedClause`). Step: LANDS IN WAVE 2 as W2-11; W2-10 (runtime) is
+  retained defense-in-depth and W2-11b (body-only source scan) is the optional
+  tripwire. Recorded here as PROMOTED so the register shows the ruling was
+  applied, not silently dropped.
 - **OV-SUBSET-1 (this wave's OV, extends OV-2) - the class-addressed subset
   clause reads name-free and as this app's voice on a real run, and the
   instructor named list is visible, legible and clearly distinct from the class
@@ -659,6 +947,16 @@ disposal/push (a residual not in the backlog does not exist -
   the leaf holds its OWN `useState` (or the class-draft panel's state is not
   passed into the leaf) - flag to the implementer; I do not over-specify the
   state shape here. Recorded so it is not mistaken for covered by a unit test.
+- **R-UX-1 (from the wave plan) - DISCHARGED into W2-18 + W2-19.** The wave plan
+  (`docs/n13b-waves.md:610-612`) assigned the test-author to author, for Wave 2,
+  (a) the two distinct Copy labels and (b) the three-way empty-state branch.
+  Both are now authored: (a) is W2-18 (distinct Copy labels, source-text), (b) is
+  W2-19 (three-way empty state, source-text half; the render is OV-SUBSET-1).
+  Owner: test-author (done, this pass) + implementer (writes the tests). The
+  purely visual halves (buttons read as distinct, exactly one empty message
+  shows, contrast/legibility) remain OV under OV-SUBSET-1. No residual work
+  remains under R-UX-1 beyond the implementer executing W2-18/W2-19 and the OV
+  walk; recorded here so the discharge is visible, not assumed.
 
 ---
 
@@ -669,13 +967,18 @@ disposal/push (a residual not in the backlog does not exist -
   `resolved` seam so that if Y is later chosen the dedup is already proven.
 - No component renders under vitest and there is no API key. Every pixel /
   focus / legibility / real-model claim (OV-SUBSET-1, OV-2/4/5/6) is an owner
-  walk. W2-14..W2-17 prove import/mount/attribute wiring; they never prove the
-  screen.
-- Whether the architect adopts R-T2's compile-time exclusion. I recommend it
-  and record the residual; I do not decide the composer's parameter type (the
-  architect's lane). Until then the runtime + static privacy pair is the
-  enforcement, and I state its limit (W2-11 catches the field being named, not
-  every indirection).
+  walk. W2-14..W2-19 prove import/mount/attribute/label/branch wiring by
+  source-text; they never prove the screen (W2-18's distinctness and W2-19's
+  actual per-state render are OV-SUBSET-1).
+- R-T2 is RESOLVED, not open: the ORCHESTRATOR RULING 2026-09-29 adopted the
+  compile-time exclusion, so the composer's first-parameter type is now the
+  architect's decided shape (`Omit<ClassTrendsReport, "instructorAttribution">`
+  or `ClassTrendsDraftInput`) and W2-11 proves it as a `tsc` error. What this
+  pass still cannot execute is W2-11 itself - the narrowed type does not exist in
+  the tree yet, so W2-11 is RED-by-construction and argued, not run by me; the
+  implementer runs it against the real narrowed signature. W2-10 (runtime) +
+  W2-11b (optional body scan) remain as defense-in-depth; W2-11's honest limit
+  (it does not catch an in-body cast to `any`) is stated in its HONEST LIMIT row.
 - The exact subset-clause prose and the leaf's JSX layout are UX +
   implementer's; this pass pins the FACTS (own denominator, "students" noun,
   name-free, name-consuming leaf) and the frozen numeric oracles, never the

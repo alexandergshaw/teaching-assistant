@@ -241,6 +241,7 @@ describe("manual-rail", () => {
         "grading-repos",
         "grading-recording",
         "grading-snapshots",
+        "grading-drafts",
       ]);
     });
 
@@ -373,18 +374,20 @@ describe("grading subtab", () => {
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has four inner destinations: Submissions, Repo Grades, Grading (from a recording), and Grading (from screenshots) (GRAD-SUBTAB wave 2)", () => {
+  it("has five inner destinations: Submissions, Repo Grades, Grading (from a recording), Grading (from screenshots), and Drafted Grades (GRAD-SUBTAB waves 2-3)", () => {
     expect(getInnerDestinations("grading")?.map((d) => d.id)).toEqual([
       "grading-run",
       "grading-repos",
       "grading-recording",
       "grading-snapshots",
+      "grading-drafts",
     ]);
     expect(getInnerDestinations("grading")?.map((d) => d.label)).toEqual([
       "Submissions",
       "Repo Grades",
       "Grading (from a recording)",
       "Grading (from screenshots)",
+      "Drafted Grades",
     ]);
   });
 

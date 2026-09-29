@@ -305,7 +305,7 @@ describe("the merged tabs are one navigation level deep", () => {
     ).not.toContain("LMS views");
   });
 
-  it("has taken the Workflows/Automations/Drafts subnav out of WorkflowsPanel, leaving only the Drafts subnav", () => {
+  it("has taken the Workflows/Automations/Drafts subnav out of WorkflowsPanel, and (GRAD-SUBTAB wave 3) the Grades/Messages subnav that used to sit inside Drafts too", () => {
     const source = readWithoutComments(WORKFLOWS_PANEL);
     expect(source.length, "WorkflowsPanel.tsx could not be read").toBeGreaterThan(200);
     expect(
@@ -313,7 +313,11 @@ describe("the merged tabs are one navigation level deep", () => {
       "WorkflowsPanel.tsx still takes onWorkflowsViewChange, so its own three-chip subnav " +
         "is still rendering below the flattened rail that already contains those three."
     ).not.toContain("onWorkflowsViewChange");
-    expect(source.split('role="tablist"').length - 1).toBe(1);
+    // GRAD-SUBTAB wave 3 (DECISION 19, E-full): the Grades/Messages tablist
+    // that used to sit inside Drafts is gone too - Drafted Grades moved to
+    // Tools > Grading, and Drafts now renders MessageDraftsTab directly with
+    // no subnav left. Zero tablists, not one.
+    expect(source.split('role="tablist"').length - 1).toBe(0);
   });
 
   it("has taken the Term/Daily-Weekly tablist out of TasksTab entirely", () => {
@@ -583,5 +587,48 @@ describe('the manualView === "grading" branch renders GradingTab/RepoGradesTab O
         "gradingView === \"recording\"/\"snapshots\" would render GradingTab AND the new " +
         "always-mounted capture panel at the same time"
     ).toMatch(/gradingView === "run"[\s\S]{0,80}gradingView === "repos"/);
+  });
+});
+
+// GRAD-SUBTAB wave 3 (docs/tools-grading-subtab-wave3-architecture.md
+// section 4.6, instruments I-drafts-mount and I-no-mirror). Drafted Grades
+// moved from Workflows > Drafts into Tools > Grading's own inner nav
+// (DECISION 18/19 - moved, not mirrored). Two source-text checks, deliberately
+// NOT modelled on the I-W2 assertAlwaysMounted helper above (RESIDUAL R-4):
+// DraftedGradesTab is a plain CONDITIONAL mount - it holds no live capture
+// resource, only onOpenWorkflow and app-root contexts - so demanding a
+// display-toggle wrapper here would be wrong, unlike the two capture panels
+// I-W2 guards.
+describe("Drafted Grades is reachable at its new home and dead at its old one (I-drafts-mount, I-no-mirror)", () => {
+  it("I-drafts-mount: page.tsx mounts DraftedGradesTab as a plain conditional for manualView===grading && gradingView===drafts", () => {
+    const source = read(PAGE);
+    const renderIndex = source.indexOf("<DraftedGradesTab");
+    expect(renderIndex, "src/app/page.tsx does not render DraftedGradesTab at all").toBeGreaterThan(-1);
+    // Exactly one render site.
+    expect(source.indexOf("<DraftedGradesTab", renderIndex + 1)).toBe(-1);
+    const wrapper = source.slice(Math.max(0, renderIndex - 200), renderIndex);
+    expect(
+      wrapper,
+      "DraftedGradesTab's guard must include both manualView === \"grading\" and gradingView === \"drafts\" - " +
+        "without this, the Drafted Grades chip leads to a blank pane"
+    ).toMatch(/manualView === "grading"[\s\S]{0,80}gradingView === "drafts"/);
+    // A plain conditional, never an always-mounted display toggle: no
+    // `display` style sits immediately above this render site the way I-W2's
+    // assertAlwaysMounted requires for the two capture panels.
+    expect(
+      wrapper,
+      "DraftedGradesTab must be a plain conditional mount, not an always-mounted display toggle - it holds " +
+        "no live capture resource, unlike GradingRecordingPanel/SnapshotGradingPanel"
+    ).not.toMatch(/display:\s*[\s\S]{0,40}?"none"/);
+  });
+
+  it("I-no-mirror: WorkflowsPanel no longer imports or renders DraftedGradesTab, and has no draftsView === 'grades' render", () => {
+    const source = read(WORKFLOWS_PANEL);
+    expect(
+      source,
+      "WorkflowsPanel.tsx still imports DraftedGradesTab - DECISION 18 says surfaces MOVE into " +
+        "the new home, they are not mirrored from it"
+    ).not.toContain("DraftedGradesTab");
+    expect(source).not.toContain('draftsView === "grades"');
   });
 });

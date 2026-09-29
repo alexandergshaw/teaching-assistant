@@ -44988,3 +44988,54 @@ A wave that makes either panel a conditional mount has regressed this.
 **Ceiling note (RES-W2-5):** snapshot-grading.structure.test.ts landed at exactly
 1000 lines on both counters - the wall, zero headroom. The next added line trips
 the repo-wide ceiling; the next editor must extract, not append.
+
+## 438. GRAD-SUBTAB wave 3 as-shipped - Drafted Grades joins the Grading inner nav, and GRAD-SUBTAB closes
+
+The final wave; with it all five grading surfaces (the run surface, Repo Grades,
+the two Recording grading panels, and Drafted Grades) live under one Tools >
+Grading inner nav. Oracle of what wave 3 does at HEAD, read from source; nothing
+renders under this vitest, so every redirect/landing claim is a READING claim and
+the visible half is owner walk OW-W3-1..4.
+
+Wave 3 landed after: derivation, derivation check (found one blocker), build with
+the blocker fix folded in, verify (clean). Chain closed GRAD-SUBTAB.
+
+**The move.** DraftedGradesTab left the workflows family (toolsSection=workflows
+-> workflowsView=drafts -> draftsView=grades) for the manual family
+(toolsSection=manual -> manualView=grading -> gradingView=drafts). GradingView
+gained a fifth member "drafts"; destination grading-drafts labelled "Drafted
+Grades"; it flows through the wave-1/2 machinery (GRADING_VIEWS loop,
+getActiveDestinationId generic) with no hardcoded list. Per DECISION 19 (E-full)
+the DraftsView type and its whole Grades/Messages subnav are retired: Workflows >
+Drafts now renders MessageDraftsTab directly, WorkflowsPanel shrank 84->41.
+
+**The invariant that broke twice and must not break a third time:** the retired
+drafts-grades pointer redirects a returning user to Tools>Grading>Drafted Grades
+on ALL THREE read paths, and the discriminant is toolsSection (page.tsx renders
+{toolsSection==="manual"} vs {toolsSection==="workflows"}), so every path must
+FORCE toolsSection="manual":
+- URL: resolveGradingPointer (now with optional rawWorkflowsView/rawDraftsView)
+  matches the drafts-grades shape; parseUrlState forces toolsSection.
+- popstate: the useAppNavigation popstate branch sets all three.
+- initial-load localStorage: the toolsSection INITIALIZER checks the stored
+  triple (ta-tools-section=workflows AND ta-workflows-view=drafts AND
+  ta-drafts-view=grades) and returns "manual". This exact line was MISSED by the
+  derivation and caught by its check - it is the same class as wave 1's shipped
+  blocker (a retired pointer applied on some read paths but not the one the page
+  renders on). A test that pins only parseUrlState would pass while this is
+  broken, because parseUrlState is not on the initial-load path.
+
+**Other invariants no rendered test guards:**
+- The draftsGradesCount BADGE moved off the removed Drafts>Grades button onto the
+  Grading rail chip; the Drafts chip badges messages only. No gate instrument
+  (OW-W3-4) - a badge left on a removed control vanishes silently.
+- DraftedGradesTab is a CONDITIONAL mount (it holds no live resource, only the
+  onOpenWorkflow prop and app-root contexts), mounted bare after the run/repos
+  TabShell block because it self-wraps its own TabShell - NOT wave 2's
+  always-mounted treatment.
+
+**Residual (V-1):** only the toolsSection localStorage migration has a source-text
+pin; the symmetric manualView and gradingView migrations are code-correct but
+unpinned, so a future deletion would land a returning user on Build Courses / the
+"run" default with the suite green. Same class this feature hit twice; filed on
+the row.

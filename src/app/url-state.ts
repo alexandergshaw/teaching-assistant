@@ -77,13 +77,15 @@ import {
 // site keeps resolving them from this module, and so the "workflowsView" and
 // "tasksView" params they validate are untouched.
 export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination, WorkflowsView, TasksView };
-// No canonical home elsewhere (unlike ManualViewType/ContentView/ActiveTab/
-// WorkflowsView, which are owned by manual-rail.ts, content-tab/constants.ts
-// and tabs/tab-sections.ts respectively) - this module is the single source of
-// truth for it. DraftsView is a level BELOW the flattened rail (it lives
-// inside the Drafts view, not beside it), so unlike its two siblings above it
-// had no reason to move.
-export type DraftsView = "grades" | "messages";
+// DraftsView (the Grades/Messages subnav that used to live inside Drafts)
+// was retired entirely in GRAD-SUBTAB wave 3 (DECISION 19, E-full): Drafted
+// Grades moved to Tools > Grading's own inner nav, and Drafts renders
+// MessageDraftsTab directly - a one-member selector describing a control that
+// no longer exists is exactly the vestige this repo avoids (see
+// tab-sections.ts's own "registration describing a screen that no longer
+// exists" comment). The RAW param name "draftsView" is still read (never
+// emitted) purely to detect the retired "grades" pointer below - see
+// resolveGradingPointer and DRAFTS_VIEW_PARAM.
 
 // Derived from TAB_ORDER rather than restating the four members, so a tab
 // added to the strip is accepted by the URL and the localStorage restore
@@ -222,16 +224,6 @@ export function normalizeGradingView(value: string | null): GradingView {
   return isGradingView(value) ? value : "run";
 }
 
-const DRAFTS_VIEW_VALUES: ReadonlySet<string> = new Set<DraftsView>(["grades", "messages"]);
-
-export function isDraftsView(value: unknown): value is DraftsView {
-  return typeof value === "string" && DRAFTS_VIEW_VALUES.has(value);
-}
-
-export function normalizeDraftsView(value: string | null): DraftsView {
-  return isDraftsView(value) ? value : "grades";
-}
-
 // Knowledge's selected institution and page have no fixed member list (they
 // are dynamic, per-user data - registered institution acronyms and page
 // UUIDs) unlike every other field above, so there is no isX/enum to validate
@@ -270,7 +262,6 @@ const DEFAULT_MANUAL_VIEW = normalizeManualView(null);
 const DEFAULT_WORKFLOWS_VIEW = normalizeWorkflowsView(null);
 const DEFAULT_BUILD_VIEW = normalizeBuildView(null);
 const DEFAULT_CONTENT_VIEW = normalizeContentView(null);
-const DEFAULT_DRAFTS_VIEW = normalizeDraftsView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
 const DEFAULT_GRADING_VIEW = normalizeGradingView(null);
 
@@ -294,6 +285,10 @@ const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
 const GRADING_VIEW_PARAM = "gradingView";
+// RETIRED (GRAD-SUBTAB wave 3, DECISION 19 E-full): never emitted by
+// buildUrlSearch and no longer a field on UrlNavState - kept only so
+// parseUrlState can still read the raw legacy value, to detect the
+// "drafts-view:grades" retired pointer below.
 const DRAFTS_VIEW_PARAM = "draftsView";
 const TASKS_VIEW_PARAM = "tasksView";
 const KB_INSTITUTION_PARAM = "kbInstitution";
@@ -313,7 +308,6 @@ export interface UrlNavState {
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
-  draftsView: DraftsView;
   tasksView: TasksView;
   // null means "no page/institution named in the URL" - there is no fixed
   // default to fall back to the way the other fields have one, since which
@@ -346,11 +340,23 @@ export interface UrlNavState {
 // initial-load initializers too - applies the exact same alias rule. Two
 // copies of this lookup is exactly the kind of drift this repo has already
 // paid for once (see manual-rail.ts's isManualViewType comment).
+//
+// rawWorkflowsView/rawDraftsView are OPTIONAL (GRAD-SUBTAB wave 3, RESIDUAL
+// R-1): they cover the one retired pointer whose SOURCE sits outside the
+// manualView/contentView pair every earlier pointer used - Drafts > Grades,
+// which lived at workflowsView="drafts" + draftsView="grades". Optional so
+// every existing 2-arg call site (this module's own parseUrlState before this
+// wave, and every pre-wave-3 test) keeps compiling unchanged.
 export function resolveGradingPointer(
   rawManualView: string | null,
-  rawContentView: string | null
+  rawContentView: string | null,
+  rawWorkflowsView?: string | null,
+  rawDraftsView?: string | null
 ): GradingPointerTarget | undefined {
   return (
+    (rawWorkflowsView === "drafts" && rawDraftsView === "grades"
+      ? RETIRED_GRADING_POINTERS["drafts-view:grades"]
+      : undefined) ??
     (rawManualView === "content" && rawContentView !== null
       ? RETIRED_GRADING_POINTERS[`content-view:${rawContentView}`]
       : undefined) ??
@@ -374,18 +380,28 @@ export function parseUrlState(search: string): UrlNavState {
   const rawLibrarySection = params.get(LIBRARY_SECTION_PARAM);
   const rawManualView = params.get(MANUAL_VIEW_PARAM);
   const rawContentView = params.get(CONTENT_VIEW_PARAM);
-  const gradingPointer = resolveGradingPointer(rawManualView, rawContentView);
+  const rawWorkflowsView = params.get(WORKFLOWS_VIEW_PARAM);
+  const rawDraftsView = params.get(DRAFTS_VIEW_PARAM);
+  const gradingPointer = resolveGradingPointer(rawManualView, rawContentView, rawWorkflowsView, rawDraftsView);
   return {
     tab: destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
-    toolsSection: isToolsSection(rawToolsSection) ? rawToolsSection : destination.toolsSection,
+    // A resolved grading pointer FORCES toolsSection to "manual", even when an
+    // explicit (and otherwise valid) toolsSection param says "workflows" - the
+    // legacy Drafts > Grades URL carries exactly that combination
+    // (?toolsSection=workflows&workflowsView=drafts&draftsView=grades), and
+    // its target is in the manual family (GRAD-SUBTAB wave 3 section 3.3).
+    toolsSection: gradingPointer
+      ? "manual"
+      : isToolsSection(rawToolsSection)
+        ? rawToolsSection
+        : destination.toolsSection,
     librarySection: isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection,
     manualView: gradingPointer ? gradingPointer.manualView : normalizeManualView(rawManualView),
-    workflowsView: normalizeWorkflowsView(params.get(WORKFLOWS_VIEW_PARAM)),
+    workflowsView: normalizeWorkflowsView(rawWorkflowsView),
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(rawContentView),
     gradingView: gradingPointer ? gradingPointer.gradingView : normalizeGradingView(params.get(GRADING_VIEW_PARAM)),
-    draftsView: normalizeDraftsView(params.get(DRAFTS_VIEW_PARAM)),
     tasksView: normalizeTasksView(params.get(TASKS_VIEW_PARAM)),
     kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),
     kbPageId: normalizeKbPageId(params.get(KB_PAGE_PARAM)),
@@ -437,9 +453,6 @@ export function buildUrlSearch(state: UrlNavState): string {
     }
     if (state.toolsSection === "workflows") {
       if (state.workflowsView !== DEFAULT_WORKFLOWS_VIEW) params.set(WORKFLOWS_VIEW_PARAM, state.workflowsView);
-      if (state.workflowsView === "drafts" && state.draftsView !== DEFAULT_DRAFTS_VIEW) {
-        params.set(DRAFTS_VIEW_PARAM, state.draftsView);
-      }
     }
   }
 

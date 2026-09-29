@@ -16,14 +16,13 @@ import {
   normalizeBuildView,
   isContentView,
   normalizeContentView,
-  isDraftsView,
-  normalizeDraftsView,
   isTasksView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
   parseUrlState,
   buildUrlSearch,
+  resolveGradingPointer,
   type UrlNavState,
 } from "./url-state";
 import { RETIRED_TAB_DESTINATIONS, TAB_ORDER } from "./components/tabs/tab-sections";
@@ -40,7 +39,6 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",
-  draftsView: "grades",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,
@@ -158,12 +156,14 @@ describe("url-state", () => {
         coursesSection: "tasks",
         tasksView: "recurring",
       });
+      // draftsView is a retired param now (GRAD-SUBTAB wave 3, DECISION 19
+      // E-full) - it is read only to detect the "grades" retired pointer
+      // below; any other value (like "messages" here) is simply ignored.
       expect(parseUrlState("?tab=workflows&workflowsView=drafts&draftsView=messages")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
         workflowsView: "drafts",
-        draftsView: "messages",
       });
       expect(parseUrlState("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123")).toEqual({
         ...DEFAULT_STATE,
@@ -187,7 +187,7 @@ describe("url-state", () => {
         "?tab=courses&coursesSection=tasks&tasksView=recurring"
       );
       expect(buildUrlSearch(parseUrlState("?tab=workflows&workflowsView=drafts&draftsView=messages"))).toBe(
-        "?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages"
+        "?tab=manual&toolsSection=workflows&workflowsView=drafts"
       );
       expect(buildUrlSearch(parseUrlState("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123"))).toBe(
         "?tab=files&librarySection=knowledge&kbInstitution=MCC&kbPage=abc-123"
@@ -315,20 +315,6 @@ describe("url-state", () => {
     it("rejects version-control - it is a legacy migration target, not a navigable URL value", () => {
       expect(isContentView("version-control")).toBe(false);
       expect(normalizeContentView("version-control")).toBe("modules");
-    });
-  });
-
-  describe("normalizeDraftsView / isDraftsView", () => {
-    it("accepts valid drafts views", () => {
-      expect(normalizeDraftsView("grades")).toBe("grades");
-      expect(normalizeDraftsView("messages")).toBe("messages");
-      expect(isDraftsView("messages")).toBe(true);
-    });
-
-    it("falls back to grades for an unknown or missing value", () => {
-      expect(normalizeDraftsView("bogus")).toBe("grades");
-      expect(normalizeDraftsView(null)).toBe("grades");
-      expect(isDraftsView("bogus")).toBe(false);
     });
   });
 
@@ -466,20 +452,21 @@ describe("url-state", () => {
       });
     });
 
-    it("parses draftsView nested under workflows + drafts", () => {
+    // draftsView is a retired param (GRAD-SUBTAB wave 3, DECISION 19 E-full):
+    // it is no longer a UrlNavState field, and a value other than the
+    // retired "grades" pointer (see "the retired 'drafts-view:grades'
+    // pointer" describe block below) is simply ignored.
+    it("ignores a draftsView param nested under workflows + drafts (retired)", () => {
       expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
         workflowsView: "drafts",
-        draftsView: "messages",
       });
     });
 
-    it("falls back safely for unknown buildView/contentView/draftsView values", () => {
-      expect(
-        parseUrlState("?tab=manual&manualView=content&buildView=bogus&contentView=bogus&draftsView=bogus")
-      ).toEqual({
+    it("falls back safely for unknown buildView/contentView values", () => {
+      expect(parseUrlState("?tab=manual&manualView=content&buildView=bogus&contentView=bogus")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         manualView: "content",
@@ -512,9 +499,9 @@ describe("url-state", () => {
     it("still parses a valid sub-view even when it belongs to the wrong tab/parent", () => {
       // parseUrlState is a per-field parser; it is the caller's job to decide
       // which sub-view field actually applies to the parsed tab/parent. A
-      // manualView param alongside tab=courses, or a buildView/contentView/
-      // draftsView param whose parent doesn't match, is still parsed as
-      // given here - not collapsed to a default.
+      // manualView param alongside tab=courses, or a buildView/contentView
+      // param whose parent doesn't match, is still parsed as given here - not
+      // collapsed to a default.
       expect(parseUrlState("?tab=courses&manualView=content")).toEqual({
         ...DEFAULT_STATE,
         tab: "courses",
@@ -538,16 +525,6 @@ describe("url-state", () => {
         tab: "manual",
         contentView: "assignments",
       });
-      // draftsView present but workflowsView is "automations", not "drafts".
-      expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations&draftsView=messages")).toEqual(
-        {
-          ...DEFAULT_STATE,
-          tab: "manual",
-          toolsSection: "workflows",
-          workflowsView: "automations",
-          draftsView: "messages",
-        }
-      );
       // A section param belonging to a different merged tab is parsed as
       // given too - it simply never reaches the query string on this tab.
       expect(parseUrlState("?tab=courses&librarySection=knowledge")).toEqual({
@@ -681,37 +658,18 @@ describe("url-state", () => {
       ).toBe("?tab=manual");
     });
 
-    it("includes draftsView only when workflows + drafts, and only when non-default", () => {
+    // draftsView is retired entirely (GRAD-SUBTAB wave 3, DECISION 19
+    // E-full): UrlNavState has no such field any more, so buildUrlSearch has
+    // nothing to emit for Drafts beyond workflowsView itself.
+    it("emits only workflowsView under workflows + drafts, with nothing below it", () => {
       expect(
         buildUrlSearch({
           ...DEFAULT_STATE,
           tab: "manual",
           toolsSection: "workflows",
           workflowsView: "drafts",
-          draftsView: "messages",
-        })
-      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages");
-      expect(
-        buildUrlSearch({
-          ...DEFAULT_STATE,
-          tab: "manual",
-          toolsSection: "workflows",
-          workflowsView: "drafts",
-          draftsView: "grades",
         })
       ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
-    });
-
-    it("drops draftsView when workflowsView is not drafts", () => {
-      expect(
-        buildUrlSearch({
-          ...DEFAULT_STATE,
-          tab: "manual",
-          toolsSection: "workflows",
-          workflowsView: "automations",
-          draftsView: "messages",
-        })
-      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=automations");
     });
 
     it("omits kbInstitution/kbPage when the Knowledge section has no selection (AC3's common case)", () => {
@@ -769,9 +727,8 @@ describe("url-state", () => {
           tab: "manual",
           toolsSection: "workflows",
           workflowsView: "drafts",
-          draftsView: "messages",
         })
-      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages");
+      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
 
       expect(
         buildUrlSearch({
@@ -800,7 +757,7 @@ describe("url-state", () => {
   // by the strings buildUrlSearch actually emits, rather than by reading the
   // source for a constant.
   describe("no pre-existing view param was renamed", () => {
-    it("still emits manualView, buildView, contentView, workflowsView, draftsView, tasksView, kbInstitution and kbPage", () => {
+    it("still emits manualView, buildView, contentView, workflowsView, tasksView, kbInstitution and kbPage", () => {
       expect(
         buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "assignments" })
       ).toContain("manualView=");
@@ -817,10 +774,8 @@ describe("url-state", () => {
         tab: "manual",
         toolsSection: "workflows",
         workflowsView: "drafts",
-        draftsView: "messages",
       });
       expect(drafts).toContain("workflowsView=");
-      expect(drafts).toContain("draftsView=");
 
       expect(
         buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", coursesSection: "tasks", tasksView: "recurring" })
@@ -951,6 +906,65 @@ describe("url-state", () => {
       expect(buildUrlSearch(parseUrlState("?tab=manual&manualView=content&contentView=grading"))).toBe(
         "?tab=manual&manualView=grading"
       );
+    });
+  });
+
+  // GRAD-SUBTAB wave 3 (docs/tools-grading-subtab-wave3-architecture.md
+  // section 3.3, instrument I-retired-drafts): Drafted Grades moved from
+  // Workflows > Drafts into Tools > Grading's own inner nav. Unlike every
+  // pointer above, this one's SOURCE sits in the WORKFLOWS family
+  // (toolsSection="workflows") while its TARGET is in the MANUAL family -
+  // so resolving it must also force toolsSection itself, not just
+  // manualView/gradingView, or the redirect lands the user on Tools >
+  // Workflows > Drafts (toolsSection never left "workflows") instead of
+  // Tools > Grading > Drafted Grades.
+  describe("the retired 'drafts-view:grades' pointer resolves to the Grading sub-tab, crossing toolsSection (I-retired-drafts)", () => {
+    it("resolves the canonical legacy URL to manual/grading/drafts, forcing toolsSection to manual even though the URL says workflows", () => {
+      const parsed = parseUrlState(
+        "?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=grades"
+      );
+      expect(parsed.toolsSection).toBe("manual");
+      expect(parsed.manualView).toBe("grading");
+      expect(parsed.gradingView).toBe("drafts");
+    });
+
+    it("resolves the legacy pre-D25 URL shape the same way", () => {
+      const parsed = parseUrlState("?tab=workflows&workflowsView=drafts&draftsView=grades");
+      expect(parsed.tab).toBe("manual");
+      expect(parsed.toolsSection).toBe("manual");
+      expect(parsed.manualView).toBe("grading");
+      expect(parsed.gradingView).toBe("drafts");
+    });
+
+    it("writes the canonical value back - an alias is a redirect, not a synonym", () => {
+      expect(
+        buildUrlSearch(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=grades"))
+      ).toBe("?tab=manual&manualView=grading&gradingView=drafts");
+    });
+
+    it("is idempotent: the canonical URL parses and rebuilds to itself", () => {
+      const canonical = buildUrlSearch(
+        parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=grades")
+      );
+      expect(buildUrlSearch(parseUrlState(canonical))).toBe(canonical);
+    });
+
+    it("does not fire for draftsView=messages - only the exact 'grades' pointer redirects", () => {
+      const parsed = parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages");
+      expect(parsed.toolsSection).toBe("workflows");
+      expect(parsed.manualView).toBe("course-planning");
+    });
+
+    it("resolveGradingPointer resolves the drafts-grades shape directly, and rejects a workflowsView/draftsView pair that is not it", () => {
+      expect(resolveGradingPointer(null, null, "drafts", "grades")).toEqual({
+        manualView: "grading",
+        gradingView: "drafts",
+      });
+      expect(resolveGradingPointer(null, null, "drafts", "messages")).toBeUndefined();
+      expect(resolveGradingPointer(null, null, "automations", "grades")).toBeUndefined();
+      // The optional params default to undefined, so every pre-wave-3 2-arg
+      // call site (RESIDUAL R-1) keeps compiling and behaving unchanged.
+      expect(resolveGradingPointer("repo-grades", null)).toEqual({ manualView: "grading", gradingView: "repos" });
     });
   });
 });

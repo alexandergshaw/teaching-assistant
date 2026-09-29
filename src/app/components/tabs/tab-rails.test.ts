@@ -277,7 +277,6 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",
-  draftsView: "grades",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,
@@ -286,6 +285,12 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
   // Frozen literals on purpose: derived from the module they are checking,
   // these would agree with a rename and prove nothing. The whole point is that
   // this list is written down somewhere the rename cannot reach.
+  //
+  // "draftsView" LEFT this list in GRAD-SUBTAB wave 3 (DECISION 19, E-full):
+  // Drafted Grades moved out of Drafts into Tools > Grading's own inner nav,
+  // and Drafts (now message-only) has nothing left below workflowsView to
+  // address - this is a genuine retirement, the B6.2 accounting shape this
+  // frozen list exists to catch, not a drift.
   const EXPECTED_PARAM_NAMES = [
     "tab",
     "coursesSection",
@@ -296,7 +301,6 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     "buildView",
     "contentView",
     "gradingView",
-    "draftsView",
     "tasksView",
     "kbInstitution",
     "kbPage",
@@ -316,7 +320,6 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
         tab: "manual",
         toolsSection: "workflows",
         workflowsView: "drafts",
-        draftsView: "messages",
       },
       { ...DEFAULT_STATE, tab: "files" },
       {
@@ -335,7 +338,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     return [...names].sort();
   }
 
-  it("emits exactly the twelve param names it emitted before the flattening", () => {
+  it("emits exactly the eleven param names it emits after the drafts-grades retirement (GRAD-SUBTAB wave 3)", () => {
     expect(emittedParamNames()).toEqual([...EXPECTED_PARAM_NAMES].sort());
   });
 
@@ -349,9 +352,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     );
     expect(parseUrlState("?tab=courses&coursesSection=tasks&tasksView=recurring").tasksView).toBe("recurring");
     expect(parseUrlState("?tab=manual&manualView=content&contentView=quizzes").contentView).toBe("quizzes");
-    expect(
-      parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages").draftsView
-    ).toBe("messages");
+    expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts").workflowsView).toBe("drafts");
     expect(parseUrlState("?tab=files&librarySection=knowledge&kbInstitution=acme&kbPage=p1").kbInstitution).toBe(
       "ACME"
     );
@@ -368,11 +369,10 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       tab: "manual",
       toolsSection: "workflows",
       workflowsView: "drafts",
-      draftsView: "messages",
     });
     expect(everything).not.toContain("manual:");
     expect(everything).not.toContain("workflows:drafts");
     expect(everything).not.toContain("railItem");
-    expect(everything).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages");
+    expect(everything).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
   });
 });

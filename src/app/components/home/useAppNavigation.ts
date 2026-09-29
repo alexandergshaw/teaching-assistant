@@ -10,7 +10,6 @@ import {
   type ToolsSection,
   type LibrarySection,
   type WorkflowsView,
-  type DraftsView,
   type TasksView,
   isCoursesSection,
   isToolsSection,
@@ -20,7 +19,6 @@ import {
   normalizeBuildView,
   normalizeContentView,
   normalizeGradingView,
-  normalizeDraftsView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -31,9 +29,11 @@ import {
 } from "../../url-state";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 
-// ActiveTab, WorkflowsView, and DraftsView live in ../../url-state since that
-// module is also the single source of truth for validating/normalizing them
-// against the URL - see the Back/Forward history feature.
+// ActiveTab and WorkflowsView live in ../../url-state since that module is
+// also the single source of truth for validating/normalizing them against the
+// URL - see the Back/Forward history feature. DraftsView was retired entirely
+// in GRAD-SUBTAB wave 3 (DECISION 19, E-full): Drafts renders MessageDraftsTab
+// directly now, with no inner selector left to validate.
 // ManualViewType/BuildViewType have their own canonical home in manual-rail.ts;
 // the local aliases below just keep the existing state-variable naming.
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
@@ -53,8 +53,6 @@ const BUILD_VIEW_KEY = "ta-build-view";
 const GRADING_VIEW_KEY = "ta-grading-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
-// The Drafts tab groups Grades and Messages as subtabs.
-const DRAFTS_VIEW_KEY = "ta-drafts-view";
 // The Tasks tab groups Term and Recurring as subtabs.
 const TASKS_VIEW_KEY = "ta-tasks-view";
 // Which half of each merged top-level tab is showing (D25). New keys, and
@@ -139,10 +137,39 @@ export function useAppNavigation() {
     if (typeof window === "undefined") return "manual";
     const { params, urlHasTab, destination } = readNavSource();
     if (urlHasTab) {
+      // GRAD-SUBTAB wave 3 (the toolsSection crossing, section 3.3): the
+      // legacy Drafts > Grades URL still carries an explicit
+      // toolsSection=workflows param, but a resolved grading pointer's target
+      // is in the manual family - the pointer must win over that explicit
+      // param, mirroring parseUrlState's own override in url-state.ts.
+      const gradingPointer = resolveGradingPointer(
+        params.get("manualView"),
+        params.get("contentView"),
+        params.get("workflowsView"),
+        params.get("draftsView")
+      );
+      if (gradingPointer) return "manual";
       const raw = params.get("toolsSection");
       return isToolsSection(raw) ? raw : destination.toolsSection;
     }
     if (destination.toolsSection !== DEFAULT_DESTINATION.toolsSection) return destination.toolsSection;
+    // GRAD-SUBTAB wave 3 BLOCKER 1 fix (docs/tools-grading-subtab-wave3-
+    // architecture-check.md): a returning user who last sat on Drafts >
+    // Grades carries this exact stored combination. That pointer's target is
+    // now in the MANUAL family (Tools > Grading > Drafted Grades), so
+    // toolsSection itself - the discriminant page.tsx actually renders on -
+    // must be forced here too, symmetric to the manualView/gradingView
+    // localStorage migrations below. The raw "ta-drafts-view" string stays a
+    // literal on purpose: DRAFTS_VIEW_KEY is retired along with draftsView
+    // itself (E-full), but a value stored under that key by an old build is
+    // still exactly this string.
+    if (
+      localStorage.getItem(TOOLS_SECTION_KEY) === "workflows" &&
+      localStorage.getItem(WORKFLOWS_VIEW_KEY) === "drafts" &&
+      localStorage.getItem("ta-drafts-view") === "grades"
+    ) {
+      return "manual";
+    }
     const saved = localStorage.getItem(TOOLS_SECTION_KEY);
     return isToolsSection(saved) ? saved : destination.toolsSection;
   });
@@ -193,9 +220,26 @@ export function useAppNavigation() {
       // alias for the popstate/Back-Forward path (url-state.ts); this mirrors
       // it via the shared resolveGradingPointer helper so the INITIAL load
       // from a raw URL gets the same redirect instead of bypassing it.
-      const gradingPointer = resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView"));
+      const gradingPointer = resolveGradingPointer(
+        urlParams.get("manualView"),
+        urlParams.get("contentView"),
+        urlParams.get("workflowsView"),
+        urlParams.get("draftsView")
+      );
       if (gradingPointer) return gradingPointer.manualView;
       return normalizeManualView(urlParams.get("manualView"));
+    }
+    // GRAD-SUBTAB wave 3 (P3(iii)): a returning user who last sat on
+    // Drafts > Grades - symmetric to the toolsSection migration above, and to
+    // the gradingView migration below. That stored combination now means the
+    // Grading sub-tab's Drafted Grades inner view, not any ta-manual-view
+    // value, so it is checked before the ta-manual-view checks below.
+    if (
+      localStorage.getItem(TOOLS_SECTION_KEY) === "workflows" &&
+      localStorage.getItem(WORKFLOWS_VIEW_KEY) === "drafts" &&
+      localStorage.getItem("ta-drafts-view") === "grades"
+    ) {
+      return "grading";
     }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
     // GRAD-SUBTAB wave 1 (the "repo-grades" retired pointer, M10): a stored
@@ -301,21 +345,6 @@ export function useAppNavigation() {
     if (saved === "grade-drafts" || saved === "drafts") return "drafts";
     return normalizeWorkflowsView(localStorage.getItem(WORKFLOWS_VIEW_KEY));
   });
-  const [draftsView, setDraftsView] = useState<DraftsView>(() => {
-    if (typeof window === "undefined") return "grades";
-    // The URL wins over localStorage, but only when it actually named Tools >
-    // Workflows > Drafts as the branch being restored into - see the matching
-    // comment on buildView above.
-    const { params: urlParams, urlHasTab, destination } = readNavSource();
-    if (urlHasTab && destination.tab === "manual" && toolsSection === "workflows" && workflowsView === "drafts") {
-      return normalizeDraftsView(urlParams.get("draftsView"));
-    }
-    const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
-    // A stale "presentations" value (the subtab was removed) must never leave
-    // the user on a dead view - migrate it to "grades".
-    if (saved === "presentations") return "grades";
-    return saved === "grades" || saved === "messages" ? saved : "grades";
-  });
   const [tasksView, setTasksView] = useState<TasksView>(() => {
     if (typeof window === "undefined") return "term";
     // The URL wins over localStorage, but only when it actually names the
@@ -349,7 +378,12 @@ export function useAppNavigation() {
       // param on an old bookmark, so normalizeGradingView(null) alone would
       // land on the wrong inner surface even though manualView itself is now
       // correct.
-      const gradingPointer = resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView"));
+      const gradingPointer = resolveGradingPointer(
+        urlParams.get("manualView"),
+        urlParams.get("contentView"),
+        urlParams.get("workflowsView"),
+        urlParams.get("draftsView")
+      );
       if (gradingPointer) return gradingPointer.gradingView;
       return normalizeGradingView(urlParams.get("gradingView"));
     }
@@ -358,6 +392,18 @@ export function useAppNavigation() {
     // item specifically. Consulted here directly because normalizeGradingView
     // has no way to see the OLD manualView key at all.
     if (localStorage.getItem(MANUAL_VIEW_KEY) === "repo-grades") return "repos";
+    // GRAD-SUBTAB wave 3 (P3(iii)): a returning user who last sat on
+    // Drafts > Grades - symmetric to the toolsSection/manualView migrations
+    // above. That stored combination now means this inner view specifically
+    // ("drafts"), not the "run" default normalizeGradingView(null) would
+    // otherwise fall back to.
+    if (
+      localStorage.getItem(TOOLS_SECTION_KEY) === "workflows" &&
+      localStorage.getItem(WORKFLOWS_VIEW_KEY) === "drafts" &&
+      localStorage.getItem("ta-drafts-view") === "grades"
+    ) {
+      return "drafts";
+    }
     return normalizeGradingView(localStorage.getItem(GRADING_VIEW_KEY));
   });
   // Which course the Courses tab should scroll to and highlight on arrival,
@@ -386,8 +432,8 @@ export function useAppNavigation() {
   // chain (see that hook's docstring), so this is the one call site for it -
   // KnowledgeTab.tsx no longer calls it itself. Passing a URL-derived
   // institution only when "?tab=knowledge" was actually present mirrors
-  // every buildView/contentView/draftsView initializer above: a param is
-  // only meaningful when it belongs to the branch actually being restored.
+  // every buildView/contentView initializer above: a param is only
+  // meaningful when it belongs to the branch actually being restored.
   const {
     institutions: kbInstitutions,
     active: kbInstitution,
@@ -471,10 +517,6 @@ export function useAppNavigation() {
   }, [workflowsView]);
 
   useEffect(() => {
-    localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
-  }, [draftsView]);
-
-  useEffect(() => {
     localStorage.setItem(TASKS_VIEW_KEY, tasksView);
   }, [tasksView]);
 
@@ -555,7 +597,6 @@ export function useAppNavigation() {
       buildView,
       contentView,
       gradingView,
-      draftsView,
       tasksView,
       kbInstitution,
       kbPageId,
@@ -592,7 +633,6 @@ export function useAppNavigation() {
     buildView,
     contentView,
     gradingView,
-    draftsView,
     tasksView,
     kbInstitution,
     kbPageId,
@@ -637,9 +677,9 @@ export function useAppNavigation() {
       lastKnownSearchRef.current = buildUrlSearch(parsed);
       setActiveTab(parsed.tab);
       // Only apply a sub-view when its parent is the one actually being
-      // restored to - a manualView/workflowsView/buildView/contentView/
-      // draftsView value parsed off an unrelated branch's history entry (see
-      // url-state.ts) must not reset the sub-view the user had set up the
+      // restored to - a manualView/workflowsView/buildView/contentView value
+      // parsed off an unrelated branch's history entry (see url-state.ts)
+      // must not reset the sub-view the user had set up the
       // last time they were on that branch. Each level is gated on its own
       // immediate parent, walking the chain one step at a time, so a deep
       // restore sets the whole chain rather than just the leaf. Since the
@@ -660,7 +700,6 @@ export function useAppNavigation() {
         }
         if (parsed.toolsSection === "workflows") {
           setWorkflowsView(parsed.workflowsView);
-          if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
         }
       }
       if (parsed.tab === "files") {
@@ -700,8 +739,6 @@ export function useAppNavigation() {
     setGradingView,
     workflowsView,
     setWorkflowsView,
-    draftsView,
-    setDraftsView,
     tasksView,
     setTasksView,
     focusCourseId,

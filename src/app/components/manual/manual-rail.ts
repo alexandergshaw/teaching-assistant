@@ -30,9 +30,20 @@ export type BuildViewType = "new" | "prebuilt";
 // docs/tools-grading-subtab-wave2-architecture.md): the two Recording-tab
 // grading surfaces (grading-via-recording, snapshot grading) re-parented into
 // this inner nav as two more Grading destinations.
-export type GradingView = "run" | "repos" | "recording" | "snapshots";
+// "drafts" (GRAD-SUBTAB wave 3,
+// docs/tools-grading-subtab-wave3-architecture.md): Drafted Grades, moved in
+// from Workflows > Drafts (DECISION 18/19 - moved, not mirrored). Unlike
+// "recording"/"snapshots" it is a plain conditional mount, not an
+// always-mounted capture surface - see that document's section 2.2.
+export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts";
 
-const GRADING_VIEW_PRESENCE: Record<GradingView, true> = { run: true, repos: true, recording: true, snapshots: true };
+const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
+  run: true,
+  repos: true,
+  recording: true,
+  snapshots: true,
+  drafts: true,
+};
 export const GRADING_VIEWS: readonly GradingView[] = Object.keys(GRADING_VIEW_PRESENCE) as GradingView[];
 
 const GRADING_VIEW_SET: ReadonlySet<string> = new Set(GRADING_VIEWS);
@@ -106,6 +117,7 @@ export const destinations: DestinationGroup[] = [
       { id: "grading-repos", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
       { id: "grading-recording", label: "Grading (from a recording)", description: "Grade submissions by narrating over a screen recording" },
       { id: "grading-snapshots", label: "Grading (from screenshots)", description: "Grade submissions from screenshots of student work" },
+      { id: "grading-drafts", label: "Drafted Grades", description: "Review and post grades saved as drafts" },
     ],
   },
 ];
@@ -252,6 +264,15 @@ export const RETIRED_GRADING_POINTERS: Record<string, GradingPointerTarget> = {
   // ta-active-tab = "grading", the pre-merge top-level tab value still
   // handled by useAppNavigation.ts's manualView initializer.
   "active-tab:grading": { manualView: "grading", gradingView: "run" },
+  // Drafts > Grades (workflowsView=drafts + draftsView=grades) is now Tools >
+  // Grading > Drafted Grades (GRAD-SUBTAB wave 3). Unlike every pointer above,
+  // its SOURCE sits in the workflows family (toolsSection="workflows") while
+  // its TARGET is in the manual family - every read path that resolves this
+  // pointer must also force toolsSection to "manual" itself (this target
+  // shape carries no toolsSection field, since every OTHER pointer already
+  // originates in the manual family and needs no override); see
+  // docs/tools-grading-subtab-wave3-architecture.md section 3.3.
+  "drafts-view:grades": { manualView: "grading", gradingView: "drafts" },
 };
 
 export function resolveStateFromDestinationId(
@@ -309,6 +330,7 @@ export function resolveStateFromDestinationId(
     if (id === "grading-repos") return "repos";
     if (id === "grading-recording") return "recording";
     if (id === "grading-snapshots") return "snapshots";
+    if (id === "grading-drafts") return "drafts";
     return currentGradingView;
   })();
 

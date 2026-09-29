@@ -270,6 +270,21 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
     expect(resolveGradingPointer("course-planning", null)).toBeUndefined();
   });
 
+  // GRAD-SUBTAB wave 3 (docs/tools-grading-subtab-wave3-architecture.md
+  // section 3.3): the retired Drafts > Grades pointer, added alongside the
+  // two above. Its shape is different - keyed on workflowsView/draftsView,
+  // not manualView/contentView - so it gets its own case, plus the negative
+  // that a workflowsView of "drafts" alone (without draftsView === "grades")
+  // must not redirect.
+  it("resolveGradingPointer also resolves the retired Drafts > Grades shape (workflowsView/draftsView args)", () => {
+    expect(resolveGradingPointer(null, null, "drafts", "grades")).toEqual({
+      manualView: "grading",
+      gradingView: "drafts",
+    });
+    expect(resolveGradingPointer(null, null, "drafts", "messages")).toBeUndefined();
+    expect(resolveGradingPointer(null, null, "automations", "grades")).toBeUndefined();
+  });
+
   it("the manualView initializer's URL branch consults resolveGradingPointer before falling back to normalizeManualView (the wiring half)", () => {
     const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
     expect(start, "expected to find the manualView useState initializer").toBeGreaterThan(-1);
@@ -287,14 +302,16 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
 
     expect(
       urlBranch,
-      "BLOCKER 1: the manualView initializer's URL branch must call " +
-        'resolveGradingPointer(urlParams.get("manualView"), urlParams.get("contentView")) and return its ' +
-        "manualView when it matches, BEFORE falling back to normalizeManualView - otherwise a bookmarked " +
-        '"?manualView=repo-grades" or "?manualView=content&contentView=grading" is normalized straight past ' +
-        "the alias table (normalizeManualView/normalizeContentView know nothing about it) and lands on " +
-        "Build Courses/LMS Modules instead of Grading, on the one path (initial mount) that parseUrlState's " +
-        "own redirect never runs on."
-    ).toMatch(/resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\)\s*\)/);
+      "BLOCKER 1: the manualView initializer's URL branch must call resolveGradingPointer with all four raw " +
+        "params (manualView, contentView, workflowsView, draftsView - GRAD-SUBTAB wave 3 added the last two) " +
+        "and return its manualView when it matches, BEFORE falling back to normalizeManualView - otherwise a " +
+        'bookmarked "?manualView=repo-grades" or "?manualView=content&contentView=grading" is normalized ' +
+        "straight past the alias table (normalizeManualView/normalizeContentView know nothing about it) and " +
+        "lands on Build Courses/LMS Modules instead of Grading, on the one path (initial mount) that " +
+        "parseUrlState's own redirect never runs on."
+    ).toMatch(
+      /resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\),\s*urlParams\.get\("workflowsView"\),\s*urlParams\.get\("draftsView"\)\s*\)/
+    );
 
     // Must actually be used to redirect, not merely called and discarded.
     expect(urlBranch, "the resolved gradingPointer must be returned as manualView").toMatch(
@@ -315,10 +332,51 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
         '"manualView === \\"grading\\"" branch will run for a bookmarked "?manualView=repo-grades" URL too - ' +
         'but that URL carries no "gradingView" param, so normalizeGradingView(null) alone returns the "run" ' +
         "default instead of the pointer's actual target (\"repos\"). The initializer must consult " +
-        "resolveGradingPointer here as well and prefer its gradingView when it matches."
-    ).toMatch(/resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\)\s*\)/);
+        "resolveGradingPointer (with all four raw params) here as well and prefer its gradingView when it matches."
+    ).toMatch(
+      /resolveGradingPointer\(\s*urlParams\.get\("manualView"\),\s*urlParams\.get\("contentView"\),\s*urlParams\.get\("workflowsView"\),\s*urlParams\.get\("draftsView"\)\s*\)/
+    );
     expect(block, "the resolved gradingPointer must be returned as gradingView").toMatch(
       /if\s*\(gradingPointer\)\s*return\s+gradingPointer\.gradingView/
     );
+  });
+});
+
+// GRAD-SUBTAB wave 3 BLOCKER 1 (docs/tools-grading-subtab-wave3-architecture-
+// check.md): the returning-user localStorage restore path landed on the WRONG
+// FAMILY. The manualView/gradingView localStorage migrations above are dead
+// unless toolsSection ITSELF - the discriminant page.tsx actually renders on
+// ({toolsSection === "manual" ...} vs {toolsSection === "workflows" ...}) -
+// is also forced to "manual" for the same stored combination. This is
+// deliberately its own describe block, modelled on the BLOCKER-1 block above:
+// that block pins the manualView/gradingView halves; this one pins the
+// toolsSection half the derivation's own check found missing.
+describe("GRAD-SUBTAB wave 3 BLOCKER 1 fix: the toolsSection localStorage initializer forces 'manual' for a stored Drafts > Grades pointer", () => {
+  it("the toolsSection initializer's localStorage branch checks the exact stored drafts-grades combination and returns 'manual'", () => {
+    const start = source.indexOf("const [toolsSection, setToolsSection] = useState<ToolsSection>(");
+    expect(start, "expected to find the toolsSection useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [librarySection", start);
+    expect(end, "expected to find the next useState block after toolsSection's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(
+      block,
+      'BLOCKER 1: the toolsSection localStorage branch must check localStorage.getItem(TOOLS_SECTION_KEY) === "workflows"'
+    ).toMatch(/localStorage\.getItem\(TOOLS_SECTION_KEY\)\s*===\s*"workflows"/);
+    expect(
+      block,
+      "BLOCKER 1: the same branch must also check localStorage.getItem(WORKFLOWS_VIEW_KEY) === \"drafts\""
+    ).toMatch(/localStorage\.getItem\(WORKFLOWS_VIEW_KEY\)\s*===\s*"drafts"/);
+    expect(
+      block,
+      'BLOCKER 1: and localStorage.getItem("ta-drafts-view") === "grades" - the raw string literal, not ' +
+        "DRAFTS_VIEW_KEY (E-full deletes that constant along with draftsView itself)"
+    ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"/);
+    expect(
+      block,
+      "BLOCKER 1: without this, a returning user whose stored ta-tools-section is \"workflows\" never sees " +
+        "toolsSection forced to \"manual\", so the manualView/gradingView localStorage migrations run dead - " +
+        "page.tsx renders {toolsSection === \"workflows\" && <WorkflowsPanel/>} instead of the Grading branch"
+    ).toMatch(/if\s*\(\s*[\s\S]{0,200}?return\s+"manual"/);
   });
 });

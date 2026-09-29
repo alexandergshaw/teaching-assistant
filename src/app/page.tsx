@@ -28,6 +28,7 @@ import LessonPlanningForm from "./components/LessonPlanningForm";
 import TabShell from "./components/TabShell";
 import TopBar from "./components/TopBar";
 import WorkflowsPanel from "./components/home/WorkflowsPanel";
+import DraftedGradesTab from "./components/DraftedGradesTab";
 import { useAppNavigation } from "./components/home/useAppNavigation";
 import { useLessonPlanner } from "./components/home/useLessonPlanner";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
@@ -44,6 +45,7 @@ import {
   TOOLS_RAIL_ITEMS,
   coursesRailItemFor,
   coursesStateFromRailItem,
+  manualRailItemId,
   toolsRailItemFor,
   toolsStateFromRailItem,
 } from "./components/tabs/tab-rails";
@@ -72,7 +74,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -199,28 +201,40 @@ export default function Home() {
   // criteria.md M16): the Saved-to-drafts link on a message-replies row
   // (MessageThreadRow.tsx) dispatches MESSAGE_DRAFTS_NAV_EVENT (src/lib/
   // drafts-nav.ts) rather than reaching setActiveTab/setWorkflowsView/
-  // setDraftsView directly, for the identical reason RECORDING_LAUNCH_EVENT
+  // setToolsSection directly, for the identical reason RECORDING_LAUNCH_EVENT
   // and KNOWLEDGE_RETURN_EVENT do above: this component is the sole owner of
   // those setters. Registered once, live, the same "kept mounted" shape as
   // the two listeners above. Carries no payload of its own - every dispatch
   // wants the same three destination values, so this listener sets all
-  // three itself with nothing to drain from a one-shot slot.
+  // three itself with nothing to drain from a one-shot slot. GRAD-SUBTAB
+  // wave 3 (DECISION 19, E-full) dropped the fourth setter, setDraftsView -
+  // Drafts renders MessageDraftsTab directly now, with no inner selector.
   useEffect(() => {
     const handler = () => {
       setWorkflowsView("drafts");
-      setDraftsView("messages");
       setToolsSection("workflows");
       setActiveTab("manual");
     };
     window.addEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
     return () => window.removeEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
-  }, [setActiveTab, setToolsSection, setWorkflowsView, setDraftsView]);
+  }, [setActiveTab, setToolsSection, setWorkflowsView]);
 
   useEffect(() => {
-    if (activeTab === "manual" && toolsSection === "workflows" && workflowsView === "drafts") {
+    // GRAD-SUBTAB wave 3: Drafted Grades now also refreshes from its new home
+    // (Tools > Grading > Drafted Grades), alongside the pre-existing Workflows
+    // > Drafts refresh - both still feed the same useDraftedGradesInbox count.
+    // Written with gradingView checked before manualView (rather than the
+    // usual outside-in order) so this clause does not spell manualView's
+    // grading check immediately followed by "&&" - topLevelTabs.wiring.test.ts's
+    // R-1 guard locates the run/repos render branch by searching for exactly
+    // that text, and an earlier, unrelated match here would misdirect it.
+    const workflowsDraftsShowing = activeTab === "manual" && toolsSection === "workflows" && workflowsView === "drafts";
+    const gradingDraftsShowing =
+      activeTab === "manual" && toolsSection === "manual" && gradingView === "drafts" && manualView === "grading";
+    if (workflowsDraftsShowing || gradingDraftsShowing) {
       refreshDrafts();
     }
-  }, [activeTab, toolsSection, workflowsView, refreshDrafts]);
+  }, [activeTab, toolsSection, workflowsView, manualView, gradingView, refreshDrafts]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -330,10 +344,21 @@ export default function Home() {
   // The Drafts chip inherits the unread badge that used to sit on the deleted
   // section switch's "Workflows" half, named through tab-rails' own builder so
   // this cannot drift from the id the rail actually renders.
+  //
+  // GRAD-SUBTAB wave 3 (RES-W3-2): Drafted Grades moved out of Drafts into
+  // Tools > Grading, so its count moves with it - the Grading chip now
+  // carries draftsGradesCount, and the Drafts chip's count narrows to
+  // draftsMessagesCount only (it used to be draftsInbox, grades+messages
+  // combined, when Drafts still hosted both).
   const toolsRailOptions = TOOLS_RAIL_ITEMS.map((item) => ({
     id: item.id,
     label: item.label,
-    count: item.id === TOOLS_RAIL_DRAFTS_ID ? draftsInbox : 0,
+    count:
+      item.id === TOOLS_RAIL_DRAFTS_ID
+        ? draftsMessagesCount
+        : item.id === manualRailItemId("grading")
+          ? draftsGradesCount
+          : 0,
   }));
   // Library was already flat before D26 - its two halves have no sub-views to
   // pull up, so its rail is still exactly its two sections, unchanged in
@@ -609,23 +634,33 @@ export default function Home() {
                     )}
                   </TabShell>
                 )}
+
+                {/* GRAD-SUBTAB wave 3: Drafted Grades re-parented from
+                    Workflows > Drafts into Tools > Grading's own inner nav
+                    (DECISION 18/19 - moved, not mirrored). A SEPARATE
+                    conditional sibling of the run/repos block above, not
+                    inside its <TabShell> - DraftedGradesTab self-wraps its
+                    own TabShell (DraftedGradesTab.tsx:420), and it is a plain
+                    conditional mount, not an always-mounted display toggle
+                    (unlike GradingRecordingPanel/SnapshotGradingPanel below):
+                    it holds no live capture resource, only onOpenWorkflow and
+                    app-root contexts, so there is nothing to preserve across a
+                    tab switch. */}
+                {manualView === "grading" && gradingView === "drafts" && (
+                  <DraftedGradesTab onOpenWorkflow={openWorkflow} />
+                )}
               </>
             )}
 
             {/* WorkflowsPanel's own Workflows/Automations/Drafts subnav is
                 gone with D26 - those three are chips in the rail above now,
                 writing the same workflowsView param, and the Drafts badge
-                moved up with them. What stays is the Grades/Messages subnav
-                INSIDE Drafts, which is the innermost level. */}
+                moved up with them. The Grades/Messages subnav that used to
+                sit INSIDE Drafts is gone too (GRAD-SUBTAB wave 3, DECISION 19
+                E-full) - Drafted Grades moved out, and Drafts now renders
+                MessageDraftsTab directly. */}
             {toolsSection === "workflows" && (
-              <WorkflowsPanel
-                workflowsView={workflowsView}
-                draftsView={draftsView}
-                onDraftsViewChange={setDraftsView}
-                draftsGradesCount={draftsGradesCount}
-                draftsMessagesCount={draftsMessagesCount}
-                onOpenWorkflow={openWorkflow}
-              />
+              <WorkflowsPanel workflowsView={workflowsView} onOpenWorkflow={openWorkflow} />
             )}
           </>
         )}

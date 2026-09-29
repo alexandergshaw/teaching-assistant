@@ -46128,3 +46128,300 @@ closing summary rather than duplicated here, per entry 442d's convention.
 | initialPostCount/replyCount remain shape-only with no runtime reader | whoever builds R3/R4 | grep -rn "initialPostCount\|replyCount" src | The future scope that would add a reader |
 | The dot-differing-classmate submittedFiles name collision sliver (RT-6) | next seat that touches uniqueContributionName/dotFreeContributionName (extraction.ts:246-265) | A fixture with two dot-differing parentNames feeding the same student's replies, asserted against extraction.test.ts | Before any change that relies on submittedFiles names being human-disambiguating, not just React-key-unique |
 | AC-5's rendered UI (rows, focus, keyboard) for the new manifest/section content | owner/UX pass (R5, docs/a8-waves.md:508-511) | Manual check or screenshot in the running app | After this wave, before the feature is presented as UI-verified |
+
+
+## 445. PRES-1 waves 1+2 as shipped (`6464a523` + `c20a9063`): the presentations-authoring generation library and route handler - baseline before the batched PRES-1 regression pass
+
+Written so the batched PRES-1 regression pass (`docs/DEV_LOOP.md`, "Regression,
+batched per group") has an oracle for Waves 1-2 before Wave 3 (the client
+panel, currently uncommitted) lands. This entry records what the SHIPPED code
+DOES, read out of source and confirmed by running its own tests; it is an
+oracle, not a requirement - a later change that moves a cited line without
+being filed to move it is a regression. It baselines Waves 1-2 only, per this
+seat's brief; Wave 3's client panel is explicitly out of scope here (see "What
+is not covered" below).
+
+**Read at `b3145ecb`** (`git rev-parse --short HEAD`). **`git status --short`**
+at the time of writing shows five paths, all Wave-3 work in progress and none
+under `src/lib/presentations/` or `src/app/api/presentations/`:
+`src/app/components/home/useAppNavigation.ts`,
+`src/app/components/manual/manual-rail.test.ts`,
+`src/app/components/manual/manual-rail.ts`,
+`src/app/components/tabs/topLevelTabs.wiring.test.ts`,
+`src/app/page.tsx` (all ` M`), plus the untracked
+`src/app/components/presentations/` directory. Confirmed disjoint from this
+entry's citations with
+`git diff --stat -- src/lib/presentations src/app/api/presentations`, which
+returns empty output. This entry's own write set is `docs/REGRESSION.md`
+alone; no source or test file was changed to produce it.
+
+### The coverage check
+
+Measured with `grep -ac -- "<term>" docs/REGRESSION.md` against this file as it
+stood at **46,130 lines** (`wc -l docs/REGRESSION.md`) before this entry was
+appended:
+
+| term | matching lines before this entry |
+|---|---|
+| `PRES-1` | **0** |
+| `generateOneArtifact` | **0** |
+| `validateDeck` | **0** |
+| `buildRegeneratePrompt` | **0** |
+| `presentations/generate` | **0** |
+| `ProducedArtifact` | **0** |
+| `serializeDeckToPptx` | **0** |
+
+So the accurate statement is: **no entry in this file covers any part of
+PRES-1.** This is a first baseline for a new feature, not a supersession or a
+partial-coverage reconciliation.
+
+### File sizes on the path
+
+`wc -l <path>`, at `b3145ecb`: `src/lib/presentations/types.ts` 87,
+`src/lib/presentations/prompts.ts` 92, `src/lib/presentations/parse.ts` 116,
+`src/lib/presentations/generate.ts` 148, `src/lib/presentations/deck-file.ts`
+28, `src/app/api/presentations/generate/route.ts` 291. All well under the
+repo-wide 1000-line ceiling enforced by
+`src/file-size-ceiling.structure.test.ts` (confirmed that file exists at that
+path).
+
+### 445a - the shape, as built
+
+`src/lib/presentations/types.ts` is TYPE-ONLY (`types.ts:1-10`'s own comment
+states this and it is confirmed: the file declares only `interface`/`type`
+exports, no runtime statement) - the one construction-level exception to "a
+wave must include the caller of every new export" (`docs/loop/seats.md:163`).
+It reuses exactly one slide model: `PptxSlide` imported from `@/lib/pptx`
+(`types.ts:12`) and `GeneratedDeck` imported from `@/lib/decks/generate`
+(`types.ts:13`, `DeckContent = GeneratedDeck` at `:54`) - confirmed no local
+slide-shaped interface exists anywhere under `src/lib/presentations/` by
+`parse.test.ts:81-96`'s own structural guard (passing; see Gates below).
+
+- `ArtifactSelection` (`types.ts:22-27`) is the four independently-selectable
+  booleans (AC-4): `outline`, `activities`, `deck`, `review`. `review` is not a
+  fifth content kind (AC-5 reconciliation) - `generate.ts:33`'s
+  `CONTENT_KINDS` array holds exactly `["outline", "activities", "deck"]`, and
+  `selectedContentKinds` (`generate.ts:35-37`) filters that fixed array
+  against the selection, so `review` can never appear in its output regardless
+  of its value (confirmed by `generate.test.ts:58`, `selection({ deck: true,
+  review: true })` yields `["deck"]`).
+- `ProducedArtifact` (`types.ts:64-67`) is a discriminated union keyed by
+  `kind`, each variant carrying `content` and `critique: Critique | null`
+  INSIDE the artifact object itself - critique-per-artifact is a structural
+  property of the type (AC-5), not a side table keyed separately, so "a
+  critique for a non-produced artifact" has no representable slot to occupy.
+
+### 445b - generation: one call per artifact, T|null never throw
+
+`generateOneArtifact` (`generate.ts:76-99`), `reviewArtifact` (`generate.ts:
+106-114`), and `regenerateArtifact` (`generate.ts:121-148`) are the three
+executors the route handler calls. Each issues at most one `callLlm`
+(`regenerateArtifact` issues a second, optional one for its own re-review at
+`generate.ts:143`, only when `input.withReview` is true).
+
+- **The T|null contract.** All three return `null`, never throw, on a
+  `callLlm` failure (`!result.ok`, `generate.ts:83,88,93,112,124`) or, for the
+  deck kind, when `parseDeckSlides` rejects the response
+  (`generate.ts:94-95,135`). Confirmed by `generate.test.ts:132-136` ("returns
+  null when callLlm fails") and by the route's own test asserting a `null`
+  from `generateOneArtifact` never reaches the client as a 200
+  (`route.test.ts:129-146`, explicitly marked SABOTAGE-CHECKED in its own
+  comment at `:123-128`).
+- **`validateDeck` runs BEFORE `enforceTitleLength`, and this ordering is the
+  fix for a real defect (B1).** `parse.ts:57-68`'s `validateDeck` rejects a
+  deck with zero slides, a blank/whitespace title, or non-array `bullets`
+  (confirmed by `parse.test.ts:16-59`, five cases including the >60-char-title
+  cases at `:45-59`). `parse.ts:106-109` calls `validateDeck` and returns
+  `null` on rejection BEFORE ever calling `enforceTitleLength`
+  (`parse.ts:109`) - the comment at `parse.ts:78-84` states the pre-fix
+  ordering threw an uncaught `TypeError` (`enforceTitleLength` reads
+  `slide.bullets.length` on a slide whose title exceeds 60 chars) when a
+  malformed deck had a long title AND missing bullets. `generate.test.ts:
+  120-130` is the regression guard for exactly that combination, asserting the
+  call `resolves.toBeNull()` rather than rejecting.
+- **`toRawPptxSlide` deliberately does not normalize `bullets`**
+  (`parse.ts:38-47`, comment at `:33-37`), so a malformed (non-array) value
+  reaches `validateDeck`'s `Array.isArray` check unmodified rather than being
+  sanitized away before the gate runs.
+
+### 445c - the route: auth, budget, error shape, single-kind-per-invocation
+
+`src/app/api/presentations/generate/route.ts`:
+
+- **Auth first.** `POST` (`:140-168`) calls `requireUser()` (`:144`) before
+  reading the body or touching any model call; a rejection returns 401
+  (`:145-147`). Confirmed by `route.test.ts:59-70` ("returns 401... `expect
+  (generateOneArtifact).not.toHaveBeenCalled()`").
+- **Explicit failure surfacing, never a silent-success 200.** `handleGenerate`
+  (`:170-242`): a `null` from `generateOneArtifact` (a `callLlm` failure or a
+  `validateDeck` rejection) returns `{status:"error", kind, error}` at 502
+  (`:203-207`); a `null` critique from `reviewArtifact` degrades the response
+  to 200 with `critique: null` on the artifact (`:228-231`, confirmed
+  `route.test.ts:148-165`) - the two null sources are distinguished by which
+  field goes null (the whole artifact vs. one field on it) and by status code
+  (502 vs 200).
+- **The 60-second wall.** `maxDuration = 60` (`:26`), a SOFT deadline of
+  50,000ms (`SOFT_DEADLINE_MS`, `:36`) checked via `remainingBudgetMs`
+  (`:105-107`) before each of up to two sequential calls (generate, then an
+  optional review; or regenerate). Each call is raced against the REMAINING
+  budget through `callWithBudget`/`withDeadline` (`:128-138`), distinguishing
+  a deadline rejection (message matching `/did not finish within/`, `:133`)
+  from any other rejection - the former returns a worded 504 partial
+  (`deadlinePartialResponse`, `:114-116`), the latter a generic styled 502
+  never leaking the underlying error text (`:136`, `CALL_FAILED_MESSAGE`,
+  confirmed `route.test.ts:277-295` asserts the response does NOT match
+  `/ECONNRESET/`). Confirmed the 504-vs-502 split by `route.test.ts:256-275`
+  (timeout -> 504, `partial: true`) and `:277-295` (other rejection -> 502).
+- **`reviewSkipped` distinguishes a budget-exhausted skip from a legitimate
+  null critique.** `:215,218-220` sets `reviewSkipped = true` only when the
+  remaining budget before the review call is at or below
+  `MIN_CALL_BUDGET_MS` (3,000ms, `:42`) - never when the review actually ran
+  and returned nothing. Confirmed by `route.test.ts:302-330` (skip: budget
+  forced to 2s left via a `Date.now` spy, `reviewArtifact` never called,
+  `reviewSkipped: true`) versus `:332-349` (review ran, returned `null`,
+  response has no `reviewSkipped` field at all - `toBeUndefined()`).
+- **An unrecognized `mode` is a 400, not a silent fall-through.** `:159-162`:
+  `body.mode` absent means fresh-generate (back-compat); present and not
+  `"regenerate"` is rejected explicitly. Confirmed `route.test.ts:355-373`.
+- **Single-kind-per-invocation.** The route's own comment (`:20-24`) and code
+  confirm there is no server-side loop over `selectedContentKinds()` - each
+  invocation produces exactly one content artifact named by `body.kind`
+  (`:181-184` validates `kind` is a member of the posted `selection`).
+  `grep -n "for (" src/app/api/presentations/generate/route.ts` returns no
+  match, confirmed directly.
+- **In-house-only, no direct `callLlm` in the route.** `route.ts` imports
+  `generateOneArtifact`/`reviewArtifact`/`regenerateArtifact` from
+  `@/lib/presentations/generate` (`:5`) and does not import `callLlm` itself -
+  `grep -n "callLlm" src/app/api/presentations/generate/route.ts` returns no
+  match, confirmed directly. `grep -n "fetch(" src/app/api/presentations/
+  generate/route.ts` likewise returns no match.
+
+### 445d - LEV-1's enforcer, as built
+
+`buildRegeneratePrompt` (`prompts.ts:76-92`) is the LEV-1/AC-7 fold-in: it
+composes `contextLine` (`:77`, prior pasted context + prior source text
+through the shared `contextToPromptText`, `:16-22`) and `critiqueLine`
+(`:78-80`, the prior critique text when present, an empty string otherwise) as
+two SEPARATELY DELETABLE lines in the returned prompt. Confirmed by
+`prompts.test.ts:23-37`: the first test asserts both the context nonce and the
+critique nonce appear in the built prompt; the second asserts the context
+nonce still appears with `priorCritique: null` and that the literal string
+"null" is never injected. This is the pure half of the oracle; the executor
+half (`regenerateArtifact` actually calling `callLlm` with this built prompt)
+is confirmed by `generate.test.ts:186-199` ("folds prior context and prior
+critique into the callLlm request").
+
+**Not yet built: the CALLER-side fold, i.e. Wave 3 supplying the actual prior
+context/critique values from UI state into this request.** That caller is the
+uncommitted `src/app/components/presentations/` tree (see "What is not
+covered" below) - this entry baselines only that the library and route
+correctly propagate whatever `priorContext`/`priorCritique` they are given,
+not that Wave 3 supplies the right values yet.
+
+### 445e - AC-6: the .pptx serializer
+
+`serializeDeckToPptx` (`deck-file.ts:22-28`) wraps the pre-existing
+`buildSlidesPptx` (`@/lib/pptx`), passing `presentationTitle`, `slides`, and
+`author` and deliberately NO `theme` argument (comment at `:12-21`, citing a
+measured `buildSlidesPptx` crash on a theme with `backgroundKind:"solid"` and
+no `backgroundColor`). Confirmed non-empty output for a non-empty deck by
+`deck-file.test.ts:14-21` (`byteLength > 0`), and confirmed no `theme` is
+passed by `deck-file.test.ts:26-34`'s source-text assertion against the
+function signature and the `buildSlidesPptx` call site. This is AC-6's
+DOWNLOADABLE half only; AC-6's VISIBLE half (an on-page slide preview) is
+Wave-3 UI and out of scope for this entry (owner-verification only, R-4 in
+`docs/pres-1-acceptance-criteria.md`).
+
+### What executes over this behaviour today
+
+Per `docs/loop/this-repo.md` section 1, the wrapper is mandatory for two or
+more test files (`npx vitest run a b` silently drops an unmatched argument):
+
+```
+npm run test:paths -- src/lib/presentations/generate.test.ts src/lib/presentations/parse.test.ts src/lib/presentations/prompts.test.ts src/lib/presentations/deck-file.test.ts src/app/api/presentations/generate/route.test.ts
+```
+
+`Test Files  5 passed (5)` / `Tests  39 passed (39)`, and the wrapper's own
+per-argument lines, so no path was silently dropped:
+
+```
+COVERED src/lib/presentations/generate.test.ts files=1 passed=11
+COVERED src/lib/presentations/parse.test.ts files=1 passed=10
+COVERED src/lib/presentations/prompts.test.ts files=1 passed=2
+COVERED src/lib/presentations/deck-file.test.ts files=1 passed=2
+COVERED src/app/api/presentations/generate/route.test.ts files=1 passed=14
+```
+
+Every assertion above is either a pure-function unit test or a mocked-`callLlm`
+unit test (`generate.test.ts:5-8` mocks only `callLlm`, keeping the rest of
+`@/lib/llm` real, per the idiom at `src/lib/decks/sequence.test.ts:5-8`) or a
+mocked-executor route test (`route.test.ts:10-14` mocks the three executors and
+`withDeadline` as a passthrough by default). No test here issues a real network
+call - `vitest.setup.ts` throws on any real `fetch` (`docs/loop/this-repo.md`,
+"tests are network-blocked") - and none renders a component.
+
+### What is NOT covered by this entry, stated plainly
+
+- **No live `callLlm` call was made.** There is no API key in this
+  environment (`docs/loop/this-repo.md` section 6). Every request-shape and
+  T|null-contract claim above is verified with `callLlm` mocked; the QUALITY
+  of any real model output (whether an outline is good, whether 3-5 activity
+  ideas come back, whether a critique is genuinely adversarial) is
+  owner-verification only (R-3, R-5 in `docs/pres-1-acceptance-criteria.md`)
+  and this entry asserts nothing about it.
+- **Wave 3 (the client panel) is explicitly NOT covered here.** At `b3145ecb`,
+  `src/app/components/presentations/` is untracked working-tree state, not a
+  shipped commit - it is not cited by file:line anywhere above, and nothing in
+  it was executed to produce this entry. In particular:
+  - `panel-logic.ts` (`readPersistedString`/`readPersistedJSON`/
+    `writePersistedString`/`writePersistedJSON`, `buildGenerateRequestBody`/
+    `buildRegenerateRequestBody`, `reduceGenerateResponse`,
+    `deckDownloadFilename`) exists in the working tree with its own test file
+    but is UNCOMMITTED; this entry does not baseline it and a later pass must
+    not read its presence here as coverage.
+  - **The route currently has ZERO reachable caller in the committed tree.**
+    `grep -rn "api/presentations/generate" src --include=*.ts --include=*.tsx`
+    finds exactly three hits: the route's own test description string
+    (`route.test.ts:58`), the untracked `index.tsx:34`
+    (`GENERATE_URL = "/api/presentations/generate"`), and a comment in the
+    untracked `panel-logic.ts:20`. So as of `b3145ecb`, nothing in the
+    committed tree ever fetches this route - it is reachable only by a direct
+    HTTP call (e.g. `curl`), not from any shipped UI. This is not a defect in
+    Waves 1-2 (the route was scoped and built as a standalone layer per the
+    architect's wave plan) but it is the exact "verify reachability, not just
+    correctness" trap (`AGENTS.md` memory
+    `verify-reachability-not-just-correctness.md`) until Wave 3 ships and
+    wires a real caller.
+  - AC-1/AC-2 (the "Presentations" Tools sub-tab and its "Slide Deck Creation"
+    child) are also Wave 3/architect territory; `manual-rail.ts` is modified
+    in the uncommitted working tree (` M` in `git status --short` above) but
+    this entry does not describe its contents, since it is not yet shipped.
+- **No component is rendered by any test in this repo**
+  (`docs/loop/this-repo.md` section 2: vitest is node-env,
+  `include: ["src/**/*.test.ts"]`). Tab reachability, the child-tab appearing,
+  the deck being visually rendered on the page, the download button actually
+  producing a file, persistence surviving a real reload, and a real
+  regenerate-with-context round-trip are OWNER-VERIFICATION ONLY (R-4 in
+  `docs/pres-1-acceptance-criteria.md`) and not machine-checkable here now or
+  after Wave 3 ships, per this repo's ceiling.
+- **LEV-1's removal-test oracle (the mocked-`callLlm` request-capture test
+  named in `docs/pres-1-acceptance-criteria.md`'s Leverage claim) is
+  functionally present** (`generate.test.ts:186-199` and
+  `prompts.test.ts:23-37` together capture the request and assert both prior
+  context and prior critique appear) **but was not authored by a dedicated
+  test seat as a standalone "removal test" artifact** - `docs/pres-1-
+  acceptance-criteria.md`'s R-6 names the test seat as owner for that
+  construction. This entry does not close R-6; it only confirms an assertion
+  with the same effect already exists and passes.
+
+### Residual register for this entry
+
+Each names an owner, an instrument, and the step that will measure it.
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL445-1 | The route has no reachable caller in the committed tree (dead until wired) | Wave 3 implementer | `grep -rn "api/presentations/generate" src --include=*.ts --include=*.tsx` restricted to committed files, expecting a fetch call outside test/comment text | Wave 3's own wave gate, before that wave is called shipped |
+| BL445-2 | Whether a real `callLlm` run returns a well-formed deck/outline/activities/critique for real course material | Owner | A live generation run in the deployed app (no API key here) | Post-deploy owner verification (R-3, R-5) |
+| BL445-3 | AC-6's VISIBLE half (on-page slide preview) and AC-1/AC-2 (tab/child-tab reachability) | Architect (design) + Owner (verify) | Architect's preview design, then the owner opening Tools > Presentations in the deployed app | Wave 3 architect pass, then post-deploy owner verification (R-4) |
+| BL445-4 | Whether Wave 3, once committed, actually supplies the correct prior-context/prior-critique VALUES into `buildRegeneratePrompt` (this entry only confirms the library/route propagate whatever they are given) | Wave 3 implementer + its verifier | A wiring/integration test or reading pass over the committed Wave 3 diff, asserting the UI-sourced values reaching `RegenerateInput` match what was actually shown to the instructor | Wave 3's own build + verify, before PRES-1 is presented as feature-complete |
+| BL445-5 | LEV-1's removal-test oracle has not been authored as a dedicated test-seat artifact per `docs/pres-1-acceptance-criteria.md` R-6, though an equivalent assertion already exists and passes | Test seat | Author the standalone removal-test per the AC's Instrument/Direction-of-failure, or explicitly ratify the existing `generate.test.ts:186-199`/`prompts.test.ts:23-37` pair as satisfying it | Test seat's own pass, per `docs/loop/seats.md:59` (runs after Build and Verify) |

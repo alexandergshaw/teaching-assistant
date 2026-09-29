@@ -258,7 +258,7 @@ executors. Files: `types.ts` (type-only), `prompts.ts`, `parse.ts`,
   behaviour of `generateOneArtifact("deck", ...)` on a malformed model response.
 - Instrument [MACHINE, pure + mocked `callLlm`]:
   - PURE: assert `validateDeck` returns `null` for each of (a) `{ presentationTitle:"X", slides: [] }`; (b) a deck whose one slide has `title: "   "` (whitespace); (c) a deck whose one slide has `bullets` that is not an array; AND returns the deck UNCHANGED (deep-equal) for a valid non-empty deck with a non-empty trimmed title and an array of bullets.
-  - EXECUTED: mock `callLlm` for the deck kind to resolve `text` that parses to a zero-slide deck (or a non-array-bullets slide). Assert `generateOneArtifact("deck", ...)` surfaces a GENERATION FAILURE (the executor signals `null`/error that the route turns into `{ error }`, `docs/pres-1-architecture.md:403-405`) and that `serializeDeckToPptx`/`buildSlidesPptx` is NEVER called on that input. Enforce the last clause by `vi.mock`-ing `@/lib/pptx`'s `buildSlidesPptx` as a `vi.fn()` and asserting `not.toHaveBeenCalled()`.
+  - EXECUTED: mock `callLlm` for the deck kind to resolve `text` that parses to a zero-slide deck (or a non-array-bullets slide). Assert `generateOneArtifact("deck", ...)` surfaces a GENERATION FAILURE (the executor signals `null`/error that the route turns into `{ error }`, `docs/pres-1-architecture.md:403-405`). CORRECTION (round-1 check B1): do NOT add a `buildSlidesPptx not.toHaveBeenCalled()` assertion here - it is VACUOUS. `generateOneArtifact` never touches the serializer (it returns structured `GeneratedDeck` content; serialization runs downstream only in the tab's download handler on an already-`validateDeck`-passed deck). So "malformed deck never reaches `buildSlidesPptx`" is a STRUCTURAL guarantee (generation returns content, not bytes) plus an owner-verified download-path property (R-4), not a call-count assertion on this executor. The real discriminator for this oracle is the GENERATION-FAILURE assertion above.
 - Direction of failure: RED if a zero-slide, blank-title, or non-array-bullets
   deck reaches `buildSlidesPptx` (which SRE MEASURED either crashes with the
   internal message `"slide.bullets.map is not a function"` or silently ships a
@@ -266,8 +266,16 @@ executors. Files: `types.ts` (type-only), `prompts.ts`, `parse.ts`,
   deck is rejected.
 - Discriminating sabotage: change `validateDeck`'s empty-slides guard from
   `slides.length > 0` to `slides.length >= 0`. Expected: the `slides: []` PURE
-  case goes RED (returns the deck instead of `null`), and the EXECUTED case goes
-  RED (`buildSlidesPptx` now gets called). Restore: GREEN. DISCRIMINATES.
+  case goes RED (validateDeck returns the deck instead of `null`), and the
+  EXECUTED case goes RED (generateOneArtifact no longer surfaces a GENERATION
+  FAILURE for the zero-slide deck - the corrected discriminator, NOT a
+  buildSlidesPptx call-count). Restore: GREEN. DISCRIMINATES.
+- Additional named sabotages (round-1 check I2), one per guard: (i) drop the
+  title-trim guard so a `title:"   "` slide passes -> the blank-title PURE case
+  goes RED; (ii) drop the `Array.isArray(bullets)` guard so a non-array-bullets
+  slide passes -> the non-array PURE case goes RED. Each RED one way, GREEN after
+  restore; each discriminates its own guard (the slides.length mutation above
+  leaves both green).
 - ATTACK MY OWN GUARD: the AC-6 serializer test (W1-T6) asserts `byteLength > 0`,
   which a MISLEADING empty-deck success PASSES - SRE measured `slides: []`
   yields ~45654 bytes (`docs/pres-1-sre.md:294`). So the empty-deck refusal
@@ -828,7 +836,7 @@ the ONLY proof of these clauses (AC R-4/R-5, `docs/pres-1-architecture.md:869-88
 | W1-T2 | build prompt from a constant, drop `context` | context-nonce assertion | yes | YES (context reach) |
 | W1-T3 | build review prompt from `context` only, drop `produced.content` | produced-content-nonce assertion | yes | YES |
 | W1-T4 | write one critique onto both artifacts | kind-distinguishable-nonce assertion | yes | YES (single-blob) |
-| W1-T5 | `slides.length > 0` becomes `>= 0` | empty-deck PURE case + executed `buildSlidesPptx` not-called | yes | YES |
+| W1-T5 | `slides.length > 0` becomes `>= 0` (+ title-trim drop, `Array.isArray` drop per I2) | empty-deck PURE case + the EXECUTED generation-failure assertion (NOT a buildSlidesPptx call-count - B1: generation never serializes); title/bullets guards each caught by their own PURE case | yes | YES |
 | W1-T6 | serializer returns `new ArrayBuffer(0)` | byteLength assertion | yes | YES (broken serializer) |
 | W1-T7 | S7a delete critique-fold; S7b delete context-fold | S7a: critique nonce; S7b: context nonces | yes | YES (each isolates one fold); whole-body delete does NOT and is not banked |
 | W1-T8 | add a local same-shape slide interface | duplicate-type assertion | yes | YES |

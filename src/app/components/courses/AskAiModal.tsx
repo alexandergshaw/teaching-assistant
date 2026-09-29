@@ -96,9 +96,10 @@ export default function AskAiModal({
             disabled={busy}
           />
           <p className={`${styles.previewMeta} ${tableStyles.mt2}`}>
-            Answers are grounded in this course&apos;s own recorded facts - its schedule, dates,
-            textbook, and description, plus its roster, weekly checklist, and grades-due date,
-            each only when set.
+            This course&apos;s recorded facts - its schedule, dates, textbook, and description,
+            plus its roster, weekly checklist, and grades-due date, each only when set - are
+            included and used where the question calls for them. General teaching questions draw
+            on that same information plus standard practice.
           </p>
           <div className={`${tableStyles.rowSm} ${tableStyles.mt2}`}>
             {SUGGESTIONS.map((s) => (

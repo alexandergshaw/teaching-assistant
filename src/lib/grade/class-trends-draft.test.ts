@@ -1,17 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { composeClassTrendsDraft, DEFAULT_CLASS_TRENDS_DRAFT_FLOOR } from "./class-trends-draft";
+import { composeClassTrendsDraft } from "./class-trends-draft";
 import type { AreaTrend, AreaTrendDirection, ClassTrendsReport } from "./class-trends";
 import type { ClassTrendsInsightObservation } from "./class-trends-insight";
 
-const FLOOR = 5;
+// N13a: backlog's own default was 5 (DEFAULT_CLASS_TRENDS_DRAFT_FLOOR,
+// removed by this backlog item - straight removal, no replacement bound).
+// This fixture size is now an arbitrary sample size, not a floor boundary;
+// kept at 5 only because most of these fixtures were already written
+// against it and there is no reason to churn the numbers.
+const SAMPLE_SIZE = 5;
 
 function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirection }): AreaTrend {
   return {
     area: overrides.area ?? "thesis-statement",
     displayArea: overrides.displayArea ?? "Thesis Statement",
-    resultsWithArea: overrides.resultsWithArea ?? FLOOR,
-    totalResults: overrides.totalResults ?? FLOOR,
-    scoredCount: overrides.scoredCount ?? FLOOR,
+    resultsWithArea: overrides.resultsWithArea ?? SAMPLE_SIZE,
+    totalResults: overrides.totalResults ?? SAMPLE_SIZE,
+    scoredCount: overrides.scoredCount ?? SAMPLE_SIZE,
     unscoredCount: overrides.unscoredCount ?? 0,
     percentValues: overrides.percentValues ?? [],
     rawValues: overrides.rawValues ?? [],
@@ -22,7 +27,7 @@ function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirectio
   };
 }
 
-function makeReport(areas: AreaTrend[], totalResults = FLOOR): ClassTrendsReport {
+function makeReport(areas: AreaTrend[], totalResults = SAMPLE_SIZE): ClassTrendsReport {
   return {
     totalResults,
     // N13a: rows this run emitted instead of grading - none, for this
@@ -44,37 +49,60 @@ function makeObservation(overrides: Partial<ClassTrendsInsightObservation> = {})
   };
 }
 
-describe("composeClassTrendsDraft - below-floor", () => {
-  it("returns below-floor, never a string, when totalResults < floor", () => {
-    const report = makeReport([], FLOOR - 1);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
-    expect(result).toEqual({ status: "below-floor", floor: FLOOR, totalResults: FLOOR - 1 });
+describe("composeClassTrendsDraft - the floor was removed (backlog N13a)", () => {
+  it("drafts from as few as one graded result - no below-floor refusal remains", () => {
+    // Below the old DEFAULT_CLASS_TRENDS_DRAFT_FLOOR of 5: this used to
+    // return { status: "below-floor", ... } and now must draft normally,
+    // proving the removal rather than merely the absence of a deleted
+    // assertion.
+    const area = makeArea({ direction: "high", resultsWithArea: 1, totalResults: 1 });
+    const report = makeReport([area], 1);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).toContain(area.displayArea);
+    }
   });
 
-  it("produces a draft at exactly the floor (boundary is inclusive)", () => {
-    const area = makeArea({ direction: "high" });
-    const report = makeReport([area], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
-    expect(result.status).toBe("ok");
+  it("has no 'below-floor' status in its result union at all", () => {
+    // A two-submission run: previously refused outright (2 < floor of 5).
+    const area = makeArea({ direction: "low", resultsWithArea: 2, totalResults: 2 });
+    const report = makeReport([area], 2);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    const status: string = result.status;
+    expect(status).not.toBe("below-floor");
+    expect(["ok", "empty", "rejected"]).toContain(status);
+  });
+
+  it("composeClassTrendsDraft takes exactly three parameters - no floor argument remains", () => {
+    expect(composeClassTrendsDraft.length).toBe(3);
   });
 });
 
 describe("composeClassTrendsDraft - the coverage denominator (Amendment 2)", () => {
-  it("drops a clause whose area is not covered by every graded result, even above the floor", () => {
-    // resultsWithArea === floor but totalResults is larger - this area is
-    // covered by fewer results than the draft's own opening line states.
-    const partiallyCovered = makeArea({ direction: "high", resultsWithArea: FLOOR, totalResults: FLOOR + 1 });
-    const report = makeReport([partiallyCovered], FLOOR + 1);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+  it("drops a clause whose area is not covered by every graded result, even with a small run", () => {
+    // resultsWithArea === SAMPLE_SIZE but totalResults is larger - this area
+    // is covered by fewer results than the draft's own opening line states.
+    const partiallyCovered = makeArea({
+      direction: "high",
+      resultsWithArea: SAMPLE_SIZE,
+      totalResults: SAMPLE_SIZE + 1,
+    });
+    const report = makeReport([partiallyCovered], SAMPLE_SIZE + 1);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     // No area is fully covered, and no observation was given, so the draft
     // has no body clauses at all - the explicit empty state.
     expect(result).toEqual({ status: "empty" });
   });
 
   it("renders a clause when resultsWithArea === totalResults exactly", () => {
-    const fullyCovered = makeArea({ direction: "low", resultsWithArea: FLOOR + 1, totalResults: FLOOR + 1 });
-    const report = makeReport([fullyCovered], FLOOR + 1);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const fullyCovered = makeArea({
+      direction: "low",
+      resultsWithArea: SAMPLE_SIZE + 1,
+      totalResults: SAMPLE_SIZE + 1,
+    });
+    const report = makeReport([fullyCovered], SAMPLE_SIZE + 1);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.markdown).toContain(fullyCovered.displayArea);
@@ -83,20 +111,20 @@ describe("composeClassTrendsDraft - the coverage denominator (Amendment 2)", () 
 });
 
 describe("composeClassTrendsDraft - direction filtering", () => {
-  it("omits mixed/no-scale/insufficient-data areas entirely, distinct from the coverage-floor case", () => {
+  it("omits mixed/no-scale/insufficient-data areas entirely", () => {
     const mixed = makeArea({ direction: "mixed", area: "a" });
     const noScale = makeArea({ direction: "no-scale", area: "b" });
     const insufficient = makeArea({ direction: "insufficient-data", area: "c" });
-    const report = makeReport([mixed, noScale, insufficient], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const report = makeReport([mixed, noScale, insufficient], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result).toEqual({ status: "empty" });
   });
 });
 
 describe("composeClassTrendsDraft - the empty state (Amendment 3)", () => {
   it("returns an explicit empty status, never an ok status with an empty-sounding body", () => {
-    const report = makeReport([], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result).toEqual({ status: "empty" });
     expect(result.status).not.toBe("ok");
   });
@@ -104,8 +132,8 @@ describe("composeClassTrendsDraft - the empty state (Amendment 3)", () => {
 
 describe("composeClassTrendsDraft - provenance and the assignmentName/displayArea phrase filters", () => {
   it("rejects with an actionable reason when the assignment name itself contains a forbidden phrase", () => {
-    const report = makeReport([makeArea({ direction: "high" })], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "The Class Final", FLOOR);
+    const report = makeReport([makeArea({ direction: "high" })], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "The Class Final");
     expect(result.status).toBe("rejected");
     if (result.status === "rejected") {
       expect(result.reason.toLowerCase()).toContain("assignment name");
@@ -119,8 +147,8 @@ describe("composeClassTrendsDraft - provenance and the assignmentName/displayAre
       displayArea: "Understanding of the class material",
     });
     const good = makeArea({ direction: "high", area: "good", displayArea: "Citations" });
-    const report = makeReport([bad, good], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const report = makeReport([bad, good], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.markdown).not.toContain("Understanding of the class material");
@@ -131,8 +159,8 @@ describe("composeClassTrendsDraft - provenance and the assignmentName/displayAre
 
 describe("composeClassTrendsDraft - the inferred clause marker", () => {
   it("always wraps an observation's text in the fixed marker substring", () => {
-    const report = makeReport([], FLOOR);
-    const result = composeClassTrendsDraft(report, [makeObservation()], "Essay 1", FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [makeObservation()], "Essay 1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.markdown).toContain("my own reading, not a count");
@@ -140,34 +168,34 @@ describe("composeClassTrendsDraft - the inferred clause marker", () => {
   });
 
   it("drops an observation whose reading contains a likely singular-submission phrase", () => {
-    const report = makeReport([], FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
     const singular = makeObservation({ reading: "one submission confused X and Y" });
-    const result = composeClassTrendsDraft(report, [singular], "Essay 1", FLOOR);
+    const result = composeClassTrendsDraft(report, [singular], "Essay 1");
     expect(result).toEqual({ status: "empty" });
   });
 
   it("drops an observation whose concept contains a likely singular-submission phrase", () => {
-    const report = makeReport([], FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
     const singular = makeObservation({ concept: "a single submission's odd framing" });
-    const result = composeClassTrendsDraft(report, [singular], "Essay 1", FLOOR);
+    const result = composeClassTrendsDraft(report, [singular], "Essay 1");
     expect(result).toEqual({ status: "empty" });
   });
 
   it("does NOT drop an equivalent singular claim phrased outside the phrase list (known accepted gap)", () => {
-    const report = makeReport([], FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
     // "a lone response" is an equivalent singular construction that the
     // best-effort phrase list does not catch - recorded as an accepted gap,
     // not a passing property, per the design's own residual 9.
     const equivalent = makeObservation({ reading: "a lone response mixed up X and Y" });
-    const result = composeClassTrendsDraft(report, [equivalent], "Essay 1", FLOOR);
+    const result = composeClassTrendsDraft(report, [equivalent], "Essay 1");
     expect(result.status).toBe("ok");
   });
 });
 
 describe("composeClassTrendsDraft - the coverage sentence is emitted, not inspected for a digit", () => {
   it("the opening line matches the fixed coverage template with totalResults at its one known position", () => {
-    const report = makeReport([makeArea({ direction: "high" })], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const report = makeReport([makeArea({ direction: "high" })], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.markdown).toMatch(
@@ -182,8 +210,8 @@ describe("composeClassTrendsDraft - the coverage sentence is emitted, not inspec
     // coverage sentence at all - the real property this composer guarantees
     // is the template's existence and position, not digit presence anywhere.
     const area = makeArea({ direction: "low", displayArea: "85% completion rate" });
-    const report = makeReport([area], FLOOR);
-    const result = composeClassTrendsDraft(report, [], "Essay 1", FLOOR);
+    const report = makeReport([area], SAMPLE_SIZE);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.markdown).toMatch(/^A note on Essay 1, based on the 5 submissions graded so far:/);
@@ -203,23 +231,17 @@ describe("composeClassTrendsDraft - the composed-markdown safety net", () => {
     // parseClassTrendsInsightResponse's own forbidden-phrase filter before
     // reaching this composer, so this is a shape the real types genuinely
     // permit a caller to pass directly.
-    const report = makeReport([], FLOOR);
+    const report = makeReport([], SAMPLE_SIZE);
     const observation = makeObservation({
       concept: "a pattern across the class",
       reading: "several submissions showed this",
     });
-    const result = composeClassTrendsDraft(report, [observation], "Essay 1", FLOOR);
+    const result = composeClassTrendsDraft(report, [observation], "Essay 1");
     expect(result.status).toBe("rejected");
     if (result.status === "rejected") {
       // Pinning the fact (this is the composed-markdown rejection, not the
       // assignmentName one) and not the exact wording of either reason.
       expect(result.reason.toLowerCase()).not.toContain("assignment name");
     }
-  });
-});
-
-describe("composeClassTrendsDraft - defaults", () => {
-  it("uses the exported default floor when no floor argument is supplied", () => {
-    expect(DEFAULT_CLASS_TRENDS_DRAFT_FLOOR).toBe(5);
   });
 });

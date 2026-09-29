@@ -70,12 +70,6 @@ export default function ClassTrendsDraftPanel({
         </Button>
       )}
 
-      {state.status === "below-floor" && (
-        <span className={styles.fieldHint}>
-          A draft needs at least {state.floor} graded submissions; you have {state.totalResults} so far.
-        </span>
-      )}
-
       {/* Amendment 3: no body clause was produced - no area was fully
           covered and classified high/low, and no inferred observation
           survived. The explanation renders; the copy control is withheld

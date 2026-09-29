@@ -19,17 +19,6 @@ describe('"composed" - status "empty" (Amendment 3)', () => {
   });
 });
 
-describe('"composed" - status "below-floor"', () => {
-  it("carries floor and totalResults through", () => {
-    const state: DraftUiState = { status: "idle" };
-    const next = nextDraftUiState(state, {
-      type: "composed",
-      result: { status: "below-floor", floor: 5, totalResults: 3 },
-    });
-    expect(next).toEqual({ status: "below-floor", floor: 5, totalResults: 3 });
-  });
-});
-
 describe('"composed" - status "rejected"', () => {
   it("carries the reason through", () => {
     const state: DraftUiState = { status: "idle" };

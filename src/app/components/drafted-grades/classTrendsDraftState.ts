@@ -28,7 +28,6 @@ export type DraftUiState =
    * empty-string markdown for "nothing to copy" and accidentally still
    * offer the control. */
   | { status: "empty" }
-  | { status: "below-floor"; floor: number; totalResults: number }
   | { status: "rejected"; reason: string };
 
 export type DraftUiEvent =
@@ -42,8 +41,6 @@ export function nextDraftUiState(state: DraftUiState, event: DraftUiEvent): Draf
         return { status: "ready", markdown: event.result.markdown, copy: "idle" };
       case "empty":
         return { status: "empty" };
-      case "below-floor":
-        return { status: "below-floor", floor: event.result.floor, totalResults: event.result.totalResults };
       case "rejected":
         return { status: "rejected", reason: event.result.reason };
     }

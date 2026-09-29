@@ -92,14 +92,8 @@ describe("ClassTrendsDraftPanel wires the clipboard call through to state (sourc
     expect(emptyBranch).not.toContain(">Copy<");
   });
 
-  it("never renders a copy control from the below-floor state", () => {
-    const belowIdx = strippedDraftPanel.indexOf('state.status === "below-floor"');
-    expect(belowIdx, "no below-floor branch found").toBeGreaterThan(-1);
-    const nextBranchIdx = strippedDraftPanel.indexOf("state.status ===", belowIdx + 1);
-    expect(nextBranchIdx, "no branch found after the below-floor branch").toBeGreaterThan(-1);
-    const belowBranch = strippedDraftPanel.slice(belowIdx, nextBranchIdx);
-    expect(belowBranch).not.toMatch(/handleCopy/);
-    expect(belowBranch).not.toContain(">Copy<");
+  it("no longer carries a below-floor branch (backlog N13a: the floor was removed, straight removal, no replacement)", () => {
+    expect(strippedDraftPanel).not.toMatch(/below-floor/);
   });
 });
 

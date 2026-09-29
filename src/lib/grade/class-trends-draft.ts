@@ -15,53 +15,6 @@ import type { ClassTrendsInsightObservation } from "./class-trends-insight";
  * cannot time out or fail from a network perspective - it does no I/O.
  */
 
-export const DEFAULT_CLASS_TRENDS_DRAFT_FLOOR = 5;
-
-/** parsePositiveInt is not exported from gemini.ts (verified:
- * `grep -n "export function parsePositiveInt"` returns nothing) - duplicated
- * here rather than exporting a function from a model-provider config file
- * for one caller in a different feature area, at this repo's own documented
- * precedent (escapeForCopyTitle duplicating markdown.ts's unexported
- * escapeHtml, useAnnouncementDraftSlots.ts:74-76). */
-function parsePositiveInt(value: string | undefined, fallback: number, min = 1): number {
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed) || parsed < min) {
-    return fallback;
-  }
-  return parsed;
-}
-
-/** This is read from a CLIENT component - layer C runs entirely in the
- * browser, no route or server action of its own - and Next inlines only
- * NEXT_PUBLIC_-prefixed variables (account-admin-rules.ts:14-25,
- * inbox-panel.tsx:42's NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC precedent). A
- * bare `process.env.CLASS_TRENDS_DRAFT_FLOOR` here would resolve to
- * `undefined` in every production build while a node-env unit test that sets
- * it passes - a silent-green shape this repo has hit before. Unlike
- * account-admin-rules.ts's OWNER_EMAILS (which stays non-public because it
- * gates access), this value is a plain numeric threshold with no student
- * data or credential behind it, so making it public costs nothing: the
- * draft itself already discloses strictly more ("based on the N submissions
- * graded so far") to the same audience that could read this constant out of
- * the shipped bundle. Whether the floor should remain a runtime-adjustable
- * knob at all - since it is now necessarily public if it exists client-side
- * - is an open owner decision (see the DEFAULT_CLASS_TRENDS_DRAFT_FLOOR /
- * GRADE_MAX_SUBMISSIONS collision noted below); this getter does not resolve
- * it. Changing this value on a deployed app requires a rebuild/redeploy
- * (NEXT_PUBLIC_ variables are inlined at build time), unlike
- * GRADE_MAX_SUBMISSIONS which is read server-side at runtime - a real
- * asymmetry between the two knobs, not a config change of equal cost either
- * way. DO NOT change the default below without an owner decision - it is
- * left at 5 deliberately, matching gemini.ts's DEFAULT_MAX_SUBMISSIONS
- * today, and whether that collision should be resolved (and how) is not
- * this module's call. */
-export function getClassTrendsDraftFloor(): number {
-  return parsePositiveInt(process.env.NEXT_PUBLIC_CLASS_TRENDS_DRAFT_FLOOR, DEFAULT_CLASS_TRENDS_DRAFT_FLOOR);
-}
-
 export type ClassTrendsDraftResult =
   | { status: "ok"; markdown: string }
   /** The draft composed with NO body clauses at all - no area cleared the
@@ -73,16 +26,15 @@ export type ClassTrendsDraftResult =
    * empty-string special case a caller could miss - the panel must render
    * the explanation and withhold the copy control entirely for this status. */
   | { status: "empty" }
-  | { status: "below-floor"; floor: number; totalResults: number }
   | { status: "rejected"; reason: string };
 
 /** A clause may only characterise an area when EVERY graded result in the
  * run carried that area - i.e. `resultsWithArea === report.totalResults`,
- * not merely `>= floor`. Reasoning: the draft's one and only stated
- * denominator is the unconditional opening line's `report.totalResults`
- * ("based on the N submissions graded so far"). If a clause could render for
- * an area covered by fewer results than that (even if it clears the floor),
- * the draft would state a set larger than the set the clause is actually
+ * not merely `>=` some lesser bound. Reasoning: the draft's one and only
+ * stated denominator is the unconditional opening line's
+ * `report.totalResults` ("based on the N submissions graded so far"). If a
+ * clause could render for an area covered by fewer results than that, the
+ * draft would state a set larger than the set the clause is actually
  * backed by.
  *
  * THE CONDITION THIS WARNED ABOUT HAS ARRIVED - re-measured 2026-09-20.
@@ -93,9 +45,12 @@ export type ClassTrendsDraftResult =
  * graded so far' could carry a clause backed by only 5 of those 30."
  * It was raised. The cap is now DEFAULT_MAX_SUBMISSIONS = 40 at
  * gemini.ts:32 - wrong in this comment on both the value and the line -
- * while DEFAULT_CLASS_TRENDS_DRAFT_FLOOR is still 5. The two knobs no
- * longer coincide, so a floor comparison and the strict rule below now
- * give DIFFERENT answers on an ordinary run.
+ * and there is no longer a class-trends-draft floor to compare it against at
+ * all (DEFAULT_CLASS_TRENDS_DRAFT_FLOOR removed per backlog N13a, owner
+ * decision: straight removal, no replacement bound). A floor comparison and
+ * the strict rule below would have given DIFFERENT answers on an ordinary
+ * run while both existed; that is now moot, but the underlying reason for
+ * `===` is not - it never depended on the floor.
  *
  * The code was already right: `===` never depended on the accident. What
  * changed is that the instruction below stopped being defensive and became
@@ -103,9 +58,10 @@ export type ClassTrendsDraftResult =
  * hypothetical. That is why the facts are corrected here rather than left.
  *
  * Tying every rendered clause's basis to the SAME field the opening line
- * states closes the gap regardless of how the two knobs are configured. DO
- * NOT "simplify" this back to a floor comparison - see the header comment
- * on the collision this guards against. */
+ * states closes the gap regardless of the cap's value. DO NOT "simplify"
+ * this back to a `>=` comparison against some other bound - the opening
+ * line's denominator is `report.totalResults`, and any weaker comparison
+ * reopens the gap this rule closes. */
 function areaFullyCovered(area: AreaTrend, report: ClassTrendsReport): boolean {
   return area.resultsWithArea === report.totalResults;
 }
@@ -162,13 +118,8 @@ function renderInferredClause(observation: ClassTrendsInsightObservation): strin
 export function composeClassTrendsDraft(
   report: ClassTrendsReport,
   observations: readonly ClassTrendsInsightObservation[],
-  assignmentName: string,
-  floor: number = getClassTrendsDraftFloor()
+  assignmentName: string
 ): ClassTrendsDraftResult {
-  if (report.totalResults < floor) {
-    return { status: "below-floor", floor, totalResults: report.totalResults };
-  }
-
   // assignmentName is instructor-typed and unfiltered by any earlier layer -
   // checked up front, with a reason that names the actionable fix, rather
   // than only at the end where the copy could not distinguish this case from
@@ -188,8 +139,7 @@ export function composeClassTrendsDraft(
   // instructor's own rubric text) and ALSO unfiltered by layer A. A rubric
   // area named e.g. "Understanding of the class material" must not take
   // down the whole draft - it is dropped, the same "omit rather than fail"
-  // shape used for below-floor/direction filtering, not escalated to a
-  // rejection.
+  // shape used for direction filtering, not escalated to a rejection.
   const countedClauses = report.areas
     .filter((area: AreaTrend) => areaFullyCovered(area, report))
     .map(renderCountedClause)

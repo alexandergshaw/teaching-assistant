@@ -37643,8 +37643,14 @@ roles, which is what proved it was an unforced choice rather than a constraint.
 `--warning-bg`, `--error`, `--error-color`, `--error-bg`, `--muted-text`,
 `--border-color`, `--bg-secondary`, `--color-border`, `--color-text-secondary`,
 `--mono-font`, `--field-border` fallbacks, `--accent-contrast`, `--error-text`.
-None were ever defined. Where a hex fallback existed it was the only thing that
-ever painted - and it never adapted to dark mode. Where none existed the
+Twelve of the thirteen were never defined; the exception, corrected per DECISION
+14 (2026-09-23, docs/owner-decisions-2026-09-23.md), is `--field-border`, which IS
+defined in both themes (src/app/globals.css:25 #cbd5e1 and :294 #334155) - its
+entry here is about the fallback EXPRESSIONS at its `var(--field-border, #hex)`
+call sites, whose hardcoded fallback never adapted to dark mode, not about the
+token being undefined. For the twelve genuinely undefined tokens, where a hex
+fallback existed it was the only thing that ever painted - and it never adapted to
+dark mode. Where none existed the
 declaration did nothing at all: `CommentEditModal`'s error and warning notices
 had been rendering with **no distinguishing background and no distinguishing
 text colour**, on the surface where an instructor edits feedback a student will

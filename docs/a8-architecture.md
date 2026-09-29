@@ -212,8 +212,14 @@ filename-requirement list (`prompts.ts:273`) - both desired (1.2).
 
 `submittedFiles` is a separate array on the entry; it is never passed to
 `truncateSubmission`, so the per-contribution recognition it carries reaches the
-entry (AC-1), the results table (AC-5), and the model's file list unconditionally
-- a second, truncation-proof carrier of the distinction alongside the manifest.
+entry (AC-1) and the results table (AC-5). NOTE (round-1 check BLOCKER-1
+correction): `submittedFiles` is NOT a model-facing carrier - the discussion
+labels use `extension: "(none)"` and dotless names, and
+`buildSubmittedFileNamesBlock` (`prompts.ts:271-274`) filters base names to
+`.includes(".")`, so the labels are DROPPED from the model's file-list block (this
+is DESIRED, per section 1.2 - it must not be "fixed" by giving the labels a real
+extension, which would inject fake filenames). The ONLY model-facing carrier of
+recognition is the front-loaded manifest.
 
 `parentName` resolution (discharges R7): `extractDiscussionActivity` already
 builds `names: Map<number,string>` (`discussions.ts:48-53`) but only uses it for
@@ -268,7 +274,7 @@ five fixtures in `src/lib/grade/extraction.test.ts:34,54,82,114,142`. Zero
 readers in scoring or routing (confirmed; matches `docs/a8-scope.md` 1.3).
 
 Design: ADD two OPTIONAL fields to `CanvasStudentWork`
-(`discussions.ts:106-120`): `initialPostCount?: number` and `replyCount?: number`,
+(`discussions.ts:106-120`): `initialPostCount?: number` and `replyCount?: number`, (SHAPE-ONLY per scope 1.3 / round-1 check INFO-1: no RUNTIME reader - the manifest reads work.discussion.initialPosts.length/.replies.length directly, not these fields; they satisfy AC-3's split-the-count requirement structurally, mirroring contributionCount's zero-reader state, and are redundant with the .length values on discussion. Do not claim canvasWorkToEntry reads them.)
 set ONLY in `fetchDiscussion` (`discussions.ts:152`) from
 `activity.initialPosts.length` and `activity.replies.length`. Keep
 `contributionCount` (write-only; removing it would touch two unrelated writers

@@ -259,39 +259,19 @@ only; [OWNER] verified only by the owner in the deployed app.
   FAILS if a `ta-`-seeded value is set only in an initializer and so does not
   survive a reload's hydration.
 
-## Forks the architect/owner must settle (NOT decided here)
+## Forks - RESOLVED by the owner 2026-09-29 (superseded, see AC-6 and residual table R-1/R-2)
 
-Both are recorded as residuals (R-1, R-2). They are FORKS: this seat recommends a
-reading and does not choose, per `docs/loop/leverage.md:113` and the never-default
-rule.
+Both forks are DECIDED; this section is retained only as a pointer so no consumer treats them as open.
 
-- **R-1 deck FORMAT** decides AC-6's "visible AND downloadable". Recommended
-  reading (not a decision): in-page HTML/reveal-style slides render natively in
-  the page (satisfying VISIBLE cheaply) and are downloadable as a self-contained
-  file; pptx via the shipped `buildSlidesPptx` (`src/lib/pptx.ts`) is
-  download-native but needs an added on-page renderer to be VISIBLE. The owner's
-  conjunction ("VISIBLE and DOWNLOADABLE on the page") slightly favors an in-page
-  render, but the shipped pptx pipeline is real reuse. The architect prices both;
-  the owner picks.
-- **R-2 relationship to the existing `ppt-design` "PowerPoint Design" tab AND to
-  A43.** MEASURED, not assumed: a Tools sub-tab that creates slide decks ALREADY
-  EXISTS - `ppt-design` (`ManualViewType` member at `manual-rail.ts:19`, label
-  "PowerPoint Design" / description "Create presentation slides" at `:110`,
-  mounted in `page.tsx:601-603` as `PowerPointDesignTab`), backed by
-  `src/app/components/ppt-design/` and `src/lib/decks/` (generate, presets,
-  types, sequence, fit-report, office-template-fill - all present) plus
-  `src/lib/pptx.ts`. A43 (`deck-generation-from-source`,
-  `docs/backlog.yml:727-738`) has shipped waves S, T1, T2 (deck from a source /
-  uploaded template, with a fit/refusal report). So A43 infra EXISTS; it is not
-  unbuilt. PRES-1's differences from both: it works from PASTED lesson context
-  with no template required, produces FOUR artifacts (outline / activities /
-  deck / per-artifact adversarial review), and has the regenerate-with-critique
-  loop. Recommended reading (not a decision): REUSE `src/lib/decks/*`,
-  `src/lib/pptx.ts`, the `deck-source` extract actions, the download idioms, and
-  the `ta-ppt-*` intake pattern rather than reinventing them; and treat
-  "Presentations" as a NEW inner-nav sibling tab (the owner named a new tab), NOT
-  a silent replacement of `ppt-design` - but whether PRES-1 eventually subsumes
-  or absorbs `ppt-design`/A43 is the owner's call. Do not merge silently.
+- **R-1 deck FORMAT = .pptx** via the shipped `buildSlidesPptx` (`src/lib/pptx.ts`). Download is
+  native .pptx (a machine-testable serialization). AC-6's VISIBLE is therefore satisfied by an
+  ON-PAGE SLIDE PREVIEW (thumbnails / rendered preview) that the architect designs as a DISTINCT
+  build item - a .pptx cannot render inline by itself. The earlier in-page-HTML recommendation is
+  SUPERSEDED and not to be built.
+- **R-2 = NEW SIBLING TAB, REUSE INFRA.** Presentations is a new inner-nav sibling; reuse
+  `src/lib/decks/*`, `src/lib/pptx.ts`, the `deck-source` extract actions, the download idioms, and
+  the `ta-ppt-*` intake pattern. The existing `ppt-design` "PowerPoint Design" tab is left UNTOUCHED
+  (no subsume, no replace this round). The measured reuse-survey facts below stand.
 
 ## Reuse notes (vetted, file:line - for the architect, not a design)
 

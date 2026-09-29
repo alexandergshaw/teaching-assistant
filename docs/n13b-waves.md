@@ -593,10 +593,20 @@ doc; this plan does not re-author them, it routes them to waves.
   refined guard must not be a longer regex. Owner: architect (shape) +
   test-author (proving the excluded state is a compile error). Instrument:
   `classTrends.wiring.test.ts:128-130`, `class-trends-draft.ts:69-72` (the
-  existing parameter-type precedent). Step: Wave 2 - satisfied by construction
-  (the architect's option (a): names live on `instructorAttribution`, a sibling
-  of `areas`, which the class composer's iteration domain cannot reach; the ban
-  is KEPT unrefined because the panel is never handed a name).
+  existing parameter-type precedent). Step: Wave 2. ORCHESTRATOR RULING 2026-09-29
+  (correcting this claim, wave-2 test-notes check, REPEAT-OF-BLOCKER-2): R8 has TWO
+  parts. Part (a) - no longer/better regex - IS satisfied by construction (the
+  panel .student ban stays unrefined; names never reach a panel). Part (b) - "the
+  excluded state must be a COMPILE ERROR" - is NOT satisfied by option (a) alone,
+  because `instructorAttribution` is a sibling FIELD of `ClassTrendsReport`, the
+  type `composeClassTrendsDraft` already receives, so reading `report.instructor
+  Attribution` inside the composer compiles fine (discipline, not a type guard).
+  RULING: PROMOTE R-T2 into Wave 2 - narrow the composer's first param to
+  `Omit<ClassTrendsReport, "instructorAttribution">` (cheap: nothing the composer
+  needs lives on that field; the sole caller passes a full report, assignable by
+  structural subtyping; `.length` stays 3; change lives in files already in Wave
+  2's write set). The test-author proves it with a `@ts-expect-error` compile-error
+  assertion on `report.instructorAttribution`, replacing the source-text token scan.
 - **R-UX-1** - extend the wiring-test family for the new section. Owner:
   test-author. Instrument: `classTrends.wiring.test.ts`. Step: Wave 2 (assert
   the distinct Copy label and the shared empty-state branch).

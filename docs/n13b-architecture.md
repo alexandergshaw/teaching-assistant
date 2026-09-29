@@ -91,12 +91,19 @@ particular guard is needed, so none is done.
 
 ### The two structural guarantees this rests on (both are new gates - see section 5)
 
-1. Names must not reach the CLASS-addressed text (AC-8). This is guaranteed by
-   TYPE, not by scanning output: `composeClassTrendsDraft`
-   (`class-trends-draft.ts:118-122`) iterates `report.areas` and reads only
-   `AreaTrend` fields. The names live on `ClassTrendsReport.instructorAttribution`
-   - a SIBLING of `areas`, never inside an `AreaTrend` - so the composer's
-   existing iteration domain cannot reach a name. The subset CLAUSE the class
+1. Names must not reach the CLASS-addressed text (AC-8). ORCHESTRATOR RULING
+   2026-09-29 (wave-2 test-notes check): the original claim that this is
+   "guaranteed by TYPE" was an OVERCLAIM. `composeClassTrendsDraft`
+   (`class-trends-draft.ts:118-122`) only HAPPENS to iterate `report.areas` and
+   read `AreaTrend` fields; because names live on
+   `ClassTrendsReport.instructorAttribution` - a SIBLING field of the type the
+   composer already receives - reading `report.instructorAttribution` there would
+   compile (discipline, not a type guarantee). To make it a genuine TYPE guarantee
+   (security R8 part (b)), the composer's first parameter is narrowed to
+   `Omit<ClassTrendsReport, "instructorAttribution">` (or a dedicated
+   `ClassTrendsDraftInput`), so any read of a name IS a compile error. The sole
+   non-test caller passes a full `ClassTrendsReport`, assignable to the Omit view
+   by structural subtyping; `.length` stays 3. The subset CLAUSE the class
    draft renders is computed from `AreaTrend.missedSubset` (numbers only). This
    is the "strongest form" AC-8's note points at: the class composer is not
    handed a channel a name can travel through.

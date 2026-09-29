@@ -5,7 +5,13 @@ import {
   extractTextFromBuffer,
   getFileExtension,
 } from "../office-extract";
-import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "../canvas";
+import {
+  fetchCanvasWork,
+  fetchAssignmentPointsPossible,
+  type CanvasStudentWork,
+  type DiscussionActivity,
+  type DiscussionPost,
+} from "../canvas";
 // A39 wave 4 (item #9): placed AFTER the ../canvas import above, not before
 // it - docs/a39-fill-waves.md's W1 step S0 ran this exact import both above
 // and below and measured runtime-import-graph.test.ts:703's frozen trail go
@@ -230,12 +236,139 @@ export function disambiguateCanvasEntries(
 }
 
 /**
+ * A8 wave 2 (docs/a8-architecture.md section 3, docs/a8-waves.md WAVE 2): make
+ * a contribution's `submittedFiles.name` unique against every name already
+ * used by an earlier contribution in the same entry, appending " (2)", " (3)"
+ * etc on collision - a student with two replies to the same classmate would
+ * otherwise produce two identical "Reply to X" names, which would collide
+ * FilesCell's React key (`` `${student}-file-name-${file.name}` ``,
+ * FilesCell.tsx:41).
+ */
+function uniqueContributionName(base: string, used: Set<string>): string {
+  if (!used.has(base)) {
+    used.add(base);
+    return base;
+  }
+  let n = 2;
+  while (used.has(`${base} (${n})`)) n += 1;
+  const unique = `${base} (${n})`;
+  used.add(unique);
+  return unique;
+}
+
+/**
+ * A8 wave 2 (docs/a8-architecture.md D-1 / F-1): the submittedFiles NAME must
+ * be dot-free so a dotted display name (e.g. "Dr. Alan Turing") cannot make
+ * `buildSubmittedFileNamesBlock` (prompts.ts:271-274) mistake a reply label
+ * for a real submitted file and inject a fake filename into the model's
+ * file-list block - that filter drops a name only when it contains NO ".".
+ * The `content` sections (below) keep the full display name; only this
+ * submittedFiles-facing label is stripped.
+ */
+function dotFreeContributionName(name: string): string {
+  return name.replace(/\./g, "");
+}
+
+/**
+ * A8 wave 2 (docs/a8-architecture.md section 3, the G1 choke-point fix): build
+ * a discussion contribution's `content` and `submittedFiles` from the already
+ * split `DiscussionActivity` (initialPosts vs replies) instead of the flat
+ * `work.text` concatenation, so a reply can never be represented as an
+ * initial post. `content` begins with a code-composed manifest line built
+ * from the integer counts, front-loaded so it survives `truncateSubmission`'s
+ * blind prefix slice (docs/a8-architecture.md section 3.3) even when a long
+ * initial post would otherwise crowd the reply prose out of the cap.
+ */
+function buildDiscussionEntry(discussion: DiscussionActivity): {
+  content: string;
+  submittedFiles: SubmittedFileInfo[];
+  mergedFileCount: number;
+} {
+  const initialPosts = discussion.initialPosts;
+  const replies = discussion.replies;
+  const initialCount = initialPosts.length;
+  const replyCount = replies.length;
+
+  const manifest =
+    `This submission is a discussion contribution: ${initialCount} initial post${initialCount === 1 ? "" : "s"} ` +
+    `and ${replyCount} repl${replyCount === 1 ? "y" : "ies"} to classmates. A reply is engagement with a ` +
+    `classmate, not a second initial post; evaluate each contribution for what it is.`;
+
+  const usedNames = new Set<string>();
+  const submittedFiles: SubmittedFileInfo[] = [];
+
+  function pushContribution(label: string, text: string): void {
+    const preview = toPreviewContent(text);
+    const name = dotFreeContributionName(uniqueContributionName(label, usedNames));
+    submittedFiles.push({
+      name,
+      extension: "(none)",
+      previewContent: preview.text,
+      previewTruncated: preview.truncated,
+      mimeType: "text/plain",
+    });
+  }
+
+  const initialSectionParts: string[] = ["=== INITIAL POST ==="];
+  if (initialCount === 0) {
+    initialSectionParts.push("[This student did not write an initial post.]");
+  } else {
+    initialPosts.forEach((post: DiscussionPost, index: number) => {
+      const label = index === 0 ? "Initial post" : `Initial post ${index + 1}`;
+      if (index > 0) initialSectionParts.push(`--- ${label} ---`);
+      initialSectionParts.push(post.text);
+      pushContribution(label, post.text);
+    });
+  }
+
+  const contentSections: string[] = [manifest, initialSectionParts.join("\n\n")];
+
+  if (replyCount > 0) {
+    const replySectionParts: string[] = ["=== REPLIES TO CLASSMATES ==="];
+    replies.forEach((reply: DiscussionPost) => {
+      const label = reply.parentName ? `Reply to ${reply.parentName}` : "Reply";
+      replySectionParts.push(`--- ${label} ---`);
+      replySectionParts.push(reply.text);
+      pushContribution(label, reply.text);
+    });
+    contentSections.push(replySectionParts.join("\n\n"));
+  }
+
+  return {
+    content: contentSections.join("\n\n"),
+    submittedFiles,
+    mergedFileCount: Math.max(1, initialCount + replyCount),
+  };
+}
+
+/**
  * Turn one student's Canvas work (discussion text and/or uploaded files) into a
  * gradable entry: text and extracted file text go into `content`; image files
  * are attached with rawBase64 so the vision grader sees them (the same image
  * handling the zip path uses).
  */
 export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmissionEntry> {
+  // A8 wave 2: a discussion source is built from the already-split
+  // work.discussion (initialPosts vs replies), never from the flat work.text
+  // concatenation, and returns EARLY so the work.text branch below does not
+  // also run (a discussion work sets work.text too - see
+  // docs/a8-architecture.md section 1.1/3 and docs/a8-test-notes.md REQ-1
+  // assertion 4, which pins that a double-emit never ships).
+  if (work.discussion) {
+    const { content, submittedFiles, mergedFileCount } = buildDiscussionEntry(work.discussion);
+    return {
+      student: work.student,
+      content,
+      mergedFileCount,
+      submittedFiles,
+      userId: work.userId,
+      submissionUrl: work.submissionUrl ?? null,
+      gradedRepo: null,
+      gradedRef: null,
+      repoReadNote: null,
+    };
+  }
+
   const contentParts: string[] = [];
   const submittedFiles: SubmittedFileInfo[] = [];
   let gradedRepo: string | null = null;

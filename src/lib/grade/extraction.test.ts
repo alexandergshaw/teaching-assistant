@@ -13,8 +13,10 @@ vi.mock("./repo-content", () => ({
 
 import { canvasWorkToEntry, extractSubmissions, extractStudentEntries, disambiguateCanvasEntries } from "./extraction";
 import { fetchGradableRepoContent } from "./repo-content";
-import type { CanvasStudentWork } from "../canvas/discussions";
+import type { CanvasStudentWork, DiscussionActivity, DiscussionPost } from "../canvas/discussions";
 import type { StudentSubmissionEntry } from "./types";
+import { truncateSubmission } from "./utils";
+import { buildSubmittedFileNamesBlock } from "./prompts";
 import JSZip from "jszip";
 
 const mockFetchGradableRepoContent = vi.mocked(fetchGradableRepoContent);
@@ -302,6 +304,181 @@ describe("extractSubmissions - zipParents (A14)", () => {
 // alone (with a hand-built zipParents literal) - this is the one test proving
 // the two are actually glued together correctly on real archive bytes. It
 // passes today (executed per the ruling); this pins it so it stays passing.
+// A8 wave 2 (docs/a8-architecture.md, docs/a8-test-notes.md REQ-1/2/3/5/7):
+// canvasWorkToEntry's discussion branch builds content/submittedFiles from
+// work.discussion (initialPosts vs replies) instead of the flat work.text
+// concatenation, so a reply can never be represented as an initial post.
+// Fixtures are named FIX-A..FIX-G to match docs/a8-test-notes.md section 2.
+describe("canvasWorkToEntry - discussion recognition (A8 wave 2)", () => {
+  function initialPost(text: string): DiscussionPost {
+    return { text, createdAt: null, isReply: false, parentUserId: null };
+  }
+
+  function reply(text: string, parentName?: string): DiscussionPost {
+    return {
+      text,
+      createdAt: null,
+      isReply: true,
+      parentUserId: parentName ? 1 : null,
+      parentName,
+    };
+  }
+
+  function discussionWork(
+    discussion: DiscussionActivity,
+    overrides?: Partial<CanvasStudentWork>
+  ): CanvasStudentWork {
+    // work.text mirrors what fetchDiscussion really produces
+    // (discussions.ts:154-156) so REQ-1's "no Discussion post pseudo-file"
+    // assertion is meaningful: on HEAD (no discussion branch) this fixture
+    // would take the work.text path and emit a "Discussion post" file.
+    const flatText = [...discussion.initialPosts, ...discussion.replies]
+      .map((p) => `${p.isReply ? "Reply" : "Post"}: ${p.text}`)
+      .join("\n\n---\n\n");
+    return {
+      student: "Test Student",
+      userId: 42,
+      text: flatText,
+      files: [],
+      contributionCount: discussion.initialPosts.length + discussion.replies.length,
+      discussion,
+      ...overrides,
+    };
+  }
+
+  // FIX-A: one initial post, one reply.
+  const FIX_A: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha")],
+    replies: [reply("REPLYSENTINEL_bravo", "Alice Adams")],
+  });
+
+  // FIX-B: 1 initial / 2 replies (REQ-2 fixture a).
+  const FIX_B: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha")],
+    replies: [
+      reply("REPLYSENTINEL_bravo", "Alice Adams"),
+      reply("REPLYSENTINEL_charlie", "Alice Adams"),
+    ],
+  });
+
+  // FIX-C: 2 initial / 1 reply - the anti-vacuity twin (REQ-2 fixture b).
+  const FIX_C: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha"), initialPost("INITIALSENTINEL_delta")],
+    replies: [reply("REPLYSENTINEL_bravo", "Alice Adams")],
+  });
+
+  // FIX-D: huge initial post, one reply - drives truncation survival (REQ-3).
+  const FIX_D: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha" + "x".repeat(50000))],
+    replies: [reply("REPLYSENTINEL_bravo", "Alice Adams")],
+  });
+
+  // FIX-E: replies but no initial post (REQ-5).
+  const FIX_E: CanvasStudentWork = discussionWork({
+    initialPosts: [],
+    replies: [reply("REPLYSENTINEL_bravo", "Alice Adams")],
+  });
+
+  // FIX-F: initial post but no replies (REQ-5).
+  const FIX_F: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha")],
+    replies: [],
+  });
+
+  // FIX-G: adversarial - a parentName containing a period (REQ-7, F-1).
+  const FIX_G: CanvasStudentWork = discussionWork({
+    initialPosts: [initialPost("INITIALSENTINEL_alpha")],
+    replies: [reply("REPLYSENTINEL_bravo", "Dr. Alan Turing")],
+  });
+
+  // --- REQ-1 (AC-1): the entry carries the initial/reply distinction as files
+  it("REQ-1: submittedFiles distinguishes the initial post from the reply, with no generic Discussion post pseudo-file", async () => {
+    const entry = await canvasWorkToEntry(FIX_A);
+
+    expect(entry.submittedFiles.filter((f) => /^initial post/i.test(f.name))).toHaveLength(1);
+    expect(entry.submittedFiles.some((f) => /^repl/i.test(f.name))).toBe(true);
+    const initialName = entry.submittedFiles.find((f) => /^initial post/i.test(f.name))?.name;
+    const replyName = entry.submittedFiles.find((f) => /^repl/i.test(f.name))?.name;
+    expect(initialName).not.toBe(replyName);
+    // Proves the discussion branch REPLACED the work.text branch (both did
+    // not run) - the double-emit self-attack docs/a8-test-notes.md warns of.
+    expect(entry.submittedFiles.some((f) => f.name === "Discussion post")).toBe(false);
+  });
+
+  // --- REQ-2 (AC-2): the front-loaded manifest states the counts, on TWO
+  // count-shape fixtures (the anti-vacuity guard against a hardcoded string)
+  it("REQ-2: the manifest states the initial-post and reply counts (fixture a: 1 initial / 2 replies)", async () => {
+    const entry = await canvasWorkToEntry(FIX_B);
+    const manifest = entry.content.split("\n\n")[0];
+    expect(manifest).toMatch(/1\s+initial post/i);
+    expect(manifest).toMatch(/2\s+repl(y|ies)/i);
+  });
+
+  it("REQ-2: the manifest states the initial-post and reply counts (fixture b: 2 initial / 1 reply, the anti-vacuity twin)", async () => {
+    const entry = await canvasWorkToEntry(FIX_C);
+    const manifest = entry.content.split("\n\n")[0];
+    expect(manifest).toMatch(/2\s+initial post/i);
+    expect(manifest).toMatch(/1\s+repl(y|ies)/i);
+  });
+
+  // --- REQ-3 (AC-2, the load-bearing oracle): the distinction survives a
+  // prefix slice through the REAL production truncateSubmission.
+  describe("REQ-3: truncation survival", () => {
+    it("keeps the reply-count distinction (and the initial-post marker) after a small-cap truncation that cuts the reply prose", async () => {
+      const entry = await canvasWorkToEntry(FIX_D);
+      const cap = 2000;
+      const result = truncateSubmission(entry.content, cap);
+
+      expect(result.truncated).toBe(true);
+      expect(result.text).toMatch(/1\s+repl(y|ies)/i);
+      expect(result.text).toMatch(/initial/i);
+      // The reply prose itself (past 50000 chars) is expected absent at this
+      // cap - AC-2 requires the DISTINCTION to survive, not the prose.
+      expect(result.text).not.toContain("REPLYSENTINEL_bravo");
+    });
+
+    it("keeps the full reply prose at the realistic (untruncated) cap", async () => {
+      const entry = await canvasWorkToEntry(FIX_D);
+      const cap = 400000;
+      const result = truncateSubmission(entry.content, cap);
+
+      expect(result.truncated).toBe(false);
+      expect(result.text).toContain("REPLYSENTINEL_bravo");
+    });
+  });
+
+  // --- REQ-5 (AC-4): two distinct empty states
+  it("REQ-5: replies-but-no-initial-post reads differently from initial-post-but-no-replies", async () => {
+    const noInitial = await canvasWorkToEntry(FIX_E);
+    const noReplies = await canvasWorkToEntry(FIX_F);
+
+    expect(noInitial.content).toMatch(/no initial post|did not (write|post)[\s\S]{0,40}initial/i);
+    expect(noReplies.content).not.toMatch(/no initial post|did not (write|post)[\s\S]{0,40}initial/i);
+    expect(noInitial.submittedFiles.some((f) => /^initial post/i.test(f.name))).toBe(false);
+    expect(noReplies.submittedFiles.some((f) => /^repl/i.test(f.name))).toBe(false);
+    expect(noInitial.content).not.toBe(noReplies.content);
+  });
+
+  // --- REQ-7 (regression guard, F-1): contribution labels must not leak into
+  // the model's file-list block - and a dotted parentName is the adversarial
+  // case that breaks a naive `"Reply to " + parentName` build.
+  describe("REQ-7: no contribution label leaks into buildSubmittedFileNamesBlock", () => {
+    it("fixture (a): dot-free labels do not appear in the model file-list block", async () => {
+      const entry = await canvasWorkToEntry(FIX_A);
+      const block = buildSubmittedFileNamesBlock(entry.submittedFiles);
+      expect(block).not.toContain("Initial post");
+      expect(block).not.toContain("Reply to Alice Adams");
+    });
+
+    it("fixture (b), ADVERSARIAL: a parentName containing a period ('Dr. Alan Turing') must not leak either", async () => {
+      const entry = await canvasWorkToEntry(FIX_G);
+      const block = buildSubmittedFileNamesBlock(entry.submittedFiles);
+      expect(block).not.toContain("Reply to Dr");
+      expect(block).not.toContain("Turing");
+    });
+  });
+});
+
 describe("extractStudentEntries - end to end through a real nested JSZip (A14 rulings v2 CONDITION 2)", () => {
   it("groups two students' per-student zips into two separate entries, not one merged row", async () => {
     const janeInner = new JSZip();

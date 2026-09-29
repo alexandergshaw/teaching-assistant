@@ -242,7 +242,7 @@ export default function GradingTab({
     // itself: that object changes on every arrival, and firing on each one
     // would scroll-jack the reader (architecture 10, M6).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runResetKey(runKey, displayRun)]);
+  }, [runResetKey(runKey, displayRun), incrementalDone > 0]);
 
   const handleAssignmentInstructionsChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,

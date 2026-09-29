@@ -472,3 +472,28 @@ describe("F25 (architecture 10, M6): the scroll effect fires at most once per ru
     expect(deps).not.toMatch(/\[\s*state\.run\s*\]/);
   });
 });
+
+describe("AC-1 (RES-FILL-13): the scroll effect's dependency gained a first-arrival signal", () => {
+  it("the dependency array's WIDER slice (through the array's closing ]) differs from the frozen no-op literal, keeps runResetKey(, references a first-arrival signal, and is not a bare [displayRun]", () => {
+    // Wider than F25's slice on purpose: F25's depsEnd stops at the FIRST ")"
+    // (the one that closes runResetKey(...)), which truncates before any
+    // appended term. This slice reaches the array's closing "]" so it can see
+    // whatever was appended after runResetKey(runKey, displayRun).
+    const FROZEN_TODAY = "[runResetKey(runKey, displayRun)]";
+    const idxScroll = gtSource.indexOf("scrollIntoView(");
+    const arrOpen = gtSource.indexOf("}, [", idxScroll);
+    const arrClose = gtSource.indexOf("]", arrOpen);
+
+    expect(idxScroll).toBeGreaterThanOrEqual(0);
+    expect(arrOpen).toBeGreaterThan(idxScroll);
+    expect(arrClose).toBeGreaterThan(arrOpen);
+
+    const depArr = gtSource.slice(arrOpen + 3, arrClose + 1);
+    expect(depArr.length).toBeLessThan(200);
+
+    expect(depArr).not.toBe(FROZEN_TODAY);
+    expect(depArr).toContain("runResetKey(");
+    expect(depArr).toMatch(/incrementalDone|incrementalRun/);
+    expect(depArr).not.toMatch(/\[\s*displayRun\s*\]/);
+  });
+});

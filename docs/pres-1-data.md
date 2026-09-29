@@ -452,11 +452,15 @@ seat's call to make regardless.
 accessor `src/lib/presentation-drafts.ts`). User-scoped, no `course_id` at
 all - a real structural fit on that axis. But it is shaped for exactly one
 thing: a single deck payload (`payload jsonb` = `{ presentationTitle,
-slides, templateName?, subject?, theme? }`, migration `:11`), one row per
-explicit "Save as draft" click
-(`createPresentationDraft`, `presentation-drafts.ts:146-171`, called from
-`ppt-design`'s `handleSaveDraft`, `ppt-design/index.tsx:592`). It has no
-`kind` column and no versioning - it cannot hold an outline, an activities
+slides, templateName?, subject?, theme? }`, migration `:11`). CORRECTION
+(round-1 check BLOCKER-1, verified from the tree): this table is DORMANT with
+ZERO callers - `createPresentationDraft`'s only caller is `media.ts:46`, never
+ppt-design; ppt-design's `handleSaveDraft` (`index.tsx:592-620`) actually calls
+`savePresentationFileAction` (`:596`, "Saved to Files"), and both the
+generated_artifacts migration header (`20261004000000...:15-16`) and
+REGRESSION.md:2360 record presentation_drafts as dormant. The row's own migration
+comment claiming the button writes here is STALE. This does NOT change the verdict:
+the table is single-deck `payload jsonb`, has no `kind` column and no versioning - it cannot hold an outline, an activities
 list, or a critique without either overloading `payload` with an ad hoc
 shape the table's own header comment does not describe, or adding columns to
 a table whose current single caller does not need them.
@@ -710,6 +714,7 @@ kept/handed-over/withdrawn.
 |---|---|---|---|---|
 | R-D1 | The persist-server-vs-client-only fork (section 3.2). Recommendation given (client-only this round); not gated on. If the owner wants generated artifacts durable across reloads or visible in the Files tab automatically, section 4 is the ready shape. | Owner (product decision), then architect (wiring) if the answer is "persist it" | Owner answers the fork; if yes, the migration in section 4 (or a revised version of it) plus the accessor/mapper the architect scopes | Escalated alongside this document's check, per the "never stall" rule's own instruction to recommend and start rather than gate; not this seat's to start (data-shape pass only, no production code) |
 | R-D2 | AC's reuse note cites `savePresentationFileAction` (`media.ts:590`) for "persist-to-Files," but `ppt-design`'s actual Save-to-Files button calls `saveRecordingFile` directly with `origin: "manual"` (`index.tsx:565-590`); reusing `savePresentationFileAction` verbatim would mislabel every save as `source: "workflow"` / `origin: "unattended"`. | Architect (if a Save-to-Files affordance is built for PRES-1 at all) | Reading review of whichever save path the architect specifies, against `index.tsx:565-590` | Architect pass |
+| R-D2b (round-1 check X2) | CROSS-PASS DIVERGENCE: the architecture pass reuses `savePresentationFileAction` for its persist button (architecture.md:65,462) - the exact mislabel above. NOTE: ppt-design has TWO conflicting attended save paths (handleSaveToFiles origin:manual at index.tsx:575-583, AND handleSaveDraft calling savePresentationFileAction origin:unattended at :596), with REGRESSION.md:2351-2360 documenting the draft button was routed through the unattended action. MOOT for round 1 under R-D1 (client-session-only, no server persist built); IF server persistence is later added, the manual-save target is saveRecordingFile origin:manual. | Architect (reconcile at the architecture check) | architecture.md:65,462 vs media.ts:628-629 vs index.tsx:575-583 | Architecture check |
 | R-D3 | AC-4's shape residual (3-5 activity ideas is owner-verification only) - carried over from the AC document's own R-3, not duplicated in substance, only cross-referenced so this document's type (`PresentationActivities.ideas: string[]`, no length constraint) is traceable to why. | Owner | Run the deployed feature | Post-deploy owner verification (unchanged from AC document) |
 | R-D6 | `SlideData` (`actions-types.ts:6-22`) is a near-duplicate of `PptxSlide` from a different pipeline (`lms-generation/deck.ts`); an implementer reaching for it "because the shape matches" would be importing the wrong pipeline for PRES-1 (R-2 scopes reuse to `decks/`/`pptx.ts`, not `lms-generation/`). | Implementer brief author (architect/plan) | Import-source-text check that the Presentations module never imports from `@/lib/lms-generation/deck` or `@/app/actions-types`'s `SlideData` | Architect pass / implementer assignment |
 | R-D7 | How `pastedText` and `fileMaterials` (section 1.6) combine into one generation prompt (order, separator, shared vs. split character budget) is a mechanism decision, not a data-shape one. | Architect | Design review of the prompt-assembly function once written | Architect pass |

@@ -45676,3 +45676,222 @@ the next time the file is appended to.
 | R6 - small-class disclosure floor (a class of 3 where all 3 missed points is attributable by elimination even with the name-free clause) | repo owner | `docs/n13b-security.md:375-378,456,527` | Owner product decision on whether/where to set a floor; no code change until then |
 | Whether the compile-time `Omit<ClassTrendsReport,"instructorAttribution">` boundary (composeClassTrendsDraft's first param) actually rejects a name-reading edit was reported sabotage-verified (R-T2) in the wave's own checked test notes, not independently re-proven in this regression pass | next seat touching `class-trends-draft.ts`'s signature | introduce a temporary `report.instructorAttribution` read inside that file and confirm `tsc --noEmit` fails, then revert | Before any future edit narrows or removes the `Omit<...>` on that parameter |
 | The real on-screen rendering of `ClassTrendsStudentListPanel.tsx` (button placement, focus order, ARIA, and whether its list is visually distinct from the class draft) is unmeasurable here | owner (no component renders under this repo's vitest, `docs/loop/this-repo.md` section 6) | manual click-through of an expanded trends block on a graded run with 3+ students missing the same area | Owner walk-through, same unresolved class of gap entries 422e/423f/441e already named |
+
+## 443. Area baseline - discussion grading on the live-Canvas AI path (Route A), before A8
+
+Written BEFORE hand-off for backlog item A8 (`docs/BACKLOG.md:112`, "Discussion
+replies graded as independent posts" - owner decision 2026-09-15: replies must be
+scored separately, against different criteria, from a student's initial post),
+per `docs/DEV_LOOP.md`'s baseline paragraph and `docs/loop/seats.md`'s baseline
+section. This entry records what the code DOES today on Route A, read out of the
+source. It is an oracle, not a requirement: if A8 changes a line below that it
+was not filed to change, that is a regression. It baselines CURRENT behavior
+only - it does not describe any of A8's designed-but-not-yet-built behavior from
+`docs/a8-architecture.md` or `docs/a8-scope.md`.
+
+**Read at commit `81909442`** (`git rev-parse --short HEAD`). **This entry is
+docs-only**; `git status --short` at the time of writing shows eight modified
+files, all from a concurrent A42 implementer, and none of them under
+`src/lib/grade/`, `src/lib/canvas/`, or `docs/`:
+`docs/css-orphans.md`,
+`src/app/components/autoGradeTransition.wiring.test.ts`,
+`src/app/components/courses/page-module-css-classes.test.ts`,
+`src/app/components/courses/page-module-css-orphan-classes.test.ts`,
+`src/app/components/grading-recording/submission-kind-callsites.structure.test.ts`,
+`src/app/components/ui/buttonVariant.test.ts`,
+`src/app/components/ui/confirmArmButtons.test.ts`,
+`src/tools/strip-comments-agreement.structure.test.ts`. None of the five files
+this entry cites (`src/lib/grade/extraction.ts`, `src/lib/canvas/discussions.ts`,
+`src/lib/canvas/work.ts`, `src/lib/grade/prompts.ts`, `src/lib/grade/engine.ts`)
+appear in that list (confirmed with `git status --short -- <those five paths>`,
+which returned nothing), so nothing below was read off a mid-edit file. This
+baseline was produced by READING source and by `grep`-ing it; **no test in this
+repo was run or modified to produce it**, and no production or test code was
+touched - this entry's only diff is to `docs/REGRESSION.md`.
+
+### The coverage check
+
+Measured with `grep -ac -- "<term>" docs/REGRESSION.md` against this file as it
+stood at **45,678 lines** (`@(Get-Content docs/REGRESSION.md).Count` in
+PowerShell) before this entry was appended. `grep -a` is mandatory on this file
+per `docs/loop/this-repo.md` section 4 and the file's own prior entries (e.g.
+428) - plain `grep` can misclassify it as binary:
+
+| term | matching lines before this entry |
+|---|---|
+| `canvasWorkToEntry` | 2 (entries 98 and 125 - the GitHub-URL-submission defects; neither mentions discussions) |
+| `buildSubmittedFileNamesBlock` | 2 (both inside entry 371 - the filename-requirement fix; see below for why entry 371 is a partial, not a duplicate) |
+| `fetchDiscussion` | **0** |
+| `DiscussionActivity` | **0** |
+| `contributionCount` | **0** |
+| `work.discussion` | **0** |
+| `gradeCanvasUrl` | **0** |
+| `Route A` | **0** |
+
+So the accurate statement is: **no entry in this file baselines discussion
+grading on Route A.** Entries 98 and 125 baseline `canvasWorkToEntry`'s
+GitHub-URL-submission handling (a different branch of the same function, unaffected
+by anything below); entry 371 documents `buildSubmittedFileNamesBlock`'s general
+pseudo-entry filter (fact reused, not re-derived, in point 3 below); entries
+367-372 (`:35920` on) baseline a *different* discussion feature entirely - the
+screenshot-based discussion-capture-and-draft-reply tool
+(`discussion-capture.ts`, `discussion-draft-loop.ts`), which has its own
+extraction path and does not touch `canvasWorkToEntry`, `fetchDiscussion`, or
+Route A. A later pass must not treat 367-372 as covering this area.
+
+### File sizes on the path
+
+`@(@Get-Content <path>).Count` via PowerShell, at `81909442`: `src/lib/grade/extraction.ts`
+372, `src/lib/canvas/discussions.ts` 158, `src/lib/canvas/work.ts` 34,
+`src/lib/grade/prompts.ts` 415, `src/lib/grade/engine.ts` 487. All well under the
+repo-wide 1000-line ceiling (`src/file-size-ceiling.structure.test.ts`).
+
+### 443a - the path, hop by hop, as the code runs it
+
+1. **Entry point.** `gradeCanvasUrl` (`src/lib/grade/engine.ts:446-487`) is the
+   default/Gemini AI grading path for a Canvas URL (Route A). It calls
+   `fetchCanvasWork` (`engine.ts:454`, imported from `../canvas`), then loops
+   `for (const work of students) entries.push(await canvasWorkToEntry(work))`
+   (`engine.ts:472`) before handing the built `StudentSubmissionEntry[]` to
+   `gradeStudentEntries` (`engine.ts:475-482`).
+2. **`fetchCanvasWork`** (`src/lib/canvas/work.ts:15-34`) auto-detects the URL
+   kind. For a discussion URL (`parsed.kind === "discussion"`, `:27`) it calls
+   `fetchDiscussion(baseUrl, token, institution, parsed.courseId, parsed.id)`
+   (`work.ts:28`) and returns its `students` untouched.
+3. **`fetchDiscussion`** (`src/lib/canvas/discussions.ts:122-158`) hits Canvas's
+   `/discussion_topics/:id/view` endpoint, walks the reply tree via
+   `extractDiscussionActivity` (`discussions.ts:44-82`), and for each
+   participating user builds one `CanvasStudentWork` (`discussions.ts:106-120`):
+   - `text` (`discussions.ts:144-146`) is every post/reply, ordered initial-posts-
+     then-replies, joined with `"\n\n---\n\n"`, each one prefixed
+     `` `${post.isReply ? "Reply" : "Post"}: ${post.text}` ``. This is the ONLY
+     signal that an initial post and a reply differ, and it is a plain string
+     inside `text` - not a separate field.
+   - `discussion` (`discussions.ts:153`) carries the full structured
+     `DiscussionActivity` (`discussions.ts:20-23`: `{ initialPosts:
+     DiscussionPost[], replies: DiscussionPost[] }`, each `DiscussionPost`
+     carrying `text`, `createdAt`, `isReply`, and `parentUserId` -
+     `discussions.ts:9-17`) - so the initial-post/reply distinction, and who a
+     reply targeted, IS available in structured form at this point.
+   - `contributionCount` (`discussions.ts:152`) is
+     `activity.initialPosts.length + activity.replies.length` - **one combined
+     number**, posts and replies summed, per student per topic.
+4. **`canvasWorkToEntry`** (`src/lib/grade/extraction.ts:238-370`) is the single
+   function through which every `CanvasStudentWork` becomes a gradable
+   `StudentSubmissionEntry`, for both Route A's discussion path and its
+   assignment path (`docs/a8-scope.md:83-95` independently traces the same
+   choke point). For a discussion `work` object (`work.files` is empty per
+   `discussions.ts:112`'s own comment, so the file-processing loop at
+   `extraction.ts:311-358` never runs):
+   - **Only `work.text` is read.** `if (work.text)` (`extraction.ts:245`) pushes
+     the whole combined string onto `contentParts` and adds one
+     `submittedFiles` pseudo-entry (`extraction.ts:248-254`) named
+     `"Discussion post"` when `work.files.length === 0` (the discussion case;
+     `"Submission text"` otherwise), extension `"txt"`.
+   - **`work.discussion` is never read.** Confirmed with
+     `grep -n "\.discussion" src/lib/grade/extraction.ts`, which returns no
+     hits (exit code 1, checked directly). The structured `initialPosts`/
+     `replies`/`isReply`/`parentUserId` data built in step 3 is discarded at
+     this line - it never reaches the model.
+   - **`work.contributionCount` is never read either**, and the returned
+     `StudentSubmissionEntry` (`extraction.ts:360-369`) has no
+     `contributionCount` field to put it in -
+     `StudentSubmissionEntry` (`src/lib/grade/types.ts:423-443`) declares
+     `student`, `content`, `mergedFileCount`, `submittedFiles`, `userId`,
+     `codeRun`, `submissionUrl`, `gradedRepo`, `gradedRef`, `repoReadNote` and
+     nothing that carries a post/reply count. The combined number computed in
+     step 3 is silently dropped a second time, independent of the `.discussion`
+     drop.
+   - **Net effect on a discussion submission**: every contribution a student
+     made to a topic - their introduction and any replies to classmates -
+     collapses into one `content` string and one `submittedFiles` entry labelled
+     "Discussion post", with no field anywhere on the entry distinguishing an
+     initial post from a reply, or naming who a reply was addressed to. This is
+     the exact shape of the owner's 2026-09-15 report at `docs/BACKLOG.md:112`.
+5. **The filename-requirement filter** (unrelated mechanism sharing the same
+   entry object, baselined here because A8's F-1 finding touches it): the
+   `"Discussion post"` pseudo-entry above is one of the three placeholder names
+   `buildSubmittedFileNamesBlock` (`src/lib/grade/prompts.ts:270-283`) filters
+   out via `.filter((name) => name.includes("."))` (`prompts.ts:273`), because
+   `getBaseFileName("Discussion post")` contains no `.`. This is already
+   pinned by an existing test (`src/lib/grade/prompts.test.ts:72-80`,
+   "filters out non-file pseudo-entries (Discussion post / Submission text /
+   Submission link) that carry no extension"), part of the 6-test
+   `describe("buildSubmittedFileNamesBlock", ...)` block at
+   `prompts.test.ts:42-95`. **The invariant this baseline freezes**: a
+   discussion `work.text` submission must keep producing a pseudo-entry name
+   with no `"."` in it (today, literally `"Discussion post"`), or this filter
+   silently stops being inert for discussions and `buildSubmittedFileNamesBlock`
+   starts emitting a phantom "SUBMITTED FILES" line for a text-only discussion
+   post. A8's F-1 fix must preserve this, whatever label(s) it substitutes.
+6. **No unit test exercises steps 3-4's discussion-specific behavior.**
+   `src/lib/grade/extraction.test.ts` imports the `CanvasStudentWork` type
+   (`extraction.test.ts:16`) but contains no test that constructs a `work`
+   object with a `discussion` or `contributionCount` field, or asserts
+   anything about discussion text framing (`grep -n
+   "discussion\|Discussion" src/lib/grade/extraction.test.ts` returns only the
+   type import, checked directly). There is also no `discussions.test.ts` file
+   under `src/lib/canvas/` (`ls src/lib/canvas/discussions.test.ts` errors "No
+   such file or directory", checked directly): `fetchDiscussion`,
+   `extractDiscussionActivity`, the `"Reply:"/"Post:"` prefix, and
+   `contributionCount`'s summing have zero test coverage in this repo today.
+   This baseline is therefore a READING oracle, not a test-run oracle, for
+   points 1-4 and 6; only point 5's claim (the pseudo-entry filter) is backed
+   by an existing, named test.
+
+### 443b - the route boundary, so a later pass does not over-apply this baseline
+
+- **This entry covers Route A only** (`gradeCanvasUrl`, provider neither
+  `"other"` nor `"embedded"`, `src/app/actions/grading.ts:816-825` area). It does
+  **not** cover the separate embedded/deterministic-engine discussion path:
+  when `provider === "embedded"` and the URL is a discussion,
+  `src/app/actions/grading.ts:769-786` routes to `buildDiscussionRubric`/
+  `gradeDiscussion` and reads `s.discussion` directly
+  (`grading.ts:778-780`, `.filter((s) => s.discussion).map((s) => ({ ...,
+  activity: s.discussion! }))`) - that route is **already reply-aware** and
+  is explicitly out of A8's scope per `docs/a8-architecture.md:130` ("Already
+  reply-aware and out of Route A's blast radius... Owner ruled the provider
+  choice stays authoritative - do NOT route Route A through it"). Nothing in
+  this entry asserts anything about that code path's behavior beyond the one
+  citation above, confirmed by direct read.
+- **Not covered**: the "other" (Deterministic Grading API / zip) provider's
+  Canvas-URL path (`canvasWorkToZipBase64`,
+  `src/lib/canvas/submissions.ts:166-188`) and `gradeOneSubmissionAction`
+  (`src/app/actions/grading.ts:601-652`, which never calls `fetchDiscussion` at
+  all). Both are out of this baseline's scope; `docs/a8-scope.md`'s own
+  Route B/C/D trace (`:83-140` area) covers them if a later pass needs them -
+  that trace was read for cross-checking only, every fact this entry asserts
+  was independently re-derived from source as cited above, not copied from it.
+
+### Gates
+
+This entry adds no test and changes no source; the only gate applicable to it is
+this file's own cleanliness. `npm run test:paths -- src/lib/no-emojis.test.ts
+src/source-bytes.structure.test.ts` (run before this entry was appended): **2
+files, 21 tests, all passing** (18 in `no-emojis.test.ts`, 3 in
+`source-bytes.structure.test.ts`). Re-run after appending, plus a direct Python
+byte scan of `docs/REGRESSION.md` for a UTF-8 BOM (`\xef\xbb\xbf`), `\r`, and
+`\x00`, both reported in this session's closing summary rather than duplicated
+here (per entry 442d's convention), so this entry does not go stale the next
+time the file is appended to. Before this entry, the same Python byte scan
+found: length 2,940,524 bytes, NUL count 0, CR count 0, no BOM.
+
+### Limits and residual register
+
+- **This is a reading oracle, not a runtime oracle.** No component renders
+  under this repo's vitest (`docs/loop/this-repo.md` section 6) and no live
+  Canvas call was made - every claim above was verified by opening the cited
+  file at the cited line, or by a `grep`/`ls` command reproduced inline, never
+  by running the discussion path end to end.
+- **`contributionCount`'s downstream use, if any, beyond Route A was not
+  traced.** `src/app/actions/grading.ts:620` constructs an unrelated
+  `contributionCount: Math.max(1, ...)` for a different code path
+  (`gradeOneSubmissionAction`'s single-submission `CanvasStudentWork`); this
+  baseline does not assert anything about that call site beyond noting it
+  exists, since it is outside Route A.
+
+| Residual | Owner | Instrument | Step that measures it |
+|---|---|---|---|
+| Whether A8's fix, once built, actually changes model-visible grading output for a real discussion (versus only the `content`/`submittedFiles` shape asserted here) | A8 implementer + owner | A live Canvas discussion URL graded through Route A, before/after | Owner-run comparison after A8 ships; unreachable from this repo per `docs/loop/this-repo.md` section 6 (no live Canvas, no API keys) |
+| `fetchDiscussion`/`extractDiscussionActivity`'s zero test coverage (443a point 6) is a pre-existing gap this baseline surfaces but does not close | next seat that touches `src/lib/canvas/discussions.ts` | `grep -n "discussion" src/lib/canvas/*.test.ts` (currently no matching file) | A8's own test-notes pass, if it adds coverage there, or a follow-up backlog row if it does not |
+| The embedded-engine discussion route's (`gradeDiscussion`) actual reply-scoring behavior was cited (443b) but not independently re-verified line-by-line the way Route A was, since it is out of scope for A8 | whichever seat next scopes work touching `src/lib/embedded-grader/discussion.ts` | direct read of that file, same method as this entry | Before any change that would route Route A traffic through it, per the owner ruling in `docs/a8-architecture.md:130` |

@@ -23,7 +23,7 @@ import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
-import { buildSubmittedFileNamesBlock } from "./prompts";
+import { buildSubmittedFileNamesBlock, SUBMISSION_FRAMING_HEADER } from "./prompts";
 // A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
 // that used to be inline here is now a PURE projection (reconcile.ts),
 // called once after the loop closes - this is a call, not the logic itself.
@@ -75,7 +75,7 @@ async function gradeSubmission(
 
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${content}${imageNote}${codeNote}`,
+      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}`,
     },
     ...imageFiles.map((f) => ({
       inlineData: { mimeType: f.mimeType, data: f.base64 },

@@ -27,6 +27,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { callLlm, type LlmResult } from "@/lib/llm";
 import { gradeCapturedSubmissionsAction } from "./grading-submission-grade";
 import { SUBMISSION_KIND_PROMPT_LABELS } from "@/lib/grade/submission-kind";
+import { SUBMISSION_FRAMING_HEADER } from "@/lib/grade/prompts";
 import { UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
@@ -393,7 +394,7 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
     return "text" in part ? part.text : "";
   }
 
-  it('a row confirmed as "reply" composes a request body with "Reply:", never "Submission:"', async () => {
+  it('a row confirmed as "reply" composes a request body with "Reply:", never "Submission:" (now also carrying SUBMISSION_FRAMING_HEADER ahead of the text - SEC-GC-1a)', async () => {
     vi.mocked(callLlm).mockResolvedValueOnce(gradeResponse("Fine.", "", "10/10"));
 
     await gradeCapturedSubmissionsAction(
@@ -404,7 +405,7 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
     );
 
     const prompt = promptTextOf(0);
-    expect(prompt).toContain("\n\nReply:\ntext");
+    expect(prompt).toContain(`\n\nReply:\n${SUBMISSION_FRAMING_HEADER}\n\ntext`);
     expect(prompt).not.toContain("\n\nSubmission:\n");
   });
 
@@ -426,7 +427,7 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
 
     const prompt = promptTextOf(0);
     expect(prompt).not.toContain("\n\nSubmission:\n");
-    expect(prompt).toContain(`\n\n${SUBMISSION_KIND_PROMPT_LABELS.unknown}:\ntext`);
+    expect(prompt).toContain(`\n\n${SUBMISSION_KIND_PROMPT_LABELS.unknown}:\n${SUBMISSION_FRAMING_HEADER}\n\ntext`);
     expect(SUBMISSION_KIND_PROMPT_LABELS.unknown.toLowerCase()).toMatch(/unknown|not identified/);
   });
 
@@ -445,7 +446,7 @@ describe("gradeCapturedSubmissionsAction - A8-R T11: submissionKind reaches the 
       "gemini"
     );
 
-    expect(promptTextOf(0)).toContain("\n\nInitial post:\ntext-a");
-    expect(promptTextOf(1)).toContain("\n\nReply:\ntext-b");
+    expect(promptTextOf(0)).toContain(`\n\nInitial post:\n${SUBMISSION_FRAMING_HEADER}\n\ntext-a`);
+    expect(promptTextOf(1)).toContain(`\n\nReply:\n${SUBMISSION_FRAMING_HEADER}\n\ntext-b`);
   });
 });

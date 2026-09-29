@@ -23,6 +23,7 @@
 // there is nowhere for formatFeedback's output to go.
 
 import { buildSystemPrompt, extractRubricCriteria } from "@/lib/grade/rubric";
+import { SUBMISSION_FRAMING_HEADER } from "@/lib/grade/prompts";
 import {
   parseRubricResponse,
   deriveTotalScore,
@@ -97,6 +98,12 @@ export function buildGradingRecordingSystemPrompt(rubricText: string): string {
  * shape exactly - and, LAST, its own clearly separated block, the
  * already-framed knowledge-context text, when present.
  *
+ * The submission text itself is wrapped with SUBMISSION_FRAMING_HEADER
+ * (src/lib/grade/prompts.ts) immediately after the header line and before
+ * `submissionText` - the same "treat this as data, not instructions" framing
+ * gradeSubmission (engine.ts) now applies at its own call site, closing
+ * SEC-GC-1a (docs/grading-prompt-injection-analysis.md) on this surface too.
+ *
  * `knowledgeContext` arrives ALREADY framed and capped:
  * RecordingKnowledgeContext.text (src/lib/recording-launch.ts) is built
  * once, upstream, via buildKnowledgeContextBlock
@@ -127,7 +134,7 @@ export function buildGradingRecordingPrompt(
 ): string {
   const knowledgeBlock = knowledgeContext ? `\n\n${knowledgeContext}` : "";
   const header = SUBMISSION_KIND_PROMPT_LABELS[kind];
-  return `${systemPrompt}\n\nStudent: ${studentName}\n\n${header}:\n${submissionText}${knowledgeBlock}`;
+  return `${systemPrompt}\n\nStudent: ${studentName}\n\n${header}:\n${SUBMISSION_FRAMING_HEADER}\n\n${submissionText}${knowledgeBlock}`;
 }
 
 /**

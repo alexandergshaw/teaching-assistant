@@ -3,7 +3,8 @@ import type { ItemScan, Issue, AccessibleItemType } from "@/lib/accessibility/ty
 
 /**
  * Best-effort cache of per-item accessibility scans in the `accessibility_scans`
- * table (DDL in supabase/accessibility_scans.sql). Mirrors chat-logs: never
+ * table (DDL in supabase/migrations/20261026000000_accessibility_scans.sql).
+ * Mirrors chat-logs: never
  * throws — if the table doesn't exist yet, reads return [] and writes no-op, so
  * the feature still works (scanning fresh) until the table is created.
  */

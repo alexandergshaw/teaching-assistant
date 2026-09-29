@@ -291,6 +291,25 @@ occurrence of `SEED` in any free-text input:
   denylist" mutant (SAB-5). Group A alone hand-builds `knownIdentifiers` and so
   is BLIND to a dead collector.
 
+**W1-9 - a CASE-MISMATCHED identifier is still suppressed (fail-open guard,
+promoted from residual R-CASEFOLD by the round-1 check).**
+- Object: the class-addressed Markdown from `composeClassTrendsDraft` when a
+  free-text input carries the run's identifier in DIFFERENT casing than
+  `report.knownIdentifiers` holds, versus `SEED`.
+- Instrument: a variant of W1-1/W1-3 driven through `composeClassTrendsDraft`
+  with `report.knownIdentifiers = [SEED]` (canonical casing) but the free text
+  (`reading`, and a companion sub-case in `assignmentName`) carrying
+  `SEED.toLowerCase()` (and a mixed-case variant, e.g. "sARAh chen"). Assert
+  `SEED`'s lowercased/mixed form does NOT appear in the ok-markdown.
+- Direction: RED under a case-SENSITIVE filter (a lowercased name leaks); GREEN
+  under the case-insensitive filter the section-3 reference already implements
+  (it lowercases both sides). This is a HARD requirement, not implementer
+  discretion: a model re-casing an echoed name is a live fail-OPEN leak (unlike
+  R-OVERMATCH which fails safe), and the fix cost is zero. An implementer cannot
+  ship a case-sensitive filter and pass this.
+- Discrimination: distinct from W1-1/W1-2/W1-3, which seed identical casing on
+  both sides and so pass under EITHER filter; only W1-9 forces case-folding.
+
 ---
 
 ## 6. Sabotage register (named mutation, RED/GREEN, discrimination stated)
@@ -340,6 +359,11 @@ worse than none.
   W1-6 (a `""` identifier makes `includes("")` true and rejects a clean draft).
   GREEN after restore. Other requirements green (their identifier sets carry no
   blank). DISCRIMINATES via W1-6.
+- **SAB-7 - make `carriesIdentifier` case-SENSITIVE (drop the `.toLowerCase()`
+  on one or both sides).** RED: W1-9 only (a lowercased/mixed-case echo of the
+  identifier leaks into the ok-markdown). GREEN after restore. BLIND: W1-1..W1-8
+  all seed identical casing on both sides, so they pass either way. DISCRIMINATES
+  via W1-9 - this is the fail-open mutant W1-9 exists to kill.
 
 Every sabotage above is RED in one direction and GREEN in the other for at least
 one named requirement; none is red-both-ways or green-both-ways. The two subtle
@@ -393,16 +417,12 @@ dropped as "redundant" - they are the sole discriminators for their mutants.
   same shape as R6's small-class floor - stated, not decided. My core
   requirements use a long two-word `SEED`, so they are unaffected either way.
 
-- **R-CASEFOLD (hardening; owner: implementer) - case-folded matching.** A model
-  echoing "sarah chen" for a `.student` of "Sarah Chen" evades a case-SENSITIVE
-  filter. The reference filter lowercases both sides and my requirements seed the
-  same casing on both, so they pass under either choice; a dedicated case-mismatch
-  case would force the stronger (case-insensitive) filter. Instrument: a variant
-  of W1-3 seeding `reading` with `SEED.toLowerCase()` while
-  `knownIdentifiers = [SEED]`, asserting absence. Step: the implementer chooses
-  case-insensitive matching (constructible, already in the reference) and adds
-  this case; if they choose case-sensitive, this residual must be argued to the
-  owner as an accepted gap.
+- **R-CASEFOLD - PROMOTED to hard requirement W1-9 by the round-1 check
+  (2026-09-29).** No longer implementer discretion: a model echoing "sarah chen"
+  for a `.student` of "Sarah Chen" is a fail-OPEN leak past a case-sensitive
+  filter, and the fix is free (the reference already lowercases both sides). See
+  W1-9 (section 5) and SAB-7 (section 6). This entry is retained only as a
+  pointer; there is no residual left here.
 
 - **R-GRADEDREPO-SEGMENT (definition; owner: architect) - what exactly the
   `gradedRepo`/`gradedRef` "owner/label segment" is.** W1-7 asserts the owner

@@ -37,10 +37,18 @@ const SNAPSHOT_GRADING_DIR = path.resolve(process.cwd(), "src/app/components/sna
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }
+
+describe("stripComments is CRLF-safe (L13)", () => {
+  it("strips a line comment on a CRLF-terminated line", () => {
+    const crlfSource = "const setRole = 1; // marker-should-be-stripped\r\nconst other = 2;\r\n";
+    const stripped = stripComments(crlfSource);
+    expect(stripped).not.toMatch(/marker-should-be-stripped/);
+  });
+});
 
 describe("setRole's call sites are pinned (AC-1, Ruling N1-R1)", () => {
   const files = fs

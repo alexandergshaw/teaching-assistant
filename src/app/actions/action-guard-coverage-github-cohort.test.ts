@@ -304,6 +304,13 @@ const GITHUB_FILES = new Set([
   // since it does the identical ingestion work grading.ts's owner-only
   // actions do.
   "actions/grading-incremental.ts",
+  // GRADING-CHAT wave 1 (docs/grading-chat-waves.md): prepareChatSubmissionAction
+  // reaches lib/github the same way, via fetchGradableRepoContent
+  // (src/lib/grade/repo-content.ts) for the chat surface's GitHub-repo-URL
+  // intake path. Both exports (prepareChatSubmissionAction,
+  // resolveChatRunHeaderAction) call requireAppOwner() as their first
+  // statement - reviewed owner-only, same posture as grading-incremental.ts.
+  "actions/grading-chat-intake.ts",
   "actions/grading.ts",
   "actions/institutions.ts",
   "actions/live-class.ts",

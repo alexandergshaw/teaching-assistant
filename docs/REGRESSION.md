@@ -45071,3 +45071,42 @@ floor to coincide with the cap.
 
 Re-cite line numbers against the current `class-trends-draft.ts` (178 lines) rather
 than reusing 423d/423e's; the removal shifted them.
+
+## 440. GRADING-CHAT wave 1 as-shipped - a chat-styled continuous grading surface under Tools > Grading
+
+The feature the owner asked for: a sixth GradingView member "chat" (inner-nav item
+under Tools > Grading) that mimics an LLM chat - instructions and rubric panels plus
+a continuous submission composer (text / file / zip / Canvas or GitHub URL), each
+submission kicking off a grading effort that APPENDS a table row with per-rubric
+scores and copyable strengths/improvements comments. Oracle of what wave 1 does at
+HEAD, read from source; nothing renders under this vitest, so the chat look/feel and
+every keyboard/clipboard behaviour is an owner-walk claim.
+
+Shipped after the full checked chain: AC (c78ef689/8205c2b9), architecture
+(526a5ec7/415ea8e3), security/reliability/ux passes, wave plan (5bc6778b + its
+persisted check), build, verify (docs/grading-chat-wave1-verify.md, 0 blockers).
+Full suite green at 23441; build compiles.
+
+Load-bearing invariants (each verified, most owner-walk for the visible half):
+- APPEND, NEVER RESET: useContinuousGradingRun accumulates rows in arrivedRef;
+  cleared only by reset(). This is the leverage over the batch surface, which resets
+  its table on each new run. A change that resets per-submit guts the feature.
+- ALWAYS-MOUNTED: GradingChatPanel is a display-toggled sibling in page.tsx (not a
+  conditional mount), so an in-flight run survives chip navigation. Pinned by
+  assertAlwaysMounted in topLevelTabs.wiring.test.ts.
+- POOL CANNOT WEDGE: pump() decrements in-flight via a single .finally on both
+  resolve and reject; a repeated-failure test proves the 4th submit still dispatches.
+  (A synchronous throw from the dispatch seam would leak a slot, but the seam
+  postGradeRunItem is async so it is unreachable - residual, defensive wrap suggested.)
+- pointsPossible threads Canvas -> intake -> body -> route so a Canvas submission
+  grades at the same scale as the batch surface (BLOCKER-1).
+- Session ceiling 40: partial-grade-to-ceiling (41 -> 40 rows + 1 partial refusal,
+  never zero). The 40 is a client-side literal mirroring gemini.ts DEFAULT_MAX_SUBMISSIONS
+  (env override not honored on this surface - RES-GC-5).
+- requireAppOwner on both new server actions; route.ts already tightened (b738ca9e).
+
+KNOWN GAP fixed in the immediate follow-up (not this row's ship): the
+Instructions/Rubric fields stay editable after beginSession (idempotent), so a
+mid-session rubric edit would grade later rows against the ORIGINAL rubric silently.
+The follow-up disables those fields once the header is set and wires a New-session
+control to the built-but-unwired reset().

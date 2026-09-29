@@ -188,6 +188,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "github-repos.grading.unmerged-branch.test.ts",
   "github-student-repos.test.ts",
   "github.grading.test.ts",
+  "grading-chat-intake.test.ts",
   "grading-checklist.test.ts",
   "grading-incremental.test.ts",
   "grading-submission-extract.test.ts",

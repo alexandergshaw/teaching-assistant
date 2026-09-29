@@ -14,6 +14,7 @@ import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import GradingRecordingPanel from "./components/grading-recording/GradingRecordingPanel";
 import SnapshotGradingPanel from "./components/snapshot-grading/SnapshotGradingPanel";
+import GradingChatPanel from "./components/grading-chat/GradingChatPanel";
 import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
@@ -726,6 +727,26 @@ export default function Home() {
           <SnapshotGradingPanel
             active={activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "snapshots"}
           />
+        </div>
+
+        {/* GRADING-CHAT wave 1 (docs/grading-chat-architecture.md section 7):
+            a sixth Grading destination, holding an in-flight continuous grading
+            run (pending /api/grade-run-item requests plus accumulated rows) -
+            an always-mounted, display-toggled top-level sibling of
+            RecordingTab, exactly like GradingRecordingPanel/SnapshotGradingPanel
+            above, never a conditional render inside the `manualView ===
+            "grading"` ternary (that would drop the whole session on
+            navigation). Do not move this into that ternary - see this file's
+            own I-chat-mount guard in topLevelTabs.wiring.test.ts. */}
+        <div
+          style={{
+            display:
+              activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "chat"
+                ? undefined
+                : "none",
+          }}
+        >
+          <GradingChatPanel copiedKey={copiedKey} onCopy={handleCopy} onOpenPreview={handleOpenPreview} />
         </div>
 
         {activeTab === "files" && (

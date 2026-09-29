@@ -564,6 +564,20 @@ describe("the two moved grading-capture panels stay mounted while hidden (I-W2)"
       'gradingView === "snapshots"',
     ]);
   });
+
+  // GRADING-CHAT wave 1 (docs/grading-chat-architecture.md section 7,
+  // instrument I-chat-mount): the chat surface holds an in-flight continuous
+  // run (pending /api/grade-run-item requests plus accumulated rows) that a
+  // conditional mount would drop on every navigation - the same reasoning as
+  // the two panels above, modelled on the identical helper.
+  it("GradingChatPanel is a display toggle on an always-rendered element, never a conditional render", () => {
+    assertAlwaysMounted("GradingChatPanel", [
+      'activeTab === "manual"',
+      'toolsSection === "manual"',
+      'manualView === "grading"',
+      'gradingView === "chat"',
+    ]);
+  });
 });
 
 // GRAD-SUBTAB wave 2 check residual R-1: without this guard,

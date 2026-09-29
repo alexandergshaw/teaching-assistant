@@ -35,7 +35,12 @@ export type BuildViewType = "new" | "prebuilt";
 // from Workflows > Drafts (DECISION 18/19 - moved, not mirrored). Unlike
 // "recording"/"snapshots" it is a plain conditional mount, not an
 // always-mounted capture surface - see that document's section 2.2.
-export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts";
+// "chat" (GRADING-CHAT wave 1, docs/grading-chat-architecture.md section 7):
+// a sixth, genuinely distinct Grading surface - a continuous chat-styled
+// submission stream, not a fill of "run". Always-mounted like
+// "recording"/"snapshots" (it holds an in-flight continuous run), not a
+// plain conditional like "drafts" - see page.tsx's mount comment.
+export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts" | "chat";
 
 const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
   run: true,
@@ -43,6 +48,7 @@ const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
   recording: true,
   snapshots: true,
   drafts: true,
+  chat: true,
 };
 export const GRADING_VIEWS: readonly GradingView[] = Object.keys(GRADING_VIEW_PRESENCE) as GradingView[];
 
@@ -118,6 +124,7 @@ export const destinations: DestinationGroup[] = [
       { id: "grading-recording", label: "Grading (from a recording)", description: "Grade submissions by narrating over a screen recording" },
       { id: "grading-snapshots", label: "Grading (from screenshots)", description: "Grade submissions from screenshots of student work" },
       { id: "grading-drafts", label: "Drafted Grades", description: "Review and post grades saved as drafts" },
+      { id: "grading-chat", label: "Chat", description: "Grade a continuous stream of submissions in a chat-style surface" },
     ],
   },
 ];
@@ -331,6 +338,7 @@ export function resolveStateFromDestinationId(
     if (id === "grading-recording") return "recording";
     if (id === "grading-snapshots") return "snapshots";
     if (id === "grading-drafts") return "drafts";
+    if (id === "grading-chat") return "chat";
     return currentGradingView;
   })();
 

@@ -380,3 +380,70 @@ describe("GRAD-SUBTAB wave 3 BLOCKER 1 fix: the toolsSection localStorage initia
     ).toMatch(/if\s*\(\s*[\s\S]{0,200}?return\s+"manual"/);
   });
 });
+
+// RES-GRAD-PINS (docs/BACKLOG.md): the toolsSection migration above (wave 3
+// BLOCKER 1) already has a source-text pin proven red. The manualView and
+// gradingView halves of the SAME stored Drafts > Grades pointer - the
+// migrations added alongside it in GRAD-SUBTAB wave 3 (P3(iii), see the
+// "returning user who last sat on Drafts > Grades" comments on both
+// initializers in useAppNavigation.ts) - were code-correct but unpinned. A
+// future deletion of either migration would silently regress the landing
+// surface for a returning Drafts > Grades user, with this file's suite still
+// green (nothing here renders the hook, per this file's own header comment).
+describe("GRAD-SUBTAB wave 3 (RES-GRAD-PINS): the manualView/gradingView localStorage initializers migrate the stored Drafts > Grades pointer", () => {
+  it("the manualView initializer's localStorage branch checks the exact stored drafts-grades combination and returns 'grading'", () => {
+    const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
+    expect(start, "expected to find the manualView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [buildView", start);
+    expect(end, "expected to find the next useState block after manualView's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(
+      block,
+      "RES-GRAD-PINS: the manualView localStorage branch must check localStorage.getItem(TOOLS_SECTION_KEY) === \"workflows\""
+    ).toMatch(/localStorage\.getItem\(TOOLS_SECTION_KEY\)\s*===\s*"workflows"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: the same branch must also check localStorage.getItem(WORKFLOWS_VIEW_KEY) === \"drafts\""
+    ).toMatch(/localStorage\.getItem\(WORKFLOWS_VIEW_KEY\)\s*===\s*"drafts"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: and localStorage.getItem(\"ta-drafts-view\") === \"grades\" - the raw string literal, not " +
+        "DRAFTS_VIEW_KEY (E-full deletes that constant along with draftsView itself)"
+    ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: without this, a returning user whose stored drafts-grades combination is present never " +
+        "sees manualView migrated to \"grading\", so they land on Build Courses/whatever ta-manual-view was " +
+        "stored instead of the Grading sub-tab's Drafted Grades inner view"
+    ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"[\s\S]{0,80}return\s+"grading"/);
+  });
+
+  it("the gradingView initializer's localStorage branch checks the exact stored drafts-grades combination and returns 'drafts'", () => {
+    const start = source.indexOf("const [gradingView, setGradingView] = useState<GradingView>(");
+    expect(start, "expected to find the gradingView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [focusCourseId", start);
+    expect(end, "expected to find the next useState block after gradingView's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(
+      block,
+      "RES-GRAD-PINS: the gradingView localStorage branch must check localStorage.getItem(TOOLS_SECTION_KEY) === \"workflows\""
+    ).toMatch(/localStorage\.getItem\(TOOLS_SECTION_KEY\)\s*===\s*"workflows"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: the same branch must also check localStorage.getItem(WORKFLOWS_VIEW_KEY) === \"drafts\""
+    ).toMatch(/localStorage\.getItem\(WORKFLOWS_VIEW_KEY\)\s*===\s*"drafts"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: and localStorage.getItem(\"ta-drafts-view\") === \"grades\" - the raw string literal, not " +
+        "DRAFTS_VIEW_KEY (E-full deletes that constant along with draftsView itself)"
+    ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"/);
+    expect(
+      block,
+      "RES-GRAD-PINS: without this, a returning user whose stored drafts-grades combination is present never " +
+        "sees gradingView migrated to \"drafts\", so normalizeGradingView(GRADING_VIEW_KEY) lands them on the " +
+        "wrong inner Grading surface instead of Drafted Grades"
+    ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"[\s\S]{0,80}return\s+"drafts"/);
+  });
+});

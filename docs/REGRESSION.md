@@ -45045,3 +45045,29 @@ pin; the symmetric manualView and gradingView migrations are code-correct but
 unpinned, so a future deletion would land a returning user on Build Courses / the
 "run" default with the suite green. Same class this feature hit twice; filed on
 the row.
+
+## 439. The class-trends-draft floor is removed (N13a) - supersedes the floor claims in 423d/423e
+
+Shipped d5179a92 (2026-09-28), backlog N13a, owner decision on file 2026-09-15
+(straight removal, no replacement). This entry supersedes the floor-dependent
+claims in entries 423d and 423e, which are kept as history but no longer describe
+the tree.
+
+WHAT CHANGED: `DEFAULT_CLASS_TRENDS_DRAFT_FLOOR` / `NEXT_PUBLIC_CLASS_TRENDS_DRAFT_FLOOR`,
+`getClassTrendsDraftFloor()`, and the `"below-floor"` member of
+`ClassTrendsDraftResult` are gone. `composeClassTrendsDraft` no longer takes a
+`floor` parameter (3 params now), and `ClassTrendsDraftPanel` / its state machine
+no longer have a `below-floor` branch. A run with as few as one graded result now
+drafts (status "ok") instead of being refused.
+
+WHAT STILL HOLDS (these were never floor-dependent, so 423d/423e remain accurate
+on them, only their line numbers drifted): a clause renders only when
+`area.resultsWithArea === report.totalResults` (full coverage, `areaFullyCovered`),
+NOT a floor check - so every rendered clause's basis equals the opening line's
+denominator; and the draft still opens unconditionally with the
+"based on the N submissions graded so far" coverage-disclosure sentence. The
+floor/cap collision that 423d and entry 421a discussed is now MOOT - there is no
+floor to coincide with the cap.
+
+Re-cite line numbers against the current `class-trends-draft.ts` (178 lines) rather
+than reusing 423d/423e's; the removal shifted them.

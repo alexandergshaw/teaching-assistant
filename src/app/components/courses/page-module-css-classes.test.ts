@@ -2,6 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 
 import fs from "fs";
 import path from "path";
+// A42: extractReferences' stripSourceComments (component .tsx/.jsx source,
+// NOT the CSS-text stripping in extractDefinedClasses below, which is a
+// separate, out-of-scope mechanism per A42's residual register) was a regex
+// pair blind to a `/*` opened inside a string literal (e.g. accept=
+// "image/*") whose matching `*/` lies outside any string, later in the
+// file - it deletes everything in between, including real `styles.<class>`
+// references (measured: AddCourseForm.tsx alone lost 25 of 26 references).
+// Converted to import the string-aware tokenizer already proven for this
+// exact defect (RULING 79, src/tools/strip-comments-agreement.structure.
+// test.ts R1). This file never defined a probe-tracked `stripComments`
+// (it is named stripSourceComments, invisible to that probe's name-based
+// walk - A42 scope section 1.1/R2), so no EXCLUSIONS move is needed here.
+import { stripComments as tokenizerStripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -192,15 +205,16 @@ function findFilesImportingAnyStylesheet(rootDir: string): string[] {
  * an accurate comment teaches people to delete comments, or worse, to add a
  * dead CSS class to silence it.
  *
- * Line comments are stripped only when `//` opens the line (after whitespace).
- * That is deliberately conservative: a trailing `// styles.foo` after real
- * code is still counted, but stripping every `//` would also eat the `//` in a
- * "https://" inside a string or JSX text and could hide a real reference on
- * the same line. No trailing-comment case exists in the tree today; if one
- * appears, widen this with a canary rather than by loosening the regex.
+ * A42: this now delegates to the shared string-aware tokenizer
+ * (modalAdoptionSourceScan.ts), which strips a TRAILING `//` too (not just a
+ * whole-line one) - a broader, still-correct axis change from the old
+ * anchored-line-comment behaviour, measured benign for this tree (A42 test
+ * notes R4's semantic note): no trailing `// styles.x` case exists in
+ * src/app today, so this changes nothing here, and the full-population
+ * orphan/classes oracles below would catch it if that ever stops being true.
  */
 function stripSourceComments(fileContent: string): string {
-  return fileContent.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return tokenizerStripComments(fileContent);
 }
 
 // Extracts every `<localName>.<className>` reference for one specific local
@@ -337,6 +351,54 @@ describe("CSS Module class usage guard (every *.module.css under src/)", () => {
   it("canary (present-but-wrong): stripping comments must not swallow the code that follows a block comment on the same line", () => {
     const refs = extractReferences("/* note */ const a = styles.survivor;", "styles");
     expect(refs).toEqual(["survivor"]);
+  });
+
+  // A42 R5: a removal test proving the class guard is RE-ARMED, not just that
+  // reference counts moved (that is R4's job, in the orphan-classes sibling
+  // file). The OLD stripSourceComments (pre-A42, reproduced here ONLY for
+  // this before/after comparison - never reused as the file's real stripper)
+  // deletes a corrupted span whole, including any undefined class reference
+  // it happens to contain, so the guard silently never sees it. The A42
+  // tokenizer keeps the span, so the reference is extracted and the guard
+  // catches it.
+  function preA42BuggyStripSourceComments(fileContent: string): string {
+    return fileContent.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  }
+  function extractReferencesWith(stripper: (s: string) => string, rawFileContent: string, localName: string): string[] {
+    const fileContent = stripper(rawFileContent);
+    const refRe = new RegExp(`(?<![\\w$])${localName}\\.([a-zA-Z_$][\\w$]*)`, "g");
+    const classNames: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = refRe.exec(fileContent)) !== null) classNames.push(match[1]);
+    return classNames;
+  }
+  const R5_FIXTURE =
+    'const x = <input accept="image/*" />;' +
+    "\n" +
+    "const y = styles.adaptPnaelTitle;" +
+    "\n" +
+    "/* a real block comment */" +
+    "\n" +
+    "const z = 1;";
+
+  it("A42 R5: an undefined class reference inside a MIME-wildcard-corrupted span is UNDETECTED under the old stripper and CAUGHT after the fix", () => {
+    const oldRefs = extractReferencesWith(preA42BuggyStripSourceComments, R5_FIXTURE, "styles");
+    expect(oldRefs).not.toContain("adaptPnaelTitle");
+
+    const newRefs = extractReferences(R5_FIXTURE, "styles");
+    expect(newRefs).toContain("adaptPnaelTitle");
+    // The extracted-but-undefined reference is genuinely undefined in the
+    // real page.module.css - the guard would flag it.
+    const pageDefined = definedClassesByStylesheet.get(sheetByLabel("src/app/page.module.css").cssPath)!;
+    expect(pageDefined.has("adaptPnaelTitle")).toBe(false);
+  });
+
+  it("A42 R5 sabotage discrimination: a DEFINED class in the same corrupted span does not flip the removal test (it resolves either way, so this only measures re-arming, not luck)", () => {
+    const definedFixture = R5_FIXTURE.replace("adaptPnaelTitle", "linkButton");
+    const newRefs = extractReferences(definedFixture, "styles");
+    expect(newRefs).toContain("linkButton");
+    const pageDefined = definedClassesByStylesheet.get(sheetByLabel("src/app/page.module.css").cssPath)!;
+    expect(pageDefined.has("linkButton")).toBe(true);
   });
 
   it("every <localName>.<className> reference in every component importing any *.module.css resolves to a class actually defined in the stylesheet ITS import statement points at", () => {

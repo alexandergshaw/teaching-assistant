@@ -9,6 +9,15 @@ import { describe, it, expect, vi } from "vitest";
 
 import { readFileSync, readdirSync } from "fs";
 import path from "path";
+// A42: the local stripComments below was a regex pair blind to a `/*` opened
+// inside a string literal (e.g. accept="image/*") whose matching `*/` lies
+// outside any string, later in the file - it deletes everything in between,
+// including real code. Converted to import the string-aware tokenizer
+// already proven for this exact defect (RULING 79,
+// src/tools/strip-comments-agreement.structure.test.ts R1). This file no
+// longer defines its own stripComments, so it moved from SAFE_FILES to
+// EXCLUSIONS in that probe in this same change.
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -22,17 +31,6 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const SOURCE_PATH = path.join(process.cwd(), "src/app/components/ui/ConfirmArmButtons.tsx");
 const source = readFileSync(SOURCE_PATH, "utf8");
-
-function stripComments(text: string): string {
-  // JSX comments ({/* ... */}) must go FIRST: they nest a /* ... */ block
-  // comment inside braces, so stripping block comments before JSX comments
-  // would leave a dangling "{" and "}" behind instead of removing the whole
-  // expression container.
-  return text
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
-}
 
 describe("stripComments (canary first)", () => {
   it("removes a // comment but leaves real code alone", () => {

@@ -2,6 +2,18 @@ import { describe, it, expect, vi } from "vitest";
 
 import fs from "fs";
 import path from "path";
+// A42: stripSourceComments (component .tsx/.jsx source, NOT the CSS-text
+// stripping in extractDefinedClasses below, which is a separate, out-of-
+// scope mechanism per A42's residual register) was a regex pair blind to a
+// `/*` opened inside a string literal (e.g. accept="image/*") whose matching
+// `*/` lies outside any string, later in the file - it deletes everything in
+// between, including real `styles.<class>` references. Converted to import
+// the string-aware tokenizer already proven for this exact defect (RULING
+// 79, src/tools/strip-comments-agreement.structure.test.ts R1). This file
+// never defined a probe-tracked `stripComments` (it is named
+// stripSourceComments, invisible to that probe's name-based walk - A42
+// scope section 1.1/R2), so no EXCLUSIONS move is needed here.
+import { stripComments as tokenizerStripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -163,15 +175,17 @@ function findStylesheetImports(filePath: string, fileContent: string): Styleshee
   return found;
 }
 
-/** Strips comments from component source, same conservative rule as the
- *  sibling guard: block comments anywhere, line comments only when `//`
- *  opens the line (after whitespace) so an accurate inline prose comment
- *  that happens to mention `styles.foo` (there are real examples of this in
- *  this tree - InSessionBanner.tsx, TasksTab.tsx) is not treated as a live
- *  reference, while a trailing `// styles.foo` after real code on the same
- *  line still counts real code that precedes it. */
+// Strips comments from component source. A42: delegates to the shared
+// string-aware tokenizer (modalAdoptionSourceScan.ts) so a block-comment
+// opener inside a string literal (e.g. a MIME wildcard attribute) is never
+// treated as a comment opener - the old regex pair here was blind to that
+// and deleted everything up to the next unrelated comment closer, including
+// real styles.foo references. The tokenizer also strips a TRAILING line
+// comment (not just a whole-line one), a broader but still-correct axis
+// change measured benign for this tree (A42 test notes R4's semantic note:
+// no trailing line-comment-after-code case exists in src/app today).
 function stripSourceComments(fileContent: string): string {
-  return fileContent.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return tokenizerStripComments(fileContent);
 }
 
 interface ReferenceScanResult {
@@ -287,7 +301,78 @@ const totalOrphanCount = orphanReports.reduce((sum, r) => sum + r.orphans.length
 // classes in security.module.css and TopBar.module.css that had been defined
 // but unreferenced. That is the direction this ratchet exists to capture, so
 // the pin follows it down in the same change, as the failure message demands.
-const PINNED_ORPHAN_CEILING = 120;
+//
+// Lowered 120 -> 118 on A42 (MIME-wildcard block-comment stripper fix,
+// src/tools/strip-comments-agreement.structure.test.ts R1/R4). Nothing was
+// deleted here either: stripSourceComments switched from a regex pair blind
+// to a `/*` opened inside a string literal (accept="image/*") to the
+// string-aware tokenizer, which stops deleting the real code between that
+// `/*` and the next unrelated `*/` in SpeedPanel.tsx. Two references to
+// src/app/page.module.css classes (courseRepoRow, page) that were silently
+// swallowed by the old stripper are now correctly counted as referenced,
+// recovering exactly those two from the orphan list - measured via the
+// EXPECTED_RECOVERED oracle below, which is the carve-out that distinguishes
+// this INTENDED recovery from an unintended loss.
+const PINNED_ORPHAN_CEILING = 118;
+
+// A42 R4: the frozen, measured delta this conversion is expected to produce -
+// distinguishes an intended reference recovery (this) from an unintended
+// loss (a real reference the tokenizer newly fails to see, which would show
+// up as a NEW orphan, never as a recovered one). Measured 2026-09-29 by
+// running this file's own computation under the pre-A42 buggy
+// stripSourceComments and under the tokenizer: the only stylesheet whose
+// orphan set changed is src/app/page.module.css, and the only two classes
+// removed from it were courseRepoRow and page - no sheet gained a member.
+const EXPECTED_RECOVERED: Readonly<Record<string, readonly string[]>> = {
+  "src/app/page.module.css": ["courseRepoRow", "page"],
+};
+
+// A42 R4: the pre-A42 buggy stripSourceComments, reproduced here ONLY to
+// recompute "what the orphan sets looked like before this fix" for the
+// carve-out oracle below - never reused as this file's real stripper.
+function preA42BuggyStripSourceComments(fileContent: string): string {
+  return fileContent.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+}
+
+function extractClassNamesWith(stripper: (s: string) => string, rawFileContent: string, localName: string): string[] {
+  const fileContent = stripper(rawFileContent);
+  const classNames: string[] = [];
+  const dotRe = new RegExp(`(?<![\\w$])${localName}\\.([a-zA-Z_$][\\w$]*)`, "g");
+  let match: RegExpExecArray | null;
+  while ((match = dotRe.exec(fileContent)) !== null) classNames.push(match[1]);
+  const bracketLiteralRe = new RegExp(`(?<![\\w$])${localName}\\[\\s*["']([a-zA-Z_$][\\w$-]*)["']\\s*\\]`, "g");
+  while ((match = bracketLiteralRe.exec(fileContent)) !== null) classNames.push(match[1]);
+  return classNames;
+}
+
+/** Recomputes, per stylesheet, the set of referenced classes under a given
+ *  stripper - used to build the OLD (pre-A42) orphan picture for comparison
+ *  against the CURRENT (post-A42) orphanReports above, without recomputing
+ *  the current picture from the same function (which would be a tautology -
+ *  refactor-disarms-tests, docs/loop/traps-tests.md). */
+function referencedClassesUnder(stripper: (s: string) => string): Map<string, Set<string>> {
+  const referenced = new Map<string, Set<string>>();
+  for (const sheet of STYLESHEETS) referenced.set(sheet.cssPath, new Set());
+  for (const file of IMPORTING_FILES) {
+    const content = fs.readFileSync(file, "utf-8");
+    const imports = findStylesheetImports(file, content);
+    for (const imp of imports) {
+      const bucket = referenced.get(imp.stylesheet.cssPath)!;
+      for (const name of extractClassNamesWith(stripper, content, imp.localName)) bucket.add(name);
+    }
+  }
+  return referenced;
+}
+
+function orphansUnder(referenced: Map<string, Set<string>>): Map<string, Set<string>> {
+  const orphans = new Map<string, Set<string>>();
+  for (const sheet of STYLESHEETS) {
+    const defined = definedClassesByStylesheet.get(sheet.cssPath)!;
+    const refs = referenced.get(sheet.cssPath)!;
+    orphans.set(sheet.cssPath, new Set([...defined].filter((c) => !refs.has(c))));
+  }
+  return orphans;
+}
 
 function formatOrphanReport(): string {
   const lines: string[] = [];
@@ -349,6 +434,26 @@ describe("CSS Module orphan-class ratchet (every *.module.css under src/)", () =
     // silent failure as a rise. Fail loudly on drift too, with the same
     // "lower it" message, rather than only warning.
     expect(totalOrphanCount, message).toBe(PINNED_ORPHAN_CEILING);
+  });
+
+  it("A42 R4: the orphan delta from the stripSourceComments fix is EXACTLY the expected recovery - no sheet gains a newly-orphaned member, and no more than the expected set is recovered", () => {
+    const oldOrphans = orphansUnder(referencedClassesUnder(preA42BuggyStripSourceComments));
+    const newOrphans = orphansUnder(referencedClassesUnder(tokenizerStripComments));
+
+    for (const sheet of STYLESHEETS) {
+      const before = oldOrphans.get(sheet.cssPath)!;
+      const after = newOrphans.get(sheet.cssPath)!;
+      const gained = [...after].filter((c) => !before.has(c));
+      expect(gained, `${sheet.label} gained a newly-orphaned class after the stripper fix - an unintended loss`).toEqual([]);
+
+      const recovered = [...before].filter((c) => !after.has(c)).sort();
+      const expected = [...(EXPECTED_RECOVERED[sheet.label] ?? [])].sort();
+      expect(recovered, `${sheet.label} recovered a different set than expected`).toEqual(expected);
+    }
+
+    const totalRecoveredCount = Object.values(EXPECTED_RECOVERED).reduce((sum, names) => sum + names.length, 0);
+    expect(totalOrphanCount).toBe(PINNED_ORPHAN_CEILING);
+    expect(PINNED_ORPHAN_CEILING).toBe(120 - totalRecoveredCount);
   });
 
   it("writes the categorised orphan candidate list to docs/css-orphans.md, with an honest caveat about dynamic access", () => {

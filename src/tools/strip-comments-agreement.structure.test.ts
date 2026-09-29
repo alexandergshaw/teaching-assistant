@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as ts from "typescript";
+import { stripComments as productionTokenizer } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L13: the repo has dozens of independently-defined `stripComments` test
 // helpers (duplicated on purpose - a cross-test-file import re-runs the
@@ -258,6 +259,34 @@ function isStringAware(fn: StripFn): boolean {
   return out.includes("http://example.com//zzz") && out.includes("ECHO_MARKER");
 }
 
+// A42 shape: /* opens INSIDE a string literal (an accept="image/*" attribute),
+// its matching */ lies OUTSIDE any string, later in the input, and real code
+// (a distinctive marker) sits between them. A string-unaware stripper deletes
+// the marker; a string-aware one keeps it AND still strips the trailing real
+// block comment.
+const FIXTURE_MIME_WILDCARD =
+  'const x = <input accept="image/*" />;' +
+  LF +
+  "const y = KEEP_MARKER_survivor;" +
+  LF +
+  "/* a real block comment REMOVE_MARKER */" +
+  LF +
+  "const z = 1;";
+
+function isMimeWildcardSafe(fn: StripFn): boolean {
+  let out: string;
+  try {
+    out = fn(FIXTURE_MIME_WILDCARD);
+  } catch {
+    return false;
+  }
+  return (
+    out.includes("KEEP_MARKER_survivor") && // real code after the wildcard survives
+    out.includes('accept="image/*"') && // the string itself is intact
+    !out.includes("REMOVE_MARKER") // a real block comment is still stripped
+  );
+}
+
 // Separate axis again: does the copy strip a block comment at all? (Two
 // real copies never call a `/* */` strip and only strip line comments -
 // this is neither mode 1 nor mode 2, it is a third, independent gap the
@@ -279,20 +308,31 @@ function supportsBlockComments(fn: StripFn): boolean {
 // shared prefix, not copies of this one).
 // ---------------------------------------------------------------------------
 
-// 67 copies that are safe on the two named failure modes (mode 1 and mode
-// 2) - the original 28, plus 39 mode-2-blind copies converted to the safe
-// form (L13 SECOND CORRECTION: split on a CR-tolerant line-feed pattern,
-// then strip an unanchored line-comment pattern per line) on 2026-09-29.
-// All 67 are still string-unaware (see below) and 2 of the 67 never strip
-// block comments (see BLOCK_COMMENT_UNSUPPORTED).
+// Copies that are safe on the two named failure modes (mode 1 and mode 2) -
+// the original 28, plus 39 mode-2-blind copies converted to the safe form
+// (L13 SECOND CORRECTION: split on a CR-tolerant line-feed pattern, then
+// strip an unanchored line-comment pattern per line) on 2026-09-29, minus 4
+// moved to EXCLUSIONS on A42 (buttonVariant.test.ts, confirmArmButtons.test.ts,
+// autoGradeTransition.wiring.test.ts, submission-kind-callsites.structure.
+// test.ts converted to import the string-aware tokenizer from
+// modalAdoptionSourceScan.ts and so no longer have an extractable local
+// stripComments definition of their own - see EXCLUSIONS below), plus one
+// newly-landed duplicate (class-trends-draft.test.ts, same safe idiom,
+// unrelated to A42 - added here only because A42's own R1 assertions below
+// require every mentioning file to be classified, and this one had not been
+// yet). The exact count is ALL_DEFINED.length, computed below - not a
+// literal, since a hand-maintained one already drifted stale once ("68" at
+// the string-awareness test, corrected by A42). All entries here are still
+// string-unaware (see below) and 2 of them never strip block comments (see
+// BLOCK_COMMENT_UNSUPPORTED).
 const SAFE_FILES: readonly string[] = [
   "src/app/actions/action-guard-coverage-github-cohort.test.ts",
   "src/app/actions/carry-module-pattern.test.ts",
   "src/app/actions/current-events-assignments.test.ts",
   "src/app/actions/guard-overtightening.test.ts",
-  "src/app/components/autoGradeTransition.wiring.test.ts",
   "src/app/components/canvas-tab/announcements-panel.wiring.test.ts",
   "src/app/components/chat/institutionTriggerWiring.test.ts",
+  "src/lib/grade/class-trends-draft.test.ts",
   "src/app/components/content-tab/CourseItemRow.wiring.test.ts",
   "src/app/components/content-tab/courseItemsView.wiring.test.ts",
   "src/app/components/content-tab/modules/CarryModulePatternReviewModal.wiring.test.ts",
@@ -320,7 +360,6 @@ const SAFE_FILES: readonly string[] = [
   "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
   "src/app/components/grading-recording/copy-feedback.test.ts",
   "src/app/components/grading-recording/grading-rows.test.ts",
-  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts",
   "src/app/components/grading-results/ungradedDisclosure.test.ts",
   "src/app/components/grading-results/ungradedRowLabel.test.ts",
   "src/app/components/knowledge/knowledgeBulkBar.wiring.test.ts",
@@ -341,8 +380,6 @@ const SAFE_FILES: readonly string[] = [
   "src/app/components/snapshot-grading/useSnapshotAutoGrade.wiring.test.ts",
   "src/app/components/snapshot-grading/useSnapshotGrade.wiring.test.ts",
   "src/app/components/tasks/taskInstructionIndicator.wiring.test.ts",
-  "src/app/components/ui/buttonVariant.test.ts",
-  "src/app/components/ui/confirmArmButtons.test.ts",
   "src/app/components/ui/segmentedToggle.test.ts",
   "src/app/components/workflows/RunFormFields.required-resolution.test.ts",
   "src/app/components/workflows/runtime-field-accessible-labels.test.ts",
@@ -390,7 +427,8 @@ const MODE2_BLIND_FILES: readonly string[] = [];
 // src/supabase-migrations.structure.test.ts already was.
 const MODE1_BLIND_FILES: readonly string[] = [];
 
-// Of the 28 SAFE_FILES, these 2 never strip a `/* */` block comment at all
+// Of the SAFE_FILES (ALL_DEFINED.length, computed below - not a literal
+// that can drift again), these 2 never strip a `/* */` block comment at all
 // (their body only ever does a line-comment replace) - a third, independent
 // gap from mode 1 and mode 2, caught by the block-comment fixture.
 const BLOCK_COMMENT_UNSUPPORTED = new Set<string>([
@@ -411,6 +449,18 @@ const ALL_DEFINED: readonly string[] = [...SAFE_FILES, ...MODE2_BLIND_FILES, ...
 const EXCLUSIONS: Readonly<Record<string, string>> = {
   "src/app/actions/announcement-image.wiring.test.ts":
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/courses/page-module-css-classes.test.ts":
+    "A42: its stripSourceComments now delegates to stripComments (imported aliased as tokenizerStripComments) from the shared module @/app/components/ui/modalAdoptionSourceScan - it never defined a function literally named stripComments, so this is a bare code mention, not a duplicated definition",
+  "src/app/components/courses/page-module-css-orphan-classes.test.ts":
+    "A42: its stripSourceComments now delegates to stripComments (imported aliased as tokenizerStripComments) from the shared module @/app/components/ui/modalAdoptionSourceScan - it never defined a function literally named stripComments, so this is a bare code mention, not a duplicated definition",
+  "src/app/components/autoGradeTransition.wiring.test.ts":
+    "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts":
+    "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/ui/buttonVariant.test.ts":
+    "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/ui/confirmArmButtons.test.ts":
+    "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
   "src/app/api/visualizer/create/route.test.ts":
     "prose comment referencing another file's stripComments helper - no code use",
   "src/app/components/message-replies/useMessageReplies.wiring.test.ts":
@@ -522,16 +572,30 @@ describe("stripComments test-helper agreement (L13 behavioural probe)", () => {
   });
 
   it("no duplicated copy is string-literal-aware (documented finding, not a pass)", () => {
-    // Measured: every one of the 68 copies strips "//" and "/* */" wherever
-    // they appear, including inside a string literal. This is a uniform,
-    // real gap - not this probe failing to discriminate. It is asserted as
-    // "all unaware" (a stronger claim than "some unaware") because that is
-    // what was measured; a copy that becomes string-aware would be a
-    // genuine improvement and this assertion is meant to surface it rather
-    // than hide it.
+    // Measured: every one of the ALL_DEFINED.length copies (computed, not a
+    // literal - it drifted stale at "68" once already while the invariant
+    // above stayed green, because that count was prose, not machine-checked)
+    // strips "//" and "/* */" wherever they appear, including inside a
+    // string literal. This is a uniform, real gap - not this probe failing
+    // to discriminate. It is asserted as "all unaware" (a stronger claim
+    // than "some unaware") because that is what was measured; a copy that
+    // becomes string-aware would be a genuine improvement and this
+    // assertion is meant to surface it rather than hide it.
+    expect(ALL_DEFINED.length).toBeGreaterThan(0);
     for (const file of ALL_DEFINED) {
       expect(isStringAware(loadCopy(file)), file).toBe(false);
     }
+  });
+
+  it("A42 R1a: no duplicated copy is safe against the MIME-wildcard shape either - a /* opened inside a string with its */ outside, later in the file (documented finding, not a pass; RED the moment any copy becomes safe)", () => {
+    for (const file of ALL_DEFINED) {
+      expect(isMimeWildcardSafe(loadCopy(file)), file).toBe(false);
+    }
+  });
+
+  it("A42 R1b: the production string-aware tokenizer (modalAdoptionSourceScan.ts) is MIME-wildcard safe, and still strips a real block comment elsewhere", () => {
+    expect(isMimeWildcardSafe(productionTokenizer)).toBe(true);
+    expect(supportsBlockComments(productionTokenizer)).toBe(true);
   });
 
   it("block-comment support matches the pinned exception set", () => {

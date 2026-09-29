@@ -12,18 +12,18 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+// A42: the local stripComments below was a regex pair blind to a `/*` opened
+// inside a string literal (e.g. accept="image/*") whose matching `*/` lies
+// outside any string, later in the file - it deletes everything in between,
+// including real code. Converted to import the string-aware tokenizer
+// already proven for this exact defect (RULING 79,
+// src/tools/strip-comments-agreement.structure.test.ts R1). This file no
+// longer defines its own stripComments, so it moved from SAFE_FILES to
+// EXCLUSIONS in that probe in this same change.
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 const GRADING_TAB_PATH = join(process.cwd(), "src/app/components/GradingTab.tsx");
 const LIVE_FEED_PATH = join(process.cwd(), "src/app/components/LiveFeedPanel.tsx");
-
-/** Source with line/block comments stripped - duplicated verbatim from
- * bulkBar.wiring.test.ts:57 (never imported - importing a helper from
- * another *.test.ts re-runs that file's describe blocks). CRLF-safe: this
- * is the multiline form, not the split-on-bare-linefeed variant that goes
- * silently blind on this repo's CRLF working tree (filed as backlog L13). */
-function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
-}
 
 describe("stripComments (canary first)", () => {
   it("removes a // comment but leaves real code alone", () => {

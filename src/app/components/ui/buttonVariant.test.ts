@@ -16,6 +16,15 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { variantFor } from "./buttonVariant";
+// A42: the local stripComments below was a regex pair blind to a `/*` opened
+// inside a string literal (e.g. accept="image/*") whose matching `*/` lies
+// outside any string, later in the file - it deletes everything in between,
+// including real code. Converted to import the string-aware tokenizer
+// already proven for this exact defect (RULING 79,
+// src/tools/strip-comments-agreement.structure.test.ts R1). This file no
+// longer defines its own stripComments, so it moved from SAFE_FILES to
+// EXCLUSIONS in that probe in this same change.
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -103,16 +112,6 @@ const SECTION_4_DIRS = [
   "src/app/components/message-replies",
 ];
 const SECTION_4_EXTRA_FILES = ["src/app/components/RecordingTab.tsx"];
-
-function stripComments(source: string): string {
-  // JSX comments first, then block comments, then line comments.
-  return source
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
 
 function sectionFourTsxFiles(): string[] {
   const out: string[] = [];

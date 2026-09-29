@@ -154,17 +154,37 @@ uses - see 2.1) and nothing here proposes reusing or changing it.
 
 ### 1.3 `contributionCount`: still write-only
 
-`grep -rn "contributionCount" src` (run 2026-09-29) returns 8 hits: the
+`grep -rn "contributionCount" src` (run 2026-09-29) returns 9 hits: the
 field declaration (`discussions.ts:114`), three writers
 (`discussions.ts:152`, `submissions.ts:158` always `1`,
 `grading.ts:620` a files/text-derived count for Route C), and five test
-fixtures in `src/lib/grade/extraction.test.ts`. None of the 8 is a read used
-in scoring or routing logic. (The note recorded "NINE" hits on 2026-09-20;
-the drop to 8 is not something I investigated further since it does not
-change the conclusion - still zero logic readers.) Splitting this field into
+fixtures in `src/lib/grade/extraction.test.ts`. (CORRECTED by the round-1
+check: an earlier draft said "8"; the enumeration above sums to 9 and
+`grep -rn "contributionCount" src | wc -l` = 9. There was no drop from the
+note's "NINE" - still 9.) None of the 9 is a read used in scoring or routing
+logic. Splitting this field into
 two counts (implication 3) is therefore a change with **no currently
 measurable downstream effect** other than the field itself - low risk,
 fork-independent, and its own AC below is correspondingly modest.
+
+
+### 1.3a Round-1 check reconciliations (INFO-2, INFO-3)
+
+- INFO-2 (stale ruling): an EARLY orchestrator ruling still in the A8 row -
+  "A8-1's wiring file is `src/lib/canvas/discussions.ts`, NOT
+  `src/lib/grade/extraction.ts`" - is SUPERSEDED by the row's later G1
+  guarantee design (read `work.discussion` inside `canvasWorkToEntry`). This
+  scope follows G1, so the choke point is `extraction.ts:238-255`, NOT
+  `discussions.ts`. An implementer reading the stale ruling (d) must ignore it
+  in favour of G1 / this scope.
+- INFO-3 (truncation survival, routes to the architect): AC-2's object is "the
+  actual API request Gemini receives," but the reply text is appended after the
+  initial post and can be truncated away at a small
+  `getGeminiMaxCharsPerSubmission` cap - so a PRE-truncation assertion can pass
+  while the model never sees the reply. The architect/test-author must ensure
+  the reply distinction SURVIVES truncation (or test AC-2 post-truncation with a
+  realistic cap). Also confirm `disambiguateCanvasEntries` (`engine.ts:480`)
+  does not re-flatten per-entry `submittedFiles` after the loop.
 
 ### 1.4 The Canvas grade-post path already carries more than one number
 

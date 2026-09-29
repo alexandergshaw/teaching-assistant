@@ -279,8 +279,8 @@ function supportsBlockComments(fn: StripFn): boolean {
 // shared prefix, not copies of this one).
 // ---------------------------------------------------------------------------
 
-// 26 copies that are safe on the two named failure modes (mode 1 and mode
-// 2). All 26 are still string-unaware (see below) and 2 of the 26 never
+// 28 copies that are safe on the two named failure modes (mode 1 and mode
+// 2). All 28 are still string-unaware (see below) and 2 of the 28 never
 // strip block comments (see BLOCK_COMMENT_UNSUPPORTED).
 const SAFE_FILES: readonly string[] = [
   "src/app/actions/action-guard-coverage-github-cohort.test.ts",
@@ -289,8 +289,10 @@ const SAFE_FILES: readonly string[] = [
   "src/app/actions/guard-overtightening.test.ts",
   "src/app/components/canvas-tab/announcements-panel.wiring.test.ts",
   "src/app/components/content-tab/modules/currentEventsAssignments.wiring.test.ts",
+  "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
   "src/app/components/grading-recording/copy-feedback.test.ts",
   "src/app/components/grading-recording/grading-rows.test.ts",
+  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts",
   "src/app/components/grading-results/ungradedDisclosure.test.ts",
   "src/app/components/grading-results/ungradedRowLabel.test.ts",
   "src/app/components/repo-grades/repoGrades.wiring.test.ts",
@@ -359,13 +361,18 @@ const MODE2_BLIND_FILES: readonly string[] = [
   "src/lib/lms-generation/selection-archive.test.ts",
 ];
 
-// 2 copies that are genuinely CRLF-blind (mode 1) today. This is a real,
-// currently-open finding for the owner, not a probe defect: these files'
-// own assertions about "no comment survives" are not actually exercised
-// against CRLF input, exactly the class of silent failure L13 exists to
-// catch. Reported here rather than fixed - fixing the mode-2 and mode-1
-// files is L13's separate "convert toward the in-tree form" item,
-// sequenced against L9.
+// Genuinely CRLF-blind (mode 1) copies: none remain. The two that were here
+// - src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts
+// and src/app/components/grading-recording/submission-kind-callsites.
+// structure.test.ts - were converted to the CR-tolerant split
+// (`.split(/\r?\n/)`, the same idiom already used by
+// action-guard-coverage-github-cohort.test.ts:78 and the in-tree safe form
+// at snapshot-grading.structure.test.ts:14-20 /
+// useSnapshotGrade.wiring.test.ts:44-51) and moved to SAFE_FILES above. This
+// array is now empty by construction - the goal state for L13's mode-1
+// slice - and the assertion below still holds it to that shape rather than
+// deleting the check, so a future mode-1-blind copy fails loudly instead of
+// having nowhere to land.
 //
 // `src/supabase-migrations.rls-coverage.structure.test.ts` used to be
 // listed here too, on the strength of it leaving the probe's JS `//`
@@ -376,12 +383,9 @@ const MODE2_BLIND_FILES: readonly string[] = [
 // CRLF input (indexOf/slice finds `--` and drops the trailing \r with
 // it). It is excluded-by-dialect below instead, same as the SQL helper in
 // src/supabase-migrations.structure.test.ts already was.
-const MODE1_BLIND_FILES: readonly string[] = [
-  "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
-  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts",
-];
+const MODE1_BLIND_FILES: readonly string[] = [];
 
-// Of the 26 SAFE_FILES, these 2 never strip a `/* */` block comment at all
+// Of the 28 SAFE_FILES, these 2 never strip a `/* */` block comment at all
 // (their body only ever does a line-comment replace) - a third, independent
 // gap from mode 1 and mode 2, caught by the block-comment fixture.
 const BLOCK_COMMENT_UNSUPPORTED = new Set<string>([

@@ -46,7 +46,7 @@ const source = fs.readFileSync(PANEL_PATH, "utf-8");
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }

@@ -43,7 +43,7 @@ const SRC_ROOT = path.resolve(process.cwd(), "src");
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }

@@ -1,5 +1,5 @@
 import { normalizeAreaName } from "./prompts";
-import { gradedResults, ungradedResults, type GradingRunEntry } from "./types";
+import { gradedResults, ungradedResults, type GradedResult, type GradingRunEntry } from "./types";
 
 /**
  * Layer A of backlog N9 (see the architect pass, revision 4): a pure,
@@ -171,6 +171,36 @@ export interface ClassTrendsReport {
   /** One line per area, ready to display or log; each already carries its
    * own coverage qualification. */
   summaryLines: string[];
+  /** N13b Wave 1 (security R5): the run's OWN identifier strings - every
+   * graded result's `.student`, plus the owner/label segment of any
+   * `gradedRepo`/`gradedRef` where present. SCAN-ONLY: this array is a
+   * denylist for `composeClassTrendsDraft`'s whole-Markdown name filter and
+   * must never itself be interpolated into any student-facing or
+   * class-addressed output - doing so would make this field a leak channel
+   * rather than the guard against one. */
+  knownIdentifiers: readonly string[];
+}
+
+/** Extracts the owner/label segment from a "owner/repo" style string (the
+ * shape `gradedRepo` is documented to carry - types.ts's `gradedRepo`
+ * comment). Returns the whole string when there is no "/" to split on, so a
+ * bare label is still collected rather than dropped. */
+function ownerSegment(repoLike: string): string {
+  const slashIndex = repoLike.indexOf("/");
+  return slashIndex === -1 ? repoLike : repoLike.slice(0, slashIndex);
+}
+
+/** Collects the run's own identifier strings for the name-filter denylist
+ * (N13b Wave 1). Scan-only - see `ClassTrendsReport.knownIdentifiers`. */
+function collectKnownIdentifiers(results: readonly GradedResult[]): string[] {
+  const identifiers: string[] = [];
+  for (const result of results) {
+    identifiers.push(result.student);
+    if (result.gradedRepo) {
+      identifiers.push(ownerSegment(result.gradedRepo));
+    }
+  }
+  return identifiers;
 }
 
 function average(values: number[]): number | null {
@@ -351,5 +381,6 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
     strengths: areas.filter((trend) => trend.direction === "high"),
     struggles: areas.filter((trend) => trend.direction === "low"),
     summaryLines: areas.map((trend) => trend.summary),
+    knownIdentifiers: collectKnownIdentifiers(results),
   };
 }

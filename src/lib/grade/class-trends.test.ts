@@ -19,7 +19,11 @@ function makeRubricArea(area: string, score: string): RubricAreaResult {
   return { area, score, comment: "" };
 }
 
-function makeResult(student: string, rubricAreas: RubricAreaResult[]): GradeResult {
+function makeResult(
+  student: string,
+  rubricAreas: RubricAreaResult[],
+  overrides: Partial<Pick<GradeResult, "gradedRepo" | "gradedRef">> = {}
+): GradeResult {
   return {
     student,
     overallComment: "",
@@ -31,6 +35,7 @@ function makeResult(student: string, rubricAreas: RubricAreaResult[]): GradeResu
     feedback: "",
     mergedFileCount: 0,
     submittedFiles: [],
+    ...overrides,
   };
 }
 
@@ -329,5 +334,42 @@ describe("sabotage control - per-area coverage must not equal total result count
     expect(report.totalResults).toBe(5);
     expect(thesis?.resultsWithArea).toBe(2);
     expect(thesis?.resultsWithArea).not.toBe(report.totalResults);
+  });
+});
+
+// N13b Wave 1 (security R5), W1-7: computeClassTrends populates
+// knownIdentifiers from the run's own identifier strings - the denylist
+// composeClassTrendsDraft's name filter scans against.
+describe("computeClassTrends - knownIdentifiers collection (N13b Wave 1, W1-7)", () => {
+  const SEED = "Zbrinqua Qwelford";
+
+  it("collects each graded result's student identifier", () => {
+    const entry = makeEntry([
+      makeResult(SEED, [makeRubricArea("Thesis", "90%")]),
+      makeResult("Other Student", [makeRubricArea("Thesis", "85%")]),
+    ]);
+
+    const report = computeClassTrends(entry);
+
+    expect(report.knownIdentifiers).toContain(SEED);
+    expect(report.knownIdentifiers).toContain("Other Student");
+  });
+
+  it("collects the owner segment of a gradedRepo string", () => {
+    const entry = makeEntry([
+      makeResult("Some Student", [makeRubricArea("Thesis", "90%")], {
+        gradedRepo: "octo-student/hw1",
+      }),
+    ]);
+
+    const report = computeClassTrends(entry);
+
+    expect(report.knownIdentifiers).toContain("octo-student");
+  });
+
+  it("returns an empty knownIdentifiers array for a run with no results", () => {
+    const entry = makeEntry([]);
+    const report = computeClassTrends(entry);
+    expect(report.knownIdentifiers).toEqual([]);
   });
 });

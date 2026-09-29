@@ -101,6 +101,20 @@ function isLikelySingularSubmissionClaim(text: string): boolean {
   return /\b(one|a|a single|this)\s+submission\b/.test(lower);
 }
 
+/** N13b Wave 1 (security R5): true if `text` contains any of `identifiers`
+ * as a case-insensitive SUBSTRING - never field equality (a name is free
+ * text embedded in a larger string, not a whole field on its own), and
+ * never for a blank/whitespace-only identifier (which would match every
+ * string and silently reject every clean draft). Both sides are lowercased
+ * so a model re-casing an echoed identifier still gets caught. */
+function carriesKnownIdentifier(text: string, identifiers: readonly string[]): boolean {
+  const lower = text.toLowerCase();
+  return identifiers.some((identifier) => {
+    const trimmed = identifier.trim().toLowerCase();
+    return trimmed.length > 0 && lower.includes(trimmed);
+  });
+}
+
 /** The ONLY function in this module allowed to turn a
  * ClassTrendsInsightObservation into draft text, and the marker prefix is a
  * fixed string literal this function owns - never something the model's
@@ -120,6 +134,13 @@ export function composeClassTrendsDraft(
   observations: readonly ClassTrendsInsightObservation[],
   assignmentName: string
 ): ClassTrendsDraftResult {
+  // N13b Wave 1 (security R5): the run's own identifier strings
+  // (report.student values, plus any gradedRepo owner segment), scanned
+  // against - never interpolated into - this draft's free text. Read
+  // defensively (`?? []`) so a persisted/older report missing the field at
+  // runtime fails safe (scans against an empty set) rather than throwing.
+  const knownIdentifiers = report.knownIdentifiers ?? [];
+
   // assignmentName is instructor-typed and unfiltered by any earlier layer -
   // checked up front, with a reason that names the actionable fix, rather
   // than only at the end where the copy could not distinguish this case from
@@ -128,6 +149,16 @@ export function composeClassTrendsDraft(
     return {
       status: "rejected",
       reason: `The assignment name contains wording this feature won't repeat to students automatically. Rename the assignment, or write the message yourself using the trends above.`,
+    };
+  }
+
+  // The opening line is UNCONDITIONAL (it is always the first line of an
+  // "ok" draft), so a name reaching it cannot be dropped the way a body
+  // clause can - the whole draft is rejected instead.
+  if (carriesKnownIdentifier(assignmentName, knownIdentifiers)) {
+    return {
+      status: "rejected",
+      reason: `The assignment name appears to contain a name from this run. Rename the assignment, or write the message yourself using the trends above.`,
     };
   }
 
@@ -143,11 +174,16 @@ export function composeClassTrendsDraft(
   const countedClauses = report.areas
     .filter((area: AreaTrend) => areaFullyCovered(area, report))
     .map(renderCountedClause)
-    .filter((clause): clause is string => clause !== null && !containsForbiddenCompletenessPhrase(clause));
+    .filter(
+      (clause): clause is string =>
+        clause !== null &&
+        !containsForbiddenCompletenessPhrase(clause) &&
+        !carriesKnownIdentifier(clause, knownIdentifiers)
+    );
 
   const inferredClauses = observations
     .map(renderInferredClause)
-    .filter((clause): clause is string => clause !== null);
+    .filter((clause): clause is string => clause !== null && !carriesKnownIdentifier(clause, knownIdentifiers));
 
   const bodyLines = [...countedClauses, ...inferredClauses];
 
@@ -171,6 +207,17 @@ export function composeClassTrendsDraft(
     return {
       status: "rejected",
       reason: "This draft could not be prepared automatically - something in the trends above contains wording this feature won't repeat to students. Write the message yourself using the trends above.",
+    };
+  }
+
+  // Last-resort defense in depth against a future clause that reaches the
+  // markdown without going through the per-clause filters above - the whole
+  // assembled draft is scanned one final time against the run's own
+  // identifiers before it is ever returned as "ok".
+  if (carriesKnownIdentifier(markdown, knownIdentifiers)) {
+    return {
+      status: "rejected",
+      reason: "This draft could not be prepared automatically - something in the trends above appears to name someone from this run. Write the message yourself using the trends above.",
     };
   }
 

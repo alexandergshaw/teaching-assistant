@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { composeClassTrendsDraft } from "./class-trends-draft";
+import { computeClassTrends } from "./class-trends";
 import type { AreaTrend, AreaTrendDirection, ClassTrendsReport } from "./class-trends";
 import type { ClassTrendsInsightObservation } from "./class-trends-insight";
+import type { GradeResult, GradingRunEntry, RubricAreaResult } from "./types";
 
 // N13a: backlog's own default was 5 (DEFAULT_CLASS_TRENDS_DRAFT_FLOOR,
 // removed by this backlog item - straight removal, no replacement bound).
@@ -27,7 +29,11 @@ function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirectio
   };
 }
 
-function makeReport(areas: AreaTrend[], totalResults = SAMPLE_SIZE): ClassTrendsReport {
+function makeReport(
+  areas: AreaTrend[],
+  totalResults = SAMPLE_SIZE,
+  knownIdentifiers: readonly string[] = []
+): ClassTrendsReport {
   return {
     totalResults,
     // N13a: rows this run emitted instead of grading - none, for this
@@ -38,6 +44,10 @@ function makeReport(areas: AreaTrend[], totalResults = SAMPLE_SIZE): ClassTrends
     strengths: areas.filter((a) => a.direction === "high"),
     struggles: areas.filter((a) => a.direction === "low"),
     summaryLines: areas.map((a) => a.summary),
+    // N13b Wave 1: the run's own identifier strings, scan-only for the
+    // name-filter denylist. Default empty - most fixtures in this file do
+    // not exercise the filter at all.
+    knownIdentifiers,
   };
 }
 
@@ -242,6 +252,186 @@ describe("composeClassTrendsDraft - the composed-markdown safety net", () => {
       // Pinning the fact (this is the composed-markdown rejection, not the
       // assignmentName one) and not the exact wording of either reason.
       expect(result.reason.toLowerCase()).not.toContain("assignment name");
+    }
+  });
+});
+
+// N13b Wave 1 (security R5): the pre-existing free-text leak (L5/L6/L7/L8),
+// per docs/n13b-wave1-test-notes.md. A distinctive, two-word marker that
+// cannot occur incidentally and is long enough not to over-match.
+const SEED = "Zbrinqua Qwelford";
+
+describe("composeClassTrendsDraft - the name filter (N13b Wave 1, W1-1..W1-9)", () => {
+  it("W1-1: a name in assignmentName does not reach the class text (L8)", () => {
+    const area = makeArea({ direction: "high" });
+    const report = makeReport([area], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [], `Makeup exam - ${SEED}`);
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  it("W1-2: a name embedded in displayArea does not reach the class text (L7)", () => {
+    const area = makeArea({ direction: "low", displayArea: `Peer review of ${SEED}` });
+    const report = makeReport([area], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  it("W1-3: a name in an observation's reading does not reach the class text (L5/L6)", () => {
+    const observation = makeObservation({ reading: `echoing ${SEED} verbatim` });
+    const report = makeReport([], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [observation], "Essay 1");
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  it("W1-3b: a name in an observation's concept does not reach the class text (L5/L6)", () => {
+    const observation = makeObservation({ concept: `the framing ${SEED} used` });
+    const report = makeReport([], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [observation], "Essay 1");
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  describe("W1-4: clean-pass controls (anti-degenerate; discriminates the reject-everything mutant)", () => {
+    it("(i) a clean high area still renders ok and contains its displayArea", () => {
+      const area = makeArea({ direction: "high", displayArea: "Thesis Statement" });
+      const report = makeReport([area], SAMPLE_SIZE, [SEED]);
+      const result = composeClassTrendsDraft(report, [], "Essay 1");
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") {
+        expect(result.markdown).toContain("Thesis Statement");
+      }
+    });
+
+    it("(ii) a clean observation still renders ok and contains the fixed marker", () => {
+      const observation = makeObservation({
+        concept: "correlation vs causation",
+        reading: "several conflated the ideas",
+      });
+      const report = makeReport([], SAMPLE_SIZE, [SEED]);
+      const result = composeClassTrendsDraft(report, [observation], "Essay 1");
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") {
+        expect(result.markdown).toContain("my own reading, not a count");
+      }
+    });
+
+    it("(iii) a clean assignmentName still renders ok and contains the opening line", () => {
+      const area = makeArea({ direction: "high" });
+      const report = makeReport([area], SAMPLE_SIZE, [SEED]);
+      const result = composeClassTrendsDraft(report, [], "Essay 1");
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") {
+        expect(result.markdown).toContain("A note on Essay 1");
+      }
+    });
+  });
+
+  it("W1-5: the scan is a substring match, not field equality (W1-1/2/3 already embed SEED inside surrounding text - restated explicitly here)", () => {
+    const observation = makeObservation({ reading: `a note that mentions ${SEED} in passing` });
+    const report = makeReport([], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [observation], "Essay 1");
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  it("W1-6: a blank/whitespace-only identifier never suppresses a clean draft (anti match-everything)", () => {
+    const area = makeArea({ direction: "high", displayArea: "Thesis Statement" });
+    const report = makeReport([area], SAMPLE_SIZE, ["", "   "]);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).toContain("Thesis Statement");
+    }
+  });
+
+  it("W1-9: a case-mismatched identifier in an observation's reading is still suppressed (fail-open guard)", () => {
+    const observation = makeObservation({ reading: `echoing ${SEED.toLowerCase()} verbatim` });
+    const report = makeReport([], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [observation], "Essay 1");
+    if (result.status === "ok") {
+      expect(result.markdown.toLowerCase()).not.toContain(SEED.toLowerCase());
+    }
+  });
+
+  it("W1-9b: a mixed-case identifier in assignmentName is still suppressed (fail-open guard)", () => {
+    const mixedCase = "zBrinqua qWELFORD";
+    const area = makeArea({ direction: "high" });
+    const report = makeReport([area], SAMPLE_SIZE, [SEED]);
+    const result = composeClassTrendsDraft(report, [], `Makeup exam - ${mixedCase}`);
+    if (result.status === "ok") {
+      expect(result.markdown.toLowerCase()).not.toContain(mixedCase.toLowerCase());
+    }
+  });
+});
+
+// W1-8: end-to-end reachability through the REAL production sequence
+// (computeClassTrends -> composeClassTrendsDraft), the exact sequence the
+// panels run. Duplicated fixture helpers, not imported from
+// class-trends.test.ts (no-cross-test-file-imports).
+function makeRubricAreaForRun(area: string, score: string): RubricAreaResult {
+  return { area, score, comment: "" };
+}
+
+function makeGradedResultForRun(student: string, rubricAreas: RubricAreaResult[]): GradeResult {
+  return {
+    student,
+    overallComment: "",
+    strengths: "",
+    improvements: "",
+    resubmitNotice: "",
+    rubricAreas,
+    totalScore: "",
+    feedback: "",
+    mergedFileCount: 0,
+    submittedFiles: [],
+  };
+}
+
+function makeRunEntry(
+  results: GradeResult[],
+  rubricAreaNames: string[],
+  assignmentName: string
+): GradingRunEntry {
+  return {
+    courseName: "Test Course",
+    assignmentName,
+    canvasUrl: "https://example.instructure.com/courses/1/assignments/1",
+    run: {
+      results,
+      rubricAreaNames,
+      fullCreditChecklist: [],
+    },
+  };
+}
+
+describe("composeClassTrendsDraft - W1-8 end-to-end reachability through the real production sequence", () => {
+  it("a seeded student name does not survive computeClassTrends -> composeClassTrendsDraft when it is also the rubric area name (L7 threat)", () => {
+    const results = [
+      makeGradedResultForRun(SEED, [makeRubricAreaForRun(`Peer review of ${SEED}`, "90%")]),
+    ];
+    const entry = makeRunEntry(results, [`Peer review of ${SEED}`], "Essay 1");
+    const report = computeClassTrends(entry);
+    const result = composeClassTrendsDraft(report, [], entry.assignmentName);
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+
+  it("a seeded student name does not survive computeClassTrends -> composeClassTrendsDraft when it is also the assignment name (L8 threat)", () => {
+    const results = [makeGradedResultForRun(SEED, [makeRubricAreaForRun("Thesis Statement", "90%")])];
+    const entry = makeRunEntry(results, ["Thesis Statement"], `Makeup exam - ${SEED}`);
+    const report = computeClassTrends(entry);
+    const result = composeClassTrendsDraft(report, [], entry.assignmentName);
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
     }
   });
 });

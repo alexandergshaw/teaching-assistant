@@ -19,6 +19,7 @@ import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
+import PresentationsTab from "./components/presentations";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
@@ -607,6 +608,12 @@ export default function Home() {
                 {manualView === "artifact-design" && (
                   <TabShell>
                     <ArtifactDesignTab />
+                  </TabShell>
+                )}
+
+                {manualView === "presentations" && (
+                  <TabShell>
+                    <PresentationsTab />
                   </TabShell>
                 )}
 

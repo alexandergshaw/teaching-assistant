@@ -18,7 +18,8 @@ export type ManualViewType =
   | "recording"
   | "ppt-design"
   | "artifact-design"
-  | "grading";
+  | "grading"
+  | "presentations";
 export type BuildViewType = "new" | "prebuilt";
 
 // The Grading sub-tab's own inner selection: which of its two surfaces is
@@ -117,6 +118,12 @@ export const destinations: DestinationGroup[] = [
     ],
   },
   {
+    name: "Presentations",
+    destinations: [
+      { id: "presentations-slide-deck", label: "Slide Deck Creation", description: "Generate a lecture outline, activity ideas, and a slide deck from pasted context" },
+    ],
+  },
+  {
     name: "Grading",
     destinations: [
       { id: "grading-run", label: "Submissions", description: "Grade student submissions and post results to Canvas" },
@@ -158,6 +165,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "recording",
   "ppt-design",
   "artifact-design",
+  "presentations",
   "grading",
 ];
 
@@ -168,6 +176,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
+  presentations: "Presentations",
   grading: "Grading",
 };
 
@@ -189,12 +198,13 @@ export function isManualViewType(value: unknown): value is ManualViewType {
 // destinations and a view with an accessible name are the same set BY
 // CONSTRUCTION - there is no second list either reader could fall out of sync
 // with (docs/tools-grading-subtab-architecture.md section 6.1).
-type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading">;
+type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading" | "presentations">;
 
 const INNER_NAV: Record<InnerNavViewType, { groupName: string; ariaLabel: string }> = {
   "course-planning": { groupName: "Build", ariaLabel: "Course build modes" },
   content: { groupName: "LMS", ariaLabel: "LMS views" },
   grading: { groupName: "Grading", ariaLabel: "Grading tools" },
+  presentations: { groupName: "Presentations", ariaLabel: "Presentations views" },
 };
 
 // The active Manual view's inner destinations, or null when that view has no
@@ -242,6 +252,8 @@ export function getActiveDestinationId(
     return "ppt-design";
   } else if (manualView === "artifact-design") {
     return "artifact-design";
+  } else if (manualView === "presentations") {
+    return "presentations-slide-deck";
   } else if (manualView === "grading") {
     return `grading-${gradingView}`;
   }
@@ -311,6 +323,7 @@ export function resolveStateFromDestinationId(
     if (id === "recording") return "recording";
     if (id === "ppt-design") return "ppt-design";
     if (id === "artifact-design") return "artifact-design";
+    if (id.startsWith("presentations-")) return "presentations";
     if (id.startsWith("grading-")) return "grading";
     return currentManualView;
   })();

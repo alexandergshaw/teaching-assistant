@@ -44,6 +44,7 @@ export type ManualView =
   | "recording"
   | "ppt-design"
   | "artifact-design"
+  | "presentations"
   | "grading";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
@@ -697,6 +698,13 @@ export function useAppNavigation() {
           if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
           if (parsed.manualView === "content") setContentView(parsed.contentView);
           if (parsed.manualView === "grading") setGradingView(parsed.gradingView);
+          // presentations has a single inner destination
+          // ("presentations-slide-deck") and no separate inner-selection
+          // state beyond manualView itself, which setManualView above
+          // already restored - so there is nothing further to restore here.
+          if (parsed.manualView === "presentations") {
+            // no-op: no extra inner state to restore
+          }
         }
         if (parsed.toolsSection === "workflows") {
           setWorkflowsView(parsed.workflowsView);

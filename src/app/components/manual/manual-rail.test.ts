@@ -186,12 +186,16 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (the Manual half of the Tools rail)", () => {
-    it("should list the seven subtabs in display order", () => {
-      // Seven, not eight: "course-intel" left this rail entirely when it was
-      // promoted to a top-level tab (D24a). See the removal block below.
-      // "grading" occupies the slot "repo-grades" used to (GRAD-SUBTAB wave 1):
-      // it absorbed both the old LMS Grading destination and the standalone
-      // Repo Grades subtab into one container with its own inner nav.
+    it("should list the eight subtabs in display order", () => {
+      // Eight, not seven: "presentations" (PRES-1 wave 3) is the newest
+      // addition - an inner-nav subtab (a "Presentations" destination group
+      // holding "Slide Deck Creation", extensible to more children later),
+      // slotted between Artifact Templates and Grading. "course-intel" left
+      // this rail entirely when it was promoted to a top-level tab (D24a).
+      // See the removal block below. "grading" occupies the slot
+      // "repo-grades" used to (GRAD-SUBTAB wave 1): it absorbed both the old
+      // LMS Grading destination and the standalone Repo Grades subtab into
+      // one container with its own inner nav.
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -199,6 +203,7 @@ describe("manual-rail", () => {
         "recording",
         "ppt-design",
         "artifact-design",
+        "presentations",
         "grading",
       ]);
     });
@@ -353,6 +358,49 @@ describe("artifact-design subtab", () => {
 
   it("has no inner destinations (it is a single-destination subtab)", () => {
     expect(getInnerDestinations("artifact-design")).toBeNull();
+  });
+});
+
+// The Presentations sub-tab (PRES-1 wave 3, AC-2 /
+// docs/pres-1-architecture.md section "the extensible-child decision"): unlike
+// version-control/recording/ppt-design/artifact-design (each a single
+// destination with getInnerDestinations returning null), presentations is
+// wired as an INNER-NAV view with a "Presentations" destinations group so a
+// child-tab strip renders under the "Presentations" chip and a second child
+// can be added later as one more array entry, with no restructuring. Before
+// this fix, presentations was a standalone name:null single-destination group
+// holding "slide-deck-creation" and getInnerDestinations("presentations")
+// returned null - this block would have failed RED against that shape
+// (getInnerDestinations returned null, not a list containing "Slide Deck
+// Creation").
+describe("presentations subtab", () => {
+  it("is reachable from its destination id and reports itself as active", () => {
+    const resolved = resolveStateFromDestinationId("presentations-slide-deck", "content", "new", "modules", "run");
+    expect(resolved.manualView).toBe("presentations");
+    expect(getActiveDestinationId("presentations", "new", "modules", "run")).toBe("presentations-slide-deck");
+  });
+
+  it("has a rail destination with a label and description", () => {
+    const dest = getDestinationById("presentations-slide-deck");
+    expect(dest).toBeDefined();
+    expect(dest!.label).toBe("Slide Deck Creation");
+    expect(dest!.description).toBeTruthy();
+  });
+
+  it("has a non-null inner-nav destinations list containing Slide Deck Creation (AC-2)", () => {
+    const inner = getInnerDestinations("presentations");
+    expect(inner).not.toBeNull();
+    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck"]);
+    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation"]);
+  });
+
+  it("is in MANUAL_VIEW_ORDER with a matching label", () => {
+    expect(MANUAL_VIEW_ORDER).toContain("presentations");
+    expect(MANUAL_VIEW_LABELS["presentations"]).toBe("Presentations");
+  });
+
+  it("is accepted by isManualViewType", () => {
+    expect(isManualViewType("presentations")).toBe(true);
   });
 });
 

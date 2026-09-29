@@ -370,8 +370,10 @@ describe("the merged tabs are one navigation level deep", () => {
     const source = read(PAGE);
     expect(source).toContain("COURSES_RAIL_ITEMS.map(");
     expect(source).toContain("TOOLS_RAIL_ITEMS.map(");
-    // Ten chips is a lot; a hand-written list is how one of them goes missing.
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
+    // Eleven chips is a lot; a hand-written list is how one of them goes
+    // missing. Eight Manual + three Workflows (was ten: PRES-1 wave 3 added
+    // the "presentations" Manual subtab, MANUAL_VIEW_ORDER's eighth entry).
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
   });
 });
 

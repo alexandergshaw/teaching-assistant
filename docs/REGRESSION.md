@@ -45895,3 +45895,236 @@ found: length 2,940,524 bytes, NUL count 0, CR count 0, no BOM.
 | Whether A8's fix, once built, actually changes model-visible grading output for a real discussion (versus only the `content`/`submittedFiles` shape asserted here) | A8 implementer + owner | A live Canvas discussion URL graded through Route A, before/after | Owner-run comparison after A8 ships; unreachable from this repo per `docs/loop/this-repo.md` section 6 (no live Canvas, no API keys) |
 | `fetchDiscussion`/`extractDiscussionActivity`'s zero test coverage (443a point 6) is a pre-existing gap this baseline surfaces but does not close | next seat that touches `src/lib/canvas/discussions.ts` | `grep -n "discussion" src/lib/canvas/*.test.ts` (currently no matching file) | A8's own test-notes pass, if it adds coverage there, or a follow-up backlog row if it does not |
 | The embedded-engine discussion route's (`gradeDiscussion`) actual reply-scoring behavior was cited (443b) but not independently re-verified line-by-line the way Route A was, since it is out of scope for A8 | whichever seat next scopes work touching `src/lib/embedded-grader/discussion.ts` | direct read of that file, same method as this entry | Before any change that would route Route A traffic through it, per the owner ruling in `docs/a8-architecture.md:130` |
+
+
+## 444 - A8 recognition-only ships (waves 1+2, `d82d18ae` + `20e8af54`): discussion replies reach the grading model labelled as replies
+
+Batched REGRESSION pass for the A8 group (both waves shipped this session).
+Part A confirms no unintended regression against entry 443's pre-A8 baseline;
+Part B records the shipped behavior. Every claim below was verified by
+opening the cited file at the cited line or by re-running the cited command
+in this session.
+
+### 444a - Part A: entry 443 facts, intended-superseded vs must-still-hold
+
+**Intended supersessions (443a point 4 - confirmed changed, matching A8's design):**
+
+- 443a said `canvasWorkToEntry` never reads `work.discussion` and always
+  collapses a discussion into one `"Discussion post"` pseudo-entry. That is
+  now false by design: `src/lib/grade/extraction.ts:357` (`if (work.discussion)`)
+  is a new top branch that early-returns via `buildDiscussionEntry`
+  (`extraction.ts:270-334`) before the old flat `work.text` path is ever
+  reached for a discussion work. Confirmed by reading `extraction.ts:355-376`
+  directly (the `if` block returns at `:372` before the old
+  `const contentParts: string[] = [];` line that used to run first).
+- The new `content` is a manifest (`extraction.ts:288-291`, e.g. "This
+  submission is a discussion contribution: N initial post(s) and N
+  reply/replies to classmates...") followed by `=== INITIAL POST ===`
+  (`extraction.ts:296`, or a `[This student did not write an initial
+  post.]` placeholder at `:298` when `initialCount === 0`) and, only when
+  `replyCount > 0` (`extraction.ts:306`), `=== REPLIES TO CLASSMATES ===`
+  (`:307`) with one `--- Reply to <parentName> ---` (or bare `--- Reply
+  ---` when `parentName` is undefined) header per reply
+  (`extraction.ts:308-311`). Confirmed by direct read; also pinned by
+  `extraction.test.ts` REQ-1/REQ-2/REQ-5 (`extraction.test.ts:395,410,417,451`),
+  all passing - see 444d.
+- The old generic `"Discussion post"` pseudo-entry name is gone from this
+  path: `submittedFiles` now carries one entry per contribution
+  (`pushContribution`, `extraction.ts:275-284`), named `"Initial post"` /
+  `"Initial post N"` / `"Reply to <parentName>"` / `"Reply"`, each passed
+  through `dotFreeContributionName` (`extraction.ts:262-265`, strips every
+  `.`) and `uniqueContributionName` (`extraction.ts:246-256`, appends
+  ` (2)`, ` (3)`... on collision). Confirmed by direct read and by
+  REQ-1/REQ-7 in `extraction.test.ts:395,465` (passing - 444d).
+
+**Must-still-hold facts (443a/443b - confirmed unchanged):**
+
+- **Non-discussion path is byte-identical.** `git show 20e8af54 -- src/lib/grade/extraction.ts`
+  shows the diff is purely additive: two new helper functions
+  (`uniqueContributionName`, `dotFreeContributionName`), one new function
+  (`buildDiscussionEntry`), and one new `if (work.discussion) { ... }` block
+  prepended inside `canvasWorkToEntry` (`extraction.ts:355-376`) that ends
+  with a `return`. Every line of the pre-existing flat-path code below that
+  block (starting at the old `const contentParts: string[] = [];`, now
+  `extraction.ts:378`) is untouched in the diff - confirmed by reading the
+  full `git show 20e8af54 -- src/lib/grade/extraction.ts` diff, which
+  contains no removal lines inside that region. A work with no
+  `discussion` field therefore still takes the old flat `work.text` path
+  exactly as 443a described it.
+- **buildSubmittedFileNamesBlock's dot-inclusion filter is unchanged and
+  now actively guarded, not just inert.** `src/lib/grade/prompts.ts:271-274`
+  is byte-identical to entry 443's citation (`git diff d82d18ae~1 20e8af54 --
+  src/lib/grade/prompts.ts` produces no output - confirmed empty diff, run
+  this session). A8 does not touch this filter; instead it relies on it by
+  constructing dot-free names (`dotFreeContributionName`,
+  `extraction.ts:262-265`) so a dotted `parentName` (e.g. Dr. Alan Turing)
+  cannot slip a fabricated filename past the `.includes(".")` check and into
+  the model's SUBMITTED FILES block - pinned by `extraction.test.ts` REQ-7
+  (`extraction.test.ts:465-483`, fixture G, passing - 444d).
+- **`contributionCount` still exists, unremoved.** `src/lib/canvas/discussions.ts:118`
+  (field declaration) and `:162` (`activity.initialPosts.length +
+  activity.replies.length`, the same combined-sum computation 443a cited)
+  are both still present - confirmed by `grep -n "contributionCount"
+  src/lib/canvas/discussions.ts` this session. Wave 1 added
+  `initialPostCount?`/`replyCount?` alongside it
+  (`discussions.ts:114,117` field docs; set at `discussions.ts:163-164`,
+  read directly) without removing or changing `contributionCount`.
+- **`grading.ts`/`submissions.ts` untouched, their `CanvasStudentWork`
+  literals still compile.** `git diff d82d18ae~1 20e8af54 -- src/app/actions/grading.ts
+  src/lib/canvas/submissions.ts` produces no output (confirmed empty this
+  session). `grading.ts:620`'s `contributionCount: Math.max(1, ...)` literal
+  and `submissions.ts:158`'s `contributionCount: 1` literal both still
+  compile because `initialPostCount`, `replyCount`, and `discussion` are all
+  optional fields on `CanvasStudentWork` (`discussions.ts:114-120`) - neither
+  call site sets them, and none is required. Confirmed by the passing
+  tsc-backed suites in 444d (no type-check failure surfaced by any of the
+  six run files, which import both call sites transitively).
+
+**No unintended regression found.** Every MUST-STILL-HOLD fact from entry 443
+holds; every changed fact is an INTENDED supersession matching A8's stated
+design (Wave 1/2 commit messages, `docs/a8-architecture.md` sections 1-3).
+
+### 444b - Part B: WAVE 1 (`d82d18ae`) - canvas-layer recognition, shape-only
+
+- **`DiscussionPost.parentName` resolved from the names map.**
+  `extractDiscussionActivity` (`src/lib/canvas/discussions.ts:44-86`) builds
+  `names: Map<number, string>` from `data.participants`
+  (`discussions.ts:51-56`) before walking the reply tree
+  (`discussions.ts:59-82`). For a reply (`isReply` true, `depth > 0`,
+  `discussions.ts:66`), `parentName` is set to
+  `names.get(parentUserId)` when `parentUserId !== null`, else `undefined`
+  (`discussions.ts:70`); for a top-level post `parentName` is always
+  `undefined` (the `isReply &&` guard, same line). This resolves the
+  PARENT's display name, not the replying author's - pinned by
+  `src/lib/canvas.test.ts` "records the parent's display name on a reply
+  (REQ-8)" (`canvas.test.ts:57-65`), passing (444d).
+- **Shape-only `initialPostCount`/`replyCount`.** `fetchDiscussion`
+  (`src/lib/canvas/discussions.ts:140-166`) sets both fields per student
+  (`discussions.ts:163-164`: `initialPostCount: activity.initialPosts.length`,
+  `replyCount: activity.replies.length`) alongside the pre-existing
+  `contributionCount` (`:162`, unchanged formula). Both new fields are
+  declared optional on `CanvasStudentWork` (`discussions.ts:114-120`,
+  doc comments say "shape-only; no runtime reader" and cite
+  `docs/a8-architecture.md` section 5) and, per 444a, have zero runtime
+  reader as of this entry - Wave 2's manifest computes its own
+  `initialCount`/`replyCount` locally from `discussion.initialPosts.length`/
+  `discussion.replies.length` (`extraction.ts:271-272`), not from these
+  fields. Pinned by `canvas.test.ts` "sets distinct initialPostCount and
+  replyCount (REQ-4)" (`canvas.test.ts:77`), passing (444d).
+- **`contributionCount` unchanged.** Confirmed in 444a (must-still-hold).
+
+### 444c - Part B: WAVE 2 (`20e8af54`) - the grading model now sees replies as replies
+
+- **Early-return discussion branch in `canvasWorkToEntry`.**
+  `extraction.ts:355-376`: `if (work.discussion) { ... return {...}; }` runs
+  before the pre-existing flat-path code, so a discussion work's
+  `work.text` (still populated per `discussions.ts:159-161`, unchanged) is
+  never read for a discussion submission - pinned by `extraction.test.ts`
+  REQ-1's assertion 4 (`extraction.test.ts:307-311` comment; test body
+  `:395-407`), passing (444d).
+- **Front-loaded manifest survives truncation.** `buildDiscussionEntry`
+  (`extraction.ts:270-334`) places the manifest string
+  (`extraction.ts:288-291`) as the FIRST element of `contentSections`
+  (`extraction.ts:293`), before the `=== INITIAL POST ===` section, so
+  `truncateSubmission`'s prefix slice keeps the counts even under a tight
+  cap. Pinned by `extraction.test.ts` REQ-3 (`extraction.test.ts:424-449`
+  area, the "truncation survival" describe block driving the real
+  `truncateSubmission`), passing (444d).
+- **Per-reply `parentName` header.** `extraction.ts:308-311`: each reply's
+  label is `Reply to <parentName>` when `parentName` is set, else bare
+  `Reply` (`extraction.ts:309`), emitted as a `--- <label> ---` content
+  header (`:310`) and passed to `pushContribution` (`:311`) for the
+  matching `submittedFiles` entry.
+- **One dot-free, unique `submittedFiles` name per contribution.**
+  `pushContribution` (`extraction.ts:275-284`) names each entry via
+  `dotFreeContributionName(uniqueContributionName(label, usedNames))`
+  (`:279`): `dotFreeContributionName` (`:262-265`) strips every `.` (the
+  D-1 privacy guard - a dotted `parentName` like Dr. Alan Turing cannot
+  reach `buildSubmittedFileNamesBlock`'s file-list, confirmed above and by
+  REQ-7); `uniqueContributionName` (`:246-256`) appends ` (2)`, ` (3)`...
+  on collision (the RT-6 partial close named in the `20e8af54` commit
+  message - two replies to the same classmate get distinct names, closing
+  the `FilesCell` React-key collision `docs/a8-waves.md:512-518` flagged as
+  RECOMMENDED-not-mandated; a dot-differing name collision, e.g. "Reply to
+  Dr. Turing" vs "Reply to Turing" both stripping to the same string,
+  remains unclosed - see 444e/RT-6 residual, unchanged from `docs/a8-waves.md:39`).
+- **Reply-as-initial-post is unrepresentable.** Because `content` and
+  `submittedFiles` are built separately from `discussion.initialPosts` and
+  `discussion.replies` (`extraction.ts:271-272`, two distinct arrays off the
+  structured `DiscussionActivity`, never a merged/re-sorted list), and the
+  reply section only exists under its own `=== REPLIES TO CLASSMATES ===`
+  header gated on `replyCount > 0` (`extraction.ts:306`), there is no code
+  path in `buildDiscussionEntry` that can place reply text inside the
+  `=== INITIAL POST ===` section or vice versa - confirmed by reading
+  `extraction.ts:293-315` in full; no shared mutable array or index
+  arithmetic crosses the two loops (`extraction.ts:296-303` for initial
+  posts, `:307-313` for replies).
+
+### 444d - Gates and the oracle, this session
+
+`npm run test:paths -- src/lib/grade/extraction.test.ts src/lib/canvas.test.ts
+src/lib/grade/grouping-zip-parents.wiring.test.ts
+src/lib/grade/rubric-stamp.wiring.test.ts
+src/app/actions/action-guard-coverage-github-cohort.test.ts
+src/app/components/grading-results/gradingResultsHelpersEditState.test.ts`,
+run this session: **6 files, 83 tests, all passing** (21 in
+`extraction.test.ts`, 6 in `canvas.test.ts`, 7 in
+`grouping-zip-parents.wiring.test.ts`, 10 in `rubric-stamp.wiring.test.ts`,
+6 in `action-guard-coverage-github-cohort.test.ts`, 33 in
+`gradingResultsHelpersEditState.test.ts`). No MUST-STILL-HOLD fact
+regressed; no blocker to report.
+
+This entry adds no test and changes no source; the applicable cleanliness
+gate is this file's own. `npm run test:paths -- src/lib/no-emojis.test.ts
+src/source-bytes.structure.test.ts`, run before this entry was appended:
+**2 files, 21 tests, all passing** (18 in `no-emojis.test.ts`, 3 in
+`source-bytes.structure.test.ts`). A direct Python byte scan of
+`docs/REGRESSION.md`, run before this entry was appended: length 2,955,452
+bytes, NUL count 0, CR count 0, no UTF-8 BOM. Both gates should be re-run
+after this entry lands; the re-run counts are reported in this session's
+closing summary rather than duplicated here, per entry 442d's convention.
+
+### 444e - What this entry does not cover, and the residual register
+
+- **This is a reading-plus-test oracle, not a live-Canvas oracle.** No live
+  Canvas call was made and no component renders under this repo's vitest
+  (`docs/loop/this-repo.md` section 6); every claim above is either a direct
+  file-and-line read or a named passing test run in this session.
+- **Route boundary unchanged from entry 443b.** Route C
+  (`gradeOneSubmissionAction`, `grading.ts:601-652`) and Route D (the
+  external "other"/Deterministic Grading API path,
+  `src/lib/canvas/submissions.ts:166-188`) are still owner-only and out of
+  scope - confirmed both waves' diffs touch neither file
+  (`git diff d82d18ae~1 20e8af54 --stat` lists only
+  `src/lib/canvas.test.ts`, `src/lib/canvas/discussions.ts`,
+  `src/lib/grade/extraction.test.ts`, `src/lib/grade/extraction.ts`).
+  `docs/a8-architecture.md:395-406` (section 10) records this as R1/R2,
+  unverifiable without a live Canvas call.
+- **The reply-section rubric (R3) and its derived-total question (R4) are
+  designed, not built.** `docs/a8-architecture.md:344-390` (section 9) lays
+  out the recommended house rule and the future `rubric.ts` shape; no code
+  in either shipped wave adds a reply-scoring criterion or reads one. R4
+  (`docs/a8-architecture.md:341,545-547`) is stated as moot until R3 ships.
+- **RT-6's dot-differing-name sliver is an OV residual, not closed.**
+  `uniqueContributionName` (`extraction.ts:246-256`) compares labels by
+  exact string equality against `usedNames`, AFTER `dotFreeContributionName`
+  has already stripped dots (`pushContribution`, `extraction.ts:279`) - so
+  two contributions whose labels differ only by dots (e.g. parentNames
+  "Dr. Turing" and "Turing") collide to the same stripped string and ARE
+  correctly disambiguated by `uniqueContributionName`'s collision counter.
+  What was not independently re-derived here is whether a same-classmate
+  reply pair that is dot-differing but otherwise textually distinct could
+  still read as ambiguous to a human reviewer despite the React key being
+  unique; carried as-is from the `20e8af54` commit message's own framing
+  ("the dot-differing-name sliver stays an OV residual").
+
+| Residual | Owner | Instrument | Step that measures it |
+|---|---|---|---|
+| Whether A8's shipped recognition actually improves grading quality/scores for a real discussion (vs. only the content/submittedFiles shape confirmed here) | A8 owner | A live Canvas discussion URL graded through Route A, before/after | Owner-run comparison; unreachable from this repo per docs/loop/this-repo.md section 6 (no live Canvas, no API keys) |
+| Route C (gradeOneSubmissionAction) discussion recognition | repo owner (R1, docs/a8-architecture.md:529) | A live Route C call with a discussion submission | Owner-run; not scoped to A8 |
+| Route D (external Deterministic Grading API) discussion handling | repo owner (R2, docs/a8-architecture.md:533) | A live Route D call | Owner-run; not scoped to A8 |
+| The reply-section rubric authoring surface and parsing convention (R3) | whoever scopes R3 next (docs/a8-architecture.md:538) | Design pass + rubric.ts/parsing.ts build | A future backlog item |
+| Whether a model-supplied total ignoring a future reply component should be overridden by deriveTotalScore (R4) | whoever scopes R3/R4 (docs/a8-architecture.md:545-547) | Re-examine parsing.ts:175-203 and grades.ts:128-143 once a reply criterion exists | That future scope, moot until R3 ships |
+| initialPostCount/replyCount remain shape-only with no runtime reader | whoever builds R3/R4 | grep -rn "initialPostCount\|replyCount" src | The future scope that would add a reader |
+| The dot-differing-classmate submittedFiles name collision sliver (RT-6) | next seat that touches uniqueContributionName/dotFreeContributionName (extraction.ts:246-265) | A fixture with two dot-differing parentNames feeding the same student's replies, asserted against extraction.test.ts | Before any change that relies on submittedFiles names being human-disambiguating, not just React-key-unique |
+| AC-5's rendered UI (rows, focus, keyboard) for the new manifest/section content | owner/UX pass (R5, docs/a8-waves.md:508-511) | Manual check or screenshot in the running app | After this wave, before the feature is presented as UI-verified |

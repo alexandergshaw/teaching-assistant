@@ -15,7 +15,17 @@ function browserStorage(): KeyValueStorage | null {
   return window.localStorage;
 }
 
-export function usePersistedJSON<T>(key: string, defaultValue: T): [T, (value: T) => void] {
+// The setter's type includes the functional-updater form (T | (prev: T) =>
+// T), matching React's own setState signature, because it IS the setState
+// dispatch returned by useState below - passed straight through, not
+// wrapped. useState already supports an updater at runtime; this type
+// annotation was previously narrowed to the value-only form, which is what
+// SourcesEditor's cross-batch drop race fix needs (composing each append
+// against the latest committed value rather than a stale snapshot).
+export function usePersistedJSON<T>(
+  key: string,
+  defaultValue: T
+): [T, (value: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     const storage = browserStorage();
     if (!storage) return defaultValue;

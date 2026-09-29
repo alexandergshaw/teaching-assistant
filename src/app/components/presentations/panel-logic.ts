@@ -11,9 +11,11 @@ import type {
   ArtifactSelection,
   ContentArtifactKind,
   PresentationContext,
+  PresentationSource,
   ProducedArtifact,
   RegenerateInput,
 } from "@/lib/presentations/types";
+import type { DeckSourceResult } from "@/lib/decks/deck-source";
 
 // ---------------------------------------------------------------------------
 // Request-body builders (fresh vs regenerate; the route contract in
@@ -204,3 +206,78 @@ export const DEFAULT_ARTIFACT_SELECTION: ArtifactSelection = {
   deck: true,
   review: true,
 };
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop file intake -> PresentationSource. The byte-to-text
+// extraction itself happens server-side (extractDeckSourceFileAction, reused
+// verbatim from A43-S - no second extractor); this module only shapes that
+// action's result union into a PresentationSource, or passes its error
+// through untouched for per-file display, and decides the append order and
+// name collision handling. FileReader/base64 and the drag events stay in
+// SourcesEditor.tsx - owner-verification only, not exercised here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Map one extractDeckSourceFileAction result to a PresentationSource (success)
+ * or pass its { error } through unchanged (failure), so a caller can display
+ * that error against the ONE file that failed without touching the others.
+ */
+export function deckSourceResultToSource(
+  name: string,
+  result: DeckSourceResult | { error: string }
+): PresentationSource | { error: string } {
+  if ("error" in result) {
+    return { error: result.error };
+  }
+  return { name, text: result.materials };
+}
+
+/**
+ * Append newly-extracted sources to the existing list, in the order the
+ * files were dropped/picked. Extracted files never replace or reorder
+ * existing sources (they are additive, same as "Add pasted source").
+ */
+export function appendExtractedSources(
+  existing: PresentationSource[],
+  added: PresentationSource[]
+): PresentationSource[] {
+  return [...existing, ...added];
+}
+
+/**
+ * A dropped file's name may collide with an existing source's name (two
+ * files named "notes.txt" from different folders, or a repeat drop of the
+ * same file). Rather than silently overwriting or producing two
+ * identically-named sources, suffix " (2)", " (3)", ... until unique.
+ */
+export function uniqueSourceName(existingNames: string[], name: string): string {
+  if (!existingNames.includes(name)) return name;
+  let n = 2;
+  while (existingNames.includes(`${name} (${n})`)) {
+    n += 1;
+  }
+  return `${name} (${n})`;
+}
+
+/**
+ * Append one successfully-extracted file to `prev`, naming it uniquely
+ * AGAINST `prev` in the same step. This is meant to be called from inside a
+ * functional state updater (prev => appendExtractedSourceNamed(prev, ...))
+ * so the name collision check always runs against the latest committed
+ * sources rather than a snapshot taken before an earlier concurrent drop's
+ * extraction finished - two overlapping drops (e.g. A.pdf and B.txt, dropped
+ * while A is still extracting) each compose against the array the other one
+ * just produced instead of racing on a shared stale base, so neither file is
+ * silently lost and both end up uniquely named.
+ */
+export function appendExtractedSourceNamed(
+  prev: PresentationSource[],
+  rawName: string,
+  text: string
+): PresentationSource[] {
+  const name = uniqueSourceName(
+    prev.map((s) => s.name),
+    rawName
+  );
+  return appendExtractedSources(prev, [{ name, text }]);
+}

@@ -9,6 +9,10 @@ import {
   readPersistedJSON,
   writePersistedString,
   writePersistedJSON,
+  deckSourceResultToSource,
+  appendExtractedSources,
+  appendExtractedSourceNamed,
+  uniqueSourceName,
   CONTENT_ARTIFACT_KINDS,
   DEFAULT_ARTIFACT_SELECTION,
   type KeyValueStorage,
@@ -16,9 +20,11 @@ import {
 import type {
   ArtifactSelection,
   PresentationContext,
+  PresentationSource,
   ProducedArtifact,
   RegenerateInput,
 } from "@/lib/presentations/types";
+import type { DeckSourceResult } from "@/lib/decks/deck-source";
 
 const context: PresentationContext = {
   text: "Week 3: recursion",
@@ -242,5 +248,120 @@ describe("persisted JSON round-trip", () => {
   it("falls back when the key is absent", () => {
     const storage = makeStorage();
     expect(readPersistedJSON(storage, "ta-pres-sources", [])).toEqual([]);
+  });
+});
+
+describe("deckSourceResultToSource", () => {
+  it("maps a successful extraction to a PresentationSource using the given name", () => {
+    const result: DeckSourceResult = {
+      materials: "recursion basics from the syllabus",
+      receipt: { name: "syllabus.pdf", bytes: 1024, characters: 34, truncated: false },
+    };
+    expect(deckSourceResultToSource("syllabus.pdf", result)).toEqual({
+      name: "syllabus.pdf",
+      text: "recursion basics from the syllabus",
+    });
+  });
+
+  it("passes a per-file error through unchanged (RED without the passthrough: a naive mapper would coerce it into a source with text:undefined instead)", () => {
+    const result = { error: "Could not extract any text from that file." };
+    expect(deckSourceResultToSource("scan.png", result)).toEqual({
+      error: "Could not extract any text from that file.",
+    });
+  });
+
+  it("handles empty extracted materials as a valid (non-error) empty-text source, not an error", () => {
+    const result: DeckSourceResult = {
+      materials: "",
+      receipt: { name: "blank.txt", bytes: 0, characters: 0, truncated: false },
+    };
+    expect(deckSourceResultToSource("blank.txt", result)).toEqual({ name: "blank.txt", text: "" });
+  });
+});
+
+describe("appendExtractedSources", () => {
+  it("appends new sources after the existing ones, preserving order", () => {
+    const existing: PresentationSource[] = [{ name: "Source 1", text: "pasted text" }];
+    const added: PresentationSource[] = [
+      { name: "notes.pdf", text: "pdf text" },
+      { name: "slides.docx", text: "docx text" },
+    ];
+    expect(appendExtractedSources(existing, added)).toEqual([...existing, ...added]);
+  });
+
+  it("returns a new array rather than mutating the existing one", () => {
+    const existing: PresentationSource[] = [{ name: "Source 1", text: "" }];
+    const result = appendExtractedSources(existing, [{ name: "file.txt", text: "x" }]);
+    expect(result).not.toBe(existing);
+    expect(existing).toHaveLength(1);
+  });
+
+  it("appending an empty batch is a no-op", () => {
+    const existing: PresentationSource[] = [{ name: "Source 1", text: "" }];
+    expect(appendExtractedSources(existing, [])).toEqual(existing);
+  });
+});
+
+describe("appendExtractedSourceNamed - cross-batch concurrent-drop race", () => {
+  it("names against the given prev, not a precomputed list", () => {
+    const prev: PresentationSource[] = [{ name: "Source 1", text: "" }];
+    expect(appendExtractedSourceNamed(prev, "notes.txt", "body")).toEqual([
+      ...prev,
+      { name: "notes.txt", text: "body" },
+    ]);
+  });
+
+  it(
+    "composing two appends against the EVOLVING base (as two overlapping drops resolving out of " +
+      "order would, each applied via a functional updater) keeps both files with unique names - " +
+      "this is the shape that was lost when both drops read the same stale snapshot",
+    () => {
+      const base: PresentationSource[] = [];
+      // Simulate B's completion applying first, then A's - both composed
+      // against whatever the array is AT THE TIME they apply, exactly like
+      // React folding two functional updates from onSourcesChange(prev => ...).
+      const afterB = appendExtractedSourceNamed(base, "B.txt", "b contents");
+      const afterA = appendExtractedSourceNamed(afterB, "A.pdf", "a contents");
+
+      expect(afterA).toEqual([
+        { name: "B.txt", text: "b contents" },
+        { name: "A.pdf", text: "a contents" },
+      ]);
+      // Neither file was dropped: both are present exactly once.
+      expect(afterA).toHaveLength(2);
+    }
+  );
+
+  it("dedupes a name collision that only exists in the evolving base (not in the original snapshot)", () => {
+    const base: PresentationSource[] = [];
+    // Two files that happen to share a name, dropped in overlapping batches.
+    const afterFirst = appendExtractedSourceNamed(base, "notes.txt", "first");
+    const afterSecond = appendExtractedSourceNamed(afterFirst, "notes.txt", "second");
+
+    expect(afterSecond).toEqual([
+      { name: "notes.txt", text: "first" },
+      { name: "notes.txt (2)", text: "second" },
+    ]);
+  });
+
+  it("returns a new array rather than mutating prev", () => {
+    const prev: PresentationSource[] = [{ name: "Source 1", text: "" }];
+    const result = appendExtractedSourceNamed(prev, "file.txt", "x");
+    expect(result).not.toBe(prev);
+    expect(prev).toHaveLength(1);
+  });
+});
+
+describe("uniqueSourceName", () => {
+  it("returns the name unchanged when there is no collision", () => {
+    expect(uniqueSourceName(["Source 1"], "notes.txt")).toBe("notes.txt");
+  });
+
+  it("suffixes (2) on a first collision", () => {
+    expect(uniqueSourceName(["notes.txt"], "notes.txt")).toBe("notes.txt (2)");
+  });
+
+  it("keeps incrementing past an already-taken (2)", () => {
+    expect(uniqueSourceName(["notes.txt", "notes.txt (2)"], "notes.txt")).toBe("notes.txt (3)");
   });
 });

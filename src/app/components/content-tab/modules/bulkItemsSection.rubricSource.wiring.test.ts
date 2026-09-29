@@ -32,7 +32,7 @@ const source = readFileSync(SECTION_PATH, "utf8");
  *  comments (which legitimately discuss "account" rubrics at length) can
  *  never satisfy an assertion meant to be about real code. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const code = stripComments(source);

@@ -90,7 +90,11 @@ describe("pickRubricToPull", () => {
 // ── Wiring: handleLmsRubric actually uses pickRubricToPull (source text) ────
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
 }
 
 describe("handleLmsRubric threads listRubricsAction's result through pickRubricToPull", () => {

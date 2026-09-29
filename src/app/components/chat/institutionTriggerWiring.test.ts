@@ -25,7 +25,7 @@ const hookSource = readFileSync(HOOK_PATH, "utf8");
  * (after whitespace), so an accurate inline prose comment that happens to
  * mention `styles.foo` or a JSX tag name is never mistaken for real code. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const windowStripped = stripComments(windowSource);

@@ -24,7 +24,7 @@ const draftLibSource = readFileSync(DRAFT_LIB_PATH, "utf8");
 const draftStateSource = readFileSync(DRAFT_STATE_PATH, "utf8");
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const strippedPanel = stripComments(panelSource);

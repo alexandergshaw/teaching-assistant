@@ -34,7 +34,7 @@ const askAiSource = readFileSync(ASK_AI_PATH, "utf8");
  * header comment) is never mistaken for real code. Mirrors
  * askAiSelection.wiring.test.ts's own helper of the same name. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

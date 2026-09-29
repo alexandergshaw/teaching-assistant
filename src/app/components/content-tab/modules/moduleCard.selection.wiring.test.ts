@@ -24,11 +24,13 @@ const MODULE_CARD_PATH = join(process.cwd(), "src/app/components/content-tab/mod
 /** Comments stripped first, mirroring ModulesHeaderBar.wiring.test.ts, so a
  *  comment that happens to mention Checkbox or Delete can never satisfy an
  *  assertion meant to be about real code. Strips block comments anywhere and
- *  full-line `//` comments (leading whitespace then `//` through EOL) - this
- *  file's own comments are always full-line, never trailing, so this is
- *  deliberately narrower than a generic `//.*$` strip. */
+ *  `//` comments per line (CR-tolerant split, then an unanchored `//.*$`
+ *  strip per line - the L13 safe form, since an anchored line-start-only
+ *  strip misses a comment trailing real code on the same line). Leading
+ *  whitespace before a stripped `//` is left in place - only the comment
+ *  text itself is removed. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 // Finding 14 (step-10 review): a canary proving stripComments actually
@@ -38,7 +40,14 @@ function stripComments(text: string): string {
 // with comments, would make every assertion below pass vacuously.
 describe("stripComments (canary: proves comment-stripping actually discriminates)", () => {
   it("removes a full-line comment mentioning a term this file asserts on", () => {
-    expect(stripComments("  // Checkbox mentioned here\nconst x = 1;")).toBe("\nconst x = 1;");
+    // Leading whitespace before the stripped "//" is preserved by the L13
+    // safe form (it only strips from "//" onward, never the indentation
+    // ahead of it) - the discriminating fact is that "Checkbox" is gone and
+    // the real code line survives untouched, not the exact leftover
+    // whitespace.
+    const stripped = stripComments("  // Checkbox mentioned here\nconst x = 1;");
+    expect(stripped).not.toContain("Checkbox");
+    expect(stripped).toBe("  \nconst x = 1;");
   });
 
   it("removes a block comment spanning multiple lines", () => {

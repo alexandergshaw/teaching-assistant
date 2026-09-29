@@ -154,7 +154,7 @@ function stickyHeaderBlock(rawText: string): string {
 /** Source with comments stripped, so a name mentioned in prose is never
  * mistaken for a declared prop, a bound one, or a rendered component. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 /** Names declared by `export interface <name> { ... }`. */

@@ -55,7 +55,7 @@ const bulkModulesSectionSource = readFileSync(BULK_MODULES_SECTION_PATH, "utf8")
  * discusses several of these tags and ids at length) is never mistaken for a
  * real render site. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

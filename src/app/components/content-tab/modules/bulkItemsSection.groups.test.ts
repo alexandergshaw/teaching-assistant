@@ -44,7 +44,7 @@ const source = readFileSync(SECTION_PATH, "utf8");
  * assertion meant to be about real code - same idiom
  * bulkItemsSection.rubricSource.wiring.test.ts already uses. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

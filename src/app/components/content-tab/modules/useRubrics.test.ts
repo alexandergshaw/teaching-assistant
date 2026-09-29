@@ -66,7 +66,7 @@ describe("interpretRubricsResult", () => {
 // ── Wiring: the hook actually uses interpretRubricsResult + setNote (source text) ─
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("useRubrics threads a genuine fetch failure to the existing note channel (AC3)", () => {

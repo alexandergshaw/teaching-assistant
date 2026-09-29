@@ -91,7 +91,7 @@ const SOURCE_PATH = join(process.cwd(), "src/app/components/ui/SegmentedToggle.t
 const source = readFileSync(SOURCE_PATH, "utf8");
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

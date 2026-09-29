@@ -18,7 +18,7 @@ const ROW_PATH = join(process.cwd(), "src/app/components/content-tab/CourseItemR
 const rowSource = readFileSync(ROW_PATH, "utf8");
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const stripped = stripComments(rowSource);

@@ -16,7 +16,7 @@ function stripComments(text: string): string {
   return text
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
+    .split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("MessageRepliesPanel.tsx - M3's RunLogRow/primary rules and M9/M18's hints, pinned as source text", () => {

@@ -109,7 +109,7 @@ const hookSource = readFileSync(HOOK_PATH, "utf8");
  * mistaken for the call itself - same idiom as
  * syllabusTemplateUpload.wiring.test.ts. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const code = stripComments(hookSource);

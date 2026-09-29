@@ -29,7 +29,7 @@ const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/us
  * otherwise either inflate a count or falsely trip a `.not.toContain`.
  * Pin the fact, never the prose that happens to sit next to it. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const hookSource = stripComments(readFileSync(HOOK_PATH, "utf8"));

@@ -34,7 +34,7 @@ const cellSource = readFileSync(CELL_PATH, "utf8");
 /** Source with comments stripped, so prose describing a check is never
  * mistaken for the check itself. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 /** Index of the first match, or -1. */

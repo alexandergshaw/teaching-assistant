@@ -35,7 +35,7 @@ const routeSource = readFileSync(ROUTE_PATH, "utf8");
  * prose (e.g. this very file's own header, or a doc comment) is never
  * mistaken for a real import or render site. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const strippedTab = stripComments(tabSource);

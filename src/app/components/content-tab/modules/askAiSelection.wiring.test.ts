@@ -34,7 +34,7 @@ const hookSource = readFileSync(HOOK_PATH, "utf8");
  * prose (e.g. this very file's own header) is never mistaken for a real
  * render site or import. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("AskAiSelectionSection is wired into ModulesView's bulk bar", () => {

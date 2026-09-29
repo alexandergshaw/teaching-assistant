@@ -21,7 +21,7 @@ const bulkBarSource = readFileSync(BULK_BAR_PATH, "utf8");
  *  inside a doc comment (this file's own header discusses several of these
  *  strings at length) is never mistaken for a real render site. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

@@ -35,7 +35,7 @@ const bulkBarSource = readFileSync(BULK_BAR_PATH, "utf8");
  *  mistaken for a real reference. Mirrors askAiSelection.wiring.test.ts's
  *  own stripComments. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const stripped = stripComments(viewSource);

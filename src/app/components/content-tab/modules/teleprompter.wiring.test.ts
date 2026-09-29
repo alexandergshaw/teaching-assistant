@@ -24,7 +24,7 @@ const SESSION_PATH = join(process.cwd(), "src/app/components/content-tab/modules
  * comment explaining what T1 forbids) is never mistaken for the pattern
  * itself. Mirrors generatedPreviewModal.wiring.test.ts's own stripComments. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 const modalSource = readFileSync(MODAL_PATH, "utf8");

@@ -16,7 +16,7 @@ function stripComments(text: string): string {
   return text
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
+    .split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("MessageCaptureSettings.tsx - M11's sign-off/instructor-name fields and M12/M13's checkboxes, pinned as source text", () => {

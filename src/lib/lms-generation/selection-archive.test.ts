@@ -305,7 +305,7 @@ describe("the item-count cap has exactly one owner (source-reading guard)", () =
    * exact number under discussion) can never be mistaken for a real
    * assignment. */
   function stripComments(text: string): string {
-    return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
   }
 
   /** How many times `150` is ASSIGNED to something (`= 150`, `: 150`)

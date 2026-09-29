@@ -39,7 +39,7 @@ const CATALOG_PATH = join(process.cwd(), "src/app/components/content-tab/modules
  * legitimately discuss `<details>`, `role="group"`, and `{open &&` at length,
  * and must never satisfy an assertion meant to be about real code. */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

@@ -22,7 +22,7 @@ const LIVE_FEED_PATH = join(process.cwd(), "src/app/components/LiveFeedPanel.tsx
  * is the multiline form, not the split-on-bare-linefeed variant that goes
  * silently blind on this repo's CRLF working tree (filed as backlog L13). */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("stripComments (canary first)", () => {

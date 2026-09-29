@@ -74,7 +74,7 @@ const HOOK_SOURCE_PATH = join(process.cwd(), "src/app/components/recording/captu
 const source = readFileSync(HOOK_SOURCE_PATH, "utf8");
 
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").split(/\r?\n/).map((line) => line.replace(/\/\/.*$/, "")).join("\n");
 }
 
 describe("useThrottledLiveSentence - the await-before-setState idiom, pinned as source text", () => {

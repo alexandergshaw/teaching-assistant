@@ -279,48 +279,19 @@ function supportsBlockComments(fn: StripFn): boolean {
 // shared prefix, not copies of this one).
 // ---------------------------------------------------------------------------
 
-// 28 copies that are safe on the two named failure modes (mode 1 and mode
-// 2). All 28 are still string-unaware (see below) and 2 of the 28 never
-// strip block comments (see BLOCK_COMMENT_UNSUPPORTED).
+// 67 copies that are safe on the two named failure modes (mode 1 and mode
+// 2) - the original 28, plus 39 mode-2-blind copies converted to the safe
+// form (L13 SECOND CORRECTION: split on a CR-tolerant line-feed pattern,
+// then strip an unanchored line-comment pattern per line) on 2026-09-29.
+// All 67 are still string-unaware (see below) and 2 of the 67 never strip
+// block comments (see BLOCK_COMMENT_UNSUPPORTED).
 const SAFE_FILES: readonly string[] = [
   "src/app/actions/action-guard-coverage-github-cohort.test.ts",
   "src/app/actions/carry-module-pattern.test.ts",
   "src/app/actions/current-events-assignments.test.ts",
   "src/app/actions/guard-overtightening.test.ts",
-  "src/app/components/canvas-tab/announcements-panel.wiring.test.ts",
-  "src/app/components/content-tab/modules/currentEventsAssignments.wiring.test.ts",
-  "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
-  "src/app/components/grading-recording/copy-feedback.test.ts",
-  "src/app/components/grading-recording/grading-rows.test.ts",
-  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts",
-  "src/app/components/grading-results/ungradedDisclosure.test.ts",
-  "src/app/components/grading-results/ungradedRowLabel.test.ts",
-  "src/app/components/repo-grades/repoGrades.wiring.test.ts",
-  "src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts",
-  "src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts",
-  "src/app/components/snapshot-grading/snapshot-grading.structure.test.ts",
-  "src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts",
-  "src/app/components/snapshot-grading/useSnapshotAutoGrade.wiring.test.ts",
-  "src/app/components/snapshot-grading/useSnapshotGrade.wiring.test.ts",
-  "src/app/components/tasks/taskInstructionIndicator.wiring.test.ts",
-  "src/app/components/workflows/RunFormFields.required-resolution.test.ts",
-  "src/app/components/workflows/runtime-field-accessible-labels.test.ts",
-  "src/lib/grade/postable.test.ts",
-  "src/lib/module-pattern-transpose.test.ts",
-  "src/lib/prompt-announcement-types.test.ts",
-  "src/lib/recording-files.kinds.test.ts",
-  "src/lib/supabase/courses.structure.test.ts",
-  "src/lib/workflow-schedule-blocking-fields.test.ts",
-];
-
-// 39 copies that are CR-safe (pass the mode-1 fixture) but never strip a
-// comment that trails real code on the same line (fail both trailing
-// fixtures) - mode 2 from the row's own analysis. This is the majority
-// shape in the repo today: CR-safety got fixed or was never broken, but
-// the anchored/line-start-only strip pattern was never revisited for
-// trailing comments.
-const MODE2_BLIND_FILES: readonly string[] = [
   "src/app/components/autoGradeTransition.wiring.test.ts",
+  "src/app/components/canvas-tab/announcements-panel.wiring.test.ts",
   "src/app/components/chat/institutionTriggerWiring.test.ts",
   "src/app/components/content-tab/CourseItemRow.wiring.test.ts",
   "src/app/components/content-tab/courseItemsView.wiring.test.ts",
@@ -331,6 +302,7 @@ const MODE2_BLIND_FILES: readonly string[] = [
   "src/app/components/content-tab/modules/bulkItemsSection.groups.test.ts",
   "src/app/components/content-tab/modules/bulkItemsSection.rubricSource.wiring.test.ts",
   "src/app/components/content-tab/modules/bulkModulesSection.wiring.test.ts",
+  "src/app/components/content-tab/modules/currentEventsAssignments.wiring.test.ts",
   "src/app/components/content-tab/modules/generatedPreviewModal.wiring.test.ts",
   "src/app/components/content-tab/modules/moduleCard.selection.wiring.test.ts",
   "src/app/components/content-tab/modules/teleprompter.wiring.test.ts",
@@ -345,6 +317,12 @@ const MODE2_BLIND_FILES: readonly string[] = [
   "src/app/components/drafted-grades/classTrends.wiring.test.ts",
   "src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts",
   "src/app/components/grading-recording/GradingCaptureSettings.wiring.test.ts",
+  "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
+  "src/app/components/grading-recording/copy-feedback.test.ts",
+  "src/app/components/grading-recording/grading-rows.test.ts",
+  "src/app/components/grading-recording/submission-kind-callsites.structure.test.ts",
+  "src/app/components/grading-results/ungradedDisclosure.test.ts",
+  "src/app/components/grading-results/ungradedRowLabel.test.ts",
   "src/app/components/knowledge/knowledgeBulkBar.wiring.test.ts",
   "src/app/components/message-replies/MessageCaptureSettings.wiring.test.ts",
   "src/app/components/message-replies/MessageRepliesPanel.wiring.test.ts",
@@ -355,11 +333,38 @@ const MODE2_BLIND_FILES: readonly string[] = [
   "src/app/components/recording/DiscussionCaptureSettings.wiring.test.ts",
   "src/app/components/recording/captureLiveRegion.test.ts",
   "src/app/components/recording/runLogRow.test.ts",
+  "src/app/components/repo-grades/repoGrades.wiring.test.ts",
+  "src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts",
+  "src/app/components/snapshot-grading/snapshot-autofire.structure.test.ts",
+  "src/app/components/snapshot-grading/snapshot-grading.structure.test.ts",
+  "src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts",
+  "src/app/components/snapshot-grading/useSnapshotAutoGrade.wiring.test.ts",
+  "src/app/components/snapshot-grading/useSnapshotGrade.wiring.test.ts",
+  "src/app/components/tasks/taskInstructionIndicator.wiring.test.ts",
   "src/app/components/ui/buttonVariant.test.ts",
   "src/app/components/ui/confirmArmButtons.test.ts",
   "src/app/components/ui/segmentedToggle.test.ts",
+  "src/app/components/workflows/RunFormFields.required-resolution.test.ts",
+  "src/app/components/workflows/runtime-field-accessible-labels.test.ts",
+  "src/lib/grade/postable.test.ts",
   "src/lib/lms-generation/selection-archive.test.ts",
+  "src/lib/module-pattern-transpose.test.ts",
+  "src/lib/prompt-announcement-types.test.ts",
+  "src/lib/recording-files.kinds.test.ts",
+  "src/lib/supabase/courses.structure.test.ts",
+  "src/lib/workflow-schedule-blocking-fields.test.ts",
 ];
+
+// Genuinely trailing-comment-blind (mode 2) copies: none remain. The 39
+// that were here were converted to the safe form on 2026-09-29 (L13
+// SECOND CORRECTION idiom: `.split(/\r?\n/).map((line) =>
+// line.replace(/\/\/.*$/, "")).join("\n")`, matching the in-tree safe form
+// at snapshot-grading.structure.test.ts:14-20) and moved to SAFE_FILES
+// above. This array is now empty by construction - the goal state for
+// L13's mode-2 slice - and the assertion below still holds it to that
+// shape rather than deleting the check, so a future mode-2-blind copy
+// fails loudly instead of having nowhere to land.
+const MODE2_BLIND_FILES: readonly string[] = [];
 
 // Genuinely CRLF-blind (mode 1) copies: none remain. The two that were here
 // - src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts

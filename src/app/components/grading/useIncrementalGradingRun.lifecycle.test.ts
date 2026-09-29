@@ -149,6 +149,19 @@ function fdWithCanvasUrl(): FormData {
   return fd;
 }
 
+// RES-FILL-2: no canvasUrl, non-gemini provider - the client-side
+// synchronous whole-run fixture (mirrors the "client-side synchronous
+// whole-run route (non-gemini provider)" test below). routeGradingRun is
+// stubbed in this file (see the header comment above routeGradingRunMock),
+// so the fixture's own field values don't drive the route decision here -
+// routeGradingRunMock.mockReturnValue("whole-run") does - but the fixture is
+// still built the way that real route would actually resolve, for fidelity.
+function fdWithoutCanvasUrl(): FormData {
+  const fd = new FormData();
+  fd.set("provider", "other");
+  return fd;
+}
+
 const fetchMock = vi.fn();
 
 function useTestRender(submitWholeRunMock: (fd: FormData) => void) {
@@ -235,6 +248,33 @@ describe("useIncrementalGradingRun - W4-9: the press-twice instrument", () => {
     const renderB = useTestRender(submitWholeRunMock);
     await Promise.all([renderA.startReview(fdWithCanvasUrl()), renderB.startReview(fdWithCanvasUrl())]);
     expect(prepareGradingRunActionMock.mock.calls.length).toBe(2);
+  });
+
+  it("RES-FILL-2: the whole-run branch (routeGradingRun resolving synchronously to 'whole-run', a fdWithoutCanvasUrl()/non-gemini fixture) also totals exactly ONE dispatch after TWO calls from the SAME render, no tick between", async () => {
+    // Unlike the incremental branch above, this branch has no `await`
+    // before `beginWholeRun` - the whole call completes in one synchronous
+    // turn, which is exactly why the lock alone (without RES-FILL-2's
+    // deferred release) gave this branch no protection at all: by the time
+    // the second call below is made, the first has already run to
+    // completion and released the lock in the same script.
+    routeGradingRunMock.mockReturnValue("whole-run");
+    const submitWholeRunMock = vi.fn();
+    const render1 = useTestRender(submitWholeRunMock);
+    const fd = fdWithoutCanvasUrl();
+
+    const p1 = render1.startReview(fd);
+    // Click 2 reuses click 1's OWN closure - the same render object, no new
+    // render, no tick, no await - exactly the incremental case's shape
+    // above (and A26b's).
+    const p2 = render1.startReview(fd);
+
+    await Promise.all([p1, p2]);
+
+    // DIRECTION OF FAILURE: RED if submitWholeRun is called more than once -
+    // not an assertion that a flag is set.
+    expect(submitWholeRunMock).toHaveBeenCalledTimes(1);
+    expect(prepareGradingRunActionMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -278,8 +278,23 @@ export function useIncrementalGradingRun(params: UseIncrementalGradingRunParams)
     } finally {
       // Released on EVERY exit, same discipline as
       // useRepoGradesBulkGrade.ts's own finally - a rejecting prepare call
-      // or a rejecting pool must never leave the lock stuck.
-      startLockRef.current = false;
+      // or a rejecting pool must never leave the lock stuck. RES-FILL-2: the
+      // release itself is deferred one microtask rather than assigned
+      // in-line here. The incremental branch already suspends at an `await`
+      // before ever reaching this `finally`, so the extra microtask hop is
+      // unobservable there. The whole-run branch (both the client-side
+      // synchronous `routeGradingRun` return and `prepareGradingRunAction`'s
+      // own `mode: "whole-run"`) has NO await before this point, so
+      // startReview runs start-to-finish inside one synchronous turn - an
+      // in-line release here would clear the lock before a second,
+      // same-render call to startReview (no tick in between, e.g. two rapid
+      // presses) has even been made, leaving that second call free to
+      // dispatch again. Deferring the release means a second synchronous
+      // call still observes startLockRef.current === true, exactly as the
+      // incremental branch's in-flight await already guarantees.
+      queueMicrotask(() => {
+        startLockRef.current = false;
+      });
     }
   };
 

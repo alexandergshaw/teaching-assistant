@@ -62,8 +62,8 @@ enforcer, so the checker and the test seat bind to one object:
 | `parseLenientJsonArray(text): string[]` | `src/lib/decks/generate.ts:147` | Exported lenient JSON-array parse. Reused to parse the activities artifact (a string list) and to tolerate a fenced response. |
 | `extractDeckSourceFileAction(name, base64): Promise<DeckSourceResult \| {error}>` | `src/app/actions/deck-source.ts:34` | In-house file intake: `requireUser`, reads only the caller's own uploaded bytes, extracts text via `extractTextFromBuffer` (50 extensions), returns normalized `materials`. This is the FILE half of AC-3. |
 | `normalizeDeckSource` / `DeckSourceResult` (`{materials, receipt}`) / `DeckSourceReceipt` / `DECK_SOURCE_MAX_CHARS = 20000` | `src/lib/decks/deck-source.ts:19-62` | The extracted-source shape and its char budget, and the receipt shape reused as the persisted intake receipt. |
-| `savePresentationFileAction({presentationTitle, slides, ...})` | `src/app/actions/media.ts:590` | Optional "save the deck to the Files tab" (delegates to `saveRecordingFile`). Reused for the optional persist button; no new storage code. |
-| `URL.createObjectURL(blob)` download idiom | `src/app/components/ppt-design/index.tsx:545-563` | The client download idiom: `new Blob([bytes], {type: PPTX_MIME})`, anchor `.download`, `.click()`, `revokeObjectURL`. Copied into the tab's download handler. |
+| `saveRecordingFile(supabase, userId, blob, {origin, ...})` | `src/lib/recording-files.ts:68` (accepts `origin?: string \| null`, `:72`) | The Files-tab persist primitive IF a manual save is ever added. It MUST be called with `origin: "manual"` - NOT `savePresentationFileAction` (`media.ts:590`), which hardcodes `origin: "unattended"` (`media.ts:629`) for workflow-generated files. Per X2 this is MOOT for round 1 (client-session-only persistence, R-D1 / section 7); recorded so no later chunk copies the unattended action. |
+| `URL.createObjectURL(blob)` download MECHANICS only | `src/app/components/ppt-design/index.tsx:553-559` | The client download mechanics: `new Blob([bytes], {type})`, `createObjectURL`, anchor `.download`, `.click()`, `revokeObjectURL`. Copy THESE lines. The surrounding `catch` at `:560-562` is `console.error`-only and is the ANTI-PATTERN (SRE 3a) - do NOT copy it; PRES-1's handler surfaces an error STATE on a throw (section 6.7, pass condition 3a). |
 | `useLocalStorageState<T>(key, default)` | `src/app/components/ppt-design/hooks.ts:15-36` | The `ta-` persistence idiom. Reused for the value-bound intake and selection state (with the hydration caveat in section 7). |
 | Inner-nav mechanism: `ManualViewType` (`:14-21`), `MANUAL_VIEW_ORDER` (`:154-162`), `MANUAL_VIEW_LABELS` (`:164-172`), `isManualViewType` built FROM the order (`:180-184`), `destinations` groups (`:75-130`), `InnerNavViewType`/`INNER_NAV` (`:192-198`), `getInnerDestinations` (`:212-216`), `getInnerNavAriaLabel` (`:222-225`), `getActiveDestinationId` (`:227-249`), `resolveStateFromDestinationId` (`:285-346`) | `src/app/components/manual/manual-rail.ts` | The extensible sub-tab + child-tab mechanism (R-2). Grading (`GradingView`, `:43`) is the worked precedent for an inner-nav view with multiple children. |
 | `TOOLS_RAIL_ITEMS` derived from `MANUAL_VIEW_ORDER` | `src/app/components/tabs/tab-rails.ts:132-136` | The rail chips are derived, so a new `MANUAL_VIEW_ORDER` member joins the rail with no edit to `tab-rails.ts`. |
@@ -115,9 +115,9 @@ New files (all new leaves; none near the 1000-line ceiling
 | `src/lib/presentations/types.ts` | ~55 | TYPE-ONLY (no runtime emit) | The seam types (section 6). |
 | `src/lib/presentations/prompts.ts` | ~120 | yes | Pure per-artifact prompt builders, incl. `buildRegeneratePrompt` (the LEV-1 enforcer). |
 | `src/lib/presentations/parse.ts` | ~55 | yes | Deck JSON slice + parse into `PptxSlide[]` (via `enforceTitleLength`); activities parse (via `parseLenientJsonArray`). |
-| `src/lib/presentations/generate.ts` | ~140 | yes | The orchestrator: `generateSelectedArtifacts`, `generateOneArtifact`, `reviewArtifact`, `regenerateArtifact`. |
-| `src/lib/presentations/deck-file.ts` | ~20 | yes | `serializeDeckToPptx(deck)` (wraps `buildSlidesPptx`) and `PRES_PPTX_MIME`. |
-| `src/app/actions/presentations.ts` | ~45 | yes (`"use server"`) | Thin server actions; `requireUser`; async-only exports. |
+| `src/lib/presentations/generate.ts` | ~130 | yes | The executors: `selectedContentKinds` (pure selection->kinds map, AC-4), `generateOneArtifact`, `reviewArtifact`, `regenerateArtifact`. NO multi-kind looper (B1). |
+| `src/lib/presentations/deck-file.ts` | ~20 | yes | `serializeDeckToPptx(deck)` (wraps `buildSlidesPptx`, NO theme param - section 6.5) and `PRES_PPTX_MIME`. |
+| `src/app/api/presentations/generate/route.ts` | ~70 | yes (Route Handler) | The single-artifact entry point (B1): POST, one content kind (produce+optional review) OR one regenerate per request; `maxDuration=60` + soft deadline; `requireUser`. Replaces the `"use server"` action. |
 | `src/app/components/presentations/SlideDeckCreationTab.tsx` | ~320 | yes (client) | The surface. |
 | `src/app/components/presentations/SlideDeckPreview.tsx` | ~90 | yes (client) | On-page slide preview (AC-6 VISIBLE). |
 | `src/app/components/presentations/hooks.ts` | ~40 | yes (client) | `ta-` persistence for intake and selection. |
@@ -169,8 +169,8 @@ that has dropped a member before is called out.
    the same class that once dropped `"artifact-design"` from a hand-restated
    guard (`manual-rail.ts:175-179` comment). It is edit hop 4 and must not be
    skipped.
-5. **Mount.** `page.tsx` renders per-view branches (`ppt-design` at `:601-603`).
-   Add `{manualView === "presentations" && (<TabShell><SlideDeckCreationTab
+5. **Mount.** `page.tsx` renders per-view branches (the `ppt-design` block is
+   `:601-605`). Add `{manualView === "presentations" && (<TabShell><SlideDeckCreationTab
    .../></TabShell>)}`. HAND-EDIT.
 6. **Child tab strip.** `ManualRail` renders `getInnerDestinations(manualView)`
    generically (`ManualRail.tsx:49,57`). DERIVED once `presentations` is in
@@ -215,9 +215,14 @@ mechanism level and NOT by threading a full child-selection state for one child:
   restore branch in `useAppNavigation.ts`, and a `page.tsx` mount switch), and
   give `getActiveDestinationId` the extra parameter then. Round 1 ships one
   child, so none of that selection plumbing is added now - and deliberately NOT
-  adding a `useState` to `useAppNavigation.ts` is why the positional guard in
-  `topLevelTabs.wiring.test.ts` (which pins the order of the `useState`
-  declarations between `contentView` and `workflowsView`) does NOT churn.
+  adding a `useState` to `useAppNavigation.ts` is why the positional
+  useState-order guard in `useAppNavigation.test.ts:39-47` (which isolates the
+  `contentView` useState block by anchoring between the `contentView` and the
+  `workflowsView` useState declarations) does NOT churn: no `useState` is added,
+  so the block boundaries and content are unchanged and the guard stays green.
+  (The `toHaveLength` bump in `topLevelTabs.wiring.test.ts:374` is a separate,
+  unrelated edit - the rail-chip COUNT, section 4/10 - not this positional
+  guard, which I1 corrected.)
 
 This choice is a genuine cost trade: threading a one-member selection now would
 add three more edited files and churn the positional guard, for a child that
@@ -256,6 +261,11 @@ export interface ArtifactSelection {
 // TEXT (not raw bytes) feeds every prompt by code.
 export interface PresentationSource { name: string; text: string; }
 export interface PresentationContext { text: string; sources: PresentationSource[]; }
+// R-UX-8 (cross-seat, RESOLVED): `sources` is PLURAL - a PresentationSource[],
+// not a single receipt. AC-3 is "files AND text"; multiple uploaded files each
+// become one PresentationSource. The data pass's singular `fileReceipt` naming
+// ALIGNS TO this array (one receipt per element); there is no singular-file
+// seam. Any implementer building intake binds to the array, not one receipt.
 
 export interface OutlineContent { markdown: string; }
 export interface ActivitiesContent { ideas: string[]; } // 3-5 is prompt/OWNER (R-3), not a machine count
@@ -291,7 +301,15 @@ export type { DeckSourceReceipt, PptxSlide };
 Note: importing `GeneratedDeck` and `DeckSourceReceipt` via `import type` from
 runtime modules is erased at compile time, so this stays a type-only module.
 
-### 6.2 `src/lib/presentations/generate.ts` (the orchestrator - AC-4/AC-5/AC-7 seam)
+### 6.2 `src/lib/presentations/generate.ts` (the executors - AC-4/AC-5/AC-7 seam)
+
+**B1 shape change (round 2): there is NO multi-kind looper here.** The old
+`generateSelectedArtifacts(context, selection)` - which looped all selected kinds
+and their reviews in one invocation, up to 6 sequential `callLlm` calls - is
+REMOVED, because that is exactly the shape the SRE pass measured as unsafe under
+the Vercel Hobby cap (section 6.6, pass condition 2a). It is split into (a) a
+PURE selection->kinds map the client uses to drive the fan-out, and (b)
+single-artifact executors the route handler calls ONE at a time.
 
 ```ts
 import { callLlm } from "@/lib/llm";
@@ -299,19 +317,17 @@ import { buildOutlinePrompt, buildActivitiesPrompt, buildDeckPrompt,
          buildReviewPrompt, buildRegeneratePrompt } from "./prompts";
 import { parseDeckSlides, parseActivities } from "./parse";
 import type { ArtifactSelection, ContentArtifactKind, PresentationContext,
-              ProducedArtifact, GenerationResult, RegenerateInput, Critique } from "./types";
+              ProducedArtifact, RegenerateInput, Critique } from "./types";
 
-// Fixed order; a deselected kind is skipped ENTIRELY - no callLlm is issued for
-// it (AC-4 direction of failure).
+// Fixed order. PURE (no callLlm): maps a selection to exactly the selected
+// content kinds, deselected kinds absent. This is the AC-4 object (section 9);
+// the client fans out ONE request per element. `review` is NOT a content kind.
 const CONTENT_KINDS: readonly ContentArtifactKind[] = ["outline", "activities", "deck"];
+export function selectedContentKinds(selection: ArtifactSelection): ContentArtifactKind[];
 
-export async function generateSelectedArtifacts(
-  context: PresentationContext,
-  selection: ArtifactSelection,
-): Promise<GenerationResult>;
-
-// One callLlm; parses per kind into the ProducedArtifact for that kind, critique null.
-async function generateOneArtifact(
+// One callLlm; parses into the ProducedArtifact for that ONE kind, critique null.
+// EXPORTED (B1): the route handler calls this once per request.
+export async function generateOneArtifact(
   kind: ContentArtifactKind, context: PresentationContext,
 ): Promise<ProducedArtifact>;
 
@@ -327,16 +343,25 @@ export async function regenerateArtifact(
 ): Promise<ProducedArtifact>;
 ```
 
-`generateSelectedArtifacts` loops `CONTENT_KINDS`, skips any kind whose selection
-flag is false, calls `generateOneArtifact` for each selected kind, and when
-`selection.review` is true attaches `await reviewArtifact(produced, context)` to
-that artifact's `critique`. It calls `callLlm(req)` with no explicit provider, so
-every call routes to Gemini, the in-house path (`llm.ts:379-385`) - AC-3 egress
-is satisfied by construction. This is the every-input-reachable check the
-architect brief demands: every prompt is built from `context`, which the
-orchestrator receives; the critique is built from the `ProducedArtifact` the same
-loop just made, so there is no input a requirement needs that the object cannot
-reach.
+`selectedContentKinds` is a pure list-membership map: `["outline","activities",
+"deck"]` filtered to the flags set true, in that fixed order, `review` ignored.
+This is the direct AC-4 instrument (section 9) - a deselected kind is absent from
+the list, so the client issues NO request for it, so the server issues NO
+`callLlm` for it. AC-4's "no call for a deselected kind" is thus GUARANTEED BY
+CONSTRUCTION, not by a loop that could regress: the server never sees more than
+the one `kind` its request body names.
+
+`generateOneArtifact` calls `callLlm(req)` with no explicit provider, so every
+call routes to Gemini, the in-house path (`llm.ts:379-385`) - AC-3 egress is
+satisfied by construction. Every prompt is built from `context`, which the
+executor receives; `reviewArtifact`'s critique is built from the
+`ProducedArtifact` just made, so there is no input a requirement needs that the
+object cannot reach.
+
+`GenerationResult` (types.ts) is now the CLIENT-ASSEMBLED collection: the tab
+holds a `ProducedArtifact[]` accreted from the per-kind responses (that array IS
+the `GenerationResult` shape). No server function returns it; the route returns
+one `ProducedArtifact` per request (section 6.6).
 
 ### 6.3 `src/lib/presentations/prompts.ts` (pure builders)
 
@@ -360,9 +385,24 @@ every builder, so "files AND text both reach generation" (AC-3) is one code path
 ### 6.4 `src/lib/presentations/parse.ts`
 
 ```ts
-export function parseDeckSlides(text: string): DeckContent | null; // slice first JSON object, map to PptxSlide[], enforceTitleLength
+export function parseDeckSlides(text: string): DeckContent | null; // slice, map to PptxSlide[], enforceTitleLength, THEN validateDeck; null on failure
 export function parseActivities(text: string): string[];          // parseLenientJsonArray
+export function validateDeck(deck: DeckContent): DeckContent | null; // pre-flight gate (B2 / SRE 3b)
 ```
+
+**B2 pre-flight validation (round 2).** The SRE pass MEASURED (`pres-1-sre.md`
+section 3.1, executed against the real `pptxgenjs`) that `buildSlidesPptx` (a)
+THROWS an internal, non-user-facing error on non-array `bullets`
+(`"slide.bullets.map is not a function"`), and (b) SILENTLY succeeds on
+`slides: []`, producing a valid ~45.6KB one-title-slide file that is not what
+was asked for. Both must be caught BEFORE `serializeDeckToPptx` is ever called.
+`validateDeck` is that pure, machine-testable gate: it returns the deck only when
+`deck.slides.length > 0` AND every slide has a non-empty trimmed `title` AND
+`Array.isArray(slide.bullets)`; otherwise it returns `null`. `parseDeckSlides`
+runs it as its last step, so a malformed model response becomes a parse failure
+(`null`) - which `generateOneArtifact` surfaces as a GENERATION FAILURE (the
+route returns `{ error }`, section 6.6), never a zero-slide "success" and never a
+raw builder throw. This is pass condition 3b (section 9), now binding.
 
 ### 6.5 `src/lib/presentations/deck-file.ts` (AC-6 DOWNLOADABLE serializer)
 
@@ -379,41 +419,101 @@ deck yields a non-empty `ArrayBuffer`. It lives in a `.ts` leaf, not the `.tsx`
 tab, so it is collectable by vitest (`.test.tsx` is not collected -
 `this-repo.md:112`).
 
-### 6.6 `src/app/actions/presentations.ts` (`"use server"`, async-only)
+**No theme param, by construction (B2 / SRE 3.4).** The signature takes only
+`(deck, author?)` - deliberately NO `theme`. SRE measured that
+`buildSlidesPptx` THROWS `"Cannot read properties of undefined (reading
+'startsWith')"` when handed a `theme` with `backgroundKind: "solid"` and no
+`backgroundColor` (`pptx.ts:104-107`). AC-6 asks only for a visible, downloadable
+deck - never a branded one - so omitting `theme` lets `buildSlidesPptx`'s standard
+NAVY/ACCENT path (`pptx.ts:493-527`) run and AVOIDS the theme-crash mode entirely.
+This is a construction, not a test: not building a theme object is cheaper and
+safer than validating one. (The empty-deck and non-array-bullets crash modes are
+still possible from a malformed MODEL response, which is why `validateDeck`
+- section 6.4 - is the pre-flight gate; the theme mode alone is closed here.)
+
+### 6.6 `src/app/api/presentations/generate/route.ts` (Route Handler - the B1 entry point)
+
+**Why a Route Handler, not a Server Action (B1, structural - not a
+recommendation).** The SRE pass established the split criterion from this repo's
+own precedent: a Server Action reachable from `src/app/page.tsx` gets NO
+`maxDuration` and runs under the platform's unconfigured default, which is
+TIGHTER than 60s (`deck/route.ts:30-33`: "src/app/page.tsx (a client component)
+sets none, so every Server Action reachable from it is capped by the platform
+default"; `command-interface.ts:28`). Even a single-kind request can be 2
+sequential `callLlm` calls (produce + review), whose worst-case retry backoff
+alone is ~21s (arithmetic below) BEFORE any real Gemini latency, which is
+unmeasured here (R-SRE-1) and can only make it worse. Under an unknown default
+tighter than 60s that is not provably safe, and the house response to "a Server
+Action's work will not fit that default" is unanimous across `deck/route.ts`,
+`visualizer-selection.ts` and `class-trends-insight/route.ts`: move it to a
+Route Handler with an explicit ceiling. So PRES-1's generation entry point IS a
+Route Handler; the `"use server"` action is not created.
 
 ```ts
-"use server";
+import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/auth";
-import { generateSelectedArtifacts, regenerateArtifact } from "@/lib/presentations/generate";
-import type { ArtifactSelection, PresentationContext, GenerationResult,
-              ProducedArtifact, RegenerateInput } from "@/lib/presentations/types";
+import { generateOneArtifact, reviewArtifact, regenerateArtifact }
+  from "@/lib/presentations/generate";
+import type { ContentArtifactKind, PresentationContext, ProducedArtifact,
+              RegenerateInput } from "@/lib/presentations/types";
 
-export async function generatePresentationArtifactsAction(
-  context: PresentationContext, selection: ArtifactSelection,
-): Promise<GenerationResult | { error: string }>;
+export const runtime = "nodejs";
+export const maxDuration = 60;          // Hobby hard cap; matches class-trends-insight/route.ts:33
+export const dynamic = "force-dynamic";
 
-export async function regeneratePresentationArtifactAction(
-  input: RegenerateInput,
-): Promise<ProducedArtifact | { error: string }>;
+// A SINGLE artifact per request. The body names exactly ONE kind (generate) or
+// carries ONE regenerate input - never an array, never a full selection. This is
+// the single-kind boundary that caps sequential callLlm at <=2 per invocation.
+type PresentationsRequest =
+  | { op: "generate"; kind: ContentArtifactKind; context: PresentationContext; withReview: boolean }
+  | { op: "regenerate"; input: RegenerateInput };
+
+export async function POST(req: Request): Promise<Response>;
+// -> NextResponse.json(ProducedArtifact) on success, or .json({ error }, { status }) on failure.
 ```
 
-Both are `export async function` (the guard-ratchet shape the security checker
-requires - `docs/loop/seats.md:350-352`; never an arrow-function export in a
-`"use server"` file). Both `await requireUser()` first (a signed-in check;
-NOT `requireAppOwner`, since the instructor generates from their own pasted
-material, and NOT the deprecated `requireOwner` alias). Only async functions are
-exported (no type re-export from a `"use server"` file - memory
-`use-server-no-type-reexport.md`; the types are imported, used, and re-declared
-at the call boundary, never re-exported).
+The handler `await requireUser()` first (a signed-in check; NOT `requireAppOwner`
+- the instructor generates from their own pasted material - and NOT the
+deprecated `requireOwner` alias). It parses the body, and:
 
-**Reliability recommendation (feeds wave-2 reliability seat, R-A2):** the CLIENT
-fans out one `generatePresentationArtifactsAction` call per selected content kind
-(passing a single-kind `ArtifactSelection`), so each server invocation issues at
-most 2 `callLlm` calls (the content call plus, if review is on, its critique) -
-well under the 60s Hobby cap (`this-repo.md` / memory `deployment-vercel-hobby`).
-The same orchestrator is driven either way; AC-4's "no call for a deselected
-kind" holds inside the orchestrator regardless of how the client batches. This is
-a recommendation, not a gate.
+- `op: "generate"`: `const produced = await generateOneArtifact(kind, context)`;
+  if `withReview`, `produced.critique = await reviewArtifact(produced, context)`.
+  At most 2 sequential `callLlm` calls.
+- `op: "regenerate"`: `await regenerateArtifact(input)` (which itself is at most 2
+  `callLlm` - the regenerate call plus, if `input.withReview`, its re-review).
+
+**Soft deadline (SRE 2.3).** The handler imposes its OWN budget strictly under
+60s and returns a WORDED error before the platform kills it, mirroring
+`class-trends-insight/route.ts:47` (`TOTAL_BUDGET_MS = 50_000`, ~10s margin under
+the 60s hard cap for auth/parse/serialize). MEASURED CAVEAT carried forward from
+SRE 2.3: `callLlm`/`postGenerateContent` accept no `AbortSignal` today
+(`llm.ts:375-386`), so a soft deadline bounds the CLIENT'S WAIT, not the retry
+loop's own work - it must not be described as cancellation. This is acceptable
+here because each request does at most 2 `callLlm` calls, so "give up waiting"
+and "the function is about to finish" are close together.
+
+**The client drives the fan-out.** `SlideDeckCreationTab.tsx` (wave 3) calls
+`selectedContentKinds(selection)` (section 6.2) and `fetch`es
+`/api/presentations/generate` ONCE per returned kind (an `op: "generate"`
+request each), and once per regenerate. This matches `command-interface.ts:26-32`
+("the fan-out is driven from the BROWSER, one invocation per row ... This
+function must NEVER loop over rows") and `SnapshotGradingPanel.tsx:13-19` (per
+batch, from the click handler, never one action looping internally). No type
+re-export concern applies (a Route Handler is not a `"use server"` file), so the
+`use-server-exports.test.ts` gate does not bind this file; the binding gate is
+pass condition 2b (route shape + auth, section 9).
+
+**Corrected worst-case call count (round 2, reconciling SRE's "8").** SRE section
+2.2 counted "4 artifacts x 2 passes = up to 8 `callLlm`". That is WRONG for the
+flag model: `ArtifactSelection` has 3 CONTENT kinds (`outline`, `activities`,
+`deck`) plus a single `review` boolean - `review` is NOT a 4th artifact
+(section 6.1, types.ts). So the corrected worst case is 3 content kinds x
+(1 produce + up to 1 review) = up to 6 `callLlm` TOTAL across the whole
+generation, spread over up to 3 independent requests, at most 2 `callLlm` PER
+request. Per-request worst-case retry backoff = 2 x ~10.6s = ~21.2s
+(SRE 2.2's ~10.6s-per-call figure), well under the 50s soft budget - so the
+single-kind boundary satisfies pass condition 2a on a lower bound alone,
+independent of the unmeasured real latency (R-SRE-1 / R-A2).
 
 ### 6.7 The tab, the preview, and the ONE slide model (AC-6 VISIBLE)
 
@@ -428,8 +528,20 @@ a recommendation, not a gate.
   renders under vitest); the wiring that the preview reads the deck's own slides
   is a READING claim (section 9, the one-slide-model check).
 - the download handler calls `serializeDeckToPptx(deck)`, wraps the bytes in
-  `new Blob([bytes], { type: PRES_PPTX_MIME })`, and uses the
-  `URL.createObjectURL` idiom (`ppt-design/index.tsx:545-563`).
+  `new Blob([bytes], { type: PRES_PPTX_MIME })`, and uses the `createObjectURL`
+  MECHANICS from `ppt-design/index.tsx:553-559` (Blob, `createObjectURL`, anchor
+  `.download`, `.click()`, `revokeObjectURL`).
+
+**The download handler MUST surface an error STATE on a throw (B2 / SRE 3a).**
+`serializeDeckToPptx` can still throw if a malformed deck reaches it (though
+`validateDeck`, section 6.4, is the upstream gate and the no-theme construction,
+section 6.5, closes the theme mode). The `catch` in `ppt-design/index.tsx:560-562`
+is `console.error`-only - a thrown builder error there produces NO user-visible
+feedback, the button appears to do nothing. That catch is the ANTI-PATTERN;
+PRES-1's handler does NOT copy it. On a throw (or an `{ error }` from the deck
+generation) it sets a rendered error state (the same discipline as
+`ppt-design/index.tsx:549-552`'s `setGenerateError` branch), never a bare
+`console.error`. This is pass condition 3a (section 9), now binding.
 
 Because both read `deck.slides` from the same state object, the preview and the
 .pptx cannot diverge - there is no second slide source to fall out of sync. Any
@@ -458,8 +570,14 @@ leverage through `ta-` keys.
   deliberate - persisting model output would need a store the environment cannot
   verify, and the leverage is the CONTEXT surviving reload (read back by
   regenerate), which the keys above deliver.
-- **Optional explicit save:** a "Save deck to Files" button reusing
-  `savePresentationFileAction` (`media.ts:590`). No new storage code.
+- **Optional explicit save: MOOT this round (X2).** Persistence is
+  client-session-only (R-D1), so no "Save deck to Files" button ships in round 1.
+  Stated here so no later chunk copies the wrong action: IF a manual save button
+  is later added, its target is `saveRecordingFile(..., { origin: "manual", ... })`
+  (`recording-files.ts:68`, `origin?` at `:72`) - NOT
+  `savePresentationFileAction` (`media.ts:590`), which hardcodes
+  `origin: "unattended"` (`media.ts:629`) for workflow-generated files and would
+  mis-tag an instructor's manual save.
 
 **Hydration rule (AC-8 direction, memory `persisted-details-open-hydration`).**
 `useLocalStorageState` seeds from a `useState` initializer. For controls bound to
@@ -490,16 +608,22 @@ export's caller is named below.
 `src/lib/presentations/types.ts`, `prompts.ts`, `parse.ts`, `generate.ts`,
 `deck-file.ts`.
 - Callers within the wave: `prompts.ts` and `parse.ts` are called by
-  `generate.ts`; `generate.ts`'s exports are called by the wave-1 unit tests and,
-  in wave 2, by the action; `serializeDeckToPptx` is called by the wave-1 AC-6
-  test and, in wave 3, by the tab; `types.ts` is TYPE-ONLY (stated exception).
-- This is where AC-4, AC-5, AC-7 and LEV-1 are provable with `callLlm` mocked -
-  the highest-consequence logic, landed first.
+  `generate.ts`; `generate.ts`'s exports (`selectedContentKinds`,
+  `generateOneArtifact`, `reviewArtifact`, `regenerateArtifact`) are called by
+  the wave-1 unit tests and, in wave 2, by the route handler (and
+  `selectedContentKinds` additionally by the wave-3 tab); `serializeDeckToPptx`
+  is called by the wave-1 AC-6 test and, in wave 3, by the tab; `validateDeck` is
+  called by `parseDeckSlides` and the wave-1 B2 test; `types.ts` is TYPE-ONLY
+  (stated exception).
+- This is where AC-4, AC-5, AC-7, LEV-1 and B2's pre-flight validation are
+  provable with `callLlm` mocked - the highest-consequence logic, landed first.
 
-**Wave 2 - server action:** `src/app/actions/presentations.ts`.
-- Depends on wave 1's `generate.ts`. Its exports are called by the wave-3 tab.
-- Isolated because the `"use server"` shape check (`use-server-exports.test.ts`)
-  and the AC-3 import-egress test bind here.
+**Wave 2 - route handler:** `src/app/api/presentations/generate/route.ts` (B1).
+- Depends on wave 1's `generate.ts`. Its `POST` is reached by the wave-3 tab via
+  `fetch`.
+- Isolated because the AC-3 import-egress test and the route-shape/auth check
+  (pass condition 2b) bind here. This is NOT a `"use server"` file, so
+  `use-server-exports.test.ts` does not bind it (B1 file-kind change).
 
 **Wave 3 - surface and nav wiring (reading/OWNER verified):**
 `src/app/components/presentations/SlideDeckCreationTab.tsx`,
@@ -507,17 +631,18 @@ export's caller is named below.
 `src/app/components/home/useAppNavigation.ts`; `src/app/page.tsx`; and the three
 owned test updates (`manual-rail.test.ts`, `tab-rails.test.ts`,
 `topLevelTabs.wiring.test.ts`).
-- The tab calls the wave-2 action, `serializeDeckToPptx`, `SlideDeckPreview`, and
-  the hooks; `manual-rail.ts`/`useAppNavigation.ts`/`page.tsx` are the
-  reachability ladder (section 5). The mount branch is the caller of the tab.
+- The tab `fetch`es the wave-2 route (one request per `selectedContentKinds`
+  entry, one per regenerate), and calls `serializeDeckToPptx`, `selectedContentKinds`,
+  `SlideDeckPreview`, and the hooks; `manual-rail.ts`/`useAppNavigation.ts`/`page.tsx`
+  are the reachability ladder (section 5). The mount branch is the caller of the tab.
 
 **Disjointness (exact-path, `sort | uniq -d` yields empty across waves):**
-wave 1 is `src/lib/presentations/*`; wave 2 is `src/app/actions/presentations.ts`;
-wave 3 is `src/app/components/presentations/*` plus the three ladder files plus
-the three owned test files. No path appears in two waves. The waves are a
-dependency chain and run sequentially, not in parallel; they are disjoint from
-any OTHER backlog item's files, which is what lets PRES-1 run concurrently with
-an unrelated item.
+wave 1 is `src/lib/presentations/*`; wave 2 is
+`src/app/api/presentations/generate/route.ts`; wave 3 is
+`src/app/components/presentations/*` plus the three ladder files plus the three
+owned test files. No path appears in two waves. The waves are a dependency chain
+and run sequentially, not in parallel; they are disjoint from any OTHER backlog
+item's files, which is what lets PRES-1 run concurrently with an unrelated item.
 
 **Files near the 1000 ceiling: none.** Measured (section 4): the largest edited
 file is `page.tsx` at 825 by `@(Get-Content src/app/page.tsx).Count`; +~8 lines.
@@ -543,15 +668,43 @@ construction.
   [MACHINE]: a unit test asserting `byteLength > 0` (the `buildSlidesPptx`
   serialization is exercised the same way at
   `src/lib/lms-generation/artifact-download.ts:187`). Direction: RED if it
-  returns a zero-byte buffer for a non-empty deck.
-- **Selection fan-out (AC-4).** Object: `generateSelectedArtifacts` output and
-  the `callLlm` mock call record, over at least the selections
-  {outline-only, deck-only, outline+deck, all four}. Instrument [MACHINE]: mocked
-  `callLlm`; assert the returned `artifacts` are exactly the selected content
-  kinds and no `callLlm` call was issued for a deselected kind. Direction: RED if
-  a subset selection produces all, if a selected kind is missing, or if a
-  deselected kind triggers a call. (Must range over multiple selections - the
-  partial-fix trap, `docs/loop/traps-spec.md:98-106`.)
+  returns a zero-byte buffer for a non-empty deck. (A non-zero byte count is
+  necessary but NOT sufficient - SRE 3.5 measured that an empty deck ALSO yields
+  ~45.6KB - which is why the zero-slide case is a refusal upstream, pass condition
+  3b, not a byte-threshold test.)
+- **Deck pre-flight validation (B2 / SRE 3b), BINDING.** Object: the
+  `DeckContent` a deck generation is about to serialize. Instrument [MACHINE]: a
+  pure unit test over `validateDeck` (section 6.4) - assert it returns `null` for
+  (a) `slides: []`, (b) a slide with a blank/whitespace `title`, and (c) a slide
+  whose `bullets` is not an array; and returns the deck unchanged for a valid
+  one. AND assert `generateOneArtifact` for `deck` surfaces a `null` parse as a
+  GENERATION FAILURE (the route returns `{ error }`) rather than calling
+  `serializeDeckToPptx`. Direction: RED if a zero-slide, blank-title, or
+  non-array-bullets deck ever reaches `buildSlidesPptx` (which SRE measured
+  either crashes with an internal message or silently ships a content-empty
+  file).
+- **Download error-state on throw (B2 / SRE 3a), BINDING.** Object: PRES-1's
+  download handler's behaviour when `serializeDeckToPptx` throws. Instrument
+  [READING]: a source-text/wiring test that the handler's `catch` (and the
+  deck-generation `{ error }` branch) sets a rendered error STATE, not merely a
+  `console.error`. Direction: RED if the only effect on a throw is a
+  `console.error` with no state a component could render - the exact shape at
+  `ppt-design/index.tsx:560-562`, which must NOT be copied. (The throw ITSELF is
+  hard to trigger post-`validateDeck` and post-no-theme; this pins the handler's
+  SHAPE, since nothing renders under vitest - R-4.)
+- **Selection map (AC-4).** Object: `selectedContentKinds(selection)` output,
+  over at least the selections {outline-only, deck-only, outline+deck, all
+  three}. Instrument [MACHINE]: a PURE unit test (no `callLlm`) asserting the
+  returned kind list equals exactly the selected content kinds, in fixed order,
+  with every deselected kind ABSENT and `review` never appearing as a kind.
+  Direction: RED if a subset selection returns all, if a selected kind is
+  missing, if a deselected kind appears, or if the order drifts. (Must range over
+  multiple selections - the partial-fix trap, `docs/loop/traps-spec.md:98-106`.)
+  AC-4's "no `callLlm` for a deselected kind" is then guaranteed BY CONSTRUCTION
+  (B1): the client requests only listed kinds, and `generateOneArtifact` /
+  `regenerateArtifact` each act on exactly one kind (a single mocked-`callLlm`
+  assertion of call count `=== 1` for a produce, `=== 2` with review, confirms
+  the executor issues no extra call).
 - **Per-artifact critique keying (AC-5).** Object: the `critique` field on each
   `ProducedArtifact`. Instrument [MACHINE]: generate outline+deck with review on;
   assert the outline artifact and the deck artifact each carry a non-null
@@ -564,15 +717,41 @@ construction.
   (`mock.calls[0][0]`); assert the request text contains both the prior context
   and the prior critique. Direction: RED when the context fold line OR the
   critique fold line in `buildRegeneratePrompt` is deleted.
-- **In-house egress (AC-3 MACHINE).** Object: the imports of
-  `src/app/actions/presentations.ts` and `src/lib/presentations/*.ts`.
-  Instrument [MACHINE]: a source-text test asserting the only generation egress
-  is `@/lib/llm` (`callLlm`) and there is no external generation SDK import, no
-  `fetch(` to a non-in-house host, and no out-link to an external authoring tool.
-  Direction: RED if any such import/link is introduced.
-- **`"use server"` shape (security).** Object: the exports of the action file.
-  Instrument [MACHINE]: `src/lib/use-server-exports.test.ts` (existing) plus
-  `next build`'s type-re-export check. Direction: RED on a non-async export.
+- **In-house egress (AC-3 MACHINE), widened (I2).** Object: the imports and
+  source text of `src/app/api/presentations/generate/route.ts`,
+  `src/lib/presentations/*.ts`, AND `src/app/components/presentations/*`
+  (especially `SlideDeckPreview.tsx`). Instrument [MACHINE]: a source-text test
+  asserting (1) the only generation egress is `@/lib/llm` (`callLlm`) - no
+  external generation SDK import, no `fetch(` to a non-in-house host; AND (2) no
+  component under `src/app/components/presentations/*` embeds an external viewer -
+  no `<iframe`, no `office.com`, no `docs.google.com`. Direction: RED if any such
+  import/link/embed is introduced. The component scan is REQUIRED because
+  RENDERING is not GENERATION: a generation-only egress test would miss an
+  external-viewer preview (a `<iframe src="office.com/...">` in
+  `SlideDeckPreview.tsx`), which is exactly the in-house-only rule's failure mode
+  the security pass flagged (R-SEC-1 / SEC-2).
+- **Route shape and auth (2b), BINDING.** Object: the route handler file
+  `src/app/api/presentations/generate/route.ts`. Instrument [READING/MACHINE]: a
+  source-text test asserting it exports `runtime = "nodejs"` and
+  `maxDuration = 60`, `await`s `requireUser()` before any generation, and its
+  request type carries exactly ONE `kind` per generate op (never an array of
+  kinds, never a full `ArtifactSelection`, never an internal loop over kinds).
+  Direction: RED if `maxDuration` is missing or above 60 (fails to build on
+  Hobby), if auth is absent, or if the body accepts/loops a kinds array (the
+  never-loop contract, `command-interface.ts:26-32`). Note: this is NOT a
+  `"use server"` file, so `use-server-exports.test.ts` and the type-re-export
+  check do NOT bind it (B1 file-kind change).
+- **Sequential `callLlm` per invocation (2a), BINDING (was residual R-A2).**
+  Object: any single request the route handler issues. Instrument [READING]:
+  count sequential `callLlm` invocations reachable from `POST` without an
+  intervening network-response boundary. Direction: RED if that count x ~10.6s
+  (SRE 2.2's worst-case-per-call retry-backoff figure) exceeds 50s (10s margin
+  under the 60s hard cap, mirroring `class-trends-insight/route.ts`'s 50s/60s
+  split). Under the single-kind boundary the count is <=2 (produce + review, or
+  regenerate + re-review), so 2 x 10.6s = ~21.2s passes on a lower bound alone;
+  the condition RE-FAILS the moment any future edit lets one entry point issue a
+  third sequential call. Real Gemini latency remains owner-verified (R-SRE-1 /
+  R-A2), but it can only raise the number, so the arithmetic bound is the gate.
 
 A gate naming two or more test files uses `npm run test:paths` (never a raw
 multi-path `vitest`, which silently drops unmatched args -
@@ -680,7 +859,7 @@ R-5, R-6 stand unchanged and are not restated here.
 | id | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
 | R-A1 | The LEV-1 / AC-7 removal-test oracle (regenerate request-capture asserting both prior context and prior critique). | Test seat | Mocked-`callLlm` `mock.calls[0][0]` capture (`sequence.test.ts:359` idiom) | Test seat, after Build and Verify (same as AC R-6) |
-| R-A2 | Reliability of multi-`callLlm` generation against the 60s Hobby cap. The recommended per-artifact client fan-out keeps each server invocation to at most 2 `callLlm` calls; confirm the arithmetic and the client actually fans out. | Reliability seat (wave 2) | Timeout arithmetic: max `callLlm` count per action invocation times worst-case latency versus 60s | Wave-2 reliability pass |
+| R-A2 | The ARITHMETIC/structural half of the 60s-cap concern is now a BINDING gate (pass condition 2a + 2b, section 9), NOT a residual - B1 made the entry point single-kind (<=2 `callLlm`/request) and moved it to a Route Handler with `maxDuration=60` + a 50s soft deadline. What remains a residual is ONLY the part this checkout cannot measure: REAL Gemini per-call latency (no API key), which can raise the ~21.2s lower bound but is owner-verified post-deploy (dedup with SRE R-SRE-1). | Owner | Time real generation requests against the deployed route; read Vercel function-duration data | Post-deploy owner verification (same as SRE R-SRE-1) |
 | R-A3 | Prompt-injection exposure: pasted files/text and prior critique reach `callLlm` prompts as free text. | Security seat (wave 2) | Open every prompt builder in `src/lib/presentations/prompts.ts`; assess framing/mitigation | Wave-2 security pass |
 | R-A4 | Duplication: `sliceJsonObject` copied into `parse.ts`, and `PRES_PPTX_MIME` becomes a sixth local copy of the MIME string. Accepted for round 1 (consistent with the existing five copies); consolidation deferred. | Orchestrator / future chunk | `grep -rn "presentationml.presentation" src` (count the copies) and a grep for the duplicated slicer | A later cleanup chunk, if the owner wants it |
 | R-A5 | OWNER-only verifications specific to this build: the Presentations chip is reachable and survives reload; the child "Slide Deck Creation" strip shows; the deck PREVIEW renders slides on screen; the download opens a valid .pptx. (These are AC R-4; recorded here because the reachability ladder in section 5 is the thing being verified.) | Owner | Open Tools > Presentations > Slide Deck Creation in prod; paste context; generate; see the preview; download | Post-deploy owner verification |

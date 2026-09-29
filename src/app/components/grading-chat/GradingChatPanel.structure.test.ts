@@ -72,3 +72,53 @@ describe("GradingChatPanel - reused house classes, no new inline flex", () => {
     expect(source).not.toContain("setDriverRun");
   });
 });
+
+describe("GradingChatPanel - fields lock once the session is ready (verify doc attack 9 fix)", () => {
+  it("derives sessionReady from headerState === \"ready\"", () => {
+    const source = read(PANEL);
+    expect(source).toMatch(/sessionReady\s*=\s*driver\.headerState\s*===\s*"ready"/);
+  });
+
+  it("the Instructions field is bound to sessionReady's disabled prop", () => {
+    const source = read(PANEL);
+    const idx = source.indexOf('id="grading-chat-instructions"');
+    expect(idx).toBeGreaterThan(-1);
+    const fieldEnd = source.indexOf("/>", idx);
+    const fieldMarkup = source.slice(idx, fieldEnd);
+    expect(fieldMarkup).toContain("disabled={sessionReady}");
+  });
+
+  it("the Rubric field is bound to sessionReady's disabled prop", () => {
+    const source = read(PANEL);
+    const idx = source.indexOf('id="grading-chat-rubric"');
+    expect(idx).toBeGreaterThan(-1);
+    const fieldEnd = source.indexOf("/>", idx);
+    const fieldMarkup = source.slice(idx, fieldEnd);
+    expect(fieldMarkup).toContain("disabled={sessionReady}");
+  });
+});
+
+describe("GradingChatPanel - New session control wires the previously-dead driver.reset() (RESIDUAL A fix)", () => {
+  it("a New session control's handler calls driver.reset()", () => {
+    const source = read(PANEL);
+    const idx = source.indexOf("const handleNewSession");
+    expect(idx, "expected to find handleNewSession in GradingChatPanel.tsx").toBeGreaterThan(-1);
+    const handlerEnd = source.indexOf("};", idx);
+    const handlerBody = source.slice(idx, handlerEnd);
+    expect(handlerBody).toContain("driver.reset()");
+  });
+
+  it("the New session handler confirms before discarding the run (repo standard: keep confirm on a destructive action)", () => {
+    const source = read(PANEL);
+    const idx = source.indexOf("const handleNewSession");
+    const handlerEnd = source.indexOf("};", idx);
+    const handlerBody = source.slice(idx, handlerEnd);
+    expect(handlerBody).toContain("window.confirm(");
+    expect(handlerBody.indexOf("window.confirm(")).toBeLessThan(handlerBody.indexOf("driver.reset()"));
+  });
+
+  it("a Button element is wired to handleNewSession", () => {
+    const source = read(PANEL);
+    expect(source).toMatch(/onClick=\{handleNewSession\}/);
+  });
+});

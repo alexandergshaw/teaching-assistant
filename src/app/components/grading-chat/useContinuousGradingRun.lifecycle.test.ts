@@ -228,6 +228,48 @@ describe("useContinuousGradingRun - RES-GC-8: partial-grade-to-the-ceiling", () 
   });
 });
 
+describe("useContinuousGradingRun - reset() genuinely clears the run for a new session (verify doc RESIDUAL A / fix #1)", () => {
+  it("reset() clears headerState, results, run and dispatchedCount, and a fresh session starts sourceIndex over rather than appending", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade assignment one.", rubric: "1. Correctness" });
+    driver = useTestDriver();
+
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Alice"));
+    await driver.submit({ kind: "text", content: "one" });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+    expect(driver.dispatchedCount).toBe(1);
+
+    driver.reset();
+    driver = useTestDriver();
+    expect(driver.headerState).toBe("unset");
+    expect(driver.results).toHaveLength(0);
+    expect(driver.run).toBeNull();
+    expect(driver.dispatchedCount).toBe(0);
+    expect(driver.completedCount).toBe(0);
+    expect(driver.inFlight).toBe(0);
+    expect(driver.sessionError).toBeNull();
+
+    // A genuinely NEW session, not a continuation: beginSession must actually
+    // re-resolve (not short-circuit on the old idempotent header), and the
+    // first submission after reset gets a fresh sourceIndex 0, never appended
+    // onto Alice's old row.
+    resolveChatRunHeaderActionMock.mockClear();
+    await driver.beginSession({ assignmentInstructions: "Grade assignment two.", rubric: "2. Style" });
+    expect(resolveChatRunHeaderActionMock).toHaveBeenCalledTimes(1);
+    driver = useTestDriver();
+
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Carol"));
+    await driver.submit({ kind: "text", content: "fresh" });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+    expect(driver.results.map((r) => r.student)).toEqual(["Carol"]);
+    expect(driver.dispatchedCount).toBe(1);
+  });
+});
+
 describe("useContinuousGradingRun - BLOCKER-1: pointsPossible threading", () => {
   it("a Canvas-URL submission's dispatched body carries the Canvas pointsPossible, not null", async () => {
     let driver = useTestDriver();

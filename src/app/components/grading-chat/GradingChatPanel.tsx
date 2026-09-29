@@ -16,6 +16,7 @@
 // preserves the in-flight run across navigation (architecture section 7).
 import { useState } from "react";
 import TextField from "@mui/material/TextField";
+import Button from "@mui/material/Button";
 import GradingResults from "../GradingResults";
 import { ChatComposer } from "./ChatComposer";
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
@@ -72,6 +73,26 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     persist(RUBRIC_STORAGE_KEY, value);
   };
 
+  // Silent-green fix (docs/grading-chat-wave1-verify.md, attack 9): beginSession
+  // captures the header ONCE and every later submit grades against that first
+  // capture (idempotent by design). Leaving the fields editable after that
+  // point let an instructor edit the rubric mid-session and silently grade the
+  // next student against the stale text. Locking the fields once the session
+  // is established closes that path by construction - they cannot diverge from
+  // what was actually captured because they can no longer be edited.
+  const sessionReady = driver.headerState === "ready";
+
+  const handleNewSession = () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Start a new session? This discards every graded row from the current session so you can grade a different assignment.")
+    ) {
+      return;
+    }
+    driver.reset();
+    setSubmitError(null);
+  };
+
   const ensureSession = async (): Promise<boolean> => {
     if (driver.headerState === "ready") return true;
     const result = await driver.beginSession({ assignmentInstructions: instructions, rubric });
@@ -114,6 +135,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           size="small"
           value={instructions}
           onChange={(event) => handleInstructionsChange(event.target.value)}
+          disabled={sessionReady}
         />
       </div>
 
@@ -127,10 +149,19 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           size="small"
           value={rubric}
           onChange={(event) => handleRubricChange(event.target.value)}
+          disabled={sessionReady}
         />
       </div>
 
-      <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
+      <div className={styles.ghActions}>
+        <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
+        {sessionReady && (
+          <p className={styles.ghMeta}>Instructions and rubric are locked for this session.</p>
+        )}
+        <Button variant="outlined" size="small" disabled={driver.headerState === "unset"} onClick={handleNewSession}>
+          New session
+        </Button>
+      </div>
 
       {submitError && (
         <p role="alert" className={styles.ghMeta}>

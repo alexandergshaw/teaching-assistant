@@ -78,11 +78,19 @@ throwaway reference, because the reference already ships and is exercised in
 production:
 
 - **N15-1** is `snapshot-rubric-capture-prompt.ts` (which already returns a
-  string carrying the injection clause, the do-not-guess clause, and the
-  plain-text-only clause) generalized by one parameter: interpolate `kind`
-  into the framing sentence and the transcription noun. Every R1 assertion is
-  satisfied by that shape; R1.1 (parameter is live) is satisfied precisely
-  because `kind` is interpolated rather than ignored.
+  string carrying the injection clause and the plain-text-only clause)
+  generalized by one parameter: interpolate `kind` into the framing sentence
+  and the transcription noun. R1.1 (parameter is live) and R1.2 (injection) are
+  satisfied by the shipped shape as-is. CORRECTION (round-1 check BLOCKER-1):
+  R1 is NOT a pure one-parameter delta. The shipped do-not-guess clause at
+  `snapshot-rubric-capture-prompt.ts:20` reads "say so plainly instead of
+  guessing at its content", which matches NONE of R1.3's OR-set tokens
+  (`"do not guess"` / `"never guess"` / `"do not invent"` / `"without guessing"`).
+  So the implementer MUST REWORD that clause to one of the OR-set tokens (e.g.
+  "if a section is unreadable, say so plainly - do not guess") when generalizing
+  the builder; R1.3 is a genuine wording change, not free from the template. Do
+  NOT instead broaden R1.3's OR-set toward "guessing"/"instead of guessing" -
+  that weakens the check (the forbidden denylist-broadening move).
 - **N15-2** is `snapshot-transcribe-rubric.ts` verbatim with exactly one
   change that makes R2.2 (the TRAP 3A mime derivation) pass: replace the
   hardcoded `mimeType: "image/jpeg"` at `:50` with the value already computed
@@ -94,8 +102,9 @@ production:
   by one known-good file with a one-line correction and a threaded parameter.
 
 Because the reference is the shipped template, there is no risk the red set is
-internally contradictory: a single file satisfies all of R1 and all of R2 at
-once.
+internally contradictory: the N15-1 file satisfies all of R1 (after the R1.3
+rewording above) and the N15-2 file satisfies all of R2 (it imports N15-1's
+builder); two files, one per wave, no cross-wave contradiction.
 
 ## Environment constraints that bind every requirement below
 
@@ -183,6 +192,12 @@ for running both waves together).
   (`docs/n15-rubric-picture-scope.md` task brief for N15-1).
 - **Direction of failure**: RED if either output lacks a do-not-invent token
   or a plain-text token.
+- **Named sabotage (do-not-invent half, added per round-1 check INFO-3)**:
+  remove/reword the do-not-guess clause so it carries none of the OR-set
+  tokens (e.g. back to the shipped "instead of guessing"). R1.3 then goes RED
+  on clause (a) for both outputs; GREEN after restoring an OR-set token. This
+  discriminates the do-not-invent half, which the JSON sabotage below does not
+  touch (that one only exercises the plain-text half).
 - **Named sabotage**: change the plain-text instruction to ask for JSON
   ("Return the result as a JSON object"). None of the plain-text tokens then
   appear -> RED. Restore -> GREEN. **Discriminates.**
@@ -465,7 +480,7 @@ Missing any of the three it is a deletion, so each is stated in full.
 |---|---|---|---|---|
 | RES-N15W-1 (this pass; the honest limit of R1.2/R1.3) | Whether the injection-guard clause and the faithful-plain-text instruction actually change model BEHAVIOUR on a real photographed rubric (resist an embedded "ignore your instructions", avoid inventing content, avoid JSON). R1.2/R1.3 prove only PRESENCE of the clauses. | The owner | A real photographed rubric containing an adversarial instruction, run through the real Gemini vision call, output eyeballed for compliance | Owner verification, post-ship, with a live provider key (no key in this environment) |
 | RES-N15W-2 (this pass) | Whether the `RubricPictureKind` union should stay exactly `"rubric" \| "assignment description"` or gain a third kind. If a third kind is added, R1.1 and R2.1 must gain a fixture for it (their coverage is per-enumerated-member, not automatic). | The N15-1 implementer, then whoever extends the kind set | `grep -n "RubricPictureKind" src/lib/grade/rubric-picture-prompt.ts` plus the count of kind fixtures in the two test files | Same commit as any change to the `RubricPictureKind` union |
-| RES-N15W-3 (this pass; a real gap in the N15-2 scope, not a test-design choice) | `detectImageMimeFromBase64` returns `null` for a PDF (`%PDF` magic is unmatched, `snapshot-parse.ts:43-56`), so N15-2 as specified here REFUSES a scanned-PDF rubric/assignment page (R2.6 would refuse it). The scope's own section 5 item 2 contemplates PDF via `isGeminiInlineSupported`/`filesToLlmParts`. This is a genuine contradiction between "derive mime via `detectImageMimeFromBase64`" (the task brief, images only) and "accept a scanned PDF page" (the scope's intake wish). It must be resolved BEFORE N15-2 is called done, not silently assumed one way. | The architect / N15-2 implementer (a shape decision), escalated to the owner if the PDF path is in scope for the first ship | Read `snapshot-parse.ts:43-56` (confirms PDF -> null) against `docs/n15-rubric-picture-scope.md` section 5 item 2; decide: images-only for N15-2 (this document's tested reading, PDF deferred) OR extend the mime gate to admit `application/pdf` by its own magic and widen R2.2/R2.6 with a PDF fixture and a frozen `"application/pdf"` literal | Before N15-2's gate. If images-only is chosen, record it as the shipped behaviour and file PDF as a follow-up row; if PDF is in scope, R2.2/R2.6 gain a PDF fixture in the same wave |
+| RES-N15W-3 (RESOLVED 2026-09-29 by orchestrator ruling: IMAGES-ONLY this wave; PDF ingestion is a DEFERRED follow-up row - this is exactly this residual''s own images-only branch) | `detectImageMimeFromBase64` returns `null` for a PDF (`%PDF` magic is unmatched, `snapshot-parse.ts:43-56`), so N15-2 as specified here REFUSES a scanned-PDF rubric/assignment page (R2.6 would refuse it). The scope's own section 5 item 2 contemplates PDF via `isGeminiInlineSupported`/`filesToLlmParts`. This is a genuine contradiction between "derive mime via `detectImageMimeFromBase64`" (the task brief, images only) and "accept a scanned PDF page" (the scope's intake wish). It must be resolved BEFORE N15-2 is called done, not silently assumed one way. | The architect / N15-2 implementer (a shape decision), escalated to the owner if the PDF path is in scope for the first ship | Read `snapshot-parse.ts:43-56` (confirms PDF -> null) against `docs/n15-rubric-picture-scope.md` section 5 item 2; decide: images-only for N15-2 (this document's tested reading, PDF deferred) OR extend the mime gate to admit `application/pdf` by its own magic and widen R2.2/R2.6 with a PDF fixture and a frozen `"application/pdf"` literal | Before N15-2's gate. If images-only is chosen, record it as the shipped behaviour and file PDF as a follow-up row; if PDF is in scope, R2.2/R2.6 gain a PDF fixture in the same wave |
 | RES-N15W-4 (this pass) | The `throw`-vs-`{error}` behaviour of the `requireUser` reject path is left UNPINNED by R2.5 (it asserts only that `callLlm` is not reached). If the loop later wants a specific caller-facing behaviour (the N15-3 client must render something), that behaviour must be chosen and R2.5 tightened accordingly. | The N15-2 implementer now (pick one, matching the template's rethrow unless a reason not to), N15-3 later (consume it) | Read the built action's placement of `requireUser()` relative to its try block | N15-2 build (choice) and N15-3 build (consumption); not blocking either wave 1-2 test |
 
 ---

@@ -220,8 +220,9 @@ only; [OWNER] verified only by the owner in the deployed app.
 - FORK: the deck FORMAT (pptx via existing `buildSlidesPptx`, versus in-page
   HTML/reveal, versus PDF) decides HOW "visible AND downloadable" is satisfied,
   because pptx is downloadable but needs an added in-page renderer to be
-  "visible", whereas HTML renders in-page natively. This is a residual fork the
-  architect/owner must settle before the build wave - R-1 below. This criterion
+  "visible", whereas HTML renders in-page natively. OWNER RESOLVED 2026-09-29 (R-1): the format is .pptx via the shipped builder, so DOWNLOADABLE is a
+  .pptx serializer test and VISIBLE is an on-page slide PREVIEW the architect designs (a .pptx does
+  not render inline by itself). This criterion
   does not pick the format; it binds to the conjunction the owner stated.
 
 ### AC-7 - REGENERATE-WITH-CONTEXT re-runs an artifact carrying prior context and prior critique [MACHINE + OWNER]
@@ -335,8 +336,8 @@ backlog under concurrency); until then they exist only in this document, which
 
 | id | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
-| R-1 | Deck FORMAT fork (pptx / in-page HTML-reveal / PDF); decides how AC-6 "visible AND downloadable" is met | Architect proposes, owner decides | Architect design doc pricing both readings + owner pick | Architect pass, before the build wave |
-| R-2 | Relationship of PRES-1 to the existing `ppt-design` tab and to A43 (subsume / reuse-extend / disjoint-new) | Architect recommends, owner decides | Reuse survey in the architect pass + owner decision recorded in `docs/owner-decisions-*.md` | Architect pass, before the build wave |
+| R-1 | RESOLVED by owner 2026-09-29: DECK FORMAT = .pptx (reuse the shipped src/lib/pptx.ts buildSlidesPptx). Download is native .pptx. IMPLICATION for AC-6: "visible on the page" is met by an ON-PAGE PREVIEW of the slides (thumbnails / rendered preview), which the architect must design (a .pptx is not natively viewable inline). A .pptx cannot render itself in the DOM, so the preview is a distinct build item, not free. | Architect (design the on-page preview + wire buildSlidesPptx) | AC-6 machine test on the serializer + owner-verify the preview | Architect pass |
+| R-2 | RESOLVED by owner 2026-09-29: NEW SIBLING TAB, REUSE INFRA. Presentations is a new Tools inner-nav sibling; reuse the decks/ + pptx.ts libraries, deck-source extract actions, the download idioms, and the ta-ppt-* intake under the hood. Leave the existing ppt-design "PowerPoint Design" tab UNTOUCHED (no subsume, no replace this round). | Architect (reuse-not-rebuild) | Reuse survey already in this AC + the architect pass | Architect pass |
 | R-3 | Whether a real run returns 3-5 useful activity ideas and on-topic deck content (model QUALITY) | Owner | Run the deployed feature (no API key here) | Post-deploy owner verification |
 | R-4 | Tab reachability, child-tab appearance, deck RENDERED-on-page visibility, working download button (nothing renders under vitest) | Owner | Open Tools > Presentations > Slide Deck Creation in prod; generate; see slides; download | Post-deploy owner verification |
 | R-5 | Whether the adversarial critique is genuinely adversarial/useful per artifact (QUALITY, not structure) | Owner | Read the critiques on a real run | Post-deploy owner verification |

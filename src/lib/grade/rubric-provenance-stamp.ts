@@ -1,14 +1,23 @@
 /**
  * RULING 57 (docs/a39-build-rulings.md): every producer of a rendered
- * GradingRun stamps the rubricUsed/rubricFingerprint pair, not only
- * engine.ts. Enumerated by `grep -rnE "\)\s*:\s*(Promise<)?GradingRun>?\s*\{"
- * src --include=*.ts | grep -v "\.test\.ts"` (five hits: engine.ts's
- * gradeStudentEntries plus its three exported wrappers, all already stamped;
- * embedded-grader/index.ts's gradeEntriesEmbedded; embedded-grader/
- * discussion.ts's gradeDiscussion; grading-run-mapping.ts's gradingApiToRun -
- * the external "Other API" mapping). stripGradingRunForDraft
- * (workflows/grading-review-rows.ts) is excluded: it transforms an
- * already-produced run, it does not produce one.
+ * GradingRun stamps the rubricUsed/rubricFingerprint pair somewhere on its
+ * path - not necessarily in its own body, and not only engine.ts. Enumerated
+ * by `grep -rnE "\)\s*:\s*(Promise<)?GradingRun>?\s*\{" src --include=*.ts |
+ * grep -v "\.test\.ts"` (nine hits, re-measured for RES-FILL-6, docs/
+ * res-fill-6-provenance-guard-notes.md section 2.1): engine.ts's
+ * gradeStudentEntries plus its three exported wrappers (gradeSubmissions,
+ * gradeEntries, gradeCanvasUrl); embedded-grader/index.ts's
+ * gradeEntriesEmbedded; embedded-grader/discussion.ts's gradeDiscussion;
+ * grading-run-mapping.ts's gradingApiToRun (the external "Other API"
+ * mapping); and incrementalRunPlan.ts's buildIncrementalRun, which passes an
+ * already-stamped pair through from run-header.ts's resolveRunHeader rather
+ * than stamping its own. stripGradingRunForDraft (workflows/
+ * grading-review-rows.ts) is excluded: it transforms an already-produced
+ * run, it does not produce one. This enumeration is enforced, not just
+ * recorded: rubric-provenance-producers.structure.test.ts derives the same
+ * producer set live on every run and compares it against a frozen,
+ * classified list, so a new producer added without being routed to a
+ * behavioural check (rubric-stamp.wiring.test.ts) fails that guard.
  *
  * RULING 58: this is also the ONLY place allowed to construct a
  * StampedRubricText. A producer calls this on the exact text it graded
@@ -17,13 +26,12 @@
  * caller separately persisted.
  *
  * A39 incremental-fill W2: src/lib/grade/run-header.ts's resolveRunHeader
- * adds a seventh caller (six real call sites above this addition: engine.ts's
- * three, index.ts's, discussion.ts's, grading-run-mapping.ts's). It is not a
- * GradingRun producer - it stamps the pair for a run-level header, not for a
- * rendered run - so gradeAction (the whole-run route) must not apply that
- * header's pair to its own returned run: the run engine.ts already stamped
- * would end up carrying two stamps of one fact, with spread order silently
- * deciding which wins.
+ * is a caller of this function too, but it is not itself a GradingRun
+ * producer - it stamps the pair for a run-level header, not for a rendered
+ * run - so gradeAction (the whole-run route) must not apply that header's
+ * pair to its own returned run: the run engine.ts already stamped would end
+ * up carrying two stamps of one fact, with spread order silently deciding
+ * which wins.
  */
 
 import { rubricFingerprint } from "../research/rubric-fingerprint";

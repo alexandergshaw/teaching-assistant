@@ -420,6 +420,8 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
     "imports stripComments from the shared module ./modalAdoptionScan - not a duplicated definition",
   "src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts":
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionScan - not a duplicated definition",
+  "src/lib/grade/rubric-provenance-producers.structure.test.ts":
+    "imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
   "src/supabase-migrations.structure.test.ts":
     "defines stripCommentsAndDollarQuotes, a SQL-specific helper with a shared name prefix, not this helper",
   "src/supabase-migrations.rls-coverage.structure.test.ts":

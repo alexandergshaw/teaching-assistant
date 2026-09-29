@@ -14,10 +14,15 @@ import { join } from "path";
 const ROUTE_PATH = join(process.cwd(), "src/app/api/grade-run-item/route.ts");
 const routeSource = readFileSync(ROUTE_PATH, "utf8");
 
-/** AUTH ORDER (S1 check 1): requireUser( appears, gradeEntries( appears,
- * and the guard comes strictly first. */
+/** AUTH ORDER (S1 check 1): requireAppOwner( appears, gradeEntries( appears,
+ * and the guard comes strictly first. Tightened from requireUser( - see
+ * route.ts's own header (docs/grading-chat-security.md finding F1): this
+ * route spends the shared owner-configured GEMINI_API_KEY on
+ * caller-supplied content, so only requireAppOwner() (the real owner gate)
+ * belongs here, not requireUser() (admits any approved account) or
+ * requireOwner() (a deprecated alias that delegates to requireUser()). */
 function checkAuthOrder(src: string): boolean {
-  const idxGuard = src.indexOf("requireUser(");
+  const idxGuard = src.indexOf("requireAppOwner(");
   const idxGrade = src.indexOf("gradeEntries(");
   return idxGuard >= 0 && idxGrade >= 0 && idxGuard < idxGrade;
 }
@@ -61,7 +66,7 @@ const BASE_FIXTURE = [
   'export const maxDuration = 60;',
   "const TOTAL_BUDGET_MS = 50_000;",
   "export async function POST(req) {",
-  "  await requireUser();",
+  "  await requireAppOwner();",
   '  const contentType = req.headers.get("content-type") ?? "";',
   "  const rawBody = await req.json();",
   "  const outcome = await raceWithTimeout(gradeEntries([entry], instructions, rubric, provider), waitMs);",
@@ -71,7 +76,7 @@ const BASE_FIXTURE = [
 
 describe("S1 negative controls (RULING 41: one fixture per check, real discriminators)", () => {
   it("F1: guard deleted - fails check 1 only", () => {
-    const f1 = BASE_FIXTURE.replace("  await requireUser();\n", "");
+    const f1 = BASE_FIXTURE.replace("  await requireAppOwner();\n", "");
     expect(checkAuthOrder(f1)).toBe(false);
     expect(checkCsrfFloor(f1)).toBe(true);
     expect(checkSoftBudgetUnderCap(f1)).toBe(true);
@@ -79,10 +84,10 @@ describe("S1 negative controls (RULING 41: one fixture per check, real discrimin
 
   it("F1b: guard present but moved AFTER the first gradeEntries( call - fails check 1 only", () => {
     const f1b = BASE_FIXTURE
-      .replace("  await requireUser();\n", "")
+      .replace("  await requireAppOwner();\n", "")
       .replace(
         "  const outcome = await raceWithTimeout(gradeEntries([entry], instructions, rubric, provider), waitMs);",
-        "  const outcome = await raceWithTimeout(gradeEntries([entry], instructions, rubric, provider), waitMs);\n  await requireUser();"
+        "  const outcome = await raceWithTimeout(gradeEntries([entry], instructions, rubric, provider), waitMs);\n  await requireAppOwner();"
       );
     expect(checkAuthOrder(f1b)).toBe(false);
     expect(checkCsrfFloor(f1b)).toBe(true);
@@ -155,8 +160,17 @@ describe("W4-13 wiring: gradeEntries( is always wrapped by raceWithTimeout(", ()
 // file does not re-test bounded-race.ts's own timer logic (already covered
 // by bounded-race.test.ts).
 // ---------------------------------------------------------------------------
+// NOTE: this top-level module mock stubs requireAppOwner() away entirely -
+// it exists so the tests below it can drive the route's OWN response
+// shaping (401/400/504/502/200) without depending on the guard's real
+// session/role logic. It proves nothing about whether the guard itself
+// admits or refuses a non-owner - that is what the separate
+// "real requireAppOwner() guard" describe block further down drives, with
+// this module mock unmocked and the real guard executing (the idiom
+// src/app/actions/grading.guard.test.ts already uses for the same
+// distinction).
 vi.mock("@/lib/supabase/auth", () => ({
-  requireUser: vi.fn(async () => ({ id: "u1", email: "owner@example.com" })),
+  requireAppOwner: vi.fn(async () => ({ id: "u1", email: "owner@example.com" })),
 }));
 vi.mock("@/lib/grade/engine", () => ({
   gradeEntries: vi.fn(),
@@ -165,12 +179,12 @@ vi.mock("@/lib/bounded-race", () => ({
   raceWithTimeout: vi.fn(),
 }));
 
-import { requireUser } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { gradeEntries } from "@/lib/grade/engine";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { POST } from "./route";
 
-const mockRequireUser = vi.mocked(requireUser);
+const mockRequireUser = vi.mocked(requireAppOwner);
 const mockGradeEntries = vi.mocked(gradeEntries);
 const mockRaceWithTimeout = vi.mocked(raceWithTimeout);
 
@@ -260,5 +274,90 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     const res = await POST(jsonRequest(oversized) as any);
     expect(res.status).toBe(400);
     expect(mockGradeEntries).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/grading-chat-security.md finding F1: this route used to gate its POST
+// with requireUser() (admits ANY active account), which let any approved
+// non-owner "instructor" account spend the shared owner-configured
+// GEMINI_API_KEY by POSTing straight to this route - a cost-abuse gap, since
+// the guard above module-mocks "@/lib/supabase/auth" wholesale and therefore
+// proves nothing about whether the REAL guard admits or refuses a non-owner.
+//
+// This block unmocks "@/lib/supabase/auth" and mocks ONE layer further down
+// instead - "@/lib/supabase/server" (the Supabase client) and
+// "@/lib/supabase/app-users" (the stored account-row lookup) - the exact
+// idiom src/app/actions/grading.guard.test.ts already uses, and for the
+// same reason its own header states: mocking "@/lib/supabase/auth" itself
+// would replace the guard with a stub and never run it. vi.resetModules()
+// plus a dynamic import gives this block a fresh module graph so these
+// mocks never leak into, or get clobbered by, the top-level
+// vi.mock("@/lib/supabase/auth", ...) used by every test above.
+// ---------------------------------------------------------------------------
+describe("POST /api/grade-run-item - real requireAppOwner() guard (F1 fix)", () => {
+  function makeFakeAuthClient(userId: string, email: string) {
+    return {
+      auth: {
+        getUser: () =>
+          Promise.resolve({
+            data: { user: { id: userId, email, email_confirmed_at: "2026-01-01T00:00:00.000Z" } },
+            error: null,
+          }),
+        mfa: {
+          getAuthenticatorAssuranceLevel: () =>
+            Promise.resolve({ data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+        },
+      },
+    };
+  }
+
+  // An active, approved, non-owner "instructor" row - the real, provisioned
+  // account tier this finding is about (docs/grading-chat-security.md F1),
+  // not a hypothetical the type system merely allows.
+  function fakeInstructorRow() {
+    return {
+      id: "u2",
+      email: "instructor@example.com",
+      displayName: null,
+      status: "active" as const,
+      role: "instructor" as const,
+      approvedAt: null,
+      approvedBy: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      statusChangedAt: null,
+      statusChangedBy: null,
+      roleGrantedBy: null,
+    };
+  }
+
+  it("refuses an authenticated, active, NON-owner (instructor) session with 401, before the model seam is ever reached - proving the REAL guard runs, not a mocked stub", async () => {
+    vi.resetModules();
+    vi.doUnmock("@/lib/supabase/auth");
+    vi.doMock("@/lib/supabase/server", () => ({
+      createClient: vi.fn(async () => makeFakeAuthClient("u2", "instructor@example.com")),
+      createServiceClient: vi.fn(() => ({})),
+    }));
+    vi.doMock("@/lib/supabase/app-users", () => ({
+      getAppUser: vi.fn(async () => fakeInstructorRow()),
+      ensureAppUser: vi.fn(async () => fakeInstructorRow()),
+      ensureAppUserRowExists: vi.fn(async () => undefined),
+      appUserNeedsReconciliation: vi.fn(() => false),
+    }));
+
+    const { OWNER_ONLY_MESSAGE } = await import("@/lib/supabase/auth");
+    const { gradeEntries: freshGradeEntries } = await import("@/lib/grade/engine");
+    const mockFreshGradeEntries = vi.mocked(freshGradeEntries);
+    mockFreshGradeEntries.mockClear();
+
+    const { POST: freshPost } = await import("./route");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await freshPost(jsonRequest(VALID_BODY) as any);
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe(OWNER_ONLY_MESSAGE);
+    expect(mockFreshGradeEntries).not.toHaveBeenCalled();
   });
 });

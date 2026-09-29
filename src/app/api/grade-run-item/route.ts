@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
@@ -17,11 +17,23 @@ import {
 // sequential loop with a fixed inter-request sleep and returning nothing
 // until every student is done.
 //
-// Modelled line-for-line on src/app/api/class-trends-insight/route.ts - see
-// that file's own header for why requireUser() (not requireOwner - an alias
-// that admits ANY active account) is the right guard here too, and why
-// maxDuration = 60 with a soft budget under it is the shape this handler
-// copies rather than inventing its own.
+// Modelled line-for-line on src/app/api/class-trends-insight/route.ts for
+// the maxDuration = 60 / soft-budget shape this handler copies rather than
+// inventing its own.
+//
+// GUARD (security pass, docs/grading-chat-security.md finding F1): this
+// route was originally gated with requireUser(), which admits ANY approved
+// account, not only the owner. That let any authenticated non-owner spend
+// the shared owner-configured GEMINI_API_KEY by POSTing straight to this
+// route - a cost-abuse gap, since this handler calls the model on
+// caller-supplied content. Tightened to requireAppOwner() (the real owner
+// gate; requireOwner() is a deprecated alias that delegates to
+// requireUser()). Confirmed safe: the only in-app caller is
+// useIncrementalGradingRun.ts's postGradeRunItem, reached only after
+// prepareGradingRunAction (already requireAppOwner()-gated) returns
+// mode: "incremental" - and that path is itself gated off today by
+// INCREMENTAL_ROUTE_ENABLED = false (incrementalRunPlan.ts), so no live
+// flow depends on the looser guard.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -127,10 +139,12 @@ function describeError(err: unknown): string {
 export async function POST(req: NextRequest) {
   const startedAtMs = Date.now();
 
-  // AUTH ORDER (S1 check 1): requireUser() before anything else, before the
-  // body is even read - matching class-trends-insight/route.ts:96-100.
+  // AUTH ORDER (S1 check 1): requireAppOwner() before anything else, before
+  // the body is even read - matching class-trends-insight/route.ts:96-100's
+  // ordering (that route's own guard choice is unrelated; see this file's
+  // header for why THIS route needs the owner gate specifically).
   try {
-    await requireUser();
+    await requireAppOwner();
   } catch (err) {
     return NextResponse.json({ error: describeError(err) }, { status: 401 });
   }

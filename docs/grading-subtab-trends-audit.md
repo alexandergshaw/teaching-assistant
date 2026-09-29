@@ -156,12 +156,19 @@ across four separate `npm run test:paths --` invocations (each command's
 per-file `COVERED ... passed=N` line is what the counts above are read from,
 not a recollection).
 
-No test file for DraftedGradesTab's own trends mount was found (`grep -rln
-"DraftedGradesTab" src/app/components/*.test.ts` found only an unrelated
-`rubricBreakdownPercent.wiring.test.ts`, and it does not reference
-`ClassTrendsPanel`) - the "drafts" row above is sourced from a direct read of
-`DraftedGradesTab.tsx:655` and `grading-draft-view.ts`, not from a passing
-test, and that gap is itself listed as a residual.
+CORRECTION (orchestrator, verified against the tree): the claim in an earlier
+draft of this audit that DraftedGradesTab's trends mount is unpinned was WRONG.
+It rested on `grep -rln "DraftedGradesTab" src/app/components/*.test.ts`, whose
+glob covers only the top-level `components/` directory and NOT
+`components/drafted-grades/`, where the pinning test actually lives.
+`src/app/components/drafted-grades/classTrends.wiring.test.ts` (backlog N12)
+reads `DraftedGradesTab.tsx` as `TAB_PATH` and asserts, on stripped source,
+that the tab imports `ClassTrendsPanel` from `./drafted-grades/ClassTrendsPanel`,
+renders `<ClassTrendsPanel`, mounts it inside the per-assignment group header
+alongside `AssignmentChecklistPanel`, and passes `entry={entry}`. So drafts'
+trends mount IS pinned by a committed wiring test, exactly like the other five.
+The "drafts" row above is therefore corroborated by that test, not only by a
+direct read.
 
 ## Answer
 
@@ -193,7 +200,7 @@ owner to decide on, not fixed here per this audit's read-only brief.
 | R1 | Whether `ClassTrendsPanel` visually paints, is keyboard-reachable, and reads correctly to a screen reader on any of the six surfaces | Owner (or a future accessibility pass) | A real browser render - nothing in this repo's vitest suite renders a component (`AGENTS.md`, `docs/DEV_LOOP.md`) | An owner walk of the six tools in the running app, or a future Playwright/manual-render pass |
 | R2 | Whether a LIVE Gemini call, for a real rubric with areas, reliably returns a response `parseRubricResponse` parses into non-empty `rubricAreas` (this audit confirmed the CODE PATH always assigns whatever `parseRubricResponse` returns, and unit tests confirm the parser and the wiring against fixture text, but no test here exercises the real model) | Owner | A live grading run against a real Gemini key | Run "run" or "chat" once against a real assignment + rubric with at least one area, confirm the trends button shows a nonzero count |
 | R3 | Whether the drafts surface can ever actually be handed a `GradingRunEntry` with zero trendable results (i.e. whether the "Trends (0)" cosmetic gap on drafts is reachable in practice, or dead because every producing surface already refuses to let an all-ungraded run reach a draft) | Owner | Trace `saveDraftAction`/wherever a draft is created, for every one of the five producing surfaces, for a refusal-to-draft-nothing-graded rule | A follow-up grep-and-read pass on the draft-save call sites, or an explicit product decision to add the same `hasTrendableResults` gate to `DraftedGradesTab.tsx:655` regardless of reachability |
-| R4 | No committed test pins `DraftedGradesTab.tsx`'s `ClassTrendsPanel` mount (unlike the other five, which all have a wiring/structure test cited above) | Owner / test-author seat | A source-text wiring test mirroring `gradingResultsExtraction.wiring.test.ts`'s `importsAndRendersClassTrendsPanel` pattern | Add a `DraftedGradesTab.wiring.test.ts` (or equivalent) asserting the mount, so a future edit that accidentally removes it is caught the same way the other five are protected |
+| R4 | ~~No committed test pins `DraftedGradesTab.tsx`'s `ClassTrendsPanel` mount~~ WITHDRAWN - false residual. `src/app/components/drafted-grades/classTrends.wiring.test.ts` (N12) already pins the import, the render, the group-header placement, and `entry={entry}`, reading `DraftedGradesTab.tsx` directly. The original grep missed it by globbing only `components/*.test.ts`, not the `drafted-grades/` subfolder. | - (closed, no gap) | - | No action - the mount is protected the same way the other five are |
 
 ## What this audit did not touch
 

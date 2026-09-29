@@ -45390,3 +45390,289 @@ here rather than fully baselined; the residual register below names it.
 | No REGRESSION entry records commit `4e46fadb` (gating the `DraftedGradesTab` mount on `hasTrendableResults`), so entry 433 is read-stale on that one point | class-trends area owner (next seat touching `DraftedGradesTab.tsx` or doing an A16-family regression pass) | `grep -n "hasTrendableResults" src/app/components/DraftedGradesTab.tsx` plus `git log -1 -- src/app/components/DraftedGradesTab.tsx` | A dedicated one-paragraph REGRESSION addendum to entry 433, or its own numbered entry, before the next change to that mount site |
 | Whether the rich (`markdownToHtml`) clipboard flavour this panel writes pastes into Canvas's rich-text editor as bold/links rather than literal markup | owner (needs a real browser + Canvas) | manual paste test into a live Canvas rich-text field | Owner verification V2, already open before N13b per entry 423f - unresolved by this baseline, not newly introduced by it |
 | The real rendered layout/focus/ARIA of `ClassTrendsPanel.tsx` and `ClassTrendsDraftPanel.tsx` | owner (no component renders under this repo's vitest) | manual click-through of an expanded trends block on a graded run | Owner walk-through, same unresolved gap entry 422e and 423f already named |
+
+## 442. N13b as shipped (waves 1+2, option X) - the class-addressed name filter and the 3+-student subset callout with instructor attribution
+
+Backlog N13b, shipped `e1befd23` (wave 1) and `9a7b13a1` (wave 2), cited in
+`docs/BACKLOG.md`/`docs/backlog.yml` by `6ae77f48` and `5dd7d7bb`. End-of-group
+REGRESSION pass, per `docs/DEV_LOOP.md`. **Read at `5dd7d7bb`**
+(`git rev-parse --short HEAD`); `git status --short` returns empty (clean tree).
+Per `docs/loop/this-repo.md`, vitest here is `environment: "node"` and collects
+only `src/**/*.test.ts`, so no component in this area is rendered by any test;
+every claim below about JSX/button text is a source-text READING claim, not a
+run, exactly as entry 441 labelled its own such claims.
+
+### Part A - no regression against entry 441's baseline
+
+Entry 441 baselined five claims about `computeClassTrends`, `classifyDirection`,
+`composeClassTrendsDraft`, the not-postable guard, and the `.student` ban.
+Each was re-opened against the current tree this session:
+
+- **Ungraded rows still excluded; empty-name areas still skipped.**
+  `class-trends.ts:406` still calls `gradedResults(entry.run.results)` for
+  `results`/`totalResults` (entry 441a cited `:272` - line moved by the wave 2
+  insertions above it, mechanism unchanged); the empty-normalized-name skip is
+  at `:427-428` (`if (normalized === "" || seenInThisResult.has(normalized))
+  continue`), same shape as 441a's `:289-292`.
+- **`classifyDirection`'s high/low path is unchanged, additive only.**
+  `HIGH_PERCENT_THRESHOLD = 70` / `LOW_PERCENT_THRESHOLD = 60` still at
+  `class-trends.ts:114-115`; `classifyDirection` (`:274-292`) still returns
+  `"high"` iff `percentValues.every((v) => v >= 70)`, `"low"` iff
+  `percentValues.every((v) => v <= 60)`, `"no-scale"` when
+  `percentValues.length === 0`, else `"mixed"` - the same logic as entry
+  441a's `:184-205` reading, only re-numbered. The wave 2 subset count
+  (`missedSubset`, computed separately at `:480-506` from
+  `accumulator.subsetByKey`, a per-student map distinct from `percentValues`)
+  is a second, additive field on `AreaTrend`; it does not replace or gate
+  `direction`.
+- **`composeClassTrendsDraft` still renders through `markdownToHtml` and stays
+  3-param.** Signature at `class-trends-draft.ts:162-166`:
+  `composeClassTrendsDraft(report: Omit<ClassTrendsReport,
+  "instructorAttribution">, observations: readonly
+  ClassTrendsInsightObservation[], assignmentName: string)` - three
+  parameters, as entry 441b/439 recorded (the `Omit<...>` on param 1 is new
+  this wave, see 442b below, but the parameter COUNT is unchanged).
+  `ClassTrendsDraftPanel.tsx` still imports and calls `markdownToHtml` (`grep
+  -n markdownToHtml src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx`:
+  two hits, the clipboard-flavour build and the `dangerouslySetInnerHTML`
+  preview), unchanged from 441b.
+- **The no-model guard still bans `lib/llm`/`lib/gemini`, and now has 8 roots,
+  not 4.** `classTrendsDraft.not-postable.test.ts:58`:
+  `FORBIDDEN_PATH_PREFIXES = ["app/actions", "lib/canvas", "lib/lms-generation",
+  "lib/llm", "lib/gemini"]` - the same five entries entry 441d recorded. Canary
+  3's `roots` array (`:207-232`) now lists eight files: the four entry 441
+  knew (`class-trends-draft.ts`, `classTrendsDraftState.ts`,
+  `ClassTrendsDraftPanel.tsx`, `ClassTrendsPanel.tsx`) plus three pre-existing
+  A16 roots (`classTrendsEntry.ts`, `classTrendsRunCohort.ts`,
+  `classTrendsFolderEntry.ts`, already present before N13b per those files'
+  own comments) plus the wave-2 addition `ClassTrendsStudentListPanel.tsx`
+  (`:232`, comment at `:227-231` names it "the EIGHTH root"). This is growth,
+  not a loosening - no prefix was removed and no root was dropped.
+- **The `ClassTrendsPanel` `.student` ban is intact.**
+  `grep -rn "\.student\b" src/lib/grade/class-trends-draft.ts
+  src/app/components/drafted-grades/ClassTrendsPanel.tsx
+  src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx
+  src/app/components/drafted-grades/classTrendsDraftState.ts
+  src/app/components/drafted-grades/ClassTrendsStudentListPanel.tsx` (re-run
+  this session, now also covering the new leaf) returns two hits, both inside
+  comments (`class-trends-draft.ts:168`, `ClassTrendsStudentListPanel.tsx:11`,
+  the latter stating in prose that the leaf reads
+  `report.instructorAttribution` "never `.student`") - no executable read of
+  a `.student` field in any of the five files.
+
+**Oracle re-run.** `npm run test:paths --
+src/lib/grade/class-trends.test.ts src/lib/grade/class-trends-draft.test.ts
+src/app/components/drafted-grades/classTrends.wiring.test.ts
+src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts
+src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
+src/app/components/repo-grades/repoGradesClassTrends.wiring.test.ts
+src/app/components/repo-grades/classTrendsFolderEntry.test.ts
+src/app/components/grading-recording/classTrendsRunCohort.test.ts` (entry
+441's five-file oracle plus the three suites wave 2 added for its new wiring/
+mounts) reports, per argument:
+```
+COVERED src/lib/grade/class-trends.test.ts files=1 passed=43
+COVERED src/lib/grade/class-trends-draft.test.ts files=1 passed=38
+COVERED src/app/components/drafted-grades/classTrends.wiring.test.ts files=1 passed=30
+COVERED src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts files=1 passed=11
+COVERED src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts files=1 passed=6
+COVERED src/app/components/repo-grades/repoGradesClassTrends.wiring.test.ts files=1 passed=45
+COVERED src/app/components/repo-grades/classTrendsFolderEntry.test.ts files=1 passed=29
+COVERED src/app/components/grading-recording/classTrendsRunCohort.test.ts files=1 passed=23
+```
+`8 passed (8)` test files, `225 passed (225)` tests total. **No baselined
+behavior regressed.** Pass condition for this oracle going forward: the
+object under comparison is these eight files' pass/fail status against this
+same wrapper invocation; the instrument is `npm run test:paths` per the
+quoted per-argument `COVERED ... passed=N` lines; the direction of failure is
+any argument line dropping below its recorded `passed=N` count or a file
+disappearing from the `COVERED` lines entirely (the raw-multi-path-`vitest`
+silent-drop failure mode `docs/loop/traps-spec.md` and entry 441 both name).
+
+### Part B - the feature as shipped
+
+### 442a - Wave 1 (`e1befd23`): the class-addressed draft gets a code-level name filter
+
+Closes a live pre-existing leak: a student name in free text (AI-insight
+`concept`/`reading`), a rubric-area name (`displayArea`), or an
+instructor-typed assignment title (`assignmentName`) could reach the
+whole-class draft with only prompt-level instructions standing in the way.
+
+- `computeClassTrends` collects the run's own identifier strings into a new
+  scan-only field. `class-trends.ts:234` declares
+  `knownIdentifiers: readonly string[]` on `ClassTrendsReport`;
+  `collectKnownIdentifiers` (`:255-263`) pushes `result.student` and, when
+  `result.gradedRepo` is set, `ownerSegment(result.gradedRepo)`, for every
+  result in the same `results` array `computeClassTrends` already filters
+  through `gradedResults`. It is called unconditionally at `:549`
+  (`knownIdentifiers: collectKnownIdentifiers(results)`), not inside any
+  `identity.kind` branch - so it stays populated even when
+  `identity.kind === "unavailable"` (verified: the call site at `:549` sits
+  outside the `if (identity.kind !== "unavailable")` block at `:481`, which
+  only guards `missedSubset`).
+- `composeClassTrendsDraft` scans the whole assembled Markdown, case-insensitive
+  substring, against `knownIdentifiers`. `carriesKnownIdentifier`
+  (`class-trends-draft.ts:129-135`) lower-cases both sides and does
+  `lower.includes(trimmed)`, skipping blank identifiers
+  (`trimmed.length > 0 &&`).
+- **`assignmentName` match rejects the whole draft.** `:188-193`: if
+  `carriesKnownIdentifier(assignmentName, knownIdentifiers)`, returns
+  `{status: "rejected", reason: "The assignment name appears to contain a
+  name from this run..."}` before the opening line is ever built - the
+  comment at `:185-187` explains why: the opening line is unconditional, so a
+  name reaching it cannot be dropped the way a body clause can.
+- **Clause-level matches drop only the clause**, not the whole draft: counted
+  clauses (`:204-212`), the wave-2 subset clauses (`:219-227`, see 442b), and
+  inferred clauses (`:229-231`) are each filtered with
+  `!carriesKnownIdentifier(clause, knownIdentifiers)` alongside the existing
+  forbidden-completeness-phrase filter, so a single tainted clause is omitted
+  while the rest of the draft still ships.
+- A final whole-markdown scan (`:262-267`) is defense-in-depth against a
+  future clause that reaches assembly without going through a per-clause
+  filter.
+- Signature stayed 3-param (confirmed in Part A above); neither
+  `ClassTrendsPanel.tsx` nor `ClassTrendsDraftPanel.tsx` was touched by this
+  wave (`git show --stat e1befd23`: only `class-trends.ts`,
+  `class-trends.test.ts`, `class-trends-draft.ts`,
+  `class-trends-draft.test.ts`), so the panel's own `.student` ban could not
+  have been loosened by it.
+
+### 442b - Wave 2 (`9a7b13a1`), layer A: the 3+-distinct-student subset count
+
+Owner ask, per the commit message: "call out any trend where three or more
+students missed points on the same section," with per-student attribution.
+
+- `SubsetIdentity` (`class-trends.ts:132-138`) is a three-member discriminated
+  union - `"per-result"` (default; every Canvas-family surface, one graded
+  result counted as one distinct student, `:392`
+  `identity: SubsetIdentity = { kind: "per-result" }`), `"resolved"` (repo
+  family under option Y, not shipped this wave), `"unavailable"` (repo family
+  today, `{kind: "unavailable"; reason: string}`).
+- `AreaTrend.missedSubset` (`:187`) is
+  `{ studentCount: number; denominator: number; unknownExcludedCount: number }
+  | null` - numbers only, no student identity on this type.
+  `SUBSET_MIN_STUDENTS = 3` (`:142`); `isSubsetTrend` (`:204-206`) is the ONLY
+  place `>= SUBSET_MIN_STUDENTS` is applied (comment at `:202`):
+  `area.missedSubset != null && area.missedSubset.studentCount >=
+  SUBSET_MIN_STUDENTS`.
+- **Counts distinct students, any deduction.** The subset loop (`:481-506`)
+  iterates `accumulator.subsetByKey.values()` (keyed per `SubsetIdentity`, one
+  entry per distinct student under `"per-result"`/`"resolved"`, never the raw
+  `.student` string per result) and, for each `"percent"`-scale score,
+  increments `denominator` always and `studentCount` at `:491`
+  `if (parsed.value < 100)` - any nonzero deduction, not gated on the
+  `LOW_PERCENT_THRESHOLD = 60` used by `classifyDirection`.
+- **Unknown-scale scores excluded from both terms.** `:497-499`: a
+  `"raw-number"` or unscored score increments only `unknownExcludedCount`,
+  touching neither `studentCount` nor `denominator` - comment: "excluded from
+  BOTH terms and disclosed (AC-4) - never counted as not-missed."
+- **Suppressed entirely under `"unavailable"`.** `:481`
+  `if (identity.kind !== "unavailable")` wraps the whole subset computation;
+  `missedSubset` stays `null` for every area on that path (confirmed this is
+  the SAME identity value the repo mount passes - see 442c).
+- `ClassTrendsReport.instructorAttribution` (`:241`) is `AreaAttribution[]`
+  (names, populated at `:503-507` only for areas whose `studentCount >=
+  SUBSET_MIN_STUDENTS`). `grep -rn instructorAttribution src/app --include=*.ts
+  --include=*.tsx` (excluding `*.test.ts`) shows it produced at
+  `class-trends.ts:534,550`, forwarded (not destructured) at
+  `ClassTrendsPanel.tsx:172`, and actually read (names mapped to JSX/clipboard
+  text) only in `ClassTrendsStudentListPanel.tsx` (`:27-34`, `:99-103`) - the
+  claim "read ONLY by ClassTrendsStudentListPanel" holds for every non-test
+  reference in the tree today.
+- `composeClassTrendsDraft`'s first parameter is narrowed to
+  `Omit<ClassTrendsReport, "instructorAttribution">`
+  (`class-trends-draft.ts:163`, `areaFullyCovered`'s own parameter narrowed
+  the same way at `:65`) - a hypothetical `report.instructorAttribution` read
+  inside `class-trends-draft.ts` is a TypeScript compile error by
+  construction, not a runtime check; this was NOT independently re-verified
+  in this pass by introducing such a read and re-running `tsc` (the wave's
+  own commit message reports this was sabotage-verified as R-T2 in the
+  checked test notes, `1eb9899f`/`45d5c27d`; not re-proven here - see the
+  residual register below).
+
+### 442c - Wave 2, layer C: the name-free subset clause and the new instructor leaf
+
+- `renderSubsetClause` (`class-trends-draft.ts:102-108`) reads only
+  `area.missedSubset.studentCount`/`.denominator` and `area.displayArea` - no
+  name-shaped field on its input type. It is filtered into `subsetClauses` at
+  `:219-227` by `isSubsetTrend`, explicitly NOT `areaFullyCovered` (comment at
+  `:214-215`: "deliberately NOT filtered through areaFullyCovered - the
+  subset can be real and worth surfacing even under partial coverage"), and
+  states its own denominator (`"N of M students missed points on this area"`,
+  `:107`) rather than reusing the opening line's `report.totalResults`.
+- The new leaf `ClassTrendsStudentListPanel.tsx` (121 lines, `wc -l`) is
+  mounted by `ClassTrendsPanel.tsx:171-174`, passed
+  `report.instructorAttribution` and
+  `unavailableReason={identity.kind === "unavailable" ? identity.reason :
+  undefined}`. Four states read from source (`:36-57`'s own doc comment,
+  confirmed against the JSX): no areas (handled by the caller's
+  `report.areas.length === 0` branch, this leaf never mounts for it),
+  no-subset-yet (`:75-81`, a hint sentence, no button), unavailable
+  (`:67-73`, "Per-student trends are not available here: {unavailableReason}"
+  - surfaces the reason rather than falling into the no-subset-yet sentence),
+  and populated (`:91-120`, heading + list + "Copy student list" button at
+  `:106-108`).
+- The repo mount passes the unavailable identity:
+  `src/app/components/repo-grades/index.tsx:860`
+  `identity={{ kind: "unavailable", reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON }}`
+  - so the repo surface (option X: subset deferred there) reaches the
+  disclosure branch above, never the no-subset-yet branch, confirming the
+  "surfaces its reason, no false-empty message" claim end to end from the
+  repo's own mount site through to the leaf's render branch.
+- Button text, read from source: the class draft's copy button reads "Copy
+  class announcement" (`ClassTrendsDraftPanel.tsx:101`); the new leaf's copy
+  button reads "Copy student list" (`ClassTrendsStudentListPanel.tsx:107`) -
+  two distinctly labelled buttons, not a relabelled single one.
+
+### 442d - sizes and the oracle, this session
+
+`wc -l`: `src/lib/grade/class-trends.ts` 552, `src/lib/grade/class-trends-draft.ts`
+270, `src/app/components/drafted-grades/ClassTrendsPanel.tsx` 233,
+`src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx` 117,
+`src/app/components/drafted-grades/ClassTrendsStudentListPanel.tsx` 121,
+`src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts` 256.
+These reconcile with entry 441's pre-N13b baseline plus each wave's own
+`git show --numstat` net line delta (e.g. `class-trends.ts`: 355 (441a) + 31
+(`e1befd23`) + 166 (`9a7b13a1`) = 552; `ClassTrendsPanel.tsx`: 212 (441c) + 21
+(`9a7b13a1`, `git show --numstat 9a7b13a1` reports 31 insertions/10 deletions
+for that file) = 233) - no unexplained drift found. The full combined oracle
+(8 files, 225 tests) is quoted in Part A above; it is also the regression
+oracle going forward for this entry, superseding entry 441's five-file
+version (which remains historically accurate for what existed before N13b).
+
+Emoji/BOM/CR cleanliness of `docs/REGRESSION.md` itself, re-run after this
+entry was appended: `npm run test:paths -- src/lib/no-emojis.test.ts
+src/source-bytes.structure.test.ts` and a Python byte scan of this file for
+`\xef\xbb\xbf` (BOM) and `\r` - both reported in the closing summary of this
+session rather than duplicated here, so this entry does not itself go stale
+the next time the file is appended to.
+
+### 442e - what this entry does not cover, and the residual register
+
+- **Wave 3 (option-Y repo roster-identity channel) is owner-gated and NOT
+  shipped.** `docs/n13b-architecture.md:541-550` (Residual R3): the owner must
+  answer the X/Y fork before a `"resolved"` identity can be built for the
+  repo surface; today it always passes `"unavailable"` (442c). This is not a
+  defect - `docs/BACKLOG.md`/`docs/backlog.yml`'s N13b row, cited by
+  `5dd7d7bb`, already records wave 3 as open under option X.
+- **AC-4/AC-5 recommendations are a non-gating owner residual**, unchanged by
+  this wave: `docs/n13b-architecture.md:165` ("R2 already routes owner
+  confirmation of AC-4/AC-5 as a non-gating batched question... The shape
+  proceeds regardless") and `:541-544` (Residual R2). No code in this wave
+  depends on the owner's answer; raw-number scores stay excluded and
+  disclosed either way.
+- **The small-class disclosure floor (R6) is a non-gating owner residual.**
+  `docs/n13b-security.md:456` files it as "R6 - small-class disclosure floor
+  (MAJOR-2), a product decision"; `:527` "Whether R6's floor recommendation is
+  adopted, and at what number - owner." Nothing in waves 1-2 implements a
+  floor; a class of exactly 3 students where all 3 missed points is
+  attributable by elimination even without a floor, and that is the
+  documented, undecided gap.
+
+| Item | Owner | Instrument | Step that measures it |
+|---|---|---|---|
+| Wave 3 (option-Y repo roster-identity channel) not built; repo surface always passes `{kind:"unavailable"}` | repo owner (X/Y fork) + implementer once answered | `docs/n13b-architecture.md:541-550` (Residual R3); `grep -n "kind: \"unavailable\"" src/app/components/repo-grades/index.tsx` | The owner's X/Y answer, then a wave-3 build against the `SubsetIdentity` seam already shipped |
+| AC-4/AC-5 (raw-number-to-percent conversion) recommendation undecided | repo owner | `docs/n13b-architecture.md:129-165` (Decision 3, Residual R2) | One batched non-gating owner question, already queued per R2 |
+| R6 - small-class disclosure floor (a class of 3 where all 3 missed points is attributable by elimination even with the name-free clause) | repo owner | `docs/n13b-security.md:375-378,456,527` | Owner product decision on whether/where to set a floor; no code change until then |
+| Whether the compile-time `Omit<ClassTrendsReport,"instructorAttribution">` boundary (composeClassTrendsDraft's first param) actually rejects a name-reading edit was reported sabotage-verified (R-T2) in the wave's own checked test notes, not independently re-proven in this regression pass | next seat touching `class-trends-draft.ts`'s signature | introduce a temporary `report.instructorAttribution` read inside that file and confirm `tsc --noEmit` fails, then revert | Before any future edit narrows or removes the `Omit<...>` on that parameter |
+| The real on-screen rendering of `ClassTrendsStudentListPanel.tsx` (button placement, focus order, ARIA, and whether its list is visually distinct from the class draft) is unmeasurable here | owner (no component renders under this repo's vitest, `docs/loop/this-repo.md` section 6) | manual click-through of an expanded trends block on a graded run with 3+ students missing the same area | Owner walk-through, same unresolved class of gap entries 422e/423f/441e already named |

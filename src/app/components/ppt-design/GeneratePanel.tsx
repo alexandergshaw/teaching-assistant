@@ -24,6 +24,11 @@ interface GeneratePanelProps {
   savingFile: boolean;
   savingDraft: boolean;
   draftNote: { kind: "success" | "error"; text: string } | null;
+  askDraft: string;
+  askBusy: boolean;
+  askOutcome: { kind: "refused" | "error"; text: string; retryable?: boolean } | null;
+  onAskDraftChange: (value: string) => void;
+  onAskDeck: () => void;
   onSubjectChange: (value: string) => void;
   onAudienceChange: (value: string) => void;
   onLoopItemsChange: (groupId: string, value: string) => void;
@@ -58,6 +63,11 @@ export default function GeneratePanel({
   savingFile,
   savingDraft,
   draftNote,
+  askDraft,
+  askBusy,
+  askOutcome,
+  onAskDraftChange,
+  onAskDeck,
   onSubjectChange,
   onAudienceChange,
   onLoopItemsChange,
@@ -415,6 +425,73 @@ export default function GeneratePanel({
               </Card>
               );
             })}
+          </div>
+
+          {/* A43-C wave C2: the conversational ask box (docs/a43-c-scope.md
+              section 10/11). ONE optional control - no mode switch, no
+              required step before Download/Save/Regenerate below (C-BUDGET).
+              Keyboard-submittable (Enter submits, matching a single-line
+              TextField's default behavior). */}
+          <div style={{ marginBottom: "var(--space-6)" }}>
+            <h4
+              style={{
+                margin: "0 0 var(--space-3) 0",
+                fontSize: "var(--font-size-2xs)",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--text-secondary)",
+              }}
+            >
+              Ask for a change
+            </h4>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
+              <TextField
+                label="e.g., make slide 2 punchier"
+                value={askDraft}
+                onChange={(e) => onAskDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !askBusy && askDraft.trim()) {
+                    e.preventDefault();
+                    onAskDeck();
+                  }
+                }}
+                disabled={askBusy}
+                fullWidth
+                size="small"
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={onAskDeck}
+                disabled={askBusy || !askDraft.trim()}
+                sx={{ textTransform: "none", whiteSpace: "nowrap" }}
+              >
+                {askBusy ? (
+                  <span role="status" aria-live="polite">
+                    <CircularProgress size={14} sx={{ marginRight: "var(--space-2)" }} /> Asking…
+                  </span>
+                ) : (
+                  "Ask"
+                )}
+              </Button>
+            </div>
+            {askOutcome && (
+              <div
+                style={{
+                  marginTop: "var(--space-3)",
+                  padding: "var(--space-3)",
+                  backgroundColor: "var(--danger-surface)",
+                  border: "1px solid var(--danger-border)",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: "var(--font-size-sm)",
+                  color: "var(--danger)",
+                }}
+              >
+                {askOutcome.text}
+                {askOutcome.retryable && " Try again."}
+              </div>
+            )}
           </div>
 
           {generateError && (

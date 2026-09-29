@@ -50,8 +50,12 @@ import {
   useDeckSourceMaterials,
   useSelectedDeckTemplateFileId,
   useDeckTemplateFiles,
+  useDeckAskDraft,
 } from "./hooks";
 import { gradientPng } from "./utils";
+import { buildAskRequestBody, reduceAskResponse } from "./ask-response";
+
+const ASK_DECK_URL = "/api/decks/ask";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -101,6 +105,13 @@ export default function PowerPointDesignTab() {
   } = generationState;
 
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // A43-C wave C2: the conversational ask box's own state. askOutcome only
+  // ever carries "refused"/"error" text - an "ok" outcome applies directly to
+  // editedSlides and clears the draft, so there is nothing to display.
+  const [askDraft, setAskDraft] = useDeckAskDraft();
+  const [askBusy, setAskBusy] = useState(false);
+  const [askOutcome, setAskOutcome] = useState<{ kind: "refused" | "error"; text: string; retryable?: boolean } | null>(null);
 
   const [sourceReceipt, setSourceReceipt] = useDeckSourceReceipt();
   const [sourceMaterials, setSourceMaterials] = useDeckSourceMaterials();
@@ -619,6 +630,43 @@ export default function PowerPointDesignTab() {
     }
   };
 
+  // A43-C wave C2 (docs/a43-c-scope.md section 10-11): the CALLER of
+  // /api/decks/ask (C3). Posts the current editedSlides + the instruction; on
+  // { status: "ok" } sets editedSlides to the returned slides - the SAME
+  // state onEditSlide already writes, so the preview and Download/Save both
+  // pick it up unchanged. On "refused" the deck is left untouched and the
+  // reason is shown; on error/partial the reducer's message is shown.
+  const handleAskDeck = async () => {
+    if (!generatedDeck || !askDraft.trim() || askBusy) return;
+    setAskBusy(true);
+    setAskOutcome(null);
+    try {
+      const res = await fetch(ASK_DECK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildAskRequestBody(askDraft, editedSlides)),
+      });
+      const body = await res.json().catch(() => undefined);
+      const outcome = reduceAskResponse(res.status, body);
+      if (outcome.phase === "ok") {
+        setEditedSlides(outcome.slides);
+        setAskDraft("");
+      } else if (outcome.phase === "refused") {
+        setAskOutcome({ kind: "refused", text: outcome.reason });
+      } else {
+        setAskOutcome({ kind: "error", text: outcome.message, retryable: outcome.retryable });
+      }
+    } catch {
+      setAskOutcome({
+        kind: "error",
+        text: "Could not reach the server. Check your connection and try again.",
+        retryable: true,
+      });
+    } finally {
+      setAskBusy(false);
+    }
+  };
+
   const isReadOnly = selected && isPresetDeckId(selected.id);
 
   return (
@@ -735,6 +783,11 @@ export default function PowerPointDesignTab() {
               savingFile={savingFile}
               savingDraft={savingDraft}
               draftNote={draftNote}
+              askDraft={askDraft}
+              askBusy={askBusy}
+              askOutcome={askOutcome}
+              onAskDraftChange={setAskDraft}
+              onAskDeck={handleAskDeck}
               onSubjectChange={setSubject}
               onAudienceChange={setAudience}
               onLoopItemsChange={(groupId, value) => setLoopItems({ ...loopItems, [groupId]: value })}

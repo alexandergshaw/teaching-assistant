@@ -134,6 +134,16 @@ export function useSelectedDeckTemplateFileId() {
 }
 
 /**
+ * A43-C wave C2 (docs/a43-c-scope.md section 12): the unsent conversational
+ * ask draft, so a half-typed instruction survives a reload - this repo's
+ * standing ta- persistence rule (MEMORY.md, persist-ui-control-state), same
+ * idiom as the other ta-ppt-* fields above.
+ */
+export function useDeckAskDraft() {
+  return useLocalStorageState<string>("ta-ppt-ask-draft", "");
+}
+
+/**
  * The owner's uploaded deck template files (metadata only). `refresh` is
  * exposed so a caller can re-fetch after an upload or delete without a full
  * page reload.

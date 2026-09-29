@@ -31,6 +31,7 @@ export interface BacklogArea {
 }
 
 export const BACKLOG_AREAS: readonly BacklogArea[] = [
+  { slug: "presentations-authoring", label: "Presentations tab: slide-deck creation, lecture outlines, activities and adversarial review from pasted lesson context" },
   { slug: "grading-run-survival-and-disclosure", label: "Grading runs: bounds, failures, not-attempted rows, class-trends signal" },
   { slug: "assessment-shared-rows-and-feedback", label: "assessment-shared: row restore and feedback composition" },
   { slug: "discussion-reply-grading", label: "Discussion replies graded as independent posts" },

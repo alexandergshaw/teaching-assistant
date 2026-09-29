@@ -98,7 +98,7 @@ export default function ClassTrendsDraftPanel({
             onClick={() => handleCopy(state.markdown)}
             style={{ marginTop: "var(--space-1)" }}
           >
-            Copy
+            Copy class announcement
           </Button>
           {state.copy === "copied" && (
             <p role="status" aria-live="polite" className={styles.fieldHint}>

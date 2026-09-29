@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { composeClassTrendsDraft } from "./class-trends-draft";
 import { computeClassTrends } from "./class-trends";
-import type { AreaTrend, AreaTrendDirection, ClassTrendsReport } from "./class-trends";
+import type { AreaAttribution, AreaTrend, AreaTrendDirection, ClassTrendsReport } from "./class-trends";
 import type { ClassTrendsInsightObservation } from "./class-trends-insight";
 import type { GradeResult, GradingRunEntry, RubricAreaResult } from "./types";
 
@@ -12,7 +12,9 @@ import type { GradeResult, GradingRunEntry, RubricAreaResult } from "./types";
 // against it and there is no reason to churn the numbers.
 const SAMPLE_SIZE = 5;
 
-function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirection }): AreaTrend {
+function makeArea(
+  overrides: Partial<AreaTrend> & { direction: AreaTrendDirection }
+): AreaTrend {
   return {
     area: overrides.area ?? "thesis-statement",
     displayArea: overrides.displayArea ?? "Thesis Statement",
@@ -26,13 +28,17 @@ function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirectio
     averageRaw: overrides.averageRaw ?? null,
     direction: overrides.direction,
     summary: overrides.summary ?? "Across the 5 submissions graded so far, 5 of 5 covered it.",
+    // N13b Wave 2: numbers-only subset, null unless a test explicitly sets it
+    // (most fixtures in this file do not exercise the subset clause).
+    missedSubset: overrides.missedSubset ?? null,
   };
 }
 
 function makeReport(
   areas: AreaTrend[],
   totalResults = SAMPLE_SIZE,
-  knownIdentifiers: readonly string[] = []
+  knownIdentifiers: readonly string[] = [],
+  instructorAttribution: AreaAttribution[] = []
 ): ClassTrendsReport {
   return {
     totalResults,
@@ -48,6 +54,13 @@ function makeReport(
     // name-filter denylist. Default empty - most fixtures in this file do
     // not exercise the filter at all.
     knownIdentifiers,
+    // N13b Wave 2: the named per-area subset list. Default empty - most
+    // fixtures in this file do not exercise it. NEVER read by
+    // composeClassTrendsDraft (its first parameter type omits this field -
+    // W2-11), so this field exists purely to satisfy ClassTrendsReport's
+    // shape for fixtures built directly rather than through
+    // computeClassTrends.
+    instructorAttribution,
   };
 }
 
@@ -430,6 +443,178 @@ describe("composeClassTrendsDraft - W1-8 end-to-end reachability through the rea
     const entry = makeRunEntry(results, ["Thesis Statement"], `Makeup exam - ${SEED}`);
     const report = computeClassTrends(entry);
     const result = composeClassTrendsDraft(report, [], entry.assignmentName);
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(SEED);
+    }
+  });
+});
+
+// N13b Wave 2 (docs/n13b-wave2-test-notes.md section 4, Group B): the
+// numbers-only subset clause and the compile-time/runtime privacy boundary
+// on report.instructorAttribution.
+
+describe("composeClassTrendsDraft - the subset clause renders even under partial coverage (W2-8, AC-6)", () => {
+  it("partial coverage (resultsWithArea 3 of totalResults 5), direction mixed -> still renders (opposite gate from high/low)", () => {
+    const area = makeArea({
+      direction: "mixed",
+      displayArea: "Thesis Statement",
+      resultsWithArea: 3,
+      totalResults: 5,
+      missedSubset: { studentCount: 3, denominator: 3, unknownExcludedCount: 0 },
+    });
+    const report = makeReport([area], 5);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).toContain("Thesis Statement");
+    }
+  });
+
+  it("the motivating case: class of 9, 4 miss the same area, direction mixed -> subset clause present", () => {
+    const area = makeArea({
+      direction: "mixed",
+      displayArea: "Thesis Statement",
+      resultsWithArea: 9,
+      totalResults: 9,
+      missedSubset: { studentCount: 4, denominator: 9, unknownExcludedCount: 0 },
+    });
+    const report = makeReport([area], 9);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).toContain("Thesis Statement");
+    }
+  });
+
+  it("sabotage control: routing the subset clause through .filter(areaFullyCovered) (the high/low path's gate) would drop the partial-coverage clause, leaving no body content at all", () => {
+    // Documents the discriminating mutation: with the SAME partially-covered,
+    // non-high/low fixture, an areaFullyCovered-gated subset renderer
+    // produces an empty draft ({status:"empty"}), never "ok". The real
+    // implementation must NOT take this shape.
+    const area = makeArea({
+      direction: "mixed",
+      displayArea: "Thesis Statement",
+      resultsWithArea: 3,
+      totalResults: 5,
+      missedSubset: { studentCount: 3, denominator: 3, unknownExcludedCount: 0 },
+    });
+    const report = makeReport([area], 5);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).not.toBe("empty");
+  });
+});
+
+describe("composeClassTrendsDraft - the subset clause states its OWN denominator, never totalResults (W2-9, AC-7)", () => {
+  it('reuses the W2-8 partial-coverage construction: contains "3 of 3" (own basis), never "3 of 5" (totalResults)', () => {
+    const area = makeArea({
+      direction: "mixed",
+      displayArea: "Thesis Statement",
+      resultsWithArea: 3,
+      totalResults: 5,
+      missedSubset: { studentCount: 3, denominator: 3, unknownExcludedCount: 0 },
+    });
+    const report = makeReport([area], 5);
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).toContain("3 of 3 students");
+      expect(result.markdown).not.toContain("3 of 5");
+    }
+  });
+});
+
+describe("composeClassTrendsDraft - PRIVACY (runtime, load-bearing): a name on instructorAttribution never reaches the returned Markdown (W2-10)", () => {
+  it("a distinctive marker placed on instructorAttribution (absent from knownIdentifiers) does not appear in the ok markdown", () => {
+    const area = makeArea({
+      direction: "mixed",
+      displayArea: "Thesis Statement",
+      missedSubset: { studentCount: 3, denominator: 3, unknownExcludedCount: 0 },
+    });
+    // CRUCIAL (per the test notes' "can't-fail" trap): knownIdentifiers is []
+    // here, NOT [marker] - a marker also present in knownIdentifiers would be
+    // caught by Wave 1's own filter regardless of whether the subset renderer
+    // itself leaks it, which would prove nothing about THIS renderer.
+    const marker = "Zzxq Marker";
+    const report: ClassTrendsReport = {
+      ...makeReport([area], SAMPLE_SIZE, []),
+      instructorAttribution: [
+        {
+          area: area.area,
+          displayArea: area.displayArea,
+          students: [{ displayName: marker, deductionLabel: "x" }],
+        },
+      ],
+    };
+    const result = composeClassTrendsDraft(report, [], "Essay 1");
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.markdown).not.toContain(marker);
+    }
+  });
+});
+
+describe("composeClassTrendsDraft - PRIVACY (compile-time, PRIMARY): instructorAttribution is UNREACHABLE through the composer's input type (W2-11, AC-8/R8 part b)", () => {
+  it("reading .instructorAttribution off the composer's own parameter type is a compile error (tsc TS2578 if this directive is ever unused)", () => {
+    const draftInput = {} as Parameters<typeof composeClassTrendsDraft>[0];
+    // @ts-expect-error instructorAttribution must be unreachable via the
+    // composer input type (AC-8 / R8 part b): reading it here MUST be a
+    // compile error, so this directive MUST be "used". If the composer's
+    // first parameter is ever widened back to the full ClassTrendsReport,
+    // this line type-checks, the directive becomes unused, and `tsc` fails
+    // with TS2578 - the type gate, not this vitest run, is what goes RED.
+    void draftInput.instructorAttribution;
+    // No runtime assertion needed or possible here - see this describe's own
+    // title. This `expect` only keeps the test from being reported as having
+    // no assertions.
+    expect(true).toBe(true);
+  });
+});
+
+describe("composeClassTrendsDraft - PRIVACY (source-text, OPTIONAL belt-and-braces): the composer BODY never names instructorAttribution (W2-11b)", () => {
+  // DUPLICATED verbatim from classTrends.wiring.test.ts's stripComments, per
+  // the no-cross-test-file-imports rule - never imported.
+  function stripComments(text: string): string {
+    return text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+  }
+
+  it("the body slice (between the signature's opening brace and the next top-level export) does not contain the token", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const source = readFileSync(join(process.cwd(), "src/lib/grade/class-trends-draft.ts"), "utf8");
+    const stripped = stripComments(source);
+
+    const sigIdx = stripped.indexOf("export function composeClassTrendsDraft(");
+    expect(sigIdx, "composer signature not found").toBeGreaterThan(-1);
+
+    const bodyOpenIdx = stripped.indexOf("{", stripped.indexOf(")", sigIdx));
+    expect(bodyOpenIdx, "composer body-opening brace not found").toBeGreaterThan(-1);
+
+    const nextExportIdx = stripped.indexOf("export function", bodyOpenIdx + 1);
+    const endIdx = nextExportIdx === -1 ? stripped.length : nextExportIdx;
+    expect(endIdx).toBeGreaterThan(bodyOpenIdx);
+
+    const body = stripped.slice(bodyOpenIdx, endIdx);
+    expect(body).not.toContain("instructorAttribution");
+  });
+});
+
+describe("composeClassTrendsDraft - the signature stays 3-param (W2-12)", () => {
+  it("composeClassTrendsDraft.length is still 3 - the subset clause reads report, not a new channel", () => {
+    expect(composeClassTrendsDraft.length).toBe(3);
+  });
+});
+
+describe("composeClassTrendsDraft - INFO-2 end-to-end through the real production sequence, repo-shaped (W2-13, AC-8 on the unavailable path; R7)", () => {
+  it("a run student's name, echoed by an observation, does not survive computeClassTrends(entry, {kind:'unavailable'}) -> composeClassTrendsDraft", () => {
+    const results = [makeGradedResultForRun(SEED, [makeRubricAreaForRun("Thesis Statement", "50%")])];
+    const entry = makeRunEntry(results, ["Thesis Statement"], "Essay 1");
+    const report = computeClassTrends(entry, { kind: "unavailable", reason: "no roster identity on this surface" });
+    const observation = makeObservation({ reading: `echoing ${SEED} verbatim` });
+    const result = composeClassTrendsDraft(report, [observation], entry.assignmentName);
     if (result.status === "ok") {
       expect(result.markdown).not.toContain(SEED);
     }

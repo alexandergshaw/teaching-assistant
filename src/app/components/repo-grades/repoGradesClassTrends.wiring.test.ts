@@ -677,6 +677,51 @@ describe("A-8: source position and binding", () => {
     })(indexFile);
     expect(boundToHookCall).toBe(true);
   });
+  it("W2-17: the mount carries an identity attribute whose object literal's kind is the string literal 'unavailable'", () => {
+    const [panel] = findJsxSelfClosing(indexFile, "ClassTrendsPanel");
+    const identityAttr = panel.attributes.properties.find(
+      (p) => ts.isJsxAttribute(p) && p.name.getText() === "identity"
+    ) as import("typescript").JsxAttribute | undefined;
+    expect(identityAttr, "no identity= attribute on the ClassTrendsPanel mount").toBeTruthy();
+    const init = identityAttr!.initializer;
+    expect(init && ts.isJsxExpression(init)).toBe(true);
+    if (!init || !ts.isJsxExpression(init) || !init.expression) return;
+    expect(ts.isObjectLiteralExpression(init.expression)).toBe(true);
+    if (!ts.isObjectLiteralExpression(init.expression)) return;
+    const kindProp = init.expression.properties.find(
+      (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "kind"
+    ) as import("typescript").PropertyAssignment | undefined;
+    expect(kindProp, "no kind property on the identity object literal").toBeTruthy();
+    const kindInit = kindProp!.initializer;
+    expect(ts.isStringLiteral(kindInit) && kindInit.text === "unavailable").toBe(true);
+  });
+
+  it("canary W2-17A: deleting the identity= attribute from the mount fails the check above", () => {
+    const fixture = `function C() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`;
+    const [panel] = findJsxSelfClosing(parseFixture(fixture, true), "ClassTrendsPanel");
+    const identityAttr = panel.attributes.properties.find(
+      (p) => ts.isJsxAttribute(p) && p.name.getText() === "identity"
+    );
+    expect(identityAttr).toBeUndefined();
+  });
+
+  it("canary W2-17B: passing kind: 'per-result' fails the string-literal check above", () => {
+    const fixture = `function C() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded identity={{ kind: "per-result" }} /></div>)}</>); }`;
+    const [panel] = findJsxSelfClosing(parseFixture(fixture, true), "ClassTrendsPanel");
+    const identityAttr = panel.attributes.properties.find(
+      (p) => ts.isJsxAttribute(p) && p.name.getText() === "identity"
+    ) as import("typescript").JsxAttribute;
+    const init = identityAttr.initializer;
+    if (!init || !ts.isJsxExpression(init) || !init.expression || !ts.isObjectLiteralExpression(init.expression)) {
+      throw new Error("fixture did not parse as expected");
+    }
+    const kindProp = init.expression.properties.find(
+      (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "kind"
+    ) as import("typescript").PropertyAssignment;
+    const kindInit = kindProp.initializer;
+    expect(ts.isStringLiteral(kindInit) && kindInit.text === "unavailable").toBe(false);
+  });
+
   it("canary F-12: a locally rebuilt `{ trendsEntry }` (not the hook call's destructure) fails the binding check", () => {
     const fixture = `function C() {
       const { model } = useRepoGradesGradingActions({});

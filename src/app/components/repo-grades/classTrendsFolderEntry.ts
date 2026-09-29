@@ -111,3 +111,19 @@ export function repoRunTrendsLabel(entry: GradingRunEntry): string {
   const noun = count === 1 ? "repo" : "repos";
   return `Trends for "${entry.assignmentName}" from the last Grade all run, covering the ${count} ${noun} it graded.`;
 }
+
+/** N13b Wave 2 (option X, architecture section 5): the repo surface has no
+ * roster-identity channel today - `GradeResult.student` here is the repo
+ * label, not a roster student, and the repo full name is discarded before
+ * this cohort is ever built (see the architect pass for the measured join
+ * gap). Counting distinct repo labels as distinct students would violate
+ * AC-1/AC-7 (two repos owned by one roster student would count as two). This
+ * string is the `reason` half of the `{kind:"unavailable", reason}` identity
+ * the repo mount (index.tsx) passes to ClassTrendsPanel - the `kind` literal
+ * itself stays inline at the mount (W2-17 / INFO-1(a)) so the AST wiring
+ * guard can tie attribute to value within one file. A plain exported string
+ * constant, not a value tied to SubsetIdentity, so this file's own value-import
+ * allowlist (this leaf's canary-3 root header, and classTrendsFolderEntry.test.ts's
+ * L-7) needs no new import to add it. */
+export const REPO_TRENDS_SUBSET_UNAVAILABLE_REASON =
+  "Repo Grades does not yet track which repos belong to the same roster student, so the per-student subset count is not shown here.";

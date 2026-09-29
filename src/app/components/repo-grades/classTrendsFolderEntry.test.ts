@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { GradeResult, GradingRunEntry } from "@/lib/grade/types";
 import { containsForbiddenCompletenessPhrase, computeClassTrends } from "@/lib/grade/class-trends";
-import { buildRepoRunCohort, repoRunTrendsEntry, repoRunTrendsLabel, type RepoRunCohort } from "./classTrendsFolderEntry";
+import {
+  buildRepoRunCohort,
+  repoRunTrendsEntry,
+  repoRunTrendsLabel,
+  REPO_TRENDS_SUBSET_UNAVAILABLE_REASON,
+  type RepoRunCohort,
+} from "./classTrendsFolderEntry";
 
 // A16 wave 3 (docs/a16-wave3-scope.md section 13.1): this leaf owns every
 // DECISION wave 3's trends surface needs, so it is exercised BY VALUE here -
@@ -201,6 +207,33 @@ describe("L-6: repoRunTrendsLabel", () => {
     const label = repoRunTrendsLabel(entryFor("linked-lists", 1));
     expect(/\b1 repo\b/.test(label)).toBe(true);
     expect(/\b1 repos\b/.test(label)).toBe(false);
+  });
+});
+
+describe("N13b Wave 2 (W2-17, option X): the repo cohort exposes the unavailable-identity reason", () => {
+  it("REPO_TRENDS_SUBSET_UNAVAILABLE_REASON is a non-empty string", () => {
+    expect(typeof REPO_TRENDS_SUBSET_UNAVAILABLE_REASON).toBe("string");
+    expect(REPO_TRENDS_SUBSET_UNAVAILABLE_REASON.length).toBeGreaterThan(0);
+  });
+
+  it("computing trends with {kind:'unavailable', reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON} suppresses the subset on a repo-shaped run", () => {
+    const cohort: RepoRunCohort = {
+      results: [
+        gradedResult({ student: "repo-a" }),
+        gradedResult({ student: "repo-b" }),
+        gradedResult({ student: "repo-c" }),
+      ],
+      folder: "f",
+      courseId: "c",
+      courseName: "",
+    };
+    const entry = repoRunTrendsEntry(cohort, "c") as GradingRunEntry;
+    const report = computeClassTrends(entry, { kind: "unavailable", reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON });
+    expect(report.areas.every((a) => a.missedSubset === null)).toBe(true);
+    expect(report.instructorAttribution).toEqual([]);
+    // knownIdentifiers is UNAFFECTED by identity (N13b Wave 1) - it must
+    // still collect the run's own identifiers even under "unavailable".
+    expect(report.knownIdentifiers).toContain("repo-a");
   });
 });
 

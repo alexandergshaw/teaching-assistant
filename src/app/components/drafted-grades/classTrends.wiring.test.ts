@@ -25,11 +25,13 @@ const TAB_PATH = join(process.cwd(), "src/app/components/DraftedGradesTab.tsx");
 const PANEL_PATH = join(process.cwd(), "src/app/components/drafted-grades/ClassTrendsPanel.tsx");
 const CLASS_TRENDS_PATH = join(process.cwd(), "src/lib/grade/class-trends.ts");
 const ROUTE_PATH = join(process.cwd(), "src/app/api/class-trends-insight/route.ts");
+const STUDENT_LIST_PATH = join(process.cwd(), "src/app/components/drafted-grades/ClassTrendsStudentListPanel.tsx");
 
 const tabSource = readFileSync(TAB_PATH, "utf8");
 const panelSource = readFileSync(PANEL_PATH, "utf8");
 const classTrendsSource = readFileSync(CLASS_TRENDS_PATH, "utf8");
 const routeSource = readFileSync(ROUTE_PATH, "utf8");
+const studentListSource = readFileSync(STUDENT_LIST_PATH, "utf8");
 
 /** Source with line/block comments stripped, so a name mentioned only in
  * prose (e.g. this very file's own header, or a doc comment) is never
@@ -40,6 +42,7 @@ function stripComments(text: string): string {
 
 const strippedTab = stripComments(tabSource);
 const strippedPanel = stripComments(panelSource);
+const strippedStudentList = stripComments(studentListSource);
 
 describe("DraftedGradesTab mounts ClassTrendsPanel (reachability, not merely rendering)", () => {
   it("imports ClassTrendsPanel from the drafted-grades folder", () => {
@@ -161,5 +164,152 @@ describe("the surface actually reaches layer A and layer B's real exports (the s
 
   it("the class-trends-insight route file exists and declares a POST handler", () => {
     expect(routeSource).toMatch(/export async function POST\(/);
+  });
+});
+
+// N13b Wave 2 (docs/n13b-wave2-test-notes.md section 4, Group C - argued, not
+// executed by the test-author; run for real here).
+
+describe("W2-14: ClassTrendsPanel mounts ClassTrendsStudentListPanel and passes instructorAttribution; the .student ban STAYS", () => {
+  it("imports ClassTrendsStudentListPanel from the drafted-grades folder", () => {
+    expect(strippedPanel).toMatch(/import\s+ClassTrendsStudentListPanel\s+from/);
+  });
+
+  it("renders <ClassTrendsStudentListPanel>", () => {
+    expect(strippedPanel).toMatch(/<ClassTrendsStudentListPanel\b/);
+  });
+
+  it("the mount's opening tag carries instructorAttribution=", () => {
+    const idx = strippedPanel.indexOf("<ClassTrendsStudentListPanel");
+    expect(idx, "mount not found").toBeGreaterThan(-1);
+    const tagEnd = strippedPanel.indexOf(">", idx);
+    expect(tagEnd).toBeGreaterThan(idx);
+    const tag = strippedPanel.slice(idx, tagEnd + 1);
+    expect(tag).toMatch(/instructorAttribution=/);
+  });
+
+  it("the .student ban still holds - names enter the leaf via instructorAttribution, never the panel via .student", () => {
+    expect(strippedPanel).not.toMatch(/\.student\b/);
+  });
+});
+
+describe("W2-15: the new leaf is reachable and reads the attribution CONTENT", () => {
+  it("references its instructorAttribution prop", () => {
+    expect(strippedStudentList).toMatch(/instructorAttribution\b/);
+  });
+
+  it("references displayName - the field it must show", () => {
+    expect(strippedStudentList).toMatch(/displayName\b/);
+  });
+
+  it("iterates with .map(", () => {
+    expect(strippedStudentList).toMatch(/\.map\(/);
+  });
+});
+
+describe("W2-18(b): the new leaf's Copy control is labeled distinctly from the class draft's own", () => {
+  it('contains the exact label "Copy student list"', () => {
+    expect(strippedStudentList).toContain("Copy student list");
+  });
+});
+
+describe("W2-19: the three-way empty-state branch", () => {
+  it("(i) PRIMARY: the leaf's stripped source contains an emptiness test on its attribution prop", () => {
+    expect(strippedStudentList).toMatch(
+      /instructorAttribution\b[\s\S]{0,60}\.length|\.length\s*===\s*0|\.length\s*>\s*0/
+    );
+  });
+
+  it("(iii) the leaf DOES contain 'Copy student list' and a .map( somewhere (state 3 renders them)", () => {
+    expect(strippedStudentList).toContain("Copy student list");
+    expect(strippedStudentList).toMatch(/\.map\(/);
+  });
+
+  it("STATE 1: the panel's areas-empty consequent does not contain the leaf mount (only ONE empty message shows)", () => {
+    const emptyTestIdx = strippedPanel.indexOf("report.areas.length === 0");
+    expect(emptyTestIdx, "areas-empty test not found").toBeGreaterThan(-1);
+    const questionIdx = strippedPanel.indexOf("?", emptyTestIdx);
+    expect(questionIdx).toBeGreaterThan(-1);
+    const colonIdx = strippedPanel.indexOf(":", questionIdx);
+    expect(colonIdx).toBeGreaterThan(-1);
+    const emptyConsequent = strippedPanel.slice(questionIdx, colonIdx);
+    expect(emptyConsequent).not.toContain("ClassTrendsStudentListPanel");
+  });
+
+  it("sabotage control (state 2/3): if the leaf rendered its heading + button unconditionally (no emptiness branch at all), the (i) anchor above would no longer match", () => {
+    // Documents the discriminating mutation without actually mutating
+    // source: an unconditional-render leaf source (no length test at all)
+    // would fail the (i) regex above. Sanity-checked against a literal
+    // fixture string standing in for that mutant.
+    const mutantSource = `
+      export default function ClassTrendsStudentListPanel({ instructorAttribution }) {
+        return (<div><button>Copy student list</button>{instructorAttribution.map((a) => <li key={a.area}>{a.displayArea}</li>)}</div>);
+      }
+    `;
+    expect(mutantSource).not.toMatch(/instructorAttribution\b[\s\S]{0,60}\.length|\.length\s*===\s*0|\.length\s*>\s*0/);
+  });
+
+  it("sabotage control (state 1): if the leaf mount moved into the panel's areas-empty arm, the empty-consequent slice above would contain it", () => {
+    const mutantPanelSlice = "report.areas.length === 0 ? (<ClassTrendsStudentListPanel instructorAttribution={report.instructorAttribution} />) : (<ul />)";
+    const questionIdx = mutantPanelSlice.indexOf("?");
+    const colonIdx = mutantPanelSlice.indexOf(":", questionIdx);
+    const emptyConsequent = mutantPanelSlice.slice(questionIdx, colonIdx);
+    expect(emptyConsequent).toContain("ClassTrendsStudentListPanel");
+  });
+});
+
+// Verify fix: under identity {kind:"unavailable"}, the repo surface must not
+// fall into the leaf's genuine-emptiness State 2 message ("nothing to contact
+// anyone about yet") - that would be a false reassurance, since the subset
+// was never computed. A fourth state must surface identity.reason instead.
+describe("blocker fix: the unavailable identity surfaces its reason instead of State 2's false-empty message", () => {
+  it("ClassTrendsPanel passes identity.reason to the leaf as unavailableReason under identity.kind === \"unavailable\"", () => {
+    const idx = strippedPanel.indexOf("<ClassTrendsStudentListPanel");
+    expect(idx, "mount not found").toBeGreaterThan(-1);
+    const tagEnd = strippedPanel.indexOf("/>", idx);
+    expect(tagEnd).toBeGreaterThan(idx);
+    const tag = strippedPanel.slice(idx, tagEnd + 2);
+    expect(tag).toMatch(/unavailableReason=\{[^}]*identity\.kind\s*===\s*["']unavailable["'][^}]*identity\.reason[^}]*\}/);
+  });
+
+  it("the leaf has a branch keyed on unavailableReason that renders it, appearing before the State-2 length check", () => {
+    const reasonIdx = strippedStudentList.indexOf("unavailableReason");
+    // First occurrence is the destructured prop; find the first conditional
+    // branch that reads it as a truthiness/emptiness test.
+    const branchIdx = strippedStudentList.search(/if\s*\(\s*unavailableReason\s*\)/);
+    expect(reasonIdx, "unavailableReason prop not referenced").toBeGreaterThan(-1);
+    expect(branchIdx, "no `if (unavailableReason)` guard branch found").toBeGreaterThan(-1);
+
+    const state2Idx = strippedStudentList.indexOf("instructorAttribution.length === 0");
+    expect(state2Idx, "State-2 emptiness check not found").toBeGreaterThan(-1);
+    expect(branchIdx, "unavailableReason branch must be checked before the State-2 emptiness branch").toBeLessThan(state2Idx);
+
+    // The unavailableReason branch itself must actually render the value,
+    // not just test it: {unavailableReason} must appear between the guard
+    // and the State-2 check (i.e. inside the guarded return, not state 2/3).
+    const renderIdx = strippedStudentList.indexOf("{unavailableReason}", branchIdx);
+    expect(renderIdx, "{unavailableReason} is never rendered").toBeGreaterThan(-1);
+    expect(renderIdx).toBeLessThan(state2Idx);
+  });
+
+  it("the unavailableReason branch's message does not assert a count occurred or nothing was found (never contains the State-2 sentence)", () => {
+    const branchIdx = strippedStudentList.search(/if\s*\(\s*unavailableReason\s*\)/);
+    expect(branchIdx).toBeGreaterThan(-1);
+    const state2Idx = strippedStudentList.indexOf("instructorAttribution.length === 0");
+    const branchBlock = strippedStudentList.slice(branchIdx, state2Idx);
+    expect(branchBlock).not.toContain("nothing to contact anyone about yet");
+  });
+
+  it("sabotage control: removing the unavailableReason guard (leaving only the State-2 check) makes the guard-order assertion fail", () => {
+    const mutantSource = `
+      export default function ClassTrendsStudentListPanel({ instructorAttribution, unavailableReason }) {
+        if (instructorAttribution.length === 0) {
+          return (<span>No area yet has three or more students who missed points - nothing to contact anyone about yet.</span>);
+        }
+        return (<div>{unavailableReason}</div>);
+      }
+    `;
+    const branchIdx = mutantSource.search(/if\s*\(\s*unavailableReason\s*\)/);
+    expect(branchIdx, "mutant has no unavailableReason guard, as expected").toBe(-1);
   });
 });

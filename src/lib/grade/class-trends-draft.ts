@@ -1,4 +1,4 @@
-import { containsForbiddenCompletenessPhrase } from "./class-trends";
+import { containsForbiddenCompletenessPhrase, isSubsetTrend } from "./class-trends";
 import type { AreaTrend, ClassTrendsReport } from "./class-trends";
 import type { ClassTrendsInsightObservation } from "./class-trends-insight";
 
@@ -62,7 +62,7 @@ export type ClassTrendsDraftResult =
  * this back to a `>=` comparison against some other bound - the opening
  * line's denominator is `report.totalResults`, and any weaker comparison
  * reopens the gap this rule closes. */
-function areaFullyCovered(area: AreaTrend, report: ClassTrendsReport): boolean {
+function areaFullyCovered(area: AreaTrend, report: Omit<ClassTrendsReport, "instructorAttribution">): boolean {
   return area.resultsWithArea === report.totalResults;
 }
 
@@ -86,6 +86,25 @@ function renderCountedClause(area: AreaTrend): string | null {
     default:
       return null;
   }
+}
+
+/** N13b Wave 2 (AC-6/AC-7): the ONLY function in this module allowed to turn
+ * an AreaTrend's `missedSubset` into draft text - and, structurally, the only
+ * one that can: `missedSubset` carries no student identity at all (numbers
+ * only), so there is no name for this function to read even if it tried.
+ * States its OWN denominator (`missedSubset.denominator`), never
+ * `report.totalResults` - the two can legitimately differ (AC-7), and
+ * restating the wrong one would pair a student-basis numerator with a
+ * submission-basis denominator. Deliberately NOT filtered through
+ * `areaFullyCovered` (the opposite gate from the high/low clauses above,
+ * AC-6): a subset can be real and worth surfacing even when fewer than every
+ * graded result carries the area. */
+function renderSubsetClause(area: AreaTrend): string | null {
+  if (!isSubsetTrend(area) || area.missedSubset === null) {
+    return null;
+  }
+  const { studentCount, denominator } = area.missedSubset;
+  return `Worth a closer look: ${area.displayArea} - ${studentCount} of ${denominator} students missed points on this area.`;
 }
 
 /** BEST-EFFORT, NOT A CLOSURE. A short, non-exhaustive phrase list catching
@@ -129,8 +148,19 @@ function renderInferredClause(observation: ClassTrendsInsightObservation): strin
   return `One pattern I noticed (my own reading, not a count): ${observation.concept} - ${observation.reading}`;
 }
 
+/** N13b Wave 2 (ORCHESTRATOR RULING 2026-09-29, promoting R-T2/AC-8 part (b)
+ * into a requirement): `composeClassTrendsDraft`'s first parameter is
+ * `ClassTrendsReport` with `instructorAttribution` OMITTED, so a read of that
+ * field anywhere in this module - the class-addressed render domain - is a
+ * COMPILE ERROR, not merely a discipline this module happens to follow. The
+ * subset clause this module renders is computed from `AreaTrend.missedSubset`
+ * (numbers only, see `renderSubsetClause`), so nothing this module needs ever
+ * lived on the omitted field. The sole non-test caller
+ * (ClassTrendsDraftPanel.tsx) passes a full `ClassTrendsReport`, which is
+ * assignable to this narrower view by structural subtyping - no caller change
+ * required. */
 export function composeClassTrendsDraft(
-  report: ClassTrendsReport,
+  report: Omit<ClassTrendsReport, "instructorAttribution">,
   observations: readonly ClassTrendsInsightObservation[],
   assignmentName: string
 ): ClassTrendsDraftResult {
@@ -181,11 +211,26 @@ export function composeClassTrendsDraft(
         !carriesKnownIdentifier(clause, knownIdentifiers)
     );
 
+  // N13b Wave 2 (AC-6): deliberately NOT filtered through areaFullyCovered -
+  // the subset can be real and worth surfacing even under partial coverage.
+  // Passed through the SAME phrase/identifier filters as every other clause,
+  // even though renderSubsetClause never reads a name - defense in depth, and
+  // consistent treatment for every clause this module emits.
+  const subsetClauses = report.areas
+    .filter((area: AreaTrend) => isSubsetTrend(area))
+    .map(renderSubsetClause)
+    .filter(
+      (clause): clause is string =>
+        clause !== null &&
+        !containsForbiddenCompletenessPhrase(clause) &&
+        !carriesKnownIdentifier(clause, knownIdentifiers)
+    );
+
   const inferredClauses = observations
     .map(renderInferredClause)
     .filter((clause): clause is string => clause !== null && !carriesKnownIdentifier(clause, knownIdentifiers));
 
-  const bodyLines = [...countedClauses, ...inferredClauses];
+  const bodyLines = [...countedClauses, ...subsetClauses, ...inferredClauses];
 
   // No area cleared the coverage bar, no direction was "high"/"low", and no
   // inferred observation survived: there is nothing to draft. See

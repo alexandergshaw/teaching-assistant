@@ -204,33 +204,39 @@ describe("canary 2b - a synthetic depth-2 fixture, proving the walk recurses", (
   });
 });
 
-describe("canary 3 - the real check: layer C's own seven files reach nothing forbidden", () => {
+describe("canary 3 - the real check: layer C's own eight files reach nothing forbidden", () => {
+  const roots = [
+    join(SRC, "lib/grade/class-trends-draft.ts"),
+    join(SRC, "app/components/drafted-grades/classTrendsDraftState.ts"),
+    join(SRC, "app/components/drafted-grades/ClassTrendsDraftPanel.tsx"),
+    join(SRC, "app/components/drafted-grades/ClassTrendsPanel.tsx"),
+    // A16-1 (docs/a16-scope.md section 4.2, "Both:" bullet): the
+    // adapter's output is built in render and handed straight to the
+    // panel, never written anywhere - it must never reach a
+    // posting/persisting capability either.
+    join(SRC, "app/components/grading-results/classTrendsEntry.ts"),
+    // A16-3 (docs/a16-plan.md 3.4, 5.5): the SAME reasoning applies to
+    // the recording surface's own run-cohort leaf - its output is also
+    // built in render and handed straight to the panel, never posted or
+    // persisted anywhere.
+    join(SRC, "app/components/grading-recording/classTrendsRunCohort.ts"),
+    // A16 wave 3 (docs/a16-wave3-scope.md section 7.1): the SAME
+    // reasoning applies to Repo Grades' own run-cohort leaf - built in
+    // render, handed straight to the panel, never posted or persisted.
+    join(SRC, "app/components/repo-grades/classTrendsFolderEntry.ts"),
+    // N13b Wave 2 (W2-16, AC-10/G5): the EIGHTH root - the new
+    // instructor-only named-list leaf. Names are the exact thing AC-8 exists
+    // to keep out of anything postable, so this leaf must never reach a
+    // posting or model capability either.
+    join(SRC, "app/components/drafted-grades/ClassTrendsStudentListPanel.tsx"),
+  ];
+
   it(
     "zero violations rooted at class-trends-draft.ts, classTrendsDraftState.ts, " +
       "ClassTrendsDraftPanel.tsx, ClassTrendsPanel.tsx, classTrendsEntry.ts, classTrendsRunCohort.ts, " +
-      "and classTrendsFolderEntry.ts",
+      "classTrendsFolderEntry.ts, and ClassTrendsStudentListPanel.tsx",
     { timeout: 30000 },
     () => {
-      const roots = [
-        join(SRC, "lib/grade/class-trends-draft.ts"),
-        join(SRC, "app/components/drafted-grades/classTrendsDraftState.ts"),
-        join(SRC, "app/components/drafted-grades/ClassTrendsDraftPanel.tsx"),
-        join(SRC, "app/components/drafted-grades/ClassTrendsPanel.tsx"),
-        // A16-1 (docs/a16-scope.md section 4.2, "Both:" bullet): the
-        // adapter's output is built in render and handed straight to the
-        // panel, never written anywhere - it must never reach a
-        // posting/persisting capability either.
-        join(SRC, "app/components/grading-results/classTrendsEntry.ts"),
-        // A16-3 (docs/a16-plan.md 3.4, 5.5): the SAME reasoning applies to
-        // the recording surface's own run-cohort leaf - its output is also
-        // built in render and handed straight to the panel, never posted or
-        // persisted anywhere.
-        join(SRC, "app/components/grading-recording/classTrendsRunCohort.ts"),
-        // A16 wave 3 (docs/a16-wave3-scope.md section 7.1): the SAME
-        // reasoning applies to Repo Grades' own run-cohort leaf - built in
-        // render, handed straight to the panel, never posted or persisted.
-        join(SRC, "app/components/repo-grades/classTrendsFolderEntry.ts"),
-      ];
       const violations = walkForForbiddenImports(roots);
       expect(
         violations,
@@ -239,4 +245,12 @@ describe("canary 3 - the real check: layer C's own seven files reach nothing for
       ).toEqual([]);
     }
   );
+
+  it("W2-16: the new leaf is an EXPLICIT member of roots and exists on disk (a leaf added to the feature but not to roots would ship uncovered)", () => {
+    expect(roots.map(toPosix)).toContain(
+      "src/app/components/drafted-grades/ClassTrendsStudentListPanel.tsx"
+    );
+    const theLeaf = join(SRC, "app/components/drafted-grades/ClassTrendsStudentListPanel.tsx");
+    expect(statSync(theLeaf).isFile()).toBe(true);
+  });
 });

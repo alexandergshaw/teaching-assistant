@@ -79,6 +79,7 @@ import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // directory rather than importing the recording surface's own cohort.
 import ClassTrendsPanel from "../drafted-grades/ClassTrendsPanel";
 import { repoRunTrendsLabel } from "./classTrendsFolderEntry";
+import { REPO_TRENDS_SUBSET_UNAVAILABLE_REASON } from "./classTrendsFolderEntry";
 import { useRepoGradesRubricSource } from "./useRepoGradesRubricSource";
 import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
 import gridStyles from "./repo-grades.module.css";
@@ -853,7 +854,11 @@ export default function RepoGradesTab() {
       {trendsEntry && (
         <div>
           <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
-          <ClassTrendsPanel entry={trendsEntry} defaultExpanded />
+          <ClassTrendsPanel
+            entry={trendsEntry}
+            defaultExpanded
+            identity={{ kind: "unavailable", reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON }}
+          />
         </div>
       )}
 

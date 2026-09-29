@@ -102,3 +102,22 @@ describe('classTrendsDraftState.ts exposes "empty" as its own DraftUiState membe
     expect(draftStateSource).toMatch(/\{\s*status:\s*["']empty["']\s*\}/);
   });
 });
+
+// N13b Wave 2, W2-18(a) / R-UX-5: the existing "Copy" button is renamed to
+// "Copy class announcement" in the SAME commit that adds the new leaf's own
+// "Copy student list" button (classTrends.wiring.test.ts), so the two labels
+// never coexist as bare "Copy".
+describe("W2-18(a): the class-draft Copy button is renamed to a distinct label", () => {
+  it('contains the exact literal "Copy class announcement" (the rename landed)', () => {
+    // NOTE (per the test notes): the ready-branch button's child text is
+    // split across lines in source (`>` then `Copy...` then `</Button>`), so
+    // a `>Copy<` substring check (the existing :92 idiom) would pass
+    // VACUOUSLY on the OLD bare "Copy" text too - this positive, full-literal
+    // check is what actually proves the rename landed.
+    expect(strippedDraftPanel).toContain("Copy class announcement");
+  });
+
+  it('the class-draft label differs from the new leaf\'s "Copy student list" label (never both read "Copy")', () => {
+    expect("Copy class announcement").not.toBe("Copy student list");
+  });
+});

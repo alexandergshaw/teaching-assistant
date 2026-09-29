@@ -114,6 +114,33 @@ export function parseScoreValue(rawScore: string): ParsedScore {
 const HIGH_PERCENT_THRESHOLD = 70;
 const LOW_PERCENT_THRESHOLD = 60;
 
+// N13b Wave 2 (option X): the subset-count + instructor-named-list feature.
+// Identity per graded result is supplied by the caller through this seam, so
+// layer A's counting logic is written once and reused by every surface:
+// - "per-result" (the DEFAULT; every Canvas-family surface): one graded
+//   result IS one distinct student (the platform invariant AC-1 states). No
+//   caller change is required - computeClassTrends(entry) already gets this.
+// - "resolved" (repo family, a future roster-identity channel): keyOf maps a
+//   result to a roster identity; two results sharing one key collapse to one
+//   distinct student.
+// - "unavailable" (repo family, today): no reachable identity exists on this
+//   surface (see the architect pass, section 5) - the subset is SUPPRESSED
+//   (missedSubset stays null, instructorAttribution stays []) rather than
+//   silently counting distinct repo labels as distinct students, which would
+//   violate AC-1/AC-7. knownIdentifiers (N13b Wave 1) is UNAFFECTED by this
+//   value - it is collected from `results` directly, never gated on identity.
+export type SubsetIdentity =
+  | { kind: "per-result" }
+  | {
+      kind: "resolved";
+      keyOf: (result: GradedResult, index: number) => { key: string; displayName: string } | null;
+    }
+  | { kind: "unavailable"; reason: string };
+
+/** The absolute distinct-student count (never a fraction of class size) at
+ * which an area's subset is flagged for instructor follow-up (AC-2). */
+export const SUBSET_MIN_STUDENTS = 3;
+
 export type AreaTrendDirection =
   | "high"
   | "low"
@@ -150,6 +177,32 @@ export interface AreaTrend {
   /** One sentence, coverage-qualified, with no forbidden completeness
    * phrase and no student name. */
   summary: string;
+  /** N13b Wave 2: NUMBERS ONLY - the distinct-student subset that missed any
+   * points on this area (AC-1/AC-3/AC-4/AC-5), counted over the SAME
+   * identity population as `denominator` (AC-7). `null` when
+   * `SubsetIdentity.kind === "unavailable"` (the subset cannot be counted
+   * without silently miscounting - see `SubsetIdentity`'s doc comment) - NEVER
+   * read by the class-addressed draft composer as a name channel; it carries
+   * no student identity at all. */
+  missedSubset: { studentCount: number; denominator: number; unknownExcludedCount: number } | null;
+}
+
+/** N13b Wave 2: the NAMED per-area list an instructor-only leaf reads.
+ * `students` is exactly the set `missedSubset.studentCount` counted for this
+ * area (same members, same cardinality - AC-9), never a superset such as the
+ * denominator's population. */
+export interface AreaAttribution {
+  /** Normalized area key, matches AreaTrend.area. */
+  area: string;
+  displayArea: string;
+  students: { displayName: string; deductionLabel: string }[];
+}
+
+/** True when an area's distinct-student missed-subset count clears the
+ * absolute floor (AC-2) - the ONLY place `>= SUBSET_MIN_STUDENTS` is
+ * evaluated, so callers never re-derive the threshold. */
+export function isSubsetTrend(area: AreaTrend): boolean {
+  return area.missedSubset != null && area.missedSubset.studentCount >= SUBSET_MIN_STUDENTS;
 }
 
 export interface ClassTrendsReport {
@@ -179,6 +232,13 @@ export interface ClassTrendsReport {
    * class-addressed output - doing so would make this field a leak channel
    * rather than the guard against one. */
   knownIdentifiers: readonly string[];
+  /** N13b Wave 2: the NAMED per-area subset list (AC-9), populated only for
+   * areas where `isSubsetTrend` holds and only when the run's identity is not
+   * `unavailable`. Read ONLY by the instructor-facing leaf
+   * (ClassTrendsStudentListPanel) - the class-addressed draft composer's
+   * input type omits this field entirely (see class-trends-draft.ts), so a
+   * name read there is a compile error, not merely a discipline. */
+  instructorAttribution: AreaAttribution[];
 }
 
 /** Extracts the owner/label segment from a "owner/repo" style string (the
@@ -275,6 +335,47 @@ function buildAreaSummary(trend: Omit<AreaTrend, "summary">): string {
 interface AreaAccumulator {
   displayArea: string;
   rawScores: string[];
+  /** N13b Wave 2: this area's raw score per DISTINCT identity key (see
+   * `SubsetIdentity`) - never per result. Two results sharing one key (the
+   * `resolved` identity) collapse to one entry here, which is the whole point
+   * of the seam: the LAST result processed for a given key "wins" its score
+   * for this area, an arbitrary but deterministic tie-break no test depends
+   * on (only distinctness of the COUNT is a frozen oracle). Left empty when
+   * `identity.kind === "unavailable"` - never populated, never read. */
+  subsetByKey: Map<string, { rawScore: string; displayName: string }>;
+}
+
+/** N13b Wave 2: resolves one graded result's distinct-student identity for
+ * the subset count, per `SubsetIdentity`'s three kinds. Returns null when no
+ * identity is available for this result (either the whole run's identity is
+ * `unavailable`, or a `resolved` keyOf declined to place this result). */
+function identityKeyFor(
+  result: GradedResult,
+  index: number,
+  identity: SubsetIdentity
+): { key: string; displayName: string } | null {
+  if (identity.kind === "unavailable") {
+    return null;
+  }
+  if (identity.kind === "resolved") {
+    return identity.keyOf(result, index);
+  }
+  // "per-result" (the default): one graded result IS one distinct student
+  // (AC-1, the Canvas platform invariant). Keyed by userId when present so a
+  // future resolved-identity surface can still be compared 1:1 against this
+  // default; falls back to the result's own index, never to `.student` (a
+  // free-text label, not a stable identity - INFO-3).
+  const key = result.userId != null ? `u:${result.userId}` : `i:${index}`;
+  return { key, displayName: result.student };
+}
+
+/** N13b Wave 2: describes one distinct student's deduction size for the
+ * instructor-facing list (AC-5 - a trivial deduction still counts and reads
+ * as trivial, never inflated into a struggle). Never read by the
+ * class-addressed draft; this string exists only for the instructor leaf. */
+function describeDeduction(percent: number): string {
+  const deduction = 100 - percent;
+  return deduction <= 5 ? "a trivial deduction" : `${Math.round(deduction)}% off`;
 }
 
 /**
@@ -286,7 +387,10 @@ interface AreaAccumulator {
  * network, no storage, no model call (requirement 8). No floor is applied
  * here (requirement 6) - that belongs to a later, student-facing layer.
  */
-export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
+export function computeClassTrends(
+  entry: GradingRunEntry,
+  identity: SubsetIdentity = { kind: "per-result" }
+): ClassTrendsReport {
   // N13a section 7 / N13b: this module's cohort is "the graded results in
   // hand", stated in this file's own header above - a not-attempted or
   // grading-failed row is not a graded submission, and counting it here
@@ -309,7 +413,11 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
 
   const areaMap = new Map<string, AreaAccumulator>();
 
-  for (const result of results) {
+  results.forEach((result, index) => {
+    // N13b Wave 2: resolved once per result, never per area - a result's
+    // identity does not change across the areas it carries.
+    const identityInfo = identityKeyFor(result, index, identity);
+
     // Dedupe within one result: a single result should never contribute
     // twice to one area's coverage count just because its rubricAreas
     // array happened to list the same area under two spellings that
@@ -327,14 +435,26 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
         accumulator = {
           displayArea: rubricArea.area.trim() || normalized,
           rawScores: [],
+          subsetByKey: new Map(),
         };
         areaMap.set(normalized, accumulator);
       }
       accumulator.rawScores.push(rubricArea.score);
+      if (identityInfo) {
+        accumulator.subsetByKey.set(identityInfo.key, {
+          rawScore: rubricArea.score,
+          displayName: identityInfo.displayName,
+        });
+      }
     }
-  }
+  });
 
   const areas: AreaTrend[] = [];
+  // N13b Wave 2: area -> this area's instructor-facing student list, only for
+  // areas whose subset clears SUBSET_MIN_STUDENTS (populated below, read back
+  // after `areas` is sorted so the two lists agree on order).
+  const attributionByArea = new Map<string, { displayName: string; deductionLabel: string }[]>();
+
   for (const [area, accumulator] of areaMap) {
     const percentValues: number[] = [];
     const rawValues: number[] = [];
@@ -354,6 +474,40 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
     const scoredCount = percentValues.length + rawValues.length;
     const direction = classifyDirection(percentValues, scoredCount);
 
+    // N13b Wave 2: the subset count, over the DISTINCT identity population
+    // collected above - never over `accumulator.rawScores` (per-result, not
+    // per-student). Suppressed entirely under `unavailable` (AC-1/AC-7).
+    let missedSubset: AreaTrend["missedSubset"] = null;
+    if (identity.kind !== "unavailable") {
+      let studentCount = 0;
+      let denominator = 0;
+      let unknownExcludedCount = 0;
+      const missedStudents: { displayName: string; deductionLabel: string }[] = [];
+
+      for (const { rawScore, displayName } of accumulator.subsetByKey.values()) {
+        const parsed = parseScoreValue(rawScore);
+        if (parsed.kind === "percent") {
+          denominator += 1;
+          if (parsed.value < 100) {
+            studentCount += 1;
+            missedStudents.push({ displayName, deductionLabel: describeDeduction(parsed.value) });
+          }
+        } else {
+          // raw-number or unscored: unknown scale, excluded from BOTH terms
+          // and disclosed (AC-4) - never counted as not-missed.
+          unknownExcludedCount += 1;
+        }
+      }
+
+      missedSubset = { studentCount, denominator, unknownExcludedCount };
+      if (studentCount >= SUBSET_MIN_STUDENTS) {
+        attributionByArea.set(
+          area,
+          missedStudents.slice().sort((a, b) => a.displayName.localeCompare(b.displayName))
+        );
+      }
+    }
+
     const withoutSummary: Omit<AreaTrend, "summary"> = {
       area,
       displayArea: accumulator.displayArea,
@@ -366,6 +520,7 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
       averagePercent: average(percentValues),
       averageRaw: average(rawValues),
       direction,
+      missedSubset,
     };
 
     areas.push({ ...withoutSummary, summary: buildAreaSummary(withoutSummary) });
@@ -373,6 +528,16 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
 
   // Deterministic, input-order-independent display order.
   areas.sort((a, b) => a.displayArea.localeCompare(b.displayArea));
+
+  // Built in the SAME sorted order as `areas`, so an instructor reading both
+  // lists sees matching order - never a second, independently-ordered pass.
+  const instructorAttribution: AreaAttribution[] = areas
+    .filter((trend) => attributionByArea.has(trend.area))
+    .map((trend) => ({
+      area: trend.area,
+      displayArea: trend.displayArea,
+      students: attributionByArea.get(trend.area)!,
+    }));
 
   return {
     totalResults,
@@ -382,5 +547,6 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
     struggles: areas.filter((trend) => trend.direction === "low"),
     summaryLines: areas.map((trend) => trend.summary),
     knownIdentifiers: collectKnownIdentifiers(results),
+    instructorAttribution,
   };
 }

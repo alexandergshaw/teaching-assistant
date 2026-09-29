@@ -7,10 +7,19 @@ import {
   computeClassTrends,
   containsForbiddenCompletenessPhrase,
   type AreaTrend,
+  type SubsetIdentity,
 } from "@/lib/grade/class-trends";
 import type { ClassTrendsInsightObservation } from "@/lib/grade/class-trends-insight";
 import type { GradingRunEntry } from "@/lib/grade";
 import ClassTrendsDraftPanel from "./ClassTrendsDraftPanel";
+import ClassTrendsStudentListPanel from "./ClassTrendsStudentListPanel";
+
+// N13b Wave 2: the default identity every Canvas-family surface gets for
+// free (one graded result IS one distinct student - AC-1). A module-level
+// constant, not an inline default-parameter object literal, so this value's
+// identity is stable across renders and never forces computeClassTrends to
+// re-run just because a new default object was allocated.
+const DEFAULT_SUBSET_IDENTITY: SubsetIdentity = { kind: "per-result" };
 
 // Backlog N12: the reachability surface for backlog N9/N10's class trends
 // feature. Two layers were shipped with no caller - src/lib/grade/class-trends.ts
@@ -76,6 +85,7 @@ function toValidObservation(candidate: unknown): ClassTrendsInsightObservation |
 export default function ClassTrendsPanel({
   entry,
   defaultExpanded = false,
+  identity = DEFAULT_SUBSET_IDENTITY,
 }: {
   entry: GradingRunEntry;
   /** A16-1 (docs/a16-scope.md section 4.6, "Half 2 item 1a: layer A disclosed
@@ -84,11 +94,16 @@ export default function ClassTrendsPanel({
    * while Drafted Grades' existing mount omits this prop and keeps its
    * original collapsed-by-default behaviour unchanged. */
   defaultExpanded?: boolean;
+  /** N13b Wave 2: the distinct-student identity basis for the subset count
+   * (AC-1/AC-2/AC-9). Every Canvas-family surface omits this and gets the
+   * default `{kind:"per-result"}` for free; the repo surface (option X) must
+   * pass `{kind:"unavailable", reason}` - see repo-grades/index.tsx. */
+  identity?: SubsetIdentity;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [insight, setInsight] = useState<InsightState>({ status: "idle" });
 
-  const report = useMemo(() => computeClassTrends(entry), [entry]);
+  const report = useMemo(() => computeClassTrends(entry, identity), [entry, identity]);
 
   const requestInsight = () => {
     setInsight({ status: "loading" });
@@ -143,15 +158,21 @@ export default function ClassTrendsPanel({
           {report.areas.length === 0 ? (
             <span className={styles.fieldHint}>No graded results to summarize yet.</span>
           ) : (
-            <ul
-              style={{ margin: 0, paddingLeft: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}
-            >
-              {report.areas.map((area: AreaTrend) => (
-                <li key={area.area} className={styles.draftFeedback} style={{ margin: 0 }}>
-                  {area.summary}
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul
+                style={{ margin: 0, paddingLeft: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}
+              >
+                {report.areas.map((area: AreaTrend) => (
+                  <li key={area.area} className={styles.draftFeedback} style={{ margin: 0 }}>
+                    {area.summary}
+                  </li>
+                ))}
+              </ul>
+              <ClassTrendsStudentListPanel
+                instructorAttribution={report.instructorAttribution}
+                unavailableReason={identity.kind === "unavailable" ? identity.reason : undefined}
+              />
+            </>
           )}
 
           <div style={{ marginTop: "var(--space-2)" }}>

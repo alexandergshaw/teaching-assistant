@@ -136,7 +136,7 @@ surfaces to go copy (checked: the only other `scrollIntoView` call sites in
 `courses/EditableRowList.tsx:83`, `courses/CoursesTable.tsx:243`,
 `course-planning/useSyllabusAdaptation.ts:85`, and
 `repo-detail/usePullsTab.ts:119` - none of them a grading surface, none of
-them a "run identity vs. arriving data" case; `grep -n "sectionRef|scrollIntoView"
+them a "run identity vs. arriving data" case (round-1 check Finding A: the root-scoped scrollIntoView search also hits `src/app/account/integrations/LmsCredentialSection.tsx:165`, a mount-time deep-link prefill scroll - not a grading surface and not this case, so the reuse conclusion is unaffected); `grep -n "sectionRef|scrollIntoView"
 src/ -r` run for this document, full output above). The fix this row asks
 for is not "add a scroll mechanism" - the mechanism, the ref, and the node
 already exist and are already shared correctly by the whole-run route. It is
@@ -169,7 +169,7 @@ not actually wired), or if it regresses to a bare `[displayRun]` (which
 `F25`'s existing test already forbids, because that reintroduces the
 scroll-jack-per-arrival behavior `M6`/`F25` were closing).
 
-**AC-2 (machine-checkable, source-text).** Object under comparison: the
+**AC-2 (PART machine-checkable, PART review-judgment - round-1 check Finding C).** The source-text half (F25's slice still contains runResetKey( and no bare [displayRun]) is machine-checkable; but the load-bearing half - that F25's INTENT was not silently gutted - is a fresh-checker JUDGMENT vitest cannot enforce (a stripped-down F25 still passes). Object under comparison: the
 existing `F25` test block itself
 (`autoGradeTransition.wiring.test.ts:461-474`). Instrument: reading the test
 after the fix lands. Direction of failure: RED if `F25`'s assertions were
@@ -202,8 +202,12 @@ only change is the incremental branch's dependency expression (one line,
 exposing a "first row has landed" signal from `useIncrementalGradingRun.ts`
 or deriving one from existing state such as `incrementalDone > 0` /
 `incrementalRun !== null`, both already returned from that hook per
-`useIncrementalGradingRun.ts:61-64` and `:305-308`) and the corresponding
-update to the `F25` test's assertions (AC-2). No new ref, no new mount, no
+`useIncrementalGradingRun.ts:61-64` and `:305-308`) and, ONLY IF the new
+dependency expression breaks F25's slice assertions, a corresponding F25 update
+(round-1 check Finding B: the recommended ADDITIVE form - appending a
+first-arrival term after `runResetKey(...)` - leaves F25 correctly GREEN with no
+edit, because the first `)` still closes runResetKey and no bare `[displayRun]`
+appears; F25 MUST NOT be loosened gratuitously). No new ref, no new mount, no
 new component, and no change to the whole-run branch's behavior are needed
 or in scope. The smallest fix is: latch the incremental branch's dependency
 to fire once when `displayRun` first becomes non-null after a run starts

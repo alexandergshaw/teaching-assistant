@@ -418,6 +418,13 @@ which reference `canvasWorkToEntry` (checked-safe for A8, section 3). While thos
 files are mid-flight, A8's WHOLE-TREE `npx tsc --noEmit` and `npm test` gates
 could false-RED on A42's uncommitted edits.
 
+CORRECTION (round-1 check INFO-1): the two files named just above are
+MISATTRIBUTED - A42's actual committed write set (28fcc63f) is 6 scanner test
+files + the L13 probe + docs/css-orphans.md, and neither named file references
+canvasWorkToEntry outside a comment. The constraint is nonetheless SATISFIED:
+A42 is already committed (28fcc63f) and the tree is clean, so A8's whole-tree
+gates run against a post-A42 tree and the false-RED hazard cannot occur.
+
 CONSTRAINT: dispatch A8's implementer so that BOTH of A8's whole-tree gates
 (steps 1 and 4 of each wave) run against a tree where A42 has ALREADY committed.
 Concretely: A8 Wave 1 starts after A42's commit lands. This is a dispatch-ordering

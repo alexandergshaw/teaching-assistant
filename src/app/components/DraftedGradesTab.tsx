@@ -25,6 +25,7 @@ import SubmissionCodePanel from "./drafted-grades/SubmissionCodePanel";
 import AssignmentChecklistPanel from "./drafted-grades/AssignmentChecklistPanel";
 import RepoGradingLogPanel from "./drafted-grades/RepoGradingLogPanel";
 import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";
+import { hasTrendableResults } from "./grading-results/classTrendsEntry";
 import { buildAssignmentChecklistSections, applyDerivedChecklist } from "@/lib/grading-draft-checklist";
 import {
   buildDraftSections,
@@ -652,7 +653,9 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                           onChecklistDerived={(items) => void handleChecklistDerived(draft, runIdx, items)}
                                         />
                                       )}
-                                      <ClassTrendsPanel entry={entry} />
+                                      {hasTrendableResults(entry) && (
+                                        <ClassTrendsPanel entry={entry} />
+                                      )}
                                     </div>
                                   </td>
                                 </tr>

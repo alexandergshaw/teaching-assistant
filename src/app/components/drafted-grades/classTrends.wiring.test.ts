@@ -67,6 +67,30 @@ describe("DraftedGradesTab mounts ClassTrendsPanel (reachability, not merely ren
     const tag = strippedTab.slice(trendsIdx, tagEnd + 1);
     expect(tag).toMatch(/entry=\{entry\}/);
   });
+
+  // Consistency with the other five grading-subtab surfaces (run, chat,
+  // repos, recording, snapshots): each gates the ClassTrendsPanel mount on
+  // hasTrendableResults so an all-ungraded run never renders a clickable
+  // "Trends (0)" button (classTrendsEntry.ts's own docstring names exactly
+  // this failure). Drafts shipped WITHOUT the gate; this pins that it now
+  // has it. Direction of failure: removing the gate drops the guarded form
+  // and this test goes RED.
+  it("gates the mount on hasTrendableResults(entry), like the other five surfaces", () => {
+    expect(
+      strippedTab,
+      "hasTrendableResults not imported into DraftedGradesTab"
+    ).toMatch(
+      /import\s*\{[^}]*hasTrendableResults[^}]*\}\s*from\s*["']\.\/grading-results\/classTrendsEntry["']/
+    );
+    // The nearest hasTrendableResults(entry) call must precede the mount,
+    // with no other <ClassTrendsPanel opening tag between the gate and it.
+    const mountIdx = strippedTab.indexOf("<ClassTrendsPanel");
+    expect(mountIdx, "<ClassTrendsPanel mount not found").toBeGreaterThan(-1);
+    const gateIdx = strippedTab.lastIndexOf("hasTrendableResults(entry)", mountIdx);
+    expect(gateIdx, "no hasTrendableResults(entry) gate before the mount").toBeGreaterThan(-1);
+    const between = strippedTab.slice(gateIdx, mountIdx);
+    expect(between).not.toMatch(/<ClassTrendsPanel/);
+  });
 });
 
 describe("ClassTrendsPanel reaches both layers of the class trends feature", () => {

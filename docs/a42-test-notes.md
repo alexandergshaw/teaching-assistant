@@ -652,3 +652,11 @@ leave `{}` - for those two the swap changes only the corruption behaviour.
 the comment text and presence of the Button, both of which the tokenizer
 satisfies.
 ```
+
+## Run discipline (round-1 check INFO-1)
+
+Every multi-file instrument in these notes - the L13 probe plus each converted
+scanner's own *.test.ts, and any verification that runs 2+ paths - MUST use
+`npm run test:paths -- <p1> <p2> ...`, NEVER a raw multi-path `vitest run a b`
+(which silently drops an unmatched path and exits 0). This is carried from scope
+AC3; restated here because the implementer runs their instruments from this file.

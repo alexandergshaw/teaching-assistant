@@ -11,6 +11,27 @@ import type { ItemScan, Issue, AccessibleItemType } from "@/lib/accessibility/ty
 
 const TABLE = "accessibility_scans";
 
+// item_title is caller-controlled (route.ts reads it from body.files[].title,
+// a client-supplied Canvas file name, and casts it with `as` rather than
+// validating it) and is written through the service-role client with no RLS
+// backstop. Bound it here, in the one seam every upsertScans caller shares,
+// rather than in route.ts, so a future caller can't reintroduce the gap.
+// 200 matches this table's own precedent: the `issues` column already caps
+// each issue's raw HTML snippet at 200 chars (rules-custom.ts), and the same
+// bound is used elsewhere in the codebase for LLM/user-supplied text
+// (canvas-inbox.ts, canvas-accessibility.ts). A real item title (a Canvas
+// assignment/page/quiz/file title) is always far shorter than that.
+const ITEM_TITLE_MAX_LENGTH = 200;
+
+/** Bounds and type-checks caller-supplied title text before it reaches a row.
+ * Non-string input (possible despite ItemScan.title's string type, since
+ * route.ts builds these objects from an unvalidated JSON body cast with
+ * `as`) coerces to "" rather than throwing, matching upsertScans' own
+ * best-effort/never-throws contract. */
+function boundedItemTitle(title: unknown): string {
+  return typeof title === "string" ? title.slice(0, ITEM_TITLE_MAX_LENGTH) : "";
+}
+
 interface ScanRow {
   item_type: string;
   item_id: string;
@@ -67,7 +88,7 @@ export async function upsertScans(
       course_id: courseId,
       item_type: it.type,
       item_id: it.id,
-      item_title: it.title,
+      item_title: boundedItemTitle(it.title),
       fingerprint: it.fingerprint,
       error_count: it.errorCount,
       warning_count: it.warningCount,

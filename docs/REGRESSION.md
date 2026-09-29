@@ -45110,3 +45110,283 @@ Instructions/Rubric fields stay editable after beginSession (idempotent), so a
 mid-session rubric edit would grade later rows against the ORIGINAL rubric silently.
 The follow-up disables those fields once the header is set and wires a New-session
 control to the built-but-unwired reset().
+
+## 441. Area baseline - the class-trends-draft counting, composing and no-model rules, before N13b
+
+Written BEFORE hand-off for backlog N13b (`docs/n13b-architecture.md`,
+`docs/n13b-security.md`), per `docs/DEV_LOOP.md`'s Baseline paragraph. This
+entry is an oracle, not a requirement: it records what
+`src/lib/grade/class-trends.ts`, `src/lib/grade/class-trends-draft.ts`, and
+`ClassTrendsPanel.tsx` DO today, so N13b's end-of-item regression pass has a
+frozen point of comparison. The class-trends area is already extensively
+covered by entries 421-423, 433 and 439; this entry does not repeat what they
+already establish correctly. It exists because four specific claims the N13b
+brief asked to be pinned are either not yet cited anywhere (the empty-area
+skip, `classifyDirection`'s literal thresholds, requirement 4's refusal to
+guess a scale) or are now WRONG in the entries that used to cover them (423b's
+three-item `FORBIDDEN_PATH_PREFIXES` list, 433's "no gate" claim about the
+`DraftedGradesTab` mount) - see the supersession notes below.
+
+**Read at `207a1a64`** (`git rev-parse --short HEAD`). `git status --short`
+returns exactly `?? docs/n13b-security.md` - one untracked N13b design doc,
+unrelated to anything measured below. Per `docs/loop/this-repo.md`, vitest
+here is `environment: "node"` and collects only `src/**/*.test.ts`
+(`vitest.config.ts`), so NO component in this area is rendered by any test;
+every claim about `ClassTrendsPanel.tsx`'s or `ClassTrendsDraftPanel.tsx`'s
+actual on-screen output, click handling, or the real clipboard is a READING
+claim, labelled as such below, never a run one.
+
+### The coverage check
+
+`grep -a` is mandatory on this file (it carries a raw NUL byte per entry 433;
+plain `grep` can false-clean). Measured at 45112 lines
+(`wc -l docs/REGRESSION.md`) before this entry was appended:
+
+```
+grep -an "class-trends" docs/REGRESSION.md | wc -l   # 25
+grep -an "class trends" docs/REGRESSION.md | wc -l   # 2 (both are the literal
+                                                      # string inside entry
+                                                      # 433's own grep example,
+                                                      # not a separate mention)
+```
+
+### 441a - what `computeClassTrends` counts, measured against the current file
+
+`src/lib/grade/class-trends.ts` is 355 lines (`wc -l`). `computeClassTrends`
+(`:259-355`) takes one `GradingRunEntry` and returns a `ClassTrendsReport`:
+`totalResults`, an `ungraded` count split by kind, one `AreaTrend` per
+normalized rubric area, `strengths`/`struggles` (areas classified `"high"` /
+`"low"`), and `summaryLines`.
+
+- **Ungraded rows are excluded from the count.** `class-trends.ts:272` calls
+  `gradedResults(entry.run.results)` and uses only that filtered array as
+  `results`/`totalResults`. `gradedResults` (`src/lib/grade/types.ts:204-206`)
+  is `results.filter((r): r is GradedResult => r.ungraded === undefined)` -
+  a row with an `ungraded` field (not-attempted or grading-failed) never
+  reaches this module's denominator or any area's `resultsWithArea`. The
+  header comment at `class-trends.ts:260-271` states this is deliberate and
+  not optional, and names the failure mode it prevents: a rubric with no
+  parsed criteria leaves an ungraded row's `rubricAreas` at `[]`, so
+  including it would raise `totalResults` without raising any area's
+  coverage and silently suppress every counted clause.
+- **An area whose name normalizes to empty is skipped.** `class-trends.ts:289-292`:
+  ```
+  const normalized = normalizeAreaName(rubricArea.area);
+  if (normalized === "" || seenInThisResult.has(normalized)) {
+    continue;
+  }
+  ```
+  `normalizeAreaName` is imported from `./prompts` (`class-trends.ts:1`) and
+  is currently defined at `src/lib/grade/prompts.ts:48-54` - lower-cases,
+  strips a trailing `"(N pts)"`/`"(N%)"` fragment, collapses non-alphanumerics
+  to spaces, and trims. A rubric area name that is all punctuation/whitespace
+  (or all point-suffix) normalizes to `""` and is dropped from the area map
+  entirely - it contributes to no `AreaTrend`, not even an `"insufficient-data"`
+  one. (Entry 421c cites this same function at `prompts.ts:19`; that line now
+  holds unrelated content - `prompts.ts` grew a security-mitigation constant
+  above it. `:48-54` is the current, re-measured location.)
+- **`classifyDirection`'s "consistently high/low" rule is literal, per-value,
+  not an average.** Thresholds: `HIGH_PERCENT_THRESHOLD = 70` and
+  `LOW_PERCENT_THRESHOLD = 60` at `class-trends.ts:114-115`. The function
+  (`:184-205`) classifies only from `percentValues` (scores that stated their
+  own 0-100 scale - see the requirement-4 bullet below on `raw-number`):
+  `"high"` iff
+  `percentValues.every((value) => value >= 70)` (`:196`), `"low"` iff
+  `percentValues.every((value) => value <= 60)` (`:200`), else `"mixed"`. The
+  comment at `:194-195` states the reading directly: "'Consistently' is read
+  literally: every percent-scale score in this area lands on the same side of
+  the line, not merely the average." One score on the wrong side of the line
+  is enough to force `"mixed"` even if every other score in that area is
+  extreme.
+- **Requirement 4's refusal to invent a denominator, at its current lines.**
+  Two separate refusals, both named "requirement 4" in the source:
+  - `parseScoreValue` (`:77-106`) never coerces an unparseable score to 0 and
+    never drops it - it returns `{ kind: "unscored" }` for blank, "N/A",
+    prose, or a range like "8-10" (comment at `:73-75`, `:103-105`).
+  - `classifyDirection` (`:188-192`) returns `"no-scale"` when
+    `percentValues.length === 0` but `scoredCount > 0` - i.e. every parsed
+    score was a bare number with no stated scale (`"raw-number"`, e.g. `"8"`
+    with no way to know if it's out of 10 or 100). The comment: "Requirement 4
+    forbids inventing a denominator to force a high/low call, so this module
+    declines to classify rather than guess one." A run whose rubric scores are
+    all bare numbers therefore never produces a `"high"`/`"low"` area, no
+    matter how extreme the numbers look.
+
+Measured this session via the wrapper (`docs/loop/traps-spec.md`'s
+"test:paths for multi-path runs" rule): `npm run test:paths --
+src/lib/grade/class-trends.test.ts src/lib/grade/class-trends-draft.test.ts
+src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
+src/app/components/drafted-grades/classTrends.wiring.test.ts
+src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts` reports,
+per argument:
+```
+COVERED src/lib/grade/class-trends.test.ts files=1 passed=23
+COVERED src/lib/grade/class-trends-draft.test.ts files=1 passed=16
+COVERED src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts files=1 passed=5
+COVERED src/app/components/drafted-grades/classTrends.wiring.test.ts files=1 passed=13
+COVERED src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts files=1 passed=9
+```
+`5 passed (5)` test files, `66 passed (66)` tests total, matching the sum
+above. Pass condition for this oracle going forward: the object under
+comparison is these five files' pass/fail status against this same wrapper
+invocation; the instrument is `npm run test:paths` per the quoted per-argument
+`COVERED ... passed=N` lines; the direction of failure is any of the five
+argument lines dropping below its recorded `passed=N` count, or the file
+disappearing from the `COVERED` lines entirely (which would mean the wrapper
+stopped matching that path - see `docs/loop/traps-spec.md` on a raw multi-path
+`vitest` command silently dropping unmatched paths and exiting 0).
+
+### 441b - `composeClassTrendsDraft` / the draft renderer, measured against the current file
+
+`src/lib/grade/class-trends-draft.ts` is 178 lines (`wc -l`), matching entry
+439's figure.
+
+- **The `areaFullyCovered` gate.** `class-trends-draft.ts:65-67`:
+  ```
+  function areaFullyCovered(area: AreaTrend, report: ClassTrendsReport): boolean {
+    return area.resultsWithArea === report.totalResults;
+  }
+  ```
+  Used at `:144` as the filter before any area can produce a counted clause:
+  `report.areas.filter((area) => areaFullyCovered(area, report))`. This is
+  `===`, not `>=` - a clause renders only when EVERY graded result carried
+  that area, matching entry 439's re-statement that this was never
+  floor-dependent and still holds after the floor's removal (N13a).
+- **The class draft is name-free today.** `grep -rn "\.student\b"` across
+  `src/lib/grade/class-trends-draft.ts`,
+  `src/app/components/drafted-grades/ClassTrendsPanel.tsx`,
+  `src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx`, and
+  `src/app/components/drafted-grades/classTrendsDraftState.ts` returns no
+  matches (re-run this session; same result entry 423g recorded). Neither
+  `renderCountedClause` (`:80-89`, reads only `area.displayArea` and
+  `area.direction`) nor `renderInferredClause` (`:111-116`, reads only
+  `observation.concept`/`.reading`) has a code path to a student identifier -
+  their parameter types (`AreaTrend`, `ClassTrendsInsightObservation`) carry
+  none.
+- **It renders through the hardened `markdownToHtml`.**
+  `ClassTrendsDraftPanel.tsx:13` imports `markdownToHtml` from
+  `@/lib/markdown`; it is called at `:55` (building the rich-text clipboard
+  flavour passed to `writeClipboardText`) and at `:93`
+  (`dangerouslySetInnerHTML={{ __html: markdownToHtml(state.markdown) }}` for
+  the on-screen preview - a READING claim that this preview shows escaped
+  HTML, since nothing here renders the component). `markdownToHtml`
+  (`src/lib/markdown.ts:199`) escapes text through `escapeHtml` inside
+  `renderInlineMd` (`:182-183`) before any tag is emitted, and gates every
+  link `href` through `ALLOWED_LINK_HREF` (`:180`, `https:`/`mailto:`/
+  `attachment:`/`#`/site-relative only) after normalizing away
+  tab/CR/LF (`:174-177`) - the same function every other markdown-to-Canvas-HTML
+  path in this codebase uses, not a separate implementation for this panel.
+
+### 441c - `ClassTrendsPanel.tsx`, measured against the current file
+
+`src/app/components/drafted-grades/ClassTrendsPanel.tsx` is 212 lines
+(`wc -l`; up from entry 423h's 201-line reading, which predates the A16 waves'
+`defaultExpanded` prop and doc-comment growth).
+
+- **Exactly one rendered "Copy" button in this panel's whole mounted tree.**
+  `grep -n "Copy" src/app/components/drafted-grades/ClassTrendsPanel.tsx
+  src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx` returns zero
+  hits in `ClassTrendsPanel.tsx` and four in `ClassTrendsDraftPanel.tsx`
+  (`:29` the copy-error string, `:50` the `handleCopy` function name, `:98`
+  its call site, `:101` the JSX text node itself). Only `:101` is a rendered
+  button label - it is the sole text child of the `<Button ...>` element
+  opened at `:95-100` and closed at `:102`, with no other `>...<` text
+  anywhere in either file matching a button label containing "Copy".
+  `ClassTrendsPanel.tsx` itself has no `Copy` button of its own; it
+  unconditionally mounts `<ClassTrendsDraftPanel ... />` at `:203-207` whenever
+  `expanded` is true, so the one Copy button is reachable exactly once per
+  expanded panel, never duplicated across layer A/B's own buttons ("Trends
+  (N)"/"Hide trends", "Get AI reading (optional)"/"Try again"/"Ask again" -
+  none of which read "Copy").
+- **The "Trends (N)" button label, and what N is.** `ClassTrendsPanel.tsx:135-137`:
+  ```
+  <Button size="small" variant="text" onClick={() => setExpanded((v) => !v)} style={{ minWidth: 0 }}>
+    {expanded ? "Hide trends" : `Trends (${report.areas.length})`}
+  </Button>
+  ```
+  N is `report.areas.length` - the number of distinct normalized rubric
+  areas computeClassTrends found, NOT `report.totalResults` (graded-result
+  count) and not the layer B observation count. A run with 5 graded results
+  under one rubric area shows "Trends (1)"; a run with 1 graded result under
+  5 rubric areas shows "Trends (5)".
+- **The empty-area branch.** `ClassTrendsPanel.tsx:143-145`:
+  `report.areas.length === 0 ? <span>No graded results to summarize
+  yet.</span> : <ul>...</ul>` - when there are no areas at all (as opposed to
+  areas present but all `"mixed"`/`"no-scale"`), the counted-trends block
+  renders this one sentence instead of an empty list.
+- **`.student` is never read here either.** Same `grep -rn "\.student\b"`
+  command as 441b, run across this file too: no matches.
+- **`computeClassTrends` is called unconditionally on render, not deferred to
+  expansion.** `ClassTrendsPanel.tsx:91`: `const report = useMemo(() =>
+  computeClassTrends(entry), [entry]);` - this line executes on every render
+  of the component regardless of `expanded`'s value; `expanded` only gates
+  which JSX referencing `report` is returned (`:138-209`), not whether
+  `report` itself is computed. A collapsed panel still runs
+  `computeClassTrends` on every render where `entry` is a new reference.
+
+### 441d - the no-model invariant (AC-10 / entry 423), and where entry 423b is now stale
+
+The not-postable guard's own file,
+`src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts`, is
+242 lines today (`wc -l`; entry 423h recorded 216). Its
+`FORBIDDEN_PATH_PREFIXES` (`:58`) is currently:
+```
+const FORBIDDEN_PATH_PREFIXES = ["app/actions", "lib/canvas", "lib/lms-generation", "lib/llm", "lib/gemini"];
+```
+five entries, not the three entry 423b quoted (`["app/actions", "lib/canvas",
+"lib/lms-generation"]`). `git log -p --follow -- src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts`
+shows the two-item addition (`"lib/llm"`, `"lib/gemini"`) landed in commit
+`f04dd78e` ("feat(loop): every feature answers what a chat with an LLM cannot
+do") - after entry 423 was written, and this addition is not recorded
+anywhere else in this file (`grep -an "lib/llm\|lib/gemini" docs/REGRESSION.md`
+before this entry: 0 hits). **Entry 423b's three-item quote is stale and
+should not be used to reason about this guard's current reach; this entry's
+five-item quote is the current one.** The guard's mechanism (a transitive,
+path-prefix-based import ban rooted at layer C's four files, not a name
+denylist) is unchanged and entry 423b/423c's description of HOW it works
+still holds - only the WHAT-does-it-ban list drifted.
+
+Re-run this session, `isForbiddenPath` (`:67-70`) still character-prefix
+matches (not segment matches) the resolved import target's path relative to
+`src/`, so `"lib/llm"` (no trailing slash) also catches a hypothetical
+`lib/llm-anything.ts`, the same no-trailing-slash mechanism entry 423b
+documented for the original three.
+
+**A second, smaller staleness found while opening the adjacent mount site.**
+Entry 433 (line ~44332-44338 of this file, written before A16) states the
+`DraftedGradesTab.tsx` mount of `ClassTrendsPanel` has "no `hasTrendableResults`
+gate visible at that call site." That is no longer true:
+`grep -n "ClassTrendsPanel\|hasTrendableResults" src/app/components/DraftedGradesTab.tsx`
+shows `:656 {hasTrendableResults(entry) && (` immediately guarding `:657
+<ClassTrendsPanel entry={entry} />`. `git log --oneline -1 -- src/app/components/DraftedGradesTab.tsx`
+attributes this to commit `4e46fadb` ("fix(trends): gate drafts'
+ClassTrendsPanel on hasTrendableResults, like the other five surfaces"),
+already present in this session's own git log and not yet recorded in this
+file under its own entry. This is outside this entry's assigned scope
+(`ClassTrendsPanel.tsx`'s own internals, not its callers), so it is flagged
+here rather than fully baselined; the residual register below names it.
+
+### 441e - what this baseline does not cover, and why
+
+- The real, on-screen rendering of `ClassTrendsPanel.tsx` and
+  `ClassTrendsDraftPanel.tsx` - button layout, focus order, ARIA - is not
+  measurable here at all (`docs/loop/this-repo.md` section 6: no component is
+  rendered by any test in this repo). Every claim above about JSX shape is a
+  source-text reading, not a run.
+- The real system clipboard behind `writeClipboardText` is not exercised by
+  anything in this repo; `handleCopy`'s success/error branches
+  (`ClassTrendsDraftPanel.tsx:50-59`) are asserted only by source-text tests.
+- The layer B route (`src/app/api/class-trends-insight/route.ts`) and
+  `class-trends-insight.ts`'s parsing are outside this entry's assigned scope
+  (computeClassTrends / composeClassTrendsDraft / ClassTrendsPanel.tsx /
+  the not-postable guard) and were not re-measured here; entries 421g and 422
+  already cover layer B's reachability and are not superseded by anything
+  found in this pass.
+
+### Residual register
+
+| Item | Owner | Instrument | Step that measures it |
+|---|---|---|---|
+| No REGRESSION entry records commit `4e46fadb` (gating the `DraftedGradesTab` mount on `hasTrendableResults`), so entry 433 is read-stale on that one point | class-trends area owner (next seat touching `DraftedGradesTab.tsx` or doing an A16-family regression pass) | `grep -n "hasTrendableResults" src/app/components/DraftedGradesTab.tsx` plus `git log -1 -- src/app/components/DraftedGradesTab.tsx` | A dedicated one-paragraph REGRESSION addendum to entry 433, or its own numbered entry, before the next change to that mount site |
+| Whether the rich (`markdownToHtml`) clipboard flavour this panel writes pastes into Canvas's rich-text editor as bold/links rather than literal markup | owner (needs a real browser + Canvas) | manual paste test into a live Canvas rich-text field | Owner verification V2, already open before N13b per entry 423f - unresolved by this baseline, not newly introduced by it |
+| The real rendered layout/focus/ARIA of `ClassTrendsPanel.tsx` and `ClassTrendsDraftPanel.tsx` | owner (no component renders under this repo's vitest) | manual click-through of an expanded trends block on a graded run | Owner walk-through, same unresolved gap entry 422e and 423f already named |

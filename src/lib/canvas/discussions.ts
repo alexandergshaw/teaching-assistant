@@ -14,6 +14,9 @@ export interface DiscussionPost {
   isReply: boolean;
   /** The user id of the entry this one replied to (null for top-level posts). */
   parentUserId: number | null;
+  /** Display name of the entry this one replied to, when resolvable (undefined for
+   *  top-level posts, or when the parent's participant name is unknown). */
+  parentName?: string;
 }
 
 /** A student's structured activity in one discussion thread. */
@@ -64,6 +67,7 @@ export function extractDiscussionActivity(data: CanvasViewResponse): {
             createdAt: entry.created_at ?? null,
             isReply,
             parentUserId: isReply ? parentUserId : null,
+            parentName: isReply && parentUserId !== null ? names.get(parentUserId) : undefined,
           };
           const activity = byUser.get(entry.user_id) ?? { initialPosts: [], replies: [] };
           if (isReply) activity.replies.push(post);
@@ -112,6 +116,12 @@ export interface CanvasStudentWork {
   files: Array<{ name: string; base64: string; mimeType: string }>;
   /** Posts/replies for discussions; 1 for an assignment submission. */
   contributionCount: number;
+  /** Number of top-level initial posts, set only by fetchDiscussion (shape-only;
+   *  no runtime reader - see docs/a8-architecture.md section 5). */
+  initialPostCount?: number;
+  /** Number of replies to classmates, set only by fetchDiscussion (shape-only;
+   *  no runtime reader - see docs/a8-architecture.md section 5). */
+  replyCount?: number;
   /** Structured thread activity, present only for the discussion source. */
   discussion?: DiscussionActivity;
   /** URL the student submitted (a Canvas "online_url" assignment submission,
@@ -150,6 +160,8 @@ export async function fetchDiscussion(
       text,
       files: [],
       contributionCount: activity.initialPosts.length + activity.replies.length,
+      initialPostCount: activity.initialPosts.length,
+      replyCount: activity.replies.length,
       discussion: activity,
     });
   }

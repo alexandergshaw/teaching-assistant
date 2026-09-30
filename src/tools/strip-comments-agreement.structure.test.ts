@@ -324,7 +324,10 @@ function supportsBlockComments(fn: StripFn): boolean {
 // literal, since a hand-maintained one already drifted stale once ("68" at
 // the string-awareness test, corrected by A42). All entries here are still
 // string-unaware (see below) and 2 of them never strip block comments (see
-// BLOCK_COMMENT_UNSUPPORTED).
+// BLOCK_COMMENT_UNSUPPORTED). Also includes useGradingRowGrade.wiring.test.ts
+// (A38 Wave 1), the same safe idiom as its sibling
+// GradingRecordingPanel.wiring.test.ts - added here because A38's own
+// enumeration assertion requires every mentioning file to be classified.
 const SAFE_FILES: readonly string[] = [
   "src/app/actions/action-guard-coverage-github-cohort.test.ts",
   "src/app/actions/carry-module-pattern.test.ts",
@@ -360,6 +363,7 @@ const SAFE_FILES: readonly string[] = [
   "src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts",
   "src/app/components/grading-recording/copy-feedback.test.ts",
   "src/app/components/grading-recording/grading-rows.test.ts",
+  "src/app/components/grading-recording/useGradingRowGrade.wiring.test.ts",
   "src/app/components/grading-results/ungradedDisclosure.test.ts",
   "src/app/components/grading-results/ungradedRowLabel.test.ts",
   "src/app/components/knowledge/knowledgeBulkBar.wiring.test.ts",

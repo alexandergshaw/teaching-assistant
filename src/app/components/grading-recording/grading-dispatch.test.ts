@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { checkGradingReadiness, MISSING_RUBRIC_MESSAGE, NO_SUBMISSIONS_TO_GRADE_MESSAGE } from "./grading-dispatch";
+import {
+  checkGradingReadiness,
+  MISSING_RUBRIC_MESSAGE,
+  NO_SUBMISSIONS_TO_GRADE_MESSAGE,
+  buildSingleSubmission,
+  gradingRowGradeAction,
+} from "./grading-dispatch";
+import type { GradingRow } from "./grading-row";
+
+function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
+  return {
+    id: "grade-1",
+    studentName: "Maria Alvarez",
+    nameMatch: "no-roster",
+    rosterCandidates: [],
+    submissionText: "A submission about the reading.",
+    state: "pending",
+    totalScore: "",
+    strengths: "",
+    improvements: "",
+    overallComment: "",
+    error: "",
+    userEdited: false,
+    rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
+    ...overrides,
+  };
+}
 
 describe("checkGradingReadiness (item 5: rubric required before grading, not before capturing)", () => {
   it("refuses with NO_SUBMISSIONS_TO_GRADE_MESSAGE when the table is empty, rubric or not", () => {
@@ -24,5 +53,84 @@ describe("checkGradingReadiness (item 5: rubric required before grading, not bef
     // The refusal is about the missing rubric, not a claim that capturing
     // without one was itself invalid.
     expect(result.reason).toBe(MISSING_RUBRIC_MESSAGE);
+  });
+});
+
+// A38 wave 1 (docs/a38-acceptance-criteria.md AC-1 stronger form;
+// docs/a38-scope.md section 4.6 Unit 1): buildSingleSubmission's return
+// type IS a single submission object, never an array - "sends more than
+// one row" is unrepresentable at this function's own signature. This test
+// is the direct-call id proof AC-1's stronger form asks for; the
+// one-element-array-literal call site itself is pinned by
+// useGradingRowGrade.wiring.test.ts, by reading, since no hook is driven
+// here.
+describe("buildSingleSubmission (AC-1 Unit 1: the single-row submission builder)", () => {
+  it("returns exactly one submission object mirroring the row's own four fields - id, studentName, submissionText, submissionKind", () => {
+    const row = makeRow({
+      id: "row-7",
+      studentName: "Diego Chen",
+      submissionText: "The essay argues for causation.",
+      submissionKind: "reply",
+    });
+    const submission = buildSingleSubmission(row);
+    expect(submission).toEqual({
+      id: "row-7",
+      studentName: "Diego Chen",
+      submissionText: "The essay argues for causation.",
+      submissionKind: "reply",
+    });
+  });
+
+  it("the returned object is not an array - it has no `length` property at all", () => {
+    const submission = buildSingleSubmission(makeRow());
+    expect(Array.isArray(submission)).toBe(false);
+    expect((submission as unknown as { length?: unknown }).length).toBeUndefined();
+  });
+
+  it("carries the pressed row's id, not some other row's - proven with two distinct rows", () => {
+    const a = buildSingleSubmission(makeRow({ id: "a" }));
+    const b = buildSingleSubmission(makeRow({ id: "b" }));
+    expect(a.id).toBe("a");
+    expect(b.id).toBe("b");
+  });
+
+  it("does not read or leak any scored/feedback field - only the four submission fields cross this boundary", () => {
+    const row = makeRow({ totalScore: "9/10", strengths: "secret grader notes" });
+    const submission = buildSingleSubmission(row);
+    expect(Object.keys(submission).sort()).toEqual(["id", "studentName", "submissionKind", "submissionText"].sort());
+  });
+});
+
+// docs/a38-scope.md section 4.4's eligibility table: pending/failed/ready
+// are all offered; grading is not (this row is the one in flight).
+// P-6: `failed` MUST be eligible - it is where a bound-overflow row lands
+// (AC-5), and excluding it is exactly the defect this feature exists to fix.
+describe("gradingRowGradeAction (A38 wave 1, docs/a38-scope.md section 4.4's eligibility table)", () => {
+  it("pending is eligible, labelled Grade", () => {
+    expect(gradingRowGradeAction(makeRow({ state: "pending" }), true)).toEqual({ gradeable: true, label: "Grade" });
+  });
+
+  it("failed is eligible, labelled Re-grade - the bound-overflow remedy (P-6)", () => {
+    expect(gradingRowGradeAction(makeRow({ state: "failed" }), true)).toEqual({ gradeable: true, label: "Re-grade" });
+  });
+
+  it("ready is eligible, labelled Re-grade", () => {
+    expect(gradingRowGradeAction(makeRow({ state: "ready" }), true)).toEqual({ gradeable: true, label: "Re-grade" });
+  });
+
+  it("grading is never eligible - this row is the one already in flight", () => {
+    const result = gradingRowGradeAction(makeRow({ state: "grading" }), true);
+    expect(result.gradeable).toBe(false);
+    expect(result.label).toBe("Grading…");
+  });
+
+  it("no rubric present makes every non-grading state ineligible, regardless of row.state", () => {
+    expect(gradingRowGradeAction(makeRow({ state: "pending" }), false).gradeable).toBe(false);
+    expect(gradingRowGradeAction(makeRow({ state: "failed" }), false).gradeable).toBe(false);
+    expect(gradingRowGradeAction(makeRow({ state: "ready" }), false).gradeable).toBe(false);
+  });
+
+  it("a grading row reports ineligible even when a rubric is present - it is not the rubric that disables it", () => {
+    expect(gradingRowGradeAction(makeRow({ state: "grading" }), true).gradeable).toBe(false);
   });
 });

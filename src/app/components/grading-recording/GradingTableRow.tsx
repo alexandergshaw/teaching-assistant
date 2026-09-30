@@ -45,6 +45,10 @@ import {
 } from "./grading-row";
 import { submissionKindLabel } from "@/lib/grade/submission-kind";
 import { GRADING_TABLE_COLUMN_COUNT, type GradingFeedbackField } from "./grading-rows";
+// A38 wave 1 (docs/a38-scope.md section 4.4/4.6): the pure per-row grade
+// eligibility decision - see that file's own doc comment for why this is a
+// plain function rather than logic inlined here.
+import { gradingRowGradeAction } from "./grading-dispatch";
 // docs/recording-controls-ux-acceptance-criteria.md CC5: the one arm/confirm
 // component for every destructive or overwriting action.
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
@@ -94,6 +98,15 @@ export interface GradingTableRowProps {
   /** docs/a8r-scope.md (A8-R) section 3: an instructor confirming (or
    *  overriding) this row's kind. */
   onConfirmSubmissionKind: (id: string, kind: GradingRow["submissionKind"]) => void;
+  /** A38 wave 1 (docs/a38-scope.md section 4.4): grades exactly this one
+   *  row - GradingRecordingPanel.tsx's useGradingRowGrade().gradeRow. */
+  onGrade: (id: string) => void;
+  /** Whether a rubric is present - see GradingTable.tsx's own prop doc for
+   *  why this cannot be derived in the row itself. */
+  rubricPresent: boolean;
+  /** Another row is grading, or a bulk run is in progress - see
+   *  GradingTable.tsx's own prop doc. */
+  gradingLocked: boolean;
 }
 
 function GradingTableRowImpl({
@@ -104,8 +117,15 @@ function GradingTableRowImpl({
   onCopyError,
   registerRemoveRef,
   onConfirmSubmissionKind,
+  onGrade,
+  rubricPresent,
+  gradingLocked,
 }: GradingTableRowProps) {
   const matchBadge = NAME_MATCH_BADGE[row.nameMatch];
+  // A38 wave 1 (docs/a38-scope.md section 4.4): the eligibility decision is
+  // computed once per render from the row's own state - "this row is busy"
+  // is derived (row.state === "grading"), never a separate prop.
+  const gradeEligibility = gradingRowGradeAction(row, rubricPresent);
   // R3b: an unmatched/ambiguous name never blocks the feedback - it only
   // changes what the row SAYS. Candidates are shown, never auto-applied
   // (grading-row.ts's own doc comment on `rosterCandidates`) - the
@@ -170,6 +190,25 @@ function GradingTableRowImpl({
               DiscussionReplyRow.tsx's own `.ghActions .rowActions` wrapper -
               layered on top of styles.ghActions rather than replacing it. */}
           <div className={`${styles.ghActions} ${rowStyles.rowActions}`}>
+            {/* A38 wave 1 (docs/a38-scope.md section 4.4): the per-row grade
+                control - constructive action first, ahead of Remove/Mark
+                late (this cluster's own order). Not rendered at all when
+                there is no rubric (disabled reason 1) - the panel already
+                states that reason once, globally. No confirm step: an
+                edited row's scored fields are structurally untouchable by a
+                machine result (assessment-row.ts), so a mis-press cannot
+                destroy typed feedback. */}
+            {rubricPresent && (
+              <Button
+                size="small"
+                variant="text"
+                disabled={!gradeEligibility.gradeable || gradingLocked}
+                aria-label={`Grade ${row.studentName}'s submission`}
+                onClick={() => onGrade(row.id)}
+              >
+                {gradeEligibility.label}
+              </Button>
+            )}
             {/* CC5: a row with nothing hand-typed to lose removes on the first
                 click, same as today (AC19); a row the instructor has edited
                 gets the shared arm/confirm component instead of a bespoke

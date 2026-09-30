@@ -337,19 +337,43 @@ function catchBranchBody(strippedHandlerBody: string): string | null {
   return match ? match[1] : null;
 }
 
+// A38 wave 1 (docs/a38-scope.md section 4.5, round-2 Ruling 8): the FOURTH
+// non-success exit - the shared lock's refusal. `readinessRefusalBody`
+// above cannot find this one (its regex is anchored on `!readiness.ok`),
+// so this needs its own extractor, anchored on the lock acquire call.
+function lockRefusalBranchBody(strippedHandlerBody: string): string | null {
+  const match = /if \(!rowGrade\.lock\.acquire\(\)\) \{([\s\S]*?)\n(\s*)\}/.exec(strippedHandlerBody);
+  return match ? match[1] : null;
+}
+
 describe("branch-body helpers (canary)", () => {
-  it("find each of the three non-success branches on the real panel", () => {
+  it("find each of the four non-success branches on the real panel", () => {
     expect(readinessRefusalBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
+    expect(lockRefusalBranchBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
     expect(errorResultBranchBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
     expect(catchBranchBody(HANDLE_GRADE_ALL_BODY)).not.toBeNull();
   });
 });
 
-describe("GradingRecordingPanel.tsx clears the cohort in all three non-success branches (B1, closes P16)", () => {
+describe("GradingRecordingPanel.tsx clears the cohort in all four non-success branches (B1, closes P16; A38 wave 1 adds the fourth, the lock refusal)", () => {
   it("the readiness refusal (which returns BEFORE the run starts) clears lastRunCohort", () => {
     const body = readinessRefusalBody(HANDLE_GRADE_ALL_BODY);
     expect(body).not.toBeNull();
     expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+
+  it("A38: the lock-refusal exit clears lastRunCohort too - left unpinned, a refused click would leave the PREVIOUS run's trends on screen while doing nothing (A16-3 ruling 23's exact defect, for a new exit)", () => {
+    const body = lockRefusalBranchBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+
+  it("A38: the lock-refusal exit sits AFTER the readiness refusal - a refused readiness check never reaches the lock at all", () => {
+    const readinessIdx = HANDLE_GRADE_ALL_BODY.indexOf("if (!readiness.ok)");
+    const lockIdx = HANDLE_GRADE_ALL_BODY.indexOf("if (!rowGrade.lock.acquire())");
+    expect(readinessIdx).toBeGreaterThan(-1);
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(readinessIdx).toBeLessThan(lockIdx);
   });
 
   it("the \"error\" in result branch clears lastRunCohort", () => {
@@ -362,6 +386,12 @@ describe("GradingRecordingPanel.tsx clears the cohort in all three non-success b
     const body = catchBranchBody(HANDLE_GRADE_ALL_BODY);
     expect(body).not.toBeNull();
     expect(body).toMatch(/setLastRunCohort\(null\)/);
+  });
+});
+
+describe("GradingRecordingPanel.tsx releases the shared lock in handleGradeAll's finally block (A38 wave 1, AC-8)", () => {
+  it("finally releases rowGrade.lock - always runs, whichever branch returned", () => {
+    expect(HANDLE_GRADE_ALL_BODY).toMatch(/finally\s*\{[\s\S]*?rowGrade\.lock\.release\(\);/);
   });
 });
 

@@ -41,6 +41,7 @@ import {
   confirmSubmissionKind,
   isEligibleForBatchAccept,
   acceptSuggestedKinds,
+  setGradingRowState,
 } from "./grading-rows";
 import { GRADING_ROW_HAYSTACK, type GradingRow } from "./grading-row";
 import { filterRowsByQuery } from "../recording/discussion-table-view";
@@ -781,5 +782,37 @@ describe('A4d: GradingRecordingPanel is actually wired to rubric-memory.ts for S
     const stripped = stripComments(leafSource);
     expect(stripped).toMatch(/localStorage\.getItem\(storageKey\)/);
     expect(stripped).toMatch(/localStorage\.setItem\(storageKey,/);
+  });
+});
+
+describe("setGradingRowState (A38 wave 1, docs/a38-scope.md section 6.2 'B4's fix', AC-3's error-outcome entry point)", () => {
+  it("returns a new row with only `state` changed - every other field (scored fields, userEdited, rubricAreas) is preserved by spread", () => {
+    const row = makeRow({
+      state: "ready",
+      totalScore: "9",
+      strengths: "Clear argument.",
+      userEdited: true,
+      rubricAreas: [{ area: "Thesis", score: "9/10", comment: "Strong." }],
+    });
+    const next = setGradingRowState(row, "grading");
+    expect(next.state).toBe("grading");
+    expect(next.totalScore).toBe("9");
+    expect(next.strengths).toBe("Clear argument.");
+    expect(next.userEdited).toBe(true);
+    expect(next.rubricAreas).toEqual(row.rubricAreas);
+  });
+
+  it("restoring the PRIOR state after a failed dispatch never touches any other field", () => {
+    const row = makeRow({ state: "pending" });
+    const inFlight = setGradingRowState(row, "grading");
+    const restored = setGradingRowState(inFlight, "pending");
+    expect(restored).toEqual(row);
+  });
+
+  it("is a pure function - does not mutate its argument", () => {
+    const row = makeRow({ state: "pending" });
+    const frozen = Object.freeze({ ...row });
+    expect(() => setGradingRowState(frozen as GradingRow, "grading")).not.toThrow();
+    expect(frozen.state).toBe("pending");
   });
 });

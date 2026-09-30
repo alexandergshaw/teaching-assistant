@@ -192,6 +192,19 @@ Re-confirmed, not inherited:
 
 ### 2.3 THE THIRD CANDIDATE, found by measuring which blocks are unpinned
 
+> **STALE-PREMISE CORRECTION (2026-09-29, wave-plan delta pass).** The
+> capture-status block this section extracts (below, "inline at 879-931") is NO
+> LONGER inline: A39 wave 3a-ii already extracted it to
+> `src/app/components/grading-recording/GradingRecordingCaptureStatus.tsx` (117
+> lines, `PS> @(Get-Content ...).Count`), imported at `GradingRecordingPanel.tsx:129`
+> and mounted at `:901-912` (commit `ff42424e`). So the wave-0 target NAMED in
+> this section and in `docs/a38-wave-plan.md` section 3 is DISCHARGED-by-A39, and
+> re-extracting it would duplicate dead code. The corrected wave-0 target - the
+> capture-drain pipeline (`runExtraction` + drain effect) into a
+> `useGradingRecordingExtraction.ts` hook - is decided in
+> `docs/a38-wave-plan.md` section 3 (which this correction defers to); the block
+> table below is kept for its pin-mapping METHOD, not its now-stale line numbers.
+
 I enumerated every test that reads the panel as source text and mapped each
 one to the block it pins:
 

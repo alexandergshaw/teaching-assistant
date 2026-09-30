@@ -110,6 +110,19 @@ export interface GradingTableProps {
   onConfirmSubmissionKind: (id: string, kind: GradingRow["submissionKind"]) => void;
   /** CUE-2 (docs/a8r-scope.md section 6): the toolbar's batch action. */
   onAcceptSuggestedKinds: () => void;
+  /** A38 wave 1 (docs/a38-scope.md section 4.4): grades exactly the one
+   *  chosen row - forwarded straight to each row's own control. */
+  onGrade: (id: string) => void;
+  /** Whether a rubric is present - when false, no row renders a grade
+   *  control at all (disabled reason 1, section 4.4); the panel already
+   *  states the reason once, globally. */
+  rubricPresent: boolean;
+  /** Another row is grading, or a bulk run is in progress - disables every
+   *  row's grade control except the one actually in flight (which is
+   *  disabled by its own `row.state === "grading"` instead, so it can show
+   *  "Grading..."). Not a property of any one row (section 4.4's own
+   *  PROP SET table). */
+  gradingLocked: boolean;
 }
 
 export default function GradingTable({
@@ -126,6 +139,9 @@ export default function GradingTable({
   onCopyError,
   onConfirmSubmissionKind,
   onAcceptSuggestedKinds,
+  onGrade,
+  rubricPresent,
+  gradingLocked,
 }: GradingTableProps) {
   // "Clear table" confirm-arm - AC19/AC19a discipline (see the import
   // comment above and gradingClearTableSignature's own header): armed-for is
@@ -278,6 +294,9 @@ export default function GradingTable({
                   onCopyError={onCopyError}
                   registerRemoveRef={registerRemoveRef}
                   onConfirmSubmissionKind={onConfirmSubmissionKind}
+                  onGrade={onGrade}
+                  rubricPresent={rubricPresent}
+                  gradingLocked={gradingLocked}
                 />
               ))
             )}

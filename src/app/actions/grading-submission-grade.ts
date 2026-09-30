@@ -57,10 +57,17 @@
 // because its caller owns the whole result list) - each excess submission
 // still gets its own row back, via composeFailedGradingRow, naming the limit
 // and stating that it was not graded, so no row is left wedged in "grading"
-// forever. It does NOT tell the instructor to retry the row on its own: this
-// action's sole production caller (GradingRecordingPanel.tsx's
-// handleGradeAll) always rebuilds its submission list from the whole table,
-// so there is no control that grades a subset - see docs/backlog.yml A34.
+// forever. It does NOT tell the instructor to retry the row on its own in
+// THIS sentence - see docs/backlog.yml A34 for why that vocabulary was
+// deleted rather than made true. CORRECTED (A38 wave 1,
+// docs/a38-wave-plan.md section 1): this action now has a SECOND production
+// caller - useGradingRowGrade.ts's gradeRow (GradingRecordingPanel.tsx),
+// which sends exactly one submission (`[buildSingleSubmission(row)]`) - so
+// the remedy this comment used to say did not exist now does: an
+// instructor can re-press an overflow row's own per-row control, which is
+// always under this action's per-invocation bound (docs/a38-
+// acceptance-criteria.md AC-5). `handleGradeAll` still rebuilds its
+// submission list from the whole table, unchanged.
 
 import { requireOwner } from "@/lib/supabase/auth";
 import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -199,9 +206,13 @@ export async function gradeCapturedSubmissionsAction(
         ...composeFailedGradingRow(
           // A34: reuses A31's single-author vocabulary (types.ts) rather than
           // minting a second sentence for the same "stopped at the
-          // submission-count bound" state. Offers no action - this action's
-          // sole production caller always resubmits the whole table, so
-          // there is no control that grades this row on its own.
+          // submission-count bound" state. This sentence itself still
+          // offers no action (A31 Ruling 1: it may assert only what holds on
+          // every caller and every reachable state, and this string is
+          // shared with the bulk path, which has none). CORRECTED (A38
+          // wave 1): an action now DOES exist for this row - the per-row
+          // grade control (GradingTableRow.tsx), which this file's own
+          // header above now documents.
           `${UNGRADED_NOT_ATTEMPTED_MESSAGES["submission-count-bound"]} This run's limit was ${maxSubmissions} submissions.`
         ),
       });

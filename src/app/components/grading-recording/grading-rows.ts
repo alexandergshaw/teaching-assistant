@@ -20,7 +20,7 @@
 // features").
 
 import { compareNameKey, filterRowsByQuery } from "../recording/discussion-table-view";
-import { GRADING_ROW_HAYSTACK, type GradingRow } from "./grading-row";
+import { GRADING_ROW_HAYSTACK, type GradingRow, type GradingRowState } from "./grading-row";
 import {
   editAssessmentField,
   applyAssessmentResult,
@@ -175,6 +175,25 @@ export interface GradingResultInput extends AssessmentResultInput {
 export function applyGradingResultToRow(row: GradingRow, result: GradingResultInput): GradingRow {
   const applied = applyAssessmentResult(row, result);
   return { ...applied, rubricAreas: result.rubricAreas };
+}
+
+/**
+ * B4's fix (docs/a38-scope.md section 4.6 Unit 2/section 6.2) - a pure,
+ * state-only write, spreading every other field (including `gradeAttempts`,
+ * added in wave 2) unchanged. This is the single-row grade path's error-
+ * outcome entry point: on a failed dispatch the hook restores the row's
+ * PRIOR state with this function rather than leaving it stuck on
+ * "grading" - and because this is a plain spread, the wave-2 spend-cap
+ * counter it will carry survives the restore untouched (nothing here can
+ * refund it).
+ *
+ * Also the wave-1 DISPATCH write itself (`setGradingRowState(row,
+ * "grading")`, written before the grade action's await) - wave 2 upgrades
+ * that one call site to `beginGradeAttempt`, which composes this same
+ * state write with the attempt-count increment.
+ */
+export function setGradingRowState(row: GradingRow, state: GradingRowState): GradingRow {
+  return { ...row, state };
 }
 
 /** Merges a roster-match verdict (grading-roster-match.ts's

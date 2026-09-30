@@ -125,6 +125,11 @@ import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
 // leaf's own header.
 import GradingRecordingCaptureStatus from "./GradingRecordingCaptureStatus";
 import { checkGradingReadiness } from "./grading-dispatch";
+// A38 wave 1 (docs/a38-wave-plan.md section 4/section 6): the single-row
+// grade path's thin composing hook - holds the shared lock handleGradeAll
+// below also claims, and the pure units it composes. See that file's own
+// header for the full flow.
+import { useGradingRowGrade } from "./useGradingRowGrade";
 // A38 wave 0 (docs/a38-wave-plan.md section 3.1): the capture-drain pipeline
 // (runExtraction + its drain effect + the `extracting` state) moved out into
 // this hook - a pin-free, behaviour-preserving relocation. See that file's
@@ -536,6 +541,27 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const [gradeError, setGradeError] = useState<string | null>(null);
   const [gradingBusy, setGradingBusy] = useState(false);
 
+  // A38 wave 1 (docs/a38-wave-plan.md section 4/6): the single-row grade
+  // path. `rowGrade.lock` is the ONE shared instance handleGradeAll below
+  // also claims - per-row and bulk grading must never interleave (section
+  // 4.5, AC-8).
+  const rowGrade = useGradingRowGrade({
+    rawRows: gradingRows.rawRows,
+    rubricText,
+    knowledgeContext,
+    provider,
+    applyGradingResult: gradingRows.applyGradingResult,
+    markRowState: gradingRows.markRowState,
+  });
+
+  // A38 (docs/a38-wave-plan.md section 5, section 4.5): true while either a
+  // bulk run or any single row is grading - drives GradingTable's
+  // `gradingLocked` prop (every OTHER row's control disables) and the
+  // "Grade submissions" primary's own disabled state. The row actually in
+  // flight is not disabled via this - it derives its own busy state from
+  // `row.state === "grading"` (grading-dispatch.ts's gradingRowGradeAction).
+  const gradingLocked = gradingBusy || gradingRows.rawRows.some((r) => r.state === "grading");
+
   const handleGradeAll = useCallback(async () => {
     const readiness = checkGradingReadiness(rubricText, gradingRows.totalCount);
     if (!readiness.ok) {
@@ -547,6 +573,16 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       // A16-3 (docs/a16-plan.md 9.3, ruling 23): this refusal returns BEFORE
       // any run starts - without this, the trends panel would sit under a
       // fresh grading error while still reporting the PREVIOUS run's cohort.
+      setLastRunCohort(null);
+      return;
+    }
+    // A38 wave 1 (docs/a38-scope.md section 4.5, round-2 Ruling 8): the
+    // FOURTH non-success exit. acquire() is an atomic check-and-set that
+    // mutates nothing on refusal, and it is reached only AFTER the
+    // readiness refusal above has already returned - so a refused press
+    // never holds the lock, and this exit can never deadlock a later
+    // legitimate press.
+    if (!rowGrade.lock.acquire()) {
       setLastRunCohort(null);
       return;
     }
@@ -624,9 +660,11 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       ]);
       setLastRunCohort(null);
     } finally {
+      // A38 wave 1: release always runs, whichever branch returned.
+      rowGrade.lock.release();
       setGradingBusy(false);
     }
-  }, [rubricText, gradingRows, knowledgeContext, provider, selectedCourse, assessmentId]);
+  }, [rubricText, gradingRows, knowledgeContext, provider, selectedCourse, assessmentId, rowGrade.lock]);
 
   // docs/DEV_LOOP.md's downloadable-log rule: assembled fresh on every
   // render (cheap - a handful of array spreads over state that only grows on
@@ -718,7 +756,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           "added") now renders as a neutral `controls.notice` box rather than
           a bare `.fieldHint` line, matching module deck's own notice
           treatment. */}
-      {(droppedFramesTotal > 0 || frameEncodeNotice || gradeError || notices.length > 0) && (
+      {(droppedFramesTotal > 0 || frameEncodeNotice || gradeError || rowGrade.rowError || notices.length > 0) && (
         <div role="status" aria-live="polite" className={styles.field}>
           {droppedFramesTotal > 0 && (
             <p className={`${controls.notice} ${controls.noticeDanger}`}>
@@ -728,6 +766,12 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           )}
           {frameEncodeNotice && <p className={`${controls.notice} ${controls.noticeDanger}`}>{frameEncodeNotice}</p>}
           {gradeError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{gradeError}</p>}
+          {/* A38 wave 1: the single-row grade path's own refusal/error -
+              kept separate from `gradeError` (the bulk path's) so neither
+              clobbers the other, and surfaced through the SAME notice
+              region rather than a second live region (docs/a38-scope.md
+              section 4.5's "no new live region" rule). */}
+          {rowGrade.rowError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{rowGrade.rowError}</p>}
           {notices.map((n) => (
             <p key={n.id} className={isDangerNotice(n.kind) ? `${controls.notice} ${controls.noticeDanger}` : controls.notice}>
               {n.text}{" "}
@@ -810,7 +854,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           size="small"
           loading={gradingBusy}
           loadingPosition="start"
-          disabled={!canGrade}
+          disabled={!canGrade || gradingLocked}
           onClick={() => void handleGradeAll()}
         >
           {gradingBusy ? "Grading…" : "Grade submissions"}
@@ -872,6 +916,9 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onCopyError={handleCopyFeedbackError}
         onConfirmSubmissionKind={gradingRows.confirmSubmissionKind}
         onAcceptSuggestedKinds={gradingRows.acceptSuggestedKinds}
+        onGrade={(id) => void rowGrade.gradeRow(id)}
+        rubricPresent={canGrade}
+        gradingLocked={gradingLocked}
       />
 
       {rubricModalOpen && (

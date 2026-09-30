@@ -153,6 +153,7 @@ import {
   removeGradingRow,
   confirmSubmissionKind,
   acceptSuggestedKinds,
+  setGradingRowState,
   DEFAULT_GRADING_SORT,
   type GradingSort,
   type GradingFeedbackField,
@@ -165,6 +166,7 @@ import {
   countUnattributedGradingRows,
   type GradingRow,
   type GradingRowNameMatch,
+  type GradingRowState,
 } from "./grading-row";
 import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
 import { gradingRowCodec } from "./grading-row-serialization";
@@ -244,6 +246,14 @@ export interface UseGradingRowsReturn {
 
   removeRow: (id: string) => void;
   clearTable: () => void;
+
+  /** A38 wave 1 (docs/a38-scope.md section 6.2, "B4's fix"): the single-row
+   *  grade path's state-only write - `useGradingRowGrade.ts` calls this for
+   *  the pre-await "grading" dispatch write and for restoring a row's PRIOR
+   *  state on a failed/errored grade. A thin wrapper over grading-rows.ts's
+   *  own `setGradingRowState`, mirroring this file's other row mutators - a
+   *  no-op when `id` is not found. */
+  markRowState: (id: string, state: GradingRowState) => void;
 
   /** D23c: sets `id`'s `submissionTimeStatus` to "marked-late" and clears
    *  `submittedAt` (marked-late carries a verdict, never a timestamp - see
@@ -447,6 +457,21 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     [commitRows, rowsRef]
   );
 
+  // A38 wave 1: the single-row grade path's state-only write - see this
+  // file's own interface doc comment on `markRowState`. A no-op when `id`
+  // is not found, mirroring editField/applyRosterMatch/markSubmissionLate's
+  // own "row is gone" discipline above.
+  const markRowState = useCallback(
+    (id: string, state: GradingRowState) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return;
+      const next = raw.map((r, i) => (i === idx ? setGradingRowState(r, state) : r));
+      commitRows(next);
+    },
+    [commitRows, rowsRef]
+  );
+
   // docs/a8r-scope.md (A8-R) section 3: a no-op when `id` is not found,
   // mirroring markSubmissionLate/editField's own "row is gone" discipline.
   const confirmSubmissionKindCb = useCallback(
@@ -512,6 +537,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     applyRosterMatch,
     removeRow,
     clearTable,
+    markRowState,
     markSubmissionLate,
     confirmSubmissionKind: confirmSubmissionKindCb,
     acceptSuggestedKinds: acceptSuggestedKindsCb,

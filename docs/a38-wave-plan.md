@@ -40,17 +40,31 @@ Measured at HEAD, 2026-09-29.
    is disjoint from any concurrently-dispatched sibling item. Concurrency WITHIN
    A38 is impossible and idle sequencing is the correct, unavoidable cost.
 
-3. **The panel is at the ceiling and wave 0 must extract before wave 1 adds.**
-   Measured, both tools agreeing (no 42-line discrepancy on this file):
+3. **The panel is at the ceiling and wave 0 must extract before wave 1 adds -
+   but the scope's NAMED wave-0 target is already extracted, so wave 0 gets a
+   NEW target (this correction).** Measured, both tools agreeing (no 42-line
+   discrepancy on this file):
    ```
    wc -l src/app/components/grading-recording/GradingRecordingPanel.tsx        -> 977
    PS> @(Get-Content src/app/components/grading-recording/GradingRecordingPanel.tsx).Count -> 977
    grep -n "LIMIT" src/file-size-ceiling.structure.test.ts                     -> 41:const LIMIT = 1000;
    ```
    1000 is legal, 1001 is red (`docs/a38-scope.md:178-181`). Headroom is +23.
-   Wave 0 extracts `GradingCaptureStatus.tsx` (scope section 2.3) BEFORE any
-   feature line is added; wave 1's budget is set from the MEASURED post-extraction
-   count at the P-8 gate, never from the projection. See section 3.
+   Scope section 2.3 / this plan's original section 3 told wave 0 to extract the
+   capture-status block (`<video>`, timer/count/extracting status, live region,
+   stalled notice, readings-merged hint, `fmt()`) into a new
+   `GradingCaptureStatus.tsx`. **A39 wave 3a-ii ALREADY did exactly that** - it
+   lives at
+   `src/app/components/grading-recording/GradingRecordingCaptureStatus.tsx` (117
+   lines, `PS> @(Get-Content ...).Count`), imported at `GradingRecordingPanel.tsx:129`
+   and mounted at `:901-912` (commit `ff42424e`, "refactor(a39): extract two
+   leaves from the recording panel, 990 to 904"). Nothing of that block remains
+   inline, so re-extracting it would produce a dead duplicate. **Wave 0 therefore
+   extracts a DIFFERENT, still-inline, pin-free section** - the capture-drain
+   extraction pipeline (`runExtraction` + its drain effect + the `extracting`
+   state) into a new `useGradingRecordingExtraction.ts` hook - BEFORE any feature
+   line is added; wave 1's budget is set from the MEASURED post-extraction count
+   at the P-8 gate, never from the projection. See section 3.
 
 ---
 
@@ -149,30 +163,142 @@ the honest name - is intentional and strictly no-more-restrictive.
 
 ---
 
-## 3. The panel ceiling and the extraction plan
+## 3. The panel ceiling and the CORRECTED extraction plan
 
-Wave 0 is scope section 2.3's extraction of `GradingCaptureStatus.tsx` (the
-`<video>` preview, the timer/count/extracting/catching-up status column, the
-throttled visually-hidden live region, the `stalled` notice, the readings-merged
-hint, plus `fmt()`). It is the LAST unpinned panel block the scope could find
-(scope section 2.3's per-block pin table; RES-A38-6). It is a PURE MOVE - no
-behaviour change, no new state, every read becomes a prop, hooks stay in the panel
-(scope section 2.4).
+### 3.0 Why the scope's named wave-0 target is withdrawn (the stale premise)
 
-- Projected net: -62 lines -> panel ~915 (scope section 2.3/6.3). **This is a
-  PROJECTION over a block measured at the revision-2 HEAD; the wave-0 implementer
-  RE-MEASURES the block line numbers before extracting and the panel count after,
-  with `PS> @(Get-Content ...).Count` at the P-8 gate.** RES-A38WP-1.
-- Wave 1 adds ~24 lines to the panel (scope section 6.3) -> ~939. Wave 2 adds ~6
-  -> ~945. All under 1000, all PROJECTIONS; P-8 is the authority at each gate.
-- **Ruling 1's escape, carried not resolved:** if wave 0's measured result leaves
+Scope section 2.3 and this plan's original section 3 told wave 0 to extract the
+capture-status block into a new `GradingCaptureStatus.tsx`. **That extraction has
+already shipped, in A39 wave 3a-ii, as
+`GradingRecordingCaptureStatus.tsx`.** Verified at HEAD by reading the panel and
+the component in full and the commit:
+
+```
+PS> @(Get-Content src/app/components/grading-recording/GradingRecordingCaptureStatus.tsx).Count -> 117
+grep -n "GradingRecordingCaptureStatus\|previewRef\|throttledLiveSentence" src/app/components/grading-recording/GradingRecordingPanel.tsx
+  129:import GradingRecordingCaptureStatus from "./GradingRecordingCaptureStatus";
+  901:      <GradingRecordingCaptureStatus
+  911:        previewRef={previewRef}
+git log --oneline -- src/app/components/grading-recording/GradingRecordingCaptureStatus.tsx
+  ff42424e refactor(a39): extract two leaves from the recording panel, 990 to 904
+```
+
+`GradingRecordingCaptureStatus.tsx` already owns the `<video>` preview, the
+timer/count/extracting status row, the throttled visually-hidden live region, the
+`stalled` notice, the readings-merged hint and `fmt()` - the exact contents the
+scope's wave-0 block named (`GradingRecordingPanel.tsx:66-114` of that leaf; the
+props it takes are at `:30-41`). The panel now only MOUNTS it (`:901-912`, ten
+props). **There is nothing of that block left inline to move; duplicating it
+would ship dead code and add lines rather than remove them.** So the scope's
+wave-0 target is DISCHARGED-by-A39, not this plan's to build, and wave 0 needs a
+genuinely-new inline target.
+
+### 3.1 The new wave-0 target: extract the capture-drain pipeline into a hook
+
+Wave 0 extracts `runExtraction` and its drain effect - the "drain the capture
+queue as frames arrive" pipeline - together with the `extracting` state they own,
+into a NEW pure-logic hook `useGradingRecordingExtraction.ts` (a `.ts` file, no
+JSX). This is the in-repo precedent the panel's own header already cites
+(`GradingRecordingPanel.tsx:146-149`: "Collection ... lives here, mirroring
+useDiscussionReplies.ts's own split") and the same shape snapshot-grading used to
+lift action-calling logic out of its panel for this exact ceiling
+(`useSnapshotGrade.ts`, `useSnapshotRubricCapture.ts`).
+
+**Exact HEAD line ranges that MOVE** (`grep -n`, shown in section 12):
+
+| Moves into the hook | Lines at HEAD | Count |
+|---|---|---|
+| `const [extracting, setExtracting] = useState(false);` + its blank line | 463-464 | 2 |
+| `runExtraction` useCallback (whole body, deps included) | 511-577 | 67 |
+| blank line | 578 | 1 |
+| the drain `useEffect` and its comment | 579-602 | 24 |
+| **TOTAL OUT** | | **~94** |
+
+**What is added back to the panel:** one import line, and the hook call placed
+where `runExtraction` was (after every input it needs is in scope - the latest is
+`totalReadingsCount` at `:492` and `capture` at `:472`):
+
+```
+const { extracting } = useGradingRecordingExtraction({
+  takeFrameBatch, pendingFrames, provider, pushNotices,
+  gradingRows, selectedRosterText, capture,
+  setLogBatches, setTotalReadingsCount,
+});
+```
+
+~12 lines back. **Projected net: ~-82 -> panel ~895.** This is a PROJECTION; the
+wave-0 implementer RE-MEASURES the panel with `PS> @(Get-Content ...).Count` at the
+P-8 gate (RES-A38WP-1). Even if the estimate is off by 20 lines, the headroom
+(~85-105) clears wave 1's ~24 and wave 2's ~6 with wide margin.
+
+### 3.2 Why this block is pin-free (the correctness argument for a NON-rendered move)
+
+Nothing renders under this repo's vitest, so a `.tsx`/`.ts` move's correctness is
+proven by (a) the whole suite staying green with NO test edited (P-0) and (b)
+reading the diff as a byte-identical relocation plus the parameter/return
+plumbing. For (a) to hold, no test may read the moved lines as source text.
+Verified at HEAD - every test that reads `GradingRecordingPanel.tsx` as source,
+and what it pins, with the moved block absent from all of them:
+
+```
+grep -rln "GradingRecordingPanel.tsx" src --include=*.test.ts
+```
+
+| Test reading the panel source | What it pins | Touches the moved block? |
+|---|---|---|
+| `GradingRecordingPanel.wiring.test.ts` | dropped-frame accumulator effect (`:57-73`), `handleGradeAll` body + render body, `useGradingCaptureTracking`/Remove/Clear bindings, `GradingCaptureSettings` mount, `buildRunCohort`, trends IIFE | **No** - `runExtraction`, the drain effect, `setLogBatches`, `setTotalReadingsCount`, `extracting` appear in none of its assertions |
+| `GradingRecordingPanel.assessment.test.ts` | `STORAGE_KEY_ASSESSMENT`, `assessmentLabel` state, `assessmentId` trim, `useGradingRows(courseId, assessmentId)`, `assessmentOptions` memo, the Start/Stop Button element | **No** |
+| `grading-rows.test.ts` (A4d, `:762-778`) | panel declares `STORAGE_KEY_RUBRIC` and calls `loadRubricMemory`/`saveRubricMemory` | **No** |
+| `markLate.wiring.test.ts` (`:52`) | `onMarkLate={gradingRows.markSubmissionLate}` on the `GradingTable` mount | **No** |
+| `runLogRow.test.ts` (`:16,:41`) | exactly one `<RunLogRow` | **No** |
+| `GradingAssessmentDeclarationControls.test.ts` (`:242-246`) | the declaration-controls mount + props | **No** |
+| `buttonVariant.test.ts` (`FROZEN_PRIMARY_SITES:169`) | panel has exactly **3** primary sites (Add rubric, Start/Stop, Grade submissions) - all JSX Buttons that STAY; the new file is `.ts`, and its walker only scans `.tsx` (`:121`) | **No** |
+| `submission-kind-callsites.structure.test.ts` (`:84,:136`) | panel is in Set B (never composes a label) - an ABSENCE, unaffected by a move | **No** |
+| `snapshot-autofire.structure.test.ts` | references the panel only in COMMENTS (`:39,:265`) as an anti-pattern; it scans the `snapshot-grading` dir only | **No** |
+
+`grep -rl "runExtraction\|setLogBatches\|setTotalReadingsCount\|totalReadingsCount\|prevEncodeNoticeRef" src --include=*.test.ts` returns only `snapshot-autofire.structure.test.ts` (comment-only) for `runExtraction` and NOTHING for the rest - confirming the block is untested and therefore pin-free. The value that crosses back out, `extracting`, is consumed at `:745` (`captureLiveSentence`) and `:903` (the `GradingRecordingCaptureStatus` mount), neither of which is pinned by any test.
+
+**Consequence for the gate (section 7):** the Wave 0 gate STAYS the strict "whole
+suite green, no test file edited" (P-0) + P-8 re-measure the brief asks for,
+because the corrected target is pin-free. No wiring line moves. The one honest
+weakness is that, being untested, the block's runtime correctness after the move
+is proven ONLY by reading and by `tsc`/lint/build - NOT by any assertion. This is
+not a regression in coverage: `runExtraction` and the drain effect are already
+owner-verification-only today (nothing renders; the pipeline is exercised at
+runtime, not in vitest). Recorded as RES-A38WP-4.
+
+### 3.3 Alternatives considered and rejected
+
+- **Re-extracting the capture-status block (the scope's original target):**
+  impossible - already shipped by A39 (section 3.0). Withdrawn.
+- **A `useGradingRecordingRunLog` hook holding the run-log state AND the
+  dropped-frame accumulator effect** (the other large cohesive block): it frees a
+  comparable ~50 lines, but the dropped-frame effect is PINNED by
+  `GradingRecordingPanel.wiring.test.ts:58` (`accumulateDroppedFrames(prevLiveDroppedRef.current, droppedFrames,`),
+  read against the panel source. Moving it would force re-pointing that
+  `describe` block (`:56-88`) to the hook file - a real, "kept-real" move, but it
+  BREAKS the strict P-0 "no test edited" gate the brief specifies for wave 0. The
+  run-log state WITHOUT the pinned effect frees too little (~-15 net). Rejected in
+  favour of the pin-free pipeline extraction, which keeps P-0 intact.
+- **Splitting wave 1 to fit the current +23 headroom:** unnecessary once wave 0
+  frees ~82 lines. Kept as the fallback only if the wave-0 re-measure comes in far
+  below projection (RES-A38WP-1 / Ruling 1's escape).
+
+### 3.4 Budgets and the escape, carried
+
+- Wave 1 adds ~24 lines to the panel (scope section 6.3); wave 2 adds ~6. Against
+  the projected ~895, that is ~925 after both - all under 1000, all PROJECTIONS;
+  P-8 is the authority at each gate.
+- **Ruling 1's escape, carried not resolved:** if wave 0's MEASURED result leaves
   under ~50 lines of headroom for wave 1's ~24 plus wave 2's ~6, a SECOND
-  extraction is scoped and the feature waits (scope section 2.3, section 6.1 gate;
-  round-2 Ruling 7). This plan does not pre-authorise wave 1 past a thin margin.
+  extraction is scoped and the feature waits (scope section 6.1 gate; round-2
+  Ruling 7). With ~82 lines projected free this is not expected to fire, but the
+  gate remains.
 
-No `.ts/.tsx` A38 touches is projected over 1000; the two new leaf files
-(`grade-lock.ts`, `useGradingRowGrade.ts`) and `grading-dispatch.ts` additions are
-small. P-8 measures each touched file at each wave gate.
+No `.ts/.tsx` A38 touches is projected over 1000; the new hook
+(`useGradingRecordingExtraction.ts`, ~110 lines) and the two wave-1 leaf files
+(`grade-lock.ts`, `useGradingRowGrade.ts`) are small. P-8 measures each touched
+file at each wave gate.
 
 ---
 
@@ -187,7 +313,7 @@ enter.
 
 | Wave | Write set (edited/new source + owned tests) | Exports | Caller of each export | Pure/surface | Independently gateable? |
 |---|---|---|---|---|---|
-| **0 - extraction (pure move)** | NEW `GradingCaptureStatus.tsx`; EDIT `GradingRecordingPanel.tsx` | `GradingCaptureStatus` component + ~9 props | `GradingRecordingPanel.tsx` mounts it (IN THIS WAVE) | surface move; behaviour unchanged | YES - the full section 6.5 suite green with NO test edited (P-0), + P-8 |
+| **0 - extraction (pure move)** | NEW `useGradingRecordingExtraction.ts`; EDIT `GradingRecordingPanel.tsx` | `useGradingRecordingExtraction` hook (params object; returns `{ extracting }`) | `GradingRecordingPanel.tsx` calls it (IN THIS WAVE) | logic move; behaviour unchanged | YES - the full section 6.5 suite green with NO test edited (P-0), + P-8 |
 | **1 - single-row path, end to end** | EDIT `grading-dispatch.ts`, `grading-rows.ts`, `useGradingRows.ts`, `GradingRecordingPanel.tsx`, `GradingTable.tsx`, `GradingTableRow.tsx`, `grading-submission-grade.ts` (header comment only); NEW `grade-lock.ts`, `useGradingRowGrade.ts`; OWNED tests `grading-dispatch.test.ts`, `grading-rows.test.ts`, `GradingRecordingPanel.wiring.test.ts`, `grading-submission-grade.test.ts`, NEW `grade-lock.test.ts`, NEW `useGradingRowGrade.wiring.test.ts` | `buildSingleSubmission` (Unit 1), `gradingRowGradeAction` (eligibility), `createGradeLock` (Unit 3), `setGradingRowState`, `markRowState`, `useGradingRowGrade` | each pure unit is called by `useGradingRowGrade` (IN THIS WAVE); the hook is called by `GradingRecordingPanel.tsx` (IN THIS WAVE); the shared lock is also claimed by `handleGradeAll` (IN THIS WAVE) | pure-logic units = vitest; hook composition = reading/wiring vitest + owner runtime; button/offer render = owner | YES - caller-complete within the wave |
 | **2 - rubric provenance + spend cap** | EDIT `grading-row.ts`, `grading-dispatch.ts`, `grading-rows.ts`, `grading-row-serialization.ts`, `grading-submission-grade.ts`, `GradingRecordingPanel.tsx`, `useGradingRowGrade.ts`, `GradingTable.tsx`, `GradingTableRow.tsx`; OWNED tests `grading-row-serialization.test.ts`, `grading-submission-grade.test.ts`, `action-guard-coverage.test.ts`, `grading-dispatch.test.ts`, `grading-rows.test.ts`, `grading-row.test.ts` | `recordGradeDispatch`, `beginGradeAttempt` (Unit 2), `computeGradeConfirmThreshold`, `sumGradeAttempts`, `requiresGradeConfirm`, `getEffectiveGradeBoundAction` (requireUser) | counter/threshold leaves called by `useGradingRowGrade` + `GradingRecordingPanel.tsx` (IN THIS WAVE); `getEffectiveGradeBoundAction` fetched on mount by `GradingRecordingPanel.tsx` (IN THIS WAVE) | pure-logic (counter, threshold, wire round-trip, divergence condition, mocked-bound action) = vitest; confirm/hint render + disabled states = owner | YES - caller-complete within the wave |
 
@@ -243,9 +369,15 @@ src/app/components/grading-recording/grading-rows.test.ts
 src/app/components/grading-recording/grading-rows.ts
 src/app/components/grading-recording/useGradingRowGrade.ts
 $ cat w0 w0 | sort | uniq -d          # canary: a duplicated set must print its paths
-src/app/components/grading-recording/GradingCaptureStatus.tsx
 src/app/components/grading-recording/GradingRecordingPanel.tsx
+src/app/components/grading-recording/useGradingRecordingExtraction.ts
 ```
+
+(w0 = {`useGradingRecordingExtraction.ts`, `GradingRecordingPanel.tsx`}. It owns NO
+test: the corrected wave-0 target is pin-free, so its proof is the whole
+section-6.5 suite green with no test edited (P-0), not an owned test file. The
+overlap with w1 and w2 is only the shared panel, which is why all three waves are
+strictly sequential.)
 
 The intersections are NON-EMPTY. This is the finding, not a defect: the three A38
 waves share files, so they are strictly sequential (section 0.2). The canary
@@ -264,7 +396,7 @@ is chartered to change? Computed from each wave's stated write set:
 
 | Wave | Facts it assumes to start | Established by | Coupled? |
 |---|---|---|---|
-| 0 | the capture-status block is the last UNPINNED panel block; behaviour is pure-movable | scope section 2.3 (measured pins) + shipped panel | No incoming; ESTABLISHES the post-extraction panel size/shape wave 1 consumes |
+| 0 | the capture-drain pipeline (`runExtraction` + drain effect + `extracting`) is inline, pin-free, and behaviour-preservingly movable to a hook | section 3.2's pin map (measured) + shipped panel | No incoming; ESTABLISHES the post-extraction panel size wave 1 consumes |
 | 1 | the post-extraction panel (wave 0), `checkGradingReadiness` in `grading-dispatch.ts`, `classifyGradingResult`/`applyGradingResultToRow` in `grading-rows.ts`, `ConfirmArmButtons` in the row, the action's one-element-array tolerance (`slice(0, maxSubmissions)`, `maxSubmissions>=1`) | wave 0 + shipped tree | Directional on wave 0; ESTABLISHES the hook, the shared lock, the row props wave 2 consumes |
 | 2 | wave 1's `useGradingRowGrade`, its `setGradingRowState` dispatch write (upgraded to `beginGradeAttempt`), the row's 3 props (extended by 2), the action module, `fnv1aHash` in `generation-diag`, `getGeminiMaxSubmissions` server-only | wave 1 + shipped tree | Directional on wave 1 |
 
@@ -332,19 +464,36 @@ copy edited). Any command naming two or more test files uses
 (`test-paths-wrapper`; `docs/loop/this-repo.md` section 1). Exit code is read from a
 file, never from a pipe.
 
-**Wave 0 gate (a pure move is only proven by the WHOLE suite passing unchanged).**
-P-0 + P-8:
+**Wave 0 gate (a pin-free move is proven by the WHOLE suite passing unchanged +
+reading, NOT by any owned test - section 3.2).** P-0 + P-8:
 - The full scope-section-6.5 VERIFY GATE (the 37-path `npm run test:paths -- ...`
   command pasted at `docs/a38-scope.md:1158`) is GREEN with **no test file edited
-  in wave 0**. A pass means the capture-status behaviour moved with zero assertion
-  changed; RED anywhere means the move was not a move.
+  in wave 0**. Because the corrected target is pin-free (section 3.2), a pass means
+  the capture-drain pipeline moved with zero assertion changed; RED anywhere means
+  the move was not a move, OR that a test the pin map missed does read the block -
+  in which case STOP and re-scope, do not edit the test to make it green.
+- **The reading proof (mandatory for a pin-free move):** the wave-0 implementer
+  confirms the moved lines are a byte-identical relocation of HEAD `:463-464` and
+  `:511-602` (modulo the params-object destructure at the top of the hook and the
+  `return { extracting };`), that the two useCallback/useEffect DEP ARRAYS are
+  unchanged (`[takeFrameBatch, provider, pushNotices, gradingRows, selectedRosterText, capture]`
+  and `[pendingFrames, extracting, runExtraction]`), that `runExtraction` still
+  reads `gradingRows.rawRows` (the RENDER value, never `rawRowsRef.current` -
+  panel comment `:536-544`), and that the `await Promise.resolve()` microtask gate
+  (`:521`) and the drain effect's `cancelled` flag survive verbatim.
 - `PS> @(Get-Content src/app/components/grading-recording/GradingRecordingPanel.tsx).Count`
-  and `@(Get-Content .../GradingCaptureStatus.tsx).Count` - both <= 1000; the panel
-  number SETS wave 1's budget (Ruling 7). Pass = panel measurably below the pre-wave
-  977 with the projected ~50+ headroom; if not, escalate the second extraction.
-- New file joins the walkers `file-size-ceiling.structure.test.ts`,
-  `no-emojis.test.ts`, `source-bytes.structure.test.ts`, and (being under
-  `SECTION_4_DIRS`) `buttonVariant.test.ts` - all green.
+  and `@(Get-Content .../useGradingRecordingExtraction.ts).Count` - both <= 1000;
+  the panel number SETS wave 1's budget (Ruling 7). Pass = panel measurably below
+  the pre-wave 977 with the projected ~82 headroom (>= ~50 needed for waves 1+2);
+  if it comes in under ~50, escalate the second extraction (Ruling 1's escape).
+- `npx tsc --noEmit` and `npm run lint` GREEN - these, not a test, are what catch
+  a broken dep array or the eslint set-state-in-effect idiom (`AGENTS.md`), so they
+  are load-bearing for this pin-free move, not a formality.
+- The new `.ts` file joins the walkers `file-size-ceiling.structure.test.ts`,
+  `no-emojis.test.ts`, `source-bytes.structure.test.ts` - all green. It is a `.ts`
+  hook (no JSX), so it does NOT enter `buttonVariant.test.ts`'s scan (that walker
+  collects only `.tsx`, `:121`), and `FROZEN_PRIMARY_SITES`' panel count stays 3
+  (all three primary Buttons remain inline).
 
 **Wave 1 gate.** Focused, then item-level:
 ```
@@ -383,15 +532,17 @@ RED; drop the digest non-empty guard -> P-12 RED.
 
 ## 8. Line-shift and revertibility obligations this plan creates
 
-- **Wave 0 shifts every panel line below the extraction point.** The scope's
-  section 2.3 block addresses and THIS plan's citations
-  (`handleGradeAll:621`, `submissions:638`, `classify:677`) are revision-2/HEAD
-  addresses that MOVE after wave 0. DELTA: unknown until measured (net ~-62).
-  OWNER: the wave-0 implementer re-measures the block before extracting; the wave-1
-  briefer/implementer re-derives every panel line from the post-wave-0 tree, never
-  from these citations. The wiring-test pins locate handlers by LITERAL text over
-  a balanced body (`GradingRecordingPanel.wiring.test.ts:186-191`), so they survive
-  the shift - but any citation-by-line does not. RES-A38WP-1.
+- **Wave 0 removes lines ABOVE `handleGradeAll`, so every handler below the
+  extraction point shifts UP.** The moved block is HEAD `:463-464` and `:511-602`,
+  all above `handleGradeAll` (HEAD `:621`), so THIS plan's citations
+  (`handleGradeAll:621`, `submissions:638`, `classify:677`) and the section-6
+  line numbers decrease by ~82 after wave 0. DELTA: net ~-82, MEASURED at the P-8
+  gate, not trusted from this estimate. OWNER: the wave-0 implementer re-measures
+  the panel after extracting; the wave-1 briefer/implementer re-derives every
+  panel line from the post-wave-0 tree, never from these citations. The wiring-test
+  pins locate handlers by LITERAL text over a balanced body
+  (`GradingRecordingPanel.wiring.test.ts:186-191`), so they survive the shift - but
+  any citation-by-line does not. RES-A38WP-1.
 - **Wave 1 adds the fourth cohort-clearing pin** to
   `GradingRecordingPanel.wiring.test.ts` in the SAME commit as the lock-refusal
   exit (scope section 4.5). Three pins today (`:349,:355,:361`); leaving the fourth
@@ -436,20 +587,23 @@ RED; drop the digest non-empty guard -> P-12 RED.
 ## 10. Residual register (owner, instrument, step - missing one is a deletion)
 
 Inherited residuals are NOT re-owned here; they stay filed under the AC and scope
-and the orchestrator carries them to `docs/BACKLOG.md`. This plan adds two of its
+and the orchestrator carries them to `docs/BACKLOG.md`. This plan adds three of its
 own and RE-STATES the open items it does not close.
 
 | id | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
-| RES-A38WP-1 | Wave 0's post-extraction line counts are PROJECTIONS (~915 panel, from a rev-2-HEAD block); the real numbers set wave 1's budget and gate the second-extraction escape | Wave-0 implementer | `PS> @(Get-Content .../GradingRecordingPanel.tsx).Count` at the P-8 gate, vs 1000 and vs the ~50-line headroom wave 1+2 need | Measured at the wave-0 gate BEFORE wave 1 is briefed; feature waits if thin (Ruling 1 / round-2 Ruling 7) |
+| RES-A38WP-1 | Wave 0's post-extraction line count is a PROJECTION (~895 panel, from the section-3.1 estimate); the real number sets wave 1's budget and gates the second-extraction escape | Wave-0 implementer | `PS> @(Get-Content .../GradingRecordingPanel.tsx).Count` at the P-8 gate, vs 1000 and vs the ~50-line headroom wave 1+2 need | Measured at the wave-0 gate BEFORE wave 1 is briefed; feature waits if thin (Ruling 1 / round-2 Ruling 7) |
+| RES-A38WP-4 | The corrected wave-0 target (`runExtraction` + drain effect) is PIN-FREE, so its post-move runtime correctness is proven ONLY by reading + `tsc`/lint/build + the whole suite staying green - NO assertion covers the drain->extract->merge pipeline, and nothing renders under vitest. Not a coverage regression (the block is owner-verification-only at HEAD too), but the move is the one place a silent behaviour change could pass every gate | Wave-0 implementer + repo owner | The section-7 reading proof (byte-identical relocation, unchanged dep arrays, render-value-not-ref, microtask gate, cancelled flag) + owner runtime check that capture still drains and merges after wave 0 | Reading proof at the wave-0 gate; owner runtime check batched with the other RES-A38-5 UI claims |
 | RES-A38WP-2 | Round-2 Rulings 7, 10, 11 are OPEN and this plan does not close them (scope section 12): Ruling 7 (state the wave-0 extraction gate as ONE derived number - partly overtaken by section 3's projection but still owed a single stated gate number at wave 0); Ruling 10 (the offer sentence's split placement vs P-9's "same conditional expression"); Ruling 11 (button-reasoning correction, design unchanged) | Repo owner / next A38 activity | The scope's section 12 statement of each; P-9's reachability pin for Ruling 10 | Not this plan; recorded so the next A38 activity does not treat them settled |
 | RES-A38WP-3 | OQ-1 (cap applies per-row only) and OQ-2 (one-row-under-bound is INTENDED) are AC open questions; the scope adopted the recommended readings (per-row-only count, section 5.1; overflow remedy intended, section 4.1) and this plan builds to them | Repo owner | AC OQ-1/OQ-2 terminating answers | Owner confirmation; a "both" answer for OQ-1 would add a grade-all guard to wave 2 (a one-value change), a "guard it" for OQ-2 adds a single-row cap to AC-5 |
 
 **Carried, already filed (not re-owned):** RES-A38-2 (bulk press discloses no
-count), RES-A38-4 (`fmt` duplicated across four panels), RES-A38-5 (all UI claims
-are reading claims - owner browser), RES-A38-6 (panel headroom after A38),
-RES-A38-7 (wider non-persistence class); and the AC residuals RES-A38AC-1..7. All
-must land as `docs/BACKLOG.md` rows via the orchestrator (this seat writes no
+count), RES-A38-4 (`fmt` duplicated across four panels - NOTE: one copy now lives
+in `GradingRecordingCaptureStatus.tsx:24-28`, moved there by A39, not by A38's
+withdrawn wave 0; the residual's baseline is one lower than the scope's), RES-A38-5
+(all UI claims are reading claims - owner browser), RES-A38-6 (panel headroom after
+A38), RES-A38-7 (wider non-persistence class); and the AC residuals RES-A38AC-1..7.
+All must land as `docs/BACKLOG.md` rows via the orchestrator (this seat writes no
 backlog under concurrency).
 
 ---
@@ -485,6 +639,23 @@ EXPECTED_WIRE_KEYS (grading-row-serialization.test.ts:707-731)             -> 19
 cohort-clear pins (GradingRecordingPanel.wiring.test.ts)                   -> :349,:355,:361 (three; +1 wave 1)
 comm -12 / uniq -d over w0,w1,w2 (section 5)                               -> panel shared by all; w1 INT w2 = 10 paths; canary prints dups
 ```
+
+**Wave-0 correction instruments (this delta pass, HEAD 2026-09-29):**
+```
+# the scope's named wave-0 target is ALREADY extracted (A39):
+wc -l src/app/components/grading-recording/GradingRecordingCaptureStatus.tsx -> 117
+PS> @(Get-Content .../GradingRecordingCaptureStatus.tsx).Count               -> 117 (agrees)
+grep -n "GradingRecordingCaptureStatus" .../GradingRecordingPanel.tsx        -> :129 import, :901 mount
+git log --oneline -- .../GradingRecordingCaptureStatus.tsx                   -> ff42424e "extract two leaves ... 990 to 904"
+# the NEW wave-0 target's exact ranges:
+grep -n "const \[extracting, setExtracting\]|const runExtraction = useCallback|}, \[takeFrameBatch|Drains the capture queue|}, \[pendingFrames, extracting, runExtraction\]" .../GradingRecordingPanel.tsx
+  -> extracting state :464; runExtraction :511-577; drain comment :579; drain effect close :602
+# pin-freeness of the moved block (section 3.2):
+grep -rl "runExtraction|setLogBatches|setTotalReadingsCount|totalReadingsCount|prevEncodeNoticeRef" src --include=*.test.ts
+  -> only snapshot-autofire.structure.test.ts (COMMENT-only, :39/:265), nothing else
+buttonVariant.test.ts FROZEN_PRIMARY_SITES                                   -> panel = 3 (:169); walker scans .tsx only (:121)
+grading-rows.test.ts A4d block                                              -> pins STORAGE_KEY_RUBRIC + load/save IN the panel (:762-778)
+```
 Files opened directly for this pass: `docs/a38-acceptance-criteria.md`;
 `docs/a38-scope.md` (full, both pages); `docs/pres-2-s6-plan.md` (house format);
 `src/app/components/grading-recording/GradingRecordingPanel.tsx`,
@@ -492,6 +663,14 @@ Files opened directly for this pass: `docs/a38-acceptance-criteria.md`;
 `grading-row-serialization.test.ts`, `GradingRecordingPanel.wiring.test.ts`
 (targeted); `src/app/actions/grading-submission-grade.ts`,
 `action-guard-coverage.test.ts`; `src/lib/supabase/auth.ts`.
+
+Files opened for the WAVE-0 CORRECTION delta pass (2026-09-29):
+`src/app/components/grading-recording/GradingRecordingPanel.tsx` (full, current
+977-line HEAD), `GradingRecordingCaptureStatus.tsx` (full),
+`GradingRecordingPanel.wiring.test.ts` (full), `GradingRecordingPanel.assessment.test.ts`,
+`buttonVariant.test.ts`, `grading-rows.test.ts` (`:660-786`),
+`snapshot-autofire.structure.test.ts` (full), and the grep pin-map over every
+`*.test.ts` reading the panel.
 
 Line counts use `@(Get-Content).Count`, the mandated PowerShell instrument; an
 implementer re-measures before trusting any headroom, since it and

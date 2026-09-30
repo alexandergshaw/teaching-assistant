@@ -52,10 +52,12 @@ import {
   type StageId,
 } from "@/lib/presentations/pipeline";
 import { applyStageEdit, buildPipelineRequest, reducePipelineResponse, runToEnd } from "./panel-logic";
+import { buildMergedReview } from "./merged-review";
 import { reduceAskResponse } from "../../ppt-design/ask-response";
 import { checkDeckStandard, DECK_STANDARD_V1 } from "@/lib/deck-standard/standard";
 import { polishDeck } from "@/lib/deck-standard/polish";
 import { validateSlidePlan, type SlidePlanEntry } from "@/lib/deck-standard/slide-plan";
+import { INFO_FLOW_CHECKLIST, VISUAL_CHECKLIST, type Checklist } from "@/lib/deck-standard/checklists";
 import PipelineStepper, { STAGE_LABELS } from "./PipelineStepper";
 import FrameEditor from "./FrameEditor";
 import ReviewFindings from "./ReviewFindings";
@@ -95,6 +97,39 @@ async function callPipelineRoute(
   return reducePipelineResponse(op, res.status, body, state);
 }
 
+// S6.7 gap closer (S6.7-flagged): the checklist each review stage's
+// deterministic pass runs against, matching the stage's own route op.
+const REVIEW_STAGE_CHECKLIST: Record<"reviewInfoFlow" | "reviewVisual", Checklist> = {
+  reviewInfoFlow: INFO_FLOW_CHECKLIST,
+  reviewVisual: VISUAL_CHECKLIST,
+};
+
+/**
+ * Runs one review stage (reviewInfoFlow/reviewVisual): POSTs the LLM route
+ * op exactly as before, then - only on a genuine success (the stage lands
+ * "done" with an LLM ChecklistResult) - ALSO runs the matching deterministic
+ * checklist locally (pure, no fetch) against the current deck and merges the
+ * two via `buildMergedReview` (review-merge.ts's
+ * mergeWithDeterministicChecklist) so the stored artifact's `ranItemIds` is a
+ * completeness receipt for the WHOLE checklist, not just the llm half. A
+ * failed/malformed route response is left exactly as `reducePipelineResponse`
+ * produced it (the stage marked "error") - never merged as if it were a
+ * success.
+ */
+async function runReviewStage(
+  stage: "reviewInfoFlow" | "reviewVisual",
+  op: Extract<PipelineOp, "review-infoflow" | "review-visual">,
+  state: PipelineState,
+  contextText: string
+): Promise<PipelineState> {
+  const next = await callPipelineRoute(op, state, contextText);
+  if (next[stage].status !== "done") return next;
+  const llmResult = next[stage].artifact;
+  if (!llmResult) return next;
+  const merged = buildMergedReview(REVIEW_STAGE_CHECKLIST[stage], state.deck.artifact, llmResult);
+  return applyStageEdit(next, stage, merged);
+}
+
 /** Runs one stage against `state`, returning the next state. "sources" is a no-op here (user-commit gate). */
 async function runStage(stage: StageId, state: PipelineState, contextText: string): Promise<PipelineState> {
   if (stage === "sources") return state;
@@ -108,6 +143,8 @@ async function runStage(stage: StageId, state: PipelineState, contextText: strin
     if (!deck) return state;
     return applyStageEdit(state, "polish", polishDeck(deck));
   }
+  if (stage === "reviewInfoFlow") return runReviewStage(stage, "review-infoflow", state, contextText);
+  if (stage === "reviewVisual") return runReviewStage(stage, "review-visual", state, contextText);
   const op = STAGE_TO_OP[stage];
   if (!op) return state;
   return callPipelineRoute(op, state, contextText);

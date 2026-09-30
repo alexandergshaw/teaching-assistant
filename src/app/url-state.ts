@@ -39,6 +39,8 @@ import {
   type GradingView,
   type GradingPointerTarget,
   RETIRED_GRADING_POINTERS,
+  isPresentationsView,
+  type PresentationsView,
 } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
@@ -224,6 +226,13 @@ export function normalizeGradingView(value: string | null): GradingView {
   return isGradingView(value) ? value : "run";
 }
 
+// PRES-2 S6.7: Presentations' own inner selection, same shape as
+// normalizeGradingView above - reuses isPresentationsView (manual-rail.ts's
+// single source of truth for the two children) rather than restating them.
+export function normalizePresentationsView(value: string | null): PresentationsView {
+  return isPresentationsView(value) ? value : "slide-deck";
+}
+
 // Knowledge's selected institution and page have no fixed member list (they
 // are dynamic, per-user data - registered institution acronyms and page
 // UUIDs) unlike every other field above, so there is no isX/enum to validate
@@ -264,6 +273,7 @@ const DEFAULT_BUILD_VIEW = normalizeBuildView(null);
 const DEFAULT_CONTENT_VIEW = normalizeContentView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
 const DEFAULT_GRADING_VIEW = normalizeGradingView(null);
+const DEFAULT_PRESENTATIONS_VIEW = normalizePresentationsView(null);
 
 const TAB_PARAM = "tab";
 // The three merged tabs' section params were NEW at D25; every param below
@@ -285,6 +295,7 @@ const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
 const GRADING_VIEW_PARAM = "gradingView";
+const PRESENTATIONS_VIEW_PARAM = "presentationsView";
 // RETIRED (GRAD-SUBTAB wave 3, DECISION 19 E-full): never emitted by
 // buildUrlSearch and no longer a field on UrlNavState - kept only so
 // parseUrlState can still read the raw legacy value, to detect the
@@ -308,6 +319,7 @@ export interface UrlNavState {
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
+  presentationsView: PresentationsView;
   tasksView: TasksView;
   // null means "no page/institution named in the URL" - there is no fixed
   // default to fall back to the way the other fields have one, since which
@@ -402,6 +414,7 @@ export function parseUrlState(search: string): UrlNavState {
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(rawContentView),
     gradingView: gradingPointer ? gradingPointer.gradingView : normalizeGradingView(params.get(GRADING_VIEW_PARAM)),
+    presentationsView: normalizePresentationsView(params.get(PRESENTATIONS_VIEW_PARAM)),
     tasksView: normalizeTasksView(params.get(TASKS_VIEW_PARAM)),
     kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),
     kbPageId: normalizeKbPageId(params.get(KB_PAGE_PARAM)),
@@ -449,6 +462,9 @@ export function buildUrlSearch(state: UrlNavState): string {
       }
       if (state.manualView === "grading" && state.gradingView !== DEFAULT_GRADING_VIEW) {
         params.set(GRADING_VIEW_PARAM, state.gradingView);
+      }
+      if (state.manualView === "presentations" && state.presentationsView !== DEFAULT_PRESENTATIONS_VIEW) {
+        params.set(PRESENTATIONS_VIEW_PARAM, state.presentationsView);
       }
     }
     if (state.toolsSection === "workflows") {

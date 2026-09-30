@@ -52,6 +52,23 @@ Measured, not assumed (`docs/loop/this-repo.md` sections 1, 6):
   per-row button appearing, its disabled state, the confirm dialog showing, or a
   click landing is a READING claim or an OWNER-VERIFICATION claim, never
   machine-checkable. Each such criterion says so.
+- NO HOOK IS DRIVEN AT RUNTIME EITHER, which is a stricter ceiling than "no
+  component renders" and binds AC-1, AC-3 and AC-8 specifically: `grep -rn
+  "renderHook\|@testing-library" package.json vitest.config.ts vitest.setup.ts`
+  returns nothing - there is no `@testing-library/react-hooks` or
+  `@testing-library/react` `renderHook` in this tree, and `environment: "node"`
+  (above) forecloses adding one that works without a DOM. A criterion whose
+  instrument reads "drive the hook", "press twice" against a hook, or "call the
+  hook with a mocked ref" is not buildable here even mocked - it needs a
+  render pass this repo's vitest cannot perform. Any such criterion's
+  MACHINE instrument must instead name a plain function/object this repo can
+  construct and call directly with `new`/a factory - never a hook invocation -
+  which in turn requires the behavior to be EXTRACTED out of the hook into a
+  pure, dependency-injected unit before the criterion is satisfiable. Where a
+  criterion below requires that extraction as its instrument's precondition,
+  it says so and routes the extraction to the architect (mechanism is out of
+  scope for this document per the header above); this document does not design
+  the extraction, only requires that the instrument be buildable.
 - No API key, and `vitest.setup.ts` throws on real network. Every `callLlm` path
   is exercised only through mocks. The single-row DISPATCH logic, the
   spend-count increment, the N threshold decision, the classifier reuse and the
@@ -157,17 +174,42 @@ reading source only; [OWNER] verified only by the owner in the deployed app.
 ### AC-1 - A single-row grade sends EXACTLY the one chosen row [MACHINE + OWNER]
 - Owner's words: "Single row. Grade ONE submission ... rather than the whole
   table."
-- Object: the submissions payload the grade action receives when the instructor
-  grades one row, and the set of rows the press mutates.
-- Instrument: [MACHINE] the LEV-1 request-capture (grade action mocked): the
-  captured array has length 1 and its id is the pressed row's; and a second
-  assertion that no other row's result fields change (compare the row array
-  before and after the press - only the target row differs). [OWNER] the owner
-  presses one row's grade control and sees only that row update.
-- Direction of failure: FAILS if the press sends more than the one row; FAILS if
-  it regrades the whole prefix (the first `maxSubmissions` rows); FAILS if any
-  non-target row's fields change; FAILS if the existing grade-all path is broken
-  by the change (cross-checked by AC-2).
+- INSTRUMENT PRECONDITION (routed to the architect, not designed here): the
+  code that turns "one chosen row" into the grade action's request payload
+  (the single-row selection/request-body builder) must be a PURE function,
+  extracted out of the hook the scope sketches (`useGradingRowGrade`) rather
+  than inlined in it, taking a row (or row id + row lookup) and returning the
+  payload the grade action receives - callable directly from a node test with
+  no hook driven and nothing rendered. This is the same "no hook runtime"
+  ceiling named above; without the extraction this criterion has no buildable
+  MACHINE instrument.
+- Object: the request-body/selection builder's OUTPUT for one chosen row (the
+  payload the grade action would receive), and, separately, the set of rows a
+  press mutates.
+- Instrument: [MACHINE] STRONGER FORM, preferred where the architect can make
+  it hold: shape the builder so its return type IS a single submission (e.g. it
+  takes one row and returns one payload object, not an array) - "sends more
+  than one row" then becomes UNREPRESENTABLE by the type/shape itself, and this
+  criterion needs no runtime length assertion at all; a source-reading check
+  that the builder's signature and return shape admit only one row is
+  sufficient. FALLBACK FORM, only if the stronger form is not adopted: call the
+  pure builder directly (no hook, no render) with one row and assert the
+  returned payload's array length is 1 and its id is the pressed row's - this
+  is still a MACHINE instrument because the builder is a plain function, unlike
+  the banned hook-driven form. Either form is paired with a second assertion
+  that no other row's result fields change (compare the row array before and
+  after the press, using the existing wiring/action-mock pattern LEV-1 already
+  uses - that part does not need the hook driven, only the action mocked).
+  [OWNER] the owner presses one row's grade control and sees only that row
+  update.
+- Direction of failure: FAILS if the builder's output (or, fallback form, the
+  captured payload) contains more than the one row; FAILS if it regrades the
+  whole prefix (the first `maxSubmissions` rows); FAILS if any non-target row's
+  fields change; FAILS if the existing grade-all path is broken by the change
+  (cross-checked by AC-2); FAILS (as a document defect, not a code defect) if
+  the extraction precondition above is skipped and the only instrument offered
+  is a source-text grep for "one row" - that does not observe a length or a
+  shape and satisfies nothing.
 
 ### AC-2 - Grade-all whole-table behavior is preserved, additively [MACHINE + READING]
 - Owner's words (implication): the single-row control is added; grade-all is
@@ -194,10 +236,20 @@ reading source only; [OWNER] verified only by the owner in the deployed app.
 - Object: (a) the per-row attempt count for the table, and WHEN it increments;
   (b) the pure decision "does this press require a confirm", as a function of
   that count and N; (c) N's value.
+- INSTRUMENT PRECONDITION (routed to the architect, not designed here): the
+  per-row attempt counter must be a PURE, dependency-injected unit (an
+  increment/read pair, or a small state object with an `onDispatch` /
+  `onOutcome` entry point) extracted out of the hook, not a `useState`/`useRef`
+  counter reachable only by driving `useGradingRowGrade`. Same "no hook
+  runtime" ceiling as AC-1.
 - Instrument:
-  - [MACHINE] the count increments when a call is dispatched, INCLUDING a call
-    that then fails: drive the single-row path with the grade action mocked to
-    return `{ error }` (or throw) and assert the count still rose by one.
+  - [MACHINE] drive the pure counter directly: call its dispatch-increment
+    entry point, then call its error/failure outcome entry point (simulating
+    the grade action returning `{ error }` or throwing), and assert the count
+    rose by one at the DISPATCH call and did not fall or reset at the
+    failure-outcome call. This proves "increments on dispatch, survives an
+    error outcome" without a hook driven or anything rendered - the counter is
+    a plain object under direct call, not the hook.
   - [MACHINE] a pure threshold predicate: below N returns proceed-without-confirm;
     at or above N returns require-confirm.
   - [MACHINE] N is `min(totalCount, maxSubmissions)`, NOT `totalCount`: with
@@ -302,20 +354,35 @@ reading source only; [OWNER] verified only by the owner in the deployed app.
   rubric fetch double-graded every repo. A per-row button multiplies the click
   surface, so say whether the same lock covers it or whether per-row presses may
   interleave."
+- INSTRUMENT PRECONDITION (routed to the architect, not designed here): the
+  lock itself must be a PURE, dependency-injected unit - an acquire/release
+  pair (or equivalent) callable directly, independent of the hook and of
+  `useRef` - extracted out of `useGradingRowGrade` rather than living only as a
+  ref reachable by driving the hook. Same "no hook runtime" ceiling as AC-1 and
+  AC-3; without this extraction Ruling 8's mandated deadlock instrument (below)
+  has nothing to call.
 - Object: concurrent single-row presses; a single-row press concurrent with a
-  bulk run; and the state of the surface AFTER a press that the lock refused.
-- Instrument: [MACHINE] a second dispatch while one grade is in flight is refused
-  (only one call reaches the mocked action). [MACHINE] the deadlock guard
-  (`docs/a38-rulings-round2.md` Ruling 8): press TWICE with the second press
-  expected to WORK after the first completes - a test that only asserts the lock
-  is CLAIMED cannot see the silent-green deadlock and is forbidden as the sole
-  instrument. [OWNER] while one row grades, its control reads busy/disabled and
-  other controls are disabled.
-- Direction of failure: FAILS if two presses both dispatch concurrently; FAILS if
-  a single-row press can interleave with a bulk run (in either order); FAILS if
-  the lock is claimed on an early-return/refusal path and never released, so the
-  next legitimate press does nothing (every gate green, feature dead on the
-  second click - Ruling 8).
+  bulk run; and the state of the lock AFTER a press that it refused.
+- Instrument: [MACHINE] drive the pure lock directly: acquire it once (asserts
+  acquired), attempt a second acquire while still held (asserts refused - only
+  one logical "call" would proceed), then release, then acquire AGAIN (asserts
+  the second acquire now SUCCEEDS). This is Ruling 8's "press twice, second
+  press works" requirement satisfied by calling the real lock unit twice, not
+  by rendering or driving a hook. [MACHINE] separately, a claims-the-lock-only
+  check (asserting merely that `acquire()` was called or returned truthy once,
+  with no second acquire-after-release proving release actually happened) is
+  EXPLICITLY INSUFFICIENT per Ruling 8 and must not be offered as the sole or
+  primary instrument - Ruling 8 exists precisely because that shape passes
+  green while the surface deadlocks on the second click. [OWNER] while one row
+  grades, its control reads busy/disabled and other controls are disabled;
+  after that grade completes, the control is pressable again.
+- Direction of failure: FAILS if two presses both dispatch concurrently; FAILS
+  if a single-row press can interleave with a bulk run (in either order); FAILS
+  if the lock is claimed on an early-return/refusal path and never released, so
+  the next legitimate press does nothing (every gate green, feature dead on the
+  second click - Ruling 8); FAILS (as a document defect, not a code defect) if
+  the second-acquire-after-release call is missing from the instrument and only
+  the claims-the-lock check is offered - that is the banned shape.
 
 ## Open questions - forks the owner must settle (phrased so every answer terminates)
 
@@ -350,7 +417,8 @@ backlog under concurrency); until then they exist only here, which
 | id | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
 | RES-A38AC-1 | The confirm's copy and the per-row offer sentence, written true on every reachable state per A31 Ruling 1 (not frozen as a literal) | Test seat / architect | Reading against every reachable state; `docs/a38-rulings-round2.md` Ruling 10 B-3 | Design + test-notes pass |
-| RES-A38AC-2 | HOW `min(totalCount, maxSubmissions)` is computed given `maxSubmissions` is server-only (compute server-side vs expose the bound) - AC-3's satisfiability depends on this | Architect | The AC-3 machine test once the mechanism is chosen | Architect pass |
+| RES-A38AC-2 | WIDENED (round-1 fix): HOW the extraction is done - (a) `min(totalCount, maxSubmissions)` computed given `maxSubmissions` is server-only (AC-3); (b) the single-row request-body/selection builder pulled out of `useGradingRowGrade` as a pure function (AC-1); (c) the per-row attempt counter pulled out as a pure dependency-injected unit (AC-3); (d) the per-row lock pulled out as a pure acquire/release unit (AC-8) - all four are one architect decision about the hook's internal shape, not four separate ones, because this repo's vitest cannot drive a hook (see the ceiling note above `AC-1`) | Architect | The AC-1 / AC-3 / AC-8 machine instruments, each of which needs its named unit to exist before it can be written | Architect pass |
+| RES-A38AC-7 | `docs/a38-scope.md` is STALE relative to owner decisions made after it was written, and BLOCKS the wave plan until refreshed: (1) `docs/a38-scope.md:652` sets `N = gradingRows.totalCount`, superseded by `docs/owner-decisions-2026-09-23.md` DECISION 2 and Ruling 9's `N = min(totalCount, maxSubmissions)` (AC-3's conflict note, above); (2) the scope's wave 1 plans to ship rubric-text persistence (`docs/a38-scope.md:372,376-377`, "seven to eight" key canary at `:298,724`) and that persistence, plus the eighth key and the run-level fingerprint, ALREADY SHIPPED via A39 (commit 8a977b1; `grading-rows.test.ts:694` already shows eight keys; `GradingRecordingPanel.tsx:197`) - wave 1 as scoped would re-ship a shipped canary bump and re-litigate a settled key count. Filed as a residual rather than fixed here because scope revision is the architect's mechanism pass, out of this document's scope (see header). | Architect | A fresh read of `docs/a38-scope.md` against current HEAD and against `docs/owner-decisions-2026-09-23.md` / `docs/a38-rulings-round2.md`, producing a revision 3 | Architect pass, BEFORE the A38 wave plan is written - the wave plan must not consume scope revision 2 as-is |
 | RES-A38AC-3 | Per-row rubric-divergence signal (`gradedRubricDigest`) is NEW; run-level provenance already ships (`rubric-memory.ts`) - decide whether the per-row signal is additive or reuses the shipped provenance | Architect | AC-6 machine + owner verify | Architect pass |
 | RES-A38AC-4 | The per-row button rendering, its three disabled reasons, and the confirm dialog interaction (nothing renders under vitest) | Owner | Open Tools grading recording panel in prod; grade one row; exceed N; cancel and proceed | Post-deploy owner verification |
 | RES-A38AC-5 | Whether a real single-row run returns useful feedback (model QUALITY) | Owner | Run the deployed feature (no API key here) | Post-deploy owner verification |

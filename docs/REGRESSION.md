@@ -46425,3 +46425,808 @@ Each names an owner, an instrument, and the step that will measure it.
 | BL445-3 | AC-6's VISIBLE half (on-page slide preview) and AC-1/AC-2 (tab/child-tab reachability) | Architect (design) + Owner (verify) | Architect's preview design, then the owner opening Tools > Presentations in the deployed app | Wave 3 architect pass, then post-deploy owner verification (R-4) |
 | BL445-4 | Whether Wave 3, once committed, actually supplies the correct prior-context/prior-critique VALUES into `buildRegeneratePrompt` (this entry only confirms the library/route propagate whatever they are given) | Wave 3 implementer + its verifier | A wiring/integration test or reading pass over the committed Wave 3 diff, asserting the UI-sourced values reaching `RegenerateInput` match what was actually shown to the instructor | Wave 3's own build + verify, before PRES-1 is presented as feature-complete |
 | BL445-5 | LEV-1's removal-test oracle has not been authored as a dedicated test-seat artifact per `docs/pres-1-acceptance-criteria.md` R-6, though an equivalent assertion already exists and passes | Test seat | Author the standalone removal-test per the AC's Instrument/Direction-of-failure, or explicitly ratify the existing `generate.test.ts:186-199`/`prompts.test.ts:23-37` pair as satisfying it | Test seat's own pass, per `docs/loop/seats.md:59` (runs after Build and Verify) |
+
+## 446. PRES-2 S1-S5 as staged (`src/lib/deck-standard/*`): the five pure deck-automation libraries - baseline before S6 assembles them
+
+Written so S6 (`docs/pres-2-scope.md` section 2, "the five genuinely-new
+pieces") has an oracle for S1-S5's machine-checkable behavior before it
+composes them into the resumable pipeline. This entry records what the
+STAGED code DOES, read out of source and confirmed by running its own tests;
+it is an oracle, not a requirement - a later change that moves a cited line
+without being filed to move it is a regression. This is a first baseline for
+these five leaves, not a supersession: the coverage check below confirms no
+prior entry covers any part of PRES-2, so there is no disposition table
+(nothing here was restructured out of a prior REGRESSION entry).
+
+**Read at `6c585a24`** (`git rev-parse --short HEAD`). **`git status --short`**
+at the time of writing:
+
+```
+ M docs/BACKLOG.md
+M  docs/a38-acceptance-criteria.md
+ M docs/backlog.yml
+A  src/lib/deck-standard/checklists.test.ts
+A  src/lib/deck-standard/checklists.ts
+A  src/lib/deck-standard/polish.test.ts
+A  src/lib/deck-standard/polish.ts
+M  src/lib/deck-standard/standard.test.ts
+M  src/lib/deck-standard/standard.ts
+?? src/lib/deck-standard/frame.test.ts
+?? src/lib/deck-standard/frame.ts
+?? src/lib/deck-standard/slide-plan.test.ts
+?? src/lib/deck-standard/slide-plan.ts
+```
+
+The five S1-S5 source/test pairs (`standard.ts`+`standard.test.ts`,
+`frame.ts`+`frame.test.ts`, `slide-plan.ts`+`slide-plan.test.ts`,
+`checklists.ts`+`checklists.test.ts`, `polish.ts`+`polish.test.ts`, plus S1's
+`types.ts`) are the only paths under `src/lib/deck-standard/` touched or
+added; `git diff --stat -- src/lib/deck-standard` against the index returns
+empty output, confirming every change to this directory is already staged
+(none left unstaged). This entry's own write set is `docs/REGRESSION.md`
+alone; no source or test file was changed to produce it.
+
+### The coverage check
+
+Measured with `grep -ac -- "<term>" docs/REGRESSION.md` against this file as
+it stood at **46,427 lines** (`wc -l docs/REGRESSION.md`) before this entry
+was appended:
+
+| term | matching lines before this entry |
+|---|---|
+| `PRES-2` | **0** |
+| `checkDeckStandard` | **0** |
+| `buildFrameFoldLines` | **0** |
+| `frameConsistencyReceipt` | **0** |
+| `validateSlidePlan` | **0** |
+| `SlidePlanEntry` | **0** |
+| `buildChecklistPrompt` | **0** |
+| `parseChecklistResponse` | **0** |
+| `polishDeck` | **0** |
+| `DECK_STANDARD_V1` | **0** |
+
+So the accurate statement is: **no entry in this file covers any part of
+PRES-2.** This is a first baseline for a new set of leaves, not a partial-
+coverage reconciliation.
+
+### File sizes on the path
+
+`wc -l <path>`, at `6c585a24`: `src/lib/deck-standard/types.ts` 58,
+`src/lib/deck-standard/standard.ts` 166, `src/lib/deck-standard/frame.ts` 109,
+`src/lib/deck-standard/slide-plan.ts` 130, `src/lib/deck-standard/
+checklists.ts` 327, `src/lib/deck-standard/polish.ts` 211. All five leaves
+plus `types.ts` sum to 1,001 lines and each individual file is well under the
+repo-wide 1000-line ceiling enforced by `src/file-size-ceiling.structure.test.ts`
+(confirmed that file exists at that path).
+
+### Import independence, confirmed directly
+
+`grep -n "^import" src/lib/deck-standard/*.ts | grep -v test.ts` returns
+exactly one hit: `standard.ts:12` importing types only (`DeckStandard`,
+`CheckResult`, `StandardViolation`) from its own sibling `./types`. `frame.ts`,
+`slide-plan.ts`, `checklists.ts`, and `polish.ts` have zero `import`
+statements of any kind - each is a self-contained pure leaf with no
+compile-time dependency on `src/lib/decks`, `src/lib/pptx`,
+`src/lib/presentations`, or any other `deck-standard` file, matching each
+file's own header comment claiming that independence (`frame.ts:18-22`,
+`slide-plan.ts:19-20`, `checklists.ts:29-30`, `polish.ts:16-21`).
+
+### 446a - S1 `standard.ts`: the four deck-decidable rules, provenance on the result
+
+`checkDeckStandard(deck, standard)` (`standard.ts:125-166`) returns
+`{standardVersion, violations}` (`types.ts:55-58`), the provenance stamp
+copied from the `standard` argument that ran (`standard.ts:165`), never
+stored on the deck itself (B1: `types.ts:48-54`'s own comment; confirmed by
+`standard.test.ts:133-144`, which shows the same deck yields a different
+`standardVersion` when a different standard object runs).
+
+- **The four rules**, each independently triggerable
+  (`standard.test.ts:146-188`): `requireTitleCase` (`standard.ts:132-138`),
+  `titleSlideOnlyTitle` - flags bullets on `slides[0]` only
+  (`standard.ts:140-146`), `maxBulletsPerSlide` (`standard.ts:148-154`), and
+  `titleMaxChars` (`standard.ts:156-162`).
+- **Title Case, with the colon-subtitle and hyphen refinements
+  (`isTitleCase`, `standard.ts:85-117`).** A word immediately after a word
+  ending in `:` is forced-capital (segment-start) even mid-title
+  (`standard.ts:93,105-108`; RED/GREEN proof against a reimplemented pre-fix
+  rule at `standard.test.ts:61-83`, and the small-word-first-word-after-colon
+  case at `standard.test.ts:85-87`). Each hyphen-separated component of a
+  word is checked independently against capitalize-unless-small-word, with
+  the title's first/last-word edge bonus reaching only the first component of
+  the first word and the last component of the last word
+  (`standard.ts:95-116`; confirmed `standard.test.ts:89-95`: "Client-Server
+  Model" passes, "Client-server Model" fails because "server" is not a small
+  word and gets no edge bonus).
+- **`DECK_STANDARD_V1` defaults** (`standard.ts:32-38`): `maxBullets=4`
+  (`maxBulletsPerSlide: 4`), `titleMaxChars=60`, `requireTitleCase: true`,
+  `titleSlideOnlyTitle: true`.
+- **DS-CHECK: mandatory-removal sabotage, one per rule
+  (`standard.test.ts:190-288`).** Four sabotaged reimplementations of
+  `checkDeckStandard`, each with exactly one rule's branch deleted, are
+  proven to MISS the violation the real checker catches - this is the
+  falsifiability proof that each rule's branch is load-bearing, not merely a
+  passing assertion.
+
+### 446b - S2 `frame.ts`: the Pinned Frame fold lines and drift receipt
+
+`PinnedFrame` (`frame.ts:29-32`) is the one mental model plus one running
+example. `buildFrameFoldLines(frame)` (`frame.ts:59-73`) emits one line per
+field (`mentalModelLine`/`runningExampleLine`, `frame.ts:62-70`), omitting an
+empty field's line rather than emitting a hollow one (`frame.ts:72`;
+confirmed `frame.test.ts:22-41`: dropping either field's data drops only that
+field's line, keeping the other independently present/deletable).
+
+- **FRAME-FOLD sabotage** (`frame.test.ts:52-61`): simulates a caller that
+  fails to splice `buildFrameFoldLines`' output into its prompt, and shows the
+  composed prompt then lacks the mental-model step names and the running
+  example's name entirely - the fold function itself is what makes the
+  presence guarantee true.
+- **`frameConsistencyReceipt(deck, frame)`** (`frame.ts:92-109`) is a
+  textual-mention counter: case-insensitive containment (`frame.ts:79-82`) of
+  each mental-model step plus the running-example name, summed per slide over
+  title+bullets+notes (`frame.ts:101-107`; confirmed the notes field counts,
+  `frame.test.ts:97-103`, and the count is case-insensitive,
+  `frame.test.ts:105-111`). `mentions === 0` is drift, but the receipt itself
+  only reports the count - deciding a specific slide is "drift" is left to the
+  caller (`frame.ts:14-16`'s own comment; confirmed
+  `frame.test.ts:78-95`: slides 0 and 2 are correctly identified as
+  zero-mention by filtering the receipt, not by a `drift` field on the type).
+- **Non-vacuous sabotage** (`frame.test.ts:117-132`): a receipt that always
+  returns 0 mentions (ignoring the frame) is shown to fail to distinguish an
+  on-frame slide from an off-frame one, proving the drift-distinguishing
+  assertions above are not trivially satisfied.
+
+### 446c - S3 `slide-plan.ts`: prediction/answer separation is a type invariant, not a runtime check
+
+`SlidePlanEntry` (`slide-plan.ts:22-25`) is a three-variant discriminated
+union on `role` (`content` | `prediction` | `answer`); no variant carries both
+a question payload and an answer payload, so "a prediction and its answer on
+one slide" has no constructor - it is unrepresentable by the type, not merely
+disallowed by a check (`slide-plan.ts:1-12`'s own comment states this;
+confirmed at runtime two ways in `slide-plan.test.ts:45-90`: (a) an
+exhaustive `switch` over `entry.role` with a `never`-typed `default` compiles
+today with exactly three cases, meaning a fourth combined variant does not
+exist, and (b) every constructed `prediction`/`answer` entry is checked to
+lack the other's payload key).
+
+- **`validateSlidePlan(plan)`** (`slide-plan.ts:65-130`) is the
+  belt-and-suspenders half, catching what the type cannot: `orphan-prediction`
+  (a `prediction` with no matching `answer`, `slide-plan.ts:100-107`;
+  confirmed `slide-plan.test.ts:108-123`, with a SABOTAGE proof at
+  `slide-plan.test.ts:125-156` showing a validator that omits this check
+  misses it while the real one catches it), `orphan-answer`
+  (`slide-plan.ts:119-126`; confirmed `slide-plan.test.ts:159-171`),
+  `duplicate-prediction-id` (two `prediction` or two `answer` entries sharing
+  one `predictionId`, `slide-plan.ts:91-99,110-118`; confirmed
+  `slide-plan.test.ts:173-186`), and `missing-dominant-claim` (empty or
+  whitespace-only `dominantClaim` on any role, `slide-plan.ts:72-78`;
+  confirmed `slide-plan.test.ts:188-208`, both when the plan has an empty
+  claim and when it's whitespace-only).
+- **A legitimate prediction+answer pair sharing an id is NOT flagged.**
+  `slide-plan.test.ts:93-105` runs a fully-paired plan (a `content`, a
+  `prediction`/p1, an `answer`/p1, a `content`) through `validateSlidePlan`
+  and asserts zero findings - the shared `predictionId` between a real pair is
+  the intended pairing key, not a duplicate.
+- Multiple simultaneous violation classes are each reported with the correct
+  entry index, not just the first found - `validateSlidePlan`'s loop
+  (`slide-plan.ts:71-127`) never short-circuits on the first violation it
+  pushes, confirmed by `slide-plan.test.ts:212-231`, which triggers all three
+  of `missing-dominant-claim`/`orphan-prediction`/`orphan-answer` in one plan
+  and asserts each one's index independently.
+
+### 446d - S4 `checklists.ts`: the FIND half of the adversarial-review gates
+
+`INFO_FLOW_CHECKLIST` (`checklists.ts:54-73`, version
+`info-flow-checklist-v1`) carries 6 items and `VISUAL_CHECKLIST`
+(`checklists.ts:81-106`, version `visual-checklist-v1`) carries 4, both
+matching the owner's stage-11/12 questions (confirmed
+`checklists.test.ts:18-48`). Exactly two info-flow items are `mode:
+"deterministic"` (`vocab-without-a-model`, `standalone-reconstructable`,
+`checklists.ts:62-71`) and every other item across both checklists is `mode:
+"llm"` (confirmed `checklists.test.ts:50-62`).
+
+- **The two deterministic checks.** `checkStandaloneReconstructable`
+  (`checklists.ts:161-178`) flags a non-title slide with zero bullets and no
+  (or blank) notes, exempting `slideIndex === 0` (`checklists.ts:165`;
+  confirmed it fires at `checklists.test.ts:88-99` and does NOT fire on a
+  bullet-only slide with no notes, `checklists.test.ts:101-112`).
+  `checkVocabWithoutModel` (`checklists.ts:184-201`) flags a
+  `ChecklistTerm` whose `definition` is missing or blank
+  (confirmed `checklists.test.ts:114-133`).
+- **`buildChecklistPrompt`** (`checklists.ts:241-267`) includes every `llm`
+  item's id and text, in checklist order (confirmed
+  `checklists.test.ts:150-162`), omits the deterministic-only items from the
+  question lines (`checklists.test.ts:164-171`), and places the deck content
+  after the checklist questions (`checklists.test.ts:173-178`).
+- **`parseChecklistResponse` never throws and cannot forge findings.**
+  (`checklists.ts:287-327`.) A malformed-JSON reply, a non-array reply, an
+  entry naming an unknown `itemId`, an entry naming a `deterministic`-only
+  `itemId` (an llm reply cannot manufacture a finding for a check it wasn't
+  asked to run - `checklists.ts:308,310` gates on `validItemIds`, built only
+  from `mode === "llm"` items at `checklists.ts:288-290`), and an entry with a
+  missing/non-string/blank `message` are each handled by dropping the entry
+  and returning zero findings, never by raising (confirmed, respectively,
+  `checklists.test.ts:217-222`, `:224-228`, `:206-210`, `:212-215`,
+  `:230-238`).
+- **`ranItemIds` completeness receipt.** `runDeterministicChecklist`
+  (`checklists.ts:214-229`) lists every deterministic item id it ran
+  regardless of whether it produced a finding (confirmed
+  `checklists.test.ts:83-86`, and `checklists.test.ts:135-139` for the case
+  where a checklist has zero deterministic items); `parseChecklistResponse`
+  lists every `llm` item id in the checklist as ran, since the prompt asked
+  about all of them and "omit when clean" means an unmentioned item was still
+  asked about, not skipped (confirmed `checklists.test.ts:199-204`).
+
+### 446e - S5 `polish.ts`: the idempotent, non-mutating polish pass
+
+`polishDeck(deck)` (`polish.ts:113-211`) returns `{deck, changes}` and applies
+four normalizations in order: `normalize-spacing` (trim + collapse internal
+whitespace across `presentationTitle`, every title/bullet/notes,
+`polish.ts:116-155`), `normalize-badge` (canonicalize a leading activity-badge
+prefix, `polish.ts:157-164`), `dedupe-label` (drop a slide whose
+already-normalized title exactly repeats the immediately preceding slide's,
+`polish.ts:172-184`), and `renumber-section` (renumber `Section <n>:`
+dividers contiguously over the post-dedupe list, `polish.ts:186-202`).
+
+- **POLISH-IDEMPOTENT.** `polishDeck(polishDeck(d).deck)` yields zero further
+  changes and a deep-equal deck (`polish.ts:96-99`'s own stated contract;
+  confirmed `polish.test.ts:35-41` against the deliberately-messy fixture, and
+  `polish.test.ts:43-49` for a no-op on an already-clean deck).
+- **Non-mutating.** `polishDeck` never mutates its input; confirmed by
+  `polish.test.ts:110-117` (snapshotting the input before the call and
+  diffing after).
+- **CO-PRESERVE / B1 fix: badge canonicalization requires a real separator.**
+  `canonicalizeBadge` (`polish.ts:84-93`) only rewrites a title whose badge
+  word is followed by `:` or `-` (`polish.ts:61-68`'s `BADGE_RULES`, each
+  `match` regex requiring the separator); a title merely starting with a
+  badge word and no separator (e.g. "Practice makes perfect", "Answer key for
+  homework") is left byte-for-byte unchanged (confirmed
+  `polish.test.ts:128-144`'s five-title `it.each`, and the RED/GREEN proof at
+  `polish.test.ts:146-160` reimplementing the pre-fix optional-separator regex
+  and showing it corrupts "Practice makes perfect" into "Practice: makes
+  perfect", which the real, fixed rule does not do).
+- **Dedupe sabotage.** `polish.test.ts:60-80` reimplements `polishDeck` with
+  the dedupe step removed and shows the duplicate slide survives, proving the
+  dedupe assertion (`polish.test.ts:51-58`) is load-bearing.
+
+### What executes over this behaviour today
+
+Per `docs/loop/this-repo.md` section 1, the wrapper is mandatory for two or
+more test files (`npx vitest run a b` silently drops an unmatched argument):
+
+```
+npm run test:paths -- src/lib/deck-standard/standard.test.ts src/lib/deck-standard/frame.test.ts src/lib/deck-standard/slide-plan.test.ts src/lib/deck-standard/checklists.test.ts src/lib/deck-standard/polish.test.ts
+```
+
+`Test Files  5 passed (5)` / `Tests  77 passed (77)`, and the wrapper's own
+per-argument lines, so no path was silently dropped:
+
+```
+COVERED src/lib/deck-standard/standard.test.ts files=1 passed=21
+COVERED src/lib/deck-standard/frame.test.ts files=1 passed=10
+COVERED src/lib/deck-standard/slide-plan.test.ts files=1 passed=10
+COVERED src/lib/deck-standard/checklists.test.ts files=1 passed=19
+COVERED src/lib/deck-standard/polish.test.ts files=1 passed=17
+```
+
+Total: 21 + 10 + 10 + 19 + 17 = 77, matching `Tests 77 passed (77)` above -
+the per-file sum and the aggregate agree, so no test silently double-counted
+or dropped.
+
+Every assertion above is a pure-function unit test: no test file in this
+group imports `fs`, issues a network call, or renders a component. All five
+libraries are structural leaves (`DeckStandardInput`, `FrameDeckInput`,
+`ChecklistDeckInput`, `PolishDeckInput`, `SlidePlan` are each locally-declared
+shapes, not `GeneratedDeck`/`PptxSlide` imports), so nothing here depends on
+`src/lib/decks` or `src/lib/pptx` compiling or behaving a particular way.
+
+### What is NOT covered by this entry, stated plainly (owner-verification only)
+
+- **Real LLM finding fidelity.** Whether a genuine `callLlm` response to
+  `buildChecklistPrompt` (checklists.ts) or a genuinely on-Frame model output
+  (frame.ts's `frameConsistencyReceipt` only measures textual mention count,
+  never semantic on-model-ness, per its own comment at `frame.ts:14-16`) is
+  actually good is unverifiable here: there is no API key in this environment
+  and `vitest.setup.ts` throws on any real `fetch`
+  (`docs/loop/this-repo.md` section 6). This is RES-PRES2-5 in
+  `docs/pres-2-scope.md:574`.
+- **Anything requiring render.** The Polish Linter's scope note
+  (`polish.ts:5-14`) states plainly that "fix overlaps," "enlarge diagrams,"
+  and whether a deck "looks polished from the back of the room" are RENDER
+  properties nothing here can see - `polishDeck` only fixes what is decidable
+  from the deck's text model. This is RES-PRES2-4 in
+  `docs/pres-2-scope.md:573`. No component is rendered by any test in this
+  repo (`docs/loop/this-repo.md` section 6; vitest is node-env,
+  `include: ["src/**/*.test.ts"]`).
+- **S6 (assembling S1-S5 into the resumable pipeline) is explicitly NOT
+  covered here.** This entry baselines only the five leaves as they exist
+  today in isolation; it says nothing about whether S6 correctly sequences,
+  persists, or resumes them, and nothing about F1 (the surface fork,
+  `docs/pres-2-scope.md` section 8) since S6 is gated on that fork being
+  answered first.
+- **No pptx/deck-file wiring is exercised here.** None of these five leaves
+  import `src/lib/pptx`, `src/lib/decks`, or `src/lib/presentations`
+  (confirmed above, "Import independence"), so this entry says nothing about
+  whether a real `GeneratedDeck`/`PptxSlide` object satisfies each leaf's
+  structural input type at the call site - that is S6's wiring job to get
+  right and to verify when it lands.
+
+### Residual register for this entry
+
+Each names an owner, an instrument, and the step that will measure it.
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL446-1 | Real LLM finding fidelity for `buildChecklistPrompt`/`parseChecklistResponse` and semantic on-Frame content for `frameConsistencyReceipt` (textual-mention only today) | Owner | Generate a deck with a Frame, run both checklists against a real model, read the findings | Post-deploy owner verification (RES-PRES2-5, `docs/pres-2-scope.md:574`) |
+| BL446-2 | The Polish Linter's render-only properties (overlaps, diagram sizing, "looks polished") - `polishDeck` covers only the model-representable subset | Owner | Open a polished `.pptx` produced from these five leaves in PowerPoint | Rendered layout against "no overlap, consistent spacing" (RES-PRES2-4, `docs/pres-2-scope.md:573`) |
+| BL446-3 | Whether a real `GeneratedDeck`/`PptxSlide` object satisfies each leaf's structural input type at S6's actual call sites (this entry only confirms the five leaves are import-independent, not that S6 wires them correctly) | S6 implementer + its verifier | A wiring/integration test or reading pass over S6's committed diff, asserting each call site's real deck object matches the structural shape these leaves assume | S6's own build + verify, before PRES-2 is presented as feature-complete |
+| BL446-4 | S6's sequencing/persistence/resumability of S1-S5 as a pipeline - out of scope for this entry entirely | S6 implementer | S6's own test suite plus a reading pass over the wave plan | S6's wave gate |
+| BL446-5 | F1 (the surface fork) is unanswered; S6's `owns` set and pipeline home are unfixed until it is | Repo owner (product call) | `docs/pres-2-scope.md` section 8, F1 | The plan seat cuts S6 only after the owner answers F1 (RES-PRES2-1, `docs/pres-2-scope.md:570`) |
+
+## 447. PRES-2 S6 as staged (`pipeline.ts` + `pipeline-prompts.ts` + the pipeline route + `panel-logic.ts`): the resumable-pipeline assembly - baseline before S6.7 mounts a surface
+
+Written so the S6 push (S6.3/S6.4/S6.5/S6.6, each verified SHIP per the
+implementing seat) has an oracle for its own machine-checkable behavior before
+S6.7 (the stepper/render wave, `docs/pres-2-s6-plan.md` line 227) starts
+consuming it. Like entry 446, this is an oracle read out of source and
+confirmed by running the code's own tests, not a requirement - a later change
+that moves a cited line without being filed to move it is a regression. F1
+(the surface fork) was answered by the owner before this wave (`docs/BACKLOG.md`
+PRES-2 row: "OWNER DECISIONS 2026-09-29: F1 = pipeline on the NEW Slide Deck
+Creation tab ... F3 = stage-gated with a run-to-end option"), so S6 building at
+all is downstream of that decision, not a thing this entry re-litigates.
+
+**Read at `6c585a24`** (`git rev-parse --short HEAD`; same commit entry 446
+was read at - S6 sits on top of it, uncommitted). **`git status --short`** at
+the time of writing:
+
+```
+ M docs/BACKLOG.md
+M  docs/REGRESSION.md
+M  docs/a38-acceptance-criteria.md
+M  docs/a38-scope.md
+A  docs/a38-wave-plan.md
+ M docs/backlog.yml
+A  docs/pres-2-s6-plan.md
+A  src/app/api/presentations/pipeline/route.test.ts
+A  src/app/api/presentations/pipeline/route.ts
+ M src/app/components/manual/ManualRail.tsx
+ M src/app/components/manual/manual-rail.test.ts
+ M src/app/components/manual/manual-rail.ts
+A  src/app/components/presentations/pipeline/panel-logic.test.ts
+A  src/app/components/presentations/pipeline/panel-logic.ts
+ M src/app/url-state.ts
+A  src/lib/deck-standard/checklists.test.ts
+A  src/lib/deck-standard/checklists.ts
+A  src/lib/deck-standard/polish.test.ts
+A  src/lib/deck-standard/polish.ts
+M  src/lib/deck-standard/standard.test.ts
+M  src/lib/deck-standard/standard.ts
+A  src/lib/presentations/pipeline-prompts.test.ts
+A  src/lib/presentations/pipeline-prompts.ts
+A  src/lib/presentations/pipeline.test.ts
+A  src/lib/presentations/pipeline.ts
+?? src/lib/deck-standard/frame.test.ts
+?? src/lib/deck-standard/frame.ts
+?? src/lib/deck-standard/slide-plan.test.ts
+?? src/lib/deck-standard/slide-plan.ts
+```
+
+The `manual-rail.*`/`url-state.ts` modifications and the S1-S5 `deck-standard`
+files above are OUT of this entry's write set - entry 446 already baselines
+S1-S5, and `manual-rail.ts`/`url-state.ts` belong to S6.7 (not yet built: no
+`.tsx` under `src/app/components/presentations/pipeline/` other than
+`panel-logic.ts`/`panel-logic.test.ts` exists in this `git status`, confirming
+S6.7 has not started). This entry's own write set is `docs/REGRESSION.md`
+alone.
+
+### The coverage check
+
+Measured with `grep -ac -- "<term>" docs/REGRESSION.md` against this file as
+it stood at **46,764 lines** (`wc -l docs/REGRESSION.md`) before this entry was
+appended (i.e. immediately after entry 446's residual table):
+
+| term | matching lines before this entry |
+|---|---|
+| `PipelineOp` | **0** |
+| `computeStale` | **0** |
+| `STAGE_DEPENDENCIES` | **0** |
+| `applyStageEdit` | **0** |
+| `canRunStage` | **0** |
+| `buildPipelineRequest` | **0** |
+| `reducePipelineResponse` | **0** |
+| `runToEnd` | **0** |
+| `PipelineRequest` | **0** |
+| `PipelineSuccessResponse` | **0** |
+| `PipelineErrorResponse` | **0** |
+| `S6.3` / `S6.4` / `S6.5` / `S6.6` / `S6.7` | **0** each |
+
+So the accurate statement is the same shape as 446's: **no entry in this file
+covers any part of S6.** This is a first baseline for these four leaves, not a
+partial-coverage reconciliation - there is no disposition table (nothing here
+was restructured out of a prior REGRESSION entry).
+
+### File sizes on the path
+
+`wc -l <path>`, at `6c585a24` (working tree): `src/lib/presentations/pipeline.ts`
+**347**, `src/lib/presentations/pipeline-prompts.ts` **358**,
+`src/app/api/presentations/pipeline/route.ts` **361**,
+`src/app/components/presentations/pipeline/panel-logic.ts` **280** - all four
+well under the repo-wide 1000-line ceiling
+(`src/file-size-ceiling.structure.test.ts`, confirmed that file exists at that
+path, same as entry 446 confirmed). Test files: `pipeline.test.ts` **358**,
+`pipeline-prompts.test.ts` **410**, `route.test.ts` **277**,
+`panel-logic.test.ts` **335**.
+
+Flagged per this file's own "measure, do not recall" rule
+(`docs/loop/this-repo.md` section "The gates," the 42-line/13-file
+line-counting-tool disagreement): the Read tool's own line numbering on each
+of these four source files reports one line MORE than `wc -l` (e.g.
+`pipeline.ts`'s last populated line is numbered 348 by Read, `wc -l` reports
+347). This is consistent with each file ending in a trailing newline that `cat
+-n`-style numbering counts as a line boundary before EOF while `wc -l` counts
+completed newlines - not the 42-line divergence this file has seen before, but
+recorded here so a future run that quotes "348" against this entry's "347"
+does not read as drift. `wc -l` is the instrument cited throughout this entry,
+matching entry 446's own convention.
+
+### 447a - S6.3 `pipeline.ts`: the stage-state model, the invalidation graph, and the wire contract
+
+The ten-member `StageId` union (`pipeline.ts:38-48`, `ALL_STAGE_IDS`
+`:50-61`) is coarser than the owner's 13-step narrative by design
+(`:28-37`'s own comment: several narrative steps share one editable
+artifact). `activities` is the S6.3 amendment over the plan's original
+sketch: its op payload is textually `{context}`, the same shape as
+`outline`'s, and `PresentationContext` embeds `sources`
+(`presentations/types.ts`), so `STAGE_DEPENDENCIES.activities` is
+`["sources"]` (`pipeline.ts:156`), identical to `outline`'s edge
+(`:155`) - and nothing consumes `activities` (the `deck` op payload has no
+`activities` field), so its own downstream set is empty (`:163` has no
+`activities` value anywhere on the right-hand side).
+
+- **`STAGE_DEPENDENCIES`** (`pipeline.ts:153-164`), the single source of truth
+  the graph walks: `sources: []`, `outline/activities/frame: ["sources"]`,
+  `plan: ["outline"]` (NOT frame), `deck: ["frame","plan"]` (NOT activities),
+  `standard/reviewInfoFlow/reviewVisual/polish: ["deck"]`.
+- **`computeStale(state, editedStage)`** (`:189-202`) is the transitive
+  closure of `directDependents` (`:170-172`), via a BFS-style queue, never
+  including the edited stage itself (`:191-201`; the "never includes itself"
+  doc comment at `:179`). Checked EXHAUSTIVELY against `STALE_ORACLE`
+  (`pipeline.test.ts:77-88`), a table its own comment (`:64-76`) states was
+  "independently authored from the plan's OWN prose ... not derived from
+  computeStale's implementation" - one test per `StageId` (`:90-105`, 10
+  cases) asserting BOTH that every expected downstream stage is present and
+  that `stale.size` equals the expected count exactly (no extra stage sneaks
+  in). Five further targeted PROBEs pin the non-obvious edges by name:
+  editing `frame` does NOT stale `outline`/`sources`/`plan` (`:111-118`);
+  editing `plan` does NOT stale `outline`/`frame`/`sources` (`:120-125`);
+  editing `sources` DOES stale `activities` (`:127-130`); editing
+  `outline`/`frame`/`plan`/`deck` does NOT stale `activities` (`:132-137`);
+  and editing any of the four leaf stages stales nothing (`:139-149`).
+- **Caveat on the "sabotage" label.** `pipeline.test.ts:151-157` is titled
+  "sabotage probe: dropping the frame->deck edge would break this test," but
+  its own comment states plainly it "does not mutate pipeline.ts; it records
+  the expectation" - unlike S1's `standard.test.ts:190-288` (four actually
+  reimplemented, edge-removed checkers proven to miss what the real one
+  catches), this is an ordinary assertion with a comment, not an executed
+  RED/GREEN mutation proof. The exhaustive per-stage oracle above (10 cases,
+  each asserting an exact set) is what actually makes a dropped edge
+  detectable - it would fail the `stale.size` equality or the
+  presence/absence assertion for that stage - but no test here actually
+  deletes an edge and reruns to prove it. Recorded as BL447-1 below rather
+  than silently upgraded to "sabotage-backed."
+- **`applyStageEdit`** (`:225-239`) marks the edited stage `"done"` with the
+  new artifact (`:231-233`) and every `computeStale`-named stage `"stale"` via
+  `markStale` (`:221-223`), which keeps the stage's EXISTING artifact
+  (`{...state[stage], status: "stale"}` - the value is never discarded, only
+  the status changes). Non-mutating: returns a new object via spread at every
+  level, confirmed `pipeline.test.ts:169-190` (asserts `before.frame.status`
+  and `before.deck.status` are unchanged after the call) and the "stale keeps
+  last-good artifact" claim confirmed at `:185` (`after.deck.artifact` equals
+  `before.deck.artifact` after a frame edit staled it).
+- **`canRunStage`** (`:248-253`): every direct dependency must have a
+  non-null artifact AND status `"done"` - a `"stale"` dependency blocks the
+  run (its artifact is non-null but its status isn't `"done"`). Confirmed
+  `pipeline.test.ts:225-256` (5 cases): `sources` always runnable (no deps,
+  `:226-229`); an idle/no-artifact dependency blocks `outline`/`activities`/
+  `deck` (`:231-236`); all-done dependencies allow `activities`/`deck`/
+  `standard` (`:238-243`); a STALE `frame` blocks `deck` (`:245-249`); and a
+  stage whose OWN status is stale but whose dependencies are done CAN run
+  (`:251-256`) - re-running is exactly what a stale-but-runnable stage means.
+- **The wire contract** (`:266-347`): `PipelineOp` is an 8-member union
+  (`:266-274`: outline, frame-suggest, plan, deck, activities,
+  review-infoflow, review-visual, regen-slide). `PipelineRequest`
+  (`:309-311`) and `PipelineSuccessResponse` (`:331-333`) are both mapped
+  types over `PipelineRequestPayload`/`PipelineSuccessPayload`
+  (`:290-306`/`:314-323`), so every op's request/response shape is declared
+  once, next to the payload it describes. `PipelineErrorResponse`
+  (`:336-339`) is `{status: "error", reason: string}` only - there is no
+  third "refused" status distinct from error (confirmed by reading the full
+  type; `panel-logic.ts:13-22`'s own header comment states the same
+  divergence from the shipped `/api/decks/ask` three-way contract). All 8 ops
+  plus the error shape are constructed and type-checked in
+  `pipeline.test.ts:260-358` (9 tests). `DeckContent` is `GeneratedDeck`
+  reused verbatim (`presentations/types.ts:54`), not re-declared.
+
+### 447b - S6.4 `pipeline-prompts.ts`: 8 builders + 8 parsers, every parser malformed-input-safe
+
+One builder and one parser per `PipelineOp` member, each typed directly
+against `Extract<PipelineRequest, {op: "..."}>` (confirmed by reading every
+builder's signature, `pipeline-prompts.ts:90,105,161,236,267,280,284,313`) so
+S6.4 cannot silently drift from S6.3's wire contract. Reuse, per the file's
+own ledger (`:14-32`): `outline`/`activities` reuse the shipped
+`buildOutlinePrompt`/`buildActivitiesPrompt` verbatim (`:47`, confirmed those
+two exports exist at `src/lib/presentations/prompts.ts:24,34`); `deck` folds
+`SLIDE_STRUCTURE_REQUIREMENTS`/`SLIDE_DECK_JSON_SHAPE` from
+`@/lib/slide-prompt` unedited (confirmed exported at `slide-prompt.ts:65,40`)
+and `buildFrameFoldLines` from S2's `frame.ts` unedited; `deck`/`regen-slide`
+parsing reuses `parseDeckSlides` from `./parse.ts` unedited (confirmed
+exported at `parse.ts:86`); `activities` parsing reuses `parseActivities`
+(confirmed `parse.ts:114`); `review-infoflow`/`review-visual` reuse
+`buildChecklistPrompt`/`parseChecklistResponse` with S4's
+`INFO_FLOW_CHECKLIST`/`VISUAL_CHECKLIST` unedited.
+
+- **outline**: `buildPipelineOutlinePrompt` (`:90-92`) delegates to the
+  reused builder; `parseOutlineResponse` (`:95-99`) returns `null` on a
+  blank/whitespace-only reply, never an empty-markdown object.
+- **frame-suggest**: `buildFrameSuggestPrompt` (`:105-115`); `parseFrame`
+  (`:118-155`) is a hand-rolled structural JSON validator - malformed JSON,
+  a non-object, a missing/empty `mentalModel.name`, an empty `steps` array,
+  a missing `runningExample.name`, all return `null` (`:120-149`), never
+  throw.
+- **plan**: `buildPlanPrompt` (`:161-178`) folds `buildFrameFoldLines(request.frame)`
+  (`:162`) before the outline and material. `parsePlan` (`:189-222`) is
+  explicitly documented as STRUCTURAL-ONLY (`:180-188`'s comment: "it does
+  not itself run `validateSlidePlan`'s cross-entry pairing checks") - it
+  validates each entry's `role`/`dominantClaim`/`predictionId` shape but
+  leaves orphan/duplicate detection to `@/lib/deck-standard/slide-plan.ts`
+  (S3, entry 446c), confirmed by reading `parsePlan` never importing or
+  calling `validateSlidePlan`.
+- **deck**: `buildPipelineDeckPrompt` (`:236-256`) is the one builder that
+  folds all three reused pieces plus the plan's per-slide claims, in order:
+  `SLIDE_STRUCTURE_REQUIREMENTS` (`:244`), the frame fold lines (`:237,245`),
+  one claim line per plan entry (`:238-239,247-248`), then
+  `SLIDE_DECK_JSON_SHAPE` (`:250`), then the material (`:253-254`). Ordering
+  confirmed `pipeline-prompts.test.ts:203-235` (asserts
+  `structureIdx < frameIdx < claimIdx < materialIdx`) and the frame-null case
+  at `:237-248` (frame lines omitted, structure+plan still present).
+- **activities**: `buildPipelineActivitiesPrompt` (`:267-269`);
+  `parseActivitiesResponse` (`:272-274`) NEVER returns `null` - a malformed
+  reply degrades to `{ideas: []}` via the reused `parseActivities`, confirmed
+  `pipeline-prompts.test.ts:291-294`.
+- **review-infoflow / review-visual**: `buildReviewInfoFlowPrompt`/
+  `buildReviewVisualPrompt` (`:280-286`) delegate to `buildChecklistPrompt`
+  with each checklist; `parseReviewInfoFlowResponse`/`parseReviewVisualResponse`
+  (`:289-295`) delegate to `parseChecklistResponse`, which (per entry 446d)
+  never throws and degrades to zero findings.
+- **regen-slide**: `buildRegenSlidePrompt` (`:313-345`) derives
+  `priorSlide = request.deck.slides[request.slideIndex]` (`:314`) and
+  `planEntry = request.plan.entries[request.slideIndex]` (`:315`) BY CODE
+  rather than accepting them as separate payload fields - the out-of-range
+  guard (`priorSlide ? [...] : ["(no prior slide at this index)"]`,
+  `:318-324`) is confirmed non-throwing at `slideIndex: 99`
+  (`pipeline-prompts.test.ts:375-387`, including the literal fallback string
+  assertion). `parseRegenSlideResponse` (`:354-358`) reuses `parseDeckSlides`
+  and returns `[]` (never `null`, never throws) on an invalid or
+  zero-slide reply (`:356`).
+- **Malformed-input safety, one `not.toThrow()` assertion per parser
+  (direct assertions, not mutation-sabotage - each exercises the real
+  function against a bad input, it does not reimplement the function
+  without its guard).** `parseOutlineResponse`
+  (`pipeline-prompts.test.ts:83,85`), `parseFrame` (`:127`), `parsePlan`
+  (`:192`), `parseDeckResponse` (`:269`), `parseActivitiesResponse` (`:292`),
+  `parseReviewInfoFlowResponse` (`:320`), `parseReviewVisualResponse`
+  (`:340`), `parseRegenSlideResponse` (`:406`) - 8 of the file's 10
+  `not.toThrow()` assertions (the other 2, `:83` and `:85`, are both against
+  `parseOutlineResponse`; the 10th, `:385`, is the `buildRegenSlidePrompt`
+  out-of-range guard, a builder not a parser) - confirmed by
+  `grep -n "not.toThrow" src/lib/presentations/pipeline-prompts.test.ts`.
+
+### 447c - S6.5 `route.ts`: one op per invocation, budget-raced, never a bare 500
+
+`POST` (`route.ts:229-276`) contains no loop of any kind over stages - it
+reads exactly one `request.op`, builds one prompt (`buildPromptForOp`,
+`:278-297`), makes one `callLlm` call, and returns one response
+(`respondForOp`, `:306-348`); confirmed by reading the full function body,
+which is the "never-loop contract" (`docs/pres-2-s6-plan.md:188`) that binds
+the route to the single `maxDuration = 60` declaration (`:50`).
+
+- **`requireUser` first, 401 before any callLlm call.** `:232-236`, the
+  first statement inside `POST`, before the body is even parsed. Confirmed
+  `route.test.ts:75-84` (401, `expect(callLlm).not.toHaveBeenCalled()`).
+- **Inbound per-op validation is 400, never a crash.** `parsePipelineRequest`
+  (`:179-227`) is a pure switch of structural type guards (`isRecord`,
+  `isPresentationContext`, `isPinnedFrameOrNull`, `isSlidePlan`,
+  `isDeckContent`, `:115-170`), returning `null` on any op/shape mismatch;
+  `POST` responds 400 at `:249` when it does. Confirmed `route.test.ts:86-95`
+  (unknown op), `:97-107` (a known op, `deck`, missing its required `plan`
+  field), and `:109-118` (the body itself is not valid JSON, caught at
+  `:239-243`) - all three assert `callLlm` was never reached (first two
+  explicitly; the JSON-parse failure returns before `parsePipelineRequest`
+  even runs).
+- **Each `callLlm` is raced via `withDeadline` against the REMAINING
+  budget.** `callWithBudget` (`:91-101`) wraps `withDeadline(work, budgetMs,
+  label)` (imported from `@/lib/course-intel/fetch:316`, confirmed that
+  export exists at that line); `budgetMs` is `remainingBudgetMs(startedAtMs)`
+  (`:103-105,252,260`), never the full `SOFT_DEADLINE_MS` - so retries inside
+  `callLlm` cannot run past this request's own deadline.
+- **504 on timeout, distinguishable from 502 on failure.** A timeout
+  (`withDeadline` rejecting with a message matching `/did not finish
+  within/`, `:96-98`) or an upfront insufficient-budget check (`:252-255`)
+  both produce `deadlinePartialResponse()` (`:74-77`) - HTTP 504. Any other
+  `callWithBudget` failure, or `callResult.value.ok === false`
+  (`:264-273`), produces a plain `errorResponse(..., 502)`. Both directions
+  are RED/GREEN-proven, not just asserted once: 504 RED at
+  `route.test.ts:234-243` (a rejected `withDeadline`), GREEN at `:245-254`
+  (same `outline` op, no timeout, real callLlm success mock, no
+  auth/behavior change other than removing the timeout -> 200); 502 for a
+  failed call at `:256-265` (`callLlm` resolves `{ok: false}`) and for a
+  thrown non-deadline error at `:267-276`.
+- **A null-parser result is an explicit 502, never a 200 masquerading as
+  success.** Every op whose parser CAN fail (`outline`, `frame-suggest`,
+  `plan`, `deck`, `regen-slide` - lines `312,317,322,327,344`) calls
+  `refused(reason)` (`:358-361`, `NextResponse.json({status:"error",
+  reason}, {status: 502})`) on a `null`/empty parse. RED/GREEN-proven for
+  `outline`: RED at `route.test.ts:190-199` (blank reply -> not-200, status
+  error), GREEN at `:222-232` (same op, a real reply -> 200) - the comment at
+  `:222` names this explicitly as a sabotage-style proof. Also directly
+  asserted for `regen-slide` at `:201-220` (an unparseable reply -> not-200,
+  error). `activities`/`review-infoflow`/`review-visual` NEVER refuse
+  (`:330-341`'s own comment: their parsers always degrade to an
+  empty-but-valid artifact, so those three ops always respond `ok` even on a
+  garbage LLM reply) - this is the behavior named in the residual register
+  below (BL447-2), since I could not find a filed "S6.5 INFO-1" note under
+  that name anywhere in `docs/pres-2-s6-plan.md` or `docs/pres-2-scope.md`
+  (`grep -n "INFO-1" docs/pres-2-s6-plan.md docs/pres-2-scope.md` returns
+  nothing for this route) - the behavior itself is real and cited above by
+  line number; only the specific "INFO-1" label could not be confirmed as
+  filed anywhere, so it is not repeated as a citation here.
+- **In-house only.** The only model-access import in `route.ts` is `callLlm`
+  from `@/lib/llm` (`:5`); `grep -n "fetch(\|axios\|http\.\|https\."` across
+  all four S6 files (`pipeline.ts`, `pipeline-prompts.ts`, `route.ts`,
+  `panel-logic.ts`) returns no matches, confirming none of the four makes a
+  direct network call outside `callLlm`.
+
+### 447d - S6.6 `panel-logic.ts`: request builders, a refuse-not-ok reducer, and a frontier planner
+
+Pure - no fetch, no DOM, no `React` import (confirmed by reading the full
+file's imports, `:24-35`); all IO is left to the not-yet-built S6.7 `.tsx`
+per the file's own header comment (`:1-6`).
+
+- **`buildPipelineRequest`** (`:111-157`) assembles one op's request from
+  `PipelineState` plus (for `regen-slide` only) `RegenSlideExtras`
+  (`:106-109`). `requireArtifact` (`:94-103`) throws a named error
+  (`` `buildPipelineRequest: stage "${stage}" has no artifact yet` ``) rather
+  than silently passing `null` where the wire contract requires a real
+  artifact - confirmed `panel-logic.test.ts:161-165` (building `plan`
+  without a done `outline` throws, matching `/outline/`) and `:152-159`
+  (`regen-slide` without `regenExtras` throws, `:143-145`). Seven request
+  shapes are asserted structurally equal to the expected `PipelineRequest`
+  (`:80-166`): `outline`, `plan` with a done frame, `plan` with frame still
+  `null` (`toMatchObject`, since `frame: null` is itself the assertion),
+  `deck`, `regen-slide`, plus the two throw cases above.
+- **`reducePipelineResponse`** (`:213-248`) reduces to success ONLY when
+  BOTH `httpStatus === 200` AND `isMatchingOkBody(op, body)` hold
+  (`:221`); `isMatchingOkBody` (`:172-192`) checks `status === "ok"`, `op ===
+  op`, AND the presence of that op's own payload field. Anything else -
+  wrong status, wrong op, a non-200, or a 200 body missing its own field -
+  falls through to `markStageError(state, stage)` (`:195-197,247`), which
+  rewrites ONLY that one stage's entry via a shallow spread, leaving every
+  sibling untouched. Confirmed non-vacuously in both directions:
+  `panel-logic.test.ts:177-204` (a genuine `outline` ok response marks
+  `outline` `"done"` AND stales its dependents via `applyStageEdit`, proving
+  the reducer actually delegates to the S6.3 invalidation graph, not a
+  local copy of it); `:226-246` (a 502 `PipelineErrorResponse` marks ONLY
+  `frame` `"error"`, with `sources`/`outline`/`plan` asserted `toEqual` their
+  pre-call values); `:248-265` (a `{status: "refused", ...}` body at HTTP
+  200 - a shape the wire contract does not define as ok - is still reduced
+  as an error, with the deck artifact left in place); `:267-272` (a 200 body
+  with `status: "ok"` but missing the `outline` field is also reduced as
+  error). These are direct assertions against specific non-conforming
+  bodies, not a mutation-sabotaged copy of the reducer.
+- **`regen-slide` folds `{slides}` into the existing deck, preserving
+  `presentationTitle`.** `applyRegenSlideSuccess` (`:207-211`) reads
+  `state.deck.artifact?.presentationTitle` and builds a new `DeckContent`
+  with the SAME title and the NEW slide array, then routes through
+  `applyStageEdit("deck", ...)` so reviews/polish go stale exactly as a full
+  `deck` op would. Confirmed `panel-logic.test.ts:206-224` (title preserved
+  as `"My Deck"`, `reviewVisual` staled).
+- **`runToEnd`** (`:272-280`), the frontier planner: candidates are
+  `ALL_STAGE_IDS` up to (and including) an optional `target`
+  (`:273-274`, defaulting to the full chain ending at `polish`); a stage is
+  scheduled only if it is not already `"done"` (`:277`) AND `canRunStage`
+  (imported from `pipeline.ts`) says its dependencies are satisfied
+  (`:278`). Confirmed `panel-logic.test.ts:279-335` (6 cases): a fresh
+  pipeline schedules only `sources` (`:280-283`); once `sources` is done,
+  the frontier is `["outline","activities","frame"]` in `ALL_STAGE_IDS`
+  order (`:285-288`); a done-and-fresh stage is skipped (`:290-298`); a
+  `"stale"` stage is RE-included once its own deps are satisfied
+  (`:300-308`); and the PROBE at `:310-326` asserts an unmet-dependency
+  stage (`plan`, whose `outline` is still idle) is NOT scheduled, and
+  neither is anything depending on it (`deck`, transitively) - even though
+  `deck`'s OTHER dependency (`frame`) is already done, while `outline`
+  itself (whose only dependency, `sources`, IS done) and the independent
+  `activities` ARE scheduled. An explicit `target` excludes everything past
+  it (`:328-334`).
+
+### What executes over this behaviour today
+
+Per `docs/loop/this-repo.md` section 1, the wrapper is mandatory for two or
+more test files:
+
+```
+npm run test:paths -- src/lib/presentations/pipeline.test.ts src/lib/presentations/pipeline-prompts.test.ts src/app/api/presentations/pipeline/route.test.ts src/app/components/presentations/pipeline/panel-logic.test.ts
+```
+
+`Test Files  4 passed (4)` / `Tests  95 passed (95)`, and the wrapper's own
+per-argument lines, so no path was silently dropped:
+
+```
+COVERED src/lib/presentations/pipeline.test.ts files=1 passed=37
+COVERED src/app/components/presentations/pipeline/panel-logic.test.ts files=1 passed=18
+COVERED src/lib/presentations/pipeline-prompts.test.ts files=1 passed=25
+COVERED src/app/api/presentations/pipeline/route.test.ts files=1 passed=15
+```
+
+Total: 37 + 18 + 25 + 15 = 95, matching `Tests 95 passed (95)` above - the
+per-file sum and the aggregate agree, so no test silently double-counted or
+dropped.
+
+`route.test.ts` is the one file in this group that mocks its dependencies
+(`@/lib/supabase/auth`, `@/lib/llm`, `@/lib/course-intel/fetch`, all at the
+EXACT specifiers `route.ts` imports from, `route.test.ts:8-16`) - the other
+three are pure-function unit tests with no mock and no IO. No test file in
+this group renders a component.
+
+### What is NOT covered by this entry, stated plainly (owner-verification only)
+
+- **Real `callLlm` output quality for every stage** (outline, frame-suggest,
+  plan, deck, activities, review-infoflow, review-visual, regen-slide) is
+  unverifiable here: there is no API key in this environment and
+  `vitest.setup.ts` throws on any real `fetch` (`docs/loop/this-repo.md`
+  section 6); `route.test.ts` mocks `callLlm` entirely. This extends
+  RES-PRES2-5 (dup'd as RES-S6-C, `docs/pres-2-s6-plan.md:391`) to the
+  pipeline route's own 8 ops.
+- **S6.7 - the stepper render, run-to-end execution against a live route,
+  drag/paste, the deck preview, the `.pptx` download, and per-slide "ask"
+  interactions - is a separate, not-yet-built surface wave.** No component
+  under `src/app/components/presentations/pipeline/` renders under vitest
+  (only `panel-logic.ts`/`panel-logic.test.ts` exist there today, confirmed
+  by this entry's own `git status --short` above); render, focus, and
+  keyboard behavior for S6.7 are all reading claims once built, per
+  `docs/loop/this-repo.md` section 6 ("No component is rendered by any test
+  in this repo"). This is RES-S6-C (`docs/pres-2-s6-plan.md:391`).
+  `docs/pres-2-s6-plan.md:227` names the exact file list S6.7 will touch.
+- **An empty-but-valid review/activities result is indistinguishable from an
+  unparsed one at the wire.** `route.ts:330-341`'s own comment states that
+  `activities`/`review-infoflow`/`review-visual` never signal failure -
+  their parsers degrade to an empty ideas list or zero findings rather than
+  `null` - so a genuinely-broken LLM reply for one of these three ops
+  produces the SAME 200-ok, empty-artifact response as a legitimately clean
+  review. I could not locate a filed note under the name "S6.5 INFO-1" for
+  this specific behavior in `docs/pres-2-s6-plan.md` or
+  `docs/pres-2-scope.md` (both greped, no hit) - it is recorded here as a
+  residual (BL447-2) directly from reading the route, not as confirmation of
+  a pre-existing filed citation.
+- **The `computeStale` invalidation graph's exhaustive 10-case oracle is not
+  backed by an executed edge-removal mutation test**, unlike S1's
+  `standard.test.ts:190-288` four-rule sabotage. See 447a's caveat and
+  BL447-1 below.
+- **No per-project/server persistence of pipeline state.** `PipelineState`
+  as modeled in `pipeline.ts` has no `localStorage`/server read or write
+  path anywhere in these four files (confirmed by reading all four; the only
+  persistence mentioned anywhere is the plan's own note that S6.7 will use
+  client-only `ta-pres-pipeline-*` keys, `docs/pres-2-s6-plan.md:154`) - this
+  is RES-S6-B (`docs/pres-2-s6-plan.md:390`).
+
+### Residual register for this entry
+
+Each names an owner, an instrument, and the step that will measure it.
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL447-1 | `computeStale`'s exhaustive per-stage oracle (`pipeline.test.ts:90-105`) is not backed by an actually-executed edge-removal mutation test the way S1's four rules are (`standard.test.ts:190-288`); the test titled "sabotage probe" at `pipeline.test.ts:151-157` does not mutate `pipeline.ts` by its own admitted comment | S6 implementer or its verifier | A reimplemented `computeStale` with one edge (e.g. `frame->deck`) deleted from a local copy of `STAGE_DEPENDENCIES`, asserted to MISS what the real graph catches | Next revision of `pipeline.test.ts`, before this graph is called load-bearing without qualification |
+| BL447-2 | An empty-but-valid `activities`/`review-infoflow`/`review-visual` result is wire-indistinguishable from a genuinely broken LLM reply for those three ops (`route.ts:330-341`); I could not confirm a filed "S6.5 INFO-1" citation for this under that name | Owner | Manually trigger a garbage LLM reply for one of these three ops in a deployed environment and confirm the UI does not silently present it as "no issues found" | Owner verification post-S6.7, or a named follow-up scope item if the owner wants a distinguishing signal added to the wire contract |
+| BL447-3 | Real `callLlm` output quality/faithfulness for all 8 pipeline ops - no API key, no real fetch in this environment | Owner | Generate through each of the 8 ops against a real model in a deployed environment and read the output | Post-deploy owner verification (RES-PRES2-5 / RES-S6-C, `docs/pres-2-s6-plan.md:391`) |
+| BL447-4 | S6.7 (the stepper surface, run-to-end execution against a live route, drag/paste, deck preview, `.pptx` download, per-slide ask) - out of scope for this entry entirely; nothing under `components/presentations/pipeline/` renders yet | S6.7 implementer + its verifier | Build the surface per `docs/pres-2-s6-plan.md:227`'s file list, then a reading pass plus owner walkthrough (RES-S6-C) | S6.7's own wave gate + owner verification after it lands |
+| BL447-5 | Per-project/server persistence and RLS for pipeline stage-state - today's `PipelineState` has no persistence path in any of these four files; the plan defers this to client-only `localStorage` for now | Repo owner + future data wave | A migration with a stored generated column + idempotent RLS (`docs/loop/seats.md:217-229`), then a live-DB check | Deferred; owner verification on a deployed DB (RES-S6-B, `docs/pres-2-s6-plan.md:390`) |

@@ -230,6 +230,23 @@ describe("the popstate ladder restores every inner-nav view's own state (I5)", (
         "would flag this, and until then, picking a Grading inner item never pushes a history entry"
     ).toContain("gradingView");
   });
+
+  it("PRES-2 S6.7: reads parsed.presentationsView inside the popstate handler, so the new branch actually restores it", () => {
+    expect(popStateSlice).toContain("parsed.presentationsView");
+  });
+
+  it("PRES-2 S6.7: lists presentationsView in the URL-sync effect's dependency array, so picking the pipeline child pushes a history entry", () => {
+    const syncEffectStart = source.indexOf("useEffect(() => {\n    const target = buildUrlSearch({");
+    expect(syncEffectStart, "expected to find the URL-sync effect").toBeGreaterThan(-1);
+    const depsStart = source.indexOf("}, [", syncEffectStart);
+    const depsEnd = source.indexOf("]);", depsStart);
+    const deps = source.slice(depsStart, depsEnd);
+    expect(
+      deps,
+      "presentationsView is missing from the URL-sync effect's dependency array - exhaustive-deps " +
+        "would flag this, and until then, picking the pipeline child never pushes a history entry"
+    ).toContain("presentationsView");
+  });
 });
 
 // GRAD-SUBTAB wave 1 verify BLOCKER 1: parseUrlState (via RETIRED_GRADING_POINTERS)
@@ -322,8 +339,15 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
   it("the gradingView initializer's URL branch also consults resolveGradingPointer, so the pointer's inner view survives (repo-grades -> repos, not the 'run' default)", () => {
     const start = source.indexOf("const [gradingView, setGradingView] = useState<GradingView>(");
     expect(start, "expected to find the gradingView useState initializer").toBeGreaterThan(-1);
-    const end = source.indexOf("const [focusCourseId", start);
-    expect(end, "expected to find the next useState block after gradingView's").toBeGreaterThan(start);
+    // PRES-2 S6.7 line-shift obligation (docs/pres-2-s6-plan.md section 7):
+    // this guard used to end at "const [focusCourseId", the next useState
+    // after gradingView's. S6.7 inserted presentationsView's own useState
+    // between them (deliberately, mirroring gradingView's own placement rule
+    // - see that initializer's comment in useAppNavigation.ts), so the guard
+    // is re-pinned to end there instead; presentationsView gets its own,
+    // separate block below ending at "const [focusCourseId".
+    const end = source.indexOf("const [presentationsView", start);
+    expect(end, "expected to find the presentationsView useState block after gradingView's").toBeGreaterThan(start);
     const block = source.slice(start, end);
 
     expect(
@@ -339,6 +363,18 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
     expect(block, "the resolved gradingPointer must be returned as gradingView").toMatch(
       /if\s*\(gradingPointer\)\s*return\s+gradingPointer\.gradingView/
     );
+  });
+
+  it("PRES-2 S6.7: the presentationsView initializer's URL branch is gated on manualView === \"presentations\" and calls normalizePresentationsView", () => {
+    const start = source.indexOf("const [presentationsView, setPresentationsView] = useState<PresentationsView>(");
+    expect(start, "expected to find the presentationsView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [focusCourseId", start);
+    expect(end, "expected to find the next useState block after presentationsView's").toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    expect(block).toMatch(/manualView === "presentations"/);
+    expect(block).toMatch(/normalizePresentationsView\(\s*urlParams\.get\("presentationsView"\)\s*\)/);
+    expect(block).toMatch(/normalizePresentationsView\(\s*localStorage\.getItem\(PRESENTATIONS_VIEW_KEY\)\s*\)/);
   });
 });
 
@@ -422,8 +458,10 @@ describe("GRAD-SUBTAB wave 3 (RES-GRAD-PINS): the manualView/gradingView localSt
   it("the gradingView initializer's localStorage branch checks the exact stored drafts-grades combination and returns 'drafts'", () => {
     const start = source.indexOf("const [gradingView, setGradingView] = useState<GradingView>(");
     expect(start, "expected to find the gradingView useState initializer").toBeGreaterThan(-1);
-    const end = source.indexOf("const [focusCourseId", start);
-    expect(end, "expected to find the next useState block after gradingView's").toBeGreaterThan(start);
+    // Re-pinned for PRES-2 S6.7 - see the matching comment on the other
+    // gradingView-block test above.
+    const end = source.indexOf("const [presentationsView", start);
+    expect(end, "expected to find the presentationsView useState block after gradingView's").toBeGreaterThan(start);
     const block = source.slice(start, end);
 
     expect(

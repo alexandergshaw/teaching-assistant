@@ -43,6 +43,29 @@ export type BuildViewType = "new" | "prebuilt";
 // plain conditional like "drafts" - see page.tsx's mount comment.
 export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts" | "chat";
 
+// The Presentations sub-tab's own inner selection (PRES-2 S6.7,
+// RES-S6-A/docs/pres-2-s6-plan.md section 0.1): which of its two children is
+// showing. The owner's "NEW Slide Deck Creation tab" for the 13-stage
+// pipeline lands as a SECOND inner-nav child under the existing
+// `presentations` Manual view rather than replacing the shipped thin
+// one-shot flow - "slide-deck" is that shipped thin flow
+// (`presentations-slide-deck`, unchanged), "pipeline" is the new stage-gated
+// surface (`presentations-pipeline`). Same shape as GradingView above.
+export type PresentationsView = "slide-deck" | "pipeline";
+
+const PRESENTATIONS_VIEW_PRESENCE: Record<PresentationsView, true> = {
+  "slide-deck": true,
+  pipeline: true,
+};
+export const PRESENTATIONS_VIEWS: readonly PresentationsView[] = Object.keys(
+  PRESENTATIONS_VIEW_PRESENCE
+) as PresentationsView[];
+
+const PRESENTATIONS_VIEW_SET: ReadonlySet<string> = new Set(PRESENTATIONS_VIEWS);
+export function isPresentationsView(value: unknown): value is PresentationsView {
+  return typeof value === "string" && PRESENTATIONS_VIEW_SET.has(value);
+}
+
 const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
   run: true,
   repos: true,
@@ -121,6 +144,7 @@ export const destinations: DestinationGroup[] = [
     name: "Presentations",
     destinations: [
       { id: "presentations-slide-deck", label: "Slide Deck Creation", description: "Generate a lecture outline, activity ideas, and a slide deck from pasted context" },
+      { id: "presentations-pipeline", label: "Slide Deck Pipeline", description: "Build a deck through the full 13-stage pipeline, stage by stage, with editable intermediates and a run-to-end option" },
     ],
   },
   {
@@ -239,6 +263,7 @@ export function getActiveDestinationId(
   buildView: BuildViewType,
   contentView: ContentView,
   gradingView: GradingView,
+  presentationsView: PresentationsView = "slide-deck",
 ): string {
   if (manualView === "course-planning") {
     return buildView === "new" ? "build-new" : "build-prebuilt";
@@ -253,7 +278,7 @@ export function getActiveDestinationId(
   } else if (manualView === "artifact-design") {
     return "artifact-design";
   } else if (manualView === "presentations") {
-    return "presentations-slide-deck";
+    return presentationsView === "pipeline" ? "presentations-pipeline" : "presentations-slide-deck";
   } else if (manualView === "grading") {
     return `grading-${gradingView}`;
   }
@@ -300,11 +325,13 @@ export function resolveStateFromDestinationId(
   currentBuildView: BuildViewType,
   currentContentView: ContentView,
   currentGradingView: GradingView,
+  currentPresentationsView: PresentationsView = "slide-deck",
 ): {
   manualView: ManualViewType;
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
+  presentationsView: PresentationsView;
 } {
   const alias = RETIRED_GRADING_POINTERS[id];
   if (alias) {
@@ -313,6 +340,7 @@ export function resolveStateFromDestinationId(
       buildView: currentBuildView,
       contentView: currentContentView,
       gradingView: alias.gradingView,
+      presentationsView: currentPresentationsView,
     };
   }
 
@@ -355,7 +383,13 @@ export function resolveStateFromDestinationId(
     return currentGradingView;
   })();
 
-  return { manualView, buildView, contentView, gradingView };
+  const presentationsView: PresentationsView = (() => {
+    if (id === "presentations-pipeline") return "pipeline";
+    if (id === "presentations-slide-deck") return "slide-deck";
+    return currentPresentationsView;
+  })();
+
+  return { manualView, buildView, contentView, gradingView, presentationsView };
 }
 
 export function validateLmsViewsCompleteness(): string[] {

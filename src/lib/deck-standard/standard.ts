@@ -51,30 +51,68 @@ const SMALL_WORDS = new Set([
 ]);
 
 /**
- * Whether `title` conforms to Title Case: the first and last word are
- * always capitalized; every other word is capitalized UNLESS it is one of
- * SMALL_WORDS, in which case it must stay lowercase. Words with no letters
- * (pure numbers/punctuation) never violate the rule. Leading punctuation
- * inside a word (e.g. an opening quote) is skipped to find the letter that
- * actually needs checking.
+ * Whether `title` conforms to Title Case: the first and last word of the
+ * WHOLE TITLE are always capitalized; every other word is capitalized
+ * UNLESS it is one of SMALL_WORDS, in which case it must stay lowercase.
+ * Words with no letters (pure numbers/punctuation) never violate the rule.
+ * Leading punctuation inside a word (e.g. an opening quote) is skipped to
+ * find the letter that actually needs checking.
+ *
+ * Two refinements on top of that base rule (INFO-1 fix):
+ *
+ * COLON SUBTITLES: a title like "Section 2: The Request Lifecycle" is a
+ * section-divider convention (stages 7/13), not a title with a stray small
+ * word in the middle. The word immediately after a word ending in ":" is
+ * treated as SEGMENT-START - forced capital exactly like the title's own
+ * first word (the small-word exception does not apply to it) - even though
+ * it is not the first word of the whole title. Everything else about the
+ * whole-title first/last-word override is unchanged.
+ *
+ * HYPHENATED COMPOUNDS (chosen rule, stated explicitly per the brief): each
+ * hyphen-separated component of a word is checked independently against the
+ * same capitalize-unless-small-word rule (its own component text decides
+ * whether it is a SMALL_WORDS hit). The first/last-word override applies to
+ * the WHOLE TITLE, not per component: only the first component of the
+ * title's first word and the last component of the title's last word get
+ * the forced-capital edge override; every other component - including the
+ * first component of a hyphenated word that is NOT the title's first word -
+ * follows the plain capitalize-unless-small-word rule with no edge bonus.
+ * (Segment-start after a colon also only reaches the first component of the
+ * following word, for the same reason.) So "Client-Server Model" passes,
+ * but "Client-server Model" now fails: "server" is not a small word, so its
+ * own component must be capitalized.
  */
 export function isTitleCase(title: string): boolean {
   const words = title.split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
 
   return words.every((word, i) => {
-    const letterMatch = word.match(/[A-Za-z]/);
-    if (!letterMatch) return true;
+    const isFirstWord = i === 0;
+    const isLastWord = i === words.length - 1;
+    const previousWord = i > 0 ? words[i - 1] : null;
+    const isSegmentStart = previousWord !== null && previousWord.endsWith(":");
 
-    const firstLetter = letterMatch[0];
-    const bareWord = word.replace(/[^A-Za-z]/g, "").toLowerCase();
-    const isEdge = i === 0 || i === words.length - 1;
-    const isSmall = SMALL_WORDS.has(bareWord);
+    const components = word.split("-");
+    return components.every((component, ci) => {
+      const letterMatch = component.match(/[A-Za-z]/);
+      if (!letterMatch) return true;
 
-    if (isEdge || !isSmall) {
-      return firstLetter === firstLetter.toUpperCase();
-    }
-    return firstLetter === firstLetter.toLowerCase();
+      const firstLetter = letterMatch[0];
+      const bareComponent = component.replace(/[^A-Za-z]/g, "").toLowerCase();
+      const isFirstComponent = ci === 0;
+      const isLastComponent = ci === components.length - 1;
+
+      const isTitleEdge =
+        (isFirstWord && isFirstComponent) || (isLastWord && isLastComponent);
+      const isForcedCapital =
+        isTitleEdge || (isSegmentStart && isFirstComponent);
+      const isSmall = SMALL_WORDS.has(bareComponent);
+
+      if (isForcedCapital || !isSmall) {
+        return firstLetter === firstLetter.toUpperCase();
+      }
+      return firstLetter === firstLetter.toLowerCase();
+    });
   });
 }
 

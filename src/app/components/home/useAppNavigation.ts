@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VIEW_KEY, type ContentView } from "../content-tab/constants";
-import { isManualViewType, type GradingView } from "../manual/manual-rail";
+import { isManualViewType, type GradingView, type PresentationsView } from "../manual/manual-rail";
 import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "../knowledge/knowledge-helpers";
 import {
   type ActiveTab,
@@ -19,6 +19,7 @@ import {
   normalizeBuildView,
   normalizeContentView,
   normalizeGradingView,
+  normalizePresentationsView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -52,6 +53,10 @@ export type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
 // The Grading sub-tab's own inner selection (GRAD-SUBTAB wave 1).
 const GRADING_VIEW_KEY = "ta-grading-view";
+// The Presentations sub-tab's own inner selection (PRES-2 S6.7): which of its
+// two children - the shipped thin "Slide Deck Creation" flow or the new
+// stage-gated pipeline - is showing.
+const PRESENTATIONS_VIEW_KEY = "ta-presentations-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Tasks tab groups Term and Recurring as subtabs.
@@ -407,6 +412,32 @@ export function useAppNavigation() {
     }
     return normalizeGradingView(localStorage.getItem(GRADING_VIEW_KEY));
   });
+  // The Presentations sub-tab's own inner selection (PRES-2 S6.7, RES-S6-A):
+  // which of its two children is showing. Placed immediately after
+  // gradingView, deliberately mirroring that state's own placement rule (see
+  // gradingView's comment above): it sits OUTSIDE the isolated slice
+  // topLevelTabs.wiring.test.ts pins between the contentView initializer and
+  // `const [workflowsView` - and it CHURNS the positional guard this file's
+  // own useAppNavigation.test.ts pins between the gradingView initializer and
+  // `const [focusCourseId` (docs/pres-2-s6-plan.md section 7's line-shift
+  // obligation), which that test file re-pins in this same wave to end at
+  // `const [presentationsView` instead, plus a new analogous block for this
+  // initializer ending at `const [focusCourseId`. Unlike gradingView, there is
+  // no retired pointer to migrate - presentations is a PRES-1 (wave 3)
+  // addition with nothing predating it in localStorage - so this initializer
+  // is the simpler contentView-style shape (URL branch, then a plain
+  // normalize-the-stored-value fallback).
+  const [presentationsView, setPresentationsView] = useState<PresentationsView>(() => {
+    if (typeof window === "undefined") return "slide-deck";
+    // The URL wins over localStorage, but only when it actually named Tools >
+    // Manual > Presentations as the branch being restored into - see the
+    // matching comment on buildView above.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "presentations") {
+      return normalizePresentationsView(urlParams.get("presentationsView"));
+    }
+    return normalizePresentationsView(localStorage.getItem(PRESENTATIONS_VIEW_KEY));
+  });
   // Which course the Courses tab should scroll to and highlight on arrival,
   // or null for "no pending focus". Set two ways: by InSessionBanner's
   // onSelectCourse when the banner is clicked on this route (no navigation
@@ -526,6 +557,10 @@ export function useAppNavigation() {
   }, [gradingView]);
 
   useEffect(() => {
+    localStorage.setItem(PRESENTATIONS_VIEW_KEY, presentationsView);
+  }, [presentationsView]);
+
+  useEffect(() => {
     localStorage.setItem(COURSES_SECTION_KEY, coursesSection);
   }, [coursesSection]);
 
@@ -598,6 +633,7 @@ export function useAppNavigation() {
       buildView,
       contentView,
       gradingView,
+      presentationsView,
       tasksView,
       kbInstitution,
       kbPageId,
@@ -634,6 +670,7 @@ export function useAppNavigation() {
     buildView,
     contentView,
     gradingView,
+    presentationsView,
     tasksView,
     kbInstitution,
     kbPageId,
@@ -698,13 +735,10 @@ export function useAppNavigation() {
           if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
           if (parsed.manualView === "content") setContentView(parsed.contentView);
           if (parsed.manualView === "grading") setGradingView(parsed.gradingView);
-          // presentations has a single inner destination
-          // ("presentations-slide-deck") and no separate inner-selection
-          // state beyond manualView itself, which setManualView above
-          // already restored - so there is nothing further to restore here.
-          if (parsed.manualView === "presentations") {
-            // no-op: no extra inner state to restore
-          }
+          // PRES-2 S6.7: presentations now has TWO inner destinations
+          // ("presentations-slide-deck", "presentations-pipeline"), so which
+          // one is showing is restored the same way gradingView is above.
+          if (parsed.manualView === "presentations") setPresentationsView(parsed.presentationsView);
         }
         if (parsed.toolsSection === "workflows") {
           setWorkflowsView(parsed.workflowsView);
@@ -745,6 +779,8 @@ export function useAppNavigation() {
     setContentView,
     gradingView,
     setGradingView,
+    presentationsView,
+    setPresentationsView,
     workflowsView,
     setWorkflowsView,
     tasksView,

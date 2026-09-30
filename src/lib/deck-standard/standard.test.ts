@@ -51,6 +51,76 @@ describe("isTitleCase", () => {
     expect(isTitleCase("2026")).toBe(true);
     expect(isTitleCase("")).toBe(true);
   });
+
+  // INFO-1 fix: colon subtitles (section-divider convention, stages 7/13).
+  // Before the fix, "The" after the colon was checked as a MID-TITLE small
+  // word and flagged lowercase-required, which it is not - it opens a new
+  // segment. This is the RED/GREEN case: reimplementing the pre-fix rule
+  // (whole-title first/last only, no segment-start concept) demonstrates
+  // the false-fail was real, and the real isTitleCase no longer has it.
+  it("INFO-1: a colon-subtitle title passes (was a false-fail before the fix)", () => {
+    function preFixIsTitleCase(title: string): boolean {
+      const words = title.split(/\s+/).filter(Boolean);
+      if (words.length === 0) return true;
+      return words.every((word, i) => {
+        const letterMatch = word.match(/[A-Za-z]/);
+        if (!letterMatch) return true;
+        const firstLetter = letterMatch[0];
+        const bareWord = word.replace(/[^A-Za-z]/g, "").toLowerCase();
+        const isEdge = i === 0 || i === words.length - 1;
+        const isSmall = SMALL_WORDS_FOR_TEST.has(bareWord);
+        if (isEdge || !isSmall) return firstLetter === firstLetter.toUpperCase();
+        return firstLetter === firstLetter.toLowerCase();
+      });
+    }
+
+    // RED: the pre-fix rule flags "The" (mid-title small word) as needing
+    // to stay lowercase, so it reports the title as NOT Title Case.
+    expect(preFixIsTitleCase("Section 2: The Request Lifecycle")).toBe(false);
+
+    // GREEN: the real (fixed) isTitleCase treats "The" as segment-start.
+    expect(isTitleCase("Section 2: The Request Lifecycle")).toBe(true);
+  });
+
+  it("INFO-1: a colon subtitle whose first word is itself a small word still capitalizes it", () => {
+    expect(isTitleCase("Chapter 1: A New Start")).toBe(true);
+  });
+
+  it("INFO-1: hyphenated compounds - each component follows capitalize-unless-small-word", () => {
+    // Chosen rule: correctly-capitalized compound passes.
+    expect(isTitleCase("Client-Server Model")).toBe(true);
+    // The mild false-pass from the old whole-word-only check is now a real
+    // catch: "server" is not a small word, so it must be capitalized too.
+    expect(isTitleCase("Client-server Model")).toBe(false);
+  });
+
+  it("does not regress: mid-title small words and a genuinely bad title", () => {
+    // Existing mid-small-word title still passes.
+    expect(isTitleCase("A Tour of the DOM")).toBe(true);
+    // A genuinely wrong (all-lowercase) title is still caught.
+    expect(isTitleCase("the request lifecycle")).toBe(false);
+  });
+});
+
+// Local copy of the pre-fix SMALL_WORDS set, used only by the RED/GREEN
+// reimplementation above (no-cross-test-file-imports: this must not import
+// SMALL_WORDS from standard.ts since it is not exported, and duplicating a
+// small literal here is fine per the project's fixture convention).
+const SMALL_WORDS_FOR_TEST = new Set([
+  "a", "an", "the",
+  "and", "but", "or", "nor",
+  "as", "at", "by", "for", "in", "of", "on", "per", "to", "up", "via",
+]);
+
+describe("checkDeckStandard: still catches a real title-case violation", () => {
+  it("flags a genuinely bad title even after the colon/hyphen refinements", () => {
+    const deck = conformingDeck();
+    deck.slides[1] = { ...deck.slides[1], title: "the request lifecycle" };
+    const result = checkDeckStandard(deck, DECK_STANDARD_V1);
+    const hit = result.violations.find((v) => v.rule === "requireTitleCase");
+    expect(hit).toBeDefined();
+    expect(hit?.slideIndex).toBe(1);
+  });
 });
 
 describe("checkDeckStandard: conforming deck", () => {

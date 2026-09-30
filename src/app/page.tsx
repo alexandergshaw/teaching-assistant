@@ -20,6 +20,7 @@ import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
 import PresentationsTab from "./components/presentations";
+import PipelineTab from "./components/presentations/pipeline/PipelineTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
@@ -76,7 +77,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -549,12 +550,21 @@ export default function Home() {
                   buildView={buildView}
                   contentView={contentView}
                   gradingView={gradingView}
+                  presentationsView={presentationsView}
                   onDestinationClick={(destId) => {
-                    const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView, gradingView);
+                    const resolved = resolveStateFromDestinationId(
+                      destId,
+                      manualView,
+                      buildView,
+                      contentView,
+                      gradingView,
+                      presentationsView
+                    );
                     if (resolved.manualView !== manualView) setManualView(resolved.manualView);
                     if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
                     if (resolved.contentView !== contentView) setContentView(resolved.contentView);
                     if (resolved.gradingView !== gradingView) setGradingView(resolved.gradingView);
+                    if (resolved.presentationsView !== presentationsView) setPresentationsView(resolved.presentationsView);
                   }}
                 />
 
@@ -613,7 +623,7 @@ export default function Home() {
 
                 {manualView === "presentations" && (
                   <TabShell>
-                    <PresentationsTab />
+                    {presentationsView === "pipeline" ? <PipelineTab /> : <PresentationsTab />}
                   </TabShell>
                 )}
 

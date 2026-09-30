@@ -387,11 +387,30 @@ describe("presentations subtab", () => {
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has a non-null inner-nav destinations list containing Slide Deck Creation (AC-2)", () => {
+  it("has a non-null inner-nav destinations list containing Slide Deck Creation and, since PRES-2 S6.7, Slide Deck Pipeline (AC-2 / RES-S6-A)", () => {
     const inner = getInnerDestinations("presentations");
     expect(inner).not.toBeNull();
-    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck"]);
-    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation"]);
+    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck", "presentations-pipeline"]);
+    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation", "Slide Deck Pipeline"]);
+  });
+
+  it("PRES-2 S6.7: the pipeline child is reachable from its destination id and reports itself as active via presentationsView", () => {
+    const resolved = resolveStateFromDestinationId(
+      "presentations-pipeline",
+      "content",
+      "new",
+      "modules",
+      "run",
+      "slide-deck"
+    );
+    expect(resolved.manualView).toBe("presentations");
+    expect(resolved.presentationsView).toBe("pipeline");
+    expect(getActiveDestinationId("presentations", "new", "modules", "run", "pipeline")).toBe(
+      "presentations-pipeline"
+    );
+    // The shipped thin child stays the default when presentationsView is
+    // omitted/at its default - RES-S6-A kept it, not renamed/replaced it.
+    expect(getActiveDestinationId("presentations", "new", "modules", "run")).toBe("presentations-slide-deck");
   });
 
   it("is in MANUAL_VIEW_ORDER with a matching label", () => {

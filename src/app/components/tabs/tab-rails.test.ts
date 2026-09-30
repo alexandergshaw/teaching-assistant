@@ -40,7 +40,7 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  *    of the family it belongs to, and picking one family's chip never disturbs
  *    the other family's remembered view.
  *
- * 4. ONE LEVEL. Ten Tools chips in one list, three Courses chips in one list,
+ * 4. ONE LEVEL. Eleven Tools chips in one list, three Courses chips in one list,
  *    with nothing between the tab strip and them.
  *
  * What it cannot prove: that any of it RENDERS. vitest here is node-env and
@@ -50,7 +50,7 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  */
 
 describe("the Tools rail is one flat list of both families' views (D26)", () => {
-  it("holds exactly the seven Manual views then the three Workflows views, in that order", () => {
+  it("holds exactly the eight Manual views then the three Workflows views, in that order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
@@ -58,12 +58,13 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "manual:recording",
       "manual:ppt-design",
       "manual:artifact-design",
+      "manual:presentations",
       "manual:grading",
       "workflows:workflows",
       "workflows:automations",
       "workflows:drafts",
     ]);
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {
@@ -277,6 +278,7 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",
+  presentationsView: "slide-deck",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,

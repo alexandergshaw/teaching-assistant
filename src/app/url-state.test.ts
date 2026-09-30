@@ -20,6 +20,7 @@ import {
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
+  normalizePresentationsView,
   parseUrlState,
   buildUrlSearch,
   resolveGradingPointer,
@@ -39,6 +40,7 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",
+  presentationsView: "slide-deck",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,
@@ -965,6 +967,28 @@ describe("url-state", () => {
       // The optional params default to undefined, so every pre-wave-3 2-arg
       // call site (RESIDUAL R-1) keeps compiling and behaving unchanged.
       expect(resolveGradingPointer("repo-grades", null)).toEqual({ manualView: "grading", gradingView: "repos" });
+    });
+  });
+
+  // PRES-2 S6.7 (RES-S6-A): presentationsView round-trips exactly like
+  // gradingView above - a non-default value survives through Presentations
+  // and is dropped elsewhere (I3-style), and normalizePresentationsView falls
+  // back to "slide-deck" on anything else. RES-S6-D: kept minimal (this file
+  // was measured at 970 lines pre-wave, within 30 of the 1000 ceiling).
+  describe("presentationsView (PRES-2 S6.7)", () => {
+    it("normalizes an unknown/missing value to the shipped thin flow", () => {
+      expect(normalizePresentationsView(null)).toBe("slide-deck");
+      expect(normalizePresentationsView("bogus")).toBe("slide-deck");
+      expect(normalizePresentationsView("pipeline")).toBe("pipeline");
+    });
+
+    it("preserves a non-default presentationsView through Presentations, and drops it elsewhere", () => {
+      const pipelineState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "presentations", presentationsView: "pipeline" };
+      expect(buildUrlSearch(pipelineState)).toBe("?tab=manual&manualView=presentations&presentationsView=pipeline");
+      expect(parseUrlState(buildUrlSearch(pipelineState)).presentationsView).toBe("pipeline");
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", presentationsView: "pipeline" })
+      ).toBe("?tab=manual&manualView=content");
     });
   });
 });

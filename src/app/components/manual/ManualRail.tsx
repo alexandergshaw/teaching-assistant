@@ -7,6 +7,7 @@ import {
   type BuildViewType,
   type GradingView,
   type ManualViewType,
+  type PresentationsView,
 } from "./manual-rail";
 import styles from "../../page.module.css";
 import type { ContentView } from "../content-tab/constants";
@@ -37,15 +38,22 @@ export function ManualRail({
   buildView,
   contentView,
   gradingView,
+  presentationsView,
   onDestinationClick,
 }: {
   manualView: ManualViewType;
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
+  // PRES-2 S6.7: which of the two Presentations children is active, so this
+  // row highlights "Slide Deck Pipeline" once it is mounted instead of always
+  // showing the shipped thin "Slide Deck Creation" chip as active (defaults
+  // to "slide-deck" - see getActiveDestinationId's own default - so a caller
+  // that has not yet threaded this prop still gets the pre-S6.7 behavior).
+  presentationsView?: PresentationsView;
   onDestinationClick: (destId: string) => void;
 }) {
-  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView);
+  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView);
   const innerDestinations = getInnerDestinations(manualView);
   const ariaLabel = getInnerNavAriaLabel(manualView);
 

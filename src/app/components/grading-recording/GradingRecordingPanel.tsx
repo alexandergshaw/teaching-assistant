@@ -63,7 +63,7 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useDiscussionCapture } from "../recording/useDiscussionCapture";
-import { EXTRACT_BATCH_WIRE_BUDGET, accumulateDroppedFrames } from "../recording/discussion-capture";
+import { accumulateDroppedFrames } from "../recording/discussion-capture";
 // docs/recording-controls-ux-acceptance-criteria.md CC1: the one legal
 // spelling of a state-dependent primary.
 import { variantFor } from "../ui/buttonVariant";
@@ -88,17 +88,14 @@ import {
 // reasoning and the sibling precedent (wave 3a-i's SnapshotGradingPanel.tsx
 // extraction).
 import GradingRecordingContextPanel from "./GradingRecordingContextPanel";
-import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 // The sibling GRADING action - coded against the exact signature this task's
 // brief pinned, before this file's own path (src/app/actions/grading-
 // submission-grade.ts, following extractGradingSubmissionsAction's own
 // naming) existed. It landed, with that exact signature, while this panel
 // was being built - see this task's report for the confirmation.
 import { gradeCapturedSubmissionsAction } from "@/app/actions/grading-submission-grade";
-import { GRADING_EXTRACT_BATCH_SIZE } from "./grading-extraction-prompt";
 import { matchNameAgainstRoster } from "./grading-roster-match";
 import { useGradingRows } from "./useGradingRows";
-import type { GradingRow } from "./grading-row";
 import GradingTable from "./GradingTable";
 import { RubricInputModal } from "./RubricInputModal";
 import { loadRubricMemory, saveRubricMemory, describeRubricOrigin } from "@/lib/grade/rubric-memory";
@@ -128,7 +125,12 @@ import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
 // leaf's own header.
 import GradingRecordingCaptureStatus from "./GradingRecordingCaptureStatus";
 import { checkGradingReadiness } from "./grading-dispatch";
-import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
+// A38 wave 0 (docs/a38-wave-plan.md section 3.1): the capture-drain pipeline
+// (runExtraction + its drain effect + the `extracting` state) moved out into
+// this hook - a pin-free, behaviour-preserving relocation. See that file's
+// own header for the full reasoning.
+import { useGradingRecordingExtraction } from "./useGradingRecordingExtraction";
+import { isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { classifyGradingResult } from "./grading-rows";
 // A16-3 (docs/a16-plan.md 5.5/9.3, rulings 10/19): the SAME ClassTrendsPanel
 // GradingResults.tsx already mounts for the LMS grading surfaces, reached
@@ -148,7 +150,6 @@ import { buildRunCohort, toRunCohortEntry, cohortLabelSpread, type RunCohort } f
 // assembly/formatting is entirely grading-recording-log.ts, per that module's
 // own header.
 import {
-  makeGradingRecordingLogBatch,
   buildGradingRecordingRunLog,
   summarizeGradingRecordingRunLog,
   gradingRecordingLogSummaryLine,
@@ -461,8 +462,6 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     [pushNotices]
   );
 
-  const [extracting, setExtracting] = useState(false);
-
   // Wave 2 (docs/REGRESSION.md entry 428, RES-A9-7): the accumulator, its
   // Remove/Clear-table wiring and its per-course persisted tombstone set all
   // live in useGradingCaptureTracking.ts / grading-capture-tombstones.ts.
@@ -508,98 +507,17 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
   }, []);
 
-  const runExtraction = useCallback(async () => {
-    const frames = takeFrameBatch(GRADING_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET);
-    if (frames.length === 0) return;
-    // AGENTS.md's setState-in-effect idiom: this function is invoked
-    // (`void runExtraction()`) from the drain effect below - a setState
-    // reached SYNCHRONOUSLY from an effect (even indirectly, through a
-    // called function) is what react-hooks/set-state-in-effect rejects. The
-    // microtask hop below is a real gate, not a no-op - it is what makes
-    // every setState from here on happen strictly AFTER the effect body has
-    // returned, exactly like AiChatFab.tsx's own tone-status effect.
-    await Promise.resolve();
-    setExtracting(true);
-    try {
-      const result = await extractGradingSubmissionsAction(
-        frames.map((f) => ({ base64: f.base64 })),
-        provider
-      );
-      if ("error" in result) {
-        setLogBatches((prev) => [
-          ...prev,
-          makeGradingRecordingLogBatch({ at: new Date().toISOString(), framesInBatch: frames.length, error: result.error }),
-        ]);
-        pushNotices(describeExtractionOutcome(result, 0));
-        return;
-      }
-      // A9/RES-A9-9: the RENDER value (gradingRows.rawRows), never
-      // rawRowsRef.current - the ref is one commit stale (see the effect
-      // above that writes it), and on the render where courseId/assessmentId
-      // change, gradingRows.rawRows is already the new scope's slice while
-      // the ref still holds the old one. Reading the ref here would feed a
-      // stale course's rows against this call's freshly-scoped accumulator,
-      // reproducing the course-switch misattribution REGRESSION.md entry 428f
-      // records. capture.advance persists the dismissed projection AFTER
-      // committing rows - see commitCaptureAdvance's own header for why the
-      // order matters.
-      let nextRows: GradingRow[] = [];
-      const advance = capture.advance(gradingRows.rawRows, result.submissions, (rows) => {
-        nextRows = rows;
-        gradingRows.setAllRows(rows);
-      });
-      setLogBatches((prev) => [
-        ...prev,
-        makeGradingRecordingLogBatch({
-          at: new Date().toISOString(),
-          framesInBatch: frames.length,
-          submissionsExtracted: result.submissions.length,
-          added: advance.addedCount,
-          merged: advance.mergedCount,
-          skippedUnnamed: result.skippedUnnamed,
-          confirmedEmpty: result.confirmedEmpty,
-        }),
-      ]);
-      pushNotices(describeExtractionOutcome(result, advance.addedCount));
-      setTotalReadingsCount((prev) => prev + advance.addedCount + advance.mergedCount);
-
-      // R3a: roster-match every row in THIS synced table right away, so a
-      // newly-minted row never sits at the neutral "no-roster" default for
-      // longer than one tick when a real roster is already selected.
-      const rosterNames = parseRosterNames(selectedRosterText);
-      for (const row of nextRows) {
-        const match = matchNameAgainstRoster(row.studentName, rosterNames);
-        gradingRows.applyRosterMatch(row.id, match);
-      }
-    } finally {
-      setExtracting(false);
-    }
-  }, [takeFrameBatch, provider, pushNotices, gradingRows, selectedRosterText, capture]);
-
-  // Drains the capture queue as frames arrive, and keeps draining after Stop
-  // - mirroring useDiscussionCapture's own documented contract ("the
-  // extraction loop outlives capturing===false and drains it to empty").
-  //
-  // AGENTS.md's setState-in-effect idiom, applied the same way AiChatFab.tsx's
-  // own tone-status effect does: an inline async IIFE with a `cancelled`
-  // flag, invoked from the effect body rather than calling a setState-
-  // touching function directly - react-hooks/set-state-in-effect traces a
-  // same-file useCallback's body and flags a setState reachable from it, so
-  // `runExtraction` (which does set state, after its own await gate) is
-  // called from inside this wrapper instead of directly from the effect.
-  useEffect(() => {
-    if (extracting) return;
-    if (pendingFrames === 0) return;
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      await runExtraction();
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingFrames, extracting, runExtraction]);
+  const { extracting } = useGradingRecordingExtraction({
+    takeFrameBatch,
+    pendingFrames,
+    provider,
+    pushNotices,
+    gradingRows,
+    selectedRosterText,
+    capture,
+    setLogBatches,
+    setTotalReadingsCount,
+  });
 
   const handleStartStop = useCallback(() => {
     if (capturing) {

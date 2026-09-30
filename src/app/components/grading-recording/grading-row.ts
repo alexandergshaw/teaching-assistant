@@ -250,6 +250,32 @@ export interface GradingRow extends AssessmentRowCore {
    *  submission-kind-callsites.structure.test.ts, pins that the composer
    *  files contain zero references to the suggestion). */
   submissionKind: GradingSubmissionKind;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-3, "confirm above N"):
+   *  how many times a grade has been DISPATCHED for this row - incremented
+   *  by grading-dispatch.ts's `recordGradeDispatch`/`beginGradeAttempt`
+   *  BEFORE the grade action's own await, on every dispatch including one
+   *  that later errors or fails (round-2 Ruling 6: a failing row must still
+   *  count toward the spend cap, or it could be re-pressed past N for
+   *  free). Optional for the identical reason `assessment` above is
+   *  optional - an already-shipped type; a row built before this axis
+   *  existed (or a test fixture that omits it) reads as zero via
+   *  `sumGradeAttempts`'s own `?? 0` normalization, never as though it had
+   *  never been attempted in a way that would under-count a real spend. */
+  gradeAttempts?: number;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-6): a digest of the
+   *  rubric text this row was last SUCCESSFULLY graded against
+   *  (grading-rows.ts's `gradedRubricDigestOf`/`classifyGradingResult`) -
+   *  used only to detect that the CURRENT rubric has since diverged from
+   *  the one this row's score reflects, never rendered itself and never
+   *  sent to the model. Absent means "never successfully graded" - a row in
+   *  that state must never be warned about divergence (there is nothing to
+   *  diverge from), which is why every reader of this field treats
+   *  undefined/empty as "no signal", not as "diverged". A failed grade
+   *  attempt does NOT clear this - the row's most recent SUCCESSFUL
+   *  grade's digest is what the disclosure is about, and a retry that also
+   *  fails must not silently erase the fact that an earlier score exists
+   *  and may now be stale. */
+  gradedRubricDigest?: string;
 }
 
 /**

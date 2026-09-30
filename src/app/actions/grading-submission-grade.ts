@@ -69,7 +69,7 @@
 // acceptance-criteria.md AC-5). `handleGradeAll` still rebuilds its
 // submission list from the whole table, unchanged.
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireOwner, requireUser } from "@/lib/supabase/auth";
 import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart } from "@/lib/llm";
 import { getGeminiMaxSubmissions, getGeminiInterRequestDelayMs, getGeminiMaxOutputTokens } from "@/lib/gemini";
 import { sleep } from "@/lib/grade/utils";
@@ -222,4 +222,28 @@ export async function gradeCapturedSubmissionsAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade these submissions." };
   }
+}
+
+/**
+ * A38 wave 2 (docs/a38-acceptance-criteria.md AC-3 "N = min(totalCount,
+ * maxSubmissions)"; docs/a38-wave-plan.md section 2): the current
+ * per-invocation submission bound, so the client can compute the
+ * confirm-above-N threshold. `getGeminiMaxSubmissions()` is server-only
+ * (it reads `process.env.GRADE_MAX_SUBMISSIONS`) - this is the one seam
+ * that exposes it to the client at all.
+ *
+ * Guarded by `requireUser()`, deliberately NOT `requireOwner()` (both
+ * currently admit the identical set of callers - `requireOwner()` is a bare
+ * `return requireUser()` alias, src/lib/supabase/auth.ts - but `requireUser()`
+ * is the honest, correctly-targeted name for what this reader actually needs):
+ * the bound it returns is a non-sensitive config integer, no more sensitive
+ * than the grading action beside it (`gradeCapturedSubmissionsAction` above,
+ * which every reachable instructor account may already call) - a reader that
+ * only exposes a bound the grade path already honors must be no more
+ * restrictive than that path. See docs/a38-wave-plan.md section 2 for the
+ * full reasoning this correction is bound to.
+ */
+export async function getEffectiveGradeBoundAction(): Promise<{ bound: number }> {
+  await requireUser();
+  return { bound: getGeminiMaxSubmissions() };
 }

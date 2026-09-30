@@ -30,6 +30,11 @@ import {
   type AssessmentResultInput,
 } from "../assessment-shared/assessment-row";
 import type { RubricAreaResult } from "@/lib/grade/types";
+// A38 wave 2 (docs/a38-wave-plan.md section 6, Unit 2): the ONE pre-await
+// spend-cap mutation - see this file's own `setGradingRowState` for why the
+// "grading" transition composes this rather than every dispatch call site
+// doing so individually.
+import { beginGradeAttempt } from "./grading-dispatch";
 
 // ---------------------------------------------------------------------------
 // Sorting - "sortable by name" is the only sort this table needs (the AC's
@@ -140,6 +145,11 @@ export function editGradingRowField(row: GradingRow, field: GradingFeedbackField
  */
 export interface GradingResultInput extends AssessmentResultInput {
   rubricAreas: RubricAreaResult[];
+  /** A38 wave 2 (AC-6): the CURRENT rubric's digest, set only on a SUCCESS
+   *  (classifyGradingResult below never sets this on a failure) - see
+   *  applyGradingResultToRow's own doc comment for why a failure preserves
+   *  the row's prior digest instead of clearing it. */
+  gradedRubricDigest?: string;
 }
 
 /**
@@ -174,7 +184,15 @@ export interface GradingResultInput extends AssessmentResultInput {
  */
 export function applyGradingResultToRow(row: GradingRow, result: GradingResultInput): GradingRow {
   const applied = applyAssessmentResult(row, result);
-  return { ...applied, rubricAreas: result.rubricAreas };
+  // A38 wave 2 (AC-6): `result.gradedRubricDigest` is set only on a success
+  // (classifyGradingResult never sets it on a failure) - a failed/errored
+  // attempt therefore falls back to `row.gradedRubricDigest`, preserving
+  // whatever the row's last SUCCESSFUL grade recorded rather than wiping the
+  // divergence signal every time a retry fails. Written unconditionally
+  // (never gated by userEdited), the same discipline `rubricAreas`
+  // immediately above already follows - this is a machine fact about which
+  // rubric text produced the row's score, not instructor-authored content.
+  return { ...applied, rubricAreas: result.rubricAreas, gradedRubricDigest: result.gradedRubricDigest ?? row.gradedRubricDigest };
 }
 
 /**
@@ -188,11 +206,18 @@ export function applyGradingResultToRow(row: GradingRow, result: GradingResultIn
  * refund it).
  *
  * Also the wave-1 DISPATCH write itself (`setGradingRowState(row,
- * "grading")`, written before the grade action's await) - wave 2 upgrades
- * that one call site to `beginGradeAttempt`, which composes this same
- * state write with the attempt-count increment.
+ * "grading")`, written before the grade action's await) - A38 WAVE 2
+ * upgrades this one transition to compose `beginGradeAttempt`
+ * (grading-dispatch.ts), so every caller of this function (useGradingRows.ts's
+ * `markRowState`, the single-row grade path's only entry point into the
+ * store) gets the spend-cap counter bumped for free, with no change to its
+ * own call sites or signature. Every OTHER transition (restoring a row's
+ * PRIOR state on an error/failure outcome in particular) stays a plain
+ * spread - `gradeAttempts` is untouched, never refunded, which is exactly
+ * what AC-3's anti-Ruling-6 instrument requires.
  */
 export function setGradingRowState(row: GradingRow, state: GradingRowState): GradingRow {
+  if (state === "grading") return beginGradeAttempt(row);
   return { ...row, state };
 }
 
@@ -289,8 +314,17 @@ export interface GradingRecordingResult {
  * message (GRADING_FAILURE_PREFIX stripped, when present) in `error`.
  * `failed: false` maps to state "ready" with the four fields passed through
  * unchanged, regardless of what `strengths` happens to start with.
+ *
+ * A38 wave 2 (AC-6): `gradedRubricDigest` is an optional SECOND parameter -
+ * the CURRENT rubric's digest (gradedRubricDigestOf below), supplied by both
+ * production callers (useGradingRowGrade.ts, GradingRecordingPanel.tsx's
+ * handleGradeAll). Omitted entirely from the return value on a failure (a
+ * failed attempt recorded no new score against any rubric, so it must never
+ * overwrite the row's prior digest - applyGradingResultToRow's own doc
+ * comment on the fallback). On a success it is passed straight through
+ * uninterpreted.
  */
-export function classifyGradingResult(result: GradingRecordingResult): GradingResultInput {
+export function classifyGradingResult(result: GradingRecordingResult, gradedRubricDigest?: string): GradingResultInput {
   if (result.failed) {
     const error = result.strengths.startsWith(GRADING_FAILURE_PREFIX)
       ? result.strengths.slice(GRADING_FAILURE_PREFIX.length)
@@ -316,7 +350,61 @@ export function classifyGradingResult(result: GradingRecordingResult): GradingRe
     state: "ready",
     // A16-2 hop H6: an ordinary success passes its areas straight through.
     rubricAreas: result.rubricAreas,
+    gradedRubricDigest,
   };
+}
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-6): rubric-divergence
+// disclosure. A row must never be warned about diverging from a rubric it
+// was never actually graded against (docs/a38-scope.md:410-412) - both
+// functions below are the one place that rule lives.
+// ---------------------------------------------------------------------------
+
+/**
+ * A short, non-cryptographic content hash (FNV-1a, 32-bit, hex) - good
+ * enough to detect that the rubric text changed, never meant as an
+ * integrity/security check. DELIBERATELY NOT the shared `fnv1aHash` leaf
+ * (src/lib/lms-generation/generation-diag.ts) that media.ts/walkthrough-
+ * announcement.ts reuse for their own promptHash: this file is reachable
+ * from the class-trends "layer C" draft surface
+ * (classTrendsDraft.not-postable.test.ts), whose own boundary test forbids
+ * ANY value-import under `lib/lms-generation` (a capability-prefix ban, not
+ * a per-file judgment) - reusing that leaf here would fail that guard.
+ * Duplicated rather than imported for that reason alone; the algorithm is
+ * intentionally identical (byte-for-byte) so a future extraction of a truly
+ * shared, dependency-free hash leaf has a straightforward merge.
+ */
+function fnv1aHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * A stable, non-secret digest of the rubric text a row is graded against -
+ * trimmed first so trailing/leading whitespace can never itself cause a
+ * false divergence.
+ */
+export function gradedRubricDigestOf(rubricText: string): string {
+  return fnv1aHash(rubricText.trim());
+}
+
+/**
+ * True only when the row carries a RECORDED digest (a prior successful
+ * grade) that differs from the CURRENT rubric's digest. A row with no
+ * recorded digest at all (never successfully graded, or graded before this
+ * field existed) returns false unconditionally - there is nothing to
+ * diverge from, and warning anyway would be exactly the false positive
+ * AC-6's "must not fire on a row with no recorded digest" direction of
+ * failure forbids.
+ */
+export function rowHasRubricDivergence(row: GradingRow, currentRubricText: string): boolean {
+  if (!row.gradedRubricDigest) return false;
+  return row.gradedRubricDigest !== gradedRubricDigestOf(currentRubricText);
 }
 
 // ---------------------------------------------------------------------------

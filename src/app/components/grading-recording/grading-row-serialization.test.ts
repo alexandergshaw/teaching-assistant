@@ -85,6 +85,11 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     suggestedSubmissionKind: "unknown",
     submissionKindCue: "",
     submissionKind: "unknown",
+    // A38 wave 2: the round-trip-stable default (deserializeGradingRows
+    // normalizes an absent count to exactly 0) - same discipline as
+    // submissionTimeStatus above. A test that needs the genuinely ABSENT
+    // case explicitly overrides this to `undefined`.
+    gradeAttempts: 0,
     ...overrides,
   };
 }
@@ -417,6 +422,8 @@ describe("frozen serialization oracle", () => {
       suggestedSubmissionKind: "initial-post",
       submissionKindCue: "No @mention or Replying-to line - opens the thread.",
       submissionKind: "initial-post",
+      // A38 wave 2: the round-trip-stable default for a never-attempted row (D23c's own identical discipline).
+      gradeAttempts: 0,
     },
     {
       id: "grade-1-1",
@@ -446,6 +453,8 @@ describe("frozen serialization oracle", () => {
       suggestedSubmissionKind: "unknown",
       submissionKindCue: "",
       submissionKind: "unknown",
+      // A38 wave 2: the round-trip-stable default for a never-attempted row (D23c's own identical discipline).
+      gradeAttempts: 0,
     },
     {
       id: "grade-1-2",
@@ -472,6 +481,8 @@ describe("frozen serialization oracle", () => {
       suggestedSubmissionKind: "reply",
       submissionKindCue: "Replying to Maria Alvarez",
       submissionKind: "reply",
+      // A38 wave 2: the round-trip-stable default for a never-attempted row (D23c's own identical discipline).
+      gradeAttempts: 0,
     },
     {
       id: "grade-1-3",
@@ -496,6 +507,8 @@ describe("frozen serialization oracle", () => {
       suggestedSubmissionKind: "other",
       submissionKindCue: "",
       submissionKind: "unknown",
+      // A38 wave 2: the round-trip-stable default for a never-attempted row (D23c's own identical discipline).
+      gradeAttempts: 0,
     },
   ];
 
@@ -509,12 +522,12 @@ describe("frozen serialization oracle", () => {
   // grade-1-1 has no suggestion at all, grade-1-2 is a confirmed reply, and
   // grade-1-3 is suggested but never confirmed).
   const FROZEN_FULL =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown"},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply"},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown"}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown","gradeAttempts":0,"gradedRubricDigest":""}]}';
 
   // Captured verbatim from a real run of serializeGradingRowsWithoutSubmissionText
   // against the same oracleRows - identical except every submissionText is "".
   const FROZEN_NOTEXT =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown"},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply"},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown"}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply","gradeAttempts":0,"gradedRubricDigest":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown","gradeAttempts":0,"gradedRubricDigest":""}]}';
 
   it("matches the frozen literal byte-for-byte (full write)", () => {
     expect(serializeGradingRows(oracleRows)).toBe(FROZEN_FULL);
@@ -728,9 +741,16 @@ describe("the persisted wire row's exact key set (frozen oracle, real codec)", (
     "suggestedSubmissionKind",
     "submissionKindCue",
     "submissionKind",
+    // A38 wave 2 (docs/a38-acceptance-criteria.md AC-3/AC-6): taking this
+    // list from 19 to 21 keys, deliberately, in the same commit that adds
+    // these two fields to GradingRow - see grading-row.ts's own doc comments
+    // on `gradeAttempts`/`gradedRubricDigest` and grading-row-serialization.ts's
+    // own toWire/fromWire for why both must survive a reload.
+    "gradeAttempts",
+    "gradedRubricDigest",
   ];
 
-  it("writes exactly these 19 keys and no others", () => {
+  it("writes exactly these 21 keys and no others", () => {
     const wire = gradingRowCodec.toWire(makeRow(), { dropBulk: false });
     expect(Object.keys(wire)).toEqual(EXPECTED_WIRE_KEYS);
   });
@@ -761,5 +781,41 @@ describe("the persisted wire row's exact key set (frozen oracle, real codec)", (
     ];
     const keys = Object.keys(gradingRowCodec.toWire(makeRow(), { dropBulk: false }));
     expect(keys.filter((k) => forbidden.includes(k))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-3/AC-6): gradeAttempts and
+// gradedRubricDigest must survive a reload - P-11's round-trip instrument.
+// ---------------------------------------------------------------------------
+describe("gradeAttempts / gradedRubricDigest round-trip (A38 wave 2)", () => {
+  it("a real attempt count and digest survive serialize -> deserialize unchanged", () => {
+    const row = makeRow({ gradeAttempts: 3, gradedRubricDigest: "abc123" });
+    const rows = deserializeGradingRows(serializeGradingRows([row]));
+    expect(rows[0].gradeAttempts).toBe(3);
+    expect(rows[0].gradedRubricDigest).toBe("abc123");
+  });
+
+  it("a row with no attempts/digest yet (never graded) round-trips to 0/undefined, never a truthy default", () => {
+    const row = makeRow();
+    const rows = deserializeGradingRows(serializeGradingRows([row]));
+    expect(rows[0].gradeAttempts).toBe(0);
+    expect(rows[0].gradedRubricDigest).toBeUndefined();
+  });
+
+  it("a garbled gradeAttempts (negative, non-finite, or non-number) coerces to 0, never a false spend count", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ ...gradingRowCodec.toWire(makeRow(), { dropBulk: false }), gradeAttempts: -5 }],
+    });
+    expect(deserializeGradingRows(raw)[0].gradeAttempts).toBe(0);
+  });
+
+  it("a non-string gradedRubricDigest coerces to undefined, never a false divergence signal", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ ...gradingRowCodec.toWire(makeRow(), { dropBulk: false }), gradedRubricDigest: 12345 }],
+    });
+    expect(deserializeGradingRows(raw)[0].gradedRubricDigest).toBeUndefined();
   });
 });

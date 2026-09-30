@@ -44,7 +44,7 @@ import {
   type GradingRowNameMatch,
 } from "./grading-row";
 import { submissionKindLabel } from "@/lib/grade/submission-kind";
-import { GRADING_TABLE_COLUMN_COUNT, type GradingFeedbackField } from "./grading-rows";
+import { GRADING_TABLE_COLUMN_COUNT, rowHasRubricDivergence, type GradingFeedbackField } from "./grading-rows";
 // A38 wave 1 (docs/a38-scope.md section 4.4/4.6): the pure per-row grade
 // eligibility decision - see that file's own doc comment for why this is a
 // plain function rather than logic inlined here.
@@ -107,6 +107,16 @@ export interface GradingTableRowProps {
   /** Another row is grading, or a bulk run is in progress - see
    *  GradingTable.tsx's own prop doc. */
   gradingLocked: boolean;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-3, DECISION 2 "confirm
+   *  above N"): see GradingTable.tsx's own prop doc - a table-wide fact,
+   *  forwarded straight through. */
+  requiresGradeConfirm: boolean;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-6): the rubric text
+   *  currently on screen - threaded down only so this row can compute its
+   *  OWN divergence signal (rowHasRubricDivergence, grading-rows.ts)
+   *  against `row.gradedRubricDigest`. Never rendered itself, never sent
+   *  anywhere - only compared. */
+  rubricText: string;
 }
 
 function GradingTableRowImpl({
@@ -120,12 +130,18 @@ function GradingTableRowImpl({
   onGrade,
   rubricPresent,
   gradingLocked,
+  requiresGradeConfirm,
+  rubricText,
 }: GradingTableRowProps) {
   const matchBadge = NAME_MATCH_BADGE[row.nameMatch];
   // A38 wave 1 (docs/a38-scope.md section 4.4): the eligibility decision is
   // computed once per render from the row's own state - "this row is busy"
   // is derived (row.state === "grading"), never a separate prop.
   const gradeEligibility = gradingRowGradeAction(row, rubricPresent);
+  // A38 wave 2 (AC-6): false unconditionally on a row that has never been
+  // successfully graded (no recorded digest) - see rowHasRubricDivergence's
+  // own doc comment.
+  const rubricDiverged = rowHasRubricDivergence(row, rubricText);
   // R3b: an unmatched/ambiguous name never blocks the feedback - it only
   // changes what the row SAYS. Candidates are shown, never auto-applied
   // (grading-row.ts's own doc comment on `rosterCandidates`) - the
@@ -143,6 +159,15 @@ function GradingTableRowImpl({
   // own `lastReplyForArm` check uses, rather than a useEffect - this repo's
   // eslint rejects a setState reached synchronously from an effect).
   const [removeArmed, setRemoveArmed] = useState(false);
+  // A38 wave 2 (AC-3, DECISION 2): arm-then-confirm ABOVE N, plain one-click
+  // below - mirrors `removeArmed`'s own shape. Not signature-invalidated the
+  // way `removeArmed` is (the threshold is a table-wide fact, not something
+  // an edit to THIS row's own feedback fields would ever change) - a stale
+  // arm simply disarms itself the next time this component renders with
+  // `requiresGradeConfirm` false, since the confirm branch is not offered
+  // at all in that case.
+  const [gradeArmed, setGradeArmed] = useState(false);
+  const gradeConsequenceId = `grading-grade-row-${row.id}-consequence`;
   const feedbackSignature = `${row.totalScore}|${row.strengths}|${row.improvements}|${row.overallComment}`;
   const [lastFeedbackForArm, setLastFeedbackForArm] = useState(feedbackSignature);
   if (feedbackSignature !== lastFeedbackForArm) {
@@ -175,6 +200,17 @@ function GradingTableRowImpl({
               several rows can fail at once and an assertive interruption per
               row is exactly the defect that convention avoids. */}
           {row.state === "failed" && row.error && <p className={rowStyles.rowErrorText}>{row.error}</p>}
+          {/* A38 wave 2 (AC-6): a divergence hint, never a full notice card
+              or role="alert" - the same per-row, non-interrupting treatment
+              the failed-grade error text immediately above already uses.
+              Absent unconditionally on a row with no recorded digest
+              (rowHasRubricDivergence's own contract) - never renders for a
+              row that has not yet been successfully graded. */}
+          {rubricDiverged && (
+            <p className={rowStyles.rowErrorText}>
+              Graded against an earlier rubric - the rubric has changed since this row was last scored.
+            </p>
+          )}
         </td>
         <td>
           <AssessmentScoreField
@@ -198,16 +234,43 @@ function GradingTableRowImpl({
                 edited row's scored fields are structurally untouchable by a
                 machine result (assessment-row.ts), so a mis-press cannot
                 destroy typed feedback. */}
-            {rubricPresent && (
-              <Button
-                size="small"
-                variant="text"
+            {/* A38 wave 2 (AC-3, DECISION 2 "confirm above N"): above N, the
+                per-row grade control arms then confirms - a real step, never
+                a hard stop, so the instructor is asked and may still
+                proceed. Below N (the common case) it stays wave 1's plain
+                one-click Button, unchanged. `idleVariant="text"` keeps this
+                a row control, never a primary (buttonVariant.test.ts's
+                FROZEN_PRIMARY_SITES pins this file at zero). */}
+            {rubricPresent && requiresGradeConfirm ? (
+              <ConfirmArmButtons
+                armed={gradeArmed}
+                idleLabel={gradeEligibility.label}
+                confirmLabel="Confirm grade"
+                tone="primary"
+                idleVariant="text"
                 disabled={!gradeEligibility.gradeable || gradingLocked}
-                aria-label={`Grade ${row.studentName}'s submission`}
-                onClick={() => onGrade(row.id)}
-              >
-                {gradeEligibility.label}
-              </Button>
+                idleAriaLabel={`Grade ${row.studentName}'s submission`}
+                confirmAriaLabel={`Confirm grading ${row.studentName}'s submission`}
+                onArm={() => setGradeArmed(true)}
+                onConfirm={() => {
+                  setGradeArmed(false);
+                  onGrade(row.id);
+                }}
+                onCancel={() => setGradeArmed(false)}
+                consequenceId={gradeConsequenceId}
+              />
+            ) : (
+              rubricPresent && (
+                <Button
+                  size="small"
+                  variant="text"
+                  disabled={!gradeEligibility.gradeable || gradingLocked}
+                  aria-label={`Grade ${row.studentName}'s submission`}
+                  onClick={() => onGrade(row.id)}
+                >
+                  {gradeEligibility.label}
+                </Button>
+              )
             )}
             {/* CC5: a row with nothing hand-typed to lose removes on the first
                 click, same as today (AC19); a row the instructor has edited
@@ -288,6 +351,14 @@ function GradingTableRowImpl({
           {row.userEdited && removeArmed && (
             <p id={removeConsequenceId} role="status" aria-live="polite" className={controls.consequence}>
               {`This removes ${row.studentName}'s row and the feedback you edited.`}
+            </p>
+          )}
+          {/* A38 wave 2 (AC-3, DECISION 2): the consequence line ConfirmArmButtons'
+              confirm button describes via aria-describedby - names what pressing
+              Confirm spends, never a vague "are you sure". */}
+          {requiresGradeConfirm && gradeArmed && (
+            <p id={gradeConsequenceId} role="status" aria-live="polite" className={controls.consequence}>
+              {`This grades ${row.studentName}'s submission - one more model call.`}
             </p>
           )}
         </td>

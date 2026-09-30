@@ -42,6 +42,8 @@ import {
   isEligibleForBatchAccept,
   acceptSuggestedKinds,
   setGradingRowState,
+  gradedRubricDigestOf,
+  rowHasRubricDivergence,
 } from "./grading-rows";
 import { GRADING_ROW_HAYSTACK, type GradingRow } from "./grading-row";
 import { filterRowsByQuery } from "../recording/discussion-table-view";
@@ -802,11 +804,11 @@ describe("setGradingRowState (A38 wave 1, docs/a38-scope.md section 6.2 'B4's fi
     expect(next.rubricAreas).toEqual(row.rubricAreas);
   });
 
-  it("restoring the PRIOR state after a failed dispatch never touches any other field", () => {
+  it("restoring the PRIOR state after a failed dispatch never touches any other field EXCEPT gradeAttempts, which is NEVER refunded (A38 wave 2, AC-3's anti-Ruling-6 requirement - the whole reason this transition composes beginGradeAttempt)", () => {
     const row = makeRow({ state: "pending" });
     const inFlight = setGradingRowState(row, "grading");
     const restored = setGradingRowState(inFlight, "pending");
-    expect(restored).toEqual(row);
+    expect(restored).toEqual({ ...row, gradeAttempts: 1 });
   });
 
   it("is a pure function - does not mutate its argument", () => {
@@ -814,5 +816,114 @@ describe("setGradingRowState (A38 wave 1, docs/a38-scope.md section 6.2 'B4's fi
     const frozen = Object.freeze({ ...row });
     expect(() => setGradingRowState(frozen as GradingRow, "grading")).not.toThrow();
     expect(frozen.state).toBe("pending");
+  });
+
+  // A38 wave 2 (AC-3): the "grading" transition now composes beginGradeAttempt
+  // (grading-dispatch.ts) - see that function's own tests for the pure-unit
+  // coverage; these two pin the COMPOSITION at this call site specifically.
+  it("the 'grading' transition increments gradeAttempts - this call site is the production entry point AC-3's dispatch-counts-even-on-error requirement depends on", () => {
+    const row = makeRow({ state: "pending" });
+    expect(setGradingRowState(row, "grading").gradeAttempts).toBe(1);
+  });
+
+  it("a SECOND 'grading' dispatch (a re-grade after a completed attempt) increments again, from whatever the row already carried", () => {
+    const row = makeRow({ state: "ready", gradeAttempts: 1 });
+    expect(setGradingRowState(row, "grading").gradeAttempts).toBe(2);
+  });
+
+  it("every non-'grading' transition leaves gradeAttempts untouched by plain spread - never incremented, never reset", () => {
+    const row = makeRow({ state: "grading", gradeAttempts: 4 });
+    expect(setGradingRowState(row, "ready").gradeAttempts).toBe(4);
+    expect(setGradingRowState(row, "failed").gradeAttempts).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-6): rubric-divergence
+// disclosure.
+// ---------------------------------------------------------------------------
+describe("gradedRubricDigestOf / rowHasRubricDivergence (AC-6)", () => {
+  it("the same rubric text produces the same digest, trimmed first so trailing whitespace never causes a false divergence", () => {
+    expect(gradedRubricDigestOf("Grade for clarity.")).toBe(gradedRubricDigestOf("Grade for clarity.  \n"));
+  });
+
+  it("different rubric text produces a different digest", () => {
+    expect(gradedRubricDigestOf("Rubric A")).not.toBe(gradedRubricDigestOf("Rubric B"));
+  });
+
+  it("a row with NO recorded digest never diverges - there is nothing to diverge from (the direction of failure AC-6 names explicitly)", () => {
+    const row = makeRow({ gradedRubricDigest: undefined });
+    expect(rowHasRubricDivergence(row, "Any rubric text at all")).toBe(false);
+  });
+
+  it("a row graded against the CURRENT rubric does not diverge", () => {
+    const rubric = "Grade for clarity and evidence.";
+    const row = makeRow({ gradedRubricDigest: gradedRubricDigestOf(rubric) });
+    expect(rowHasRubricDivergence(row, rubric)).toBe(false);
+  });
+
+  it("a row graded against a DIFFERENT rubric than the current one diverges", () => {
+    const row = makeRow({ gradedRubricDigest: gradedRubricDigestOf("Old rubric.") });
+    expect(rowHasRubricDivergence(row, "New rubric.")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (AC-6): classifyGradingResult's new optional second parameter,
+// and applyGradingResultToRow's preserve-on-failure fallback.
+// ---------------------------------------------------------------------------
+describe("classifyGradingResult carries the current rubric's digest on success only (A38 wave 2)", () => {
+  const successResult = {
+    totalScore: "9/10",
+    strengths: "Strong thesis.",
+    improvements: "",
+    overallComment: "Strong thesis.",
+    failed: false,
+    rubricAreas: [],
+  };
+
+  it("a success with a digest argument carries it through", () => {
+    expect(classifyGradingResult(successResult, "digest-abc").gradedRubricDigest).toBe("digest-abc");
+  });
+
+  it("a success called with NO digest argument (existing callers unaffected) omits the field", () => {
+    expect(classifyGradingResult(successResult).gradedRubricDigest).toBeUndefined();
+  });
+
+  it("a failure NEVER carries the digest through, even when one is passed - a failed attempt recorded no new score against any rubric", () => {
+    const failedResult = { ...successResult, failed: true, strengths: "This submission could not be graded: timeout" };
+    expect(classifyGradingResult(failedResult, "digest-abc").gradedRubricDigest).toBeUndefined();
+  });
+});
+
+describe("applyGradingResultToRow preserves the row's PRIOR gradedRubricDigest on a failure/no-digest result, never clearing it (A38 wave 2)", () => {
+  const failedResult = {
+    totalScore: "",
+    strengths: "",
+    improvements: "",
+    overallComment: "",
+    state: "failed" as const,
+    error: "timed out",
+    rubricAreas: [],
+  };
+
+  it("a row with a prior digest keeps it through a failed re-grade attempt", () => {
+    const row = makeRow({ gradedRubricDigest: "digest-abc" });
+    const next = applyGradingResultToRow(row, failedResult);
+    expect(next.gradedRubricDigest).toBe("digest-abc");
+  });
+
+  it("a success WITH a digest overwrites the row's prior one", () => {
+    const row = makeRow({ gradedRubricDigest: "digest-old" });
+    const next = applyGradingResultToRow(row, {
+      totalScore: "9/10",
+      strengths: "Fine.",
+      improvements: "",
+      overallComment: "Fine.",
+      state: "ready",
+      rubricAreas: [],
+      gradedRubricDigest: "digest-new",
+    });
+    expect(next.gradedRubricDigest).toBe("digest-new");
   });
 });

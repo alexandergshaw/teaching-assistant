@@ -78,7 +78,10 @@ describe("useGradingRowGrade.ts composes the pure units (reading only - no hook 
 
   it("on success, routes result.results[0] through classifyGradingResult into applyGradingResult - the SAME reuse handleGradeAll's own success path makes", () => {
     expect(STRIPPED).toMatch(/const \[first\] = result\.results;/);
-    expect(STRIPPED).toMatch(/applyGradingResult\(id, classifyGradingResult\(first\)\)/);
+    // A38 wave 2 (AC-6): classifyGradingResult now takes the CURRENT
+    // rubric's digest as a second argument (gradedRubricDigestOf(rubricText)),
+    // so the pin allows any second argument rather than requiring none.
+    expect(STRIPPED).toMatch(/applyGradingResult\(id, classifyGradingResult\(first,\s*gradedRubricDigestOf\(rubricText\)\)\)/);
   });
 
   it("lock.release() runs in a finally block - always runs, whichever branch returned", () => {

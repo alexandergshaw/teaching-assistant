@@ -5,6 +5,11 @@ import {
   NO_SUBMISSIONS_TO_GRADE_MESSAGE,
   buildSingleSubmission,
   gradingRowGradeAction,
+  recordGradeDispatch,
+  beginGradeAttempt,
+  computeGradeConfirmThreshold,
+  sumGradeAttempts,
+  requiresGradeConfirm,
 } from "./grading-dispatch";
 import type { GradingRow } from "./grading-row";
 
@@ -132,5 +137,97 @@ describe("gradingRowGradeAction (A38 wave 1, docs/a38-scope.md section 4.4's eli
 
   it("a grading row reports ineligible even when a rubric is present - it is not the rubric that disables it", () => {
     expect(gradingRowGradeAction(makeRow({ state: "grading" }), true).gradeable).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-3): the spend-cap counter
+// and the confirm-above-N threshold, driven directly - no hook, nothing
+// rendered.
+// ---------------------------------------------------------------------------
+
+describe("recordGradeDispatch (AC-3 Unit 2: the ONE increment primitive)", () => {
+  it("recordGradeDispatch(undefined) is 1 - the first dispatch on a never-attempted row", () => {
+    expect(recordGradeDispatch(undefined)).toBe(1);
+    expect(recordGradeDispatch()).toBe(1);
+  });
+
+  it("recordGradeDispatch(0) is 1", () => {
+    expect(recordGradeDispatch(0)).toBe(1);
+  });
+
+  it("increments from any prior count", () => {
+    expect(recordGradeDispatch(4)).toBe(5);
+  });
+});
+
+describe("beginGradeAttempt (AC-3: increments on DISPATCH, before the grade action's own await; anti-Ruling-6)", () => {
+  it("sets state to 'grading' and gradeAttempts to 1 on a never-attempted row", () => {
+    const row = makeRow({ state: "pending" });
+    const next = beginGradeAttempt(row);
+    expect(next.state).toBe("grading");
+    expect(next.gradeAttempts).toBe(1);
+  });
+
+  it("increments gradeAttempts from whatever the row already carried", () => {
+    const row = makeRow({ state: "failed", gradeAttempts: 2 });
+    expect(beginGradeAttempt(row).gradeAttempts).toBe(3);
+  });
+
+  it("ANTI-RULING-6: a dispatch that later ERRORS still counted - simulated here by calling beginGradeAttempt (the dispatch) then restoring state WITHOUT touching gradeAttempts (the error-outcome entry point, setGradingRowState in grading-rows.ts) - the count must survive the restore, never fall back to 0", () => {
+    const row = makeRow({ state: "pending" });
+    const dispatched = beginGradeAttempt(row);
+    expect(dispatched.gradeAttempts).toBe(1);
+    // The error-outcome restore is a plain spread that leaves gradeAttempts
+    // untouched - modelled directly here (grading-rows.test.ts exercises the
+    // real setGradingRowState for this same claim against the row store).
+    const restored = { ...dispatched, state: "pending" as const };
+    expect(restored.gradeAttempts).toBe(1);
+  });
+
+  it("does not mutate the input row", () => {
+    const row = makeRow({ state: "pending" });
+    beginGradeAttempt(row);
+    expect(row.state).toBe("pending");
+    expect(row.gradeAttempts).toBeUndefined();
+  });
+});
+
+describe("computeGradeConfirmThreshold (AC-3 Ruling 9: N = min(totalCount, maxSubmissions), never totalCount alone)", () => {
+  it("the bound is the binding constraint when it is smaller than the table", () => {
+    expect(computeGradeConfirmThreshold(200, 3)).toBe(3);
+  });
+
+  it("the table size is the binding constraint when it is smaller than the bound", () => {
+    expect(computeGradeConfirmThreshold(2, 40)).toBe(2);
+  });
+
+  it("a null (not-yet-fetched) bound falls back to totalCount - never fires EARLIER than a real bound would allow", () => {
+    expect(computeGradeConfirmThreshold(200, null)).toBe(200);
+  });
+});
+
+describe("sumGradeAttempts", () => {
+  it("sums every row's gradeAttempts, treating an absent count as 0", () => {
+    const rows = [makeRow({ id: "a", gradeAttempts: 2 }), makeRow({ id: "b" }), makeRow({ id: "c", gradeAttempts: 5 })];
+    expect(sumGradeAttempts(rows)).toBe(7);
+  });
+
+  it("an empty table sums to 0", () => {
+    expect(sumGradeAttempts([])).toBe(0);
+  });
+});
+
+describe("requiresGradeConfirm (DECISION 2: confirm ABOVE N - at or above N, so the Nth dispatch itself is gated)", () => {
+  it("below N: no confirm required", () => {
+    expect(requiresGradeConfirm(2, 3)).toBe(false);
+  });
+
+  it("at N: confirm required (not merely past it)", () => {
+    expect(requiresGradeConfirm(3, 3)).toBe(true);
+  });
+
+  it("above N: confirm required", () => {
+    expect(requiresGradeConfirm(10, 3)).toBe(true);
   });
 });

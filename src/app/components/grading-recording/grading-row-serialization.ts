@@ -178,6 +178,17 @@ function toWire(row: NoPostableIdentity<GradingRow>, opts: { dropBulk: boolean }
     suggestedSubmissionKind: r.suggestedSubmissionKind,
     submissionKindCue: r.submissionKindCue,
     submissionKind: r.submissionKind,
+    // A38 wave 2 (docs/a38-acceptance-criteria.md AC-3/AC-6): taking this
+    // list from 19 to 21 keys, deliberately, in the same commit that adds
+    // these two fields to GradingRow - see grading-row.ts's own doc comments
+    // on `gradeAttempts`/`gradedRubricDigest` for why both must survive a
+    // reload (a spend-cap counter and a rubric-divergence signal that reset
+    // every reload would both be silently wrong). Absent normalizes to `0`/
+    // undefined on read below, the identical "absent is a real, safe
+    // default" discipline every other optional field in this codec already
+    // follows.
+    gradeAttempts: r.gradeAttempts ?? 0,
+    gradedRubricDigest: r.gradedRubricDigest ?? "",
   };
 }
 
@@ -288,6 +299,21 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<GradingRow> 
   const submissionKindCue = typeof r.submissionKindCue === "string" ? r.submissionKindCue : "";
   const submissionKind = coerceSubmissionKind(r.submissionKind);
 
+  // A38 wave 2 (AC-3): a missing/non-numeric/negative value normalizes to 0
+  // (never attempted), the same "an unreadable flag must never grant
+  // something the stored data did not earn" discipline `userEdited` above
+  // already runs - a garbled count must never UNDER- or OVER-state how many
+  // model calls this row has actually spent.
+  const gradeAttempts = typeof r.gradeAttempts === "number" && Number.isFinite(r.gradeAttempts) && r.gradeAttempts >= 0
+    ? r.gradeAttempts
+    : 0;
+  // A38 wave 2 (AC-6): absent-stays-absent, the identical discipline
+  // `course`/`assessment` above already run - a row from before this field
+  // existed has no digest at all and must read as "never successfully
+  // graded" (undefined), never as an empty-string digest that could
+  // accidentally equal a real one.
+  const gradedRubricDigest = typeof r.gradedRubricDigest === "string" && r.gradedRubricDigest ? r.gradedRubricDigest : undefined;
+
   return {
     id,
     studentName,
@@ -318,6 +344,8 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<GradingRow> 
     suggestedSubmissionKind,
     submissionKindCue,
     submissionKind,
+    gradeAttempts,
+    gradedRubricDigest,
   } as unknown as NoPostableIdentity<GradingRow>;
 }
 

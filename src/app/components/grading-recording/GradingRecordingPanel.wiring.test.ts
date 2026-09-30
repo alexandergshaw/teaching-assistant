@@ -389,6 +389,45 @@ describe("GradingRecordingPanel.tsx clears the cohort in all four non-success br
   });
 });
 
+// A38 wave 2 fix: beginGradeAttempt sets state:"grading" on every dispatched
+// row before the batch's own await (see the block below). On a whole-batch
+// failure, leaving those rows on "grading" bricks gradingLocked forever -
+// both failure branches must restore them, the way useGradingRowGrade.ts's
+// per-row path already does on its own failure.
+describe("GradingRecordingPanel.tsx restores dispatched rows out of \"grading\" on a whole-batch failure (A38 wave 2 fix)", () => {
+  it("the \"error\" in result branch calls restoreAttempted()", () => {
+    const body = errorResultBranchBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/restoreAttempted\(\);/);
+  });
+
+  it("the catch branch calls restoreAttempted()", () => {
+    const body = catchBranchBody(HANDLE_GRADE_ALL_BODY);
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/restoreAttempted\(\);/);
+  });
+
+  it("restoreAttempted is declared BEFORE the try block (so it is in scope from the catch block, not shadowed inside try's own block scope)", () => {
+    const beforeTryIdx = HANDLE_GRADE_ALL_BODY.indexOf("let restoreAttempted");
+    const tryIdx = HANDLE_GRADE_ALL_BODY.indexOf("try {");
+    expect(beforeTryIdx).toBeGreaterThan(-1);
+    expect(tryIdx).toBeGreaterThan(-1);
+    expect(beforeTryIdx).toBeLessThan(tryIdx);
+  });
+
+  it("restoreAttempted's assignment restores each dispatched row's STATE via setGradingRowState against the PRIOR (pre-attempt) row array, not the pre-beginGradeAttempt row objects - so the bumped gradeAttempts survives the restore untouched", () => {
+    expect(HANDLE_GRADE_ALL_BODY).toMatch(
+      /restoreAttempted\s*=\s*\(\)\s*=>\s*\n?\s*gradingRows\.setAllRows\(attempted\.map\(\(r,\s*i\)\s*=>\s*setGradingRowState\(r,\s*priorRows\[i\]\.state\)\)\)/
+    );
+  });
+
+  it("setGradingRowState is imported from ./grading-rows (the same plain-spread state-only write the per-row path's restore uses)", () => {
+    expect(
+      /import\s*\{[^}]*\bsetGradingRowState\b[^}]*\}\s*from\s*["']\.\/grading-rows["']/.test(STRIPPED_SOURCE)
+    ).toBe(true);
+  });
+});
+
 describe("GradingRecordingPanel.tsx releases the shared lock in handleGradeAll's finally block (A38 wave 1, AC-8)", () => {
   it("finally releases rowGrade.lock - always runs, whichever branch returned", () => {
     expect(HANDLE_GRADE_ALL_BODY).toMatch(/finally\s*\{[\s\S]*?rowGrade\.lock\.release\(\);/);

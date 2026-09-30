@@ -123,6 +123,16 @@ export interface GradingTableProps {
    *  "Grading..."). Not a property of any one row (section 4.4's own
    *  PROP SET table). */
   gradingLocked: boolean;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-3, DECISION 2 "confirm
+   *  above N"): whether the NEXT single-row grade dispatch would put the
+   *  table's total attempt count at or above N. A table-wide fact (the
+   *  spend cap is one shared total, not a per-row one), so every row's
+   *  control renders the SAME arm/confirm-or-plain choice - forwarded
+   *  straight through, mirroring `gradingLocked`'s own shape. */
+  requiresGradeConfirm: boolean;
+  /** A38 wave 2 (docs/a38-acceptance-criteria.md AC-6): forwarded straight
+   *  through to each row - see GradingTableRow.tsx's own prop doc. */
+  rubricText: string;
 }
 
 export default function GradingTable({
@@ -142,6 +152,8 @@ export default function GradingTable({
   onGrade,
   rubricPresent,
   gradingLocked,
+  requiresGradeConfirm,
+  rubricText,
 }: GradingTableProps) {
   // "Clear table" confirm-arm - AC19/AC19a discipline (see the import
   // comment above and gradingClearTableSignature's own header): armed-for is
@@ -297,6 +309,8 @@ export default function GradingTable({
                   onGrade={onGrade}
                   rubricPresent={rubricPresent}
                   gradingLocked={gradingLocked}
+                  requiresGradeConfirm={requiresGradeConfirm}
+                  rubricText={rubricText}
                 />
               ))
             )}

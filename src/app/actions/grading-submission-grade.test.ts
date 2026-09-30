@@ -13,6 +13,7 @@ vi.mock("@/lib/gemini", () => ({
 
 vi.mock("@/lib/supabase/auth", () => ({
   requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/llm", async () => {
@@ -23,9 +24,9 @@ vi.mock("@/lib/llm", async () => {
   };
 });
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireOwner, requireUser } from "@/lib/supabase/auth";
 import { callLlm, type LlmResult } from "@/lib/llm";
-import { gradeCapturedSubmissionsAction } from "./grading-submission-grade";
+import { gradeCapturedSubmissionsAction, getEffectiveGradeBoundAction } from "./grading-submission-grade";
 import { SUBMISSION_KIND_PROMPT_LABELS } from "@/lib/grade/submission-kind";
 import { SUBMISSION_FRAMING_HEADER } from "@/lib/grade/prompts";
 import { UNGRADED_NOT_ATTEMPTED_MESSAGES } from "@/lib/grade/types";
@@ -68,6 +69,26 @@ const RUBRIC = "Correctness (100 pts): does it meet the requirements";
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
+});
+
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-3 N=min server half;
+// docs/a38-wave-plan.md section 2's requireUser() correction).
+describe("getEffectiveGradeBoundAction (A38 wave 2)", () => {
+  it("calls requireUser() - an unauthenticated caller rejects, never resolves a bound", async () => {
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
+    await expect(getEffectiveGradeBoundAction()).rejects.toThrow("Not authorized. Sign in with an approved account.");
+    expect(requireUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("never relies on requireOwner() - the deprecated alias must not be what actually guards this reader", async () => {
+    await getEffectiveGradeBoundAction();
+    expect(requireOwner).not.toHaveBeenCalled();
+  });
+
+  it("returns the current bound - getGeminiMaxSubmissions mocked low (3) in this file's own module mock, the same pattern the submissions-cap describe block above uses", async () => {
+    await expect(getEffectiveGradeBoundAction()).resolves.toEqual({ bound: 3 });
+  });
 });
 
 describe("gradeCapturedSubmissionsAction - ownership and input guards, before any model call", () => {

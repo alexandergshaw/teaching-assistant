@@ -94,3 +94,80 @@ export function gradingRowGradeAction(row: GradingRow, rubricPresent: boolean): 
   if (row.state === "grading") return { gradeable: false, label: "Grading…" };
   return { gradeable: rubricPresent, label: row.state === "pending" ? "Grade" : "Re-grade" };
 }
+
+// ---------------------------------------------------------------------------
+// A38 wave 2 (docs/a38-acceptance-criteria.md AC-3; docs/a38-wave-plan.md
+// section 6, Unit 2): the spend-cap counter and the confirm-above-N
+// threshold. Both pure, dependency-free leaves - this repo's vitest drives
+// no hook, so the AC-3 MACHINE instrument (increments on DISPATCH, survives
+// an error outcome, N = min not totalCount) has to be satisfiable by calling
+// these directly, never by driving useGradingRowGrade.
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE increment primitive: `count` is the row's PRIOR `gradeAttempts`
+ * (absent normalizes to 0, mirroring `sumGradeAttempts`'s own `?? 0`).
+ * Never decrements and never resets - there is no "refund" entry point
+ * anywhere in this feature (round-2 Ruling 6): a dispatch that later errors
+ * or fails still spent a model call, so it still counts.
+ */
+export function recordGradeDispatch(count?: number): number {
+  return (count ?? 0) + 1;
+}
+
+/**
+ * The single-row grade path's ONE pre-await mutation (docs/a38-scope.md
+ * section 4.6 Unit 2). Composes the state write wave 1 already made
+ * ("grading") with the attempt-count increment, so the count rises the
+ * moment a grade is DISPATCHED - before the grade action's own await, not
+ * after its result comes back - which is what makes a failing row still
+ * count toward N (AC-3's anti-Ruling-6 requirement). grading-rows.ts's
+ * `setGradingRowState` is the one production entry point that calls this
+ * (see that function's own header for why the call lives there rather than
+ * at every dispatch call site individually), and every OTHER state
+ * transition (the error-outcome restore in particular) is a plain spread
+ * that leaves `gradeAttempts` untouched - nothing in this feature ever
+ * refunds it.
+ */
+export function beginGradeAttempt(row: GradingRow): GradingRow {
+  return { ...row, state: "grading", gradeAttempts: recordGradeDispatch(row.gradeAttempts) };
+}
+
+/**
+ * AC-3 / round-2 Ruling 9: N = min(totalCount, maxSubmissions), NEVER
+ * `totalCount` alone (docs/a38-scope.md:652 is stale on this point - see
+ * docs/a38-wave-plan.md section 2's conflict note). `effectiveBound` is
+ * `null` before the server-only bound has been fetched at least once
+ * (getEffectiveGradeBoundAction, grading-submission-grade.ts) - in that
+ * window this returns `totalCount` itself, which keeps the confirm from
+ * ever firing EARLIER than it should (a threshold of `totalCount` is the
+ * loosest possible one), never earlier than the moment a real bound is
+ * known.
+ */
+export function computeGradeConfirmThreshold(totalCount: number, effectiveBound: number | null): number {
+  return Math.min(totalCount, effectiveBound ?? totalCount);
+}
+
+/**
+ * The running total of grade DISPATCHES across the whole table - every
+ * row's own `gradeAttempts`, summed (absent normalizes to 0). This is what
+ * the confirm-above-N decision compares against N, per OQ-1's adopted
+ * reading (per-row path only counts toward this decision's CONFIRM gate,
+ * but every dispatch anywhere - including a bulk grade-all press - still
+ * increments the underlying per-row counter this sums, per the wave plan's
+ * "grade-all still sends rawRows, now also incrementing attempts on
+ * dispatch" invariant).
+ */
+export function sumGradeAttempts(rows: ReadonlyArray<GradingRow>): number {
+  return rows.reduce((sum, r) => sum + (r.gradeAttempts ?? 0), 0);
+}
+
+/**
+ * DECISION 2 (docs/owner-decisions-2026-09-23.md): "confirm above N" - at or
+ * above N, not merely past it, so the Nth dispatch itself is the one that
+ * requires confirmation rather than letting it through for free and gating
+ * only the (N+1)th.
+ */
+export function requiresGradeConfirm(totalAttempts: number, n: number): boolean {
+  return totalAttempts >= n;
+}

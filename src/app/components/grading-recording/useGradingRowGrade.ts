@@ -47,7 +47,7 @@
 import { useCallback, useState } from "react";
 import { gradeCapturedSubmissionsAction } from "@/app/actions/grading-submission-grade";
 import { checkGradingReadiness, buildSingleSubmission } from "./grading-dispatch";
-import { classifyGradingResult } from "./grading-rows";
+import { classifyGradingResult, gradedRubricDigestOf } from "./grading-rows";
 import { createGradeLock, type GradeLock } from "./grade-lock";
 import type { GradingRow, GradingRowState } from "./grading-row";
 import type { GradingResultInput } from "./grading-rows";
@@ -136,7 +136,10 @@ export function useGradingRowGrade({
           return;
         }
         const [first] = result.results;
-        applyGradingResult(id, classifyGradingResult(first));
+        // A38 wave 2 (AC-6): the CURRENT rubric's digest, so a later
+        // divergence check (rowHasRubricDivergence, grading-rows.ts) knows
+        // whether this row's score still matches the rubric on screen.
+        applyGradingResult(id, classifyGradingResult(first, gradedRubricDigestOf(rubricText)));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not grade this submission.";
         setRowError(message);

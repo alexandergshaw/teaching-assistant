@@ -93,7 +93,7 @@ import GradingRecordingContextPanel from "./GradingRecordingContextPanel";
 // submission-grade.ts, following extractGradingSubmissionsAction's own
 // naming) existed. It landed, with that exact signature, while this panel
 // was being built - see this task's report for the confirmation.
-import { gradeCapturedSubmissionsAction } from "@/app/actions/grading-submission-grade";
+import { gradeCapturedSubmissionsAction, getEffectiveGradeBoundAction } from "@/app/actions/grading-submission-grade";
 import { matchNameAgainstRoster } from "./grading-roster-match";
 import { useGradingRows } from "./useGradingRows";
 import GradingTable from "./GradingTable";
@@ -124,7 +124,13 @@ import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
 // GradingRecordingContextPanel above. No hook moved with it; see that
 // leaf's own header.
 import GradingRecordingCaptureStatus from "./GradingRecordingCaptureStatus";
-import { checkGradingReadiness } from "./grading-dispatch";
+import {
+  checkGradingReadiness,
+  beginGradeAttempt,
+  computeGradeConfirmThreshold,
+  sumGradeAttempts,
+  requiresGradeConfirm,
+} from "./grading-dispatch";
 // A38 wave 1 (docs/a38-wave-plan.md section 4/section 6): the single-row
 // grade path's thin composing hook - holds the shared lock handleGradeAll
 // below also claims, and the pure units it composes. See that file's own
@@ -136,7 +142,7 @@ import { useGradingRowGrade } from "./useGradingRowGrade";
 // own header for the full reasoning.
 import { useGradingRecordingExtraction } from "./useGradingRecordingExtraction";
 import { isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
-import { classifyGradingResult } from "./grading-rows";
+import { classifyGradingResult, gradedRubricDigestOf, setGradingRowState } from "./grading-rows";
 // A16-3 (docs/a16-plan.md 5.5/9.3, rulings 10/19): the SAME ClassTrendsPanel
 // GradingResults.tsx already mounts for the LMS grading surfaces, reached
 // here from a run over THIS table instead of a navigated-to destination.
@@ -541,6 +547,31 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const [gradeError, setGradeError] = useState<string | null>(null);
   const [gradingBusy, setGradingBusy] = useState(false);
 
+  // A38 wave 2 (docs/a38-acceptance-criteria.md AC-3 N=min; docs/a38-wave-plan.md
+  // section 2): fetched ONCE on mount, never re-fetched per press - the bound
+  // is a deployment-wide config integer, not a per-row or per-run value.
+  // Starts `null` DELIBERATELY: computeGradeConfirmThreshold falls back to
+  // `totalCount` itself while this is null, which is the LOOSEST possible
+  // threshold - the confirm can only start firing LATER, once the real bound
+  // is known, never earlier (no dismissal-training from a premature confirm).
+  const [effectiveGradeBound, setEffectiveGradeBound] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { bound } = await getEffectiveGradeBoundAction();
+        if (!cancelled) setEffectiveGradeBound(bound);
+      } catch {
+        // Best-effort: staying at null keeps the pre-fetch fallback above -
+        // this is a spend-cap disclosure, not the grading path itself, so a
+        // failed fetch here must never block or error the grading surface.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // A38 wave 1 (docs/a38-wave-plan.md section 4/6): the single-row grade
   // path. `rowGrade.lock` is the ONE shared instance handleGradeAll below
   // also claims - per-row and bulk grading must never interleave (section
@@ -561,6 +592,16 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // flight is not disabled via this - it derives its own busy state from
   // `row.state === "grading"` (grading-dispatch.ts's gradingRowGradeAction).
   const gradingLocked = gradingBusy || gradingRows.rawRows.some((r) => r.state === "grading");
+
+  // A38 wave 2 (AC-3, OQ-1's adopted reading: the confirm gate is per-row
+  // path only - grade-all stays bounded per invocation as it already was).
+  // N = min(totalCount, effectiveGradeBound) (Ruling 9, never totalCount
+  // alone); totalGradeAttempts sums every row's own counter, which BOTH the
+  // per-row path and grade-all's own dispatch bump - see handleGradeAll's
+  // own comment below.
+  const gradeConfirmThreshold = computeGradeConfirmThreshold(gradingRows.totalCount, effectiveGradeBound);
+  const totalGradeAttempts = sumGradeAttempts(gradingRows.rawRows);
+  const requiresConfirmAboveN = requiresGradeConfirm(totalGradeAttempts, gradeConfirmThreshold);
 
   const handleGradeAll = useCallback(async () => {
     const readiness = checkGradingReadiness(rubricText, gradingRows.totalCount);
@@ -588,8 +629,20 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     }
     setGradeError(null);
     setGradingBusy(true);
+    // Wave 2 fix: hoisted above the try so both failure branches below can
+    // restore dispatched rows out of "grading" without refunding gradeAttempts
+    // (a plain setGradingRowState spread), mirroring useGradingRowGrade.ts.
+    let restoreAttempted: () => void = () => {};
     try {
-      const submissions = gradingRows.rawRows.map((r) => ({
+      // A38 wave 2 (AC-3): dispatch bumps gradeAttempts via beginGradeAttempt
+      // (same helper the per-row path uses) before the batch's own await, so
+      // grade-all's dispatches count toward the shared spend-cap total.
+      const priorRows = gradingRows.rawRows;
+      const attempted = priorRows.map((r) => beginGradeAttempt(r));
+      gradingRows.setAllRows(attempted);
+      restoreAttempted = () =>
+        gradingRows.setAllRows(attempted.map((r, i) => setGradingRowState(r, priorRows[i].state)));
+      const submissions = attempted.map((r) => ({
         id: r.id,
         studentName: r.studentName,
         submissionText: r.submissionText,
@@ -601,7 +654,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       // row it graded. Never assessmentId/assessmentLabel here - that is
       // the single in-scope value, and using it would make every row carry
       // the same label, silently killing the disclosure line further down.
-      const identity = gradingRows.rawRows.map((r) => ({ id: r.id, studentName: r.studentName, assessment: r.assessment }));
+      const identity = attempted.map((r) => ({ id: r.id, studentName: r.studentName, assessment: r.assessment }));
       const result = await gradeCapturedSubmissionsAction(
         submissions,
         rubricText.trim(),
@@ -614,21 +667,23 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           ...prev,
           erroredGradingRun(new Date().toISOString(), submissions.length, result.error),
         ]);
+        restoreAttempted();
         setLastRunCohort(null);
         return;
       }
-      // BLOCKER 3: classifyGradingResult (grading-rows.ts) is the one place
-      // that recovers a per-submission failure from gradeCapturedSubmissionsAction's
-      // result (which carries no separate state/error field - see that
-      // function's own header) and turns it into a real "failed" row with
-      // its verbatim message in `error`, never a feedback field. Applying
-      // every result as "ready" unconditionally (the previous code here) is
-      // exactly what made GradingRow's "failed" state and `error` field
-      // dead code.
+      // BLOCKER 3: classifyGradingResult (grading-rows.ts) recovers a
+      // per-submission failure from gradeCapturedSubmissionsAction's result
+      // (no separate state/error field) into a real "failed" row with its
+      // verbatim message in `error`. Applying every result as "ready"
+      // unconditionally (the previous code) made GradingRow's "failed"
+      // state and `error` field dead code.
       let graded = 0;
       let failed = 0;
+      // A38 wave 2 (AC-6): the CURRENT rubric's digest, computed once for
+      // the whole run - classifyGradingResult ignores it on a failed result.
+      const rubricDigest = gradedRubricDigestOf(rubricText);
       for (const r of result.results) {
-        const classified = classifyGradingResult(r);
+        const classified = classifyGradingResult(r, rubricDigest);
         if (classified.state === "failed") failed += 1;
         else graded += 1;
         gradingRows.applyGradingResult(r.id, classified);
@@ -658,6 +713,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         ...prev,
         erroredGradingRun(new Date().toISOString(), gradingRows.totalCount, message),
       ]);
+      restoreAttempted();
       setLastRunCohort(null);
     } finally {
       // A38 wave 1: release always runs, whichever branch returned.
@@ -919,6 +975,8 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onGrade={(id) => void rowGrade.gradeRow(id)}
         rubricPresent={canGrade}
         gradingLocked={gradingLocked}
+        requiresGradeConfirm={requiresConfirmAboveN}
+        rubricText={rubricText}
       />
 
       {rubricModalOpen && (

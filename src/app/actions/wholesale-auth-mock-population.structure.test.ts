@@ -191,6 +191,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "grading-chat-intake.test.ts",
   "grading-checklist.test.ts",
   "grading-incremental.test.ts",
+  "grading-picture-transcribe.test.ts",
   "grading-submission-extract.test.ts",
   "grading-submission-grade.test.ts",
   "grading.budget.test.ts",

@@ -119,6 +119,7 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
     "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.
     "./RubricProvenance.tsx", // A39 wave 2: the run's version-provenance leaf, mounted by GradingTab.tsx (not by this directory's own GradingResults.tsx).
+    "../DraftedGradesTab.tsx", // fix(trends) 4e46fadb: the new non-local consumer of ./classTrendsEntry (hasTrendableResults), gating drafts' ClassTrendsPanel mount like the other five surfaces.
     "../GradingResults.tsx",
     "../GradingTab.tsx", // A39 wave 2: the new non-local consumer of ./RubricProvenance.tsx above.
     "../LiveFeedPanel.tsx", // A39 wave 5 (docs/a39-waves.md 8.5): the second RubricProvenance.tsx mount, on the Live Feed surface.

@@ -62,6 +62,7 @@ interface GradeRunItemRequestBody {
   rubric?: unknown;
   provider?: unknown;
   pointsPossible?: unknown;
+  commentSplit?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +92,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   rubric: string;
   provider: ReturnType<typeof normalizeProvider>;
   pointsPossible: number | null;
+  commentSplit: boolean;
 } | null {
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
@@ -129,6 +131,8 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     rubric: body.rubric,
     provider: normalizeProvider(typeof body.provider === "string" ? body.provider : undefined),
     pointsPossible: body.pointsPossible,
+    // Only a literal true opts in; anything else is the default mapping.
+    commentSplit: body.commentSplit === true,
   };
 }
 
@@ -169,7 +173,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit } = parsed;
 
   // THE SOFT BUDGET IS UNDER THE HARD CAP (S1 check 3): TOTAL_BUDGET_MS is
   // strictly below maxDuration * 1000, so this handler stops itself, on its
@@ -184,7 +188,7 @@ export async function POST(req: NextRequest) {
     // either per item would reproduce the grading.ts:634-636 defect this
     // seam exists to avoid (W4-4).
     const outcome = await raceWithTimeout(
-      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible),
+      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit }),
       waitMs
     );
 

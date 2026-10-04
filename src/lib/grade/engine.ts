@@ -21,7 +21,7 @@ import {
 } from "./types";
 import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
-import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
+import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
 import { buildSubmittedFileNamesBlock, SUBMISSION_FRAMING_HEADER } from "./prompts";
 // A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
@@ -52,7 +52,11 @@ async function gradeSubmission(
   // (see buildSubmittedFileNamesBlock) so it can check a stated filename
   // requirement by comparing two lists instead of noticing names buried in
   // the "--- FILE: path ---" headers inside `content`.
-  submittedFiles: SubmittedFileInfo[] = []
+  submittedFiles: SubmittedFileInfo[] = [],
+  // G8/F1=B: when true the prompt ran in "separate-strengths" mode, so the
+  // model's praise is in parsed.strengths and its deductions are in
+  // overallComment (see the routing below).
+  commentSplit = false
 ): Promise<GradedResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -95,6 +99,19 @@ async function gradeSubmission(
     throw new Error(normalizeGeminiError(result.status, result.body));
   }
 
+  // G5 bad-output guard. ALLOWLIST of complete reasons (absent or "STOP"):
+  // an unbounded set of cap/blocked reasons must never become a graded row.
+  // Throws into gradeStudentEntries's catch, which builds the grading-failed
+  // row. The parser itself is shared with the recording path and stays as is.
+  if (result.finishReason !== undefined && result.finishReason !== "STOP") {
+    throw new Error(
+      `The model's response was cut off or blocked before it finished (${result.finishReason}), so it was not graded.`
+    );
+  }
+  if (!hasParseableRubricJson(result.text)) {
+    throw new Error("The model's response was not valid grading JSON, so it was not graded.");
+  }
+
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
   const derivedTotal = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
@@ -111,8 +128,12 @@ async function gradeSubmission(
   // resubmitNotice is NEVER model-generated, only this fixed-wording,
   // fixed-condition append. overallComment is the composition of all three,
   // never authored on its own.
-  const strengths = parsed.overallComment;
-  const improvements = parsed.improvements;
+  // G8/F1=B (reading R1): under commentSplit, praise -> strengths and
+  // deductions + advice -> improvements. Unset: today's mapping, unchanged.
+  const strengths = commentSplit ? extractStrengthsField(feedback) : parsed.overallComment;
+  const improvements = commentSplit
+    ? [parsed.overallComment, parsed.improvements].filter((t) => t.trim()).join("\n\n")
+    : parsed.improvements;
   const resubmitNotice = pointsWereDeducted(totalScore, rubricAreas) ? RESUBMIT_NOTICE : "";
   const overallComment = composeOverallComment(strengths, improvements, resubmitNotice);
 
@@ -142,6 +163,9 @@ export interface GradingRunOptions {
    *  there is no authorization consequence to threading it through
    *  unauthenticated-looking layers like FormData. */
   readonly deadlineMs?: number;
+  /** G8/F1=B: separate praise (What Went Well) from deductions + advice
+   *  (What Could Be Better). Unset/false keeps today's byte-identical mapping. */
+  readonly commentSplit?: boolean;
 }
 
 /**
@@ -196,7 +220,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs } = options;
+  const { deadlineMs, commentSplit } = options;
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
@@ -206,7 +230,9 @@ async function gradeStudentEntries(
   // the same names (otherwise the per-student LLM calls drift, and the results
   // table shows mismatched, half-filled columns).
   const criteria = extractRubricCriteria(rubric);
-  const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric, criteria);
+  const systemPrompt = commentSplit
+    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths")
+    : buildSystemPrompt(assignmentInstructions, rubric, criteria);
   const results: GradeResult[] = [];
 
   // N13a: entry 0 always STARTS (it does not follow that results[0] is a
@@ -245,7 +271,8 @@ async function gradeStudentEntries(
         imageFiles,
         pointsPossible,
         codeRun,
-        submittedFiles
+        submittedFiles,
+        commentSplit === true
       );
       results.push({
         ...result,

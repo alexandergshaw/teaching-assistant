@@ -359,3 +359,56 @@ describe("gradeEntries - stdin-starved runs are withheld from the model's prompt
     expect(sentText.text).toContain("Ran without errors: yes");
   });
 });
+
+// G8 / F1=B (reading R1): praise -> strengths; deductions + advice ->
+// improvements, only when the commentSplit option is set.
+describe("gradeEntries - commentSplit routing (G8)", () => {
+  const SPLIT_JSON = JSON.stringify({
+    strengths: "PRAISE_X you structured this well",
+    overallComment: "DEDUCT_Y Thesis: the claim is missing",
+    improvements: "ADVICE_Z try an outline next time",
+    rubricResults: [{ area: "Overall", score: "7/10" }],
+    totalScore: "7/10",
+  });
+  const DEFAULT_JSON = JSON.stringify({
+    overallComment: "PRAISE_AND_DEDUCT_W",
+    improvements: "ADVICE_Z",
+    rubricResults: [{ area: "Overall", score: "7/10" }],
+    totalScore: "7/10",
+  });
+
+  function sentPrompt(): string {
+    const part = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in part)) throw new Error("expected a text part");
+    return part.text;
+  }
+
+  it("5.1: routes praise to strengths and deductions + advice to improvements", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: SPLIT_JSON });
+    const run = await gradeEntries([entry()], "Grade.", "Rubric text.", "gemini", null, { commentSplit: true });
+    const row = run.results[0];
+    expect(row.strengths).toContain("PRAISE_X");
+    expect(row.strengths).not.toContain("DEDUCT_Y");
+    expect(row.improvements).toContain("DEDUCT_Y");
+    expect(row.improvements).toContain("ADVICE_Z");
+    expect(row.strengths).not.toBe(row.improvements);
+  });
+
+  it("5.2: the engine selects the separate-strengths prompt only when the option is set", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: SPLIT_JSON });
+    await gradeEntries([entry()], "Grade.", "Rubric text.", "gemini", null, { commentSplit: true });
+    expect(sentPrompt()).toContain('"strengths": "what the student did well",');
+
+    mockCallLlm.mockClear();
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: DEFAULT_JSON });
+    await gradeEntries([entry()], "Grade.", "Rubric text.", "gemini");
+    expect(sentPrompt()).not.toContain('"strengths": "what the student did well",');
+  });
+
+  it("5.3: with the option unset the mapping is today's (overallComment -> strengths)", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: DEFAULT_JSON });
+    const run = await gradeEntries([entry()], "Grade.", "Rubric text.", "gemini");
+    expect(run.results[0].strengths).toBe("PRAISE_AND_DEDUCT_W");
+    expect(run.results[0].improvements).toBe("ADVICE_Z");
+  });
+});

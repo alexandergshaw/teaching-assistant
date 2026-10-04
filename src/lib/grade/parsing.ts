@@ -27,6 +27,39 @@ function extractJsonObject(raw: string): string | null {
   return candidate.slice(start, end + 1);
 }
 
+/**
+ * True when `raw` carries a JSON object that JSON.parse accepts - the SAME two
+ * steps parseRubricResponse runs, shared so the engine's bad-output guard and
+ * the parser can never disagree about what "parseable" means.
+ */
+export function hasParseableRubricJson(raw: string): boolean {
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) return false;
+  try {
+    JSON.parse(jsonText);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The model's separate praise text (the "strengths" JSON key, emitted only in
+ * the "separate-strengths" prompt mode). A SIBLING accessor rather than a field
+ * on parseRubricResponse's return, so that shared return shape (also read by
+ * the recording path) stays byte-identical. "" when absent or unparseable.
+ */
+export function extractStrengthsField(raw: string): string {
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) return "";
+  try {
+    const parsed = JSON.parse(jsonText) as { strengths?: unknown };
+    return normalizeText(parsed?.strengths);
+  } catch {
+    return "";
+  }
+}
+
 function toRubricAreaResult(value: unknown): RubricAreaResult | null {
   if (!value || typeof value !== "object") {
     return null;

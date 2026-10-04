@@ -429,3 +429,51 @@ describe("SABOTAGE 5 - ALL_GRADE_RESULT_FIELDS", () => {
     expect(stripped.userId).toBeUndefined();
   });
 });
+
+// G5 - bad model output never becomes a graded row. Each case isolates ONE
+// guard: G5a uses VALID JSON so only the finishReason guard can make the row
+// ungraded; G5b uses a STOP finishReason so only the parse guard can.
+describe("G5 - bad model output is surfaced as grading-failed", () => {
+  const VALID_JSON = JSON.stringify({
+    overallComment: "RAW_SENTINEL_OK",
+    rubricResults: [{ area: "Overall", score: "8/10" }],
+    totalScore: "8/10",
+  });
+  const PROSE_NO_JSON = "PROSE_SENTINEL the work looks good overall";
+
+  function allBoxes(row: { strengths: string; improvements: string; overallComment: string; feedback: string }): string {
+    return [row.strengths, row.improvements, row.overallComment, row.feedback].join("\n");
+  }
+
+  it("G5a: a MAX_TOKENS finishReason with otherwise valid JSON is grading-failed and leaks no raw text", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "MAX_TOKENS", text: VALID_JSON });
+    const run = await gradeEntries([entry()], "Grade it.", PARSEABLE_RUBRIC, "gemini");
+    const row = run.results[0];
+    expect(row.ungraded?.kind).toBe("grading-failed");
+    expect((row.ungraded as { message: string }).message.startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
+    expect(allBoxes(row)).not.toContain("RAW_SENTINEL_OK");
+  });
+
+  it("G5b: prose with no JSON (finishReason STOP) is grading-failed and leaks no raw text", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: PROSE_NO_JSON });
+    const run = await gradeEntries([entry()], "Grade it.", PARSEABLE_RUBRIC, "gemini");
+    const row = run.results[0];
+    expect(row.ungraded?.kind).toBe("grading-failed");
+    expect(allBoxes(row)).not.toContain("PROSE_SENTINEL");
+  });
+
+  it("G5c: a complete (STOP) parseable response is graded", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, finishReason: "STOP", text: VALID_JSON });
+    const run = await gradeEntries([entry()], "Grade it.", PARSEABLE_RUBRIC, "gemini");
+    const row = run.results[0];
+    expect(row.ungraded).toBeUndefined();
+    expect(row.totalScore).toBe("8/10");
+    expect(row.overallComment).toContain("RAW_SENTINEL_OK");
+  });
+
+  it("G5d: an ABSENT finishReason (the shape most calls have) is graded, not treated as truncation", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: VALID_JSON });
+    const run = await gradeEntries([entry()], "Grade it.", PARSEABLE_RUBRIC, "gemini");
+    expect(run.results[0].ungraded).toBeUndefined();
+  });
+});

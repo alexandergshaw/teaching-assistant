@@ -80,6 +80,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -98,6 +99,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -115,6 +117,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -129,6 +132,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -148,6 +152,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
       })
@@ -169,6 +174,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
       })
@@ -197,6 +203,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -220,6 +227,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -250,10 +258,32 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: true,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
     expect(loadRepoGradesUiState().runCodeScoring).toBe(true);
+  });
+
+  it("W-B-PERSIST: round-trips searchQuery through persist then load under ta-repo-grades-search, defaulting to empty", () => {
+    expect(loadRepoGradesUiState().searchQuery).toBe("");
+    persistRepoGradesUiState({
+      courseId: "",
+      orgPrefix: "",
+      sort: DEFAULT_REPO_GRADE_SORT,
+      instructions: "",
+      rubric: "",
+      linkAssignmentId: "",
+      linkSource: "roster",
+      useReadmeInstructions: true,
+      bulkSelectionOnly: false,
+      runCodeScoring: false,
+      searchQuery: "jane",
+      settingsOpen: null,
+      linkPanelOpen: null,
+    });
+    expect(fakeStorage.getItem("ta-repo-grades-search")).toBe("jane");
+    expect(loadRepoGradesUiState().searchQuery).toBe("jane");
   });
 
   it("reads runCodeScoring as false for any stored value other than the exact \"1\" marker, same as its own true-marker default of false", () => {
@@ -273,6 +303,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: true,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });
@@ -301,6 +332,7 @@ describe("collapse overrides (A7 W2): settingsOpen / linkPanelOpen tri-state", (
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
     runCodeScoring: false,
+    searchQuery: "",
   };
 
   it("P2a: never-written reads back as null for both", () => {
@@ -703,6 +735,7 @@ describe("loadRepoGradeManualRubricText / persistRepoGradeManualRubricText (item
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
     });

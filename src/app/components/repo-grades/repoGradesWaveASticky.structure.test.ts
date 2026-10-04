@@ -118,8 +118,14 @@ describe("Wave A wiring", () => {
     expect(RUNBAR).toContain("scopedToSelection: bulkSelectionOnly && selected.size > 0");
     expect(RUNBAR).not.toContain("selected.size > 0 || bulkSelectionOnly");
     expect(INDEX).toMatch(/rows:\s*displayedRows/);
-    for (const [name, src] of [["index.tsx", INDEX], ["RepoGradesStickyHeader.tsx", HEADER], ["RepoGradesRunBar.tsx", RUNBAR]]) {
-      for (const id of ["visibleRepoRows", "bodyRows", "planRows"]) {
+    // Wave B retires the bodyRows ban for index.tsx ONLY (it legitimately feeds
+    // the grid's bodyRows prop); the full ban stays on the header and run bar.
+    for (const [name, src, banned] of [
+      ["index.tsx", INDEX, ["visibleRepoRows", "planRows"]],
+      ["RepoGradesStickyHeader.tsx", HEADER, ["visibleRepoRows", "bodyRows", "planRows"]],
+      ["RepoGradesRunBar.tsx", RUNBAR, ["visibleRepoRows", "bodyRows", "planRows"]],
+    ] as const) {
+      for (const id of banned) {
         expect(src, `${name} must not contain ${id}`).not.toContain(id);
       }
     }

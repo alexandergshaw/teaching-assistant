@@ -58,7 +58,7 @@ import {
 import RepoGradesLogPanel from "./RepoGradesLogPanel";
 import RepoGradesControls from "./RepoGradesControls";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
-import RepoGradesStatusBanners from "./RepoGradesStatusBanners";
+import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { linkUsernamesLogDetail } from "./linkRepoUsernames";
 import { confirmableBindingSummary, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
@@ -79,6 +79,7 @@ import {
 import { describeRestoredRepoGradeCells } from "./repoGradesResultsStore";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
+import { rowMatchesQuery } from "./repoGradesSearch";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // A16 wave 3: mounts this run's trends above the grid - see
 // classTrendsFolderEntry.ts's header for why the leaf lives in this
@@ -399,6 +400,9 @@ export default function RepoGradesTab() {
     currentSelectedFolder === ALL_FOLDERS
       ? sortedRows
       : sortedRows.filter((row) => row.cells[currentSelectedFolder]?.status === "ungraded");
+  // RG-SEARCH-STICKY Wave B: the search query narrows ONLY the table body.
+  // `displayedRows` above stays query-free and feeds every plan surface.
+  const bodyRows = displayedRows.filter((row) => rowMatchesQuery(row, uiState.searchQuery));
   const folderMissingCount =
     currentSelectedFolder === ALL_FOLDERS
       ? 0
@@ -898,27 +902,21 @@ export default function RepoGradesTab() {
         </div>
       )}
 
-      {/* U1.3b - rows follow columns, DISPLAY ONLY (section 5: buildBulkGradePlan
-          already skips missing-folder/scan-error rows internally, so this
-          never changes what a bulk run covers). Named counts rather than
-          silently rendering fewer rows with no explanation. */}
-      {model && currentSelectedFolder !== ALL_FOLDERS && (folderMissingCount > 0 || folderScanErrorCount > 0) && (
-        <p className={pageStyles.fieldHint}>
-          {displayedRows.length} repo{displayedRows.length === 1 ? "" : "s"} shown with a &quot;{currentSelectedFolder}
-          &quot; folder
-          {folderMissingCount > 0
-            ? `; ${folderMissingCount} repo${folderMissingCount === 1 ? "" : "s"} do not have it`
-            : ""}
-          {folderScanErrorCount > 0
-            ? `; ${folderScanErrorCount} repo${folderScanErrorCount === 1 ? "" : "s"} could not be scanned`
-            : ""}
-          .
-        </p>
+      {/* U1.3b - named counts, DISPLAY ONLY (see RepoGradesFolderHint). */}
+      {model && currentSelectedFolder !== ALL_FOLDERS && (
+        <RepoGradesFolderHint
+          folder={currentSelectedFolder}
+          shown={displayedRows.length}
+          missing={folderMissingCount}
+          scanErrors={folderScanErrorCount}
+        />
       )}
 
       {/* RG-SEARCH-STICKY Wave A: one shell encloses the sticky run bar (A7 W3,
           one folder only, same confirmed handlers as the column header) and the grid. */}
       <RepoGradesStickyHeader
+        searchQuery={uiState.searchQuery}
+        onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
         runBar={
           model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0]
             ? {
@@ -935,6 +933,7 @@ export default function RepoGradesTab() {
         <RepoGradesGrid
           columns={displayedColumns}
           rows={displayedRows}
+          bodyRows={bodyRows}
           roster={roster}
           selectedFolder={currentSelectedFolder}
           sort={uiState.sort}

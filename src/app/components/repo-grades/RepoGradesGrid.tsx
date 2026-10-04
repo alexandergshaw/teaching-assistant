@@ -144,7 +144,13 @@ function SortableColumnHeader({
 
 export interface RepoGradesGridProps {
   columns: RepoGradeColumn[];
+  /** The folder-scoped, query-FREE row set. Feeds every plan surface (the
+   * column header's Grade/Post counts and disabled state) and the empty-state
+   * test. The search query must never reach it (RG-SEARCH-STICKY). */
   rows: RepoGradeRow[];
+  /** The rows the `<tbody>` renders: `rows` narrowed by the search query.
+   * DISPLAY ONLY - never read by a plan surface. */
+  bodyRows: RepoGradeRow[];
   roster: RepoBindingRosterEntry[];
   /** A5 - the folder this view is currently scoped to, exactly as
    * index.tsx's resolveSelectedFolder produced it (a raw folder name, or
@@ -441,6 +447,7 @@ function ColumnHeaderControls({
 export default function RepoGradesGrid({
   columns,
   rows,
+  bodyRows,
   roster,
   selectedFolder,
   sort,
@@ -531,7 +538,7 @@ export default function RepoGradesGrid({
           </tr>
         </thead>
         <tbody role="rowgroup">
-          {rows.map((row) => {
+          {bodyRows.map((row) => {
             // N2/N3 - the ONE derivation, read from `row.binding.student`/
             // `row.binding.studentSortable` alone (repoGradeStudentName.ts),
             // computed once per row and used by BOTH name cells below. The
@@ -636,6 +643,7 @@ export default function RepoGradesGrid({
           })}
         </tbody>
       </table>
+      {bodyRows.length === 0 && <p className={pageStyles.emptyState}>No repositories match your search.</p>}
     </div>
   );
 }

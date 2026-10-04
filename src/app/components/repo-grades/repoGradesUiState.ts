@@ -89,6 +89,9 @@ const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
 // columns of the SAME grading run disagree about whether code scoring is on
 // with no way to see that from the grid.
 const RUN_CODE_SCORING_KEY = "ta-repo-grades-run-code-scoring";
+// RG-SEARCH-STICKY Wave B: the sticky header's search box text. Display-only -
+// it narrows the table body and nothing else (never a plan, count or Post gate).
+const SEARCH_KEY = "ta-repo-grades-search";
 // L3 (docs/repo-grades-activity-log-acceptance-criteria.md): the activity
 // log, stored per COURSE inside one blob for the same reason
 // ASSIGNMENT_MAP_KEY is - one course's record of "who did I post, at what
@@ -149,6 +152,8 @@ export interface RepoGradesUiState {
    * false - see RUN_CODE_SCORING_KEY's comment above for why this must never
    * default on. */
   runCodeScoring: boolean;
+  /** The search box text (RG-SEARCH-STICKY). Default "" (no narrowing). */
+  searchQuery: string;
   /** Explicit open (true) / closed (false) choice for the grading-settings
    * disclosure, or null when never written (the derived default applies). */
   settingsOpen: boolean | null;
@@ -168,6 +173,7 @@ function defaultUiState(): RepoGradesUiState {
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
     runCodeScoring: false,
+    searchQuery: "",
     settingsOpen: null,
     linkPanelOpen: null,
   };
@@ -238,6 +244,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     useReadmeInstructions: parseUseReadmeInstructions(localStorage.getItem(README_INSTRUCTIONS_KEY)),
     bulkSelectionOnly: parseBulkSelectionOnly(localStorage.getItem(BULK_SELECTION_ONLY_KEY)),
     runCodeScoring: parseRunCodeScoring(localStorage.getItem(RUN_CODE_SCORING_KEY)),
+    searchQuery: localStorage.getItem(SEARCH_KEY) ?? "",
     settingsOpen: parseCollapseOverride(localStorage.getItem(SETTINGS_OPEN_KEY)),
     linkPanelOpen: parseCollapseOverride(localStorage.getItem(LINK_OPEN_KEY)),
   };
@@ -256,6 +263,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(README_INSTRUCTIONS_KEY, state.useReadmeInstructions ? "1" : "");
     localStorage.setItem(BULK_SELECTION_ONLY_KEY, state.bulkSelectionOnly ? "1" : "");
     localStorage.setItem(RUN_CODE_SCORING_KEY, state.runCodeScoring ? "1" : "");
+    localStorage.setItem(SEARCH_KEY, state.searchQuery);
     writeCollapseOverride(SETTINGS_OPEN_KEY, state.settingsOpen);
     writeCollapseOverride(LINK_OPEN_KEY, state.linkPanelOpen);
   } catch {

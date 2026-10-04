@@ -151,3 +151,30 @@ export default function RepoGradesStatusBanners({
     </>
   );
 }
+
+/** U1.3b - the named-counts line shown under a single-folder view when some
+ * repos lack the chosen folder or could not be scanned, instead of silently
+ * rendering fewer rows. Extracted from index.tsx (RG-SEARCH-STICKY Wave B, to
+ * stay under the 1000-line cap); DISPLAY ONLY, makes no decision. */
+export function RepoGradesFolderHint({
+  folder,
+  shown,
+  missing,
+  scanErrors,
+}: {
+  folder: string;
+  shown: number;
+  missing: number;
+  scanErrors: number;
+}) {
+  if (missing === 0 && scanErrors === 0) return null;
+  return (
+    <p className={styles.fieldHint}>
+      {shown} repo{shown === 1 ? "" : "s"} shown with a &quot;{folder}
+      &quot; folder
+      {missing > 0 ? `; ${missing} repo${missing === 1 ? "" : "s"} do not have it` : ""}
+      {scanErrors > 0 ? `; ${scanErrors} repo${scanErrors === 1 ? "" : "s"} could not be scanned` : ""}
+      .
+    </p>
+  );
+}

@@ -1,3 +1,5 @@
+import { UPLOAD_WIRE_BUDGET_BYTES } from "./upload-budget";
+
 // Chunk planning and joining for transcribing a recorded take's audio.
 // `transcribeLiveAudioAction` (src/app/actions/live-class.ts) accepts one WAV
 // clip per request, bounded by the wire budget in src/lib/upload-budget.ts -
@@ -82,4 +84,43 @@ export function joinTranscriptChunks(parts: ReadonlyArray<string>): string {
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .join(" ");
+}
+
+export interface SegmentSubchunk {
+  startSample: number;
+  endSample: number;
+}
+
+// Largest mono sample count whose WAV, once base64-inflated, still fits one
+// wire request. WAV bytes = 44 + 2n; base64 length = 4 * ceil(bytes / 3).
+// With quarter = floor(budget / 4), base64 length <= budget holds exactly
+// when ceil(bytes / 3) <= quarter, i.e. bytes <= 3 * quarter, so
+// n <= floor((3 * quarter - 44) / 2). Derived from the public budget; do not
+// raise it without redoing that arithmetic (forgetting the 44-byte header
+// yields a value one chunk-boundary too high).
+const MAX_SUBCHUNK_SAMPLES = Math.floor((3 * Math.floor(UPLOAD_WIRE_BUDGET_BYTES / 4) - 44) / 2);
+
+/**
+ * Plans how to split ONE decoded segment of `sampleCount` mono samples into
+ * ordered, half-open `[startSample, endSample)` ranges that each fit one wire
+ * request (UPLOAD_WIRE_BUDGET_BYTES) once WAV-encoded and base64-inflated.
+ * The ranges are contiguous and cover `[0, sampleCount)` exactly. A segment
+ * that already fits comes back as a single range. A count that is zero,
+ * negative, NaN or Infinity returns an empty plan.
+ *
+ * `sampleRate` is accepted for call-site symmetry with the rest of this
+ * module; the budget is a byte limit, so the split is by sample count alone.
+ */
+export function planSegmentSubchunks(sampleCount: number, sampleRate: number): SegmentSubchunk[] {
+  void sampleRate;
+  if (!Number.isFinite(sampleCount) || sampleCount <= 0) return [];
+  const total = Math.floor(sampleCount);
+  const chunks: SegmentSubchunk[] = [];
+  let start = 0;
+  while (start < total) {
+    const end = Math.min(start + MAX_SUBCHUNK_SAMPLES, total);
+    chunks.push({ startSample: start, endSample: end });
+    start = end;
+  }
+  return chunks;
 }

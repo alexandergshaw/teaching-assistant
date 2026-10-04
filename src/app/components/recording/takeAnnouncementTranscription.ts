@@ -34,7 +34,7 @@ import { LIVE_SAMPLE_RATE, downsampleToMono, encodeWav, base64FromArrayBuffer } 
 import { checkWireBudget } from "@/lib/upload-budget";
 import { extractAudioOnly } from "@/lib/strip-audio";
 import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
-import { planTranscriptChunks, sliceMonoSamples, joinTranscriptChunks, type TranscriptChunkPlan } from "@/lib/take-transcript";
+import { planTranscriptChunks, planSegmentSubchunks, sliceMonoSamples, joinTranscriptChunks, type TranscriptChunkPlan } from "@/lib/take-transcript";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { Take } from "./types";
 
@@ -242,18 +242,36 @@ async function runTranscriptionLoop(startIndex: number, total: number, deps: Tra
       continue;
     }
 
-    const wav = encodeWav(mono, LIVE_SAMPLE_RATE);
-    const base64 = base64FromArrayBuffer(wav);
-    const budget = checkWireBudget(base64.length, `Chunk ${i + 1} of ${total}`);
-    if (!budget.ok) {
-      return { kind: "failed", chunkIndex: i, message: budget.error ?? "This chunk is too large to send." };
-    }
+    // One decoded segment can exceed a single wire request (a paused take's
+    // sidecar segment accumulates more than one rotation period). The unit
+    // of progress, indexing and retry stays the segment `i`; an oversize
+    // segment is split by planSegmentSubchunks into N sub-chunk requests
+    // whose texts are joined into parts[i]. A segment that fits yields one
+    // range covering the whole buffer, so the common path sends exactly one
+    // request, as before.
+    const subchunks = planSegmentSubchunks(mono.length, LIVE_SAMPLE_RATE);
+    const subTexts: string[] = [];
+    for (let s = 0; s < subchunks.length; s++) {
+      if (deps.cancelledRef.current) {
+        return { kind: "cancelled", completed: i };
+      }
+      const { startSample, endSample } = subchunks[s];
+      const slice = startSample === 0 && endSample === mono.length ? mono : mono.slice(startSample, endSample);
+      const wav = encodeWav(slice, LIVE_SAMPLE_RATE);
+      const base64 = base64FromArrayBuffer(wav);
+      const label = subchunks.length > 1 ? `Chunk ${i + 1} of ${total} (part ${s + 1} of ${subchunks.length})` : `Chunk ${i + 1} of ${total}`;
+      const budget = checkWireBudget(base64.length, label);
+      if (!budget.ok) {
+        return { kind: "failed", chunkIndex: i, message: budget.error ?? "This chunk is too large to send." };
+      }
 
-    const result = await transcribeLiveAudioAction(base64, { provider: getStoredProvider() });
-    if ("error" in result) {
-      return { kind: "failed", chunkIndex: i, message: result.error };
+      const result = await transcribeLiveAudioAction(base64, { provider: getStoredProvider() });
+      if ("error" in result) {
+        return { kind: "failed", chunkIndex: i, message: result.error };
+      }
+      subTexts.push(result.text);
     }
-    parts[i] = result.text;
+    parts[i] = joinTranscriptChunks(subTexts);
   }
   return { kind: "done" };
 }

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { planTranscriptChunks, sliceMonoSamples, joinTranscriptChunks, TRANSCRIBE_CHUNK_SECONDS } from "./take-transcript";
+import { planTranscriptChunks, planSegmentSubchunks, sliceMonoSamples, joinTranscriptChunks, TRANSCRIBE_CHUNK_SECONDS } from "./take-transcript";
+import { encodeWav, base64FromArrayBuffer } from "@/lib/live-class/wav";
+import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 
 describe("planTranscriptChunks", () => {
   it("covers [0, durationSec) contiguously and non-overlapping for an exact multiple", () => {
@@ -96,4 +98,107 @@ describe("joinTranscriptChunks", () => {
   it("returns an empty string for an empty input array", () => {
     expect(joinTranscriptChunks([])).toBe("");
   });
+});
+
+// ---------------------------------------------------------------------------
+// planSegmentSubchunks: oversize-segment sub-chunking (W1a, ARC-T1)
+// ---------------------------------------------------------------------------
+
+const RATE = 16000;
+
+// The REAL wire unit checkWireBudget compares: base64 string length of the
+// encoded WAV of `n` mono samples. Never a hand-typed byte count.
+function wireLen(n: number): number {
+  return base64FromArrayBuffer(encodeWav(new Float32Array(n), RATE)).length;
+}
+
+// Derived independently from the PUBLIC budget (no internal constant from the
+// leaf is imported) and validated against the real encoders below.
+const MAX = Math.floor((3 * Math.floor(UPLOAD_WIRE_BUDGET_BYTES / 4) - 44) / 2);
+
+function expectCoverage(n: number): ReturnType<typeof planSegmentSubchunks> {
+  const chunks = planSegmentSubchunks(n, RATE);
+  expect(chunks[0].startSample).toBe(0);
+  expect(chunks[chunks.length - 1].endSample).toBe(n);
+  let sum = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    expect(chunks[i].endSample).toBeGreaterThan(chunks[i].startSample);
+    if (i > 0) expect(chunks[i].startSample).toBe(chunks[i - 1].endSample);
+    sum += chunks[i].endSample - chunks[i].startSample;
+  }
+  expect(sum).toBe(n);
+  return chunks;
+}
+
+function expectEveryChunkWithinBudget(chunks: ReturnType<typeof planSegmentSubchunks>): void {
+  for (const c of chunks) {
+    expect(wireLen(c.endSample - c.startSample)).toBeLessThanOrEqual(UPLOAD_WIRE_BUDGET_BYTES);
+  }
+}
+
+describe("planSegmentSubchunks - MAX self-derivation", () => {
+  it("the test-derived MAX is the real encoder boundary", () => {
+    expect(wireLen(MAX)).toBeLessThanOrEqual(UPLOAD_WIRE_BUDGET_BYTES);
+    expect(wireLen(MAX + 1)).toBeGreaterThan(UPLOAD_WIRE_BUDGET_BYTES);
+  });
+});
+
+describe("planSegmentSubchunks - Family A (seconds)", () => {
+  const singles: Array<[string, number]> = [
+    ["1s", 1 * RATE],
+    ["60s", 60 * RATE],
+    ["86s", 86 * RATE],
+  ];
+  for (const [label, n] of singles) {
+    it(`${label} stays one chunk, covers, and fits the wire budget`, () => {
+      const chunks = expectCoverage(n);
+      expect(chunks).toEqual([{ startSample: 0, endSample: n }]);
+      expectEveryChunkWithinBudget(chunks);
+    });
+  }
+
+  const splits: Array<[string, number]> = [
+    ["87s", 87 * RATE],
+    ["120s", 120 * RATE],
+  ];
+  for (const [label, n] of splits) {
+    it(`${label} splits into at least ceil(n/MAX) chunks, covers, and each fits`, () => {
+      const chunks = expectCoverage(n);
+      expect(chunks.length).toBeGreaterThanOrEqual(Math.ceil(n / MAX));
+      expect(chunks.length).toBeGreaterThanOrEqual(2);
+      expectEveryChunkWithinBudget(chunks);
+    });
+  }
+
+  it("600s covers and splits into at least 7 chunks (chunks not encoded: memory)", () => {
+    const n = 600 * RATE;
+    const chunks = expectCoverage(n);
+    expect(chunks.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it("0s returns an empty plan", () => {
+    expect(planSegmentSubchunks(0 * RATE, RATE)).toEqual([]);
+  });
+});
+
+describe("planSegmentSubchunks - Family B (exact byte boundary)", () => {
+  it("exact-MAX is exactly one chunk and fits", () => {
+    const chunks = expectCoverage(1_376_234);
+    expect(chunks).toHaveLength(1);
+    expectEveryChunkWithinBudget(chunks);
+  });
+
+  it("exact-MAX+1 splits into at least two chunks, each fitting", () => {
+    const chunks = expectCoverage(1_376_235);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expectEveryChunkWithinBudget(chunks);
+  });
+});
+
+describe("planSegmentSubchunks - Family C (guard inputs)", () => {
+  for (const input of [0, -1, NaN, Infinity]) {
+    it(`returns [] for ${String(input)}`, () => {
+      expect(planSegmentSubchunks(input, RATE)).toEqual([]);
+    });
+  }
 });

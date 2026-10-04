@@ -107,6 +107,12 @@ const LOG_KEY = "ta-repo-grades-log";
 // it MEANS (which folder to show, whether a drop is genuine) is
 // repoGradesFolderSelection.ts's job, not this one's.
 const FOLDER_KEY = "ta-repo-grades-folder";
+// A7 W2: the open/closed override for the "Grading settings" disclosure and the
+// "Link GitHub usernames" panel. Each is a tri-state (see parseCollapseOverride):
+// an ABSENT key means never written, so a derived default may apply; "1" and
+// "0" mean the instructor explicitly opened or closed it and that choice wins.
+const SETTINGS_OPEN_KEY = "ta-repo-grades-settings-open";
+const LINK_OPEN_KEY = "ta-repo-grades-link-open";
 
 export interface RepoGradesUiState {
   courseId: string;
@@ -134,6 +140,11 @@ export interface RepoGradesUiState {
    * false - see RUN_CODE_SCORING_KEY's comment above for why this must never
    * default on. */
   runCodeScoring: boolean;
+  /** Explicit open (true) / closed (false) choice for the grading-settings
+   * disclosure, or null when never written (the derived default applies). */
+  settingsOpen: boolean | null;
+  /** Same tri-state for the link-usernames panel. */
+  linkPanelOpen: boolean | null;
 }
 
 function defaultUiState(): RepoGradesUiState {
@@ -148,6 +159,8 @@ function defaultUiState(): RepoGradesUiState {
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
     runCodeScoring: false,
+    settingsOpen: null,
+    linkPanelOpen: null,
   };
 }
 
@@ -189,6 +202,20 @@ function parseRunCodeScoring(raw: string | null): boolean {
   return raw === "1";
 }
 
+/** Parses a persisted open/closed override. `null` (key absent) means never
+ * written and stays null so a derived default can apply; "1" is open and any
+ * other stored value (including "0") reads as an explicit close. */
+function parseCollapseOverride(raw: string | null): boolean | null {
+  return raw === null ? null : raw === "1";
+}
+
+/** Writes an override: null removes the key (never written), true is "1",
+ * false is "0" - so an explicit close stays distinguishable from unset. */
+function writeCollapseOverride(key: string, value: boolean | null): void {
+  if (value === null) localStorage.removeItem(key);
+  else localStorage.setItem(key, value ? "1" : "0");
+}
+
 export function loadRepoGradesUiState(): RepoGradesUiState {
   if (typeof window === "undefined") return defaultUiState();
   return {
@@ -202,6 +229,8 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     useReadmeInstructions: parseUseReadmeInstructions(localStorage.getItem(README_INSTRUCTIONS_KEY)),
     bulkSelectionOnly: parseBulkSelectionOnly(localStorage.getItem(BULK_SELECTION_ONLY_KEY)),
     runCodeScoring: parseRunCodeScoring(localStorage.getItem(RUN_CODE_SCORING_KEY)),
+    settingsOpen: parseCollapseOverride(localStorage.getItem(SETTINGS_OPEN_KEY)),
+    linkPanelOpen: parseCollapseOverride(localStorage.getItem(LINK_OPEN_KEY)),
   };
 }
 
@@ -218,6 +247,8 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(README_INSTRUCTIONS_KEY, state.useReadmeInstructions ? "1" : "");
     localStorage.setItem(BULK_SELECTION_ONLY_KEY, state.bulkSelectionOnly ? "1" : "");
     localStorage.setItem(RUN_CODE_SCORING_KEY, state.runCodeScoring ? "1" : "");
+    writeCollapseOverride(SETTINGS_OPEN_KEY, state.settingsOpen);
+    writeCollapseOverride(LINK_OPEN_KEY, state.linkPanelOpen);
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

@@ -840,3 +840,40 @@ describe("index.tsx actually feeds and renders the activity log", () => {
     expect(persistBody).toContain("if (cellStateResetForCourse !== uiState.courseId) return;");
   });
 });
+
+describe("A7 W2: single-course default and the two disclosure overrides are wired, not just defined", () => {
+  const stripped = stripComments(indexSource);
+  const controlsText = stripComments(
+    readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesControls.tsx"), "utf8")
+  );
+  const panelText = stripComments(
+    readFileSync(join(process.cwd(), "src/app/components/repo-grades/LinkUsernamesPanel.tsx"), "utf8")
+  );
+
+  it("RW4a: index.tsx imports AND calls courseIdToAutoSelect, and its result reaches setUiState", () => {
+    expect(stripped).toMatch(/import \{[^}]*courseIdToAutoSelect[^}]*\} from "\.\/repoGradesCoursePicker"/);
+    const callIdx = stripped.indexOf("courseIdToAutoSelect(courses,");
+    expect(callIdx).toBeGreaterThan(-1);
+    const region = stripped.slice(callIdx, callIdx + 500);
+    expect(region).toContain("uiState.courseId");
+    expect(region).toMatch(/setUiState\([\s\S]*courseId: autoCourseId/);
+  });
+
+  it("RW4b: index.tsx hands RepoGradesControls the settings value and a setter that writes uiState.settingsOpen", () => {
+    expect(stripped).toContain("settingsOpen={effectiveOpen(uiState.settingsOpen,");
+    expect(stripped).toMatch(/onSettingsOpenChange=\{\(value\) => setUiState\([\s\S]*?settingsOpen: value/);
+    expect(controlsText).toContain("onSettingsOpenChange(");
+  });
+
+  it("RW4c: index.tsx hands LinkUsernamesPanel the link value and a setter that writes uiState.linkPanelOpen", () => {
+    expect(stripped).toContain("linkPanelOpen={effectiveOpen(uiState.linkPanelOpen,");
+    expect(stripped).toMatch(/onLinkPanelOpenChange=\{\(value\) => setUiState\([\s\S]*?linkPanelOpen: value/);
+    expect(panelText).toContain("onLinkPanelOpenChange(");
+  });
+
+  it("the guarded controls kept their confirm-all window.confirm and bulk-selection checkbox inside the collapses", () => {
+    expect(panelText).toContain("window.confirm(");
+    expect(controlsText).toContain('id="repo-grades-bulk-selection-only"');
+    expect(controlsText).toContain('id="repo-grades-run-code-scoring"');
+  });
+});

@@ -54,6 +54,7 @@ import {
 } from "./repoGradesLog";
 import RepoGradesLogPanel from "./RepoGradesLogPanel";
 import RepoGradesControls from "./RepoGradesControls";
+import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { linkUsernamesLogDetail } from "./linkRepoUsernames";
@@ -150,6 +151,11 @@ export default function RepoGradesTab() {
     // export half; this is the same load, not a second fetch.
     exportRubrics,
   } = useRepoGradesData(uiState.courseId, uiState.orgPrefix);
+
+  // A7 W2 single-course default: with exactly one course and nothing written,
+  // select it. A written id is never changed (a stale one yields null).
+  const autoCourseId = coursesLoading ? null : courseIdToAutoSelect(courses, uiState.courseId || null);
+  if (autoCourseId && autoCourseId !== uiState.courseId) setUiState((prev) => ({ ...prev, courseId: autoCourseId }));
 
   // THE BUG THIS WAVE FIXES: the course tile already carries a student-to-
   // GitHub-username link the instructor maintains BY HAND in the Courses
@@ -695,6 +701,8 @@ export default function RepoGradesTab() {
     setPostSummary,
   });
 
+  const confirmedCount = model ? model.rows.filter((row) => row.binding.state === "confirmed").length : 0;
+  const allBound = !!model && model.rows.length > 0 && confirmedCount === model.rows.length;
   const missingOrg = !!course && !(course.githubOrg ?? "").trim();
   const noConfirmedRows = !!model && model.rows.length > 0 && model.rows.every((row) => row.binding.state !== "confirmed");
   // U4.19d state (f): the assignments load succeeded, cleanly, with nothing
@@ -756,6 +764,8 @@ export default function RepoGradesTab() {
         onBulkSelectionOnlyChange={(value) => setUiState((prev) => ({ ...prev, bulkSelectionOnly: value }))}
         runCodeScoring={uiState.runCodeScoring}
         onRunCodeScoringChange={(value) => setUiState((prev) => ({ ...prev, runCodeScoring: value }))}
+        settingsOpen={effectiveOpen(uiState.settingsOpen, currentSelectedFolder === ALL_FOLDERS)}
+        onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />
 
       <RepoGradesStatusBanners
@@ -807,6 +817,9 @@ export default function RepoGradesTab() {
           onLink={handleLinkUsernames}
           onConfirmAllSuggested={handleConfirmAllSuggested}
           onAnnounce={setPostSummary}
+          linkPanelOpen={effectiveOpen(uiState.linkPanelOpen, !allBound)}
+          onLinkPanelOpenChange={(value) => setUiState((prev) => ({ ...prev, linkPanelOpen: value }))}
+          boundSummary={`${confirmedCount} of ${model?.rows.length ?? 0} repos bound`}
         />
       )}
 

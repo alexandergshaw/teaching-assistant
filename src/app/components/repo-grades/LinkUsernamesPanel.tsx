@@ -143,6 +143,13 @@ export interface LinkUsernamesPanelProps {
    * page - two live regions on one view compete and a screen reader user gets
    * whichever won. */
   onAnnounce: (message: string) => void;
+  /** A7 W2: whether the panel body is open. index.tsx resolves it (a persisted
+   * override wins over "open unless every row is confirmed") and the toggle
+   * reports the instructor's explicit choice back. */
+  linkPanelOpen: boolean;
+  onLinkPanelOpenChange: (open: boolean) => void;
+  /** The one-line state shown while collapsed, e.g. "12 of 12 repos bound". */
+  boundSummary: string;
 }
 
 export default function LinkUsernamesPanel({
@@ -163,6 +170,9 @@ export default function LinkUsernamesPanel({
   onLink,
   onConfirmAllSuggested,
   onAnnounce,
+  linkPanelOpen,
+  onLinkPanelOpenChange,
+  boundSummary,
 }: LinkUsernamesPanelProps) {
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -241,9 +251,19 @@ export default function LinkUsernamesPanel({
 
   return (
     <section className={styles.linkPanel} aria-labelledby="repo-grades-link-heading">
-      <h3 id="repo-grades-link-heading" className={styles.logTitle}>
-        Link GitHub usernames to roster
-      </h3>
+      <details
+        open={linkPanelOpen}
+        onToggle={(e) => {
+          // Persist only a real user toggle, never a default flipping `open`.
+          if (e.currentTarget.open !== linkPanelOpen) onLinkPanelOpenChange(e.currentTarget.open);
+        }}
+      >
+      <summary style={{ cursor: "pointer" }}>
+        <h3 id="repo-grades-link-heading" className={styles.logTitle} style={{ display: "inline" }}>
+          Link GitHub usernames to roster
+        </h3>
+        <span className={pageStyles.fieldHint}> - {boundSummary}</span>
+      </summary>
 
       {noConfirmedRows && <p className={styles.linkLeadLine}>No repos are confirmed-bound to a roster student yet.</p>}
 
@@ -448,6 +468,7 @@ export default function LinkUsernamesPanel({
           Confirmed {confirmResult} binding{confirmResult === 1 ? "" : "s"}.
         </p>
       )}
+      </details>
     </section>
   );
 }

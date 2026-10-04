@@ -80,6 +80,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
   });
 
@@ -96,6 +98,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
   });
 
@@ -111,6 +115,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
@@ -123,6 +129,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
   });
 
@@ -140,6 +148,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        settingsOpen: null,
+        linkPanelOpen: null,
       })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBeNull();
@@ -159,6 +169,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        settingsOpen: null,
+        linkPanelOpen: null,
       })
     ).not.toThrow();
   });
@@ -185,6 +197,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     expect(loadRepoGradesUiState().linkSource).toBe("live");
   });
@@ -206,6 +220,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     const loaded = loadRepoGradesUiState();
     expect(loaded.useReadmeInstructions).toBe(false);
@@ -234,6 +250,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: true,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     expect(loadRepoGradesUiState().runCodeScoring).toBe(true);
   });
@@ -255,6 +273,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: true,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBe("course-9");
     expect(fakeStorage.getItem("ta-repo-grades-org-prefix")).toBe("wk");
@@ -266,6 +286,67 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(fakeStorage.getItem("ta-repo-grades-readme-instructions")).toBe("");
     expect(fakeStorage.getItem("ta-repo-grades-bulk-selection-only")).toBe("1");
     expect(fakeStorage.getItem("ta-repo-grades-run-code-scoring")).toBe("1");
+  });
+});
+
+describe("collapse overrides (A7 W2): settingsOpen / linkPanelOpen tri-state", () => {
+  const base = {
+    courseId: "",
+    orgPrefix: "",
+    sort: DEFAULT_REPO_GRADE_SORT,
+    instructions: "",
+    rubric: "",
+    linkAssignmentId: "",
+    linkSource: "roster" as const,
+    useReadmeInstructions: true,
+    bulkSelectionOnly: false,
+    runCodeScoring: false,
+  };
+
+  it("P2a: never-written reads back as null for both", () => {
+    const loaded = loadRepoGradesUiState();
+    expect(loaded.settingsOpen).toBeNull();
+    expect(loaded.linkPanelOpen).toBeNull();
+  });
+
+  it("P2b: an explicit open and an explicit close both round-trip", () => {
+    persistRepoGradesUiState({ ...base, settingsOpen: true, linkPanelOpen: false });
+    const loaded = loadRepoGradesUiState();
+    expect(loaded.settingsOpen).toBe(true);
+    expect(loaded.linkPanelOpen).toBe(false);
+  });
+
+  it("P2c: an explicit close survives reload as false, NOT null", () => {
+    persistRepoGradesUiState({ ...base, settingsOpen: false, linkPanelOpen: null });
+    expect(loadRepoGradesUiState().settingsOpen).toBe(false);
+  });
+
+  it("P2d: raw storage - null is ABSENT, true is 1, false is 0", () => {
+    persistRepoGradesUiState({ ...base, settingsOpen: null, linkPanelOpen: true });
+    expect(fakeStorage.getItem("ta-repo-grades-settings-open")).toBeNull();
+    expect(fakeStorage.getItem("ta-repo-grades-link-open")).toBe("1");
+    persistRepoGradesUiState({ ...base, settingsOpen: false, linkPanelOpen: true });
+    expect(fakeStorage.getItem("ta-repo-grades-settings-open")).toBe("0");
+  });
+
+  it("P2d-b: persisting null after a written value removes the key again", () => {
+    persistRepoGradesUiState({ ...base, settingsOpen: true, linkPanelOpen: true });
+    persistRepoGradesUiState({ ...base, settingsOpen: null, linkPanelOpen: null });
+    expect(fakeStorage.getItem("ta-repo-grades-settings-open")).toBeNull();
+    expect(fakeStorage.getItem("ta-repo-grades-link-open")).toBeNull();
+  });
+
+  it("P2e: SSR-safe - load returns null for both and persist does not throw", () => {
+    delete (globalThis as { window?: unknown }).window;
+    const loaded = loadRepoGradesUiState();
+    expect(loaded.settingsOpen).toBeNull();
+    expect(loaded.linkPanelOpen).toBeNull();
+    expect(() => persistRepoGradesUiState({ ...base, settingsOpen: true, linkPanelOpen: true })).not.toThrow();
+  });
+
+  it("P2f: a stray stored value reads as false", () => {
+    fakeStorage.setItem("ta-repo-grades-settings-open", "nonsense");
+    expect(loadRepoGradesUiState().settingsOpen).toBe(false);
   });
 });
 
@@ -622,6 +703,8 @@ describe("loadRepoGradeManualRubricText / persistRepoGradeManualRubricText (item
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      settingsOpen: null,
+      linkPanelOpen: null,
     });
     persistRepoGradeManualRubricText("course-1", "the per-course rubric text");
     expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("the global rubric text");

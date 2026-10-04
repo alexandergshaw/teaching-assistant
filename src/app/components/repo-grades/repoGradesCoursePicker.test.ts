@@ -8,7 +8,7 @@
 // default filter over the label this leaf produces, so there is no second
 // predicate to pin.
 import { describe, it, expect } from "vitest";
-import { buildCourseOptions } from "./repoGradesCoursePicker";
+import { buildCourseOptions, courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import type { Course } from "@/lib/supabase/courses";
 import { emptyCourseProject } from "@/lib/course-project";
 
@@ -125,4 +125,40 @@ describe("buildCourseOptions", () => {
   it("returns an empty list for an empty course list", () => {
     expect(buildCourseOptions([])).toEqual([]);
   });
+});
+
+describe("courseIdToAutoSelect (A7 W2 single-course default)", () => {
+  const c1 = { id: "c1" };
+  const c2 = { id: "c2" };
+  const rows: Array<[string, { id: string }[], string | null, string | null]> = [
+    ["R1 sole course, never written", [c1], null, "c1"],
+    ["R2 sole course, empty string", [c1], "", "c1"],
+    ["R3 many courses, never written", [c1, c2], null, null],
+    ["R4 zero courses, never written", [], null, null],
+    ["R5 zero courses, empty string", [], "", null],
+    ["R6 present written id, sole course", [c1], "c1", "c1"],
+    ["R7 present written id among many", [c1, c2], "c1", "c1"],
+    ["R8 stale written id with one course is NOT re-homed", [c1], "c2", null],
+    ["R9 stale written id among many", [c1, c2], "c9", null],
+    ["R10 present written id in second position", [c1, c2], "c2", "c2"],
+  ];
+  for (const [name, courses, stored, expected] of rows) {
+    it(name, () => {
+      expect(courseIdToAutoSelect(courses, stored)).toBe(expected);
+    });
+  }
+});
+
+describe("effectiveOpen (A7 W2 written override wins over the derived default)", () => {
+  const rows: Array<[string, boolean | null, boolean, boolean]> = [
+    ["E1 explicit open beats a closed default", true, false, true],
+    ["E2 explicit close beats an open default", false, true, false],
+    ["E3 unset takes an open default", null, true, true],
+    ["E4 unset takes a closed default", null, false, false],
+  ];
+  for (const [name, override, fallback, expected] of rows) {
+    it(name, () => {
+      expect(effectiveOpen(override, fallback)).toBe(expected);
+    });
+  }
 });

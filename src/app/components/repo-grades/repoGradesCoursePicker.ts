@@ -63,3 +63,29 @@ export function buildCourseOptions(courses: readonly Course[]): TypeaheadOption[
     };
   });
 }
+
+/**
+ * The single-course default (A7 W2). Returns the course id to select, or null
+ * to change nothing. A written id that is still present is returned unchanged;
+ * a written id that is no longer present (stale) yields null - it is never
+ * re-homed to the sole course, because that would silently move which course
+ * gets graded and posted. Only a never-written value (`null` or "") with
+ * exactly one course selects that course. Callers pass `uiState.courseId || null`.
+ */
+export function courseIdToAutoSelect(
+  courses: readonly { readonly id: string }[],
+  storedId: string | null
+): string | null {
+  if (storedId) return courses.some((course) => course.id === storedId) ? storedId : null;
+  return courses.length === 1 ? courses[0].id : null;
+}
+
+/**
+ * Resolves a disclosure's open state: a written override always wins, and the
+ * derived default applies only when nothing was ever written. This is the ONE
+ * swappable expression for the default policy (the default itself is computed
+ * by the caller and is never persisted).
+ */
+export function effectiveOpen(override: boolean | null, defaultWhenUnset: boolean): boolean {
+  return override ?? defaultWhenUnset;
+}

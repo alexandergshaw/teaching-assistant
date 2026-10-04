@@ -273,6 +273,12 @@ export interface RepoGradesControlsProps {
    * instructor's choice here is not lost by switching providers and back. */
   runCodeScoring: boolean;
   onRunCodeScoringChange: (value: boolean) => void;
+
+  /** A7 W2: whether the "Grading settings" disclosure is open. index.tsx
+   * resolves it (a persisted override wins over the derived default) and the
+   * toggle reports the instructor's explicit choice back. */
+  settingsOpen: boolean;
+  onSettingsOpenChange: (value: boolean) => void;
 }
 
 /** Overrides just the label-text typography MUI's `FormControlLabel` slot
@@ -330,7 +336,21 @@ export default function RepoGradesControls({
   onBulkSelectionOnlyChange,
   runCodeScoring,
   onRunCodeScoringChange,
+  settingsOpen,
+  onSettingsOpenChange,
 }: RepoGradesControlsProps) {
+  const rubricSource = parseRepoGradeRubricValue(rubricSourceValue)?.source ?? "generate";
+  const hasInstructions = instructions.trim() !== "";
+  // The summary line always states the live state, including the empty-fallback
+  // warning and the code-scoring "changes scores" fact the body also explains.
+  const settingsSummary =
+    `Instructions: ${
+      useReadmeInstructions
+        ? `each folder's README (fallback: ${hasInstructions ? "typed text" : "none"})`
+        : hasInstructions
+        ? "typed text"
+        : "none yet - nothing to grade against"
+    } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"}`;
   return (
     <>
       <div className={styles.field}>
@@ -470,7 +490,15 @@ export default function RepoGradesControls({
       )}
 
       {showRowDependentFields && (
-        <>
+        <details
+          open={settingsOpen}
+          onToggle={(e) => {
+            // Only a real user toggle is an explicit choice; a default flipping
+            // the open attribute re-fires this event and must not be persisted.
+            if (e.currentTarget.open !== settingsOpen) onSettingsOpenChange(e.currentTarget.open);
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Grading settings - {settingsSummary}</summary>
           <div className={styles.field}>
             <FormControlLabel
               sx={CHECKBOX_LABEL_SX}
@@ -640,7 +668,7 @@ export default function RepoGradesControls({
               </>
             )}
           </div>
-        </>
+        </details>
       )}
     </>
   );

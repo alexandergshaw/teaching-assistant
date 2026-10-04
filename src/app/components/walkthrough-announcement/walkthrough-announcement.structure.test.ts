@@ -115,12 +115,14 @@ describe("directory-wide ta- key ordinal canary (this directory has no canary an
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly five distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources)", () => {
+  it("finds exactly six distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources, ta-rec-wta-autodraft)", () => {
     // G3 Ruling 4/G: bumped from 3 to 5 in the same change that added the
     // emoji and resource-research toggles - the canary this comment sits
     // next to is the only gate in this repo that can see a persisted key
-    // added anywhere in this directory.
-    expect(distinctKeys.size).toBe(5);
+    // added anywhere in this directory. SMOOTH-WALKTHROUGH W3 (R-F1-TOGGLE):
+    // bumped from 5 to 6 in the same commit that added the persisted
+    // auto-draft toggle.
+    expect(distinctKeys.size).toBe(6);
   });
 
   it("the exemplar's raw text is NOT among the persisted keys (decision P3: Supabase, not localStorage)", () => {
@@ -137,10 +139,19 @@ describe("directory-wide ta- key ordinal canary (this directory has no canary an
 // ---------------------------------------------------------------------------
 
 describe("P1: the panel posts via the markdown-safe action, never the plain-text one", () => {
-  const panelSource = fs.readFileSync(
+  // SMOOTH-WALKTHROUGH W3 (R-AC16): the post call moved verbatim from the panel
+  // into useWalkthroughGenerationAdapters.ts (the panel injects it into
+  // useAnnouncementDraftSlots). The call pin reads that file; the "never the
+  // plain-text poster" pin reads BOTH files so neither can import it.
+  const adaptersSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughGenerationAdapters.ts"),
+    "utf-8"
+  );
+  const panelOnlySource = fs.readFileSync(
     path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
     "utf-8"
   );
+  const panelSource = adaptersSource + "\n" + panelOnlySource;
 
   it("calls postWalkthroughAnnouncementAction(...)", () => {
     // Tightened from a bare-import match (docs/announcement-from-walkthrough-acceptance-criteria.md): the call, not
@@ -149,7 +160,12 @@ describe("P1: the panel posts via the markdown-safe action, never the plain-text
     // call was required to stay in this panel (blocker 5). A doc comment
     // alone (as this test's own name once implied) would satisfy the old
     // regex; this one requires the actual call expression.
-    expect(panelSource).toMatch(/postWalkthroughAnnouncementAction\(/);
+    expect(adaptersSource).toMatch(/postWalkthroughAnnouncementAction\(/);
+  });
+
+  it("the panel wires the adapters hook's postDraft into useAnnouncementDraftSlots (the call is reachable, not orphaned in the new file)", () => {
+    expect(panelOnlySource).toMatch(/useWalkthroughGenerationAdapters\(/);
+    expect(panelOnlySource).toMatch(/useAnnouncementDraftSlots\(\{[^}]*\bpostDraft\b/);
   });
 
   it("never imports createAnnouncementAction (the plain-text poster every OTHER announcement surface uses)", () => {
@@ -280,8 +296,10 @@ describe("G3 Ruling 14/30: researchNotice reaches the draft-slot seam by name, n
 // ---------------------------------------------------------------------------
 
 describe("G3 Correction M5: draftOne actually forwards emojiOn/researchOutcome into the action call", () => {
+  // Retargeted with draftOne (W3 R-AC16): it now lives in
+  // useWalkthroughGenerationAdapters.ts.
   const panelSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughGenerationAdapters.ts"),
     "utf-8"
   );
 
@@ -475,160 +493,6 @@ describe("G6: the courseId seed from localStorage is TRIMMED", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A18 AC-1: the empty-material hint stops claiming the app "records" - it
-// reads a shared screen and discards the frames, never saves video. The
-// anchor is a whitespace-tolerant regex (not a plain indexOf) because this
-// file's own neighbouring hints at :800-803 and :885-887 are already
-// multi-line, so a realistic reflow of this hint into the same shape must
-// not defeat the check.
-// ---------------------------------------------------------------------------
-
-describe("A18 AC-1: the empty-material hint no longer says the app records", () => {
-  const panelSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
-    "utf-8"
-  );
-
-  const ANCHOR_RE = /\{!hasMaterial\s*&&\s*<p\s+className=\{styles\.fieldHint\}>/;
-  const anchorMatch = panelSource.match(ANCHOR_RE);
-
-  it("finds the empty-material hint's conditional + <p className={styles.fieldHint}> opening (anchor resolves)", () => {
-    expect(
-      anchorMatch,
-      "expected to find the empty-material hint's conditional + <p className={styles.fieldHint}> opening " +
-        "(whitespace-tolerant); if this is not found, the conditional's returned content was likely replaced " +
-        "with something other than a reworded <p> - e.g. null - which is the wrong fix"
-    ).toBeTruthy();
-  });
-
-  it("finds the hint's closing </p> after the anchor (anchor resolves)", () => {
-    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
-    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
-    expect(closeIdx, "expected to find the hint's closing </p>").toBeGreaterThan(-1);
-  });
-
-  function hintText(): string {
-    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
-    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
-    return panelSource.slice(afterAnchor, closeIdx).replace(/\s+/g, " ").trim();
-  }
-
-  it("does not contain the whole word record/recording", () => {
-    expect(hintText()).not.toMatch(/\brecord(ing)?\b/i);
-  });
-
-  it("still mentions capturing or reading, so the hint was reworded, not deleted", () => {
-    const text = hintText();
-    expect(text.length).toBeGreaterThan(0);
-    expect(text).toMatch(/\b(captur|read)\w*\b/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A18 AC-3: the privacy disclosure drops the word "record" from its first
-// sentence only. The second sentence (the screen/window recommendation and
-// the three named surfaces to close) is frozen as an exact literal per
-// ruling W2 - a keyword-only check was demonstrated to pass an
-// advice-inverting rewrite that keeps every keyword.
-// ---------------------------------------------------------------------------
-
-describe("A18 AC-3: the privacy disclosure's first sentence drops \"record\"; the second sentence is frozen verbatim", () => {
-  const fieldsetSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
-    "utf-8"
-  );
-
-  const fieldsetCloseIdx = fieldsetSource.lastIndexOf("</fieldset>");
-  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
-
-  it("finds the privacy disclosure's opening <p> before the fieldset's close (anchor resolves)", () => {
-    expect(
-      pOpenIdx,
-      "expected to find the privacy disclosure's opening <p> before the fieldset's close"
-    ).toBeGreaterThan(-1);
-  });
-
-  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
-
-  it("finds the disclosure's closing </p> (anchor resolves)", () => {
-    expect(pCloseIdx, "expected to find the disclosure's closing </p>").toBeGreaterThan(-1);
-  });
-
-  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
-  const normalized = raw.replace(/\s+/g, " ").trim();
-
-  const FROZEN_SECOND_SENTENCE =
-    "Share a single window rather than your whole screen, and close any " +
-    "gradebook, inbox, or student submission first.";
-
-  it("the second sentence is byte-equal to the frozen literal - it must not change by even one character", () => {
-    expect(
-      normalized.endsWith(FROZEN_SECOND_SENTENCE),
-      "the disclosure's second sentence - the screen/window recommendation and the three named surfaces - " +
-        "must not change by even one character"
-    ).toBe(true);
-  });
-
-  const firstSentence = normalized.slice(0, normalized.length - FROZEN_SECOND_SENTENCE.length).trim();
-
-  it("the first sentence is non-empty", () => {
-    expect(
-      firstSentence.length,
-      "expected non-empty text before the frozen second sentence"
-    ).toBeGreaterThan(0);
-  });
-
-  it("the first sentence does not contain the whole word record/recording", () => {
-    expect(firstSentence).not.toMatch(/\brecord(ing)?\b/i);
-  });
-
-  it("the first sentence still says what is transmitted (Frames)", () => {
-    expect(firstSentence).toMatch(/\bframes\b/i);
-  });
-
-  it("the first sentence still names the recipient as third-party", () => {
-    expect(firstSentence).toMatch(/third-party/i);
-  });
-
-  it("the first sentence still names the recipient type as an AI provider", () => {
-    expect(firstSentence).toMatch(/AI provider/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// docs/a18-test-notes.md 5.9: a hedge denylist is the unbounded denylist the
-// caps forbid. Freeze the whole disclosure whole instead - this row changed
-// exactly one word in it (the fact regexes above stay, for the readable
-// diff on a mismatch; equality is what actually discriminates a hedge).
-// ---------------------------------------------------------------------------
-
-describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, applied to this block)", () => {
-  const fieldsetSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
-    "utf-8"
-  );
-
-  const fieldsetCloseIdx = fieldsetSource.lastIndexOf("</fieldset>");
-  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
-  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
-  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
-  const normalized = raw.replace(/\s+/g, " ").trim();
-
-  const FROZEN_DISCLOSURE =
-    "Frames from your screen are sent to a third-party AI provider to be read while you capture. " +
-    "Share a single window rather than your whole screen, and close any gradebook, inbox, or student submission first.";
-
-  it("both anchors resolve", () => {
-    expect(pOpenIdx).toBeGreaterThan(-1);
-    expect(pCloseIdx).toBeGreaterThan(-1);
-  });
-
-  it("the whole disclosure, whitespace-normalized, is byte-equal to the frozen literal", () => {
-    expect(normalized).toBe(FROZEN_DISCLOSURE);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // A18 AC-4: the protected video-script wording (a recording the instructor
 // makes ELSEWHERE, to read a script aloud while re-recording) must survive
 // untouched. The two-line source comment is pinned as two independent
@@ -711,17 +575,30 @@ describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-ru
   const strippedPanel = stripComments(
     fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"), "utf-8")
   );
+  // SMOOTH-WALKTHROUGH W3 (R-AC16): the auto-draft machinery (blocks A and B,
+  // and the W3 toggle-consumption pin below, which slices the SAME call and
+  // shares its end anchor) moved into useWalkthroughAutoDraft.ts. Blocks C and
+  // D still read the panel.
+  const strippedAutoDraft = stripComments(
+    fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughAutoDraft.ts"), "utf-8")
+  );
 
-  function sliceBetween(startNeedle: string, endNeedle: string, endFromStart = true): string {
-    const start = strippedPanel.indexOf(startNeedle);
+  function sliceFrom(source: string, startNeedle: string, endNeedle: string): string {
+    const start = source.indexOf(startNeedle);
     expect(start, `expected to find start anchor ${startNeedle}`).toBeGreaterThan(-1);
-    const end = strippedPanel.indexOf(endNeedle, endFromStart ? start : 0);
+    const end = source.indexOf(endNeedle, start);
     expect(end, `expected to find end anchor ${endNeedle}`).toBeGreaterThan(-1);
-    return strippedPanel.slice(start, end);
+    return source.slice(start, end);
+  }
+  function sliceBetween(startNeedle: string, endNeedle: string): string {
+    return sliceFrom(strippedPanel, startNeedle, endNeedle);
+  }
+  function sliceAutoDraft(startNeedle: string, endNeedle: string): string {
+    return sliceFrom(strippedAutoDraft, startNeedle, endNeedle);
   }
 
   describe("A: the firing effect's shouldAutoDraft call site", () => {
-    const fireBlock = sliceBetween("shouldAutoDraft({", "}, [capturing, extracting,");
+    const fireBlock = sliceAutoDraft("shouldAutoDraft({", "}, [capturing, extracting,");
 
     it("A1: extracting ORs in batchInFlightRef.current", () => {
       expect(fireBlock).toMatch(/extracting:\s*extracting\s*\|\|\s*batchInFlightRef\.current/);
@@ -733,16 +610,16 @@ describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-ru
       expect(fireBlock).toMatch(/hasEmptySlot:\s*readyToDraftCount\s*>\s*0/);
     });
     it("A4: the result is consumed as a guard (if (!fire) return;)", () => {
-      expect(strippedPanel.slice(strippedPanel.indexOf("const fire = shouldAutoDraft"))).toMatch(/if\s*\(!fire\)\s*return;/);
+      expect(strippedAutoDraft.slice(strippedAutoDraft.indexOf("const fire = shouldAutoDraft"))).toMatch(/if\s*\(!fire\)\s*return;/);
     });
     it("A5: the effect itself calls generate() (slice-bound, not the Generate button's call)", () => {
-      const effect = sliceBetween("const fire = shouldAutoDraft", "}, [capturing, extracting,");
+      const effect = sliceAutoDraft("const fire = shouldAutoDraft", "}, [capturing, extracting,");
       expect(effect).toMatch(/\bgenerate\(\)/);
     });
   });
 
   describe("B: once-per-stop arming effect", () => {
-    const armBlock = sliceBetween("const prevCapturingRef = useRef(false);", "const fire = shouldAutoDraft");
+    const armBlock = sliceAutoDraft("const prevCapturingRef = useRef(false);", "const fire = shouldAutoDraft");
 
     it("B1: armed on the capturing true -> false edge", () => {
       expect(armBlock).toMatch(/prevCapturingRef\.current\s*&&\s*!capturing\)\s*autoDraftPendingRef\.current\s*=\s*true/);
@@ -811,5 +688,280 @@ describe("AC-10 W2 wiring: useWalkthroughSetup consumes courseToAutoSelect", () 
     expect(strippedSetup).toMatch(
       /setCourseId\(\s*\(prev\)\s*=>[\s\S]*?courseToAutoSelect\([\s\S]*?\)\s*\?\?\s*prev\s*\)/
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SMOOTH-WALKTHROUGH W3 SURFACE (docs/walkthrough-w3-surface-test-notes.md).
+// Source-text pins over COMMENT-STRIPPED source - nothing renders under vitest,
+// so every pin proves the MECHANISM is in the source, never that a pixel moved
+// or a bar stuck (the numeric ACs are owner residuals RW3-1..8).
+// ---------------------------------------------------------------------------
+
+describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle", () => {
+  const read = (name: string): string => fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, name), "utf-8");
+  const panel = stripComments(read("WalkthroughAnnouncementPanel.tsx"));
+  const fieldset = stripComments(read("AnnouncementCourseFieldset.tsx"));
+  const slot = stripComments(read("AnnouncementDraftSlot.tsx"));
+  const setup = stripComments(read("useWalkthroughSetup.ts"));
+
+  describe("W3-R1: capture controls and Start precede the format/options controls", () => {
+    it("fieldset: Course and the disclosure come before the paste box, Save for reuse and the three toggles", () => {
+      const anchors = [
+        'label="Course"',
+        "Frames from your screen",
+        'label="Paste a previous announcement to match its format (optional)"',
+        "Save for reuse",
+        "Use emojis in the draft",
+        "Research and cite relevant resource links",
+        "Draft automatically when capture stops",
+      ];
+      const idx = anchors.map((a) => fieldset.indexOf(a));
+      idx.forEach((i, n) => expect(i, `expected anchor ${anchors[n]}`).toBeGreaterThan(-1));
+      for (let n = 1; n < idx.length; n++) {
+        expect(idx[n], `${anchors[n]} must come after ${anchors[n - 1]}`).toBeGreaterThan(idx[n - 1]);
+      }
+    });
+
+    it("fieldset: two fieldsets, with {children} (the run bar) between the first close and the second open", () => {
+      const firstClose = fieldset.indexOf("</fieldset>");
+      const childrenIdx = fieldset.indexOf("{children}");
+      const secondOpen = fieldset.indexOf("<fieldset", firstClose);
+      expect(firstClose).toBeGreaterThan(-1);
+      expect(childrenIdx).toBeGreaterThan(-1);
+      expect(secondOpen).toBeGreaterThan(-1);
+      expect(childrenIdx).toBeGreaterThan(firstClose);
+      expect(secondOpen).toBeGreaterThan(childrenIdx);
+      expect((fieldset.match(/<fieldset\b/g) ?? []).length).toBe(2);
+    });
+
+    it("panel: Start is rendered as a child of the fieldset mount, after its opening tag", () => {
+      const mount = panel.indexOf("<AnnouncementCourseFieldset");
+      const startIdx = panel.indexOf("Start capture");
+      const mountClose = panel.indexOf("</AnnouncementCourseFieldset>");
+      expect(mount).toBeGreaterThan(-1);
+      expect(startIdx).toBeGreaterThan(-1);
+      expect(mountClose).toBeGreaterThan(-1);
+      expect(startIdx).toBeGreaterThan(mount);
+      expect(startIdx).toBeLessThan(mountClose);
+    });
+  });
+
+  // The run bar's wrapper: the nearest <div before the Start text. The Buttons
+  // hold no nested <div>, so the first </div> after Start closes the wrapper.
+  const startTextIdx = panel.indexOf("Start capture");
+  const barOpen = panel.lastIndexOf("<div", startTextIdx);
+  const barClose = panel.indexOf("</div>", startTextIdx);
+  const barSlice = panel.slice(barOpen, barClose);
+
+  describe("W3-R2: Start and both Generate buttons are siblings in ONE run bar", () => {
+    it("both slice anchors resolve", () => {
+      expect(startTextIdx).toBeGreaterThan(-1);
+      expect(barOpen).toBeGreaterThan(-1);
+      expect(barClose).toBeGreaterThan(startTextIdx);
+    });
+    it("Generate announcement and Generate video script both sit inside the wrapper that holds Start", () => {
+      expect(barSlice).toContain("Generate announcement");
+      expect(barSlice).toContain("Generate video script");
+    });
+    it("the bar holds no Post control (the sticky bar must stay non-destructive)", () => {
+      expect(barSlice).not.toMatch(/Post to Canvas|Confirm post|postWalkthroughAnnouncementAction|ConfirmArmButtons/);
+    });
+  });
+
+  describe("W3-F-STICKY: the run bar carries a specific class whose OWN rule is sticky with a top offset", () => {
+    // MECHANISM PROXY, argued: position:sticky only works when no ancestor clips
+    // overflow, which nothing here can check. The real test is owner AC-1.
+    const openTag = panel.slice(barOpen, panel.indexOf(">", barOpen) + 1);
+    const classRef = openTag.match(/\$\{([A-Za-z_$][\w$]*)\.runBarSticky\}/);
+    const css = fs
+      .readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughRunBar.module.css"), "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const ruleStart = css.indexOf(".runBarSticky {");
+    const ruleEnd = css.indexOf("}", ruleStart);
+    const rule = css.slice(ruleStart, ruleEnd);
+
+    it("the bar wrapper's className references <alias>.runBarSticky", () => {
+      expect(classRef, `expected runBarSticky in ${openTag}`).toBeTruthy();
+    });
+    it("that alias is the panel's import of WalkthroughRunBar.module.css", () => {
+      const imp = panel.match(/import\s+([A-Za-z_$][\w$]*)\s+from\s+"\.\/WalkthroughRunBar\.module\.css"/);
+      expect(imp).toBeTruthy();
+      expect(imp![1]).toBe(classRef![1]);
+    });
+    it("the .runBarSticky rule block resolves and itself holds position: sticky and a top offset", () => {
+      expect(ruleStart).toBeGreaterThan(-1);
+      expect(ruleEnd).toBeGreaterThan(ruleStart);
+      expect(rule).toMatch(/position:\s*sticky/);
+      expect(rule).toMatch(/\btop:\s*-?\d/);
+    });
+  });
+
+  describe("W3-R3: the post-arm consequence FOLLOWS the Post/Regenerate/Copy row (Confirm does not shift)", () => {
+    const rowOpen = slot.indexOf("`${styles.ghActions} ${controls.runRow}`");
+    const consequence = slot.indexOf("id={`wta-post-consequence-${slot.id}`}");
+    const copyIdx = slot.indexOf("onCopy(slot.id)");
+    it("all three anchors resolve", () => {
+      expect(rowOpen).toBeGreaterThan(-1);
+      expect(consequence).toBeGreaterThan(-1);
+      expect(copyIdx).toBeGreaterThan(-1);
+    });
+    it("the consequence paragraph comes after the row open and after the row's last control", () => {
+      expect(consequence).toBeGreaterThan(rowOpen);
+      expect(consequence).toBeGreaterThan(copyIdx);
+    });
+    it("the Post button still links to it by consequenceId", () => {
+      expect(slot).toContain("consequenceId={`wta-post-consequence-${slot.id}`}");
+    });
+  });
+
+  describe("W3-R4: Message and Preview share one adaptFieldGrid2; preview before the Post row; no clip", () => {
+    const gridOpen = slot.indexOf("<div className={styles.adaptFieldGrid2}>");
+    const messageIdx = slot.indexOf('label="Message (Markdown)"');
+    const previewIdx = slot.indexOf("dangerouslySetInnerHTML");
+    const gridEnd = slot.indexOf("Markdown formatting (##");
+    const rowOpen = slot.indexOf("`${styles.ghActions} ${controls.runRow}`");
+    it("all anchors resolve", () => {
+      for (const i of [gridOpen, messageIdx, previewIdx, gridEnd, rowOpen]) expect(i).toBeGreaterThan(-1);
+    });
+    it("Message and the preview both sit inside the grid", () => {
+      expect(messageIdx).toBeGreaterThan(gridOpen);
+      expect(previewIdx).toBeGreaterThan(messageIdx);
+      expect(previewIdx).toBeLessThan(gridEnd);
+    });
+    it("the preview precedes the Post row", () => {
+      expect(previewIdx).toBeLessThan(rowOpen);
+    });
+    it("the preview div's own tag carries no max-height, overflow or inline style", () => {
+      const open = slot.lastIndexOf("<div", previewIdx);
+      const tag = slot.slice(open, slot.indexOf("/>", previewIdx) + 2);
+      expect(tag).toContain("controls.draftPreview");
+      expect(tag).not.toMatch(/max-?height|overflow|style=/i);
+    });
+  });
+
+  describe("W3-R5: Visible-to moves INTO the Post row, label verbatim", () => {
+    const rowOpen = slot.indexOf("`${styles.ghActions} ${controls.runRow}`");
+    const visible = slot.indexOf('label="Visible to students (optional)"');
+    const hint = slot.indexOf("Leave blank to post immediately");
+    const armedBlock = slot.indexOf("{postArmed && (");
+    it("anchors resolve", () => {
+      for (const i of [rowOpen, visible, hint, armedBlock]) expect(i).toBeGreaterThan(-1);
+    });
+    it("the field and its trailing hint sit between the row open and the armed consequence", () => {
+      expect(visible).toBeGreaterThan(rowOpen);
+      expect(hint).toBeGreaterThan(visible);
+      expect(hint).toBeLessThan(armedBlock);
+    });
+  });
+
+  describe("W3-R8: persisted auto-draft toggle (R-F1-TOGGLE), default ON, restored by a mount effect", () => {
+    it("the key constant equals the all-lowercase-hyphen literal", () => {
+      expect(setup).toMatch(/const STORAGE_KEY_AUTODRAFT = "ta-rec-wta-autodraft";/);
+    });
+    it("default is ON: useState(true)", () => {
+      expect(setup).toMatch(/const \[autoDraftOn, setAutoDraftOn\] = useState\(true\);/);
+    });
+    it("restore is NOT a lazy useState initializer", () => {
+      expect(setup).not.toMatch(/useState[^;]*getItem\(STORAGE_KEY_AUTODRAFT\)/);
+    });
+    it("a mount effect (empty dependency array) reads the key and calls the setter, reading BEFORE its await", () => {
+      const read = setup.indexOf("getItem(STORAGE_KEY_AUTODRAFT)");
+      expect(read).toBeGreaterThan(-1);
+      const effectOpen = setup.lastIndexOf("useEffect(", read);
+      const effectEnd = setup.indexOf("}, [", read);
+      expect(effectOpen).toBeGreaterThan(-1);
+      expect(effectEnd).toBeGreaterThan(read);
+      const effect = setup.slice(effectOpen, effectEnd);
+      expect(setup.slice(effectEnd, effectEnd + 7)).toBe("}, []);");
+      expect(effect).toMatch(/setAutoDraftOn\(/);
+      const awaitIdx = effect.indexOf("await Promise.resolve()");
+      expect(awaitIdx).toBeGreaterThan(-1);
+      expect(effect.indexOf("getItem(STORAGE_KEY_AUTODRAFT)")).toBeLessThan(awaitIdx);
+    });
+    it("a persist effect writes the value back", () => {
+      expect(setup).toMatch(/setItem\(STORAGE_KEY_AUTODRAFT,\s*String\(autoDraftOn\)\)/);
+    });
+    it("the fieldset renders the checkbox from autoDraftOn and reports changes upward; the panel wires both", () => {
+      expect(fieldset).toMatch(/checked=\{autoDraftOn\}/);
+      expect(fieldset).toMatch(/onAutoDraftOnChange\(e\.target\.checked\)/);
+      expect(panel).toMatch(/autoDraftOn=\{autoDraftOn\}/);
+      expect(panel).toMatch(/onAutoDraftOnChange=\{setAutoDraftOn\}/);
+    });
+  });
+
+  describe("W3-R8 consumption pin: the auto-draft predicate reads the THREADED toggle, wherever the call lives", () => {
+    // Scans the PRODUCTION write set (every non-test source file in this
+    // directory), never one fixed path, so a constant relocated into a new
+    // file is caught wherever it lands. Retargets together with AC-10 block A:
+    // same call, same end anchor.
+    const productionFiles = fs
+      .readdirSync(WALKTHROUGH_ANNOUNCEMENT_DIR)
+      .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+    const strippedByFile = new Map(productionFiles.map((f) => [f, stripComments(read(f))] as const));
+
+    it("the scan covers the panel and the extracted auto-draft hook (a check over nothing proves nothing)", () => {
+      expect(productionFiles).toContain("WalkthroughAnnouncementPanel.tsx");
+      expect(productionFiles).toContain("useWalkthroughAutoDraft.ts");
+    });
+
+    it("(a) no hard-coded-on AUTO_DRAFT_ON constant survives in any production file", () => {
+      for (const [file, src] of strippedByFile) {
+        expect(src, `${file} must not declare AUTO_DRAFT_ON = true`).not.toMatch(/const\s+AUTO_DRAFT_ON\s*=\s*true/);
+      }
+    });
+
+    const callFiles = [...strippedByFile].filter(([, src]) => src.includes("shouldAutoDraft({"));
+
+    it("(b) exactly one file contains the shouldAutoDraft({ call", () => {
+      expect(callFiles.map(([f]) => f)).toHaveLength(1);
+    });
+
+    const callSource = callFiles.length === 1 ? callFiles[0][1] : "";
+    const callStart = callSource.indexOf("shouldAutoDraft({");
+    const callEnd = callSource.indexOf("}, [capturing, extracting,", callStart);
+    const argSlice = callSource.slice(callStart, callEnd);
+    const captured = argSlice.match(/autoDraftOn:\s*([A-Za-z_$][\w$]*)/);
+
+    it("(b) both slice anchors resolve and the autoDraftOn argument was captured", () => {
+      expect(callStart).toBeGreaterThan(-1);
+      expect(callEnd).toBeGreaterThan(callStart);
+      expect(captured, "expected an autoDraftOn: <identifier> argument in the call").toBeTruthy();
+    });
+
+    it("(b) the captured identifier is neither true nor AUTO_DRAFT_ON", () => {
+      expect(captured![1]).not.toBe("true");
+      expect(captured![1]).not.toBe("AUTO_DRAFT_ON");
+    });
+
+    it("(c) that identifier is the persisted toggle: it appears in the panel's useWalkthroughSetup destructure", () => {
+      const setupCall = panel.indexOf("= useWalkthroughSetup(");
+      expect(setupCall).toBeGreaterThan(-1);
+      const destructureOpen = panel.lastIndexOf("const {", setupCall);
+      expect(destructureOpen).toBeGreaterThan(-1);
+      const destructure = panel.slice(destructureOpen, setupCall);
+      expect(destructure).toMatch(new RegExp(`\\b${captured![1]}\\b`));
+    });
+
+    it("(d) the panel threads that same identifier into the hook that owns the call", () => {
+      const hookCall = panel.indexOf("useWalkthroughAutoDraft({");
+      expect(hookCall).toBeGreaterThan(-1);
+      const hookCallEnd = panel.indexOf("});", hookCall);
+      expect(hookCallEnd).toBeGreaterThan(hookCall);
+      expect(panel.slice(hookCall, hookCallEnd)).toMatch(new RegExp(`\\b${captured![1]}\\b`));
+    });
+  });
+
+  describe("W3-R10: guard counts unchanged", () => {
+    it("AnnouncementDraftSlot.tsx renders exactly two ConfirmArmButtons (Post, Regenerate); the fieldset exactly one", () => {
+      expect((slot.match(/<ConfirmArmButtons\b/g) ?? []).length).toBe(2);
+      expect((fieldset.match(/<ConfirmArmButtons\b/g) ?? []).length).toBe(1);
+    });
+    it("Start carries no disabled attribute", () => {
+      const startOpen = panel.lastIndexOf("<Button", panel.indexOf("Start capture"));
+      const tag = panel.slice(startOpen, panel.indexOf(">", startOpen));
+      expect(tag).toContain("handleStartStop");
+      expect(tag).not.toMatch(/\bdisabled\b/);
+    });
   });
 });

@@ -37,6 +37,7 @@ import { raceWithTimeout } from "@/lib/bounded-race";
 import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
+import runBar from "./WalkthroughRunBar.module.css";
 import { variantFor } from "../ui/buttonVariant";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { LegibilityProbeModal } from "../grading-recording/LegibilityProbeModal";
@@ -50,27 +51,20 @@ import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "../module-deck-c
 import { reduceCaptureToMaterials } from "../module-deck-capture/module-blocks";
 import { deriveWalkthroughPageCoverage, renderWalkthroughCoverageBlock } from "./walkthrough-announcement-coverage";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
-import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP } from "@/lib/walkthrough-announcement-prompt";
 import { WALKTHROUGH_SCRIPT_MATERIALS_CAP } from "@/lib/walkthrough-script-prompt";
-import { fnv1aHash } from "@/lib/lms-generation/generation-diag";
 import {
   getMostRecentAnnouncementExemplarAction,
   listAnnouncementExemplarsAction,
   saveAnnouncementExemplarAction,
   deleteAnnouncementExemplarAction,
-  draftWalkthroughAnnouncementAction,
   draftWalkthroughVideoScriptAction,
-  postWalkthroughAnnouncementAction,
-  gatherWalkthroughResourcesAction,
 } from "@/app/actions/walkthrough-announcement";
-import {
-  useAnnouncementDraftSlots,
-  type AnnouncementDraftRequestContext,
-  type AnnouncementDraftDispatchContext,
-} from "./useAnnouncementDraftSlots";
+import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from "./useAnnouncementDraftSlots";
 import { MAX_NOTES_CHARS, useWalkthroughSetup } from "./useWalkthroughSetup";
-import { isRunComplete, shouldAutoDraft } from "./walkthrough-run-decisions";
+import { useWalkthroughAutoDraft } from "./useWalkthroughAutoDraft";
+import { useWalkthroughGenerationAdapters } from "./useWalkthroughGenerationAdapters";
+import { isRunComplete } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
 import AnnouncementCourseFieldset, {
   type AnnouncementExemplarSummary,
@@ -78,8 +72,6 @@ import AnnouncementCourseFieldset, {
 import {
   EXEMPLAR_FETCH_TIMEOUT_MS,
   MAX_ANNOUNCEMENT_BATCH_SIZE,
-  type ResearchNotice,
-  type ResourceOutcome,
   type SavedFormatsState,
   type TemplateCandidate,
   type TemplateOptionSource,
@@ -99,10 +91,6 @@ interface Notice {
   kind: "info" | "danger";
   text: string;
 }
-
-// F1 (c): auto-draft on stop is on. A persisted toggle is a later decision; it
-// would add a sixth ta- key and bump the directory key canary.
-const AUTO_DRAFT_ON = true;
 
 function fmt(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -133,6 +121,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     setEmojiOn,
     researchOn,
     setResearchOn,
+    autoDraftOn,
+    setAutoDraftOn,
     selectedCourse,
   } = useWalkthroughSetup(active);
 
@@ -465,79 +455,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     [pastedOutline, optionSource.mostRecent]
   );
 
-  // G3 Ruling 2/9: the actual research call - the only site (per blocker 5)
-  // that may call a server action directly. gatherWalkthroughResourcesAction
-  // never rejects on its own known failure paths, but the hook's own
-  // in-flight handling still treats a thrown error as "failed" as an outer
-  // belt (mirroring useReplyResources.ts's own shape).
-  const fetchResources = useCallback(
-    (ctx: AnnouncementDraftRequestContext): Promise<ResourceOutcome> =>
-      gatherWalkthroughResourcesAction(ctx.materialsText, ctx.courseLabel, ctx.provider),
-    []
-  );
-
-  // G3 Ruling 17/33: a control-character-free fingerprint over every input
-  // the research result depends on - course, module, a hash+length of the
-  // materials text (never the full text itself, which can run to tens of
-  // thousands of characters), and researchOn. JSON.stringify's own quoting
-  // keeps the fields unambiguous without a literal delimiter character.
-  const researchFingerprint = useCallback((ctx: AnnouncementDraftRequestContext): string => {
-    return JSON.stringify([
-      ctx.courseLabel,
-      ctx.moduleLabel ?? "",
-      ctx.materialsText.length,
-      fnv1aHash(ctx.materialsText),
-      ctx.researchOn,
-    ]);
-  }, []);
-
-  const draftOne = useCallback(
-    async (
-      ctx: AnnouncementDraftDispatchContext,
-      outline: AnnouncementOutline
-    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }> => {
-      // G3 Ruling 9/M3.3: the derivation from the once-per-Generate research
-      // OUTCOME to the RAW resource list the composer/enforcer actually
-      // consume - any outcome other than "found" contributes zero citable
-      // resources.
-      const researchedResources = ctx.researchOutcome.kind === "found" ? ctx.researchOutcome.links : [];
-      const result = await draftWalkthroughAnnouncementAction({
-        courseLabel: ctx.courseLabel,
-        moduleLabel: ctx.moduleLabel,
-        materialsText: ctx.materialsText,
-        outline,
-        coverageBlock: ctx.coverageBlock,
-        notes: ctx.notes,
-        provider: ctx.provider,
-        emojiPolicy: ctx.emojiOn ? "requested" : "forbidden",
-        researchedResources,
-        researchOutcome: ctx.researchOutcome,
-        timing: ctx.timing,
-      });
-      if ("error" in result) return { error: result.error };
-      return { title: result.title, message: result.message, researchNotice: result.researchNotice };
-    },
-    []
-  );
-
-  const postDraft = useCallback(
-    (title: string, message: string, delayedPostAt?: string) => {
-      if (!selectedCourse) return null;
-      return postWalkthroughAnnouncementAction(
-        selectedCourse.canvasUrl,
-        title,
-        message,
-        selectedCourse.institution ?? undefined,
-        delayedPostAt
-      ).then((result) => {
-        if ("error" in result) {
-          return { error: `Canvas refused the announcement - ${result.error}. Nothing was posted.` };
-        }
-        return { course: selectedCourse.name };
-      });
-    },
-    [selectedCourse]
-  );
+  // Research / draft / post adapters (the literal server-action calls) live in
+  // useWalkthroughGenerationAdapters.ts and are injected below.
+  const { fetchResources, researchFingerprint, draftOne, postDraft } = useWalkthroughGenerationAdapters(selectedCourse);
 
   const {
     slots,
@@ -561,6 +481,21 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
+
+  // Auto-draft on stop (F1) - useWalkthroughAutoDraft.ts. autoDraftOn is the
+  // persisted toggle from useWalkthroughSetup.
+  useWalkthroughAutoDraft({
+    autoDraftOn,
+    capturing,
+    extracting,
+    batchInFlightRef,
+    pendingFrames,
+    hasMaterial,
+    readyToDraftCount,
+    savedFormatsState,
+    generate,
+    setAutoDrafted,
+  });
 
   // Start / Stop. Starting after a run whose every slot is already posted
   // begins a FRESH run (F4): the captured material and the slots reset, so last
@@ -586,39 +521,6 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       }
     })();
   }, [capturing, start, stop, slots, reset]);
-
-  // Auto-draft on stop (F1). ONCE PER STOP: the pending ref is armed when
-  // capturing falls true -> false (the Stop button OR the browser sharing bar)
-  // and disarmed the moment the draft fires or a new capture starts, so this
-  // can neither repeat nor run from a remount. shouldAutoDraft requires an
-  // empty slot, and the reducer's generate-started guard independently
-  // refuses to touch a drafted slot: an existing draft is never overwritten.
-  const prevCapturingRef = useRef(false);
-  const autoDraftPendingRef = useRef(false);
-  useEffect(() => {
-    if (prevCapturingRef.current && !capturing) autoDraftPendingRef.current = true;
-    if (capturing) autoDraftPendingRef.current = false;
-    prevCapturingRef.current = capturing;
-  }, [capturing]);
-  useEffect(() => {
-    const fire = shouldAutoDraft({
-      autoDraftOn: AUTO_DRAFT_ON,
-      capturing,
-      extracting: extracting || batchInFlightRef.current,
-      pendingFrames,
-      hasMaterial,
-      hasEmptySlot: readyToDraftCount > 0,
-      savedFormatsState,
-      alreadyDraftedThisStop: !autoDraftPendingRef.current,
-    });
-    if (!fire) return;
-    autoDraftPendingRef.current = false;
-    void (async () => {
-      await Promise.resolve();
-      setAutoDrafted(true);
-      await generate();
-    })();
-  }, [capturing, extracting, pendingFrames, hasMaterial, readyToDraftCount, savedFormatsState, generate]);
 
   const handleRemoveExemplar = useCallback(
     async (id: string) => {
@@ -694,13 +596,14 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         </div>
       )}
 
-      {/* AC1/AC3: course, module, exemplar, format toggles and notes - all
-          reachable BEFORE the capture controls, all persisted where the
-          standing rule requires it (course/module/notes/emoji/resources
-          under ta- keys; the exemplar itself in Supabase, per decision P3,
-          never localStorage). Extracted to AnnouncementCourseFieldset.tsx
-          (backlog 4.1) - every literal server-action call stays here in the
-          panel (blocker 5); the fieldset only renders and reports upward. */}
+      {/* AC1/AC3: course, module and notes come first, then the run bar (Start
+          and both Generate buttons, sticky), then the draft format and
+          options - all persisted where the standing rule requires it
+          (course/module/notes/emoji/resources/auto-draft under ta- keys; the
+          exemplar itself in Supabase, per decision P3, never localStorage).
+          Extracted to AnnouncementCourseFieldset.tsx (backlog 4.1), which
+          renders the run bar between its two fieldsets; the fieldset only
+          renders and reports upward. */}
       <AnnouncementCourseFieldset
         courses={courses}
         courseId={courseId}
@@ -743,102 +646,104 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         onEmojiOnChange={setEmojiOn}
         researchOn={researchOn}
         onResearchOnChange={setResearchOn}
-      />
-
-      <p className={styles.fieldHint}>
-        A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
-        vision call already in flight, is lost.
-      </p>
-
-      <div className={`${styles.ghActions} ${controls.runRow}`}>
-        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" onClick={handleStartStop}>
-          {capturing ? "Stop capture" : "Start capture"}
-        </Button>
-        <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
-          Run legibility probe
-        </Button>
-      </div>
-      <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
-
-      <div className={controls.statusRow}>
-        <video
-          ref={previewRef}
-          className={capturing ? controls.previewVideo : `${controls.previewVideo} ${controls.previewVideoHidden}`}
-          aria-hidden="true"
-          autoPlay
-          muted
-          playsInline
-        />
-        {capturing && (
-          <div className={controls.statusText}>
-            <span>{fmt(elapsedSec)}</span>
-            <span>
-              {legibleBlockCount === 0
-                ? "Capturing - nothing read yet."
-                : `${legibleBlockCount} block${legibleBlockCount === 1 ? "" : "s"} read so far.`}
-            </span>
-            {extracting && <span>Reading the screen…</span>}
-            {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
-          </div>
-        )}
-      </div>
-      {stalled && (
-        <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
-          Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window
-          while you scroll.
-        </p>
-      )}
-
-      {/* P5: two always-visible buttons, never a mode toggle. */}
-      <div className={`${styles.ghActions} ${controls.runRow}`}>
-        <Button
-          variant={variantFor(!capturing && hasMaterial)}
-          color="primary"
-          size="small"
-          loading={anyDrafting}
-          loadingPosition="start"
-          // Per the owner's recorded decision (G1): only the LOADING state
-          // gates Generate - a timed-out fetch re-enables it, so a click
-          // drafts anyway rather than waiting indefinitely on saved formats.
-          disabled={
-            capturing || extracting || !hasMaterial || anyDrafting || savedFormatsState === "loading" || readyToDraftCount === 0
-          }
-          onClick={() => void generate()}
-        >
-          {anyDrafting ? "Generating…" : "Generate announcement"}
-        </Button>
-        <Button
-          variant="outlined"
-          color="primary"
-          size="small"
-          loading={scriptGenerating}
-          loadingPosition="start"
-          disabled={capturing || extracting || !hasMaterial || scriptGenerating}
-          onClick={() => void handleGenerateScript()}
-        >
-          {scriptGenerating ? "Generating…" : "Generate video script"}
-        </Button>
-      </div>
-      {/* G3 Ruling 24/34: Generate awaits research before any slot enters
-          "drafting" and stays enabled throughout the wait (a second click
-          reuses the in-flight research call) - this is the only feedback the
-          instructor gets during that wait. */}
-      {researching && (
-        <p role="status" aria-live="polite" className={styles.fieldHint}>
-          Researching resources for this module…
-        </p>
-      )}
-      {autoDrafted && (
-        <p role="status" aria-live="polite" className={styles.fieldHint}>
-          Drafting automatically from this capture. Nothing is posted until you confirm.
-        </p>
-      )}
-      {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}
-      {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
+        autoDraftOn={autoDraftOn}
+        onAutoDraftOnChange={setAutoDraftOn}
+      >
+        {/* W3: Start, the probe and both Generate buttons are siblings in ONE
+            sticky run bar (P5: two always-visible Generate buttons, never a
+            mode toggle). The bar holds no Post or other irreversible control. */}
+        <div className={`${styles.ghActions} ${runBar.runBarSticky}`}>
+          <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" onClick={handleStartStop}>
+            {capturing ? "Stop capture" : "Start capture"}
+          </Button>
+          <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
+            Run legibility probe
+          </Button>
+          <Button
+            variant={variantFor(!capturing && hasMaterial)}
+            color="primary"
+            size="small"
+            loading={anyDrafting}
+            loadingPosition="start"
+            // Per the owner's recorded decision (G1): only the LOADING state
+            // gates Generate - a timed-out fetch re-enables it, so a click
+            // drafts anyway rather than waiting indefinitely on saved formats.
+            disabled={
+              capturing || extracting || !hasMaterial || anyDrafting || savedFormatsState === "loading" || readyToDraftCount === 0
+            }
+            onClick={() => void generate()}
+          >
+            {anyDrafting ? "Generating…" : "Generate announcement"}
+          </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            size="small"
+            loading={scriptGenerating}
+            loadingPosition="start"
+            disabled={capturing || extracting || !hasMaterial || scriptGenerating}
+            onClick={() => void handleGenerateScript()}
+          >
+            {scriptGenerating ? "Generating…" : "Generate video script"}
+          </Button>
+        </div>
         <p className={styles.fieldHint}>
-          Every draft slot already has a draft - add another slot, or use Regenerate on one.
+          A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
+          vision call already in flight, is lost.
         </p>
-      )}
+
+        <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
+
+        <div className={controls.statusRow}>
+          <video
+            ref={previewRef}
+            className={capturing ? controls.previewVideo : `${controls.previewVideo} ${controls.previewVideoHidden}`}
+            aria-hidden="true"
+            autoPlay
+            muted
+            playsInline
+          />
+          {capturing && (
+            <div className={controls.statusText}>
+              <span>{fmt(elapsedSec)}</span>
+              <span>
+                {legibleBlockCount === 0
+                  ? "Capturing - nothing read yet."
+                  : `${legibleBlockCount} block${legibleBlockCount === 1 ? "" : "s"} read so far.`}
+              </span>
+              {extracting && <span>Reading the screen…</span>}
+              {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
+            </div>
+          )}
+        </div>
+        {stalled && (
+          <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
+            Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window
+            while you scroll.
+          </p>
+        )}
+
+        {/* G3 Ruling 24/34: Generate awaits research before any slot enters
+            "drafting" and stays enabled throughout the wait (a second click
+            reuses the in-flight research call) - this is the only feedback the
+            instructor gets during that wait. */}
+        {researching && (
+          <p role="status" aria-live="polite" className={styles.fieldHint}>
+            Researching resources for this module…
+          </p>
+        )}
+        {autoDrafted && (
+          <p role="status" aria-live="polite" className={styles.fieldHint}>
+            Drafting automatically from this capture. Nothing is posted until you confirm.
+          </p>
+        )}
+        {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}
+        {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
+          <p className={styles.fieldHint}>
+            Every draft slot already has a draft - add another slot, or use Regenerate on one.
+          </p>
+        )}
+      </AnnouncementCourseFieldset>
 
       {/* AC7/G2: one row per draft slot - always visible from mount, never
           gated on a generated result the way the single-draft version was. */}

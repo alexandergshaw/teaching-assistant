@@ -10,10 +10,18 @@
 // and reports control changes upward via props, exactly like
 // AnnouncementDraftSlot.tsx already does for the draft-slot row.
 //
+// SMOOTH-WALKTHROUGH W3 (M1): this component now renders TWO fieldsets with the
+// panel's run bar between them (passed as children) - first the capture
+// controls (course, module, notes, the screen-share disclosure), then the
+// draft format and options (exemplar paste/save/browse, the three toggles). So
+// Start sits directly under the controls it depends on and the optional format
+// controls no longer sit between the instructor and Start.
+//
 // Sized against THIS feature's own additions (the two new toggles), not
 // against the 1000-line ceiling in the abstract - the repo has already paid
 // once for extracting against the wrong target (modulesview-at-ceiling.md).
 
+import type { ReactNode } from "react";
 import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -76,6 +84,13 @@ export interface AnnouncementCourseFieldsetProps {
    * resource links before drafting. Persisted under ta-rec-wta-resources. */
   readonly researchOn: boolean;
   readonly onResearchOnChange: (value: boolean) => void;
+  /** SMOOTH-WALKTHROUGH W3 (R-F1-TOGGLE): whether stopping a capture drafts
+   * automatically. Persisted under ta-rec-wta-autodraft. */
+  readonly autoDraftOn: boolean;
+  readonly onAutoDraftOnChange: (value: boolean) => void;
+  /** Rendered between the capture fieldset and the format/options fieldset
+   * (the panel's run bar). */
+  readonly children?: ReactNode;
 }
 
 export default function AnnouncementCourseFieldset({
@@ -110,10 +125,14 @@ export default function AnnouncementCourseFieldset({
   onEmojiOnChange,
   researchOn,
   onResearchOnChange,
+  autoDraftOn,
+  onAutoDraftOnChange,
+  children,
 }: AnnouncementCourseFieldsetProps) {
   return (
+    <>
     <fieldset className={controls.section}>
-      <legend className={controls.sectionLegend}>Course and format</legend>
+      <legend className={controls.sectionLegend}>Course and walkthrough</legend>
       <div className={styles.adaptRow}>
         <TextField
           select
@@ -144,6 +163,26 @@ export default function AnnouncementCourseFieldset({
       )}
       <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
 
+      <TextField
+        size="small"
+        label={`Notes for this walkthrough - optional (${notesText.length}/${maxNotesChars})`}
+        value={notesText}
+        onChange={(e) => onNotesTextChange(e.target.value)}
+        multiline
+        minRows={2}
+        fullWidth
+      />
+
+      <p className={styles.fieldHint}>
+        Frames from your screen are sent to a third-party AI provider to be read while you capture. Share a single
+        window rather than your whole screen, and close any gradebook, inbox, or student submission first.
+      </p>
+    </fieldset>
+
+    {children}
+
+    <fieldset className={controls.section}>
+      <legend className={controls.sectionLegend}>Draft format and options</legend>
       <TextField
         size="small"
         label="Paste a previous announcement to match its format (optional)"
@@ -237,22 +276,13 @@ export default function AnnouncementCourseFieldset({
           control={<Checkbox size="small" checked={researchOn} onChange={(e) => onResearchOnChange(e.target.checked)} />}
           label="Research and cite relevant resource links"
         />
+        <FormControlLabel
+          control={<Checkbox size="small" checked={autoDraftOn} onChange={(e) => onAutoDraftOnChange(e.target.checked)} />}
+          label="Draft automatically when capture stops"
+        />
       </div>
 
-      <TextField
-        size="small"
-        label={`Notes for this walkthrough - optional (${notesText.length}/${maxNotesChars})`}
-        value={notesText}
-        onChange={(e) => onNotesTextChange(e.target.value)}
-        multiline
-        minRows={2}
-        fullWidth
-      />
-
-      <p className={styles.fieldHint}>
-        Frames from your screen are sent to a third-party AI provider to be read while you capture. Share a single
-        window rather than your whole screen, and close any gradebook, inbox, or student submission first.
-      </p>
     </fieldset>
+    </>
   );
 }

@@ -26,6 +26,10 @@ const STORAGE_KEY_NOTES = "ta-rec-wta-notes";
 // G3 Ruling 4/G: two new persisted format toggles.
 const STORAGE_KEY_EMOJI = "ta-rec-wta-emoji";
 const STORAGE_KEY_RESOURCES = "ta-rec-wta-resources";
+// SMOOTH-WALKTHROUGH W3 (R-F1-TOGGLE): whether stopping a capture drafts the
+// announcement automatically. Default ON; also the opt-out for the research
+// web call that auto-draft makes on every stop when research is on.
+const STORAGE_KEY_AUTODRAFT = "ta-rec-wta-autodraft";
 
 export const MAX_NOTES_CHARS = 2000;
 
@@ -119,21 +123,30 @@ export function useWalkthroughSetup(active: boolean) {
   // (persisted-details-open-hydration.md's own fix shape).
   const [emojiOn, setEmojiOn] = useState(false);
   const [researchOn, setResearchOn] = useState(false);
+  const [autoDraftOn, setAutoDraftOn] = useState(true);
   useEffect(() => {
+    // The stored values are read SYNCHRONOUSLY, before the await: the persist
+    // effects below run in this same commit and write the defaults, so a read
+    // after the await would see the defaults and never the saved choice.
+    let storedEmoji: string | null = null;
+    let storedResearch: string | null = null;
+    let storedAutoDraft: string | null = null;
+    try {
+      storedEmoji = window.localStorage.getItem(STORAGE_KEY_EMOJI);
+      storedResearch = window.localStorage.getItem(STORAGE_KEY_RESOURCES);
+      storedAutoDraft = window.localStorage.getItem(STORAGE_KEY_AUTODRAFT);
+    } catch {
+      // Best-effort - falls back to the defaults above.
+    }
     // setState-in-effect idiom (AGENTS.md/CLAUDE.md guidance, this repo's own
     // useCourseIntel.ts precedent): every setState below is reached only
     // after an await, never synchronously from the effect body - eslint's
     // react-hooks/set-state-in-effect rejects the latter.
     void (async () => {
       await Promise.resolve();
-      try {
-        const storedEmoji = window.localStorage.getItem(STORAGE_KEY_EMOJI);
-        if (storedEmoji !== null) setEmojiOn(storedEmoji === "true");
-        const storedResearch = window.localStorage.getItem(STORAGE_KEY_RESOURCES);
-        if (storedResearch !== null) setResearchOn(storedResearch === "true");
-      } catch {
-        // Best-effort - falls back to the defaults above.
-      }
+      if (storedEmoji !== null) setEmojiOn(storedEmoji === "true");
+      if (storedResearch !== null) setResearchOn(storedResearch === "true");
+      if (storedAutoDraft !== null) setAutoDraftOn(storedAutoDraft === "true");
     })();
   }, []);
   useEffect(() => {
@@ -150,6 +163,13 @@ export function useWalkthroughSetup(active: boolean) {
       // Best-effort.
     }
   }, [researchOn]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY_AUTODRAFT, String(autoDraftOn));
+    } catch {
+      // Best-effort.
+    }
+  }, [autoDraftOn]);
 
   const selectedCourse = (courses ?? []).find((c) => c.id === courseId) ?? null;
 
@@ -166,6 +186,8 @@ export function useWalkthroughSetup(active: boolean) {
     setEmojiOn,
     researchOn,
     setResearchOn,
+    autoDraftOn,
+    setAutoDraftOn,
     selectedCourse,
   };
 }

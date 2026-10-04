@@ -1,0 +1,16 @@
+/* SMOOTH-WALKTHROUGH W3 sticky run bar (WalkthroughAnnouncementPanel.tsx).
+   The bar holds Start/Stop, the legibility probe and both Generate buttons, so
+   they stay under the instructor's cursor while the setup and the drafts
+   scroll past. Its OWN rule carries the sticky mechanism. Whether it actually
+   sticks depends on no ancestor clipping overflow - an owner check (the
+   SMOOTH-BASELINE walk), not something a test here can measure. The bar
+   holds no Post or other irreversible control by design. */
+.runBarSticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: var(--space-2) var(--space-3);
+  background: var(--field-background);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}

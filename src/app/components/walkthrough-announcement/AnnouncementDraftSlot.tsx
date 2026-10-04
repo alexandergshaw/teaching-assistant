@@ -151,30 +151,6 @@ export default function AnnouncementDraftSlot({
         ))}
       </TextField>
 
-      <TextField
-        type="datetime-local"
-        size="small"
-        label="Visible to students (optional)"
-        className={controls.fieldMd}
-        value={slot.scheduledAt}
-        onChange={(e) => onSetScheduledAt(slot.id, e.target.value)}
-        slotProps={{
-          htmlInput: { min: toDatetimeLocalValue(new Date()) },
-          inputLabel: { shrink: true },
-        }}
-      />
-      <p className={styles.fieldHint}>
-        Leave blank to post immediately. Pick a future date and time to schedule when students can see it.
-        {slot.scheduledAt && (
-          <>
-            {" "}
-            <button type="button" className={styles.linkButton} onClick={() => onSetScheduledAt(slot.id, "")}>
-              Clear
-            </button>
-          </>
-        )}
-      </p>
-
       {(() => {
         const statusText = savedFormatsStatusText(optionSource.savedState, optionSource.saved.length);
         if (!statusText) return null;
@@ -239,17 +215,21 @@ export default function AnnouncementDraftSlot({
             onChange={(e) => onEdit(slot.id, "title", e.target.value)}
             fullWidth
           />
-          <TextField
-            size="small"
-            label="Message (Markdown)"
-            value={slot.draft.draft.message}
-            onChange={(e) => onEdit(slot.id, "message", e.target.value)}
-            multiline
-            minRows={6}
-            fullWidth
-          />
-          <p className={styles.fieldHint}>Preview (how this renders on Canvas):</p>
-          <div className={controls.draftPreview} dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          <div className={styles.adaptFieldGrid2}>
+            <TextField
+              size="small"
+              label="Message (Markdown)"
+              value={slot.draft.draft.message}
+              onChange={(e) => onEdit(slot.id, "message", e.target.value)}
+              multiline
+              minRows={6}
+              fullWidth
+            />
+            <div>
+              <p className={styles.fieldHint}>Preview (how this renders on Canvas):</p>
+              <div className={controls.draftPreview} dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          </div>
           <p className={styles.fieldHint}>
             Markdown formatting (##, -, numbered lists, **bold**, *italic*) becomes real headings, lists and emphasis
             when posted to Canvas - and Copy now puts the formatted version on the clipboard alongside the raw
@@ -267,25 +247,6 @@ export default function AnnouncementDraftSlot({
             </p>
           )}
 
-          {postArmed && (
-            <div className={`${controls.notice} ${controls.noticeWarning}`}>
-              <p id={`wta-post-consequence-${slot.id}`} role="status" aria-live="polite">
-                {isScheduled ? (
-                  <>
-                    Confirming schedules this announcement to become visible to every student in{" "}
-                    {courseName ?? "the course"} at {visibility.kind === "scheduled" ? visibility.label : ""} - Canvas
-                    has no unpublished state before then, and this app cannot recall or delete it afterward.
-                  </>
-                ) : (
-                  <>
-                    Posting publishes this announcement to every student in {courseName ?? "the course"} immediately -
-                    Canvas has no unpublished state for an announcement - and this app cannot recall or delete it
-                    afterward.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
           {slot.postError && (
             <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
               {slot.postError}
@@ -332,7 +293,51 @@ export default function AnnouncementDraftSlot({
             <Button size="small" variant="outlined" onClick={() => onCopy(slot.id)}>
               Copy
             </Button>
+            <div>
+              <TextField
+                type="datetime-local"
+                size="small"
+                label="Visible to students (optional)"
+                className={controls.fieldMd}
+                value={slot.scheduledAt}
+                onChange={(e) => onSetScheduledAt(slot.id, e.target.value)}
+                slotProps={{
+                  htmlInput: { min: toDatetimeLocalValue(new Date()) },
+                  inputLabel: { shrink: true },
+                }}
+              />
+              <p className={styles.fieldHint}>
+                Leave blank to post immediately. Pick a future date and time to schedule when students can see it.
+                {slot.scheduledAt && (
+                  <>
+                    {" "}
+                    <button type="button" className={styles.linkButton} onClick={() => onSetScheduledAt(slot.id, "")}>
+                      Clear
+                    </button>
+                  </>
+                )}
+              </p>
+            </div>
           </div>
+          {postArmed && (
+            <div className={`${controls.notice} ${controls.noticeWarning}`}>
+              <p id={`wta-post-consequence-${slot.id}`} role="status" aria-live="polite">
+                {isScheduled ? (
+                  <>
+                    Confirming schedules this announcement to become visible to every student in{" "}
+                    {courseName ?? "the course"} at {visibility.kind === "scheduled" ? visibility.label : ""} - Canvas
+                    has no unpublished state before then, and this app cannot recall or delete it afterward.
+                  </>
+                ) : (
+                  <>
+                    Posting publishes this announcement to every student in {courseName ?? "the course"} immediately -
+                    Canvas has no unpublished state for an announcement - and this app cannot recall or delete it
+                    afterward.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
           {slot.regenerateArmed && (
             <p id={`wta-regenerate-consequence-${slot.id}`} className={styles.fieldHint}>
               Regenerating replaces this draft&apos;s hand-edited text - anything typed above will be lost.

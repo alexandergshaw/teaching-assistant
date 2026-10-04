@@ -28,8 +28,10 @@ const WALKTHROUGH_ANNOUNCEMENT_DIR = path.resolve(process.cwd(), "src/app/compon
 // ---------------------------------------------------------------------------
 
 describe("A19 AC-6: draftOne forwards ctx.timing into WalkthroughAnnouncementDraftInput.timing, sliced structurally", () => {
+  // SMOOTH-WALKTHROUGH W3 (R-AC16): draftOne moved verbatim from the panel into
+  // useWalkthroughGenerationAdapters.ts; the slice retargets there unchanged.
   const panelSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughGenerationAdapters.ts"),
     "utf-8"
   );
 
@@ -138,7 +140,11 @@ describe("A32/REQ-A32-1: the consequence copy and all five ConfirmArmButtons lab
   // Anchored on "wta-post-consequence", never a bare "consequenceId=" - a
   // SECOND ConfirmArmButtons block for Regenerate follows immediately after
   // with its own "wta-regenerate-consequence" id (docs/a24-a32-waves.md 6.4.3).
-  const consequenceStart = source.indexOf("wta-post-consequence");
+  // W3: the consequence paragraph now renders BELOW the button row (so Confirm
+  // does not shift when it appears), which makes the ConfirmArmButtons
+  // consequenceId prop the first textual "wta-post-consequence". Anchor on the
+  // paragraph's own id attribute instead.
+  const consequenceStart = source.indexOf("id={`wta-post-consequence");
   const consequenceEnd = source.indexOf("</p>", consequenceStart);
 
   it("both anchors resolve", () => {
@@ -295,8 +301,10 @@ describe("A32/RULING 64: the postedTo success sentence branches honestly on post
 });
 
 describe("A19 AC-15: researchFingerprint does NOT include timing (a deliberate non-goal, section 4)", () => {
+  // Retargeted with draftOne (W3 R-AC16): researchFingerprint now lives in
+  // useWalkthroughGenerationAdapters.ts.
   const panelSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughGenerationAdapters.ts"),
     "utf-8"
   );
 
@@ -335,5 +343,180 @@ describe("A19 AC-12: staleTiming mirrors staleChoice - static source-text token 
     const slice = source.slice(startIdx, endIdx);
     expect(slice).toMatch(/phase === "drafted" && slot\.draft\.phase === "drafted"/);
     expect(slice).toContain("!==");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MOVED VERBATIM from walkthrough-announcement.structure.test.ts (SMOOTH-
+// WALKTHROUGH W3): the A18 AC-1 / AC-3 / 5.9 blocks below, none of which use
+// comment stripping, moved here so the sibling file stays under the repo's
+// 1000-line ceiling after the W3 surface pins landed. The ONLY edit is the
+// W3-R9 re-anchor inside the two disclosure blocks (first </fieldset>, plus the
+// no-later-hint guard) - the fieldset split made lastIndexOf latch the wrong
+// fieldset.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// A18 AC-1: the empty-material hint stops claiming the app "records" - it
+// reads a shared screen and discards the frames, never saves video. The
+// anchor is a whitespace-tolerant regex (not a plain indexOf) because this
+// file's own neighbouring hints at :800-803 and :885-887 are already
+// multi-line, so a realistic reflow of this hint into the same shape must
+// not defeat the check.
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-1: the empty-material hint no longer says the app records", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  const ANCHOR_RE = /\{!hasMaterial\s*&&\s*<p\s+className=\{styles\.fieldHint\}>/;
+  const anchorMatch = panelSource.match(ANCHOR_RE);
+
+  it("finds the empty-material hint's conditional + <p className={styles.fieldHint}> opening (anchor resolves)", () => {
+    expect(
+      anchorMatch,
+      "expected to find the empty-material hint's conditional + <p className={styles.fieldHint}> opening " +
+        "(whitespace-tolerant); if this is not found, the conditional's returned content was likely replaced " +
+        "with something other than a reworded <p> - e.g. null - which is the wrong fix"
+    ).toBeTruthy();
+  });
+
+  it("finds the hint's closing </p> after the anchor (anchor resolves)", () => {
+    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
+    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
+    expect(closeIdx, "expected to find the hint's closing </p>").toBeGreaterThan(-1);
+  });
+
+  function hintText(): string {
+    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
+    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
+    return panelSource.slice(afterAnchor, closeIdx).replace(/\s+/g, " ").trim();
+  }
+
+  it("does not contain the whole word record/recording", () => {
+    expect(hintText()).not.toMatch(/\brecord(ing)?\b/i);
+  });
+
+  it("still mentions capturing or reading, so the hint was reworded, not deleted", () => {
+    const text = hintText();
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).toMatch(/\b(captur|read)\w*\b/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A18 AC-3: the privacy disclosure drops the word "record" from its first
+// sentence only. The second sentence (the screen/window recommendation and
+// the three named surfaces to close) is frozen as an exact literal per
+// ruling W2 - a keyword-only check was demonstrated to pass an
+// advice-inverting rewrite that keeps every keyword.
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-3: the privacy disclosure's first sentence drops \"record\"; the second sentence is frozen verbatim", () => {
+  const fieldsetSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
+    "utf-8"
+  );
+
+  // W3 (M1) split the component into TWO fieldsets with the disclosure in the
+  // FIRST (capture) one, so the anchor is the FIRST </fieldset>: lastIndexOf
+  // would latch onto the format/options fieldset's close and a different hint.
+  const fieldsetCloseIdx = fieldsetSource.indexOf("</fieldset>");
+  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+
+  it("finds the privacy disclosure's opening <p> before the fieldset's close (anchor resolves)", () => {
+    expect(
+      pOpenIdx,
+      "expected to find the privacy disclosure's opening <p> before the fieldset's close"
+    ).toBeGreaterThan(-1);
+  });
+
+  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
+
+  it("finds the disclosure's closing </p> (anchor resolves)", () => {
+    expect(pCloseIdx, "expected to find the disclosure's closing </p>").toBeGreaterThan(-1);
+  });
+
+  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
+  const normalized = raw.replace(/\s+/g, " ").trim();
+
+  const FROZEN_SECOND_SENTENCE =
+    "Share a single window rather than your whole screen, and close any " +
+    "gradebook, inbox, or student submission first.";
+
+  it("the second sentence is byte-equal to the frozen literal - it must not change by even one character", () => {
+    expect(
+      normalized.endsWith(FROZEN_SECOND_SENTENCE),
+      "the disclosure's second sentence - the screen/window recommendation and the three named surfaces - " +
+        "must not change by even one character"
+    ).toBe(true);
+  });
+
+  const firstSentence = normalized.slice(0, normalized.length - FROZEN_SECOND_SENTENCE.length).trim();
+
+  it("the first sentence is non-empty", () => {
+    expect(
+      firstSentence.length,
+      "expected non-empty text before the frozen second sentence"
+    ).toBeGreaterThan(0);
+  });
+
+  it("the first sentence does not contain the whole word record/recording", () => {
+    expect(firstSentence).not.toMatch(/\brecord(ing)?\b/i);
+  });
+
+  it("the first sentence still says what is transmitted (Frames)", () => {
+    expect(firstSentence).toMatch(/\bframes\b/i);
+  });
+
+  it("the first sentence still names the recipient as third-party", () => {
+    expect(firstSentence).toMatch(/third-party/i);
+  });
+
+  it("the first sentence still names the recipient type as an AI provider", () => {
+    expect(firstSentence).toMatch(/AI provider/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/a18-test-notes.md 5.9: a hedge denylist is the unbounded denylist the
+// caps forbid. Freeze the whole disclosure whole instead - this row changed
+// exactly one word in it (the fact regexes above stay, for the readable
+// diff on a mismatch; equality is what actually discriminates a hedge).
+// ---------------------------------------------------------------------------
+
+describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, applied to this block)", () => {
+  const fieldsetSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
+    "utf-8"
+  );
+
+  // First </fieldset>, not the last: see the A18 AC-3 block above (W3 M1 added
+  // a SECOND fieldset after the one holding the disclosure).
+  const fieldsetCloseIdx = fieldsetSource.indexOf("</fieldset>");
+  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
+  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
+  const normalized = raw.replace(/\s+/g, " ").trim();
+
+  const FROZEN_DISCLOSURE =
+    "Frames from your screen are sent to a third-party AI provider to be read while you capture. " +
+    "Share a single window rather than your whole screen, and close any gradebook, inbox, or student submission first.";
+
+  it("both anchors resolve", () => {
+    expect(fieldsetCloseIdx).toBeGreaterThan(-1);
+    expect(pOpenIdx).toBeGreaterThan(-1);
+    expect(pCloseIdx).toBeGreaterThan(-1);
+  });
+
+  it("no later hint sits between the disclosure's </p> and the first </fieldset> - the anchor resolved to the disclosure, not a sibling", () => {
+    const between = fieldsetSource.slice(pCloseIdx, fieldsetCloseIdx);
+    expect(between).not.toContain('<p className={styles.fieldHint}>');
+  });
+
+  it("the whole disclosure, whitespace-normalized, is byte-equal to the frozen literal", () => {
+    expect(normalized).toBe(FROZEN_DISCLOSURE);
   });
 });

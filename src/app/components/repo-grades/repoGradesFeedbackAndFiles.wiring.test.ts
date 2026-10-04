@@ -299,7 +299,7 @@ const OPTIONS = {
 
 // R-2: the derived root set against a HAND-FROZEN literal, never a second
 // readdirSync - a directoryRoots-vs-readdirSync comparison is circular and
-// discharges nothing (both go to zero together). 33 non-test, non-.d.ts
+// discharges nothing (both go to zero together). 34 non-test, non-.d.ts
 // .ts/.tsx basenames of this directory.
 const FROZEN_REPO_GRADES_ROOTS = [
   "LinkUsernamesPanel.tsx",
@@ -331,6 +331,9 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "repoGradesRows.ts",
   "repoGradesRubricCache.ts",
   "repoGradesRubricSource.ts",
+  // Repo-grader smoothing W1 (docs/repo-grader-smooth-w1-test-notes.md): the
+  // extracted pure run-plan label leaf, a new non-test .ts in this directory.
+  "repoGradesRunPlan.ts",
   "repoGradesUiState.ts",
   "rosterUsernameOverlay.ts",
   "useRepoGradesBulkGrade.ts",
@@ -340,7 +343,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
 ].sort();
 
 describe("R-2: the derived repo-grades root set matches the hand-frozen list", () => {
-  it("directoryRoots(repo-grades) names exactly the 33 frozen basenames", () => {
+  it("directoryRoots(repo-grades) names exactly the 34 frozen basenames", () => {
     const derived = directoryRoots(REPO_GRADES_DIR)
       .map((abs) => abs.slice(REPO_GRADES_DIR.length + 1))
       .sort();

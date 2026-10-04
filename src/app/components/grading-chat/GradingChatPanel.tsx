@@ -28,6 +28,7 @@ import { submitFilesSequentially } from "./chatFileBatch";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
+import chat from "./grading-chat.module.css";
 
 // The two older global slots are read ONCE at mount and never rewritten: the
 // scoped chat memory (chatSetupMemory.ts) is what persists setup from here on.
@@ -166,33 +167,39 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   return (
     <div className={styles.form}>
-      <div className={styles.field}>
-        <label htmlFor="grading-chat-instructions">Assignment instructions</label>
-        <TextField
-          id="grading-chat-instructions"
-          multiline
-          minRows={3}
-          fullWidth
-          size="small"
-          value={instructions}
-          onChange={(event) => handleInstructionsChange(event.target.value)}
-          disabled={sessionReady}
-        />
-      </div>
+      {!sessionReady ? (
+        <>
+          <div className={chat.compactField}>
+            <label htmlFor="grading-chat-instructions">Assignment instructions</label>
+            <TextField
+              id="grading-chat-instructions"
+              multiline
+              minRows={3}
+              fullWidth
+              size="small"
+              value={instructions}
+              onChange={(event) => handleInstructionsChange(event.target.value)}
+              disabled={sessionReady}
+            />
+          </div>
 
-      <div className={styles.field}>
-        <label htmlFor="grading-chat-rubric">Rubric</label>
-        <TextField
-          id="grading-chat-rubric"
-          multiline
-          minRows={3}
-          fullWidth
-          size="small"
-          value={rubric}
-          onChange={(event) => handleRubricChange(event.target.value)}
-          disabled={sessionReady}
-        />
-      </div>
+          <div className={chat.compactField}>
+            <label htmlFor="grading-chat-rubric">Rubric</label>
+            <TextField
+              id="grading-chat-rubric"
+              multiline
+              minRows={3}
+              fullWidth
+              size="small"
+              value={rubric}
+              onChange={(event) => handleRubricChange(event.target.value)}
+              disabled={sessionReady}
+            />
+          </div>
+        </>
+      ) : (
+        <p className={chat.setupSummary}>Instructions and rubric are set for this session.</p>
+      )}
 
       <div className={styles.ghActions}>
         <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
@@ -204,12 +211,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           New session
         </Button>
       </div>
-
-      {submitError && (
-        <p role="alert" className={styles.ghMeta}>
-          {submitError}
-        </p>
-      )}
 
       {hasRows && driver.run ? (
         <>
@@ -230,7 +231,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <p className={styles.ghMeta}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
-      <ChatComposer disabled={busy} onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl} />
+      <div className={chat.stickyComposer}>
+        {submitError && (
+          <p role="alert" className={styles.ghMeta}>
+            {submitError}
+          </p>
+        )}
+        <ChatComposer disabled={busy} onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl} />
+      </div>
     </div>
   );
 }

@@ -60,10 +60,11 @@ describe("ChatComposer - slotProps.input vs top-level onKeyDown split (UX doc se
 });
 
 describe("GradingChatPanel - reused house classes, no new inline flex", () => {
-  it("uses styles.field/styles.form for instructions and rubric, matching GradingTab's own pattern", () => {
+  it("keeps styles.form; the setup fields drop styles.field for chat.compactField (competing 220px selector gone)", () => {
     const source = read(PANEL);
     expect(source).toContain("styles.form");
-    expect(source).toContain("styles.field");
+    expect(source).not.toContain("styles.field");
+    expect(source).toContain("chat.compactField");
   });
 
   it("append-vs-reset: the results table is fed the driver's growing run, never a locally reset one", () => {
@@ -233,5 +234,114 @@ describe("GradingChatPanel - W2 AR1c: the Canvas fetch is gated by needsFill (fe
     const loadedIdx = block.indexOf("const loaded =", guardIdx);
     expect(loadedIdx, "expected the statement after the guard").toBeGreaterThan(-1);
     expect(block.slice(guardIdx, loadedIdx)).toContain("fetchCanvasMetaAction");
+  });
+});
+
+// GRADER W3 surface (docs/grader-w3-surface-test-notes.md, SMOOTH-GRADER).
+// Source-text and CSS-structure pins: they prove the mechanism is PRESENT in the
+// source, never that the composer sticks or a field is shorter on screen (owner
+// walk, residuals RG3-1..RG3-8).
+const CHAT_MODULE = "src/app/components/grading-chat/grading-chat.module.css";
+
+function withoutCssComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function ruleBlock(css: string, selector: string): string {
+  const sel = css.indexOf(selector);
+  expect(sel, `expected a ${selector} rule`).toBeGreaterThan(-1);
+  const open = css.indexOf("{", sel);
+  const close = css.indexOf("}", open);
+  expect(open, `expected an opening brace for ${selector}`).toBeGreaterThan(-1);
+  expect(close, `expected a closing brace for ${selector}`).toBeGreaterThan(open);
+  return css.slice(open + 1, close);
+}
+
+describe("GradingChatPanel - W3 F1: the composer sits in a sticky wrapper", () => {
+  it("the ChatComposer mount is enclosed by chat.stickyComposer within a bounded window", () => {
+    const source = withoutLineComments(read(PANEL));
+    const mountIdx = source.indexOf("<ChatComposer");
+    expect(mountIdx, "expected the ChatComposer mount").toBeGreaterThan(-1);
+    const classIdx = source.lastIndexOf("chat.stickyComposer", mountIdx);
+    expect(classIdx, "expected chat.stickyComposer before the mount").toBeGreaterThan(-1);
+    expect(mountIdx - classIdx).toBeLessThan(400);
+  });
+
+  it("the .stickyComposer rule has position: sticky and a bottom/top offset (mechanism proxy; sticking itself is an owner walk check)", () => {
+    const block = ruleBlock(withoutCssComments(read(CHAT_MODULE)), ".stickyComposer");
+    expect(block).toMatch(/position:\s*sticky/);
+    expect(block).toMatch(/(^|[\s;{])(bottom|top):\s*[^;]+/);
+  });
+});
+
+describe("GradingChatPanel - W3 F2: the setup fields collapse to a summary once the session is ready", () => {
+  it("a sessionReady guard precedes both setup field ids and a chat.setupSummary element exists", () => {
+    const source = withoutLineComments(read(PANEL));
+    const guard = source.search(/!sessionReady|sessionReady\s*\?/);
+    const instr = source.indexOf('id="grading-chat-instructions"');
+    const rubricIdx = source.indexOf('id="grading-chat-rubric"');
+    expect(guard, "expected a sessionReady guard").toBeGreaterThan(-1);
+    expect(instr).toBeGreaterThan(-1);
+    expect(rubricIdx).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(instr);
+    expect(guard).toBeLessThan(rubricIdx);
+    expect(source).toContain("chat.setupSummary");
+  });
+});
+
+describe("GradingChatPanel - W3 F3: compact setup fields", () => {
+  for (const id of ['id="grading-chat-instructions"', 'id="grading-chat-rubric"']) {
+    it(`the wrapper of ${id} carries chat.compactField and not styles.field`, () => {
+      const source = withoutLineComments(read(PANEL));
+      const idIdx = source.indexOf(id);
+      expect(idIdx).toBeGreaterThan(-1);
+      const divIdx = source.lastIndexOf("<div", idIdx);
+      expect(divIdx).toBeGreaterThan(-1);
+      expect(divIdx).toBeLessThan(idIdx);
+      const wrapperOpen = source.slice(divIdx, idIdx);
+      expect(wrapperOpen).toContain("chat.compactField");
+      expect(wrapperOpen).not.toContain("styles.field");
+    });
+  }
+
+  it("the .compactField rule sets a textarea min-height strictly below 220px", () => {
+    const css = withoutCssComments(read(CHAT_MODULE));
+    const sel = css.indexOf(".compactField textarea");
+    expect(sel, "expected a .compactField textarea rule").toBeGreaterThan(-1);
+    const block = ruleBlock(css.slice(sel), ".compactField textarea");
+    const match = block.match(/min-height:\s*(\d+)px/);
+    expect(match, "expected a px min-height").not.toBeNull();
+    expect(Number(match![1])).toBeLessThan(220);
+  });
+});
+
+describe("GradingChatPanel - W3 F4: the intake error rides inside the sticky wrapper, below the results", () => {
+  it("submitError role=alert is inside chat.stickyComposer and after the results mount", () => {
+    const source = withoutLineComments(read(PANEL));
+    const wrapperOpen = source.indexOf("chat.stickyComposer");
+    const mountIdx = source.indexOf("<ChatComposer");
+    const alertIdx = source.indexOf('role="alert"');
+    const resultsIdx = source.indexOf("<GradingResults");
+    expect(wrapperOpen).toBeGreaterThan(-1);
+    expect(mountIdx).toBeGreaterThan(-1);
+    expect(alertIdx).toBeGreaterThan(-1);
+    expect(resultsIdx).toBeGreaterThan(-1);
+    expect(alertIdx).toBeGreaterThan(wrapperOpen);
+    expect(alertIdx).toBeLessThan(mountIdx);
+    expect(alertIdx).toBeGreaterThan(resultsIdx);
+  });
+});
+
+describe("ChatComposer - W3 F5: Send stays grouped with the Submission text field", () => {
+  it("the Send IconButton sits inside the text-mode adaptRow that holds the Submission text field", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    const labelIdx = source.indexOf('label="Submission text"');
+    expect(labelIdx).toBeGreaterThan(-1);
+    const rowOpen = source.lastIndexOf("<div className={styles.adaptRow}>", labelIdx);
+    expect(rowOpen).toBeGreaterThan(-1);
+    const rowClose = source.indexOf("</div>", labelIdx);
+    expect(rowClose).toBeGreaterThan(labelIdx);
+    const slice = source.slice(rowOpen, rowClose);
+    expect(slice).toContain('aria-label="Send submission"');
   });
 });

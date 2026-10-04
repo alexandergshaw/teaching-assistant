@@ -419,6 +419,74 @@ export async function createConversation(
   }
 }
 
+/**
+ * The only recipient shape createCourseConversation will emit: a Canvas
+ * course context (`course_<digits>`), never a user id. Net-new guard that lives
+ * with the builder; it deliberately does not touch messaging.ts's own check.
+ */
+export const COURSE_RECIPIENT_PATTERN = /^course_\d+$/;
+
+/** Three-state outcome of a course-wide send, mapped from the HTTP status. */
+export interface CourseConversationResult {
+  status: "accepted" | "refused" | "unknown";
+  reason?: string;
+}
+
+/**
+ * Create ONE conversation addressed to the course itself (`recipients[]=
+ * course_<id>`), which Canvas fans out to every enrolled student.
+ *
+ * The POST body is exactly body + context_code + recipients[] (+ subject when
+ * given): no force_new, group_conversation, bulk_message or mode. The result
+ * is mapped from response.status directly, not via canvasError, because a
+ * timeout or 5xx does not prove the message was not delivered.
+ */
+export async function createCourseConversation(
+  courseUrl: string,
+  body: string,
+  subject?: string
+): Promise<CourseConversationResult> {
+  if (!body.trim()) return { status: "refused", reason: "A message needs a body." };
+  const courseIdMatch = courseUrl.match(/\/courses\/(\d+)/);
+  if (!courseIdMatch) {
+    return { status: "refused", reason: "Could not read a course from that URL." };
+  }
+  const contextCode = `course_${courseIdMatch[1]}`;
+  if (!COURSE_RECIPIENT_PATTERN.test(contextCode)) {
+    return { status: "refused", reason: "Not a course context." };
+  }
+
+  try {
+    const { token, baseUrl } = await resolveInstitution(courseUrl);
+
+    const params = new URLSearchParams();
+    params.append("recipients[]", contextCode);
+    params.append("body", body.trim());
+    if (subject && subject.trim()) {
+      params.append("subject", subject.trim());
+    }
+    params.append("context_code", contextCode);
+
+    const response = await canvasRequest(
+      `${baseUrl}/api/v1/conversations`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      },
+      token
+    );
+    const code = response.status;
+    if (code === 200 || code === 201) return { status: "accepted" };
+    if (code === 400 || code === 404 || code === 422 || code === 401 || code === 403) {
+      return { status: "refused", reason: `Canvas refused the message (HTTP ${code}).` };
+    }
+    return { status: "unknown", reason: `Canvas answered HTTP ${code}; delivery is unconfirmed.` };
+  } catch {
+    return { status: "unknown", reason: "Canvas did not respond; delivery is unconfirmed." };
+  }
+}
+
 /** Unread Canvas inbox conversation count for an institution (for badges). */
 export async function getUnreadCount(code: string): Promise<number> {
   const { institution, token, baseUrl } = await resolveInbox(code);

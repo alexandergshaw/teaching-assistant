@@ -34,6 +34,7 @@ import {
   listAssignmentTextSubmissions,
   listAssignments,
   listStudents,
+  countActiveCourseStudents,
 } from "./listings";
 import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
@@ -154,5 +155,42 @@ describe("relative next-link resolution", () => {
     expect(String(secondUrl)).toBe(
       `${TEST_BASE_URL}/api/v1/courses/123/users?enrollment_type[]=student&per_page=100&page=2`
     );
+  });
+});
+
+describe("countActiveCourseStudents", () => {
+  it("2a: counts distinct numeric user_ids", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult([{ user_id: 10 }, { user_id: 10 }, { user_id: 11 }]));
+    expect(await countActiveCourseStudents(TEST_CODE, "123")).toBe(2);
+  });
+
+  it("2a: ignores rows with a missing or non-numeric user_id", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult([{ user_id: 1 }, {}, { user_id: "x" }]));
+    expect(await countActiveCourseStudents(TEST_CODE, "123")).toBe(1);
+  });
+
+  it("2b: reads the active StudentEnrollment endpoint, not the users endpoint", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult([]));
+    await countActiveCourseStudents(TEST_CODE, "123");
+    const url = String(mockCanvasFetch.mock.calls[0][0]);
+    expect(url).toContain("/api/v1/courses/123/enrollments?type[]=StudentEnrollment&state[]=active&per_page=100");
+    expect(url).not.toContain("/users");
+  });
+
+  it("2c: follows pagination and dedups across pages", async () => {
+    mockCanvasFetch
+      .mockResolvedValueOnce(
+        okResult([{ user_id: 1 }, { user_id: 2 }], 200, {
+          link: `<${TEST_BASE_URL}/api/v1/courses/123/enrollments?page=2>; rel="next"`,
+        })
+      )
+      .mockResolvedValueOnce(okResult([{ user_id: 2 }, { user_id: 3 }]));
+    expect(await countActiveCourseStudents(TEST_CODE, "123")).toBe(3);
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws on a non-OK status", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({}, 500));
+    await expect(countActiveCourseStudents(TEST_CODE, "123")).rejects.toThrow();
   });
 });

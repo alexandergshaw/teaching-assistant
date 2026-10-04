@@ -352,6 +352,33 @@ export async function listStudentGradeSummaries(
   return summaries;
 }
 
+/**
+ * Count the distinct active students in a course. Same endpoint and pagination
+ * as listStudentGradeSummaries; dedups by numeric user_id.
+ */
+export async function countActiveCourseStudents(code: string, courseId: string): Promise<number> {
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/enrollments?type[]=StudentEnrollment&state[]=active&per_page=100`;
+  const ids = new Set<number>();
+
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
+    const response = await canvasGet(next, token);
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    pagesFetched++;
+    const page = (await response.json()) as Array<{ user_id?: number }>;
+    for (const row of page) {
+      if (typeof row.user_id === "number") ids.add(row.user_id);
+    }
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
+  }
+
+  return ids.size;
+}
+
 /** A student's text submission from an assignment. */
 export interface CanvasTextSubmission {
   userId: number;

@@ -54,7 +54,7 @@ vi.mock("../lms-credentials", () => ({
 }));
 vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
-import { listConversations, getConversation } from "./inbox";
+import { listConversations, getConversation, createConversation, createCourseConversation, COURSE_RECIPIENT_PATTERN } from "./inbox";
 import { getEffectiveIdentity } from "../supabase/effective-identity";
 import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
@@ -406,5 +406,118 @@ describe("getConversation - SEC10: the self-id cache cannot leak across credenti
 
     const second = await getConversation(1);
     expect(second.selfId).toBe(111);
+  });
+});
+
+const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
+
+function postedParams(callIndex = 0): URLSearchParams {
+  const init = mockCanvasFetch.mock.calls[callIndex][1] as { body?: string };
+  return new URLSearchParams(String(init.body));
+}
+
+describe("createCourseConversation - A29 course-wide send", () => {
+  beforeEach(() => {
+    vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+    mockCanvasFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("1a: the POST body key set is EXACTLY body, context_code, recipients[]", async () => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, 201));
+    await createCourseConversation(COURSE_URL, "Hello class");
+    const keys = [...new Set(postedParams().keys())].sort();
+    expect(keys).toEqual(["body", "context_code", "recipients[]"]);
+  });
+
+  it("1a: subject is the only permitted addition", async () => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, 201));
+    await createCourseConversation(COURSE_URL, "Hello class", "  Week 3  ");
+    const params = postedParams();
+    expect([...new Set(params.keys())].sort()).toEqual(["body", "context_code", "recipients[]", "subject"]);
+    expect(params.get("subject")).toBe("Week 3");
+  });
+
+  it("1b: exactly one recipient, the course context, matching the real guard", async () => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, 200));
+    await createCourseConversation(COURSE_URL, "Hello class");
+    const params = postedParams();
+    const recipients = params.getAll("recipients[]");
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]).toBe("course_123");
+    expect(recipients[0]).toMatch(/^course_\d+$/);
+    expect(COURSE_RECIPIENT_PATTERN.test(recipients[0])).toBe(true);
+    expect(params.get("context_code")).toBe("course_123");
+  });
+
+  it("1c: posts to /api/v1/conversations with no query string", async () => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, 200));
+    await createCourseConversation(COURSE_URL, "Hello class");
+    const [url, init] = mockCanvasFetch.mock.calls[0];
+    const parsed = new URL(String(url));
+    expect(parsed.pathname).toBe("/api/v1/conversations");
+    expect(parsed.search).toBe("");
+    expect((init as { method?: string }).method).toBe("POST");
+  });
+
+  it.each([
+    [200, "accepted"],
+    [201, "accepted"],
+    [400, "refused"],
+    [404, "refused"],
+    [422, "refused"],
+    [401, "refused"],
+    [403, "refused"],
+    [429, "unknown"],
+    [500, "unknown"],
+    [502, "unknown"],
+  ])("1e: HTTP %i maps to %s", async (code, expected) => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, code));
+    const result = await createCourseConversation(COURSE_URL, "Hello class");
+    expect(result.status).toBe(expected);
+  });
+
+  it("1e: an unreachable canvasFetch result is unknown, not a throw", async () => {
+    mockCanvasFetch.mockResolvedValue({ ok: false, kind: "unreachable" });
+    const result = await createCourseConversation(COURSE_URL, "Hello class");
+    expect(result.status).toBe("unknown");
+  });
+
+  it("1e: a thrown canvasFetch is unknown, not a throw", async () => {
+    mockCanvasFetch.mockRejectedValue(new Error("socket hang up"));
+    const result = await createCourseConversation(COURSE_URL, "Hello class");
+    expect(result.status).toBe("unknown");
+  });
+
+  it("refuses an empty body and a URL with no course without sending anything", async () => {
+    expect((await createCourseConversation(COURSE_URL, "   ")).status).toBe("refused");
+    expect((await createCourseConversation("https://canvas.mccneb.edu/", "Hi")).status).toBe("refused");
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("createConversation - RA8 preservation: single-student shape unchanged", () => {
+  beforeEach(() => {
+    vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+    mockCanvasFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("still emits force_new=1, a user recipient and context_code", async () => {
+    mockCanvasFetch.mockResolvedValue(okResult({}, 201));
+    await createConversation(COURSE_URL, "777", "Hello", "Subj");
+    const params = postedParams();
+    expect([...new Set(params.keys())].sort()).toEqual(["body", "context_code", "force_new", "recipients[]", "subject"]);
+    expect(params.get("force_new")).toBe("1");
+    expect(params.getAll("recipients[]")).toEqual(["777"]);
+    expect(params.get("context_code")).toBe("course_123");
   });
 });

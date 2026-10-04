@@ -345,3 +345,64 @@ describe("ChatComposer - W3 F5: Send stays grouped with the Submission text fiel
     expect(slice).toContain('aria-label="Send submission"');
   });
 });
+
+// GRADER-WORKFLOW-OVERHAUL M1 (docs/grader-m1-latest-result-card-test-notes.md
+// AC-M2/AC-M3). Source pins: presence, call on the live run, position. The
+// leaf-to-card value flow is closed by the type gate, not by text.
+const CARD = "src/app/components/grading-chat/LatestResultCard.tsx";
+
+describe("GradingChatPanel - M1 AC-M2: the latest-result card is wired through the leaf", () => {
+  it("imports the card and the selector from their own modules", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toMatch(/import\s*\{[^}]*\bLatestResultCard\b[^}]*\}\s*from\s*"\.\/LatestResultCard"/);
+    expect(source).toMatch(/import\s*\{[^}]*\bselectLatestResult\b[^}]*\}\s*from\s*"\.\/latestGradedResult"/);
+  });
+
+  it("calls selectLatestResult( on driver.run", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("selectLatestResult(");
+    expect(start, "expected a selectLatestResult( call").toBeGreaterThan(-1);
+    const end = source.indexOf(")", start);
+    expect(source.slice(start, end)).toContain("driver.run");
+  });
+
+  it("mounts the card inside the sticky wrapper, above the composer", () => {
+    const source = withoutLineComments(read(PANEL));
+    const wrapper = source.indexOf("chat.stickyComposer");
+    const card = source.indexOf("<LatestResultCard");
+    const composer = source.indexOf("<ChatComposer");
+    expect(card).toBeGreaterThan(-1);
+    expect(wrapper).toBeGreaterThan(-1);
+    expect(wrapper).toBeLessThan(card);
+    expect(card).toBeLessThan(composer);
+  });
+
+  it("the card mount is fed a JS value, not a literal stub", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("<LatestResultCard");
+    const end = source.indexOf("/>", start);
+    const slice = source.slice(start, end);
+    expect(slice).toContain("{");
+    expect(slice).not.toMatch(/result=\{\s*(null|undefined|\[\]|\{\})\s*\}/);
+  });
+
+  it("the card is gated on hasRows and a non-null driver.run", () => {
+    const source = withoutLineComments(read(PANEL));
+    const card = source.indexOf("<LatestResultCard");
+    const gate = source.lastIndexOf("hasRows", card);
+    expect(gate).toBeGreaterThan(-1);
+    expect(source.slice(gate, card)).toContain("driver.run");
+  });
+});
+
+describe("LatestResultCard - M1 AC-M3: shows the grade and all three feedback fields", () => {
+  it("references totalScore and maps the three feedback fields", () => {
+    const source = withoutLineComments(read(CARD));
+    expect(source).toContain("totalScore");
+    const mapsConstant =
+      /import\s*\{[^}]*\bFEEDBACK_FIELDS\b[^}]*\}\s*from\s*"\.\.\/grading-results\/gradingResultsHelpers"/.test(source) &&
+      source.includes("FEEDBACK_FIELDS.map(");
+    const namesAll = ["strengths", "improvements", "resubmitNotice"].every((f) => source.includes(f));
+    expect(mapsConstant || namesAll).toBe(true);
+  });
+});

@@ -61,3 +61,54 @@
   color: var(--text-secondary);
   line-height: var(--line-normal);
 }
+
+/* Read-only latest-result card, rendered inside .stickyComposer above the
+   composer. Capped in height so a long result never pushes the composer off
+   screen; it scrolls inside itself instead. */
+.latestCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field-background);
+}
+
+.latestCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.latestCardStudent {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.latestCardScore {
+  color: var(--text-secondary);
+}
+
+.latestCardField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.latestCardLabel {
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.latestCardText {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+  line-height: var(--line-normal);
+}

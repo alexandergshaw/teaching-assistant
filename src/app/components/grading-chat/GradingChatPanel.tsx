@@ -22,6 +22,8 @@ import GradingResults from "../GradingResults";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import { ChatComposer } from "./ChatComposer";
+import { LatestResultCard } from "./LatestResultCard";
+import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { submitFilesSequentially } from "./chatFileBatch";
@@ -232,6 +234,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       <div className={chat.stickyComposer}>
+        {hasRows && driver.run && <LatestResultCard result={selectLatestResult(driver.run)} />}
         {submitError && (
           <p role="alert" className={styles.ghMeta}>
             {submitError}

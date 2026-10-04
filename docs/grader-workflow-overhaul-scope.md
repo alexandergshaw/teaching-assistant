@@ -146,15 +146,15 @@ columns are student, files, one column per rubric area, total, and feedback
    "newest row" location to look at.
 3. **Scroll to it.** The matrix is in `.matrixWrap`, which is its own scroll
    region: `overflow-x: auto; overflow-y: auto; max-height: 65vh`
-   (`page.module.css:1988-1992`; 65vh of 768 is about 499px). Reading the newest
+   (`src/app/page.module.css:1988-1992`; 65vh of 768 is about 499px). Reading the newest
    row needs a vertical scroll WITHIN that region once rows exceed ~499px of
    height, plus (in the chat column stack below the setup summary and provenance
    cards) a page scroll to bring the matrix region itself into view. No
    scrollIntoView exists (section 1b).
 4. **Scroll horizontally to the feedback.** The matrix is `min-width: 1200px;
-   table-layout: fixed` (`page.module.css:3207-3213`) inside the horizontally
+   table-layout: fixed` (`src/app/page.module.css:3207-3213`) inside the horizontally
    scrolling `.matrixWrap`. The student column is sticky-left
-   (`page.module.css:3241-3246`) and the header is sticky-top (`:3228-3234`), but
+   (`src/app/page.module.css:3241-3246`) and the header is sticky-top (`:3228-3234`), but
    the FEEDBACK column is the LAST column, far right. On a 1366px (or narrower)
    viewport a 1200px-min table with several rubric-area columns pushes feedback
    off-screen horizontally; reading it costs a horizontal scroll. Reading claim
@@ -217,31 +217,60 @@ recommended mechanism is grading-chat-LOCAL and does NOT touch
 
 ### The data needed is reachable (checked, per the reachability non-negotiable)
 
-`GradeResult` carries `sourceIndex` (zero-based dispatch position,
-`src/lib/grade/types.ts:150,164`) and a discriminating `ungraded?`
-(`:279,292`). `useContinuousGradingRun` builds `run.results` via
-`mergeArrivedResults` (`incrementalRunPlan.ts`), which returns the arrived
-results SORTED ASCENDING by `sourceIndex`. So the result the instructor most
-recently submitted-and-got-back is `run.results[run.results.length - 1]`, and
-whether it graded or failed is `ungraded === undefined`. The newest-result signal
-is reachable from the object that must satisfy the requirement, grading-chat-local,
-with no change to the shared component.
+A graded result has NO top-level `sourceIndex` of its own. That field lives
+ONLY on the two UNGRADED variants - `NotAttemptedOutcome` and
+`GradingFailedOutcome` (`src/lib/grade/types.ts:150,164`) - nested inside the
+row's `ungraded` sub-object; `GradeResultBase` (`:212-271`) and `GradedResult`
+(`:277-280`) carry none. So the newest result CANNOT be found by comparing a
+field a graded row does not have. It is found by POSITION instead:
+`useContinuousGradingRun` builds `run.results` via `mergeArrivedResults`
+(`incrementalRunPlan.ts:174-184`), which returns the arrived rows as a Map's keys
+`.sort((a, b) => a - b)` - ASCENDING by `sourceIndex` (`:181-183`), last-wins on
+a duplicate key (`:171`). Ascending order makes the LAST element the
+highest-`sourceIndex` arrived row, so the newest arrived result is
+`run.results[run.results.length - 1]` (equivalently `run.results.at(-1)`), null
+when `results` is empty, and whether it graded or failed is still
+`ungraded === undefined` - the discriminator on the row ITSELF
+(`GradedResult.ungraded?: undefined` `:279`, `UngradedResult.ungraded`
+`:292`), reachable without any top-level `sourceIndex`. The leaf's correctness is
+therefore INHERITED from the ascending-sort invariant in `mergeArrivedResults`,
+not established by the leaf; AC-M1 pins the leaf (half a) and that upstream
+invariant (half b) SEPARATELY, so the inherited half is measured. The
+newest-result signal is reachable from the object that must satisfy the
+requirement, grading-chat-local, with no change to the shared component.
 
 ### M1 (RECOMMENDED) - a chat-native "latest result" surface above the composer
 
 Render, directly above the sticky composer (inside or just above
 `chat.stickyComposer`, `GradingChatPanel.tsx:234`), a compact card showing the
-MOST RECENTLY graded submission in full: student/label, total grade, and the three
-feedback sections, plus its ungraded/failed disclosure when `ungraded` is set. It
-is fed by a new pure leaf that selects the newest arrived result from
+NEWEST ARRIVED result in full: student/label, total grade, and the three
+feedback sections, plus its ungraded/failed disclosure when `ungraded` is set.
+"Newest" means the newest SUBMITTED entry that has ARRIVED (highest `sourceIndex`
+among the arrived rows), NOT "most recently graded" in wall-clock terms. The
+distinction is load-bearing here: `busy = headerState === "resolving"` ONLY
+(`GradingChatPanel.tsx:165`), so the composer is NOT disabled during grading and
+the instructor can keep submitting while earlier rows are still in flight;
+`INCREMENTAL_CONCURRENCY` (3, used at `useContinuousGradingRun.ts:186`, value
+pinned by `useContinuousGradingRun.lifecycle.test.ts:166`) means a multi-entry
+batch's rows can ARRIVE out of order, and for such a batch the card shows the
+LAST entry of the batch (its highest `sourceIndex`) - a deterministic, stable
+target even though arrival order is not. `retry()` exists on the driver
+(`useContinuousGradingRun.ts:91,327`) but is NOT wired into the chat mount - the
+`GradingResults` mount passes no `retry` (`GradingChatPanel.tsx:219-228`) - so a
+re-grade cannot silently replace `results.at(-1)`; this is noted, not relied on.
+The card is fed by a new pure leaf that selects the newest arrived result from
 `driver.run.results`. The instructor reads the result they just asked for with
 ~0 scroll; the full matrix stays below, unchanged, for bulk review, sort, edit,
 post and CSV export.
 
 - **Pure leaf (new, `grading-chat/latestGradedResult.ts` + test):**
-  `selectLatestResult(run)` returns the highest-`sourceIndex` entry of
-  `run.results` (or null when empty), with its graded/ungraded shape intact. No
-  React, no I/O, no server import (client-bundle guard).
+  `selectLatestResult(run) = run.results.at(-1) ?? null` - the LAST element of
+  the pre-sorted `results` array (null when empty), with its graded/ungraded
+  shape intact. It is POSITION-based, not field-comparing: a graded row has no
+  top-level `sourceIndex` to compare against, so the leaf relies on
+  `mergeArrivedResults` having already ordered `results` ascending by
+  `sourceIndex` (AC-M1 half b pins that). No React, no I/O, no server import
+  (client-bundle guard).
 - **Display leaf (new, `grading-chat/LatestResultCard.tsx`):** a read-only
   presentation of that result. Reuses the app's visual language (card classes in
   `grading-chat.module.css` under the existing `chat` binding; MUI Typography/
@@ -291,13 +320,32 @@ rows having no Post path.
 Nothing renders under vitest, so every machine criterion is a pure-leaf test or a
 source/structure pin. Pixel and felt-scroll criteria are OWNER (section 6).
 
-- **AC-M1 (removal test; the click/scroll-cost claim). Object:** the new pure
-  leaf `grading-chat/latestGradedResult.ts`. **Instrument:** a unit test with a
-  frozen literal oracle - a `run` whose `results` carry mixed `sourceIndex` values
-  and a mix of graded and `ungraded` rows. **RED if** `selectLatestResult`
-  returns anything other than the highest-`sourceIndex` entry, drops the
-  graded/ungraded shape, or returns a non-null value for an empty `results`
-  array. (Pin the FACT - newest by sourceIndex, shape preserved - not the spelling.)
+- **AC-M1 (removal test; the click/scroll-cost claim) - TWO halves, because the
+  leaf's correctness is INHERITED from an upstream invariant, not established by
+  the leaf (MINOR 2):**
+  - **(a) the leaf. Object:** the new pure leaf
+    `grading-chat/latestGradedResult.ts`. **Instrument:** a unit test with a
+    frozen literal oracle - a `run` whose `results` is a plain array of several
+    rows in a KNOWN order, mixing graded and `ungraded` shapes. **RED if**
+    `selectLatestResult` returns anything other than the LAST element of
+    `results`, mutates or drops that row's graded/ungraded shape, or returns a
+    non-null value for an empty `results` array. The leaf is position-based
+    (`results.at(-1) ?? null`): a graded row has NO top-level `sourceIndex`, so
+    the test must NOT assert on a field a graded row lacks - it asserts
+    last-element identity and null-on-empty. (Pin the FACT - last element, null
+    on empty, shape preserved - not the spelling.)
+  - **(b) the upstream ascending-sort invariant the leaf inherits. Object:**
+    `mergeArrivedResults` (`incrementalRunPlan.ts:174-184`). **Instrument:** this
+    invariant is ALREADY guarded by the existing pins in
+    `incrementalRunPlan.test.ts` - ascending-by-`sourceIndex` regardless of
+    arrival order (`:140-146`), the WATCHED arrival-order mutation that goes RED
+    if the sort is dropped (`:154-162`), empty-input (`:164-166`), and last-wins
+    on a duplicate key (`:180-189`). **RED if** `mergeArrivedResults` returns
+    `results` in any order other than ascending by `sourceIndex`, or stops
+    applying last-wins. AC-M1(b) is SATISFIED by naming these existing pins (they
+    are in the gate for any wave that touches `incrementalRunPlan.ts`); do NOT
+    author a duplicate. Without this invariant the near-trivial `.at(-1)` leaf
+    proves nothing on its own - this is the explicit answer to MINOR 2.
 - **AC-M2 (reachability / wiring; the surface is a LAYER, not an attribute).
   Object:** `GradingChatPanel.tsx`. **Instrument:** a source-structure pin in the
   EXISTING `GradingChatPanel.structure.test.ts` that the panel imports and MOUNTS
@@ -358,9 +406,11 @@ failure for all: measured scroll/clicks ABOVE the ratified target.
 
 ## 6. RESIDUAL REGISTER (owner / instrument / step - missing any one is a deletion)
 
-Each routes to the SMOOTH-BASELINE walk. These are recorded on the
-GRADER-WORKFLOW-OVERHAUL backlog row; this is the scope's copy, not a substitute
-for the row.
+Each routes to the SMOOTH-BASELINE walk. This section is the scope's COPY of the
+register; the authoritative copy MUST be mirrored onto the
+GRADER-WORKFLOW-OVERHAUL backlog row - which the orchestrator has now done
+(commit `3f0fb1f4`). A residual that is not on the backlog row does not exist, so
+this copy is not a substitute for the row.
 
 - **RES-GWO-1 (AC-R1).** The real page scroll + horizontal scroll to read a
   just-graded result, pre- and post-build. Owner: repo owner. Instrument:
@@ -503,8 +553,8 @@ Commands: `git rev-parse --short HEAD` (e191671f); `git status --short`;
 section 0; `grep -rn "<GradingResults" src --include=*.tsx` (four mounts);
 `grep -rn "scrollIntoView\|scrollTo" src/app/components/grading-chat/
 src/app/components/grading-results/ src/app/components/GradingResults.tsx` (none);
-`grep -n` for DEFAULT_SORT, the matrix CSS (`.matrixWrap` :1988-1992, `.matrix`
-:3207-3246), and the sort comparator.
+`grep -n` for DEFAULT_SORT, the matrix CSS in `src/app/page.module.css`
+(`.matrixWrap` :1988-1992, `.matrix` :3207-3246), and the sort comparator.
 
 Not run: tsc, lint, vitest, build, any browser render.
 

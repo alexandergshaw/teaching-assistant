@@ -52,8 +52,8 @@ section 8. I did not invent a vitest pin for any distance.
 | `.../walkthrough-announcement.structure.test.ts` | 815 | holds the disclosure freeze, key canary, AC-10 wiring pins |
 | `.../walkthrough-announcement-timing.structure.test.ts` | 339 | holds the REQ-A32-1 slice, Visible-to pins |
 | `src/app/components/courses/page-module-css-orphan-classes.test.ts` | 531 | CSS orphan ratchet (pinned at 118) |
-| `src/file-size-ceiling.structure.test.ts` | 152 | repo-wide 1000-line ceiling |
-| `src/tools/strip-comments-agreement.structure.test.ts` | 650 | enumerates every `*.test.ts` mentioning `stripComments` |
+| `src/file-size-ceiling.structure.test.ts` | 151 | repo-wide 1000-line ceiling |
+| `src/tools/strip-comments-agreement.structure.test.ts` | 649 | enumerates every `*.test.ts` mentioning `stripComments` |
 
 - `grep -rn "sticky" src/app/components/recording/RecordingControls.module.css`
   returns nothing: a sticky bar needs NEW CSS (no existing class).
@@ -67,9 +67,14 @@ section 8. I did not invent a vitest pin for any distance.
   test; it is HAND-MEASURED (section 5, W3-R6).
 - The directory key canary (`walkthrough-announcement.structure.test.ts:118-124`)
   asserts `distinctKeys.size === 5` over `/(?<![a-zA-Z])ta-[a-z-]*[a-z]/g` across
-  every non-test file in the dir. Any new key MUST be all-lowercase-hyphen or the
-  regex misses it (e.g. `ta-rec-wta-setupOpen` would NOT match; `ta-rec-wta-setup-open`
-  would).
+  every non-test file in the dir. A camelCase key is captured only up to its first
+  capital: `ta-rec-wta-setupOpen` DOES match, as the TRUNCATED `ta-rec-wta-setup` (the
+  `[a-z-]*[a-z]` tail stops at the `O`), so a camelCase key silently registers a
+  different, truncated key than intended. Use all-lowercase-hyphen
+  (`ta-rec-wta-setup-open`) so the whole key is captured. The W3 key
+  `ta-rec-wta-autodraft` is all-lowercase-hyphen and matches in full and cleanly; the
+  bidirectional canary sabotages (W3-R8: add-key-without-bump, bump-without-key) do not
+  depend on the key spelling and still discriminate.
 - The shared `stripComments` from `@/app/components/ui/modalAdoptionScan` is the
   string-aware, CRLF-safe, block-comment-supporting tokenizer (proven safe in
   `strip-comments-agreement.structure.test.ts` R1b). `walkthrough-announcement.
@@ -367,13 +372,40 @@ trap 1 for the per-candidate map of which pins move for which extraction boundar
      `"ta-rec-wta-autodraft"`.
   3. **Default-ON pin:** assert the `useState(` initializer for the toggle is `true`
      (default ON is the F1(c) reading).
-  4. **Consumption pin:** the panel's auto-draft predicate input `autoDraftOn:` is fed
-     the toggle VALUE, not the hard-coded `AUTO_DRAFT_ON = true`. Pin (slice-bound to
-     the `shouldAutoDraft({` call, as the AC-10 A-block does): `autoDraftOn:` reads the
-     toggle state identifier, and `const AUTO_DRAFT_ON = true` is GONE from the panel.
+  4. **Consumption pin (WRITE-SET-WIDE - binds the TOGGLE, not a location).** The R-AC16
+     extraction may relocate the auto-draft machinery (and with it `AUTO_DRAFT_ON` at
+     `:105`) into a new hook file (section 7 trap 1 names `:596-621` + `AUTO_DRAFT_ON`
+     `:105` as the FIRST extraction boundary). A panel-scoped "`AUTO_DRAFT_ON = true` is
+     gone from the panel" assertion would then pass GREEN when the implementer merely
+     MOVED the constant verbatim into the hook and never wired the toggle - shipping
+     R-F1-TOGGLE (this wave's own deliverable) DEAD on a green gate. So the pin binds the
+     toggle over the WHOLE W3 write set, never a fixed path:
+     - **(a) no hard-coded-on constant survives ANYWHERE in the write set.** Over
+       comment-stripped source of EVERY file in the W3 write set - the panel AND the new
+       auto-draft hook file IF the extraction creates one - assert none matches
+       `/const\s+AUTO_DRAFT_ON\s*=\s*true/`. Build the file list from the write set
+       (section 9 paths), never one fixed path, so a relocated constant is caught wherever
+       it lands.
+     - **(b) the call site reads a threaded identifier, not `true` and not the constant.**
+       Find `shouldAutoDraft({` by searching each write-set file's comment-stripped source;
+       EXACTLY ONE file must contain it - fail loudly on zero or more than one (that is the
+       anchor-resolves guard; it also finds the call whether it stayed in the panel or moved
+       to the hook). Slice that one call with the SAME anchors AC-10 block A uses AFTER its
+       retarget (block A and this pin slice the same firing-effect call and retarget together
+       - section 7 trap 1), asserting BOTH slice anchors resolve. In that slice capture the
+       argument via `/autoDraftOn:\s*([A-Za-z_$][\w$]*)/`, assert the capture MATCHED (guards
+       the empty-slice-passes failure mode), and assert the captured identifier is NEITHER
+       `true` NOR `AUTO_DRAFT_ON`.
+     - **(c) that identifier is the persisted toggle, not some other variable.** Assert the
+       SAME captured identifier appears in the panel's `useWalkthroughSetup(` return
+       destructuring (the panel always consumes the setup hook - W0). This binds consumption
+       to the persisted `autoDraftOn` value from pin 2 WITHOUT pinning a chosen name (pin the
+       fact, not the spelling). Together (a)+(b)+(c) go RED when the constant merely relocated
+       and the toggle was not wired.
 - **Direction:** RED if the canary is not bumped with the key, if the restore is a
-  lazy initializer instead of a mount effect, if the default is not `true`, or if the
-  predicate still reads a hard-coded constant.
+  lazy initializer instead of a mount effect, if the default is not `true`, or if a
+  hard-coded `AUTO_DRAFT_ON = true` survives anywhere in the write set / the predicate
+  still reads a hard-coded constant instead of the threaded toggle identifier.
 - **Sabotage (per sub-pin):**
   - Change `useState(true)` -> `useState(false)`: RED on the default-ON pin.
     **Discriminates** default.
@@ -384,6 +416,15 @@ trap 1 for the per-candidate map of which pins move for which extraction boundar
     5). **Discriminates** - this IS the canary's job.
   - Bump the canary without adding the key: RED (size 5 vs asserted 6).
     **Discriminates** - the bidirectional canary catches the stale bump too.
+  - Relocate the constant, do not wire the toggle: set `autoDraftOn:` back to a hard-coded
+    `true`, or re-introduce `const AUTO_DRAFT_ON = true` (in the panel OR in the new hook)
+    and feed it: RED on consumption pin (a) (write-set-wide finds the constant wherever it
+    lands) and/or (b) (the `autoDraftOn:` argument reads `true`/`AUTO_DRAFT_ON`, both
+    excluded). Restore -> GREEN. **Discriminates** the relocated-but-unwired silent-green
+    this pin exists to kill. This sabotage MUST be re-applied IN THE NEW FILE after the
+    R-AC16 retarget (W3-R7 discipline) and confirmed RED there, not only in the
+    pre-extraction panel - a consumption pin that stays green on the new-file sabotage read
+    the wrong file or lost its anchor.
 - **Egress note (fold into the owner's F1 decision, argued):** with `researchOn`
   persisted ON, auto-draft fires `gatherWalkthroughResourcesAction` (web egress) every
   stop; the toggle is the opt-out. This is a RELIABILITY/SECURITY property, not
@@ -495,9 +536,21 @@ Map (so the architect chooses with eyes open; all paths relative to the walkthro
 
 | Extraction candidate (panel lines) | Pins that RETARGET to the new file |
 |---|---|
-| Auto-draft machinery (two effects `:596-621`, `autoDrafted` `:399`, `AUTO_DRAFT_ON` `:105`) | AC-10 block A (`shouldAutoDraft({` slice) and block B (arming effect `prevCapturingRef`) at `structure.test.ts:723-756`. Blocks C (runExtraction) and D (handleStartStop) retarget ONLY if that code also moves. |
+| Auto-draft machinery (two effects `:596-621`, `autoDrafted` `:399`, `AUTO_DRAFT_ON` `:105`) | AC-10 block A (`shouldAutoDraft({` slice) and block B (arming effect `prevCapturingRef`) at `structure.test.ts:723-756`, AND the W3-R8 consumption pin (section 5). AC-10 block A and the consumption pin slice the SAME firing-effect call and RETARGET TOGETHER, as one unit. Blocks C (runExtraction) and D (handleStartStop) retarget ONLY if that code also moves. |
 | Exemplar/saved-formats fetch (`:168-306`) | G1 raceWithTimeout pins (`structure.test.ts:328-354`); the G6 canary already moved to the hook in W0. |
 | Generation adapters (`buildRequest`/`draftOne`/`postDraft`/`fetchResources`/`researchFingerprint`, `:448-521`) | A19 AC-6 draftOne slice (`timing.structure.test.ts:30-51`), G3 M5 (`structure.test.ts:282-295`), A19 AC-15 researchFingerprint slice (`timing.structure.test.ts:297-318`). |
+
+**Consumption-pin retarget (pairs with AC-10 block A).** When the auto-draft machinery
+moves, the W3-R8 consumption pin moves WITH AC-10 block A: they slice the same
+`shouldAutoDraft({` call, share one end anchor, and must retarget as a unit - retarget one
+without the other and the two pins read different files. W3-R7-style discrimination proof
+is MANDATORY: after retargeting, re-apply a moved sabotage IN THE NEW FILE - set
+`autoDraftOn:` back to a hard-coded `true`, or re-introduce `const AUTO_DRAFT_ON = true` in
+the hook and feed it - and confirm the consumption pin goes RED there; restore -> GREEN.
+Assert both call-site slice anchors resolve and the `autoDraftOn:` capture matched, so the
+pin cannot pass vacuously on an empty slice (the empty-slice-passes failure mode). A
+consumption pin that stays GREEN on the new-file sabotage read the wrong file or lost its
+anchor - treat it as unfinished, not as a kill.
 
 Every retarget keeps an independent literal expectation and proves a new-location
 sabotage reddens (W3-R7). The auto-draft machinery alone likely will not reach <=900

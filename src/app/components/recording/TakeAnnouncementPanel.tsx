@@ -44,6 +44,8 @@ import {
   announcementLogFileName,
 } from "./announcement-log";
 import { triggerFileDownload } from "../course-planning/utils";
+import { openMessageDrafts } from "@/lib/drafts-nav";
+import { takeDraftSavedNotice } from "@/lib/take-draft-lifecycle";
 
 const POST_CONFIRM_CONSEQUENCE_ID = "take-announcement-post-confirm-consequence";
 // CC5: Regenerate announcement is an arm/confirm ONLY once the instructor has
@@ -154,6 +156,7 @@ export default function TakeAnnouncementPanel({
     saveDraft,
     savingDraft,
     draftSaved,
+    draftSavedHadCourse,
     draftError,
     composition,
     setComposition,
@@ -641,7 +644,11 @@ export default function TakeAnnouncementPanel({
             <Button size="small" variant="outlined" loading={savingDraft} loadingPosition="start" onClick={saveDraft} disabled={busy || posting}>
               {savingDraft ? "Saving…" : "Save to drafts"}
             </Button>
-            {draftSaved && <span className={styles.previewMeta}>Saved to drafts.</span>}
+            {draftSaved && (
+              <Button size="small" variant="text" onClick={openMessageDrafts}>
+                {takeDraftSavedNotice(draftSavedHadCourse)}
+              </Button>
+            )}
             {draftError && (
               <span role="alert" className={styles.previewMeta}>
                 {draftError}

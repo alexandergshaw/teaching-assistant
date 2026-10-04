@@ -27,9 +27,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   draftAnnouncementAction,
   saveMessageDraftAction,
+  updateMessageDraftPayloadAction,
+  markMessageDraftReviewedAction,
   createAnnouncementAction,
   listCourseHubAction,
 } from "../../actions";
+import { runTakeDraftSave, runTakeDraftPostCleanup } from "@/lib/take-draft-lifecycle";
+import { useDraftedGradesInbox } from "../DraftedGradesInbox";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
 import type { TranscriptChunkPlan } from "@/lib/take-transcript";
 import {
@@ -186,6 +190,9 @@ export interface UseTakeAnnouncementReturn {
   saveDraft: () => void;
   savingDraft: boolean;
   draftSaved: boolean;
+  /** Whether a course was present when the draft was last saved (not the
+   * current selection) - drives the post-save notice copy. */
+  draftSavedHadCourse: boolean;
   draftError: string | null;
 
   /** docs/reply-composition-controls-acceptance-criteria.md C0-1 (this
@@ -351,6 +358,9 @@ export function useTakeAnnouncement({
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [draftSavedHadCourse, setDraftSavedHadCourse] = useState(false);
+  const savedDraftIdRef = useRef<string | null>(null);
+  const { refresh: refreshDraftsBadge } = useDraftedGradesInbox();
   const [draftError, setDraftError] = useState<string | null>(null);
 
   // Session-only cache of the transcript this pass has produced (AC24): the
@@ -808,6 +818,18 @@ export function useTakeAnnouncement({
       announce(`Posted to ${selectedCourse.name}. Students can see it now.`);
     }
     onPosted({ course: selectedCourse.name, subject });
+    const cleaned = await runTakeDraftPostCleanup({
+      cleanup: markMessageDraftReviewedAction,
+      getSavedId: () => savedDraftIdRef.current,
+      setSavedId: (id) => {
+        savedDraftIdRef.current = id;
+      },
+    });
+    if ("error" in cleaned) {
+      announce(`Posted, but the saved draft could not be cleared - ${cleaned.error}`);
+    } else {
+      refreshDraftsBadge();
+    }
   }
 
   function saveDraft() {
@@ -831,13 +853,25 @@ export function useTakeAnnouncement({
         hubCourseId: selectedCourse?.id,
         institution: institution || undefined,
       };
-      const result = await saveMessageDraftAction(`Announcement from ${take.name}`, payload);
+      const result = await runTakeDraftSave(
+        {
+          save: saveMessageDraftAction,
+          update: updateMessageDraftPayloadAction,
+          getSavedId: () => savedDraftIdRef.current,
+          setSavedId: (id) => {
+            savedDraftIdRef.current = id;
+          },
+        },
+        { summary: `Announcement from ${take.name}`, payload }
+      );
       setSavingDraft(false);
       if ("error" in result) {
         setDraftError(result.error);
         return;
       }
+      setDraftSavedHadCourse(Boolean(selectedCourse));
       setDraftSaved(true);
+      refreshDraftsBadge();
     })();
   }
 
@@ -913,6 +947,7 @@ export function useTakeAnnouncement({
     saveDraft,
     savingDraft,
     draftSaved,
+    draftSavedHadCourse,
     draftError,
 
     composition,

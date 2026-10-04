@@ -319,6 +319,24 @@ export async function postMessageDraftAction(
   }
 }
 
+/**
+ * Mark a saved message draft reviewed WITHOUT posting anything, so it leaves the
+ * pending Drafts list. Used after an in-app post so the saved copy cannot be
+ * re-posted from Drafts. Same owner guard as postMessageDraftAction.
+ */
+export async function markMessageDraftReviewedAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await markMessageDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the message draft." };
+  }
+}
+
 /** Regenerate only the recap announcement for a prepared lecture. */
 export async function regenerateAnnouncementAction(
   courseName: string,

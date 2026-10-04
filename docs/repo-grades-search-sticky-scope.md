@@ -19,9 +19,19 @@ Owner requests, verbatim:
 region as its organizing frame; #4 couples #3's selection to the display.)
 
 **The distinctions that govern the whole document - do not conflate:**
-- **Feature 1 (search) is DISPLAY-ONLY.** Narrows which rows the table SHOWS.
-  Never changes which repos a Grade/Post run touches - the posture the view
-  already takes for folder scoping (index.tsx:391-406; AC U1.3b).
+- **Feature 1 (search) is DISPLAY-ONLY AT THE BODY-ROW RENDER LAYER.** It
+  hides/shows RENDERED BODY ROWS only; it MUST NOT feed any count, label,
+  Post/Grade-disabled state, or plan builder. Never changes which repos a
+  Grade/Post run touches - the posture the view already takes for folder scoping
+  (index.tsx:391-406; AC U1.3b). This is stricter than it reads: the grid's
+  column header AND the run bar INDEPENDENTLY recompute the plan builders off
+  their `rows` prop (RepoGradesGrid.tsx:318-325,:349-350;
+  RepoGradesRunBar.tsx:59-66,:106), so the `rows` they receive for those plan
+  SURFACES must be the FOLDER-SCOPED + selection set (**planRows**), NOT the
+  search-filtered set (**bodyRows**). If the search-filtered set reaches them,
+  typing a query silently shrinks the "Grade N / Post N" count and can DISABLE
+  the Post button (RepoGradesRunBar.tsx:106) while postable rows remain. See the
+  bodyRows-vs-planRows split in section 3.5 and AC-F1-3 / F4-2 / F4-3.
 - **Feature 3 (typeahead) is RUN-SCOPING.** Changes the grade/post SET - which
   repos are included when Grade/Post fires. That set already exists as
   `selected: Set<string>` (index.tsx:226) and already governs posting
@@ -81,8 +91,10 @@ Structural canaries a new file / key / class trips (all measured):
   modules only**.
 - **Storage-key exact-set canary**, `repoGradesStorageKeys.structure.test.ts:19-43`:
   `FROZEN_KEYS` is exactly **18** `ta-repo-grades-*` keys. Feature 1 adds one
-  (18 -> 19). Feature 3's grade set reuses `ta-repo-grades-selected` (no new
-  key). Feature 4's "show all" override is a possible key (fork F4-b).
+  (18 -> 19); the `it(...)` title at `:41` ("the frozen 18") is NOT asserted, so
+  bump that string to "19" in the same change for honesty - it will not redden on
+  its own (AC-F1-4). Feature 3's grade set reuses `ta-repo-grades-selected` (no
+  new key). Feature 4's "show all" override is a possible key (fork F4-b).
 - **CSS-orphan ratchet**, `courses/page-module-css-orphan-classes.test.ts:36-41`:
   pins the repo-wide TOTAL orphan count (118 as of 2026-10-04,
   `docs/css-orphans.md:19`) and fails only when it RISES. Every new class in
@@ -323,13 +335,32 @@ Posting honours `selected` unconditionally (empty=all, non-empty=subset).
 Grading honours it only when `bulkSelectionOnly` is true
 (repoGradesBulkGrade.ts:81), default false (repoGradesUiState.ts:69,160). A
 grade-set typeahead that drives `selected` would silently NOT control grading by
-default. Recommended reading (proceeding): **a non-empty `selected` scopes BOTH
-grade and post** (empty = today's whole-column default), i.e. the grade handler
-passes `selectionOnly: selected.size > 0 || bulkSelectionOnly`. This makes grade
-and post symmetric and the typeahead immediately effective. Consequence to flag:
-`bulkSelectionOnly` ("only the checked rows") becomes redundant when a non-empty
-set is present - the owner decides whether to retire it (residual R3). This is
-the terminating fork F3-c in section 6.
+default. Recommended reading (proceeding, F3-c=X): **a non-empty `selected`
+scopes BOTH grade and post** (empty = today's whole-column default), i.e. the
+grade-scope expression becomes `selectionOnly: selected.size > 0 ||
+bulkSelectionOnly` and the selection label flag becomes
+`scopedToSelection: (selected.size > 0 || bulkSelectionOnly) && selected.size > 0`.
+This makes grade and post symmetric and the typeahead immediately effective.
+
+**Apply F3-c=X at EVERY grade-plan call site, not only the execution handler.**
+Three sites today compute the grade plan or its selection label off
+`bulkSelectionOnly` ALONE, and all must move to the expressions above in
+lockstep, or the label and the run disagree:
+- the grade execution handler (index.tsx `handleGradeColumn`);
+- the run bar's `buildBulkGradePlan` call (RepoGradesRunBar.tsx:66) and its
+  `scopedToSelection` label flag (RepoGradesRunBar.tsx:70 -
+  `bulkSelectionOnly && selected.size > 0`);
+- the column header's `buildBulkGradePlan` call (RepoGradesGrid.tsx:350) and its
+  `scopedToSelection` flag (RepoGradesGrid.tsx:352 - same bare expression).
+
+If ONLY the handler is changed, then with the mandated "Show all rows" escape
+(display un-narrowed, grade set kept) the grid/run bar show "Grade 40 / all"
+while the click grades only the N selected - a label asserting "all" over a
+subset run, the exact confirm-altering dishonesty F3-c=X must not cause. AC-F3-3
+pins the expression at all four sites so the label and the run can never
+disagree. Consequence to flag: `bulkSelectionOnly` ("only the checked rows")
+becomes redundant when a non-empty set is present - the owner decides whether to
+retire it (residual R3). This is the terminating fork F3-c in section 6.
 
 ### 3.5 Feature 4 - auto-filter the table to the grade subset (DISPLAY)
 
@@ -338,21 +369,45 @@ the terminating fork F3-c in section 6.
   narrows to show only the selected rows - regardless of how they were selected
   (typeahead OR per-row checkbox). Empty selection (today's grade-all default)
   OR a selection equal to all rows -> no filter, all rows shown. Preserve that.
-- **Composition with feature 1 (THE feature-1-vs-4 rule) and the folder
-  filter:** all three are DISPLAY filters and compose by INTERSECTION, applied
-  after folder scoping:
-  `visible = folderScoped(rows) -> (selection-subset ? only selected) -> (query ? only rowMatchesQuery)`.
-  Recommend a single pure selector `visibleRepoRows(rows, query, gradeSet)`
-  returning the intersection (folder scoping stays the existing upstream stage
-  so the selector takes already-folder-scoped rows). Defining it as one selector
-  stops the two filters fighting and makes the whole display derivation a pure
-  function of `(rows, query, gradeSet)`.
+- **Two row sets, not one - the load-bearing split (THE feature-1-vs-4 rule):**
+  the search query and the auto-filter are DISPLAY narrowings of the RENDERED
+  body rows; the grade/post RUN is scoped separately, by the plan builders off
+  `selected`. These must be computed as TWO distinct sets with distinct
+  consumers, or the search query leaks into the run counts (the round-2
+  blocker - the grid and run bar recompute the plan builders off their `rows`
+  prop, RepoGradesGrid.tsx:318-325,:349-350 and RepoGradesRunBar.tsx:59-66):
+  - **bodyRows** = `visibleRepoRows(folderScoped, query, gradeSet)` - folder
+    scoping, then the selection-subset narrow, then the query substring narrow,
+    composed by INTERSECTION:
+    `bodyRows = folderScoped(rows) -> (selection-subset ? only selected) -> (query ? only rowMatchesQuery)`.
+    bodyRows is passed to the grid ONLY to decide which `<tbody>` rows render.
+  - **planRows** = the FOLDER-SCOPED rows (NOT query-filtered), passed as the
+    `rows` prop the grid's column header and the run bar hand to the plan
+    builders; those builders apply the F3-c selection semantics internally
+    (`scopeRepoGradeRowsToSelection` / `buildBulkGradePlan` with the F3-c
+    `selectionOnly`), so every count, label, disabled gate, plan and the
+    execution read FOLDER+SELECTION, never the query.
+  A single pure selector `visibleRepoRows(rows, query, gradeSet)` returns
+  bodyRows (folder scoping stays the existing upstream stage so the selector
+  takes already-folder-scoped rows); planRows is just that folder-scoped stage
+  WITHOUT the query/auto-filter narrow. Defining bodyRows as one selector stops
+  the search and selection narrows fighting; keeping planRows = folder-scoped
+  keeps search out of the run entirely. This means index.tsx hands the grid and
+  run bar planRows for their plan surfaces (NOT today's `rows={displayedRows}` at
+  index.tsx:775,:911) and bodyRows for the body render - two props, not one.
+  AC-F4-1 oracles bodyRows; AC-F1-3 / F4-2 / F4-3 pin the split and sabotage
+  feeding bodyRows to a plan surface.
 - **Does auto-filter change WHAT GRADES? No.** It is display convenience; the
   grade set is still `selected`. On the SELECTION axis shown==run holds (hidden
   = non-selected = not graded). On the SEARCH axis it does NOT: search is
   display-only and can hide a selected (and therefore graded) row - the same
-  display-only behaviour feature 1 and folder scoping already have. The "N of M"
-  counter and the clear/show-all affordance below are what keep this honest.
+  display-only behaviour feature 1 and folder scoping already have. Because the
+  run counts/labels/disabled gates read planRows (folder+selection), NOT the
+  query, a search term NEVER shrinks the "Grade N / Post N" count and NEVER
+  disables Post while postable rows remain in the folder+selection set (the
+  round-2 face-2 trap, RepoGradesRunBar.tsx:106). The "N of M" counter and the
+  clear/show-all affordance below are what keep the hidden-but-graded rows
+  honest to the eye.
 - **Reversibility / escape hatch (REQUIRED, not optional - a filter with no
   visible clear is a trap):** whenever the auto-filter is active, show a visible
   line "Showing N of M repos (filtered to your grade-set selection)" with TWO
@@ -404,11 +459,15 @@ Land the shell first with today's controls, then populate it.
   + test, `ta-repo-grades-search` key (canary 18 -> 19), the search box in the
   sticky header, the query stage in the display selector.
 - **Wave C - features 3 + 4 (typeahead + auto-filter), populate the header.**
-  `repoGradesGradeSet.ts` + test (`toggleRepoInGradeSet`), the display selector
+  `repoGradesGradeSet.ts` + test (`toggleRepoInGradeSet`), the bodyRows selector
   `visibleRepoRows` + its test, the multi-select typeahead + chips in the sticky
-  header, the F3-c grade-scope edit, the "N of M" counter + clear/show-all
-  affordance. Features 3 and 4 are one wave: feature 4 is the display
-  consequence of feature 3's selection and shares the selector.
+  header, the F3-c=X grade-scope edit at ALL grade-plan sites (handler, run bar
+  :66/:70, grid :350/:352), the planRows-vs-bodyRows prop split so the search
+  query stays out of the run counts (edits index.tsx, RepoGradesGrid.tsx and
+  RepoGradesRunBar.tsx - plan surfaces take folder-scoped planRows, `<tbody>`
+  takes bodyRows), the "N of M" counter + clear/show-all affordance. Features 3
+  and 4 are one wave: feature 4 is the display consequence of feature 3's
+  selection and shares the selector.
 
 Why this split and not "sticky is fully independent": the sticky fix as a bare
 thead fix WOULD be independent, but the refinement makes the sticky header
@@ -439,7 +498,9 @@ git status --short   # vs the wave's explicit file list; no .claude/worktrees co
   `RepoGradesStickyHeader.tsx`; B adds `repoGradesSearch.ts`; C adds
   `repoGradesGradeSet.ts` and the display-selector leaf + a possible
   `RepoGradesGradeSetTypeahead.tsx`). Each updates `FROZEN_REPO_GRADES_ROOTS`
-  AND the "35" count in the same change (35 -> up to ~39). Every new leaf must
+  AND the "35" count in the same change (35 -> up to 40; up to 5 new non-test
+  roots: RepoGradesStickyHeader, repoGradesSearch, repoGradesGradeSet,
+  repoGradesVisibleRows, and the optional RepoGradesGradeSetTypeahead). Every new leaf must
   be browser-safe (R-1/R-3/R-4).
 - Storage-key canary: required on Wave B (new key), and on Wave C if F4-b adds
   a "show all" key.
@@ -475,12 +536,20 @@ typeahead feeds the same `selected` the plan builders read).
 - **AC-F1-2 (names agree with cells):** OBJECT the first/last values searched vs
   rendered. INSTRUMENT wiring test that `repoGradesSearch.ts` calls
   `deriveRepoGradeStudentName`. FAIL a second hand-rolled split (N5 item 16).
-- **AC-F1-3 (DISPLAY-ONLY):** OBJECT the inputs to `buildBulkGradePlan` /
-  `buildRepoGradePostPlan`. INSTRUMENT wiring test that the search query reaches
-  only the display selector, and grading/posting still read
-  `sortedRows`/`selected`. FAIL the query reaches any plan builder's input.
+- **AC-F1-3 (DISPLAY-ONLY AT THE BODY-ROW LAYER):** OBJECT the `rows` prop fed
+  to the grid's column header and the run bar (which recompute
+  `buildBulkGradePlan` / `buildRepoGradePostPlan` off it) vs the rows fed to the
+  `<tbody>` render. INSTRUMENT wiring test that the plan-surface `rows` prop is
+  planRows (folder-scoped, NOT query-filtered) and the query reaches ONLY the
+  bodyRows render path; grading/posting still scope off `selected`. FAIL the
+  query reaching any plan builder's input - the sabotage: feeding the
+  search-filtered set (bodyRows / `visibleRepoRows` output) to the grid's or run
+  bar's `rows` prop must RED this test.
 - **AC-F1-4 (persistence):** OBJECT `ta-repo-grades-search`. INSTRUMENT
-  storage-key canary `FROZEN_KEYS` = 19 including it, + a round-trip test. FAIL
+  storage-key canary `FROZEN_KEYS` = 19 including it, + a round-trip test. The
+  `it(...)` TITLE at `repoGradesStorageKeys.structure.test.ts:41` hardcodes "the
+  frozen 18" but asserts only the ARRAY, so it will NOT redden on its own - bump
+  the title string to "19" in the SAME change as the array, for honesty. FAIL
   K1 red or round-trip loses the value.
 
 ### Feature 2 (sticky working header) - machine-checkable (CSS/source structure)
@@ -530,12 +599,17 @@ typeahead feeds the same `selected` the plan builders read).
   reducer/`setSelected` + `persistSelectedRepoIds`, and the run bar receives
   that same `selected`. FAIL a second state var, a second key, or the run bar
   reading a different set (shown!=run).
-- **AC-F3-3 (grade honours a non-empty set - fork F3-c recommended):** OBJECT
-  the `selectionOnly` passed to `buildBulkGradePlan` at the grade handler.
-  INSTRUMENT wiring test that grading scopes to `selected` when
-  `selected.size > 0`, + a `buildBulkGradePlan` test that a non-empty set +
+- **AC-F3-3 (grade honours a non-empty set at EVERY site - F3-c=X):** OBJECT the
+  `selectionOnly` expression AND the `scopedToSelection` label flag at ALL FOUR
+  grade-plan sites: the execution handler (index.tsx `handleGradeColumn`),
+  RepoGradesRunBar.tsx:66 + :70, and RepoGradesGrid.tsx:350 + :352. INSTRUMENT
+  wiring test that every site computes `selectionOnly: selected.size > 0 ||
+  bulkSelectionOnly` (not bare `bulkSelectionOnly`) and `scopedToSelection`
+  reflects the same, + a `buildBulkGradePlan` test that a non-empty set +
   `selectionOnly:true` targets exactly those repos. FAIL a non-empty grade set
-  ignored by grading.
+  ignored by grading at the handler, OR any count/label site still reading bare
+  `bulkSelectionOnly` (which would let the grid/run bar label "all" while the run
+  grades only the selected subset under "Show all rows").
 - **AC-F3-4 (none-selected preserves default):** OBJECT empty-`selected`
   grade/post. INSTRUMENT existing posting tests + `buildBulkGradePlan` empty-set
   test targeting the whole column. FAIL empty set stops grading/posting all.
@@ -548,16 +622,23 @@ typeahead feeds the same `selected` the plan builders read).
   (not a strict subset, no narrow). FAIL any oracle row differs. (Axes - query,
   gradeSet membership, subset-vs-equal - come from section 3.5, a different
   source than the generator.)
-- **AC-F4-2 (one display derivation):** OBJECT the rows passed to the grid.
-  INSTRUMENT wiring test that index.tsx derives the displayed rows through the
-  single `visibleRepoRows` selector (over folder-scoped rows), not two ad-hoc
-  filters. FAIL a second, independent filter path (search and selection fighting).
+- **AC-F4-2 (one body derivation, planRows kept query-free):** OBJECT the
+  bodyRows passed to the grid's `<tbody>` vs the planRows passed to its plan
+  surfaces and the run bar. INSTRUMENT wiring test that index.tsx derives
+  bodyRows through the single `visibleRepoRows(folderScoped, query, gradeSet)`
+  selector (not two ad-hoc body filters) AND that the `rows` prop the grid/run
+  bar hand to the plan builders is the folder-scoped set, NOT that query-filtered
+  selector output. FAIL a second independent body-filter path (search and
+  selection fighting), OR a plan surface fed the query-filtered bodyRows.
 - **AC-F4-3 (shown==run on the SELECTION axis; display-only on the SEARCH
-  axis):** OBJECT the grade/post set vs the displayed set. INSTRUMENT wiring
-  test that auto-filter reads `selected` for DISPLAY only and does not alter
-  `selected`, and that the plan builders still read `selected` (not
-  `visibleRepoRows`'s output). FAIL auto-filter mutating the grade set, or a
-  plan builder reading the search-filtered display set.
+  axis):** OBJECT the grade/post run set (planRows + `selected`) vs the displayed
+  bodyRows. INSTRUMENT wiring test that the auto-filter and the search read for
+  DISPLAY only (they shape bodyRows) and do not alter `selected`, and that the
+  plan builders at the grid, the run bar AND the execution handler read planRows
+  (folder-scoped) + `selected`, never `visibleRepoRows`'s bodyRows output. FAIL
+  auto-filter or search mutating the grade set, or any plan builder reading the
+  search-filtered display set - the sabotage: swap a plan surface's `rows` to the
+  bodyRows selector output and the test must RED.
 - **AC-F4-4 (escape hatch present):** OBJECT the "N of M" + clear/show-all
   affordance. INSTRUMENT a pure helper returning the counter string + the two
   action labels, pinned by a frozen-literal test, + a wiring test that the
@@ -600,7 +681,9 @@ reading (not an owner ruling), and the answer is applied as transcription.
 - **F3-c (grade-vs-post asymmetry - THE terminating question):** this build
   produces one of two shapes:
   - **(X, recommended)** a non-empty grade set scopes BOTH grade and post
-    (empty = whole column); grade and post symmetric, typeahead immediately
+    (empty = whole column), applied at EVERY grade-plan site (execution handler,
+    run bar :66/:70, column header :350/:352) so no count or label disagrees
+    with the run (section 3.4); grade and post symmetric, typeahead immediately
     effective, `bulkSelectionOnly` becomes a candidate to retire (R3); OR
   - **(Y)** grading stays gated behind the explicit `bulkSelectionOnly` toggle;
     the typeahead then affects grading only when that toggle is on, and the AC
@@ -624,7 +707,8 @@ reading (not an owner ruling), and the answer is applied as transcription.
 src/app/components/repo-grades/index.tsx                        # EDIT - relocate controls into sticky header child; display selector; grade-scope edit (budget: sec 4.2)
 src/app/components/repo-grades/RepoGradesStickyHeader.tsx        # NEW  - the one sticky working-header container (Wave A; new R-2 root)
 src/app/components/repo-grades/RepoGradesControls.tsx            # EDIT - split working vs setup controls (F2-b)
-src/app/components/repo-grades/RepoGradesRunBar.tsx              # EDIT/MOVE - run controls now a tier inside the sticky header
+src/app/components/repo-grades/RepoGradesRunBar.tsx              # EDIT/MOVE - run controls now a tier inside the sticky header; `rows` prop = planRows (folder-scoped, not query); F3-c=X at :66/:70
+src/app/components/repo-grades/RepoGradesGrid.tsx                # EDIT - plan surfaces read planRows (not the query-filtered set), `<tbody>` renders bodyRows; F3-c=X at :350/:352 (Wave C)
 src/app/components/repo-grades/repo-grades.module.css           # EDIT - .stickyShell/.stickyWorkingHeader; thead offset; search/typeahead/chip/counter classes; narrow-width block
 src/app/components/repo-grades/repoGradesUiState.ts             # EDIT - searchQuery field + ta-repo-grades-search (Wave B); possible show-all key (F4-b)
 src/app/components/repo-grades/repoGradesBulkGrade.ts           # POSSIBLE EDIT - F3-c grade-scope rule if applied in the leaf
@@ -640,7 +724,7 @@ src/app/components/repo-grades/RepoGradesGradeSetTypeahead.tsx  # NEW (optional,
 Scanners that read the above AS SOURCE TEXT and go red unless updated same-change:
 
 ```
-src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts  # R-2 frozen roots (35 -> up to ~39) + runtime-graph (new leaves must be browser-safe)
+src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts  # R-2 frozen roots (35 -> up to 40) + runtime-graph (new leaves must be browser-safe)
 src/app/components/repo-grades/repoGradesStorageKeys.structure.test.ts    # FROZEN_KEYS 18 -> 19 (search); -> 20 if F4-b adds a key
 src/app/components/courses/page-module-css-orphan-classes.test.ts         # CSS-orphan ratchet: new classes must be referenced via styles.<name>
 src/file-size-ceiling.structure.test.ts                                   # 1000-line ceiling - index.tsx at 960 is the risk; re-measure each wave
@@ -654,10 +738,12 @@ Each names an owner, an instrument, and the step that measures it. A residual
 not in `docs/BACKLOG.md` does not exist - the orchestrator adds these at
 disposal.
 
-- **R1 (shown==run across all filters):** OWNER implementer of Wave C.
-  INSTRUMENT AC-F3-2 + AC-F4-3. STEP verify the typeahead, checkboxes, run-bar
-  counts, and auto-filter all reflect one `selected`, and plan builders never
-  read the display-filtered set. (= those ACs; not a deletion.)
+- **R1 (shown==run across all filters; bodyRows vs planRows):** OWNER
+  implementer of Wave C. INSTRUMENT AC-F1-3 + AC-F3-2 + AC-F3-3 + AC-F4-2 +
+  AC-F4-3. STEP verify the typeahead, checkboxes, run-bar counts, grid column
+  counts and auto-filter all reflect one `selected`; the grid/run bar plan
+  surfaces read planRows (folder+selection); and no plan builder reads the
+  search-filtered bodyRows. (= those ACs; not a deletion.)
 - **R2 (F3-c semantics applied):** OWNER owner answers F3-c; implementer applies.
   INSTRUMENT AC-F3-3/F3-4. STEP the answer sets the `selectionOnly` expression +
   AC wording at Wave C.

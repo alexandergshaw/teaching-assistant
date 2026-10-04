@@ -74,6 +74,7 @@ import {
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
 import RepoGradesGrid from "./RepoGradesGrid";
+import RepoGradesRunBar from "./RepoGradesRunBar";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // A16 wave 3: mounts this run's trends above the grid - see
 // classTrendsFolderEntry.ts's header for why the leaf lives in this
@@ -767,6 +768,17 @@ export default function RepoGradesTab() {
         settingsOpen={effectiveOpen(uiState.settingsOpen, currentSelectedFolder === ALL_FOLDERS)}
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />
+
+      {/* A7 W3: sticky Grade/Post run bar, one folder only; same confirmed handlers as the column header. */}
+      {model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0] && (
+        <RepoGradesRunBar
+          column={displayedColumns[0]} rows={displayedRows} selected={selected} assignments={assignments}
+          cellEdits={cellEdits} columnPosting={columnPosting} bulkRunningFolder={bulkRunningFolder}
+          bulkProgress={bulkProgress} bulkSelectionOnly={uiState.bulkSelectionOnly} scanTruncated={!!scan?.truncated}
+          describeColumnRubric={rubricSource.describeColumn}
+          onGradeColumn={handleGradeColumn} onPostColumn={handlePostColumn}
+        />
+      )}
 
       <RepoGradesStatusBanners
         hasCourse={!!course}

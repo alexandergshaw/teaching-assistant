@@ -298,6 +298,9 @@ const CHECKBOX_LABEL_SX = {
   },
 } as const;
 
+/** R4 regroup: each picker field flexes within the shared wrapping row. */
+const PICKER_FIELD_STYLE = { flex: "1 1 220px", minWidth: 0 } as const;
+
 export default function RepoGradesControls({
   courses,
   coursesLoading,
@@ -353,141 +356,144 @@ export default function RepoGradesControls({
     } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"}`;
   return (
     <>
-      <div className={styles.field}>
-        <label htmlFor="repo-grades-course">Course</label>
-        <Typeahead
-          id="repo-grades-course"
-          options={buildCourseOptions(courses)}
-          value={courseId}
-          onChange={onCourseIdChange}
-          disabled={coursesLoading || courses.length === 0}
-          loading={coursesLoading}
-          placeholder={
-            coursesLoading
-              ? "Loading courses…"
-              : courses.length === 0
-              ? "No courses found"
-              : "Choose a course…"
-          }
-          noOptionsText="No courses found"
-          aria-describedby={coursesError ? "repo-grades-course-error" : undefined}
-        />
-        {coursesError && (
-          <p id="repo-grades-course-error" className={styles.error} role="alert">
-            {coursesError}
-          </p>
-        )}
-      </div>
-
-      {showOrgPrefixFilter && (
-        <div className={styles.field}>
-          <label htmlFor="repo-grades-org-prefix">Repo name filter (optional)</label>
-          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-            <TextField
-              size="small"
-              id="repo-grades-org-prefix"
-              type="text"
-              value={orgPrefix}
-              onChange={(e) => onOrgPrefixChange(e.target.value)}
-              placeholder="e.g. module"
-              sx={{ flex: "1 1 220px" }}
-            />
-            <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => onRefreshScan()}>
-              {scanLoading ? "Scanning…" : "Refresh"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* U1.1/U1.3 - the folder chooser, in the view's own control surface
-          rather than buried in a table column header. describeFolderOption
-          gives each option its "in N of M repos" hint (U1.4) so the
-          instructor can see how common a folder is BEFORE grading it. */}
-      {showRowDependentFields && (
-        <div className={styles.field}>
-          <label htmlFor="repo-grades-folder">Assignment folder to grade</label>
-          <TextField
-            select
-            size="small"
-            fullWidth
-            id="repo-grades-folder"
-            value={selectedFolder}
-            onChange={(e) => onSelectedFolderChange(e.target.value)}
-          >
-            <MenuItem value={ALL_FOLDERS}>All folders</MenuItem>
-            {folderOptions.map((option) => (
-              <MenuItem key={option.folder} value={option.folder}>
-                {describeFolderOption(option, folderCensus)}
-              </MenuItem>
-            ))}
-          </TextField>
-          {/* A5 (Ruling A5-6/A5-9) - the only place this page states that a
-              row's GitHub link opens the branch RECORDED AT SCAN TIME, not
-              necessarily the org's current default branch (see
-              repoGradeTreeLink.ts's header comment for the full staleness
-              note). Conditional on a specific folder being selected: in the
-              ALL_FOLDERS view the link falls back to the bare repo root and
-              pins no branch at all, so this sentence would be false there. */}
-          {selectedFolder !== ALL_FOLDERS && (
-            <p className={styles.fieldHint}>Links open the branch recorded when the repos were scanned.</p>
-          )}
-          {folderOptions.length === 0 && (
-            <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
-          )}
-          {folderDropNotice && (
-            <p className={styles.error} role="alert">
-              {folderDropNotice}
+      {/* A7 W3 R4: the cheap pickers (course, repo filter + Refresh, folder, sort) share one wrapping row so they sit together instead of stacking. */}
+      <div className={styles.adaptRow}>
+        <div className={styles.field} style={PICKER_FIELD_STYLE}>
+          <label htmlFor="repo-grades-course">Course</label>
+          <Typeahead
+            id="repo-grades-course"
+            options={buildCourseOptions(courses)}
+            value={courseId}
+            onChange={onCourseIdChange}
+            disabled={coursesLoading || courses.length === 0}
+            loading={coursesLoading}
+            placeholder={
+              coursesLoading
+                ? "Loading courses…"
+                : courses.length === 0
+                ? "No courses found"
+                : "Choose a course…"
+            }
+            noOptionsText="No courses found"
+            aria-describedby={coursesError ? "repo-grades-course-error" : undefined}
+          />
+          {coursesError && (
+            <p id="repo-grades-course-error" className={styles.error} role="alert">
+              {coursesError}
             </p>
           )}
         </div>
-      )}
 
-      {/* N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-
-          criteria.md) - every column is ALSO sortable via its own header
-          button now (RepoGradesGrid.tsx), including the per-folder score
-          columns this select cannot reasonably list. This control still
-          covers the four fields it always has, but its value and parsing now
-          both go through repoGradesRows.ts's repoGradeSortSelectValue/
-          parseRepoGradeSortSelectValue - N5 item 15: the OLD local
-          parseSortValue coerced any unrecognised field (e.g. a header-set
-          "firstName" or "folder" sort) to "repo", so simply rendering this
-          select with a mismatched value and then having the instructor
-          interact with it at all could silently snap the sort back to "repo".
-          repoGradeSortSelectValue instead resolves to the disabled "custom"
-          option below whenever the active sort is not one of these four, so
-          the select never shows (or can fire onChange from) a value that
-          does not match one of its own real options. */}
-      {showRowDependentFields && (
-        <div className={styles.field}>
-          <label htmlFor="repo-grades-sort">Sort</label>
-          <TextField
-            select
-            size="small"
-            fullWidth
-            id="repo-grades-sort"
-            value={repoGradeSortSelectValue(sort)}
-            onChange={(e) => onSortChange(parseRepoGradeSortSelectValue(e.target.value))}
-          >
-            <MenuItem value="repo:asc">Repo name (A to Z)</MenuItem>
-            <MenuItem value="repo:desc">Repo name (Z to A)</MenuItem>
-            <MenuItem value="binding:asc">Needs attention first</MenuItem>
-            <MenuItem value="binding:desc">Confirmed first</MenuItem>
-            <MenuItem value="firstName:asc">First name (A to Z)</MenuItem>
-            <MenuItem value="firstName:desc">First name (Z to A)</MenuItem>
-            <MenuItem value="lastName:asc">Last name (A to Z)</MenuItem>
-            <MenuItem value="lastName:desc">Last name (Z to A)</MenuItem>
-            {/* Rendered only while it is the active value (repoGradeSortSelectValue
-                only ever returns "custom" for a folder-column sort) - disabled
-                so it can never itself be chosen, matching this file's own
-                header comment above. */}
-            {repoGradeSortSelectValue(sort) === "custom" && (
-              <MenuItem value="custom" disabled>
-                Sorted by a folder column (see the table header)
-              </MenuItem>
+        {showOrgPrefixFilter && (
+          <div className={styles.field} style={PICKER_FIELD_STYLE}>
+            <label htmlFor="repo-grades-org-prefix">Repo name filter (optional)</label>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+              <TextField
+                size="small"
+                id="repo-grades-org-prefix"
+                type="text"
+                value={orgPrefix}
+                onChange={(e) => onOrgPrefixChange(e.target.value)}
+                placeholder="e.g. module"
+                sx={{ flex: "1 1 220px" }}
+              />
+              <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => onRefreshScan()}>
+                {scanLoading ? "Scanning…" : "Refresh"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* U1.1/U1.3 - the folder chooser, in the view's own control surface
+            rather than buried in a table column header. describeFolderOption
+            gives each option its "in N of M repos" hint (U1.4) so the
+            instructor can see how common a folder is BEFORE grading it. */}
+        {showRowDependentFields && (
+          <div className={styles.field} style={PICKER_FIELD_STYLE}>
+            <label htmlFor="repo-grades-folder">Assignment folder to grade</label>
+            <TextField
+              select
+              size="small"
+              fullWidth
+              id="repo-grades-folder"
+              value={selectedFolder}
+              onChange={(e) => onSelectedFolderChange(e.target.value)}
+            >
+              <MenuItem value={ALL_FOLDERS}>All folders</MenuItem>
+              {folderOptions.map((option) => (
+                <MenuItem key={option.folder} value={option.folder}>
+                  {describeFolderOption(option, folderCensus)}
+                </MenuItem>
+              ))}
+            </TextField>
+            {/* A5 (Ruling A5-6/A5-9) - the only place this page states that a
+                row's GitHub link opens the branch RECORDED AT SCAN TIME, not
+                necessarily the org's current default branch (see
+                repoGradeTreeLink.ts's header comment for the full staleness
+                note). Conditional on a specific folder being selected: in the
+                ALL_FOLDERS view the link falls back to the bare repo root and
+                pins no branch at all, so this sentence would be false there. */}
+            {selectedFolder !== ALL_FOLDERS && (
+              <p className={styles.fieldHint}>Links open the branch recorded when the repos were scanned.</p>
             )}
-          </TextField>
-        </div>
-      )}
+            {folderOptions.length === 0 && (
+              <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
+            )}
+            {folderDropNotice && (
+              <p className={styles.error} role="alert">
+                {folderDropNotice}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-
+            criteria.md) - every column is ALSO sortable via its own header
+            button now (RepoGradesGrid.tsx), including the per-folder score
+            columns this select cannot reasonably list. This control still
+            covers the four fields it always has, but its value and parsing now
+            both go through repoGradesRows.ts's repoGradeSortSelectValue/
+            parseRepoGradeSortSelectValue - N5 item 15: the OLD local
+            parseSortValue coerced any unrecognised field (e.g. a header-set
+            "firstName" or "folder" sort) to "repo", so simply rendering this
+            select with a mismatched value and then having the instructor
+            interact with it at all could silently snap the sort back to "repo".
+            repoGradeSortSelectValue instead resolves to the disabled "custom"
+            option below whenever the active sort is not one of these four, so
+            the select never shows (or can fire onChange from) a value that
+            does not match one of its own real options. */}
+        {showRowDependentFields && (
+          <div className={styles.field} style={PICKER_FIELD_STYLE}>
+            <label htmlFor="repo-grades-sort">Sort</label>
+            <TextField
+              select
+              size="small"
+              fullWidth
+              id="repo-grades-sort"
+              value={repoGradeSortSelectValue(sort)}
+              onChange={(e) => onSortChange(parseRepoGradeSortSelectValue(e.target.value))}
+            >
+              <MenuItem value="repo:asc">Repo name (A to Z)</MenuItem>
+              <MenuItem value="repo:desc">Repo name (Z to A)</MenuItem>
+              <MenuItem value="binding:asc">Needs attention first</MenuItem>
+              <MenuItem value="binding:desc">Confirmed first</MenuItem>
+              <MenuItem value="firstName:asc">First name (A to Z)</MenuItem>
+              <MenuItem value="firstName:desc">First name (Z to A)</MenuItem>
+              <MenuItem value="lastName:asc">Last name (A to Z)</MenuItem>
+              <MenuItem value="lastName:desc">Last name (Z to A)</MenuItem>
+              {/* Rendered only while it is the active value (repoGradeSortSelectValue
+                  only ever returns "custom" for a folder-column sort) - disabled
+                  so it can never itself be chosen, matching this file's own
+                  header comment above. */}
+              {repoGradeSortSelectValue(sort) === "custom" && (
+                <MenuItem value="custom" disabled>
+                  Sorted by a folder column (see the table header)
+                </MenuItem>
+              )}
+            </TextField>
+          </div>
+        )}
+      </div>
 
       {showRowDependentFields && (
         <details

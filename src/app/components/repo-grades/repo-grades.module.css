@@ -862,3 +862,34 @@
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
+
+/* A7 W3 sticky run bar (RepoGradesRunBar.tsx). Its OWN rule carries the
+   sticky mechanism (the grid's thead th rule above is a different element).
+   z-index sits above the sticky table header so the bar never slides under
+   it. Whether it actually sticks depends on no ancestor clipping overflow -
+   an owner check (docs/repo-grader-w3-surface-test-notes.md RW3-4). */
+.runBar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--field-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+}
+
+.runBarContext {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.runBarFolder {
+  font-weight: 600;
+  color: var(--text-primary);
+}

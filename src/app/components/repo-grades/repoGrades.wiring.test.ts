@@ -70,6 +70,7 @@ const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGra
 const hookSource = readFileSync(HOOK_PATH, "utf8");
 const RUN_PLAN_PATH = join(process.cwd(), "src/app/components/repo-grades/repoGradesRunPlan.ts");
 const runPlanSource = readFileSync(RUN_PLAN_PATH, "utf8");
+const runBarSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesRunBar.tsx"), "utf8");
 
 /**
  * Starting at `openBraceIdx` (which must point at a `{`), walks forward
@@ -742,6 +743,7 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(countCalls(hookSource)).toBe(2);
     expect(countCalls(gridSource)).toBe(0);
     expect(countCalls(runPlanSource)).toBe(0);
+    expect(countCalls(runBarSource)).toBe(0);
   });
 });
 
@@ -875,5 +877,100 @@ describe("A7 W2: single-course default and the two disclosure overrides are wire
     expect(panelText).toContain("window.confirm(");
     expect(controlsText).toContain('id="repo-grades-bulk-selection-only"');
     expect(controlsText).toContain('id="repo-grades-run-code-scoring"');
+  });
+});
+
+describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Grade/Post, and sticks by its own class", () => {
+  // Mechanism proxies only: nothing renders under vitest, so these prove the
+  // source carries the run bar, its sticky rule and its wiring - never that the
+  // bar paints or sticks at runtime (owner residuals RW3-1..9 in
+  // docs/repo-grader-w3-surface-test-notes.md).
+  const indexText = stripComments(indexSource);
+  const barText = stripComments(runBarSource);
+  const cssText = readFileSync(join(process.cwd(), "src/app/components/repo-grades/repo-grades.module.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    ""
+  );
+  const controlsText = stripComments(
+    readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesControls.tsx"), "utf8")
+  );
+
+  /** The mount JSX: from the `<RepoGradesRunBar` tag to its self-closing end. */
+  function mountSlice(): { guard: string; tag: string } {
+    const tagIdx = indexText.indexOf("<RepoGradesRunBar");
+    expect(tagIdx).toBeGreaterThan(-1);
+    const guardIdx = indexText.lastIndexOf("{", tagIdx);
+    expect(guardIdx).toBeGreaterThan(-1);
+    const endIdx = indexText.indexOf("/>", tagIdx);
+    expect(endIdx).toBeGreaterThan(tagIdx);
+    return { guard: indexText.slice(guardIdx, tagIdx), tag: indexText.slice(tagIdx, endIdx) };
+  }
+
+  it("W3-R1: index.tsx imports and renders the run bar, gated on one folder being selected", () => {
+    expect(indexText).toMatch(/import RepoGradesRunBar from "\.\/RepoGradesRunBar"/);
+    expect(indexText).toMatch(/<RepoGradesRunBar\b/);
+    const { guard } = mountSlice();
+    expect(guard).toContain("currentSelectedFolder");
+    expect(guard).toContain("ALL_FOLDERS");
+  });
+
+  it("W3-R2: the run bar consumes the shared label leaf and calls the same plan builders as the column header, without re-inlining a label", () => {
+    expect(barText).toMatch(/import \{[^}]*repoGradesRunPlanLabels[^}]*\} from "\.\/repoGradesRunPlan"/);
+    expect(barText).toMatch(/[:\s]gradeLabel\b/);
+    expect(barText).toMatch(/[:\s]postLabel\b/);
+    for (const call of ["buildBulkGradePlan(", "buildRepoGradePostPlan(", "repoGradePostCandidateRows(", "scopeRepoGradeRowsToSelection("]) {
+      expect(barText).toContain(call);
+    }
+    expect(barText).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
+    expect(barText).not.toContain("Nothing to grade in");
+  });
+
+  it("W3-R3: Grade and Post sit in ONE run-bar wrapper, forward only to the confirmed handlers, and the mount passes the real handlers", () => {
+    const start = barText.indexOf("<div className={styles.runBar}");
+    expect(start).toBeGreaterThan(-1);
+    const end = barText.indexOf("</div>", start);
+    expect(end).toBeGreaterThan(start);
+    const wrapper = barText.slice(start, end);
+    expect(wrapper).toMatch(/onGradeColumn\(column\.folder\)/);
+    expect(wrapper).toMatch(/onPostColumn\(column, pointsPossible\)/);
+    expect((wrapper.match(/<Button\b/g) ?? []).length).toBe(2);
+    expect(barText).not.toContain("postCanvasGradesAction(");
+    expect(barText).not.toContain("gradeRepoAction(");
+    const { tag } = mountSlice();
+    expect(tag).toContain("onGradeColumn={handleGradeColumn}");
+    expect(tag).toContain("onPostColumn={handlePostColumn}");
+  });
+
+  it("W3-R4: the wrapper carries a class whose OWN rule is position: sticky with a vertical offset (not the grid's thead rule)", () => {
+    const m = /<div className=\{styles\.([A-Za-z0-9_]+)\}/.exec(barText.slice(barText.indexOf("<div className={styles.runBar}")));
+    expect(m).not.toBeNull();
+    const stickyClass = m![1];
+    const open = cssText.indexOf(`.${stickyClass} {`);
+    expect(open).toBeGreaterThan(-1);
+    const close = cssText.indexOf("}", open);
+    expect(close).toBeGreaterThan(open);
+    const rule = cssText.slice(open, close);
+    expect(rule).toMatch(/position:\s*sticky/);
+    expect(rule).toMatch(/\b(top|bottom):/);
+  });
+
+  it("W3-R7: the course, repo-filter, folder and sort pickers share ONE existing-class wrapper row", () => {
+    const wrapperIdx = controlsText.indexOf("<div className={styles.adaptRow}>");
+    expect(wrapperIdx).toBeGreaterThan(-1);
+    const detailsIdx = controlsText.indexOf("<details", wrapperIdx);
+    expect(detailsIdx).toBeGreaterThan(wrapperIdx);
+    for (const id of ["repo-grades-course", "repo-grades-org-prefix", "repo-grades-folder", "repo-grades-sort"]) {
+      const at = controlsText.indexOf(`htmlFor="${id}"`);
+      expect(at).toBeGreaterThan(wrapperIdx);
+      expect(at).toBeLessThan(detailsIdx);
+    }
+  });
+
+  it("W3-R5: the W2 confirm-all and bulk-selection guards are still present (no confirm dropped)", () => {
+    expect(controlsText).toContain('id="repo-grades-bulk-selection-only"');
+    expect(controlsText).toContain('id="repo-grades-run-code-scoring"');
+    expect(stripComments(readFileSync(join(process.cwd(), "src/app/components/repo-grades/LinkUsernamesPanel.tsx"), "utf8"))).toContain(
+      "window.confirm("
+    );
   });
 });

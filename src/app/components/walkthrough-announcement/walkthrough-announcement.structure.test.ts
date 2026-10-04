@@ -696,3 +696,120 @@ describe("A18 AC-6: no stale \"record button\" phrase remains in the panel", () 
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// AC-10 (R-AC10-WIRING, docs/walkthrough-ac10-wiring-test-notes.md): the W2
+// WIRING facts. The pure decision functions are covered by
+// walkthrough-run-decisions.test.ts; what nothing else guards is the panel's
+// call sites that feed and act on them. Source-text pins over COMMENT-STRIPPED
+// source, each slice-bound to its own effect/callback with both anchors
+// resolved, so neither a comment nor an identifier elsewhere in the file (for
+// example the Generate button's own generate() call) can satisfy a pin.
+// ---------------------------------------------------------------------------
+
+describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-run call sites", () => {
+  const strippedPanel = stripComments(
+    fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"), "utf-8")
+  );
+
+  function sliceBetween(startNeedle: string, endNeedle: string, endFromStart = true): string {
+    const start = strippedPanel.indexOf(startNeedle);
+    expect(start, `expected to find start anchor ${startNeedle}`).toBeGreaterThan(-1);
+    const end = strippedPanel.indexOf(endNeedle, endFromStart ? start : 0);
+    expect(end, `expected to find end anchor ${endNeedle}`).toBeGreaterThan(-1);
+    return strippedPanel.slice(start, end);
+  }
+
+  describe("A: the firing effect's shouldAutoDraft call site", () => {
+    const fireBlock = sliceBetween("shouldAutoDraft({", "}, [capturing, extracting,");
+
+    it("A1: extracting ORs in batchInFlightRef.current", () => {
+      expect(fireBlock).toMatch(/extracting:\s*extracting\s*\|\|\s*batchInFlightRef\.current/);
+    });
+    it("A2: alreadyDraftedThisStop is the NEGATION of autoDraftPendingRef.current", () => {
+      expect(fireBlock).toMatch(/alreadyDraftedThisStop:\s*!autoDraftPendingRef\.current/);
+    });
+    it("A3: hasEmptySlot is readyToDraftCount > 0", () => {
+      expect(fireBlock).toMatch(/hasEmptySlot:\s*readyToDraftCount\s*>\s*0/);
+    });
+    it("A4: the result is consumed as a guard (if (!fire) return;)", () => {
+      expect(strippedPanel.slice(strippedPanel.indexOf("const fire = shouldAutoDraft"))).toMatch(/if\s*\(!fire\)\s*return;/);
+    });
+    it("A5: the effect itself calls generate() (slice-bound, not the Generate button's call)", () => {
+      const effect = sliceBetween("const fire = shouldAutoDraft", "}, [capturing, extracting,");
+      expect(effect).toMatch(/\bgenerate\(\)/);
+    });
+  });
+
+  describe("B: once-per-stop arming effect", () => {
+    const armBlock = sliceBetween("const prevCapturingRef = useRef(false);", "const fire = shouldAutoDraft");
+
+    it("B1: armed on the capturing true -> false edge", () => {
+      expect(armBlock).toMatch(/prevCapturingRef\.current\s*&&\s*!capturing\)\s*autoDraftPendingRef\.current\s*=\s*true/);
+    });
+    it("B2: forced false while capturing", () => {
+      expect(armBlock).toMatch(/if\s*\(capturing\)\s*autoDraftPendingRef\.current\s*=\s*false/);
+    });
+    it("B3: prevCapturingRef tracks capturing", () => {
+      expect(armBlock).toMatch(/prevCapturingRef\.current\s*=\s*capturing/);
+    });
+  });
+
+  describe("C: extraction-window guard in runExtraction", () => {
+    const rxBlock = sliceBetween("const runExtraction = useCallback", "}, [takeFrameBatch,");
+
+    it("C1: batchInFlightRef.current = true is set BEFORE the first await", () => {
+      const setIdx = rxBlock.indexOf("batchInFlightRef.current = true");
+      const awaitIdx = rxBlock.indexOf("await ");
+      expect(setIdx).toBeGreaterThan(-1);
+      expect(awaitIdx).toBeGreaterThan(-1);
+      expect(setIdx).toBeLessThan(awaitIdx);
+    });
+    it("C2: batchInFlightRef.current is cleared in the finally block", () => {
+      const finallyIdx = rxBlock.indexOf("} finally {");
+      expect(finallyIdx).toBeGreaterThan(-1);
+      expect(rxBlock.slice(finallyIdx)).toMatch(/batchInFlightRef\.current\s*=\s*false/);
+    });
+  });
+
+  describe("D: fresh-run reset is gated by isRunComplete in handleStartStop", () => {
+    const hssBlock = sliceBetween(
+      "const handleStartStop = useCallback",
+      "}, [capturing, start, stop, slots, reset]);"
+    );
+
+    it("D1: reset(), batchBlocksRef clear and setLegibleBlockCount(0) all live INSIDE if (isRunComplete(slots))", () => {
+      const guardStart = hssBlock.indexOf("if (isRunComplete(slots)) {");
+      expect(guardStart).toBeGreaterThan(-1);
+      const guardEnd = hssBlock.indexOf("(async () =>", guardStart);
+      expect(guardEnd).toBeGreaterThan(-1);
+      const guardBlock = hssBlock.slice(guardStart, guardEnd);
+      expect(guardBlock).toContain("reset()");
+      expect(guardBlock).toContain("batchBlocksRef.current = []");
+      expect(guardBlock).toContain("setLegibleBlockCount(0)");
+    });
+  });
+});
+
+describe("AC-10 W2 wiring: useWalkthroughSetup consumes courseToAutoSelect", () => {
+  const strippedSetup = stripComments(
+    fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughSetup.ts"), "utf-8")
+  );
+
+  // Documentary: tsc already backstops this (the call below would not compile
+  // without the import). E2 is the discriminating pin.
+  it("E1: imports courseToAutoSelect from ./walkthrough-run-decisions", () => {
+    expect(strippedSetup).toMatch(
+      /import\s*\{[^}]*\bcourseToAutoSelect\b[^}]*\}\s*from\s*"\.\/walkthrough-run-decisions"/
+    );
+  });
+
+  // The `?? prev` tail is a frozen literal on purpose: null from
+  // courseToAutoSelect means "change nothing", and the fallback is what keeps
+  // the persisted choice. Arguments are deliberately not pinned.
+  it("E2: setCourseId's updater calls courseToAutoSelect and consumes it with ?? prev", () => {
+    expect(strippedSetup).toMatch(
+      /setCourseId\(\s*\(prev\)\s*=>[\s\S]*?courseToAutoSelect\([\s\S]*?\)\s*\?\?\s*prev\s*\)/
+    );
+  });
+});

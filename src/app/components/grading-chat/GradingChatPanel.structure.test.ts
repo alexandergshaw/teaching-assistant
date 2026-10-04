@@ -60,11 +60,11 @@ describe("ChatComposer - slotProps.input vs top-level onKeyDown split (UX doc se
 });
 
 describe("GradingChatPanel - reused house classes, no new inline flex", () => {
-  it("keeps styles.form; the setup fields drop styles.field for chat.compactField (competing 220px selector gone)", () => {
+  it("keeps styles.form; the setup fields drop styles.field for chatStyles.compactField (competing 220px selector gone)", () => {
     const source = read(PANEL);
     expect(source).toContain("styles.form");
     expect(source).not.toContain("styles.field");
-    expect(source).toContain("chat.compactField");
+    expect(source).toContain("chatStyles.compactField");
   });
 
   it("append-vs-reset: the results table is fed the driver's growing run, never a locally reset one", () => {
@@ -258,12 +258,12 @@ function ruleBlock(css: string, selector: string): string {
 }
 
 describe("GradingChatPanel - W3 F1: the composer sits in a sticky wrapper", () => {
-  it("the ChatComposer mount is enclosed by chat.stickyComposer within a bounded window", () => {
+  it("the ChatComposer mount is enclosed by chatStyles.stickyComposer within a bounded window", () => {
     const source = withoutLineComments(read(PANEL));
     const mountIdx = source.indexOf("<ChatComposer");
     expect(mountIdx, "expected the ChatComposer mount").toBeGreaterThan(-1);
-    const classIdx = source.lastIndexOf("chat.stickyComposer", mountIdx);
-    expect(classIdx, "expected chat.stickyComposer before the mount").toBeGreaterThan(-1);
+    const classIdx = source.lastIndexOf("chatStyles.stickyComposer", mountIdx);
+    expect(classIdx, "expected chatStyles.stickyComposer before the mount").toBeGreaterThan(-1);
     expect(mountIdx - classIdx).toBeLessThan(400);
   });
 
@@ -275,7 +275,7 @@ describe("GradingChatPanel - W3 F1: the composer sits in a sticky wrapper", () =
 });
 
 describe("GradingChatPanel - W3 F2: the setup fields collapse to a summary once the session is ready", () => {
-  it("a sessionReady guard precedes both setup field ids and a chat.setupSummary element exists", () => {
+  it("a sessionReady guard precedes both setup field ids and a chatStyles.setupSummary element exists", () => {
     const source = withoutLineComments(read(PANEL));
     const guard = source.search(/!sessionReady|sessionReady\s*\?/);
     const instr = source.indexOf('id="grading-chat-instructions"');
@@ -285,13 +285,13 @@ describe("GradingChatPanel - W3 F2: the setup fields collapse to a summary once 
     expect(rubricIdx).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(instr);
     expect(guard).toBeLessThan(rubricIdx);
-    expect(source).toContain("chat.setupSummary");
+    expect(source).toContain("chatStyles.setupSummary");
   });
 });
 
 describe("GradingChatPanel - W3 F3: compact setup fields", () => {
   for (const id of ['id="grading-chat-instructions"', 'id="grading-chat-rubric"']) {
-    it(`the wrapper of ${id} carries chat.compactField and not styles.field`, () => {
+    it(`the wrapper of ${id} carries chatStyles.compactField and not styles.field`, () => {
       const source = withoutLineComments(read(PANEL));
       const idIdx = source.indexOf(id);
       expect(idIdx).toBeGreaterThan(-1);
@@ -299,7 +299,7 @@ describe("GradingChatPanel - W3 F3: compact setup fields", () => {
       expect(divIdx).toBeGreaterThan(-1);
       expect(divIdx).toBeLessThan(idIdx);
       const wrapperOpen = source.slice(divIdx, idIdx);
-      expect(wrapperOpen).toContain("chat.compactField");
+      expect(wrapperOpen).toContain("chatStyles.compactField");
       expect(wrapperOpen).not.toContain("styles.field");
     });
   }
@@ -316,9 +316,9 @@ describe("GradingChatPanel - W3 F3: compact setup fields", () => {
 });
 
 describe("GradingChatPanel - W3 F4: the intake error rides inside the sticky wrapper, below the results", () => {
-  it("submitError role=alert is inside chat.stickyComposer and after the results mount", () => {
+  it("submitError role=alert is inside chatStyles.stickyComposer and after the results mount", () => {
     const source = withoutLineComments(read(PANEL));
-    const wrapperOpen = source.indexOf("chat.stickyComposer");
+    const wrapperOpen = source.indexOf("chatStyles.stickyComposer");
     const mountIdx = source.indexOf("<ChatComposer");
     const alertIdx = source.indexOf('role="alert"');
     const resultsIdx = source.indexOf("<GradingResults");
@@ -368,7 +368,7 @@ describe("GradingChatPanel - M1 AC-M2: the latest-result card is wired through t
 
   it("mounts the card inside the sticky wrapper, above the composer", () => {
     const source = withoutLineComments(read(PANEL));
-    const wrapper = source.indexOf("chat.stickyComposer");
+    const wrapper = source.indexOf("chatStyles.stickyComposer");
     const card = source.indexOf("<LatestResultCard");
     const composer = source.indexOf("<ChatComposer");
     expect(card).toBeGreaterThan(-1);

@@ -30,7 +30,7 @@ import { submitFilesSequentially } from "./chatFileBatch";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
-import chat from "./grading-chat.module.css";
+import chatStyles from "./grading-chat.module.css";
 
 // RG-CLEANUP: the two older global slots (ta-grading-chat-instructions and
 // ta-grading-chat-rubric) are FROZEN pre-upgrade values and are no longer read
@@ -163,7 +163,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     <div className={styles.form}>
       {!sessionReady ? (
         <>
-          <div className={chat.compactField}>
+          <div className={chatStyles.compactField}>
             <label htmlFor="grading-chat-instructions">Assignment instructions</label>
             <TextField
               id="grading-chat-instructions"
@@ -177,7 +177,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             />
           </div>
 
-          <div className={chat.compactField}>
+          <div className={chatStyles.compactField}>
             <label htmlFor="grading-chat-rubric">Rubric</label>
             <TextField
               id="grading-chat-rubric"
@@ -192,7 +192,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           </div>
         </>
       ) : (
-        <p className={chat.setupSummary}>Instructions and rubric are set for this session.</p>
+        <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
       )}
 
       <div className={styles.ghActions}>
@@ -225,7 +225,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <p className={styles.ghMeta}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
-      <div className={chat.stickyComposer}>
+      <div className={chatStyles.stickyComposer}>
         {hasRows && driver.run && <LatestResultCard result={selectLatestResult(driver.run)} />}
         {submitError && (
           <p role="alert" className={styles.ghMeta}>

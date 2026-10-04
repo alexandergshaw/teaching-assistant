@@ -124,7 +124,7 @@ export interface RepoGradeCellEdit {
    * this feature exists to prevent). Set at the SAME time as `rubricAreas`/
    * `generatedScore` - only by a grading call, never by hand. Held here, in
    * this ephemeral React state, deliberately: graded result cells DO persist
-   * (ta-repo-grades-cells) and are restored on a course change, but
+   * (under the persisted cells key) and are restored on a course change, but
    * submittedFiles is explicitly dropped by toPersisted, so it is itself not
    * persisted and storing full file contents here carries none of the
    * localStorage-bloat/invalidation risk that ruled out re-persisting them

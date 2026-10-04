@@ -123,10 +123,10 @@ export interface RepoGradeCellEdit {
    * instructor something other than what was graded is the exact failure
    * this feature exists to prevent). Set at the SAME time as `rubricAreas`/
    * `generatedScore` - only by a grading call, never by hand. Held here, in
-   * this ephemeral React state, deliberately: index.tsx's own header comment
-   * on `cellEdits` already establishes that this state is NEVER persisted to
-   * localStorage (reset to EMPTY_REPO_GRADE_CELL_EDITS on every course
-   * switch), so storing full file contents here carries none of the
+   * this ephemeral React state, deliberately: graded result cells DO persist
+   * (ta-repo-grades-cells) and are restored on a course change, but
+   * submittedFiles is explicitly dropped by toPersisted, so it is itself not
+   * persisted and storing full file contents here carries none of the
    * localStorage-bloat/invalidation risk that ruled out re-persisting them
    * elsewhere (github-grading-run-store.ts, grading-review-rows.ts).
    * [] until this cell has been graded, or when the grading run genuinely

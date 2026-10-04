@@ -32,10 +32,11 @@ import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
 import chat from "./grading-chat.module.css";
 
-// The two older global slots are read ONCE at mount and never rewritten: the
-// scoped chat memory (chatSetupMemory.ts) is what persists setup from here on.
-const INSTRUCTIONS_STORAGE_KEY = "ta-grading-chat-instructions";
-const RUBRIC_STORAGE_KEY = "ta-grading-chat-rubric";
+// RG-CLEANUP: the two older global slots (ta-grading-chat-instructions and
+// ta-grading-chat-rubric) are FROZEN pre-upgrade values and are no longer read
+// at all: seeding the fields from them surfaced a stale value that reflects
+// nothing. The setup fields start blank; the Canvas-scoped chat memory
+// (chatSetupMemory.ts, restored inside ensureSession) is the only persistence.
 
 // RES-GC-11 (docs/grading-chat-reliability.md section 4): the reliability
 // floor. This session is held in memory only - a reload, tab close, or crash
@@ -44,15 +45,6 @@ const RUBRIC_STORAGE_KEY = "ta-grading-chat-rubric";
 export const CHAT_SESSION_NOT_SAVED_DISCLOSURE =
   "This session is not saved. Reloading or closing this tab loses every graded row and anything still grading.";
 
-function loadPersisted(key: string): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -60,8 +52,8 @@ export interface GradingChatPanelProps {
 }
 
 export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
-  const [instructions, setInstructions] = useState(() => loadPersisted(INSTRUCTIONS_STORAGE_KEY));
-  const [rubric, setRubric] = useState(() => loadPersisted(RUBRIC_STORAGE_KEY));
+  const [instructions, setInstructions] = useState("");
+  const [rubric, setRubric] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");

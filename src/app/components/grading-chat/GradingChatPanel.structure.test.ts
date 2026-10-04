@@ -406,3 +406,19 @@ describe("LatestResultCard - M1 AC-M3: shows the grade and all three feedback fi
     expect(mapsConstant || namesAll).toBe(true);
   });
 });
+
+describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas path", () => {
+  it("does not read localStorage to seed the setup fields", () => {
+    const source = read(PANEL);
+    expect(source).not.toContain("loadPersisted");
+    expect(source).not.toContain("INSTRUCTIONS_STORAGE_KEY");
+    expect(source).not.toContain("RUBRIC_STORAGE_KEY");
+    expect(source).not.toMatch(/localStorage\.getItem/);
+  });
+
+  it("the Canvas-scoped memory still restores inside ensureSession", () => {
+    const source = read(PANEL);
+    expect(source).toContain("loadChatSetupMemory(scope)");
+    expect(source).toContain("saveChatSetupMemory(scope");
+  });
+});

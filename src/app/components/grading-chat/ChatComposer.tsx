@@ -52,11 +52,11 @@ function persistInputMode(mode: InputMode) {
 export interface ChatComposerProps {
   readonly disabled: boolean;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
-  readonly onSubmitFile: (file: File) => void;
+  readonly onSubmitFiles: (files: File[]) => void;
   readonly onSubmitUrl: (url: string) => void;
 }
 
-export function ChatComposer({ disabled, onSubmitText, onSubmitFile, onSubmitUrl }: ChatComposerProps) {
+export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUrl }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -85,9 +85,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFile, onSubmitUrl
   };
 
   const handlePickFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (file && !disabled) onSubmitFile(file);
+    if (files.length > 0 && !disabled) onSubmitFiles(files);
   };
 
   const handleSendUrl = () => {
@@ -112,7 +112,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFile, onSubmitUrl
         />
         {mode === "file" && (
           <>
-            <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handlePickFile} disabled={disabled} />
+            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handlePickFile} disabled={disabled} />
             <IconButton size="small" aria-label="Attach a file" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
               +
             </IconButton>

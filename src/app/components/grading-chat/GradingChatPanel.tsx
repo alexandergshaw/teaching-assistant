@@ -14,17 +14,23 @@
 // RecordingTab in page.tsx (P2) - this component itself does not know or care
 // about visibility; the wrapper's display:none/undefined toggle is what
 // preserves the in-flight run across navigation (architecture section 7).
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import GradingResults from "../GradingResults";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import { ChatComposer } from "./ChatComposer";
-import { useContinuousGradingRun } from "./useContinuousGradingRun";
+import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
+import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
+import { submitFilesSequentially } from "./chatFileBatch";
+import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
 
+// The two older global slots are read ONCE at mount and never rewritten: the
+// scoped chat memory (chatSetupMemory.ts) is what persists setup from here on.
 const INSTRUCTIONS_STORAGE_KEY = "ta-grading-chat-instructions";
 const RUBRIC_STORAGE_KEY = "ta-grading-chat-rubric";
 
@@ -44,15 +50,6 @@ function loadPersisted(key: string): string {
   }
 }
 
-function persist(key: string, value: string) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Private window / blocked storage: degrade to not-persisted.
-  }
-}
-
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -63,17 +60,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [instructions, setInstructions] = useState(() => loadPersisted(INSTRUCTIONS_STORAGE_KEY));
   const [rubric, setRubric] = useState(() => loadPersisted(RUBRIC_STORAGE_KEY));
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [setupNote, setSetupNote] = useState<string | null>(null);
+  const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
 
-  const handleInstructionsChange = (value: string) => {
-    setInstructions(value);
-    persist(INSTRUCTIONS_STORAGE_KEY, value);
-  };
-  const handleRubricChange = (value: string) => {
-    setRubric(value);
-    persist(RUBRIC_STORAGE_KEY, value);
-  };
+  const handleInstructionsChange = (value: string) => setInstructions(value);
+  const handleRubricChange = (value: string) => setRubric(value);
 
   // Silent-green fix (docs/grading-chat-wave1-verify.md, attack 9): beginSession
   // captures the header ONCE and every later submit grades against that first
@@ -93,16 +86,49 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     }
     driver.reset();
     setSubmitError(null);
+    setSetupNote(null);
   };
 
-  const ensureSession = async (): Promise<boolean> => {
+  // Resolve the setup fields (typed text always wins; Canvas then stored memory
+  // fill only blank fields) and begin the session with the RESOLVED values passed
+  // explicitly: the instructions/rubric state captured by this closure is stale
+  // until the next render, so it must not be what beginSession reads. The Canvas
+  // fetch is awaited BEFORE beginSession.
+  const ensureSession = async (canvasUrl?: string): Promise<boolean> => {
     if (driver.headerState === "ready") return true;
-    const result = await driver.beginSession({ assignmentInstructions: instructions, rubric });
+    const scope = canvasUrl ? deriveChatScope(canvasUrl) : "";
+    const needsFill = !instructions.trim() || !rubric.trim();
+
+    let canvasMeta: { instructions: string; rubric: string } | null = null;
+    if (canvasUrl && scope && needsFill) {
+      const meta = await fetchCanvasMetaAction(canvasUrl.trim());
+      if (!("error" in meta)) canvasMeta = { instructions: meta.description, rubric: meta.rubricText };
+    }
+    const loaded = scope && needsFill ? loadChatSetupMemory(scope) : null;
+    const fill: ResolveSetupFillResult = resolveSetupFill({
+      typed: { instructions, rubric },
+      canvasMeta,
+      storedMemory: loaded ? { instructions: loaded.entry.instructions ?? "", rubric: loaded.entry.rubric } : null,
+    });
+    if (fill.instructions !== instructions) setInstructions(fill.instructions);
+    if (fill.rubric !== rubric) setRubric(fill.rubric);
+
+    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric });
     if (result.kind === "refused") {
+      sessionRefusalRef.current = result.reason;
       setSubmitError(result.reason);
       return false;
     }
     setSubmitError(null);
+    if (scope) saveChatSetupMemory(scope, { rubric: fill.rubric, instructions: fill.instructions });
+    const notes: string[] = [];
+    if (fill.instructionsSource === "canvas" || fill.rubricSource === "canvas") {
+      notes.push("Instructions and rubric not typed here were read from Canvas.");
+    }
+    if (loaded && (fill.instructionsSource === "memory" || fill.rubricSource === "memory")) {
+      notes.push(describeChatSetupOrigin(loaded, scope));
+    }
+    setSetupNote(notes.length > 0 ? notes.join(" ") : null);
     return true;
   };
 
@@ -111,13 +137,26 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     const outcome = await driver.submit({ kind: "text", content, label });
     setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   };
-  const handleSubmitFile = async (file: File) => {
-    if (!(await ensureSession())) return;
-    const outcome = await driver.submit({ kind: "file", file });
-    setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+  const handleSubmitFiles = async (files: File[]) => {
+    // The session is begun once for the whole batch, not once per file.
+    let began = false;
+    const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
+      if (!began) {
+        if (!(await ensureSession())) {
+          return { kind: "refused", reason: sessionRefusalRef.current };
+        }
+        began = true;
+      }
+      return driver.submit({ kind: "file", file });
+    });
+    const reasons: string[] = [];
+    outcomes.forEach((outcome, index) => {
+      if (outcome.kind !== "accepted") reasons.push(`${files[index].name}: ${outcome.reason}`);
+    });
+    setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
   };
   const handleSubmitUrl = async (url: string) => {
-    if (!(await ensureSession())) return;
+    if (!(await ensureSession(url))) return;
     const outcome = await driver.submit({ kind: "url", url });
     setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   };
@@ -160,6 +199,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         {sessionReady && (
           <p className={styles.ghMeta}>Instructions and rubric are locked for this session.</p>
         )}
+        {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
         <Button variant="outlined" size="small" disabled={driver.headerState === "unset"} onClick={handleNewSession}>
           New session
         </Button>
@@ -190,7 +230,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <p className={styles.ghMeta}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
-      <ChatComposer disabled={busy} onSubmitText={handleSubmitText} onSubmitFile={handleSubmitFile} onSubmitUrl={handleSubmitUrl} />
+      <ChatComposer disabled={busy} onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl} />
     </div>
   );
 }

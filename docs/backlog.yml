@@ -76,6 +76,18 @@
   from: 'c25bdec'
   note: ''
   question: null
+- id: 'L-RETRO'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'TOP PRIORITY (owner, 2026-10-04). Add two REPORT-ONLY roles to the loop: a RETROSPECTIVE role that writes evidence-grounded lessons-learned + areas-for-improvement across the past loop, and a RETRO-REVIEWER role that adversarially reviews that retrospective; both REPORT findings to the owner and make NO changes to code, docs, backlog, or the loop itself.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Owner request 2026-10-04. AC pass in flight (docs/loop-retro-roles-acceptance-criteria.md). Survey: the existing .claude/agents/loop-*.md role pattern (frontmatter name/description/tools/model), docs/DEV_LOOP.md + docs/loop/seats.md registration, and what evidence a retro can read (git log, docs/REGRESSION.md, docs/backlog.yml activity, RCAs).'
+  from: 'Owner, 2026-10-04, verbatim: I need a retrospective role and retro reviewer role added to the loop. these two roles should write and review respectively the lessons learned across the past loop and id any areas for improvement, and then report those findings to me without making any changes.'
+  note: 'Two new loop seats, defined as .claude/agents/loop-retro.md (author) + loop-retro-reviewer.md (checker-over-the-retrospective), matching the existing loop-*.md pattern and REGISTERED in DEV_LOOP.md/seats.md so they are reachable (a role file with no reference ships dead - the project''s recurring failure). DEFINING CONSTRAINT: both are READ-ONLY / REPORT-ONLY - they modify nothing; the report goes to the owner who decides what to change. Each lesson must cite real evidence (no vibes); the reviewer rejects ungrounded/over-claimed/generic findings - exactly the failure class the project already hit (a never-stall rule believed to hold while it failed six times). Tier: reviewer on the checker (strong) model; retro author analysis-heavy. OPEN QUESTIONS for the owner: what ''the past loop'' scopes to (milestone/session/commit-range); where the report is delivered; trigger (per-milestone vs on-demand). NOTHING renders under vitest; criteria are reading-verified (files exist, are referenced, forbid edits, cite evidence) plus a read-only-tools check if the agent frontmatter supports a tools allowlist.'
+  question: null
 - id: 'N3'
   state: 'unscoped'
   kind: 'chore'

@@ -66,7 +66,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // docs/a39-incremental-fill-architecture.md section 13's residual register
 // (round 2 of two) - the A39 grading feature flag's flip condition requires
 // these to exist as rows before the flag can turn on.
-const EXPECTED_ROW_COUNT = 91;
+const EXPECTED_ROW_COUNT = 92;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

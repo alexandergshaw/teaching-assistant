@@ -28,51 +28,40 @@ vi.setConfig({ testTimeout: 30_000 });
 // `it` was confirmed red, the file was restored, and the suite was confirmed
 // green again.
 
+// ANNOUNCEMENTS-TAB wave A-W2: the panel MOVED out of RecordingTab into an
+// always-mounted, display-toggled top-level sibling in page.tsx (T4). The
+// mount block below therefore reads page.tsx; RecordingTab must no longer
+// carry the panel, the walkannounce recView member, or its restore/strip
+// entries. walkannounce stays a valid LAUNCH view (second block) - only its
+// route changed (resolveRecordingLaunchRoute).
+const PAGE_PATH = path.resolve(process.cwd(), "src/app/page.tsx");
+const pageSource = fs.readFileSync(PAGE_PATH, "utf-8");
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
 const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
 
 const WALKTHROUGH_ANNOUNCEMENT_DIR = path.resolve(process.cwd(), "src/app/components/walkthrough-announcement");
 
-describe("WalkthroughAnnouncementPanel is actually mounted by RecordingTab", () => {
-  it('RecordingTab.tsx imports the default export from "./walkthrough-announcement/WalkthroughAnnouncementPanel"', () => {
-    expect(recordingTabSource).toMatch(
-      /import WalkthroughAnnouncementPanel from "\.\/walkthrough-announcement\/WalkthroughAnnouncementPanel"/
+describe("WalkthroughAnnouncementPanel is actually mounted by page.tsx (moved out of RecordingTab)", () => {
+  it('page.tsx imports the default export from "./components/walkthrough-announcement/WalkthroughAnnouncementPanel"', () => {
+    expect(pageSource).toMatch(
+      /import WalkthroughAnnouncementPanel from "\.\/components\/walkthrough-announcement\/WalkthroughAnnouncementPanel"/
     );
   });
 
-  it("RecordingTab.tsx actually renders <WalkthroughAnnouncementPanel - an import alone proves nothing", () => {
-    expect(recordingTabSource).toMatch(/<WalkthroughAnnouncementPanel\b/);
+  it("page.tsx actually renders <WalkthroughAnnouncementPanel - an import alone proves nothing", () => {
+    expect(pageSource).toMatch(/<WalkthroughAnnouncementPanel\b/);
   });
 
-  it('the rendered panel receives active={active && recView === "walkannounce"} - the same always-mounted, display:none-toggled idiom every sibling inner view uses, never unmounted on tab switch', () => {
-    expect(recordingTabSource).toMatch(/<WalkthroughAnnouncementPanel active=\{active && recView === "walkannounce"\}/);
-  });
-});
-
-describe('"walkannounce" is wired into BOTH the recView union AND the SEPARATE restore guard (the module-deck-capture trap, repeated here)', () => {
-  it('"walkannounce" is a member of the recView useState union type', () => {
-    // Anchor on the union literal's own line (unique text in this file) -
-    // deliberately not a bare source.includes check, which the restore
-    // guard's own occurrence would also satisfy and could never fail
-    // independently of it.
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).toMatch(/"walkannounce"/);
+  it('the rendered panel receives an active prop gated on announcementsView === "walkthrough" - the always-mounted, display:none-toggled idiom, never unmounted on tab switch', () => {
+    expect(pageSource).toMatch(
+      /<WalkthroughAnnouncementPanel\s+active=\{[^}]*manualView === "announcements"[^}]*announcementsView === "walkthrough"[^}]*\}/
+    );
   });
 
-  it('"walkannounce" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
-    expect(guardBlock).toMatch(/v === "walkannounce"/);
-  });
-
-  it("the inner-view tab strip includes a walkannounce entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(recordingTabSource).toMatch(/\["walkannounce",\s*"[^"]+"\]/);
+  it("RecordingTab.tsx no longer imports, renders or lists the panel (walkannounce left recView)", () => {
+    expect(recordingTabSource).not.toMatch(/WalkthroughAnnouncementPanel/);
+    expect(recordingTabSource).not.toMatch(/\["walkannounce",\s*"[^"]+"\]/);
+    expect(recordingTabSource).not.toMatch(/recView === "walkannounce"/);
   });
 });
 

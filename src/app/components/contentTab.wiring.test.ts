@@ -27,7 +27,10 @@ import { LMS_VIEWS } from "./manual/manual-rail";
 const CONTENT_TAB_PATH = path.join(__dirname, "ContentTab.tsx");
 const source = readFileSync(CONTENT_TAB_PATH, "utf8");
 
-// Two views are self-hosting (their own course picker / institution scope -
+// ANNOUNCEMENTS-TAB A-W2: "announcements" also left this set (and LMS_VIEWS)
+// when the composer moved to the Announcements sub-tab; only "inbox" remains.
+//
+// One view is self-hosting (its own course picker / institution scope -
 // see ContentTab.tsx's comment directly above `courseTab`): they are
 // DELIBERATELY absent from `courseTab` and must stay that way. Handled
 // explicitly here, by name, with the reason stated - rather than weakening
@@ -40,7 +43,7 @@ const source = readFileSync(CONTENT_TAB_PATH, "utf8");
 // assertion below still holds without it - which is exactly why it must be
 // named rather than left: LMS_VIEWS.length and courseTabEligible.length both
 // moved by one, and only re-deriving both catches that.
-const SELF_HOSTING_VIEWS: ReadonlySet<string> = new Set(["announcements", "inbox"]);
+const SELF_HOSTING_VIEWS: ReadonlySet<string> = new Set(["inbox"]);
 
 function extractCourseTabExpression(src: string): string {
   const match = src.match(/const courseTab =([\s\S]*?);/);
@@ -54,7 +57,7 @@ function extractCourseTabExpression(src: string): string {
 }
 
 function extractRenderChain(src: string): string {
-  const start = src.indexOf('view === "announcements" ? (');
+  const start = src.indexOf('view === "inbox" ? (');
   const end = src.indexOf('view === "version-control" && versionControl');
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
@@ -70,13 +73,13 @@ describe("ContentTab registration points (D4r courseTab, D5r render branch)", ()
   const courseTabExpr = extractCourseTabExpression(source);
   const renderChain = extractRenderChain(source);
 
-  it("LMS_VIEWS splits into exactly 5 courseTab-eligible views and the 3 named self-hosting ones", () => {
+  it("LMS_VIEWS splits into exactly 5 courseTab-eligible views and the named self-hosting one", () => {
     // Pins the partition itself: if a future view is added to LMS_VIEWS
     // without a matching decision recorded in SELF_HOSTING_VIEWS above, the
     // count here moves and flags that a decision is needed, rather than the
     // new view silently falling into whichever bucket the loop below assumes.
     const courseTabEligible = LMS_VIEWS.filter((v) => !SELF_HOSTING_VIEWS.has(v));
-    expect(LMS_VIEWS.length).toBe(7);
+    expect(LMS_VIEWS.length).toBe(6);
     expect(courseTabEligible.length).toBe(5);
     expect(courseTabEligible.sort()).toEqual(["assignments", "files", "modules", "pages", "quizzes"]);
   });

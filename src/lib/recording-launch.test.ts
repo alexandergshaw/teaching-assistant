@@ -721,4 +721,21 @@ describe("resolveRecordingLaunchRoute (discussion-clicks W-B-5)", () => {
       activeTab: "manual",
     });
   });
+
+  // ANNOUNCEMENTS-TAB A-W2 (REQ-8): the walkthrough-announcement capture panel
+  // left Recording, so a walkannounce launch must land on the Announcements
+  // tab's walkthrough chip, not on Recording where the panel no longer is.
+  it("routes walkannounce to Tools > Announcements > walkthrough", () => {
+    expect(resolveRecordingLaunchRoute("walkannounce")).toEqual({
+      manualView: "announcements",
+      announcementsView: "walkthrough",
+      toolsSection: "manual",
+      activeTab: "manual",
+    });
+  });
+
+  it("page.tsx's launch listener applies the route's announcementsView", () => {
+    const page = readFileSync(join(process.cwd(), "src", "app", "page.tsx"), "utf8");
+    expect(page).toContain("if (route.announcementsView) setAnnouncementsView(route.announcementsView);");
+  });
 });

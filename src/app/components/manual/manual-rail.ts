@@ -108,7 +108,6 @@ const LMS_VIEW_PRESENCE: Record<Exclude<ContentView, "version-control">, true> =
   quizzes: true,
   pages: true,
   files: true,
-  announcements: true,
   inbox: true,
 };
 
@@ -132,7 +131,6 @@ export const destinations: DestinationGroup[] = [
       { id: "lms-quizzes", label: "Quizzes", description: "List and bulk-manage every quiz in the course" },
       { id: "lms-pages", label: "Pages", description: "Create and manage course pages" },
       { id: "lms-files", label: "Files", description: "Upload and organize course files" },
-      { id: "lms-announcements", label: "Announcements", description: "Post course announcements" },
       { id: "lms-inbox", label: "Inbox", description: "View course messages" },
     ],
   },
@@ -405,7 +403,6 @@ export function resolveStateFromDestinationId(
     if (id === "lms-quizzes") return "quizzes";
     if (id === "lms-pages") return "pages";
     if (id === "lms-files") return "files";
-    if (id === "lms-announcements") return "announcements";
     if (id === "lms-inbox") return "inbox";
     return currentContentView;
   })();

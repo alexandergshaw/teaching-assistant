@@ -305,7 +305,6 @@ describe("url-state", () => {
       expect(normalizeContentView("modules")).toBe("modules");
       expect(normalizeContentView("pages")).toBe("pages");
       expect(normalizeContentView("files")).toBe("files");
-      expect(normalizeContentView("announcements")).toBe("announcements");
       expect(normalizeContentView("inbox")).toBe("inbox");
     });
 
@@ -313,6 +312,11 @@ describe("url-state", () => {
       expect(normalizeContentView("bogus")).toBe("modules");
       expect(normalizeContentView(null)).toBe("modules");
       expect(isContentView("bogus")).toBe(false);
+    });
+
+    it("rejects announcements - it moved to the Announcements sub-tab (ANNOUNCEMENTS-TAB A-W2)", () => {
+      expect(isContentView("announcements")).toBe(false);
+      expect(normalizeContentView("announcements")).toBe("modules");
     });
 
     it("rejects version-control - it is a legacy migration target, not a navigable URL value", () => {

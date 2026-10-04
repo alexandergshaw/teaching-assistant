@@ -64,12 +64,10 @@ import {
 
 export default function ContentTab({
   view,
-  announcements,
   inbox,
   versionControl,
 }: {
   view: ContentView;
-  announcements?: ReactNode;
   inbox?: ReactNode;
   versionControl?: ReactNode;
 }) {
@@ -767,9 +765,7 @@ export default function ContentTab({
             </p>
           )}
 
-          {view === "announcements" ? (
-            announcements
-          ) : view === "inbox" ? (
+          {view === "inbox" ? (
             inbox
           ) : !loaded ? null : view === "modules" ? (
             <>

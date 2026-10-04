@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   RETIRED_TAB_DESTINATIONS,
@@ -580,6 +580,77 @@ describe("the two moved grading-capture panels stay mounted while hidden (I-W2)"
       'manualView === "grading"',
       'gradingView === "chat"',
     ]);
+  });
+
+  // ANNOUNCEMENTS-TAB wave A-W2 (T4, REQ-2): the announcement-from-a-walkthrough
+  // capture panel moved out of RecordingTab to an always-mounted sibling that the
+  // Announcements "walkthrough" chip only REVEALS. Same helper, same proof.
+  it("WalkthroughAnnouncementPanel is a display toggle on an always-rendered element, never a conditional render", () => {
+    assertAlwaysMounted("WalkthroughAnnouncementPanel", [
+      'activeTab === "manual"',
+      'toolsSection === "manual"',
+      'manualView === "announcements"',
+      'announcementsView === "walkthrough"',
+    ]);
+  });
+});
+
+// ANNOUNCEMENTS-TAB wave A-W2 (REQ-5): without this guard,
+// announcementsView === "walkthrough" would render AnnouncementsSubTab (the
+// composer) AND the always-mounted capture panel for the same chip. Proven red
+// (named mutation): dropping `&& announcementsView === "post"` from the branch.
+describe('the manualView === "announcements" branch renders AnnouncementsSubTab ONLY for announcementsView "post" (REQ-5)', () => {
+  it("the announcements TabShell branch is scoped to the post inner view", () => {
+    const source = read(PAGE);
+    const renderIndex = source.indexOf("<AnnouncementsSubTab");
+    expect(renderIndex, "src/app/page.tsx does not render AnnouncementsSubTab at all").toBeGreaterThan(-1);
+    expect(source.indexOf("<AnnouncementsSubTab", renderIndex + 1)).toBe(-1);
+    const wrapper = source.slice(Math.max(0, renderIndex - 120), renderIndex);
+    expect(
+      wrapper,
+      "the AnnouncementsSubTab branch does not restrict announcementsView to post - the composer would " +
+        "paint alongside the always-mounted walkthrough capture panel"
+    ).toMatch(/manualView === "announcements" && announcementsView === "post"/);
+    expect(wrapper).not.toContain('announcementsView === "walkthrough"');
+  });
+});
+
+// ANNOUNCEMENTS-TAB wave A-W2 (REQ-1, REQ-6): single mount site per moved panel,
+// and record-announcement stays in Recording. Counted over every production .tsx.
+describe("moved announcement surfaces have exactly one mount site (REQ-1, REQ-6)", () => {
+  function productionTsx(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(join(process.cwd(), dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) out.push(...productionTsx(rel));
+      else if (entry.name.endsWith(".tsx")) out.push(rel);
+    }
+    return out;
+  }
+  function mountSites(tag: string): string[] {
+    const re = new RegExp(`<${tag}[\\s/>]`);
+    return productionTsx("src").filter((rel) => re.test(read(rel)));
+  }
+
+  it("AnnouncementsPanel is mounted only by AnnouncementsSubTab, not CanvasTab", () => {
+    expect(mountSites("AnnouncementsPanel")).toEqual(["src/app/components/announcements/AnnouncementsSubTab.tsx"]);
+  });
+
+  it("BulkCourseMessagePanel is mounted only by AnnouncementsSubTab, not CanvasTab", () => {
+    expect(mountSites("BulkCourseMessagePanel")).toEqual(["src/app/components/announcements/AnnouncementsSubTab.tsx"]);
+  });
+
+  it("TakeAnnouncementPanel (record-announcement) stays mounted only by RecordingTab", () => {
+    expect(mountSites("TakeAnnouncementPanel")).toEqual(["src/app/components/RecordingTab.tsx"]);
+  });
+
+  it("the Recording cross-link navigates to manualView announcements via page.tsx's listener", () => {
+    const page = read(PAGE);
+    const start = page.indexOf("window.addEventListener(ANNOUNCEMENTS_NAV_EVENT");
+    expect(start, "page.tsx does not listen for ANNOUNCEMENTS_NAV_EVENT").toBeGreaterThan(-1);
+    const handler = page.slice(Math.max(0, start - 400), start);
+    expect(handler).toContain('setManualView("announcements")');
+    expect(read("src/app/components/RecordingTab.tsx")).toContain("openAnnouncementsTab");
   });
 });
 

@@ -15,6 +15,7 @@ import RecordingTab from "./components/RecordingTab";
 import GradingRecordingPanel from "./components/grading-recording/GradingRecordingPanel";
 import SnapshotGradingPanel from "./components/snapshot-grading/SnapshotGradingPanel";
 import GradingChatPanel from "./components/grading-chat/GradingChatPanel";
+import WalkthroughAnnouncementPanel from "./components/walkthrough-announcement/WalkthroughAnnouncementPanel";
 import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
@@ -63,6 +64,7 @@ import {
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch, resolveRecordingLaunchRoute } from "@/lib/recording-launch";
 import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
+import { ANNOUNCEMENTS_NAV_EVENT } from "@/lib/announcements-nav";
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
@@ -159,12 +161,28 @@ export default function Home() {
       const route = resolveRecordingLaunchRoute(detail.view);
       setManualView(route.manualView);
       if (route.gradingView) setGradingView(route.gradingView);
+      if (route.announcementsView) setAnnouncementsView(route.announcementsView);
       setToolsSection(route.toolsSection);
       setActiveTab(route.activeTab);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, [setManualView, setToolsSection, setActiveTab, setGradingView]);
+  }, [setManualView, setToolsSection, setActiveTab, setGradingView, setAnnouncementsView]);
+
+  // ANNOUNCEMENTS-TAB wave A-W2: the Recording tab's record-announcement
+  // cross-link (openAnnouncementsTab, src/lib/announcements-nav.ts) lands on
+  // Tools > Announcements > Post. Same live-listener shape as the others:
+  // this component is the sole owner of these setters.
+  useEffect(() => {
+    const handler = () => {
+      setManualView("announcements");
+      setAnnouncementsView("post");
+      setToolsSection("manual");
+      setActiveTab("manual");
+    };
+    window.addEventListener(ANNOUNCEMENTS_NAV_EVENT, handler);
+    return () => window.removeEventListener(ANNOUNCEMENTS_NAV_EVENT, handler);
+  }, [setManualView, setAnnouncementsView, setToolsSection, setActiveTab]);
 
   // "Back to Knowledge" (docs/knowledge-recording-handoff-acceptance-criteria.md,
   // AC4): the other half of the same "this is the ONLY place that can call
@@ -590,7 +608,6 @@ export default function Home() {
                   <TabShell>
                     <ContentTab
                       view={contentView}
-                      announcements={<CanvasTab view="announcements" />}
                       inbox={<CanvasTab view="inbox" />}
                     />
                   </TabShell>
@@ -614,7 +631,10 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "announcements" && (
+                {/* ANNOUNCEMENTS-TAB wave A-W2: scoped to the "post" inner view so
+                    it does not paint alongside the always-mounted walkthrough
+                    capture panel below (the grading run/repos precedent). */}
+                {manualView === "announcements" && announcementsView === "post" && (
                   <TabShell>
                     <AnnouncementsSubTab view={announcementsView} />
                   </TabShell>
@@ -763,6 +783,26 @@ export default function Home() {
           }}
         >
           <GradingChatPanel copiedKey={copiedKey} onCopy={handleCopy} onOpenPreview={handleOpenPreview} />
+        </div>
+
+        {/* ANNOUNCEMENTS-TAB wave A-W2 (T4): the announcement-from-a-walkthrough
+            capture panel MOVED here from RecordingTab. It holds a live screen
+            capture and frame queue, so exactly like the grading panels above it
+            is an always-rendered, display-toggled top-level sibling, never a
+            conditional render - a conditional mount would drop a running
+            capture the moment the user switched tabs. The "From a walkthrough"
+            chip only reveals it. */}
+        <div
+          style={{
+            display:
+              activeTab === "manual" && toolsSection === "manual" && manualView === "announcements" && announcementsView === "walkthrough"
+                ? undefined
+                : "none",
+          }}
+        >
+          <WalkthroughAnnouncementPanel
+            active={activeTab === "manual" && toolsSection === "manual" && manualView === "announcements" && announcementsView === "walkthrough"}
+          />
         </div>
 
         {activeTab === "files" && (

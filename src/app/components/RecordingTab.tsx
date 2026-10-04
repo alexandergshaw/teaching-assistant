@@ -29,13 +29,13 @@ import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
 import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
-import WalkthroughAnnouncementPanel from "./walkthrough-announcement/WalkthroughAnnouncementPanel";
 import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
 import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
+import { openAnnouncementsTab } from "@/lib/announcements-nav";
 import type { Take } from "./recording/types";
 
 export type { Take } from "./recording/types";
@@ -58,7 +58,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // siblings of this tab, reached through Tools > Grading's own inner nav
   // (gradingView), not through recView.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "moduledeck" | "walkannounce" | "messages"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "moduledeck" | "messages"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -69,7 +69,6 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "avatar" ||
       v === "announcement" ||
       v === "moduledeck" ||
-      v === "walkannounce" ||
       v === "messages"
       ? v
       : "record";
@@ -105,7 +104,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       // widening recView back to include them) is what lets recView's union
       // actually shrink - tsc rejects setRecView(detail.view) otherwise,
       // since detail.view still carries both values.
-      if (detail.view === "grading" || detail.view === "snapgrade" || detail.view === "remembered") return;
+      if (detail.view === "grading" || detail.view === "snapgrade" || detail.view === "remembered" || detail.view === "walkannounce") return;
       setRecView(detail.view);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
@@ -593,7 +592,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           points at the record panel's id rather than a non-existent
           announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
@@ -642,7 +641,10 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
         {recView === "announcement" && !walkthroughTake && !announcementTake && (
           <p className={styles.fieldHint}>
-            Record a new take, or pick an existing one below (including from your recording library), to draft a Canvas announcement from it.
+            Record a new take, or pick an existing one below (including from your recording library), to draft a Canvas announcement from it.{" "}
+            <Button type="button" variant="text" size="small" onClick={openAnnouncementsTab}>
+              Open the Announcements tab
+            </Button>
           </p>
         )}
 
@@ -867,17 +869,6 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           walkthrough-deck-acceptance-criteria.md AC1). */}
       <div role="tabpanel" id="rec-panel-moduledeck" aria-labelledby="rec-tab-moduledeck" style={{ display: recView === "moduledeck" ? undefined : "none" }}>
         <ModuleDeckCapturePanel active={active && recView === "moduledeck"} />
-      </div>
-
-      {/* Same always-mounted stack, same reason: an in-progress screen-share
-          capture and its frame queue must survive the user switching to
-          another inner view - the announcement-from-a-walkthrough feature's
-          own capture loop needs exactly the guarantee "moduledeck" needs
-          above (docs/announcement-from-walkthrough-acceptance-criteria.md).
-          A SIBLING capture surface to "moduledeck", not a mode of it - see
-          recording-launch.ts's own comment on this view for why. */}
-      <div role="tabpanel" id="rec-panel-walkannounce" aria-labelledby="rec-tab-walkannounce" style={{ display: recView === "walkannounce" ? undefined : "none" }}>
-        <WalkthroughAnnouncementPanel active={active && recView === "walkannounce"} />
       </div>
 
       {/* Same always-mounted stack, same reason: an in-progress inbox capture

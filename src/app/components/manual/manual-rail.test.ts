@@ -35,7 +35,8 @@ describe("manual-rail", () => {
       expect(getDestinationById("lms-quizzes")).toBeDefined();
       expect(getDestinationById("lms-pages")).toBeDefined();
       expect(getDestinationById("lms-files")).toBeDefined();
-      expect(getDestinationById("lms-announcements")).toBeDefined();
+      // ANNOUNCEMENTS-TAB A-W2: moved out of LMS into the Announcements sub-tab.
+      expect(getDestinationById("lms-announcements")).toBeUndefined();
       expect(getDestinationById("lms-inbox")).toBeDefined();
     });
   });
@@ -115,10 +116,10 @@ describe("manual-rail", () => {
       expect(state.contentView).toBe("modules");
     });
 
-    it("should resolve lms-announcements correctly", () => {
-      const state = resolveStateFromDestinationId("lms-announcements", "course-planning", "new", "modules", "run");
-      expect(state.manualView).toBe("content");
-      expect(state.contentView).toBe("announcements");
+    it("no longer resolves lms-announcements (moved to the Announcements sub-tab in A-W2)", () => {
+      const state = resolveStateFromDestinationId("lms-announcements", "recording", "new", "modules", "run");
+      // The id falls through: the current contentView is kept, never "announcements".
+      expect(state.contentView).toBe("modules");
     });
 
     it("should resolve lms-inbox correctly", () => {
@@ -145,7 +146,7 @@ describe("manual-rail", () => {
     });
 
     it("should list all LMS views", () => {
-      expect(LMS_VIEWS).toEqual(["modules", "assignments", "quizzes", "pages", "files", "announcements", "inbox"]);
+      expect(LMS_VIEWS).toEqual(["modules", "assignments", "quizzes", "pages", "files", "inbox"]);
     });
 
     it("should have all LMS views represented in rail", () => {
@@ -243,7 +244,6 @@ describe("manual-rail", () => {
         "lms-quizzes",
         "lms-pages",
         "lms-files",
-        "lms-announcements",
         "lms-inbox",
       ]);
     });

@@ -13,7 +13,7 @@ type SF = import("typescript").SourceFile;
 type Block = import("typescript").Block;
 
 const PANEL_DIR = "src/app/components/bulk-course-message";
-const HOST_FILE = "src/app/components/CanvasTab.tsx";
+const HOST_FILE = "src/app/components/announcements/AnnouncementsSubTab.tsx";
 
 function read(rel: string): string {
   return readFileSync(join(process.cwd(), rel), "utf8");

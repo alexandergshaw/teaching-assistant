@@ -89,7 +89,7 @@ import { requireUser } from "@/lib/supabase/auth";
 import { getCourse } from "@/lib/supabase/courses";
 import { countActiveCourseStudents } from "@/lib/canvas/listings";
 import { createCourseConversation } from "@/lib/canvas/inbox";
-import { sendBulkCourseMessageAction } from "./bulk-course-message";
+import { sendBulkCourseMessageAction, previewBulkCourseMessageAction } from "./bulk-course-message";
 
 const mReq = vi.mocked(requireUser);
 const mGet = vi.mocked(getCourse);
@@ -252,5 +252,96 @@ describe("W2-9 egress pin", () => {
     expect(src).not.toContain("callLlm");
     expect(src).not.toContain("@/lib/llm");
     expect(src).not.toMatch(/sendgrid|resend|nodemailer|smtp|gmail/i);
+  });
+});
+
+// ---- A29 W3: the preview action, a read-only twin of the send ----
+
+describe("W3-1 preview twin", () => {
+  it("runs requireUser first, then getCourse, then count, and never posts", async () => {
+    await previewBulkCourseMessageAction("c1");
+    expect(h.order).toEqual(["requireUser", "getCourse", "count"]);
+    expect(mPost).not.toHaveBeenCalled();
+  });
+
+  it.each([2, 50, 100])("count %i -> ready with the stored name and the count", async (n) => {
+    mCount.mockResolvedValueOnce(n);
+    mGet.mockImplementationOnce(async () => makeCourse({ name: "Stored Name" }));
+    const p = await previewBulkCourseMessageAction("c1");
+    expect(p).toEqual({ status: "ready", courseName: "Stored Name", count: n });
+    expect(Object.keys(p).every((k) => ["status", "courseName", "count"].includes(k))).toBe(true);
+    expect(mPost).not.toHaveBeenCalled();
+  });
+
+  it("refuses 1, 0 and 101 with the count in the reason where it applies", async () => {
+    mCount.mockResolvedValueOnce(1);
+    const one = await previewBulkCourseMessageAction("c1");
+    expect(one).toMatchObject({ status: "refused", kind: "one-student" });
+    expect("reason" in one && one.reason).toContain("1");
+    mCount.mockResolvedValueOnce(0);
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "one-student" });
+    mCount.mockResolvedValueOnce(101);
+    const over = await previewBulkCourseMessageAction("c1");
+    expect(over).toMatchObject({ status: "refused", kind: "over-max" });
+    expect("reason" in over && over.reason).toContain("101");
+    expect(mPost).not.toHaveBeenCalled();
+  });
+
+  it("a blank url, a blank institution and a null course refuse without reading the count", async () => {
+    mGet.mockImplementationOnce(async () => makeCourse({ canvasUrl: null }));
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "not-linked" });
+    mGet.mockImplementationOnce(async () => makeCourse({ institution: null }));
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "needs-institution" });
+    mGet.mockImplementationOnce(async () => null);
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "not-linked" });
+    expect(mCount).not.toHaveBeenCalled();
+  });
+
+  it("a credential error -> no-credential; any other throw -> canvas-unreachable", async () => {
+    mCount.mockRejectedValueOnce(new Error(CANVAS_CREDENTIAL_REQUIRED_MESSAGE));
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "no-credential" });
+    mCount.mockRejectedValueOnce(new Error("fetch failed"));
+    expect(await previewBulkCourseMessageAction("c1")).toMatchObject({ status: "refused", kind: "canvas-unreachable" });
+  });
+
+  it("a signed-out caller reaches nothing", async () => {
+    mReq.mockImplementationOnce(async () => {
+      throw new Error("Not signed in.");
+    });
+    await expect(previewBulkCourseMessageAction("c1")).rejects.toThrow("Not signed in.");
+    expect(h.order).toEqual([]);
+  });
+});
+
+describe("W3-1 parity: preview refuses iff send refuses, ready iff send posts", () => {
+  const countFixtures: number[] = [0, 1, 2, 50, 100, 101];
+  it.each(countFixtures)("count %i", async (n) => {
+    mCount.mockResolvedValue(n);
+    const preview = await previewBulkCourseMessageAction("c1");
+    expect(mPost).not.toHaveBeenCalled();
+    const sent = await sendBulkCourseMessageAction("c1", "S", "B");
+    const posted = mPost.mock.calls.length === 1;
+    expect(preview.status === "ready").toBe(posted);
+    expect(preview.status === "refused").toBe(sent.status === "refused");
+    if (preview.status === "refused" && sent.status === "refused") {
+      expect(preview.kind).toBe(sent.kind);
+      expect(preview.reason).toBe(sent.reason);
+    }
+  });
+
+  const pathFixtures: Array<[string, Partial<Course> | null]> = [
+    ["blank url", { canvasUrl: "  " }],
+    ["blank institution", { institution: " " }],
+    ["no course id in url", { canvasUrl: "https://x.instructure.com/about" }],
+    ["null course", null],
+  ];
+  it.each(pathFixtures)("%s", async (_label, over) => {
+    mGet.mockImplementation(async () => (over === null ? null : makeCourse(over)));
+    const preview = await previewBulkCourseMessageAction("c1");
+    const sent = await sendBulkCourseMessageAction("c1", "S", "B");
+    expect(preview.status).toBe("refused");
+    expect(sent.status).toBe("refused");
+    if (preview.status === "refused" && sent.status === "refused") expect(preview.kind).toBe(sent.kind);
+    expect(mPost).not.toHaveBeenCalled();
   });
 });

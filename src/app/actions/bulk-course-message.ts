@@ -1,8 +1,10 @@
 "use server";
 
-// A29 W2: the one server action behind the course-wide message. Order is
+// A29 W2/W3: the server actions behind the course-wide message. Order is
 // fixed: requireUser -> getCourse -> canLms gate -> count read -> predicate ->
-// the single Canvas POST, which happens only on a permit. The body is passed
+// the single Canvas POST, which happens only on a permit. The preview action
+// (W3) runs the identical chain through ONE shared resolver and stops before
+// the POST, so display and send cannot disagree on a permit or a refusal. The body is passed
 // to the builder byte-identical; plain-text stripping is a draft-accept
 // concern, not this action's. No per-student data leaves this function.
 
@@ -39,9 +41,60 @@ const REFUSAL_COPY = {
   "canvas-refused": "Canvas refused the message.",
 } satisfies Record<RefusalKind, string>;
 
-function refuse(kind: RefusalKind, count?: number, detail?: string): BulkCourseMessageOutcome {
+type RefusedOutcome = Extract<BulkCourseMessageOutcome, { status: "refused" }>;
+
+function refuse(kind: RefusalKind, count?: number, detail?: string): RefusedOutcome {
   const base = REFUSAL_COPY[kind].replace("{n}", String(count ?? ""));
   return { status: "refused", kind, reason: detail ? `${base} ${detail}` : base };
+}
+
+export type BulkCoursePreview =
+  | { status: "ready"; courseName: string; count: number }
+  | RefusedOutcome;
+
+type ResolvedBulkCourse =
+  | { ok: true; canvasUrl: string; courseName: string; count: number }
+  | { ok: false; refusal: RefusedOutcome };
+
+// The one shared chain behind both exports: course lookup, the live-LMS gate,
+// the active-student count and the two-bound predicate. Not exported (a
+// "use server" module may export only async functions). It performs no POST.
+async function resolveBulkCourse(userId: string, courseId: string): Promise<ResolvedBulkCourse> {
+  const refused = (kind: RefusalKind, count?: number): ResolvedBulkCourse => ({
+    ok: false,
+    refusal: refuse(kind, count),
+  });
+  const course = await getCourse(userId, courseId);
+  if (!course) return refused("not-linked");
+  if (!canLms(course)) {
+    return refused((course.canvasUrl ?? "").trim() ? "needs-institution" : "not-linked");
+  }
+  const canvasUrl = (course.canvasUrl ?? "").trim();
+  const institution = (course.institution ?? "").trim();
+  const canvasCourseId = canvasUrl.match(/\/courses\/(\d+)/)?.[1];
+  if (!canvasCourseId) return refused("not-linked");
+
+  let count: number;
+  try {
+    count = await countActiveCourseStudents(institution, canvasCourseId);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "";
+    return refused(message === CANVAS_CREDENTIAL_REQUIRED_MESSAGE ? "no-credential" : "canvas-unreachable");
+  }
+
+  const decision = classifyRecipientCount(count);
+  if (!decision.send) return refused(decision.kind, decision.count);
+  return { ok: true, canvasUrl, courseName: course.name, count };
+}
+
+// Read-only twin of the send: the stored course name and the active-student
+// count the send's predicate would use, or the refusal the send would return.
+// Never posts anything.
+export async function previewBulkCourseMessageAction(courseId: string): Promise<BulkCoursePreview> {
+  const user = await requireUser();
+  const resolved = await resolveBulkCourse(user.id, courseId);
+  if (!resolved.ok) return resolved.refusal;
+  return { status: "ready", courseName: resolved.courseName, count: resolved.count };
 }
 
 export async function sendBulkCourseMessageAction(
@@ -50,28 +103,10 @@ export async function sendBulkCourseMessageAction(
   body: string
 ): Promise<BulkCourseMessageOutcome> {
   const user = await requireUser();
-  const course = await getCourse(user.id, courseId);
-  if (!course) return refuse("not-linked");
-  if (!canLms(course)) {
-    return refuse((course.canvasUrl ?? "").trim() ? "needs-institution" : "not-linked");
-  }
-  const canvasUrl = (course.canvasUrl ?? "").trim();
-  const institution = (course.institution ?? "").trim();
-  const canvasCourseId = canvasUrl.match(/\/courses\/(\d+)/)?.[1];
-  if (!canvasCourseId) return refuse("not-linked");
+  const resolved = await resolveBulkCourse(user.id, courseId);
+  if (!resolved.ok) return resolved.refusal;
 
-  let count: number;
-  try {
-    count = await countActiveCourseStudents(institution, canvasCourseId);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "";
-    return refuse(message === CANVAS_CREDENTIAL_REQUIRED_MESSAGE ? "no-credential" : "canvas-unreachable");
-  }
-
-  const decision = classifyRecipientCount(count);
-  if (!decision.send) return refuse(decision.kind, decision.count);
-
-  const result = await createCourseConversation(canvasUrl, body, subject);
+  const result = await createCourseConversation(resolved.canvasUrl, body, subject);
   if (result.status === "accepted") return { status: "accepted" };
   if (result.status === "refused") return refuse("canvas-refused", undefined, result.reason);
   return { status: "unknown", reason: result.reason ?? "Delivery is unconfirmed." };

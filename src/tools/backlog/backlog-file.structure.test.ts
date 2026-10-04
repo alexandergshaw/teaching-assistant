@@ -70,7 +70,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // WA-DRAFT-LOSS, GR-POST-ONE-CONFIRM, RG-GRADEALL-CONFIRM, SMOOTH-GRADER,
 // SMOOTH-WALKTHROUGH and SMOOTH-BASELINE (seven new rows); A7 was updated in
 // place, not added.
-const EXPECTED_ROW_COUNT = 103;
+const EXPECTED_ROW_COUNT = 104;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

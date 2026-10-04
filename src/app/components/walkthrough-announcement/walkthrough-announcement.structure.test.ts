@@ -439,6 +439,11 @@ describe("G1: the old savedExemplarsLoading/savedExemplarsFailed booleans are go
 });
 
 describe("G6: the courseId seed from localStorage is TRIMMED", () => {
+  // The seed lives in the extracted setup hook (W0), not the panel.
+  const setupSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "useWalkthroughSetup.ts"),
+    "utf-8"
+  );
   const panelSource = fs.readFileSync(
     path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
     "utf-8"
@@ -454,7 +459,7 @@ describe("G6: the courseId seed from localStorage is TRIMMED", () => {
   it("reads the stored course id through .trim(), so a blank-but-truthy value cannot reach the actions", () => {
     const seed = /localStorage\.getItem\(STORAGE_KEY_COURSE\)\s*\?\?\s*""\)\.trim\(\)/;
     expect(
-      panelSource,
+      setupSource,
       "the courseId useState initializer must trim the localStorage value - see this describe block's comment"
     ).toMatch(seed);
   });
@@ -462,9 +467,10 @@ describe("G6: the courseId seed from localStorage is TRIMMED", () => {
   // Canary: proves the assertion above is reading the seed and not some other
   // getItem call. If this ever fails, the key or the initializer moved and the
   // test above may be matching the wrong line.
-  it("canary: there is exactly one STORAGE_KEY_COURSE read in the panel", () => {
-    const reads = panelSource.match(/localStorage\.getItem\(STORAGE_KEY_COURSE\)/g) ?? [];
+  it("canary: there is exactly one STORAGE_KEY_COURSE read, in the hook, and none in the panel", () => {
+    const reads = setupSource.match(/localStorage\.getItem\(STORAGE_KEY_COURSE\)/g) ?? [];
     expect(reads.length).toBe(1);
+    expect((panelSource.match(/localStorage\.getItem\(STORAGE_KEY_COURSE\)/g) ?? []).length).toBe(0);
   });
 });
 

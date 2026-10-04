@@ -58,8 +58,15 @@ File sizes `[MEASURED @(Get-Content <f>).Count]`:
   which silently drops any unmatched argument (`this-repo.md` "Running a named
   set of test files"). A single path may use `npx vitest run <path>`.
 - The exact set to run as the wave gate:
-  `npm run test:paths src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts src/app/components/walkthrough-announcement/walkthrough-run-decisions.test.ts src/app/components/walkthrough-announcement/announcement-draft-slots.test.ts src/app/components/walkthrough-announcement/useWalkthroughSetup.test.ts src/file-size-ceiling.structure.test.ts`
+  `npm run test:paths src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts src/app/components/walkthrough-announcement/walkthrough-run-decisions.test.ts src/app/components/walkthrough-announcement/announcement-draft-slots.test.ts src/file-size-ceiling.structure.test.ts`
   (plus `.../useAnnouncementDraftSlots.test.ts` if W1 touches the hook export).
+  There is NO `useWalkthroughSetup.test.ts`: the hook renders nothing under
+  vitest (node-env, `src/**/*.test.ts` only), so its runtime is OWNER residual
+  T-RUNTIME and its extraction is covered by the retargeted G6 block inside
+  `walkthrough-announcement.structure.test.ts` (B0-2). Every path above either
+  pre-exists on HEAD (`walkthrough-announcement.structure.test.ts`,
+  `src/file-size-ceiling.structure.test.ts`) or is created by W1's write set
+  (`walkthrough-run-decisions.test.ts`, `announcement-draft-slots.test.ts`).
 - Prove the tree, not a report: `git status --short` against the wave's write
   set, and confirm no `.claude/worktrees` copy was edited (`this-repo.md`
   section 7: `Glob` returns the worktree copy FIRST).
@@ -381,7 +388,8 @@ contested row, and route it.
    `if (storedId && eligible.some(id===storedId)) return storedId; if
    (eligible.length === 1) return eligible[0].id; return null;`. Measured
    `[MEASURED node scratchpad/ref.mjs]`: this returns the SOLE course even for a
-   STALE stored id (`resolveSelectedCourse([c1], "c2") === "c1"`).
+   STALE stored id (`resolveSelectedCourse("c2", [c1]) === "c1"`; storedId is the
+   FIRST arg, eligible the second, `[READ bulk-message-model.ts:90-93]`).
 2. Scope M5 `[READ scope:349-352]`: auto-select "If `ta-rec-wta-course` has never
    been written (raw `null` or `""`) and exactly one Canvas-linked course loaded
    ... Never overrides an explicit value; never changes a persisted course."
@@ -616,7 +624,7 @@ verified:
 | ID | Not proven now | Owner | Instrument | Step that measures it |
 |---|---|---|---|---|
 | T-RULING-1 | courseToAutoSelect stale+single row: null (R) or sole course (precedent) | repo owner / orchestrator | the row `courseToAutoSelect([{id:"c1"}],"c2")`; decide the expected value | BEFORE W1 build finalizes W1-3 row A8 |
-| T-AC12 | AC-12's literal "returns an id ONLY when never written" is RED against R/precedent on row A6 (a call-site no-op) | orchestrator | reconcile AC-12 wording to "never returns an id DIFFERENT from the stored one" or accept R | with T-RULING-1 |
+| T-AC12 | AC-12's literal "returns an id ONLY when never written" is RED against R/precedent on BOTH rows A6 (`[c1],"c1"`) and A7 (`[c1,c2],"c1"`) - each returns the present+eligible stored id unchanged, a call-site no-op | orchestrator | reconcile AC-12 wording to "never returns an id DIFFERENT from the stored one" or accept R | with T-RULING-1 |
 | T-F2-RESET | whether the hook's `reset()` should seed the persisted "Written for" (F2) rather than default timing | repo owner | product call; one row if yes | W2 (hook wiring) |
 | T-AC10 | the W2 auto-draft effect calls shouldAutoDraft with the SAME predicate (exported-but-uncalled trap) | test seat (W2 notes) | a structure/wiring assertion in the file that calls it | W2 test notes |
 | T-REMOVAL | leverage claim is click/scroll/cursor cost; no MACHINE removal test is buildable (nothing renders) | repo owner | the scope section 3.4 browser snippet + a click count on a fresh and a returning profile | Verify after W3 (scope AC-1/AC-5/AC-8/AC-13) |

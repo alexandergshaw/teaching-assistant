@@ -300,3 +300,244 @@ describe("useContinuousGradingRun - BLOCKER-1: pointsPossible threading", () => 
     expect(dispatchedBody.pointsPossible).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Grader Wave W1 (docs/grader-w1-test-notes.md): six oracles, every expected
+// value a frozen literal (nothing imported to build an expectation).
+// ---------------------------------------------------------------------------
+
+const CANVAS_URL = "https://canvas.example.edu/courses/1/assignments/2";
+const OTHER_CANVAS_URL = "https://canvas.example.edu/courses/1/assignments/9";
+const GITHUB_URL = "https://github.com/acme/repo";
+
+const okHeader = {
+  kind: "ok" as const,
+  effectiveRubric: "1. Correctness",
+  generatedRubric: undefined,
+  criteriaNames: [],
+  rubricUsed: "1. Correctness",
+  rubricFingerprint: "fp-123",
+};
+
+const genHeader = {
+  kind: "ok" as const,
+  effectiveRubric: "GENERATED RUBRIC",
+  generatedRubric: "GENERATED RUBRIC",
+  criteriaNames: [],
+  rubricUsed: "GENERATED RUBRIC",
+  rubricFingerprint: "fp-gen",
+};
+
+function oneEntry(student: string) {
+  return {
+    kind: "entries" as const,
+    entries: [{ student, content: "x", mergedFileCount: 1, submittedFiles: [] }],
+    pointsPossible: 100,
+  };
+}
+
+describe("W1 oracle 1 - G1/FF-L: the driver pins the Canvas URL", () => {
+  it("a Canvas URL submission is retained as driver.canvasUrl; starts empty", async () => {
+    let driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("");
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("https://canvas.example.edu/courses/1/assignments/2");
+  });
+
+  it("a GitHub URL submission never becomes canvasUrl", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "url", url: GITHUB_URL });
+    driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("");
+  });
+
+  it("a second, different Canvas URL is refused and does not change canvasUrl (F3=A)", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    driver = useTestDriver();
+    const second = await driver.submit({ kind: "url", url: OTHER_CANVAS_URL });
+    expect(second.kind).toBe("refused");
+    driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("https://canvas.example.edu/courses/1/assignments/2");
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("W1 oracle 2 - G2/FF-2: cross-event duplicate names are disambiguated", () => {
+  it("two separate events yielding the same name dispatch 'Assignment 1' then 'Assignment 1 (2)'", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Assignment 1"));
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "url", url: GITHUB_URL });
+    driver = useTestDriver();
+    await driver.submit({ kind: "url", url: GITHUB_URL });
+    expect(dispatchItemMock).toHaveBeenCalledTimes(2);
+    expect(dispatchItemMock.mock.calls[0][0].entry.student).toBe("Assignment 1");
+    expect(dispatchItemMock.mock.calls[1][0].entry.student).toBe("Assignment 1 (2)");
+    expect(dispatchItemMock.mock.calls[0][0].sourceIndex).toBe(0);
+    expect(dispatchItemMock.mock.calls[1][0].sourceIndex).toBe(1);
+  });
+});
+
+describe("W1 oracle 3 - G3/FF-3: a new session has a different discriminator", () => {
+  it("sessionId and runKey are non-empty and differ across reset()", async () => {
+    let driver = useTestDriver();
+    const before = driver.runKey;
+    const sessionBefore = driver.sessionId;
+    expect(before).not.toBe("");
+    driver.reset();
+    driver = useTestDriver();
+    expect(driver.runKey).not.toBe("");
+    expect(driver.runKey).not.toBe(before);
+    expect(driver.sessionId).not.toBe(sessionBefore);
+  });
+});
+
+describe("W1 oracle 4 - G4/FF-4: runKey is stable within a session", () => {
+  it("runKey is identical after two arrivals and changes after reset()", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Alice"));
+    await driver.submit({ kind: "text", content: "one" });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.runKey).toBe("grading-chat-0");
+
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Bob"));
+    await driver.submit({ kind: "text", content: "two" });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(2);
+    expect(driver.runKey).toBe("grading-chat-0");
+
+    driver.reset();
+    driver = useTestDriver();
+    expect(driver.runKey).toBe("grading-chat-1");
+  });
+});
+
+describe("W1 oracle 5 - G6/FF-7: a failed row is retried in place", () => {
+  it("retry re-dispatches the original body at the same sourceIndex, adds no row, and is a no-op on a graded row", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockRejectedValueOnce(new Error("boom"));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+    expect(driver.results[0].ungraded?.kind).toBe("grading-failed");
+
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Ada"));
+    driver.retry(0);
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+    expect(driver.dispatchedCount).toBe(1);
+    expect(driver.results[0].ungraded).toBeUndefined();
+    // W1-R2: a retried row replaces its failed arrival, never double-counts.
+    expect(driver.completedCount).toBe(1);
+
+    expect(dispatchItemMock).toHaveBeenCalledTimes(2);
+    const retryBody = dispatchItemMock.mock.calls[1][0];
+    expect(retryBody.sourceIndex).toBe(0);
+    expect(retryBody.rubric).toBe("1. Correctness");
+    expect(retryBody.pointsPossible).toBe(100);
+    expect(retryBody.entry.student).toBe("Ada");
+
+    driver.retry(0);
+    await flushMicrotasks();
+    expect(dispatchItemMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("W1 oracle 6 - G7/FF-9: the driver exposes the effective rubric and provenance", () => {
+  it("exposes effectiveRubric and rubricFingerprint at the top level, consistent with the stamped run", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "1. Correctness" });
+    driver = useTestDriver();
+    expect(driver.effectiveRubric).toBe("1. Correctness");
+    expect(driver.rubricFingerprint).toBe("fp-123");
+
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Alice"));
+    await driver.submit({ kind: "text", content: "one" });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(dispatchItemMock.mock.calls[0][0].rubric).toBe("1. Correctness");
+    expect(driver.run?.rubricFingerprint).toBe("fp-123");
+    expect(driver.rubricFingerprint).toBe("fp-123");
+  });
+
+  it("FF-1: a blank rubric box with a generated rubric exposes the generated text, not empty", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(genHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    expect(driver.effectiveRubric).toBe("GENERATED RUBRIC");
+    expect(driver.generatedRubric).toBe("GENERATED RUBRIC");
+    expect(driver.rubricFingerprint).toBe("fp-gen");
+  });
+});
+
+describe("W1 B1 - reset() clears every per-session ref (F3=A is per session)", () => {
+  it("a new session inherits no Canvas URL, no claimed labels, and no retry bodies", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Assignment 1"));
+    dispatchItemMock.mockRejectedValueOnce(new Error("boom"));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("https://canvas.example.edu/courses/1/assignments/2");
+    expect(driver.results[0].ungraded?.kind).toBe("grading-failed");
+
+    driver.reset();
+    driver = useTestDriver();
+    // (a) the pinned Canvas URL is gone.
+    expect(driver.canvasUrl).toBe("");
+
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    // (b) a different Canvas URL is accepted in the new session, and the
+    // first new-session "Assignment 1" is NOT suffixed.
+    dispatchItemMock.mockReset();
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    const outcome = await driver.submit({ kind: "url", url: OTHER_CANVAS_URL });
+    expect(outcome.kind).toBe("accepted");
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+    expect(dispatchItemMock.mock.calls[0][0].entry.student).toBe("Assignment 1");
+    driver = useTestDriver();
+    expect(driver.canvasUrl).toBe("https://canvas.example.edu/courses/1/assignments/9");
+
+    // (c) a retry aimed at the prior session's sourceIndex 0 must not
+    // re-dispatch: the new session has no arrived row there yet, and the
+    // old retained body is gone.
+    dispatchItemMock.mockClear();
+    driver.retry(0);
+    await flushMicrotasks();
+    expect(dispatchItemMock).toHaveBeenCalledTimes(0);
+    driver.retry(5);
+    expect(dispatchItemMock).toHaveBeenCalledTimes(0);
+  });
+});

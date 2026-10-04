@@ -32,6 +32,8 @@ import { resolveChatRunHeaderAction, prepareChatSubmissionAction } from "@/app/a
 import { buildTextEntry, type ChatSubmissionInput } from "./chatSubmissionIntake";
 import type { GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
+import { detectCanvasUrlKind } from "@/lib/canvas-url";
+import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import {
   mergeArrivedResults,
   buildIncrementalRun,
@@ -81,6 +83,19 @@ export interface UseContinuousGradingRunResult {
   }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
   readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
   readonly reset: () => void;
+  /** Re-dispatches the ORIGINAL request body of a failed row in place (same
+   * sourceIndex, no new row). A no-op on a graded or still-pending row. */
+  readonly retry: (sourceIndex: number) => void;
+  /** The one Canvas URL pinned for this session (F3=A); "" until a Canvas URL
+   * submission is accepted. */
+  readonly canvasUrl: string;
+  /** Stable for a session, changes only across reset(): "grading-chat-" + sessionId. */
+  readonly runKey: string;
+  readonly sessionId: number;
+  /** The resolved header's rubric fields, exposed at the top level. */
+  readonly effectiveRubric: string;
+  readonly rubricFingerprint: string;
+  readonly generatedRubric: string | undefined;
   readonly headerState: HeaderState;
   readonly results: readonly GradeResult[];
   readonly run: GradingRun | null;
@@ -119,6 +134,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const inFlightRef = useRef(0);
   const dispatchedCountRef = useRef(0);
   const ordinalRef = useRef(0);
+  const canvasUrlRef = useRef("");
+  const sessionIdRef = useRef(0);
+  const takenLabelsRef = useRef<Set<string>>(new Set());
+  const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
+  const pendingRef = useRef<Set<number>>(new Set());
 
   const [headerState, setHeaderState] = useState<HeaderState>("unset");
   const [results, setResults] = useState<readonly GradeResult[]>([]);
@@ -151,6 +171,14 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // frees its slot and still asks for the next item, so
   // INCREMENTAL_CONCURRENCY consecutive failures cannot permanently occupy
   // every slot.
+  // Last-wins by sourceIndex: a retried row replaces its failed arrival so
+  // completedCount never double-counts (W1-R2).
+  const recordArrival = (arrived: ArrivedItemResult) => {
+    const at = arrivedRef.current.findIndex((a) => a.sourceIndex === arrived.sourceIndex);
+    if (at >= 0) arrivedRef.current[at] = arrived;
+    else arrivedRef.current.push(arrived);
+  };
+
   const pump = () => {
     while (inFlightRef.current < INCREMENTAL_CONCURRENCY && queueRef.current.length > 0) {
       const request = queueRef.current.shift()!;
@@ -159,15 +187,16 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
       dispatchItem(request)
         .then((result) => {
-          arrivedRef.current.push({ sourceIndex: request.sourceIndex, result });
+          recordArrival({ sourceIndex: request.sourceIndex, result });
         })
         .catch((err) => {
-          arrivedRef.current.push({
+          recordArrival({
             sourceIndex: request.sourceIndex,
             result: classifyItemFailure(request.sourceIndex, request.entry, err),
           });
         })
         .finally(() => {
+          pendingRef.current.delete(request.sourceIndex);
           inFlightRef.current -= 1;
           setInFlight(inFlightRef.current);
           setCompletedCount(arrivedRef.current.length);
@@ -206,6 +235,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
     let entries: StudentSubmissionEntry[];
     let pointsPossible: number | null = null;
+    let canvasUrlToPin: string | null = null;
 
     if (input.kind === "text") {
       if (!input.content.trim()) {
@@ -214,6 +244,16 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       ordinalRef.current += 1;
       entries = [buildTextEntry({ label: input.label, content: input.content }, ordinalRef.current)];
     } else {
+      if (input.kind === "url" && detectCanvasUrlKind(input.url) !== null) {
+        // F3=A: one Canvas URL per session; a different one needs a new session.
+        if (canvasUrlRef.current !== "" && canvasUrlRef.current !== input.url) {
+          return {
+            kind: "refused",
+            reason: "This session is already tied to a different Canvas assignment. Start a new session to grade another.",
+          };
+        }
+        canvasUrlToPin = input.url;
+      }
       const formData = new FormData();
       if (input.kind === "file") {
         formData.set("kind", "file");
@@ -240,20 +280,29 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
       };
     }
+    if (canvasUrlToPin !== null) canvasUrlRef.current = canvasUrlToPin;
     const admitted = entries.slice(0, available);
     const refusedCount = entries.length - admitted.length;
 
-    for (const entry of admitted) {
+    for (const rawEntry of admitted) {
       const sourceIndex = dispatchedCountRef.current;
       dispatchedCountRef.current += 1;
-      queueRef.current.push({
+      // Cross-event duplicate display names: the first claimant keeps its
+      // name, later ones get " (2)", " (3)" so row identity stays unique.
+      const label = assignUnclaimedLabel(rawEntry.student, takenLabelsRef.current);
+      takenLabelsRef.current.add(label);
+      const entry = label === rawEntry.student ? rawEntry : { ...rawEntry, student: label };
+      const body: GradeRunItemRequestBody = {
         sourceIndex,
         entry,
         assignmentInstructions: assignmentInstructionsRef.current,
         rubric: header.effectiveRubric,
         provider,
         pointsPossible,
-      });
+      };
+      retainedBodiesRef.current.set(sourceIndex, body);
+      pendingRef.current.add(sourceIndex);
+      queueRef.current.push(body);
     }
     setDispatchedCount(dispatchedCountRef.current);
     pump();
@@ -271,7 +320,22 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     return { kind: "accepted", entryCount: admitted.length };
   };
 
+  const retry = (sourceIndex: number) => {
+    const body = retainedBodiesRef.current.get(sourceIndex);
+    if (!body || pendingRef.current.has(sourceIndex)) return;
+    const arrived = arrivedRef.current.find((a) => a.sourceIndex === sourceIndex);
+    if (!arrived || !arrived.result.ungraded) return;
+    pendingRef.current.add(sourceIndex);
+    queueRef.current.push(body);
+    pump();
+  };
+
   const reset = () => {
+    sessionIdRef.current += 1;
+    canvasUrlRef.current = "";
+    takenLabelsRef.current = new Set();
+    retainedBodiesRef.current = new Map();
+    pendingRef.current = new Set();
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
     arrivedRef.current = [];
@@ -292,6 +356,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     beginSession,
     submit,
     reset,
+    retry,
+    canvasUrl: canvasUrlRef.current,
+    runKey: "grading-chat-" + sessionIdRef.current,
+    sessionId: sessionIdRef.current,
+    effectiveRubric: headerRef.current?.effectiveRubric ?? "",
+    rubricFingerprint: headerRef.current?.rubricFingerprint ?? "",
+    generatedRubric: headerRef.current?.generatedRubric,
     headerState,
     results,
     run,

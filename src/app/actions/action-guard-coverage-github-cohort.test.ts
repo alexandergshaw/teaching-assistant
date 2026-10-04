@@ -622,12 +622,18 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
 // action-guard-coverage.test.ts), not a wrong-guard matter; still
 // closure-reaches GitHub, so still named here rather than left for a reader
 // to rediscover (R4-r2, docs/r4-scope.md section 7).
+// Added 2026-10-04 (A29 W2, commit 0ff48952): actions/bulk-course-message.ts -
+// one action (sendBulkCourseMessageAction) on requireUser(); the live import-graph
+// closure reaches GitHub through it (route not traced here). Recorded here as known and
+// not yet folded into a per-action review (docs/r4-scope.md); NOT a safety
+// classification.
 // SHRINK-ONLY: this is not a safety classification (unlike
 // GITHUB_NOT_OWNER_ONLY) - it is a record of "known, not yet folded into a
 // per-action review." A name leaves this list only when GITHUB_FILES or
 // GITHUB_NOT_OWNER_ONLY takes it over for real; nothing may be added without
 // deliberately widening this comment to say why.
 const GITHUB_FILES_PENDING_ENUMERATION = new Set([
+  "actions/bulk-course-message.ts",
   "actions/llm-content.ts",
 ]);
 

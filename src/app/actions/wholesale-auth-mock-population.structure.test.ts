@@ -158,6 +158,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "announcement-image.test.ts",
   "automation-runs.test.ts",
   "build-assignment-plan.embedded-opener.test.ts",
+  "bulk-course-message.test.ts",
   "canvas-discussions.test.ts",
   "canvas-inbox.announcement-image.test.ts",
   "canvas-inbox.message-replies.test.ts",

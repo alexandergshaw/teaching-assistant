@@ -70,7 +70,11 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // WA-DRAFT-LOSS, GR-POST-ONE-CONFIRM, RG-GRADEALL-CONFIRM, SMOOTH-GRADER,
 // SMOOTH-WALKTHROUGH and SMOOTH-BASELINE (seven new rows); A7 was updated in
 // place, not added.
-const EXPECTED_ROW_COUNT = 107;
+// 107 -> 110: ANNOUNCEMENTS-TAB group-close residuals filed 2026-10-04 -
+// WA-MOVE-WALK (R-3 end-to-end browser walk), WA-SWITCHER-PLACEMENT (R-5
+// switcher placement reads well), WA-RETIRED-POINTER (R-12 stale-pointer
+// redirect, owner decision) - all owner-state follow-ups of the completed move.
+const EXPECTED_ROW_COUNT = 110;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

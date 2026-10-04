@@ -1256,7 +1256,7 @@
 - id: 'ANNOUNCEMENTS-TAB'
   state: 'actionable'
   kind: 'feature'
-  area: 'navigation-ia'
+  area: 'announcement-composition-surfaces'
   title: 'Owner request 2026-10-04 verbatim: "announcement tools need to be put into their own Announcements tab, underneath the tools tab." A navigation/IA restructure: a NEW Announcements tab (a sub-tab under the Tools tab) that groups the announcement tools, which today are scattered. FOUNDATIONAL for WALKTHROUGH-OVERHAUL (that surface relocates here).'
   owns: []
   verify: null

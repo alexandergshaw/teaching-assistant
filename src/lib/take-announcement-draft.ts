@@ -10,7 +10,7 @@ import type { TakeAnnouncementContext } from "./take-announcement";
 import { collectTakePermittedUrls, stripUnpermittedUrls } from "./walkthrough-announcement-link-guard";
 
 export const EMBEDDED_DRAFT_REFUSAL =
-  "The deterministic engine can't draft an announcement from a recording. Switch to the AI engine and try again.";
+  "The Embedded Deterministic Engine can't draft an announcement from a recording. Switch the LLM provider to Gemini in Settings and try again.";
 
 // Same wording as the walkthrough drafter's own blank-result error.
 export const BLANK_DRAFT_ERROR = "Generated announcement is empty. Try again.";

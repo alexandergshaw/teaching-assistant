@@ -47230,3 +47230,276 @@ Each names an owner, an instrument, and the step that will measure it.
 | BL447-3 | Real `callLlm` output quality/faithfulness for all 8 pipeline ops - no API key, no real fetch in this environment | Owner | Generate through each of the 8 ops against a real model in a deployed environment and read the output | Post-deploy owner verification (RES-PRES2-5 / RES-S6-C, `docs/pres-2-s6-plan.md:391`) |
 | BL447-4 | S6.7 (the stepper surface, run-to-end execution against a live route, drag/paste, deck preview, `.pptx` download, per-slide ask) - out of scope for this entry entirely; nothing under `components/presentations/pipeline/` renders yet | S6.7 implementer + its verifier | Build the surface per `docs/pres-2-s6-plan.md:227`'s file list, then a reading pass plus owner walkthrough (RES-S6-C) | S6.7's own wave gate + owner verification after it lands |
 | BL447-5 | Per-project/server persistence and RLS for pipeline stage-state - today's `PipelineState` has no persistence path in any of these four files; the plan defers this to client-only `localStorage` for now | Repo owner + future data wave | A migration with a stored generated column + idempotent RLS (`docs/loop/seats.md:217-229`), then a live-DB check | Deferred; owner verification on a deployed DB (RES-S6-B, `docs/pres-2-s6-plan.md:390`) |
+
+## 448. Grader engine, `gradeEntries` path: bad-output handling and comment routing BEFORE the G5 + G8/F1=B engine wave - baseline
+
+The frozen before-state the engine wave (G5 bad-output guard, G8/F1=B comment
+split; test notes `docs/grader-engine-test-notes.md`) is regression-tested
+against. Written from HEAD before any `engine.ts` / `parsing.ts` edit lands. Like
+entries 446 and 447 this is an oracle read out of source and confirmed by
+running the code, not a requirement: every sentence below is a statement of what
+the code does BEFORE the engine wave, and a later change that moves a cited line
+or a measured value without being filed to move it is a regression. Two of the
+behaviors below (items 2 and 3) are KNOWN-WRONG and the wave is expected to
+change them on purpose - they are baselined precisely so the change is measured,
+not so they are preserved.
+
+**Read at** `19de9018` (`git rev-parse --short HEAD` at write time; the session
+started at `903d9bd7` and an automated commit hook advanced it - only `docs/`
+files moved). Last commit to the files this entry reads:
+`6e8e7134` (`git log --oneline -1 -- src/lib/grade/engine.ts src/lib/grade/parsing.ts src/lib/grade/types.ts src/lib/llm.ts`).
+`git status --short -- src` printed nothing at write time (no uncommitted source
+edit). Line counts, `wc -l`: `engine.ts` 487, `parsing.ts` 301, `types.ts` 463.
+(Cited by `wc -l`; the repo's other line counter disagrees on some files by 42,
+`docs/loop/traps-spec.md`.)
+
+### How the values below were measured (and the limit of that instrument)
+
+Every row labelled MEASURED was produced by driving the exported `gradeEntries`
+(`engine.ts:430`) with `callLlm` mocked (`vi.mock` of `src/lib/llm`, the same
+door `engine.test.ts:13-15` mocks) and `../gemini`, `../code-runner` mocked the
+way `engine.test.ts:6-33` mocks them (cap 20 chars, 700 max output tokens, 5
+max submissions, no inter-request delay, no code run). One entry, `student:
+"Jane Doe"`, `userId: 42`, rubric text `"Overall (10 pts)"`, instructions
+`"instr"`. The probe lived OUTSIDE the repo (a scratch vitest config with
+`root` set to this checkout and the test file under the session scratchpad,
+run as `npx vitest run --config <scratch>/vitest.scratch.config.ts`); it was
+not committed and is not in `src/`, so it is not collected by `npm test`. Its
+result: 14 probe tests, all executed, output captured as JSON per case. That is
+a ONE-TIME measurement. **No committed test pins items 2 or 3 today** - see
+"What executes over this behaviour today" - and the engine wave's own tests
+(`docs/grader-engine-test-notes.md` sections 4-6) are the first committed
+instrument that will. A reader who needs to re-measure a row re-runs a probe of
+that shape; the cited `file:line` is the reading, the MEASURED value is the
+confirmation.
+
+### 1. A valid, complete, parseable `ok` result -> a graded row (BEFORE the engine wave)
+
+Input: `{ok: true, text: JSON.stringify({overallComment: "RAW_SENTINEL_OK",
+improvements: "ADV", rubricResults: [{area: "Overall", score: "8/10"}],
+totalScore: "8/10"})}`, with `finishReason` ABSENT (probe 1a) and with
+`finishReason: "STOP"` (probe 1b). The two produce identical rows.
+
+| Fact BEFORE the engine wave | Where | MEASURED |
+|---|---|---|
+| The row is graded: `ungraded === undefined` | `types.ts:200-210` (the one discriminant), `engine.ts:119-130` (`gradeSubmission` returns a `GradedResult` with no `ungraded`) | `ungraded: "undefined"` in 1a and 1b |
+| `totalScore` is `parsed.totalScore`, passed through `deriveTotalScore` (returns it unchanged when non-empty) then `scaleResultToPoints` (unchanged when `pointsPossible` is null) | `engine.ts:100-105`, `parsing.ts:175-181,214-221`, `gradeEntries` default `pointsPossible = null` `engine.ts:435` | `totalScore: "8/10"` |
+| `strengths` is `parsed.overallComment` | `engine.ts:114` | `"RAW_SENTINEL_OK"` |
+| `improvements` is `parsed.improvements` | `engine.ts:115` | `"ADV"` |
+| `resubmitNotice` is `RESUBMIT_NOTICE` iff `pointsWereDeducted(totalScore, rubricAreas)`, else `""` | `engine.ts:116`, `types.ts:15-16`, `parsing.ts:150-169` | the full `RESUBMIT_NOTICE` text (8 < 10, points deducted) |
+| `overallComment` is `composeOverallComment(strengths, improvements, resubmitNotice)`: non-empty parts joined by one space | `engine.ts:117`, `types.ts:28-37` | `"RAW_SENTINEL_OK ADV You are welcome to resubmit this assignment, and I will regrade it with no late penalty."` |
+| Each parsed rubric area carries `comment: ""` always on the JSON path | `parsing.ts:42-46` (`comment: ""`) | `rubricAreas: [{area:"Overall", score:"8/10", comment:""}]` |
+| `feedback` is `formatFeedback(overallComment, rubricAreas, totalScore)` | `engine.ts:129`, `parsing.ts:242-260` | `"Total Score: 8/10\nOverall: 8/10\nOverall: RAW_SENTINEL_OK ADV You are welcome ... no late penalty."` |
+| The graded row carries the entry's `userId` (the spread after `...result`) | `engine.ts:250-259` | `userId: 42` |
+| `results.length === studentSubmissions.length` (one entry in, one row out) | `engine.ts:303` comment, the loop at `:218` | `n: 1` |
+
+Where the three display boxes read (so "where it lands" is unambiguous), opened
+for this entry: `FEEDBACK_FIELD_META` labels `strengths` as "What Went Well",
+`improvements` as "What Could Be Better" and `resubmitNotice` as "Resubmission
+Note" (`src/app/components/grading-results/gradingResultsHelpers.ts:255-277`,
+`fieldLabel` at `:257,:264,:271`), and `seedEdits` seeds each row's editable
+`strengths` / `improvements` / `resubmitNotice` straight from the `GradeResult`
+fields of the same names (`gradingResultsHelpers.ts:280-297`, the three
+assignments at `:290-292`; `defaultRowEdit` at `:314-323` does the same for the
+Canvas-posting fallback, `:319-321`). `overallComment` is the composed CSV/Canvas
+text (`types.ts:212-218`), seeded separately as `overall` (`:289`, `:318`). What those boxes
+look like rendered is NOT verified (no component renders under vitest).
+
+### 2. An unparseable / prose `ok` result -> a GRADED row carrying the raw text (BEFORE the engine wave)
+
+This is the behavior the G5 guard is expected to turn into an ungraded
+(needs-retry) row. BEFORE the engine wave there is no parse-failure signal
+anywhere between the model's text and the row.
+
+Two distinct parser branches produce it, both in `parseRubricResponse`:
+
+- **No-JSON branch**, `parsing.ts:58-73`: `extractJsonObject` (`parsing.ts:16-28`)
+  returns `null` when the text has no `{`, no `}`, or the last `}` is not after
+  the first `{` (`:23`). Result: `overallComment = raw.trim() || "No feedback
+  generated."`, `improvements = ""`, `rubricAreas = [{area:"Overall", score:"",
+  comment: <same text>}]`, `totalScore = ""`.
+- **`JSON.parse`-throws branch**, `parsing.ts:114-127`: braces are present so
+  `extractJsonObject` returns a slice, `JSON.parse` throws, the `catch` returns
+  the IDENTICAL shape (`parsing.ts:115-126` mirrors `:61-72` field for field).
+
+The engine reads neither branch's signal because there is none: `engine.ts:99`
+is `const parsed = parseRubricResponse(feedback);` and the next use is
+`engine.ts:100`, with no check between them. `gradeSubmission` throws only on
+`!result.ok` (`engine.ts:93-96`).
+
+| Probe | Input text, `finishReason` | Branch | MEASURED row |
+|---|---|---|---|
+| 2a | `"PROSE_SENTINEL the work looks good overall"`, `"STOP"` | no-JSON `:60` | `ungraded: "undefined"`; `strengths` = `overallComment` = the raw text; `improvements: ""`; `resubmitNotice: ""`; `totalScore: ""`; `rubricAreas: [{area:"Overall", score:"", comment:<raw text>}]`; `feedback: "Overall: PROSE_SENTINEL the work looks good overall"`; `userId: 42` |
+| 2c | same prose, `finishReason` absent | no-JSON `:60` | identical to 2a |
+| 2b | `"{ not valid json }"`, `"STOP"` | `JSON.parse` throws `:114` | `ungraded: "undefined"`; `strengths` = `overallComment` = `"{ not valid json }"`; `totalScore: ""`; `userId: 42` |
+| 2d | `"   "` (whitespace only; `engine.ts:98` `.trim() \|\| "No feedback generated."`) | no-JSON `:60` | `strengths` = `overallComment` = `"No feedback generated."`; graded; `totalScore: ""` |
+| 2e | valid JSON with ONLY `{"totalScore": "5/10"}` (no `overallComment`, no `rubricResults`) | success branch, empty-areas `parsing.ts:93-106` | `strengths: "No overall comment provided."` (`parsing.ts:89-90`); `totalScore: "5/10"`; `rubricAreas: [{area:"Overall", score:"", comment:"No overall comment provided."}]`; resubmit notice appended because 5 < 10; graded; `userId: 42` |
+
+Consequences of "graded" that matter to the diff: the prose row carries
+`userId` (`engine.ts:250-259`), and its `totalScore` is `""`. Neither the engine
+nor the parser sets any flag on it. Downstream, an executing test asserts that a
+producer row of exactly this shape (blank `totalScore`, one `Overall` area
+carrying raw text, `overallComment` equal to that text) is refused by
+`checkRowPostability` as an UNTOUCHED row (`src/lib/grade/postable.test.ts:51-65`)
+- but that test builds the shape by hand, it does not drive the engine, so it
+shows a downstream refusal exists, not that the engine ever hands it a row it
+can refuse.
+
+`parseRubricResponse` is SHARED. Its non-test consumers are `engine.ts:99` and
+`src/app/components/grading-recording/grading-feedback-prompt.ts:175`
+(`grep -rn 'parseRubricResponse' src --include=*.ts --include=*.tsx`, non-test
+lines, plus the re-export `src/lib/grade.ts:10`). Its raw-text fallback on the
+recording path is exercised by
+`grading-feedback-prompt.test.ts:268-273` (asserts `totalScore === ""` and that
+`strengths` / `overallComment` are strings). **The shared parser's fallback
+output (the two bullets above, field for field) is a regression anchor that the
+engine wave must NOT change** - the wave's guard is specified to live in
+`gradeSubmission`, not the parser (`docs/grader-engine-test-notes.md` section 6).
+
+### 3. A truncated `ok` result (`finishReason: "MAX_TOKENS"`) -> a GRADED row (BEFORE the engine wave)
+
+BEFORE the engine wave nothing under `src/lib/grade/` reads `finishReason`:
+`grep -n 'finishReason' src/lib/grade/*.ts` excluding `*.test.ts` printed no
+line. The field exists on the success branch of `LlmResult`
+(`llm.ts:201`) and `callGemini` populates it from the candidate
+(`parseFinishReason`, `llm.ts:310-334`; set at `llm.ts:582`, spread into the
+result at `llm.ts:589`). `callLlm` ignores its `provider` argument and always
+calls `callGemini` (`llm.ts:375-386`), so every engine call can receive it. The
+engine's only use of the result is `result.ok`, `result.status`, `result.body`
+and `result.text` (`engine.ts:93-98`).
+
+| Probe | Input | MEASURED row |
+|---|---|---|
+| 3a | valid JSON (same as item 1), `finishReason: "MAX_TOKENS"` | IDENTICAL to item 1: `ungraded: "undefined"`, `totalScore: "8/10"`, `strengths: "RAW_SENTINEL_OK"`, resubmit notice present, `userId: 42` |
+| 3b | the same JSON cut to its first 60 characters (no closing brace), `"MAX_TOKENS"` | no-JSON branch (`lastIndexOf("}")` is -1, `parsing.ts:23`): `ungraded: "undefined"`; `strengths` = `overallComment` = the 60-character raw fragment; `totalScore: ""` - a truncation that is ALSO unparseable surfaces as the item 2 shape, graded |
+| 3c | prose, `"MAX_TOKENS"` | identical to 2a |
+| 3d | valid JSON, `finishReason: "SAFETY"` | identical to item 1 (no reason other than absence/value is read; `"SAFETY"` is treated like `"STOP"`) |
+
+So BEFORE the engine wave `finishReason` has no effect on the row in any of the
+four cases measured. A `MAX_TOKENS` response whose JSON happens to close is
+indistinguishable from a complete one.
+
+### 4. The did-right / did-wrong routing: praise AND deductions both land in "What Went Well" (BEFORE the engine wave)
+
+`engine.ts:107-113` states the design in a comment: the model supplies
+`strengths` "(still called overallComment in its JSON response - what it did
+well plus the specific reason for each deduction)". The engine implements it as
+`engine.ts:114`: `const strengths = parsed.overallComment;`. There is no
+`strengths` key read from the model response at all: `parseRubricResponse`'s
+return type has exactly four fields (`overallComment`, `improvements`,
+`rubricAreas`, `totalScore`, `parsing.ts:49-57`) and the parsed-JSON type
+declares exactly `overallComment`, `improvements`, `rubricResults`, `totalScore`
+(`parsing.ts:76-81`).
+
+The prompt side matches. `engine.ts:209` calls `buildSystemPrompt(
+assignmentInstructions, rubric, criteria)` with no mode argument, so
+`prompts.ts:86` defaults `praiseRouting` to `"in-overall-comment"`, where the
+`overallComment` field is described as `"what the student did well, and for each
+deduction the rubric area and specific reason"` (`prompts.ts:97`) and no
+`"strengths"` JSON key is requested (`prompts.ts:93` is emitted only for
+`"separate-strengths"`). MEASURED, probe 1b: the prompt text actually sent to
+`callLlm` contains `"strengths": "what the student did well",` = **false** and
+contains `"overallComment"` = **true**. The `"separate-strengths"` mode exists
+and is pinned by `prompts-praise-routing.test.ts` (16 tests passing, below) but
+no engine path selects it today: `grep -rn 'separate-strengths' src --include=*.ts
+--include=*.tsx`, non-test lines, shows the only call site passing it is
+`src/app/components/snapshot-grading/snapshot-grade-prompt.ts:107` (the other
+hits are the `prompts.ts` definition and comments), and `prompts.ts:73-82` says
+the engine's bulk path keeps the default "because neither parses a `strengths`
+key: engine.ts would simply drop the praise". The recording path has its own
+`const strengths = parsed.overallComment` (named in that same comment as
+`grading-feedback-prompt.ts:150`; I did not open that line).
+
+| Probe | Model JSON | MEASURED `strengths` ("What Went Well") | MEASURED `improvements` ("What Could Be Better") |
+|---|---|---|---|
+| 4a | `{overallComment: "PRAISE_AND_DEDUCT_W", improvements: "ADVICE_Z", ...}` (the shape the CURRENT prompt elicits) | `"PRAISE_AND_DEDUCT_W"` - praise and the deduction reason, together | `"ADVICE_Z"` |
+| 4b | `{strengths: "PRAISE_X", overallComment: "DEDUCT_Y", improvements: "ADVICE_Z", ...}` (a separate-strengths-shaped reply, if a model sent one) | `"DEDUCT_Y"` - the **deduction** lands in "What Went Well"; `"PRAISE_X"` appears NOWHERE in `strengths`, `improvements`, `overallComment` or `feedback` | `"ADVICE_Z"` |
+
+Probe 4b is the sharpest statement of the gap: a reply that DOES separate praise
+from deductions is not honored, because `parsing.ts:76-81` drops the
+`strengths` key on the floor and `engine.ts:114` routes `overallComment` to
+`strengths`. In both 4a and 4b `overallComment` (the composed text) is
+`"<strengths> <improvements> <RESUBMIT_NOTICE>"` (7 < 10 deducts points), the
+order fixed by `types.ts:28-37`.
+
+### Adjacent facts the wave must not disturb (all MEASURED, same probe)
+
+| Fact BEFORE the engine wave | Where | MEASURED |
+|---|---|---|
+| A `!result.ok` response throws, and the catch builds a `grading-failed` row whose `strengths` and `ungraded.message` carry `GRADING_FAILURE_PREFIX`; `userId` is NOT on that row | `engine.ts:93-96`, `engine.ts:260-282`, `types.ts:11`, `types.ts:290-293` | probe 5 (`{ok:false, status:500, body:"boom"}`): `ungraded: "grading-failed"`; `strengths: "This submission could not be graded: Gemini request failed (500): boom"`; `improvements: ""`; `totalScore: ""`; no `userId` in the serialized row |
+| `buildUngradedRow` sets `rubricAreas: []` but the returned row has one `Overall` area, because `reconcileRun` runs over every row | `engine.ts:171,350` | probe 5 `rubricAreas: [{area:"Overall", score:"", comment:""}]`; so `rubricAreas` is NOT a reliable graded/ungraded discriminator, `ungraded` is (`types.ts:200-202`) |
+| The request carries `temperature: 0.2` and `maxOutputTokens` from `getGeminiMaxOutputTokens()` | `engine.ts:88` | not re-measured beyond reading |
+
+### What executes over this behaviour today
+
+Measured with the wrapper, `npm run test:paths -- src/lib/grade/engine.test.ts
+src/lib/grade/engine.ungraded.test.ts src/lib/grade/prompts-praise-routing.test.ts`
+(HEAD `19de9018`, run at write time):
+
+```
+COVERED src/lib/grade/engine.test.ts files=1 passed=12
+COVERED src/lib/grade/engine.ungraded.test.ts files=1 passed=16
+COVERED src/lib/grade/prompts-praise-routing.test.ts files=1 passed=16
+Test Files  3 passed (3)    Tests  44 passed (44)
+```
+
+What those pin, and what they do not (read, not inferred): `engine.test.ts:136-176`
+pins the resubmit notice on a deduction and its absence at full credit (item 1's
+`resubmitNotice` row); `engine.ungraded.test.ts` pins the `grading-failed` row
+(item "Adjacent facts", row 1) and is where `parseRubricResponse` is mentioned
+(`:161`, a comment). `grep -n -E 'No feedback generated|MAX_TOKENS'
+src/lib/grade/*.test.ts` printed no line. **Nothing committed drives
+`gradeEntries` with a prose reply, a malformed-brace reply, a `MAX_TOKENS`
+reply, or a reply carrying a `strengths` key** - items 2, 3 and probe 4b rest on
+the one-time probe above plus the source citations until the engine wave's tests
+land.
+
+### The engine wave's stated target, for the diff (NOT a measurement)
+
+Taken from `docs/grader-engine-test-notes.md` (sections 3-6), not measured here
+and not asserted to be built. It is listed only so each BEFORE row above has its
+named counterpart:
+
+| BEFORE row | Wave's stated AFTER (per the test notes) |
+|---|---|
+| Item 2 (prose/malformed -> graded row with raw text) | `row.ungraded?.kind === "grading-failed"` with the `GRADING_FAILURE_PREFIX` message, no box containing the raw text (G5b); parser output unchanged (section 6) |
+| Item 3 (`MAX_TOKENS` + valid JSON -> graded row) | `grading-failed` row (G5a); absent `finishReason` and `"STOP"` stay graded (G5c, G5d) |
+| Item 1 (valid complete result -> graded row) | UNCHANGED (G5c, G5d are its regression anchors) |
+| Item 4 (`strengths = parsed.overallComment`, praise and deductions together) | with the new option on: `strengths` = praise only, `improvements` = deductions + advice (R1); with the option unset: byte-identical to item 4a (5.3). The fork on whether advice gets its own box is open (`docs/grader-engine-test-notes.md` section 1) |
+| Adjacent row 1 (`!ok` -> `grading-failed`) | UNCHANGED |
+
+### Disposition of prior coverage
+
+No prior REGRESSION entry covers this area: `grep -a -n -i -E
+'gradeEntries|parseRubricResponse|GRADING_FAILURE_PREFIX' docs/REGRESSION.md`
+(run before writing this entry) returned references to `gradeEntries` as a
+caller in unrelated entries (lines 34496, 35569, 36221, 36236, 37203) and no
+entry baselining `parseRubricResponse`, a prose/`MAX_TOKENS` reply, or the
+`strengths = parsed.overallComment` routing. Nothing was restructured, nothing
+withdrawn.
+
+### What this entry cannot determine
+
+- **How often a live Gemini reply is prose, malformed, or `MAX_TOKENS`.** No
+  API key, no network in this environment (`docs/loop/this-repo.md` section 6).
+  The probe feeds scripted `callLlm` results; it shows what the engine does WITH
+  such a reply, not that production receives one or how often.
+- **Whether a live model separates praise from deductions when asked.** Probe
+  4b feeds a split-shaped reply; whether the separate-strengths PROMPT elicits
+  one is an owner verification with a real key.
+- **Rendering.** No component is rendered by any test here. The field-to-label
+  mapping and seeding were read (`gradingResultsHelpers.ts:255-323`); what the
+  boxes look like on screen, and whether a component other than `seedEdits`
+  re-derives box text, is unverified.
+- **The `maxOutputTokens` request value in practice** (`engine.ts:88`) - read
+  from source only.
+
+### Residual register for this entry
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL448-1 | Items 2, 3 and probe 4b (prose / malformed / `MAX_TOKENS` / `strengths`-key replies through `gradeEntries`) rest on a one-time uncommitted probe; no committed test pins them BEFORE the wave | Engine-wave implementer, from the test notes | The tests the wave adds: `engine.ungraded.test.ts` G5a-d, `engine.test.ts` section 5, `parsing.fallback.test.ts` section 6 (`docs/grader-engine-test-notes.md`), run via `npm run test:paths -- src/lib/grade/engine.ungraded.test.ts src/lib/grade/engine.test.ts src/lib/grade/prompts-praise-routing.test.ts src/lib/grade/parsing.fallback.test.ts` | The engine wave's own test step, then the batched regression pass over this group |
+| BL448-2 | Live frequency of prose / truncated model replies in real grading runs | Repo owner | A real-key grading run, counting rows whose `strengths` equals the raw model text (the item 2 shape) | Owner verification after the engine wave ships; no agent step can measure it |
+| BL448-3 | Live praise/deduction separation quality of the separate-strengths prompt | Repo owner | A real-key run with the new option on, reading "What Went Well" / "What Could Be Better" | Owner verification after the engine wave ships (`docs/grader-engine-test-notes.md` tags this FF-10-owner) |
+| BL448-4 | Whether any component other than `seedEdits` / `defaultRowEdit` (`gradingResultsHelpers.ts:280-323`) derives the three boxes' text from `GradeResult`, and how the boxes render | Repo owner (render) / regression pass author (grep) | `grep -rn 'strengths' src/app/components/grading-results` read against `seedEdits`; render needs a real browser | The batched regression pass over the engine wave for the grep; owner verification for the render |
+| BL448-5 | The recording path's own `const strengths = parsed.overallComment` (`grading-feedback-prompt.ts:150`, named in `prompts.ts:73-82`) was not opened; it consumes the SAME shared `parseRubricResponse` this entry anchors | Regression pass author for this group | Read `grading-feedback-prompt.ts:140-190` and re-run `npm run test:paths -- src/app/components/grading-recording/grading-feedback-prompt.test.ts` after the wave | The batched regression pass over the engine wave |

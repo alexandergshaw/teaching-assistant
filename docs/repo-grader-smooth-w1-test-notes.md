@@ -38,6 +38,26 @@ oracle below. A sabotaged copy (drop `all `, misspell `Re-post`->`Repost`) went
 **6 RED**, proving the oracle discriminates. Reference and sabotage scripts:
 `scratchpad/ref-runplan.mjs`, `scratchpad/ref-sabotage.mjs` (not committed).
 
+**Scope of that 18/18 run, and the gap it did NOT cover (round-2 fix).** The
+reference exercised the LEAF in isolation (the pure REQ-1/REQ-2 oracle only). It
+did NOT run the REQ-3 wiring pin against the real `RepoGradesGrid.tsx` slice -
+that is exactly WHY the round-1 REQ-3 negative pin
+(`not.toContain('alreadyAttempted ? "Re-post" : "Post"')`) was shipped broken:
+the banned literal occurs TWICE in the real source, at `:437` (the live code the
+extraction removes) AND at `:414` (a JSX doc comment quoting it in prose). The
+round-1 pin, run against the raw `ColumnHeaderControls` slice, would RED on the
+surviving `:414` comment even after a correct extraction. Measured
+2026-10-04 with `grep -n 'alreadyAttempted ? "Re-post" : "Post"'
+src/app/components/repo-grades/RepoGradesGrid.tsx` -> lines **414 and 437**. The
+revised REQ-3 below is checkable against the REAL slice: it strips comments
+first (so the `:414` prose cannot red it) and the extraction deletes the now-
+false `:414` comment outright (FIX 1b). Both halves proven satisfiable by the
+honest Option-A shape documented in "Consumption convention" below - after
+extraction the stripped slice contains `disabled={busy || plan.postable.length
+=== 0}`, `postableCount: plan.postable.length`, `bulkProgress.done`, `Posting`,
+`: gradeLabel` and `: postLabel`, and does NOT contain `alreadyAttempted ?
+"Re-post" : "Post"`, so REQ-3/REQ-7/REQ-8 all go green together on real code.
+
 ---
 
 ## THE FORK that must be settled before build (surfaced, not resolved)
@@ -105,12 +125,42 @@ export function repoGradesRunPlanLabels(input: RepoGradesRunPlanInput): RepoGrad
 
 The transient overlays (`Grading ${done} of ${total}...`, `Posting...`) stay in
 `RepoGradesGrid.tsx` as render-state concerns and are NOT inputs to the leaf -
-this keeps the leaf pure over exactly the six inputs the oracle enumerates.
+this keeps the leaf pure over exactly the six inputs the oracle enumerates. The
+overlays wrapping the leaf's resting labels are a REQUIRED W1 instrument (REQ-7),
+not an optional pin - see REQ-7.
 
 The leaf body is transcribed byte-for-byte from current source:
 - `gradeLabel`: `RepoGradesGrid.tsx:352-357` (the `restingGradeLabel` ternary).
 - `postLabel`: `RepoGradesGrid.tsx:437`
   (`${alreadyAttempted ? "Re-post" : "Post"} ${postableCount} grade(s)`).
+
+### Consumption convention (FROZEN - REQ-8 pins it)
+
+The grid consumes the leaf's return by DESTRUCTURING WITHOUT RENAME, and feeds
+each resting label through the transient overlay that stays in the grid:
+
+```ts
+const { gradeLabel, postLabel } = repoGradesRunPlanLabels({
+  folder: column.folder,
+  gradeTargetCount,
+  scopedToSelection,
+  scanTruncated,
+  alreadyAttempted,
+  postableCount: plan.postable.length,
+});
+const gradeAllLabel =
+  gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : gradeLabel;
+// Grade button child: {gradeAllLabel}
+// Post button child:  {busy ? "Posting…" : postLabel}
+```
+
+The no-rename rule is load-bearing, not stylistic: it makes `: gradeLabel` and
+`: postLabel` appear ONLY as the resting arm of each button's overlay ternary
+(the destructuring has no colon before the names, and the input object's keys
+are different), so REQ-8's consumption pin is exact and a legitimate rename can
+never false-red it. This is the one place in these notes where the SPELLING is
+the fact (a consumption binding, same exception as a frozen copy literal); the
+pure-leaf oracle (REQ-1/REQ-2) still pins facts, never spellings.
 
 ---
 
@@ -197,10 +247,30 @@ lives in the leaf, so the pin follows the FACT, not the moved spelling.
 
 Replace the single `it(...)` at `:696-712` with the block below. It KEEPS the
 existing `function ColumnHeaderControls` .. `\nexport default function` slice
-(both anchors already asserted to resolve - `idx > -1`, `end > idx`; verified
+(both anchors asserted to resolve - `idx > -1`, `end > idx`; verified
 `function ColumnHeaderControls` at `RepoGradesGrid.tsx:267`, `export default
-function` at `:443`, so the slice spans the whole control). Anchor-resolves is
-asserted at BOTH ends, per the slice rule.
+function` at `:443`, so the slice spans the whole control, and both anchors
+survive an Option-A extraction unchanged). Anchor-resolves is asserted at BOTH
+ends, per the slice rule.
+
+**FIX 1a (BLOCKER - comment collision):** the slice MUST be run through the
+EXISTING local `stripComments` helper already declared in this file (at
+`repoGrades.wiring.test.ts:480`, a function declaration, so it hoists above these
+`it`s) BEFORE any content assertion. Reason, measured 2026-10-04: the banned
+literal `alreadyAttempted ? "Re-post" : "Post"` occurs TWICE in the real source -
+at `:437` (live code the extraction removes) and at `:414`, inside a JSX doc
+comment (`{/* ... */}`) that quotes it in prose about "pinned source-text
+assertions ... survive verbatim". After an honest Option-A extraction the `:414`
+comment still contains the string, so a `not.toContain(...)` against the RAW slice
+reds on correct code. `stripComments` turns `{/* ... */}` into `{}` (its block
+arm is `/\/\*[\s\S]*?\*\//g`), removing the `:414` occurrence; the pin then reds
+only on a RE-INLINE in real code. DO NOT author a new helper named `stripComments`
+and DO NOT put these pins in a new `*.test.ts` file - either would add a mention
+that `src/tools/strip-comments-agreement.structure.test.ts` enumerates and would
+redden that gate repo-wide until classified. This file is ALREADY pinned there as
+a SAFE copy (that agreement test's `SAFE_FILES` lists
+`src/app/components/repo-grades/repoGrades.wiring.test.ts`), so reusing its
+existing local `stripComments` changes nothing for that gate.
 
 ```ts
 it("the column header's Post/Re-post label comes from the extracted leaf, fed the SAME plan.postable.length its disabled state uses, so the shown count cannot diverge from the gated count (U8.33)", () => {
@@ -208,14 +278,21 @@ it("the column header's Post/Re-post label comes from the extracted leaf, fed th
   expect(idx).toBeGreaterThan(-1);
   const end = gridSource.indexOf("\nexport default function", idx);
   expect(end).toBeGreaterThan(idx);
-  const body = gridSource.slice(idx, end);
-  // disabled still gates on the shared plan's postable count (unchanged fact).
-  expect(body).toContain("disabled={busy || plan.postable.length === 0}");
-  // the label count passed to the leaf is the SAME plan.postable.length
-  // expression - not candidates.length or any re-derived number.
-  expect(body).toContain("postableCount: plan.postable.length");
+  // FIX 1a: strip comments first - RepoGradesGrid.tsx:413-415 quotes the banned
+  // ternary literal in a JSX doc comment, so the RAW slice contains it even
+  // after the live :437 usage is extracted. stripComments ({/* ... */} -> {})
+  // is the local helper at ~:480 (hoisted). Do NOT define a second one.
+  const stripped = stripComments(gridSource.slice(idx, end));
+  // disabled still gates on the shared plan's postable count (unchanged fact,
+  // real code - survives stripping).
+  expect(stripped).toContain("disabled={busy || plan.postable.length === 0}");
+  // the count passed to the leaf is the SAME plan.postable.length expression -
+  // not candidates.length or any re-derived number (real code).
+  expect(stripped).toContain("postableCount: plan.postable.length");
   // the inline label ternary MOVED into the leaf; it must not be re-inlined.
-  expect(body).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
+  // Checked on the STRIPPED slice, so the :414 prose cannot red it - only a
+  // re-inline in live code can.
+  expect(stripped).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
 });
 
 it("RepoGradesGrid.tsx derives its run labels from the extracted repoGradesRunPlan leaf", () => {
@@ -223,22 +300,37 @@ it("RepoGradesGrid.tsx derives its run labels from the extracted repoGradesRunPl
 });
 ```
 
-- **Object / instrument / direction:** the `ColumnHeaderControls` source slice;
-  substring presence/absence + the existing `usesSharedFunction` helper
-  (`:636-639`, canary at `:641-656`); reds if the leaf is not used, if the
+**FIX 1b (BLOCKER - delete the now-false comment), an explicit implementer REQ
+step:** as part of the extraction the implementer MUST delete or rewrite the
+`RepoGradesGrid.tsx:413-415` JSX doc comment. After W1 the inline label moves
+into the leaf, so that comment's claim that "repoGrades.wiring.test.ts's pinned
+source-text assertions (... `alreadyAttempted ? "Re-post" : "Post"`) survive
+verbatim as JSX prop/child text" is FALSE and the comment is independently wrong;
+it must not be left behind. The `stripComments` defense (FIX 1a) keeps the pin
+green regardless of whether the comment is removed, but the comment is a
+correctness defect of its own and is in scope for W1. The two POSITIVE pins
+(`disabled={busy || plan.postable.length === 0}`, `postableCount:
+plan.postable.length`) are unaffected either way - they pass against real code
+(the disabled gate is unchanged; the leaf call feeds the same expression).
+
+- **Object / instrument / direction:** the `ColumnHeaderControls` source slice,
+  comment-stripped; substring presence/absence + the existing `usesSharedFunction`
+  helper (`:636-639`, canary at `:641-656`); reds if the leaf is not used, if the
   label is re-inlined, if the disabled gate is dropped, or if the count fed to
   the label is any expression other than `plan.postable.length`.
 
-**Sabotages (against the production grid, not the test):**
+**Sabotages (against the production grid, not the test; all run on the stripped
+slice):**
 - S3a (PARITY - the U8.33 failure): change the leaf call argument from
   `postableCount: plan.postable.length` to `postableCount: candidates.length`
   (`candidates` IS in scope at `:318`, so this COMPILES - a real mutant). The
   `postableCount: plan.postable.length` pin reds. DISCRIMINATES. Restores GREEN.
 - S3b (leaf not actually used): delete the leaf call and re-inline
-  `` `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)` ``.
-  `usesSharedFunction(... repoGradesRunPlanLabels ...)` reds AND the
-  `not.toContain('alreadyAttempted ? "Re-post" : "Post"')` pin reds.
-  DISCRIMINATES (both directions covered).
+  `` `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)` ``
+  in LIVE code. `usesSharedFunction(... repoGradesRunPlanLabels ...)` reds AND the
+  `not.toContain('alreadyAttempted ? "Re-post" : "Post"')` pin reds - the
+  re-inline is real code, so stripping does not hide it. DISCRIMINATES (both
+  directions covered).
 - S3c (disabled gate dropped): change
   `disabled={busy || plan.postable.length === 0}` to `disabled={busy}`. The
   `toContain("disabled={busy || plan.postable.length === 0}")` pin reds.
@@ -314,6 +406,108 @@ npm run test:paths -- \
   `tsconfig.tsbuildinfo`) and `npm run lint`, each compared before vs after
   against the same command (watch `preserve-manual-memoization`, R6).
 
+## REQ-7 (MACHINE) - transient overlays stay in the grid (promoted from optional to REQUIRED)
+
+FIX 2 (checker recommendation, ADOPTED). The transient overlays -
+`Grading ${bulkProgress.done} of ${bulkProgress.total}…` (grade button,
+`RepoGradesGrid.tsx:357`) and `Posting…` (post button, `:437`) - are the ONE
+label behavior the frozen oracle (REQ-1/REQ-2, which test RESTING labels only)
+does not cover, and W1 is behavior-preserving over them. So this is a REQUIRED
+W1 instrument, not a residual.
+
+- **Object:** the `ColumnHeaderControls` source slice (same anchors as REQ-3),
+  comment-stripped.
+- **Instrument:** source-text PRESENCE pins. Nothing renders under vitest
+  (node-env, `src/**/*.test.ts` only), so this is a source-text presence pin,
+  NOT a render assertion - it proves the overlay EXPRESSIONS remain in the grid
+  path, not that any pixel is drawn.
+- **Direction:** reds if the grade-progress overlay or the `Posting…` overlay is
+  dropped from the column header (e.g. the implementer folds `busy`/`bulkProgress`
+  into the leaf and loses the transient text).
+
+```ts
+it("the transient Grade/Post overlays stay in RepoGradesGrid.tsx's column header (not folded into the pure leaf) - W1 is behavior-preserving over them", () => {
+  const idx = gridSource.indexOf("function ColumnHeaderControls");
+  expect(idx).toBeGreaterThan(-1);
+  const end = gridSource.indexOf("\nexport default function", idx);
+  expect(end).toBeGreaterThan(idx);
+  const stripped = stripComments(gridSource.slice(idx, end));
+  // "Grading ${done} of ${total}…" progress overlay (grade button).
+  expect(stripped).toContain("bulkProgress.done");
+  // "Posting…" in-flight overlay (post button). Substring avoids pinning the
+  // non-ASCII ellipsis.
+  expect(stripped).toContain("Posting");
+});
+```
+
+**WHY this is NOT deferrable to W3:** W3 adds the Run bar and verifies the BAR's
+labels; it does not re-verify the COLUMN HEADER overlay. So if W1 silently drops
+the column-header overlay, no later wave would catch it - it would ship green.
+That is the whole reason to make it a required W1 pin rather than a residual.
+
+**Sabotages (against the production grid, run on the stripped slice):**
+- S7a: remove the `gradingThisColumn && bulkProgress ? \`Grading ...\` :` overlay
+  wrapper (so the grade button renders the bare leaf `gradeLabel`). The
+  `toContain("bulkProgress.done")` pin reds. DISCRIMINATES. GREEN on restore.
+- S7b: remove the `busy ? "Posting…" :` wrapper. The `toContain("Posting")` pin
+  reds. DISCRIMINATES. GREEN on restore.
+
+Neither sabotage is red-in-both or green-in-both: each reds exactly on dropping
+its own overlay and is green otherwise.
+
+## REQ-8 (MACHINE) - the button children CONSUME the leaf output (close the "call then re-inline" gap)
+
+FIX 3 (checker recommendation, ADOPTED). REQ-3's `usesSharedFunction(...,
+"repoGradesRunPlanLabels", ...)` proves the leaf is imported AND called, but NOT
+that its return value is used. An extraction could call
+`repoGradesRunPlanLabels({...})`, discard the result, and re-inline a label via a
+NON-MATCHING spelling (string concat, a differently-ordered template) while
+`usesSharedFunction` still passes AND REQ-3's exact-literal `not.toContain` is
+evaded. This pin closes that gap: the Grade and Post button children must render
+the leaf's returned bindings.
+
+- **Object:** the `ColumnHeaderControls` source slice (same anchors), stripped.
+- **Instrument:** source-WIRING presence pins on `: gradeLabel` and
+  `: postLabel`, the resting arm of each button's overlay ternary under the
+  FROZEN no-rename consumption convention (see "Consumption convention" above).
+  Machine-checkable.
+- **Direction:** reds if either button child stops referencing the leaf's
+  returned label (a re-inline leaves the resting arm as some other expression).
+
+```ts
+it("the Grade and Post button children CONSUME the leaf's returned labels (gradeLabel/postLabel), so an extraction cannot call the leaf and then re-inline a label via a non-matching spelling while usesSharedFunction still passes", () => {
+  const idx = gridSource.indexOf("function ColumnHeaderControls");
+  expect(idx).toBeGreaterThan(-1);
+  const end = gridSource.indexOf("\nexport default function", idx);
+  expect(end).toBeGreaterThan(idx);
+  const stripped = stripComments(gridSource.slice(idx, end));
+  // Frozen no-rename convention: ": gradeLabel" / ": postLabel" appear ONLY as
+  // the resting arm of each button's overlay ternary - never in the
+  // destructuring (no colon before the names) nor the input object (different
+  // keys). A re-inlined label makes the arm some other expression and reds.
+  expect(stripped).toContain(": gradeLabel");
+  expect(stripped).toContain(": postLabel");
+});
+```
+
+**This is distinct from the OWNER/W3 render residual (W1-R1).** REQ-8 is a
+machine-checkable SOURCE-WIRING pin ("the child's expression IS the leaf
+binding"); it does NOT and cannot prove the right pixels render - that stays
+deferred to the owner/W3 verify as W1-R1. Nothing renders under vitest.
+
+**Sabotages (against the production grid, run on the stripped slice):**
+- S8a: keep the leaf call but re-inline the POST label in the child, e.g.
+  `{busy ? "Posting…" : \`${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)\`}`,
+  discarding the leaf's `postLabel`. `: postLabel` disappears -> reds (and S3b's
+  `not.toContain` also reds here, by the exact-literal path). DISCRIMINATES.
+- S8b: re-inline the GRADE label's resting arm via a differently-spelled concat
+  that keeps NO exact banned literal (so S3's `not.toContain` would NOT catch
+  it). `: gradeLabel` disappears -> reds. DISCRIMINATES. This is the case REQ-8
+  exists for and REQ-3 alone cannot catch.
+
+Both sabotages red exactly on their own re-inline and are green otherwise - not
+red-in-both, not green-in-both.
+
 ## Implementer wiring (what to add to repoGrades.wiring.test.ts)
 
 Near the existing source reads (`:57-70`), add:
@@ -326,16 +520,26 @@ const runPlanSource = readFileSync(RUN_PLAN_PATH, "utf8");
 Do NOT import any helper from another `*.test.ts` (it re-runs that file's
 describe blocks). The leaf test defines its own frozen table inline and imports
 ONLY the production leaf (`import { repoGradesRunPlanLabels } from "./repoGradesRunPlan";`
-- a production import, not a cross-test import). Do not name any comment-strip
-helper `stripComments` (none is needed here). No `/s` regex. No emojis.
+- a production import, not a cross-test import). No `/s` regex. No emojis.
+
+**On `stripComments` (changed in round 2).** REQ-3/REQ-7/REQ-8 run their slice
+assertions through `stripComments`. This MUST be the local helper ALREADY
+declared in `repoGrades.wiring.test.ts` (at `:480`, hoisted). Do NOT define a
+second one, do NOT rename it, and do NOT put these pins in a new file: this file
+is pinned as a SAFE copy by `src/tools/strip-comments-agreement.structure.test.ts`
+(its `SAFE_FILES` lists this path), and a new definition or a new mentioning
+file would redden that agreement gate until classified. The NEW leaf test
+(`repoGradesRunPlan.test.ts`) tests a pure function only - it has no source-text
+slice, so it must NOT mention `stripComments` at all (a mention there is a new
+unclassified file and reddens the same gate).
 
 ---
 
 ## Executable here vs argued
 
 - **MACHINE (executable under vitest / tsc / lint):** REQ-1, REQ-2 (pure leaf
-  oracle); REQ-3, REQ-4, REQ-5 (source-text + regex-count wiring); REQ-6 (suite
-  + tsc + lint before/after).
+  oracle); REQ-3, REQ-4, REQ-5, REQ-7, REQ-8 (source-text + regex-count wiring
+  on the comment-stripped grid slice); REQ-6 (suite + tsc + lint before/after).
 - **ARGUED (not executable here):** "the column header and the future Run bar
   render identical text." Nothing renders. The argument is: the leaf oracle
   pins the leaf's output (REQ-1/2) AND REQ-3 pins that the grid uses that
@@ -354,15 +558,15 @@ helper `stripComments` (none is needed here). No `/s` regex. No emojis.
 | W1-R2 | Option A vs B boundary choice | orchestrator/owner | this doc's FORK section | settle before build; default A |
 | W1-R3 | Scope said edit `:696-712` only; Option B also needs `:665-667` + `:673-676` grid halves retargeted | orchestrator | diff of those pins vs the chosen option | build (A: no change; B: apply the delta below) |
 | W1-R4 | window.confirm->:554 ordering + AC1 full guard set | W3 test notes | paren-anchored count + confirm-precedes-call slice | W3 (hook is W3's surface; W1 does not touch it) |
-| W1-R5 | Transient overlays ("Grading X of Y...", "Posting...") kept in the grid | test seat | optional light presence pin on `gridSource` | build - see note below |
+| W1-R5 | ~~Transient overlays kept in the grid~~ PROMOTED to REQ-7 (round 2) | test seat | REQ-7 required source-text presence pins | PROMOTED - no longer a residual |
 
-W1-R5 note (optional pin): the overlays are the only label behavior NOT covered
-by the frozen oracle (which tests resting labels), and nothing renders, so if
-the implementer folds `busy`/`bulkProgress` into the leaf the overlay could be
-lost silently. A light guard - `expect(body).toContain("bulkProgress.done")`
-and `expect(body).toContain("Posting")` within the ColumnHeaderControls slice -
-preserves them. Recommended, not mandatory; it is a presence check, not an
-exact-spelling pin, to avoid over-specification.
+W1-R5 note (round-2 resolution): this was an OPTIONAL pin in round 1. The checker
+recommended promoting it and the orchestrator adopted it, so the overlay
+preservation is now REQ-7, a REQUIRED W1 instrument (see REQ-7 for why it is not
+deferrable to W3). It is a source-text PRESENCE check on the stripped
+`ColumnHeaderControls` slice (`bulkProgress.done` and `Posting`), not a render
+assertion and not an exact-spelling pin, so it does not over-specify. This row is
+kept only to record the promotion; there is no residual left here.
 
 ---
 
@@ -390,3 +594,11 @@ The frozen oracle (REQ-1/REQ-2 tables) is UNCHANGED in VALUES. Changes:
    expected strings stay the hand-frozen literals above. This coupling to the
    count functions' row semantics is the concrete cost of Option B and the
    reason Option A is recommended.
+5. The round-2 fixes carry over unchanged in KIND: every grid-slice pin
+   (REQ-3's `not.toContain`, REQ-7's overlay presence, REQ-8's consume) still
+   runs on the comment-stripped slice via the existing local `stripComments`
+   (FIX 1a), and the `:413-415` comment is still deleted (FIX 1b). REQ-8's
+   resting-arm literals become `: result.gradeLabel` / `: result.postLabel` (or
+   the chosen result binding) under Option B's no-overlay-in-leaf shape, since
+   Option B's leaf returns the resting labels the same way. Option A is ruled;
+   this item exists only so the contingency section stays consistent.

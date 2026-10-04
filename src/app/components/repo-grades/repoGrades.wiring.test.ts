@@ -895,20 +895,32 @@ describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Gr
     readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesControls.tsx"), "utf8")
   );
 
-  /** The mount JSX: from the `<RepoGradesRunBar` tag to its self-closing end. */
+  const stickyHeaderText = stripComments(
+    readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesStickyHeader.tsx"), "utf8")
+  );
+
+  /**
+   * RG-SEARCH-STICKY Wave A relocated the run-bar mount into RepoGradesStickyHeader;
+   * index.tsx now builds the `runBar={...}` prop. `guard` is the condition before
+   * the `?` (the one-folder gate), `tag` is the whole prop expression (handlers).
+   */
   function mountSlice(): { guard: string; tag: string } {
-    const tagIdx = indexText.indexOf("<RepoGradesRunBar");
-    expect(tagIdx).toBeGreaterThan(-1);
-    const guardIdx = indexText.lastIndexOf("{", tagIdx);
-    expect(guardIdx).toBeGreaterThan(-1);
-    const endIdx = indexText.indexOf("/>", tagIdx);
-    expect(endIdx).toBeGreaterThan(tagIdx);
-    return { guard: indexText.slice(guardIdx, tagIdx), tag: indexText.slice(tagIdx, endIdx) };
+    const propIdx = indexText.indexOf("runBar={");
+    expect(propIdx).toBeGreaterThan(-1);
+    const openIdx = indexText.indexOf("{", propIdx);
+    const endIdx = findMatchingBraceEnd(indexText, openIdx);
+    expect(endIdx).toBeGreaterThan(openIdx);
+    const tag = indexText.slice(openIdx, endIdx);
+    const qIdx = tag.indexOf("?");
+    expect(qIdx).toBeGreaterThan(-1);
+    return { guard: tag.slice(0, qIdx), tag };
   }
 
-  it("W3-R1: index.tsx imports and renders the run bar, gated on one folder being selected", () => {
-    expect(indexText).toMatch(/import RepoGradesRunBar from "\.\/RepoGradesRunBar"/);
-    expect(indexText).toMatch(/<RepoGradesRunBar\b/);
+  it("W3-R1: index.tsx mounts the sticky header whose run bar is gated on one folder being selected, and the header renders the run bar", () => {
+    expect(indexText).toMatch(/import RepoGradesStickyHeader from "\.\/RepoGradesStickyHeader"/);
+    expect(indexText).toMatch(/<RepoGradesStickyHeader\b/);
+    expect(stickyHeaderText).toMatch(/import RepoGradesRunBar\b[^;]*from "\.\/RepoGradesRunBar"/);
+    expect(stickyHeaderText).toMatch(/<RepoGradesRunBar\b/);
     const { guard } = mountSlice();
     expect(guard).toContain("currentSelectedFolder");
     expect(guard).toContain("ALL_FOLDERS");
@@ -937,8 +949,9 @@ describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Gr
     expect(barText).not.toContain("postCanvasGradesAction(");
     expect(barText).not.toContain("gradeRepoAction(");
     const { tag } = mountSlice();
-    expect(tag).toContain("onGradeColumn={handleGradeColumn}");
-    expect(tag).toContain("onPostColumn={handlePostColumn}");
+    expect(tag).toContain("onGradeColumn: handleGradeColumn");
+    expect(tag).toContain("onPostColumn: handlePostColumn");
+    expect(stickyHeaderText).toContain("<RepoGradesRunBar {...runBar}");
   });
 
   it("W3-R4: the wrapper carries a class whose OWN rule is position: sticky with a vertical offset (not the grid's thead rule)", () => {

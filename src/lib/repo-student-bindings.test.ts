@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { suggestRepoStudentBindings, type RepoBindingRosterEntry } from "./repo-student-bindings";
+import { handleMatchesName, suggestRepoStudentBindings, type RepoBindingRosterEntry } from "./repo-student-bindings";
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
 
 // Every expectation below is a frozen literal, hand-written against the AC2
@@ -336,6 +336,139 @@ describe("suggestRepoStudentBindings", () => {
 
     expect(result.map((r) => r.repo)).toEqual(["org/alice-repo", "org/prefix-ddiaz", "org/prefix-nomatch"]);
     expect(result.map((r) => r.state)).toEqual(["confirmed", "suggested", "unbound"]);
+  });
+});
+
+// docs/repo-grades-name-matching-fix-scope.md section 5 (RG-NAME-COLUMNS, W).
+// Frozen hand-literal oracle: booleans written from the rule, never computed.
+describe("handleMatchesName - token-multiset equality (AC-W1)", () => {
+  const oracle: Array<[string, string, boolean]> = [
+    ["ruiz-ana", "Ruiz, Ana", true],
+    ["ruiz-ana", "Ana Ruiz", true],
+    ["ana-ruiz", "Ruiz, Ana", true],
+    ["dave-diaz", "Dave Diaz", true],
+    ["ana-ruiz", "ANA RUIZ", true],
+    ["cchen", "Cchen", true],
+    ["ana-ruiz", "Ana Maria Ruiz", false],
+    ["ana-maria-ruiz", "Ana Ruiz", false],
+    ["ruiz-ana", "Bob Brown", false],
+    ["cchen", "Carol Chen", false],
+    ["aanderson-gh", "Alice Anderson", false],
+    ["", "Ana Ruiz", false],
+    ["ruiz-ana", "", false],
+  ];
+  for (const [handle, name, expected] of oracle) {
+    it(`handle ${JSON.stringify(handle)} vs name ${JSON.stringify(name)} -> ${expected}`, () => {
+      expect(handleMatchesName(handle, name)).toBe(expected);
+    });
+  }
+});
+
+describe("W integration - order-insensitive name match is suggest-only (AC-W2)", () => {
+  it("G1: a stored-row NAME match populates the name but carries a blank id (blocked from confirm/post)", () => {
+    const stored: CourseStudentRepo[] = [{ student: "Ruiz, Ana", canvasUserId: null, repo: "", username: "aruiz99" }];
+    const result = suggestRepoStudentBindings(["org/cs101-ruiz-ana"], [], stored, "cs101");
+    expect(result[0]).toEqual({
+      repo: "org/cs101-ruiz-ana",
+      state: "suggested",
+      canvasUserId: null,
+      student: "Ruiz, Ana",
+      candidates: [{ canvasUserId: "", name: "Ruiz, Ana" }],
+      derivedHandle: "ruiz-ana",
+    });
+    expect(/^\d+$/.test(result[0].candidates[0].canvasUserId)).toBe(false);
+  });
+
+  it("G2: a roster name in a different token order is suggested, carrying its sortableName", () => {
+    const roster: RepoBindingRosterEntry[] = [
+      { id: "701", name: "Ana Ruiz", loginId: "sso1", sortableName: "Ruiz, Ana" },
+    ];
+    const result = suggestRepoStudentBindings(["org/cs101-ruiz-ana"], roster, [], "cs101");
+    expect(result[0]).toEqual({
+      repo: "org/cs101-ruiz-ana",
+      state: "suggested",
+      canvasUserId: null,
+      student: "Ana Ruiz",
+      studentSortable: "Ruiz, Ana",
+      candidates: [{ canvasUserId: "701", name: "Ana Ruiz", sortableName: "Ruiz, Ana" }],
+      derivedHandle: "ruiz-ana",
+    });
+  });
+
+  it("G3: a token-tie across two different students is AMBIGUOUS with student null (never a single bind)", () => {
+    const roster: RepoBindingRosterEntry[] = [
+      { id: "1", name: "Ana Ruiz", loginId: "a" },
+      { id: "2", name: "Ruiz Ana", loginId: "b" },
+    ];
+    const result = suggestRepoStudentBindings(["org/cs101-ana-ruiz"], roster, [], "cs101");
+    expect(result[0]).toEqual({
+      repo: "org/cs101-ana-ruiz",
+      state: "ambiguous",
+      canvasUserId: null,
+      student: null,
+      candidates: [
+        { canvasUserId: "1", name: "Ana Ruiz" },
+        { canvasUserId: "2", name: "Ruiz Ana" },
+      ],
+      derivedHandle: "ana-ruiz",
+    });
+  });
+
+  it("G3b: a token-tie across two stored rows is AMBIGUOUS with student null", () => {
+    const stored: CourseStudentRepo[] = [
+      { student: "Ana Ruiz", canvasUserId: "11", repo: "", username: null },
+      { student: "Ruiz, Ana", canvasUserId: "12", repo: "", username: null },
+    ];
+    const result = suggestRepoStudentBindings(["org/cs101-ana-ruiz"], [], stored, "cs101");
+    expect(result[0].state).toBe("ambiguous");
+    expect(result[0].student).toBeNull();
+    expect(result[0].canvasUserId).toBeNull();
+    expect(result[0].candidates).toHaveLength(2);
+  });
+
+  it("G4: a superset roster name is not a match - unbound, no guess", () => {
+    const roster: RepoBindingRosterEntry[] = [{ id: "1", name: "Ana Maria Ruiz", loginId: "a" }];
+    const result = suggestRepoStudentBindings(["org/cs101-ana-ruiz"], roster, [], "cs101");
+    expect(result[0]).toEqual({
+      repo: "org/cs101-ana-ruiz",
+      state: "unbound",
+      canvasUserId: null,
+      student: null,
+      candidates: [],
+      derivedHandle: "ana-ruiz",
+    });
+  });
+
+  it("G5: rule a is untouched - a stored full-name match still confirms, even with a name-matching roster", () => {
+    const roster: RepoBindingRosterEntry[] = [{ id: "999", name: "Alice Anderson", loginId: "zz" }];
+    const stored: CourseStudentRepo[] = [
+      { student: "Alice Anderson", canvasUserId: "101", repo: "org/alice-repo", username: "x" },
+    ];
+    const result = suggestRepoStudentBindings(["org/alice-repo"], roster, stored);
+    expect(result[0]).toEqual({
+      repo: "org/alice-repo",
+      state: "confirmed",
+      canvasUserId: "101",
+      student: "Alice Anderson",
+      candidates: [],
+      derivedHandle: null,
+    });
+  });
+
+  it("G6: tier-2 loginId still wins before the name tier", () => {
+    const roster: RepoBindingRosterEntry[] = [{ id: "501", name: "Jane Doe", loginId: "jdoe" }];
+    const result = suggestRepoStudentBindings(["org/module-jdoe"], roster, [], "module");
+    expect(result[0].state).toBe("suggested");
+    expect(result[0].candidates).toEqual([{ canvasUserId: "501", name: "Jane Doe" }]);
+    expect(result[0].derivedHandle).toBe("jdoe");
+  });
+
+  it("W never emits confirmed: no input without a stored full-repo match yields state confirmed", () => {
+    const roster: RepoBindingRosterEntry[] = [{ id: "701", name: "Ana Ruiz", loginId: "s" }];
+    const stored: CourseStudentRepo[] = [{ student: "Ana Ruiz", canvasUserId: "701", repo: "org/other", username: null }];
+    const result = suggestRepoStudentBindings(["org/cs101-ruiz-ana"], roster, stored, "cs101");
+    expect(result[0].state).toBe("suggested");
+    expect(result[0].canvasUserId).toBeNull();
   });
 });
 

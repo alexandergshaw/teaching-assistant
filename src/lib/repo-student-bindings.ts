@@ -152,7 +152,28 @@ function studentSortableField(sortableName: string | null | undefined): { studen
   return trimmed ? { studentSortable: trimmed } : {};
 }
 
-/** Tier 1: any stored row whose `username` matches `handle` case-insensitively.
+function nameTokens(s: string): string[] {
+  return repoSlug(s).split("-").filter(Boolean);
+}
+
+/** Token-MULTISET equality between a repo handle and a person's name: both
+ * sides go through repoSlug, split on "-", and must hold the same number of
+ * tokens with the same sorted contents. Order-insensitive ("ruiz-ana" matches
+ * "Ana Ruiz"), but neither substring nor subset - a different token count or
+ * a single shared token never matches. Used ONLY by the suggest tiers, which
+ * run after rule a, so it can never produce "confirmed". */
+export function handleMatchesName(handle: string, name: string): boolean {
+  const h = nameTokens(handle);
+  const n = nameTokens(name);
+  if (h.length === 0 || n.length === 0) return false;
+  if (h.length !== n.length) return false;
+  const hs = [...h].sort();
+  const ns = [...n].sort();
+  return hs.every((t, i) => t === ns[i]);
+}
+
+/** Tier 1: any stored row whose `username` matches `handle` case-insensitively,
+ * OR whose `student` name matches it order-insensitively (handleMatchesName).
  * Dedupes identical (canvasUserId, name) pairs so a repeated stored row never
  * inflates the candidate count. Stored rows (CourseStudentRepo) never carry a
  * Canvas sortableName, so these matches never get one either. */
@@ -164,7 +185,8 @@ function tierStoredUsername(
   const matches: Array<{ canvasUserId: string; name: string; sortableName?: string }> = [];
   for (const row of stored) {
     const username = (row.username ?? "").trim();
-    if (!username || username.toLowerCase() !== handle) continue;
+    const usernameMatches = !!username && username.toLowerCase() === handle;
+    if (!usernameMatches && !handleMatchesName(handle, row.student ?? "")) continue;
     const canvasUserId = (row.canvasUserId ?? "").trim();
     const key = `${canvasUserId}\u0000${row.student}`;
     if (seen.has(key)) continue;
@@ -194,7 +216,7 @@ function tierRosterNameSlug(
   roster: RepoBindingRosterEntry[]
 ): Array<{ canvasUserId: string; name: string; sortableName?: string }> {
   return roster
-    .filter((r) => repoSlug(r.name) === handle)
+    .filter((r) => handleMatchesName(handle, r.name))
     .map((r) => ({ canvasUserId: r.id, name: r.name, ...sortableNameField(r.sortableName) }));
 }
 

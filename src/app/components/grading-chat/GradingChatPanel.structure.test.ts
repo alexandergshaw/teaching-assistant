@@ -188,3 +188,50 @@ describe("GradingChatPanel - W2 O3 panel-feed: the driver is constructed with co
     expect(source.slice(start, end)).toMatch(/commentSplit\s*:\s*true/);
   });
 });
+
+// GRADER W2 wiring guard (docs/grader-w2-wiring-test-notes.md, SMOOTH-GRADER).
+// Source-text pins on the session-setup block; the runtime await chain is a
+// reading claim (OWNER live walk), not asserted here.
+function ensureSessionBlock(): string {
+  const source = withoutLineComments(read(PANEL));
+  const start = source.indexOf("const ensureSession = async");
+  const end = source.indexOf("const handleSubmitText");
+  expect(start, "expected the ensureSession declaration").toBeGreaterThan(-1);
+  expect(end, "expected the handleSubmitText declaration").toBeGreaterThan(-1);
+  return source.slice(start, end);
+}
+
+describe("GradingChatPanel - W2 AR1: the Canvas fetch is awaited before beginSession", () => {
+  it("an awaited fetchCanvasMetaAction( call precedes driver.beginSession(", () => {
+    const block = ensureSessionBlock();
+    const fetchIdx = block.indexOf("await fetchCanvasMetaAction(");
+    const beginIdx = block.indexOf("driver.beginSession(");
+    expect(fetchIdx, "expected an awaited Canvas meta fetch").toBeGreaterThan(-1);
+    expect(beginIdx, "expected the beginSession call").toBeGreaterThan(-1);
+    expect(fetchIdx).toBeLessThan(beginIdx);
+  });
+});
+
+describe("GradingChatPanel - W2 AR1b: beginSession is fed the resolved fill values", () => {
+  it("passes fill.instructions and fill.rubric, not the stale state vars", () => {
+    const block = ensureSessionBlock();
+    const beginStart = block.indexOf("driver.beginSession(");
+    expect(beginStart, "expected the beginSession call").toBeGreaterThan(-1);
+    const beginEnd = block.indexOf("});", beginStart);
+    expect(beginEnd, "expected the beginSession call terminator").toBeGreaterThan(-1);
+    const beginBlock = block.slice(beginStart, beginEnd);
+    expect(beginBlock).toMatch(/assignmentInstructions:\s*fill\.instructions\b/);
+    expect(beginBlock).toMatch(/\brubric:\s*fill\.rubric\b/);
+  });
+});
+
+describe("GradingChatPanel - W2 AR1c: the Canvas fetch is gated by needsFill (fetch avoidance, not precedence)", () => {
+  it("fetchCanvasMetaAction lives inside the if (canvasUrl && scope && needsFill) block", () => {
+    const block = ensureSessionBlock();
+    const guardIdx = block.indexOf("if (canvasUrl && scope && needsFill)");
+    expect(guardIdx, "expected the needsFill guard").toBeGreaterThan(-1);
+    const loadedIdx = block.indexOf("const loaded =", guardIdx);
+    expect(loadedIdx, "expected the statement after the guard").toBeGreaterThan(-1);
+    expect(block.slice(guardIdx, loadedIdx)).toContain("fetchCanvasMetaAction");
+  });
+});

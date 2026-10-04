@@ -443,8 +443,10 @@ one-line offset edit. So: F2/F3 survive all three readings; F4 holds on (a).
 
 **Named hazard (NOT a fork - a build requirement):** F3's compaction only takes
 effect at runtime if it out-cascades `.field textarea` (section 5, F3 hazard).
-The implementer MUST use mechanism (i) or (ii) and MUST NOT use the forbidden
-compound. The owner walk (AC-S1/S3) is what confirms the field actually shrank.
+The implementer MUST use mechanism (i) (drop-`styles.field`) and MUST NOT use the
+forbidden compound. Mechanism (ii) `!important` is RETIRED (section 5, F3): it
+keeps `styles.field` on the wrapper, which the F3 absence pin reds. The owner walk
+(AC-S1/S3) is what confirms the field actually shrank.
 
 ---
 
@@ -477,8 +479,8 @@ sees the classes as unreferenced. (Section 3.)
 **Trap 2 - a compound selector naming an existing class inside the new module
 reddens the orphan ratchet.** `.field.compact textarea` in grading-chat.module.css
 defines `field` there; `field` is never `chat.field`; it becomes an orphan; 118
--> 119 -> RED. Use mechanism (i) drop-`.field` or (ii) `!important`. (Section 5,
-F3.)
+-> 119 -> RED. Use mechanism (i) drop-`.field` (mechanism (ii) `!important` is
+RETIRED - see section 5, F3; it keeps `styles.field` and the absence pin reds it).
 
 **Trap 3 - the orphan test REGENERATES `docs/css-orphans.md`, which is already
 modified in the working tree.** `git status --short docs/css-orphans.md` shows

@@ -59,7 +59,7 @@ import {
   TAB_ORDER,
   type ActiveTab,
 } from "./components/tabs/tab-sections";
-import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
+import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch, resolveRecordingLaunchRoute } from "@/lib/recording-launch";
 import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
 
@@ -155,21 +155,11 @@ export default function Home() {
     const handler = (e: Event) => {
       const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
       if (!detail) return;
-      if (detail.view === "grading") {
-        setManualView("grading");
-        setGradingView("recording");
-        setToolsSection("manual");
-        setActiveTab("manual");
-      } else if (detail.view === "snapgrade") {
-        setManualView("grading");
-        setGradingView("snapshots");
-        setToolsSection("manual");
-        setActiveTab("manual");
-      } else {
-        setManualView("recording");
-        setToolsSection("manual");
-        setActiveTab("manual");
-      }
+      const route = resolveRecordingLaunchRoute(detail.view);
+      setManualView(route.manualView);
+      if (route.gradingView) setGradingView(route.gradingView);
+      setToolsSection(route.toolsSection);
+      setActiveTab(route.activeTab);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);

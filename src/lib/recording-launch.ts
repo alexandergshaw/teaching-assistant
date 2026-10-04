@@ -66,7 +66,8 @@ export type RecordingLaunchView =
   | "moduledeck"
   | "walkannounce"
   | "messages"
-  | "snapgrade";
+  | "snapgrade"
+  | "remembered";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
@@ -81,7 +82,27 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "walkannounce",
   "messages",
   "snapgrade",
+  "remembered",
 ];
+
+/** Where a launch lands in the app shell: Tools > (Grading | Recording).
+ * "grading"/"snapgrade" go to Tools > Grading; every other view, including
+ * the "remembered" sentinel (the fab's view-less entry, which RecordingTab
+ * resolves to its own persisted sub-view), goes to Tools > Recording. */
+export function resolveRecordingLaunchRoute(view: RecordingLaunchView): {
+  manualView: "grading" | "recording";
+  gradingView?: "recording" | "snapshots";
+  toolsSection: "manual";
+  activeTab: "manual";
+} {
+  if (view === "grading") {
+    return { manualView: "grading", gradingView: "recording", toolsSection: "manual", activeTab: "manual" };
+  }
+  if (view === "snapgrade") {
+    return { manualView: "grading", gradingView: "snapshots", toolsSection: "manual", activeTab: "manual" };
+  }
+  return { manualView: "recording", toolsSection: "manual", activeTab: "manual" };
+}
 
 /** Already-framed, already-capped prompt text - built via
  * buildKnowledgeContextBlock (src/lib/chat/knowledge-context.ts), the same

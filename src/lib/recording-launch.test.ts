@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  resolveRecordingLaunchRoute,
   openRecordingTool,
   navigateToRecordingTool,
   parseRecordingLaunch,
@@ -611,6 +614,111 @@ describe("recording-launch", () => {
         })
       );
       eventSpy.mockRestore();
+    });
+
+    // Discussion-clicks W-B: the fab's "Recording tools" entry now sends the
+    // "remembered" sentinel so RecordingTab keeps its persisted sub-view.
+    it("navigateToRecordingTool dispatches RECORDING_LAUNCH_EVENT for the remembered sentinel", () => {
+      const eventSpy = vi.spyOn(window, "dispatchEvent");
+      navigateToRecordingTool("remembered");
+      expect(eventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: RECORDING_LAUNCH_EVENT,
+          detail: { view: "remembered" },
+        })
+      );
+      eventSpy.mockRestore();
+    });
+  });
+});
+
+describe("remembered sentinel (discussion-clicks W-B-1)", () => {
+  it("parseRecordingLaunch resolves the sentinel: not null, not forced to record", () => {
+    const parsed = parseRecordingLaunch({ view: "remembered" });
+    expect(parsed).not.toBeNull();
+    expect(parsed).not.toEqual({ view: "record" });
+    expect(parsed).toEqual({ view: "remembered" });
+  });
+});
+
+describe("launch view set is exactly the frozen 13 (discussion-clicks W-B-2)", () => {
+  const FROZEN_13 = [
+    "announcement",
+    "avatar",
+    "captions",
+    "discussions",
+    "grading",
+    "messages",
+    "moduledeck",
+    "record",
+    "remembered",
+    "slides",
+    "snapgrade",
+    "speed",
+    "walkannounce",
+  ];
+  const src = readFileSync(join(process.cwd(), "src", "lib", "recording-launch.ts"), "utf8");
+  const quoted = (block: string): string[] =>
+    Array.from(block.matchAll(/"([a-z]+)"/g))
+      .map((m) => m[1])
+      .sort();
+
+  it("the union members equal the frozen 13 (source-text exact set)", () => {
+    const start = src.indexOf("export type RecordingLaunchView =");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf(";", start);
+    expect(end).toBeGreaterThan(start);
+    expect(quoted(src.slice(start, end))).toEqual(FROZEN_13);
+  });
+
+  it("the RECORDING_LAUNCH_VIEWS array members equal the frozen 13 (source-text exact set)", () => {
+    const start = src.indexOf("const RECORDING_LAUNCH_VIEWS");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("];", start);
+    expect(end).toBeGreaterThan(start);
+    const afterEq = src.indexOf("= [", start);
+    expect(quoted(src.slice(afterEq, end))).toEqual(FROZEN_13);
+  });
+
+  it("every frozen view still parses to itself", () => {
+    for (const v of FROZEN_13) {
+      expect(parseRecordingLaunch({ view: v })).toEqual({ view: v });
+    }
+  });
+});
+
+describe("resolveRecordingLaunchRoute (discussion-clicks W-B-5)", () => {
+  it("routes the remembered sentinel to Tools > Recording", () => {
+    expect(resolveRecordingLaunchRoute("remembered")).toEqual({
+      manualView: "recording",
+      toolsSection: "manual",
+      activeTab: "manual",
+    });
+  });
+
+  it("routes an ordinary view to Tools > Recording", () => {
+    expect(resolveRecordingLaunchRoute("discussions")).toEqual({
+      manualView: "recording",
+      toolsSection: "manual",
+      activeTab: "manual",
+    });
+  });
+
+  it("routes grading to Tools > Grading > recording", () => {
+    expect(resolveRecordingLaunchRoute("grading")).toEqual({
+      manualView: "grading",
+      gradingView: "recording",
+      toolsSection: "manual",
+      activeTab: "manual",
+    });
+  });
+
+  it("routes snapgrade to Tools > Grading > snapshots", () => {
+    expect(resolveRecordingLaunchRoute("snapgrade")).toEqual({
+      manualView: "grading",
+      gradingView: "snapshots",
+      toolsSection: "manual",
+      activeTab: "manual",
     });
   });
 });

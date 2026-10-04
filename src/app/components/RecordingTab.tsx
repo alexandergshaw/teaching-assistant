@@ -105,7 +105,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       // widening recView back to include them) is what lets recView's union
       // actually shrink - tsc rejects setRecView(detail.view) otherwise,
       // since detail.view still carries both values.
-      if (detail.view === "grading" || detail.view === "snapgrade") return;
+      if (detail.view === "grading" || detail.view === "snapgrade" || detail.view === "remembered") return;
       setRecView(detail.view);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);

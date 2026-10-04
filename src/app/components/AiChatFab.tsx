@@ -439,7 +439,7 @@ export default function AiChatFab() {
   // openRecordingTool) - see the two-line comment further below where this
   // used to be inlined three times, one per removed entry, for why.
   const handleOpenRecordingTools = useCallback(() => {
-    navigateToRecordingTool("record");
+    navigateToRecordingTool("remembered");
   }, []);
 
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[]) => {

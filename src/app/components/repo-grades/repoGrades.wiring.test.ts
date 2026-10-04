@@ -68,6 +68,8 @@ const indexSource = readFileSync(INDEX_PATH, "utf8");
 // since that wiring did not move.
 const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGradesGradingActions.ts");
 const hookSource = readFileSync(HOOK_PATH, "utf8");
+const RUN_PLAN_PATH = join(process.cwd(), "src/app/components/repo-grades/repoGradesRunPlan.ts");
+const runPlanSource = readFileSync(RUN_PLAN_PATH, "utf8");
 
 /**
  * Starting at `openBraceIdx` (which must point at a `{`), walks forward
@@ -693,23 +695,53 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(gridSource).toContain("onPostColumn={onPostColumn}");
   });
 
-  it("the column header's Post/Re-post button relabels using the SAME plan.postable.length the button's disabled state also uses, so they cannot disagree", () => {
+  it("the column header's Post/Re-post label comes from the extracted leaf, fed the SAME plan.postable.length its disabled state uses, so the shown count cannot diverge from the gated count (U8.33)", () => {
     const idx = gridSource.indexOf("function ColumnHeaderControls");
     expect(idx).toBeGreaterThan(-1);
-    // Bounded by the NEXT top-level declaration, not by a fixed character
-    // count. This used to slice a magic 2000 chars, which silently made the
-    // assertion depend on how long this function's comments happened to be:
-    // adding the selection-scoping comment pushed the label expression to
-    // offset ~1964, so the window cut it mid-string and the test failed
-    // without anything about the button actually changing. The three
-    // assertions below are unchanged - only the window they search widened
-    // from "an arbitrary prefix" to "the whole function".
     const end = gridSource.indexOf("\nexport default function", idx);
     expect(end).toBeGreaterThan(idx);
-    const body = gridSource.slice(idx, end);
-    expect(body).toContain("disabled={busy || plan.postable.length === 0}");
-    expect(body).toContain("plan.postable.length");
-    expect(body).toContain('alreadyAttempted ? "Re-post" : "Post"');
+    // Comments stripped first so prose quoting the old inline ternary cannot
+    // red the not.toContain below; only a re-inline in live code can.
+    const stripped = stripComments(gridSource.slice(idx, end));
+    expect(stripped).toContain("disabled={busy || plan.postable.length === 0}");
+    expect(stripped).toContain("postableCount: plan.postable.length");
+    expect(stripped).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
+  });
+
+  it("RepoGradesGrid.tsx derives its run labels from the extracted repoGradesRunPlan leaf", () => {
+    expect(usesSharedFunction(gridSource, "repoGradesRunPlanLabels", "./repoGradesRunPlan")).toBe(true);
+  });
+
+  it("the transient Grade/Post overlays stay in RepoGradesGrid.tsx's column header (not folded into the pure leaf)", () => {
+    const idx = gridSource.indexOf("function ColumnHeaderControls");
+    expect(idx).toBeGreaterThan(-1);
+    const end = gridSource.indexOf("\nexport default function", idx);
+    expect(end).toBeGreaterThan(idx);
+    const stripped = stripComments(gridSource.slice(idx, end));
+    expect(stripped).toContain("bulkProgress.done");
+    expect(stripped).toContain("Posting");
+  });
+
+  it("the Grade and Post button children CONSUME the leaf's returned labels (gradeLabel/postLabel), so an extraction cannot call the leaf and then re-inline a label", () => {
+    const idx = gridSource.indexOf("function ColumnHeaderControls");
+    expect(idx).toBeGreaterThan(-1);
+    const end = gridSource.indexOf("\nexport default function", idx);
+    expect(end).toBeGreaterThan(idx);
+    const stripped = stripComments(gridSource.slice(idx, end));
+    expect(stripped).toContain(": gradeLabel");
+    expect(stripped).toContain(": postLabel");
+  });
+
+  it("repoGradesRunPlan.ts is a pure label leaf - it calls no Canvas-writing or grading action", () => {
+    expect(runPlanSource).not.toContain("postCanvasGradesAction(");
+    expect(runPlanSource).not.toContain("gradeRepoAction(");
+  });
+
+  it("the only two postCanvasGradesAction call sites remain, in the hook alone (AC1, paren-anchored)", () => {
+    const countCalls = (s: string) => (s.match(/postCanvasGradesAction\(/g) ?? []).length;
+    expect(countCalls(hookSource)).toBe(2);
+    expect(countCalls(gridSource)).toBe(0);
+    expect(countCalls(runPlanSource)).toBe(0);
   });
 });
 

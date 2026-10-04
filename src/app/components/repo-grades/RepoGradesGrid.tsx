@@ -47,6 +47,7 @@ import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEdits
 import { deriveRepoGradeStudentName, repoGradeLastNameCellText } from "./repoGradeStudentName";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
+import { repoGradesRunPlanLabels } from "./repoGradesRunPlan";
 import { buildRepoGradeRowLinkHref, buildRepoGradeRowLinkText } from "./repoGradeTreeLink";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
@@ -349,12 +350,19 @@ function ColumnHeaderControls({
   const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: bulkSelectionOnly });
   const gradeTargetCount = gradePlan.targets.length;
   const scopedToSelection = bulkSelectionOnly && selected.size > 0;
-  const restingGradeLabel =
-    gradeTargetCount === 0
-      ? `Nothing to grade in ${column.folder}`
-      : `Grade ${scopedToSelection ? `${gradeTargetCount} selected` : `all ${gradeTargetCount}`} repo${gradeTargetCount === 1 ? "" : "s"} in ${column.folder}${scanTruncated ? " (scan incomplete)" : ""}`;
+  // Resting label wording lives in the pure repoGradesRunPlan leaf; the
+  // transient overlays (grading progress here, "Posting" on the Post button)
+  // stay in this component because they are render state.
+  const { gradeLabel, postLabel } = repoGradesRunPlanLabels({
+    folder: column.folder,
+    gradeTargetCount,
+    scopedToSelection,
+    scanTruncated,
+    alreadyAttempted,
+    postableCount: plan.postable.length,
+  });
   const gradeAllLabel =
-    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : restingGradeLabel;
+    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : gradeLabel;
 
   // N4 items 11/13: this column's own sort - a click toggles ascending/
   // descending on THIS folder's score via toggleRepoGradeSort's "folder"
@@ -403,16 +411,6 @@ function ColumnHeaderControls({
           rubric.
         </span>
       )}
-      {/* Repo Grades UI consistency audit item #2 - these two buttons write to
-          a live Canvas gradebook and bill per-item LLM calls, so they carry
-          MUI's primary weight (`variant="contained"`) rather than this
-          folder's usual tertiary `linkButton`, matching how
-          GradingResults.tsx:425 renders the same Post-to-Canvas action.
-          Behaviour-preserving: `disabled`/`onClick`/children are unchanged,
-          and repoGrades.wiring.test.ts's pinned source-text assertions
-          (`disabled={busy || plan.postable.length === 0}`,
-          `plan.postable.length`, `alreadyAttempted ? "Re-post" : "Post"`)
-          survive verbatim as JSX prop/child text on a MUI Button. */}
       <Button
         type="button"
         variant="contained"
@@ -434,7 +432,7 @@ function ColumnHeaderControls({
           onPostColumn(column, pointsPossible);
         }}
       >
-        {busy ? "Posting…" : `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)`}
+        {busy ? "Posting…" : postLabel}
       </Button>
     </div>
   );

@@ -346,7 +346,7 @@ This makes grade and post symmetric and the typeahead immediately effective.
 Three sites today compute the grade plan or its selection label off
 `bulkSelectionOnly` ALONE, and all must move to the expressions above in
 lockstep, or the label and the run disagree:
-- the grade execution handler (index.tsx `handleGradeColumn`);
+- the grade execution handler (`useRepoGradesGradingActions.ts:784`, the `buildBulkGradePlan` call inside `handleGradeColumn` - NOT index.tsx, which only wires the button to the hook);
 - the run bar's `buildBulkGradePlan` call (RepoGradesRunBar.tsx:66) and its
   `scopedToSelection` label flag (RepoGradesRunBar.tsx:70 -
   `bulkSelectionOnly && selected.size > 0`);
@@ -463,9 +463,10 @@ Land the shell first with today's controls, then populate it.
   `visibleRepoRows` + its test, the multi-select typeahead + chips in the sticky
   header, the F3-c=X grade-scope edit at ALL grade-plan sites (handler, run bar
   :66/:70, grid :350/:352), the planRows-vs-bodyRows prop split so the search
-  query stays out of the run counts (edits index.tsx, RepoGradesGrid.tsx and
-  RepoGradesRunBar.tsx - plan surfaces take folder-scoped planRows, `<tbody>`
-  takes bodyRows), the "N of M" counter + clear/show-all affordance. Features 3
+  query stays out of the run counts (edits index.tsx, RepoGradesGrid.tsx,
+  RepoGradesRunBar.tsx AND useRepoGradesGradingActions.ts:784 - the real grade
+  execution site, the 4th F3-c=X site; plan surfaces take folder-scoped planRows,
+  `<tbody>` takes bodyRows), the "N of M" counter + clear/show-all affordance. Features 3
   and 4 are one wave: feature 4 is the display consequence of feature 3's
   selection and shares the selector.
 
@@ -601,8 +602,10 @@ typeahead feeds the same `selected` the plan builders read).
   reading a different set (shown!=run).
 - **AC-F3-3 (grade honours a non-empty set at EVERY site - F3-c=X):** OBJECT the
   `selectionOnly` expression AND the `scopedToSelection` label flag at ALL FOUR
-  grade-plan sites: the execution handler (index.tsx `handleGradeColumn`),
-  RepoGradesRunBar.tsx:66 + :70, and RepoGradesGrid.tsx:350 + :352. INSTRUMENT
+  grade-plan sites: the execution handler (`useRepoGradesGradingActions.ts:784`,
+  the buildBulkGradePlan inside handleGradeColumn - THE site that decides which
+  repos actually grade), RepoGradesRunBar.tsx:66 + :70, and RepoGradesGrid.tsx:350
+  + :352. INSTRUMENT
   wiring test that every site computes `selectionOnly: selected.size > 0 ||
   bulkSelectionOnly` (not bare `bulkSelectionOnly`) and `scopedToSelection`
   reflects the same, + a `buildBulkGradePlan` test that a non-empty set +
@@ -704,7 +707,8 @@ reading (not an owner ruling), and the answer is applied as transcription.
 
 ```
 # edited/created (planned):
-src/app/components/repo-grades/index.tsx                        # EDIT - relocate controls into sticky header child; display selector; grade-scope edit (budget: sec 4.2)
+src/app/components/repo-grades/index.tsx                        # EDIT - relocate controls into sticky header child; display selector (bodyRows vs planRows props); NOTE grade-scope execution is NOT here (see the hook below) (budget: sec 4.2)
+src/app/components/repo-grades/useRepoGradesGradingActions.ts   # EDIT (Wave C) - F3-c=X at the REAL grade-execution site: buildBulkGradePlan :784 selectionOnly: selected.size>0 || bulkSelectionOnly (this is the 4th F3-c site; it owns which repos actually grade)
 src/app/components/repo-grades/RepoGradesStickyHeader.tsx        # NEW  - the one sticky working-header container (Wave A; new R-2 root)
 src/app/components/repo-grades/RepoGradesControls.tsx            # EDIT - split working vs setup controls (F2-b)
 src/app/components/repo-grades/RepoGradesRunBar.tsx              # EDIT/MOVE - run controls now a tier inside the sticky header; `rows` prop = planRows (folder-scoped, not query); F3-c=X at :66/:70

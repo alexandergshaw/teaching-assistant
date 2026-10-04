@@ -29,8 +29,10 @@ Unlike the walkthrough sibling (`docs/walkthrough-w3-surface-test-notes.md`,
 which I used as the pattern), the grader scope does NOT reject the collapse or
 the sticky composer - R3 proposes the collapse and F1(a) recommends the sticky.
 So I pin both firmly here, where the walkthrough routed them as forks. The
-`docs/repo-grader-w3-surface-test-notes.md` sibling does not exist yet (`Read`
-returned "File does not exist").
+`docs/repo-grader-w3-surface-test-notes.md` sibling DOES exist (committed
+`6ba5f55b`, present at HEAD - `git log --oneline --diff-filter=A` on the path);
+its sticky run-bar pin is the same `position: sticky` + bounded-slice + offset
+construction, reinforcing the F1(a) pattern this file pins.
 
 ## The hard constraint on every instrument here
 
@@ -46,8 +48,10 @@ snippet 1, at 1366x768). I did not invent a vitest pixel pin for any distance.
 
 ## 1. Measured facts (each names its command)
 
-Source read in full: `GradingChatPanel.tsx` (198 lines, `wc -l`),
-`ChatComposer.tsx` (174), the two grading-chat structure tests, the CSS orphan
+Source read in full: `GradingChatPanel.tsx` (238 lines; `wc -l` and
+`@(Get-Content).Count` agree - W2 grew it from 198, so this file's own
+citations at `:233`/`:208-212`/`:214-231` are the current layout),
+`ChatComposer.tsx` (174, `wc -l`), the two grading-chat structure tests, the CSS orphan
 ratchet, and the scope + baseline walk + walkthrough sibling notes.
 
 - `grep -n "min-height: 220px" src/app/page.module.css` -> line 230, inside the
@@ -165,8 +169,9 @@ persisted-details-open-hydration lesson) - NOT this wave.
 ## 4. Executable here vs argued-only
 
 **Executable now (machine, this environment):** F1 (sticky class applied +
-rule), F2 (collapse conditional + summary present), F3 (compact class applied +
-reduced min-height in the module), F4 (error inside the sticky wrapper), F5
+rule), F2 (collapse conditional + summary present), F3 (compact class applied
+AND `styles.field` dropped from both setup wrappers + reduced min-height in the
+module), F4 (error inside the sticky wrapper), F5
 (Send grouped), the orphan-ratchet gate (stays 118), the key-canary gate (stays
 4). I validated the LOGIC of F1-F4 against a reference implementation and its
 sabotages before writing them (section 11): 11/11 correct.
@@ -257,46 +262,108 @@ file - it reverts to the index and destroys the chunk's work). One `npx tsc
 - **Argued:** that the collapse actually saves vertical pixels is OWNER (AC-S2).
   The pin proves only that the fields are replaced by a summary in source.
 
-### F3 (scope R4; AC-S1/S3 proxy) - compact setup fields. CARRIES A NAMED HAZARD.
+### F3 (scope R4; AC-S1/S3 proxy) - compact setup fields. NEUTRALIZES ITS HAZARD BY ABSENCE, AS RIGOROUSLY AS F1.
 
 - **Object:** the two setup field wrappers in `GradingChatPanel.tsx` and
   `grading-chat.module.css`.
-- **Instrument - TWO parts:**
-  1. **Component:** both setup field wrappers reference a compaction class from
-     the new module (`chat.compactField`), verified by slicing each field's own
-     markup (anchor on `id="grading-chat-instructions"` / `-rubric"`, bounded to
-     the enclosing wrapper).
+- **THE FACT PINNED (not the spelling):** `styles.field` is GONE from both setup
+  wrappers (so the competing `.field textarea` 220px selector no longer matches
+  them), `chat.compactField` is PRESENT on both, and the module sets the compact
+  textarea `min-height < 220`. Presence of `chat.compactField` ALONE is not
+  enough - that is the B1 hazard below.
+- **Instrument - TWO parts, both required:**
+  1. **Component (presence AND absence, per wrapper, slice-bounded).** For each
+     id (`id="grading-chat-instructions"`, then `id="grading-chat-rubric"`):
+     resolve `idIdx = source.indexOf(id)` (assert `> -1`); resolve the enclosing
+     wrapper open `divIdx = source.lastIndexOf("<div", idIdx)` (assert `> -1`
+     AND `< idIdx`, so BOTH ends of the slice resolve - the className sits on the
+     enclosing `<div>`, which opens BEFORE the id, so the slice runs BACKWARD
+     from the id to that div); slice `wrapperOpen = source.slice(divIdx, idIdx)`.
+     Assert `wrapperOpen` CONTAINS `chat.compactField` AND does NOT contain
+     `styles.field`. (The id anchor does not collide with the
+     `<label htmlFor="grading-chat-instructions">` above it: the substring
+     `id="grading-chat-instructions"` is not inside `htmlFor="..."` - verified
+     by read AND by the executed harness in section 11, idIdx lands on the
+     `TextField`'s `id`.)
   2. **Stylesheet:** over `withoutCssComments(read(MODULE))`, find
-     `.compactField`, resolve its `{`/`}`, slice between, and assert a
-     `min-height:\s*(\d+)px` whose value is strictly `< 220` (verified section
-     11: the "min-height 220" sabotage reads RED).
-- **Direction:** RED if a setup wrapper lacks `chat.compactField`, or the
-  compaction rule's min-height is `>= 220`, or absent.
-- **Sabotage:** in the module, set `.compactField`'s textarea `min-height` to
-  `220px`. Expect RED. Restore -> GREEN. **Discriminates** the reduction.
-- **THE HAZARD (name it; it is a build requirement AND an owner residual):** the
+     `.compactField`, resolve its `{`/`}` (assert both and `close > open`),
+     slice between, and assert a `min-height:\s*(\d+)px` whose value is strictly
+     `< 220` (verified section 11: the "min-height 220" sabotage reads RED).
+- **Direction of failure:** RED if a setup wrapper lacks `chat.compactField`, if
+  a setup wrapper STILL carries `styles.field`, or if the compaction rule's
+  min-height is `>= 220` or absent.
+- **Sabotage (two, both discriminate):**
+  - In the module, set `.compactField`'s textarea `min-height` to `220px`.
+    Expect RED on part 2. Restore -> GREEN. **Discriminates** the reduction.
+  - **B1 keep-both sabotage:** in the panel, change one setup wrapper's className
+    back to `` className={`${styles.field} ${chat.compactField}`} `` - the exact
+    build that keeps BOTH classes. Expect RED on part 1's ABSENCE assertion AND
+    on the retargeted `:62-67` whole-file pin. Restore -> GREEN. **Discriminates**
+    the removal of the competing selector. I ran this passing-but-wrong build
+    against the instrument logic (section 11): the OLD presence-only form GREEN,
+    the new absence form RED - the absence half is what kills it, and that is the
+    whole point of B1.
+- **THE HAZARD, now closed by ABSENCE rather than by cascade luck (B1):** the
   220px lives on `.field textarea` (specificity (0,1,1)) in `page.module.css`.
-  A compaction rule of equal specificity only wins at runtime by cascade order,
-  which is NOT deterministic across module load order - so a GREEN source pin
-  (min-height 72 present) can ship a field that still renders at 220px. This is
-  the "criterion satisfied one step short of the user-visible effect" class. The
-  source pin is a PROXY; the rendered height is OWNER (AC-S1/S3). Two
-  specificity-ROBUST mechanisms, in order of preference:
-  - **(i) RECOMMENDED - drop `styles.field` from the two setup wrappers** and
-    let `chat.compactField` own the layout (replicating `.field`'s flex column
-    and `.field label` styling in the module, minus the 220px). Then `.field
-    textarea` no longer matches and nothing competes. This RETARGETS the
-    existing `styles.field` pin at `GradingChatPanel.structure.test.ts:62-67` -
-    update it IN THE SAME COMMIT to assert the compaction mechanism (pin the
-    FACT that the setup wrappers carry `chat.compactField`, not the spelling);
-    keep the `styles.form` half.
-  - **(ii) `!important` on the compaction min-height** (keeps `styles.field`,
-    deterministic, slightly smelly). Leaves `:62-67` untouched.
+  `.compactField textarea` is EQUAL specificity (0,1,1), so a build that keeps
+  `styles.field` on the wrapper AND adds `chat.compactField`
+  (`` className={`${styles.field} ${chat.compactField}`} ``) would leave both
+  `.field textarea` (220px) and `.compactField textarea` matching, the winner
+  decided only by cascade order, which is NOT deterministic across module load
+  order. A presence-only pin would ship that field at 220px GREEN - the
+  "criterion satisfied one step short of the user-visible effect" class. The
+  orchestrator's F1 ruling MANDATES dropping `styles.field`, so this wave uses
+  ONE mechanism and the instrument REDs any build that keeps the competitor:
+  - **MANDATED - drop `styles.field` from the two setup wrappers** and let
+    `chat.compactField` own the layout (see M4 below for exactly what it must
+    replace). Then `.field textarea` no longer matches the setup textareas and
+    nothing competes. This RETARGETS the existing `styles.field` pin at
+    `GradingChatPanel.structure.test.ts:62-67`: in the SAME COMMIT, keep the
+    `expect(source).toContain("styles.form")` half, REPLACE the
+    `styles.field`-present half with `expect(source).not.toContain("styles.field")`,
+    and ADD `expect(source).toContain("chat.compactField")`. The whole-file
+    absence is faithful because `styles.field` appears in the panel EXACTLY on
+    the two setup wrappers today (`grep -n "styles.field" GradingChatPanel.tsx`
+    -> `:169`, `:183`, no other use), so dropping both removes it from the panel
+    entirely. Pin the FACT (competing selector gone, compaction class present),
+    not the spelling of the className expression.
+  - **`!important` on the min-height is NO LONGER AN OPTION.** It keeps
+    `styles.field` on the wrapper, which the B1 absence assertion (part 1 and
+    the retargeted `:62-67`) now REDs. The earlier "(ii)" alternative is RETIRED
+    by the F1 ruling; do not use it.
   - **FORBIDDEN:** a compound selector naming `.field` INSIDE the new module
     (e.g. `.field.compact textarea`) to out-specify. `extractDefinedClasses`
     would register `field` as a defined class OF grading-chat.module.css, never
     referenced via `chat.field`, creating a NEW orphan -> ratchet 118 -> 119 ->
     RED. See section 9, trap 2.
+- **M4 - what dropping `.field` strips, and what the compact class MUST replace.**
+  `.field textarea` does not only carry the 220px; dropping `styles.field` from a
+  wrapper removes ALL of the following (cited in `page.module.css`), and
+  `chat.compactField` (or a sibling class applied to the same wrapper) must
+  replace everything except the 220px:
+  - `.field` (`:148-152`): `display:flex; flex-direction:column; gap:var(--space-2)`.
+  - `.field label` (`:154-160`): the uppercase label styling (font-size 2xs,
+    weight 700, letter-spacing `0.06em`, `text-transform:uppercase`,
+    `color:var(--text-secondary)`).
+  - `.fileField, .field textarea` (`:162-168`): `width:100%`, `1px solid
+    var(--field-border)`, `border-radius:var(--radius-sm)`,
+    `background:var(--field-background)`.
+  - `.field textarea` (`:229-236`): `padding:var(--space-4) var(--space-4)`,
+    `resize:vertical`, `font:inherit`, `color:var(--text-primary)`,
+    `line-height:var(--line-normal)` - KEEP these, DROP only `min-height:220px`.
+  - `.field textarea:focus, .fileField:focus-within` (`:488-493`): the focus
+    treatment (`outline:2px solid var(--focus-ring-color)`, `outline-offset:2px`,
+    `border-color:var(--accent)`).
+  - `.field textarea::placeholder` (`:238-240`): `color:var(--text-muted)`.
+  - the responsive `.field textarea` (`:4983-4985`): `min-height:180px` at the
+    narrow breakpoint - also gone; the compact class should carry its own
+    responsive floor if the narrow layout needs one.
+  MUI's `TextField` supplies SOME of this by default (a border, a focus ring,
+  internal padding), so a wrapper stripped of `.field` still FUNCTIONS - it does
+  not render raw and the pins above do not require it to. Whether the compact
+  field is a VISUAL REGRESSION against the `.field`-styled baseline (label
+  casing, field border token, focus ring, placeholder colour) is NOT
+  machine-checkable here; it is OWNER residual RG3-8.
 
 ### F4 (scope R5; AC-S4 proxy) - intake error rides with the sticky composer
 
@@ -355,17 +422,24 @@ pins.
 
 ## 7. Routed fork and named hazard (adopt neither value silently)
 
-**FORK F1 (scope section 7) - composer position.** The scope lists (a) keep the
-composer last in DOM, pin it sticky to the viewport bottom, collapse setup after
-ready; (b) move the composer ABOVE the results; (c) keep the order, only collapse
-and compact. The scope RECOMMENDS (a) and says the build leans to it. I build (a)
-as the firm pins above - acted on as the scope's recommended reading, NOT as an
-owner ruling. If the owner picks (b), it reverses the explicit UX ruling at
-`grading-chat-ux.md:187-197` and is a one-wave change in the same file; (c) drops
-F1's sticky pin and keeps F2/F3/F4. Terminating question for the owner, if asked:
-"the Start-reachability cut is (a) sticky composer [recommended, built], (b)
-composer-above-results, or (c) collapse+compact only." Either non-(a) answer is a
-small edit to this same file; the firm F2/F3/F4 pins survive all three.
+**FORK F1 (scope section 7) - composer position - RULED IN AS (a); NOT REOPENED.**
+The scope lists (a) keep the composer last in DOM, pin it sticky to the viewport
+bottom, collapse setup after ready; (b) move the composer ABOVE the results; (c)
+keep the order, only collapse and compact. The scope RECOMMENDS (a); the
+orchestrator has now RULED F1=(a), so the firm F1 sticky pins stand as authored
+and the fork is not re-argued here. Recorded for the history: (b) would have
+reversed the explicit UX ruling at `grading-chat-ux.md:187-197`; (c) would have
+dropped F1's sticky pin.
+**Pin dependence on the ruling (corrects an earlier blanket claim):** F2
+(collapse) and F3 (compact) are composer-position-INDEPENDENT - their anchors are
+the two setup fields and the summary, not the composer - so they would have
+survived ANY of (a)/(b)/(c) unchanged. F4 is NOT position-independent: its
+instrument resolves the `chat.stickyComposer` wrapper and asserts submitError
+sits INSIDE it and BELOW the results, which is only constructible under (a)
+(there is no sticky wrapper under (c), and the composer is not below the results
+under (b)). F4 is therefore sound AS-BUILT precisely BECAUSE F1=(a) is ruled in;
+had the ruling gone (b) or (c), F4's instrument would have needed rework, not a
+one-line offset edit. So: F2/F3 survive all three readings; F4 holds on (a).
 
 **Named hazard (NOT a fork - a build requirement):** F3's compaction only takes
 effect at runtime if it out-cascades `.field textarea` (section 5, F3 hazard).
@@ -443,6 +517,7 @@ grader verify is AFTER W3; the walk ratifies these.
 | RG3-5 (R-2) | Whether the composer ACTUALLY sticks (no ancestor clips `overflow`; there is room) | repo owner | the walk, scrolling with rows present | with AC-S2 |
 | RG3-6 (F3 hazard) | Whether the compact field actually renders shorter than 220px (cascade/specificity) | repo owner | snippet 1 field `top`/height, stage A | with AC-S1/S3 |
 | RG3-7 | Chrome above the panel (TopBar, rails, page padding) is unmeasured; the scope estimates exclude it | repo owner | snippet 1 `fromPanel` vs `top` (walk residual I-4) | first run of snippet 1 |
+| RG3-8 (M4 / F3 drop-`.field`) | Whether the compact setup field is a VISUAL REGRESSION against the `.field`-styled baseline once `styles.field` is dropped - uppercase label, field border token, focus outline, placeholder colour (MUI supplies defaults so it still functions, but may not match) | repo owner | snippet 1 stage A: compare the compact field's computed border / focus outline / label casing / placeholder colour against the pre-W3 `.field` baseline | SMOOTH-BASELINE walk, with AC-S1/S3. F3 part 1 (absence of `styles.field` + presence of `chat.compactField`) and part 2 (min-height < 220) are the machine PROXIES for the mechanism, never for the visual parity |
 
 Forks and these residuals are also the SMOOTH-GRADER backlog row's concern; this
 register is the test-seat copy, not a substitute for the row.
@@ -461,11 +536,25 @@ correctly reported `offset=false` when only `bottom: 0` was removed and
 `padding-top: var(--space-2)` remained, proving the boundary anchor
 `(^|[\s;{])(bottom|top):` excludes `padding-top` (the exact false-match this seat
 exists to prevent). The reference construction the implementer can build to green
-is: the two setup fields under a `{!sessionReady ? (...) : <div
+is: the two setup fields, each wrapper `<div className={chat.compactField}>` (NO
+`styles.field`), under a `{!sessionReady ? (...) : <div
 className={chat.setupSummary}>...}` conditional; a `<div
 className={chat.stickyComposer}>{submitError && <p role="alert">...</p>}<ChatComposer/></div>`
 below the results; and a module with `.stickyComposer { position: sticky; bottom:
 0; ... }`, `.compactField textarea { min-height: 72px }`, `.setupSummary { ... }`.
+
+**B1 re-execution (this revision, round 2).** I executed the rewritten F3 part 1
+(per-wrapper absence+presence) and the retargeted `:62-67` whole-file pin against
+a correct build and the keep-both hazard build (`` `${styles.field}
+${chat.compactField}` `` on each wrapper) in a scratch node script. Measured:
+correct build GREEN on all three forms; keep-both build RED on F3 part 1's
+absence assertion AND on the retargeted `:62-67` pin, while the OLD
+presence-only form PASSED keep-both - demonstrating the precise gap B1 closes (a
+presence-only instrument is a silent-green of the 220px field). The CSS part read
+`min-height:72` GREEN and the `min-height:220` sabotage RED, and the id anchor
+`id="grading-chat-instructions"` landed on the `TextField`, not the label's
+`htmlFor`. So the B1 absence instrument is satisfiable and discriminating, not an
+assertion I only argued.
 
 The genuine satisfiability RISK is entirely runtime and OWNER, not a pin: the
 sticky overflow dependency (R-2) and the compaction specificity war (F3 hazard).
@@ -489,8 +578,10 @@ npm run test:paths -- \
 ```
 
 - `GradingChatPanel.structure.test.ts` holds F1-F5 and the retargeted
-  `styles.field` pin (if mechanism (i)); it reads the new
-  `grading-chat.module.css` via its `read()` helper.
+  `styles.field` pin (`:62-67`: `styles.form` kept, `styles.field` asserted
+  ABSENT, `chat.compactField` asserted present - the drop is mandated, no longer
+  conditional); it reads the new `grading-chat.module.css` via its `read()`
+  helper.
 - `grading-chat-storage-keys.structure.test.ts` proves the key canary stays at 4
   (no stray `ta-` key).
 - `page-module-css-orphan-classes.test.ts` is REQUIRED because W3 adds a CSS
@@ -498,7 +589,8 @@ npm run test:paths -- \
 - `ChatComposer.structure` pins (F5) live in the same structure test file
   (it already reads both `PANEL` and `COMPOSER`), so no extra path.
 - Separately run `npx tsc --noEmit` once (no `/s` flags). `GradingChatPanel.tsx`
-  is 198 lines + ~25 for W3; nowhere near the 1000 ceiling, so
+  is 238 lines (`@(Get-Content).Count`) + ~25 for W3 = ~263, nowhere near the
+  1000 ceiling, so
   `file-size-ceiling.structure.test.ts` need not be in the paths, but it is free
   to include and will pass.
 - Gate the wave on `git status --short` against the W3 write set

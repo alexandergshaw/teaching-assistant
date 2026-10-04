@@ -29,13 +29,16 @@ import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
+  clearRepoGradeCells,
   loadAssignmentMapping,
   loadFolderSelection,
+  loadRepoGradeCells,
   loadRepoGradeLog,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
   persistFolderSelection,
+  persistRepoGradeCells,
   persistRepoGradeLog,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
@@ -73,6 +76,7 @@ import {
   EMPTY_REPO_GRADE_CELL_EDITS,
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
+import { describeRestoredRepoGradeCells } from "./repoGradesResultsStore";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
@@ -175,21 +179,12 @@ export default function RepoGradesTab() {
   // purely from the roster table before anything is actually saved. That is
   // intended - the same "suggested first, confirm second" honesty this view
   // already applies to a live Canvas link.
-  // ---- per-cell editable state (AC4 items 20-21) - ephemeral UI memory,
-  // never persisted to localStorage (a typed but un-posted score surviving a
-  // reload would be surprising, and this codebase's own precedent -
-  // GradingResults.tsx's `edits`/`postStatus` - does not persist these
-  // either). Reset whenever the selected course changes, via the render-
-  // phase compare-and-adjust idiom below (the `cellStateResetForCourse`
-  // block, further down this file) - that is also why this declaration had
-  // to move ABOVE `sortedRows`: docs/repo-grades-name-columns-and-sorting-
-  // acceptance-criteria.md's folder-sort needs `cellEdits` to read a
-  // folder's live score (N4 item 13), so `sortedRows` below now reads it
-  // too, and a `const` used before its own declaration is a ReferenceError,
-  // not merely a style choice. The per-column posting busy state
-  // (`columnPosting`) lives in useRepoGradesGradingActions now - it gets the
-  // SAME courseId and does its OWN render-phase reset in lockstep with the
-  // block further down (see that hook's header comment). --------------------
+  // ---- per-cell editable state (AC4 items 20-21). Graded results persist per
+  // course (RG-PERSIST-RESULTS W5, localStorage (key lives in repoGradesUiState), swept
+  // on sign-out); submittedFiles/codeExecution do NOT - they return only by
+  // re-grading. Restored in the `cellStateResetForCourse` block below, and
+  // declared ABOVE `sortedRows` because the folder-sort reads live scores
+  // (N4 item 13). -----------------------------------------------------------
   const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
   const model = scan ? buildRepoGradeGridModel(scan.repos, roster, effectiveStudentRepos, uiState.orgPrefix) : null;
   // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N5 item
@@ -550,9 +545,13 @@ export default function RepoGradesTab() {
   // never be shown, appended to, or persisted under another course's id.
   const [log, setLog] = useState<readonly RepoGradeLogEntry[]>([]);
   const [cellStateResetForCourse, setCellStateResetForCourse] = useState<string | null>(null);
+  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
+  const [persistError, setPersistError] = useState<string | null>(null);
   if (uiState.courseId !== cellStateResetForCourse) {
     setCellStateResetForCourse(uiState.courseId);
-    setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
+    const restoredEdits = loadRepoGradeCells(uiState.courseId);
+    setCellEdits(restoredEdits);
+    setRestoredNotice(describeRestoredRepoGradeCells(restoredEdits));
     setPostSummary("");
     setLog(loadRepoGradeLog(uiState.courseId));
     // U1.5/U1.6 - folded in here rather than a separate branch, per this
@@ -594,6 +593,29 @@ export default function RepoGradesTab() {
     if (cellStateResetForCourse !== uiState.courseId) return;
     persistRepoGradeLog(uiState.courseId, log);
   }, [log, uiState.courseId, cellStateResetForCourse]);
+
+  // Graded results persist likewise (same restore-ran guard); the error is
+  // surfaced after an await so no setState is synchronous in the effect.
+  useEffect(() => {
+    if (cellStateResetForCourse !== uiState.courseId) return;
+    const error = persistRepoGradeCells(uiState.courseId, cellEdits);
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (!cancelled) setPersistError(error);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cellEdits, uiState.courseId, cellStateResetForCourse]);
+
+  const handleDiscardSavedResults = () => {
+    if (!window.confirm("Discard all saved grading results for this course? Graded scores and feedback on screen will be cleared. This cannot be undone.")) return;
+    clearRepoGradeCells(uiState.courseId);
+    setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
+    setRestoredNotice(null);
+    setPostSummary("Saved results discarded for this course.");
+  };
 
   /** Builds one entry, stamped now, already carrying this view's course
    * identity - callers only supply what is specific to their event. Every
@@ -951,6 +973,15 @@ export default function RepoGradesTab() {
           useful exactly when the grid itself has nothing to render. It
           announces through setPostSummary, the view's existing role="status"
           region above, rather than adding a second live region (item 21). */}
+      {course && (
+        <div>
+          {restoredNotice && <p className={pageStyles.fieldHint}>{restoredNotice}</p>}
+          {persistError && <p className={pageStyles.fieldHint} role="status">{persistError}</p>}
+          <button type="button" className={pageStyles.linkButton} onClick={handleDiscardSavedResults}>
+            Discard saved results for this course
+          </button>
+        </div>
+      )}
       {course && (
         <RepoGradesLogPanel
           log={log}

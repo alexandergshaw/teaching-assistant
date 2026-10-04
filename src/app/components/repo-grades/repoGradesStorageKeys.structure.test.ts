@@ -19,6 +19,7 @@ function collectKeys(text: string): string[] {
 const FROZEN_KEYS = [
   "ta-repo-grades-assignment-map",
   "ta-repo-grades-bulk-selection-only",
+  "ta-repo-grades-cells",
   "ta-repo-grades-course",
   "ta-repo-grades-folder",
   "ta-repo-grades-instructions",
@@ -38,7 +39,7 @@ const FROZEN_KEYS = [
 ];
 
 describe("repo-grades persistence keys (exact set)", () => {
-  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 18", () => {
+  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 19", () => {
     expect(collectKeys(source)).toEqual(FROZEN_KEYS);
   });
 

@@ -46,6 +46,9 @@ describe("shouldKeepLocalStorageKey - the default is ERASE", () => {
       "ta-workflows",
       "ta-voice-id",
       "ta-github-grading-run",
+      // RG-PERSIST-RESULTS W5 (M1): graded student results. Pinned by DIRECT
+      // membership - the smell-word test below is blind to this key name.
+      "ta-repo-grades-cells",
       "ta-grading-results-edits:https://canvas.example.edu",
       "ta-castletop-abc123-notes",
       "ta:chat-window-state",

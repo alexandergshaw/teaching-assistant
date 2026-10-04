@@ -17,6 +17,12 @@
 import { DEFAULT_REPO_GRADE_SORT, parseRepoGradeSortState, type RepoGradeSortState } from "./repoGradesRows";
 import type { RepoGradeAssignmentMap } from "./repoGradesAssignmentMapping";
 import { parseRepoGradeLogEntries, type RepoGradeLogEntry } from "./repoGradesLog";
+import { EMPTY_REPO_GRADE_CELL_EDITS, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
+import {
+  clearRepoGradeCellsIn,
+  loadRepoGradeCellsFrom,
+  persistRepoGradeCellsTo,
+} from "./repoGradesResultsStore";
 
 const COURSE_KEY = "ta-repo-grades-course";
 const ORG_PREFIX_KEY = "ta-repo-grades-org-prefix";
@@ -92,6 +98,9 @@ const RUN_CODE_SCORING_KEY = "ta-repo-grades-run-code-scoring";
 // `ta-` localStorage key because that is the only durable store this view has
 // (postCanvasGradesAction writes to Canvas and keeps nothing locally).
 const LOG_KEY = "ta-repo-grades-log";
+// RG-PERSIST-RESULTS (W5): graded cells, per course. NOT on the sign-out
+// keep-list - client-state-sweep erases it (pinned by its test).
+const CELLS_KEY = "ta-repo-grades-cells";
 // U1.5/U1.6 (docs/repo-grades-ux-overhaul-acceptance-criteria.md) - the
 // folder chooser's own selection, the 13th ta- key (section 5's storage
 // design table). Stored per COURSE, the same shape and reason as
@@ -393,6 +402,31 @@ export function persistRepoGradeLog(courseId: string, entries: readonly RepoGrad
   } catch {
     // best-effort persistence only, matching persistRepoGradesUiState above.
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-course graded results (RG-PERSIST-RESULTS W5). All logic lives in the
+// pure leaf repoGradesResultsStore.ts; these are the `typeof window`-guarded
+// wrappers binding it to localStorage and to CELLS_KEY (the one home of the
+// key literal).
+
+/** Reads `courseId`'s saved graded cells. READ ONLY - never writes/removes. */
+export function loadRepoGradeCells(courseId: string): RepoGradeCellEditsByRepo {
+  if (typeof window === "undefined" || !courseId) return EMPTY_REPO_GRADE_CELL_EDITS;
+  return loadRepoGradeCellsFrom(localStorage, CELLS_KEY, courseId);
+}
+
+/** Writes `courseId`'s graded cells. Returns null, or a fixed content-free
+ * error string when the browser refused the write twice. */
+export function persistRepoGradeCells(courseId: string, edits: RepoGradeCellEditsByRepo): string | null {
+  if (typeof window === "undefined" || !courseId) return null;
+  return persistRepoGradeCellsTo(localStorage, CELLS_KEY, courseId, edits, new Date().toISOString());
+}
+
+/** Discards `courseId`'s saved graded cells; other courses are untouched. */
+export function clearRepoGradeCells(courseId: string): void {
+  if (typeof window === "undefined" || !courseId) return;
+  clearRepoGradeCellsIn(localStorage, CELLS_KEY, courseId);
 }
 
 // ---------------------------------------------------------------------------

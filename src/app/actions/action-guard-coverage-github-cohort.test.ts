@@ -276,6 +276,7 @@ function githubReachingActionFiles(): Set<string> {
 const GITHUB_FILES = new Set([
   "actions/accommodations.ts",
   "actions/automation-runs.ts",
+  "actions/bulk-course-message.ts",
   "actions/canvas-inbox.ts",
   "actions/canvas-modules.ts",
   "actions/carry-module-pattern.ts",
@@ -595,6 +596,11 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
     "updates a module item via updateModuleItem, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
   deleteModuleItemAction:
     "removes a module item via deleteModuleItem, contained by resolveCourse -> resolveCanvasCredential - never reaches the GitHub PAT",
+  // actions/bulk-course-message.ts: GitHub membership is import-only, not
+  // call-reachable (docs/bulk-course-message-guard-review.md section 6); same
+  // shape as postWalkthroughAnnouncementAction (RULING 84).
+  sendBulkCourseMessageAction:
+    "GitHub reachability is import-only; its call set is requireUser/getCourse/canLms/countActiveCourseStudents/classifyRecipientCount/createCourseConversation - a non-owner caller cannot spend the owner's Canvas token because resolveCanvasCredential only reaches the owner's env pair when the CALLING identity's own role is 'owner', and nothing in the call set reaches the GitHub PAT",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -622,18 +628,12 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
 // action-guard-coverage.test.ts), not a wrong-guard matter; still
 // closure-reaches GitHub, so still named here rather than left for a reader
 // to rediscover (R4-r2, docs/r4-scope.md section 7).
-// Added 2026-10-04 (A29 W2, commit 0ff48952): actions/bulk-course-message.ts -
-// one action (sendBulkCourseMessageAction) on requireUser(); the live import-graph
-// closure reaches GitHub through it (route not traced here). Recorded here as known and
-// not yet folded into a per-action review (docs/r4-scope.md); NOT a safety
-// classification.
 // SHRINK-ONLY: this is not a safety classification (unlike
 // GITHUB_NOT_OWNER_ONLY) - it is a record of "known, not yet folded into a
 // per-action review." A name leaves this list only when GITHUB_FILES or
 // GITHUB_NOT_OWNER_ONLY takes it over for real; nothing may be added without
 // deliberately widening this comment to say why.
 const GITHUB_FILES_PENDING_ENUMERATION = new Set([
-  "actions/bulk-course-message.ts",
   "actions/llm-content.ts",
 ]);
 
@@ -650,7 +650,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(69);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(70);
     }
   );
 

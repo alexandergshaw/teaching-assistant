@@ -41,8 +41,11 @@ that this scope can cut, are:
 I also record one hypothesis I CANNOT rule out from the tree and that would
 explain the owner's feeling better than any of the above: that the persisted
 values do not visibly restore after a reload, so the instructor re-does setup
-every session (section 6, H1). It is a thirty-second owner check and no wave
-below depends on its answer.
+every session (section 6, H1). It is a thirty-second owner check. W-B (fab
+arrival) does NOT depend on its answer and may proceed; W-A (course seed) IS
+gated on it - if H1 fails, the right item is a mount-effect persistence restore
+on the ta-rec-disc-* controls (the LectureScriptPanel idiom), not W-A, which
+never fires for a returning instructor whose key is already written.
 
 Triage (seats, per `docs/loop/seats.md` triage table): acceptance criteria
 (always); architect + reuse (a new module plus more than two files in the fab

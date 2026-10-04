@@ -47503,3 +47503,37 @@ withdrawn.
 | BL448-3 | Live praise/deduction separation quality of the separate-strengths prompt | Repo owner | A real-key run with the new option on, reading "What Went Well" / "What Could Be Better" | Owner verification after the engine wave ships (`docs/grader-engine-test-notes.md` tags this FF-10-owner) |
 | BL448-4 | Whether any component other than `seedEdits` / `defaultRowEdit` (`gradingResultsHelpers.ts:280-323`) derives the three boxes' text from `GradeResult`, and how the boxes render | Repo owner (render) / regression pass author (grep) | `grep -rn 'strengths' src/app/components/grading-results` read against `seedEdits`; render needs a real browser | The batched regression pass over the engine wave for the grep; owner verification for the render |
 | BL448-5 | The recording path's own `const strengths = parsed.overallComment` (`grading-feedback-prompt.ts:150`, named in `prompts.ts:73-82`) was not opened; it consumes the SAME shared `parseRubricResponse` this entry anchors | Regression pass author for this group | Read `grading-feedback-prompt.ts:140-190` and re-run `npm run test:paths -- src/app/components/grading-recording/grading-feedback-prompt.test.ts` after the wave | The batched regression pass over the engine wave |
+
+## 449. Grading-smoothing group as shipped (SMOOTH-GRADER + SMOOTH-WALKTHROUGH + A7 repo-grader) - cross-surface regression record
+
+Three grading surfaces were smoothed in one group, each in its own component directory with its own new CSS module, none touching the shared 7034-line src/app/page.module.css. Commits: GRADER 1eb28fa1 + 347df287 + 24a9c802; WALKTHROUGH df2dff8d + ffaba04f + 6cac33d2 + 494826ec; REPO-GRADER 07d32c99 + 3beaf19b + bf35f445. Verified as a group against base 217a4a61..HEAD.
+
+LOCKED, mechanism-level (all guarded by source-text tests - no component is rendered, so these lock WIRING/STRUCTURE/leaf logic, not rendered layout):
+
+GRADER (grading-chat):
+- Setup/memory/file-batch logic extracted to pure leaves. Guards: chatSetupFill.test.ts, chatSetupMemory.test.ts, chatFileBatch.test.ts, chatSubmissionIntake.test.ts.
+- Panel wiring incl. sticky composer + compact setup strip (W3) and await-before-beginSession / fill-values (W2). Guard: GradingChatPanel.structure.test.ts (32 structure assertions).
+- ta- key set frozen at exactly 4 keys. Guard: grading-chat-storage-keys.structure.test.ts:13-18 / :48-49.
+
+WALKTHROUGH (walkthrough-announcement):
+- useWalkthroughSetup hook extraction (W0) and run-decision leaves. Guard: walkthrough-run-decisions.test.ts.
+- Sticky Start bar + arm-notice reorder + auto-draft toggle (W3). Guards: useAnnouncementDraftSlots.test.ts, announcement-draft-slots.test.ts, walkthrough-announcement.structure.test.ts.
+- Persisted distinct-key set frozen at exactly 6, bumped 5->6 in the W3 toggle commit. Guard: walkthrough-announcement.structure.test.ts:125.
+- Panel shrank 934->839 lines (494826ec). Guard: file-size-ceiling.structure.test.ts.
+
+REPO-GRADER (repo-grades):
+- repoGradesRunPlanLabels leaf extraction (W1). Guard: repoGradesRunPlan.test.ts.
+- Persistence keys frozen at exactly 18, single-course default + disclosure collapses (W2). Guard: repoGradesStorageKeys.structure.test.ts:41.
+- Sticky run bar + Grade/Post regroup (W3). Guards: repoGrades.wiring.test.ts, repoGradesCoursePicker.test.ts.
+- R-2 derived root set frozen at exactly 35 basenames, bumped 34->35 in W3. Guard: repoGradesFeedbackAndFiles.wiring.test.ts:348.
+
+SHARED INVARIANTS LOCKED (the yield of the group pass):
+- src/app/page.module.css byte-unchanged across 217a4a61..HEAD; each surface added its own module instead.
+- CSS-orphan ratchet holds at exactly 118 (page-module-css-orphan-classes.test.ts PINNED_ORPHAN_CEILING at :316, asserted === at :436/:455) with the two new module files plus repo-grades .runBar classes all referenced; defined classes 1230->1237 across 29->31 stylesheets, zero net new orphans.
+- Write sets fully disjoint across the three surfaces (empty pairwise path intersections; nothing touched outside the three component dirs + docs/).
+- Whole-repo tsc --noEmit exit 0; combined gate 53 files / 1387 tests green.
+
+OWNER-RESIDUAL - PENDING, NOT RATIFIED (await the SMOOTH-BASELINE owner walk in a real browser with env; owner = repo owner, instrument = that manual walk, step = SMOOTH-BASELINE):
+- The click-count reductions each smoothing claimed (first-use and repeat-use) - unverifiable here, no component renders.
+- That each sticky surface (composer / Start bar / run bar) actually stays pinned on scroll and does not overlap content at real container widths - a rendered-layout claim.
+- That the compact setup strip / compact fields do not clip or wrap badly at narrow or resizable container widths.

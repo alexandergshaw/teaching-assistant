@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listCourseHubAction } from "@/app/actions";
 import type { WtaCourseOption } from "./AnnouncementCourseFieldset";
+import { courseToAutoSelect } from "./walkthrough-run-decisions";
 
 // PERSISTED CONTROLS (AC1/AC3) - a bound const per key, mirroring
 // ModuleDeckCapturePanel.tsx's own STORAGE_KEY_* idiom, so the directory's
@@ -34,32 +35,6 @@ export function useWalkthroughSetup(active: boolean) {
   const [courses, setCourses] = useState<WtaCourseOption[] | null>(null);
   const [coursesError, setCoursesError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await listCourseHubAction();
-        if (cancelled) return;
-        if ("error" in result) {
-          setCoursesError(result.error);
-          return;
-        }
-        setCourses(
-          result.courses
-            .filter((c) => Boolean(c.canvasUrl))
-            .map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl as string, institution: c.institution ?? null }))
-        );
-        setCoursesError(null);
-      } catch (err) {
-        if (!cancelled) setCoursesError(err instanceof Error ? err.message : "Could not load your courses.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
-
   // G6: .trim() is load-bearing. A whitespace-only stored value is TRUTHY, so it
   // would pass the `if (!courseId)` guards below and reach both exemplar
   // actions, whose `!courseId.trim()` arms return an empty SUCCESS before
@@ -76,6 +51,36 @@ export function useWalkthroughSetup(active: boolean) {
       // course-id persistence - losing this does not affect the session.
     }
   }, [courseId]);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await listCourseHubAction();
+        if (cancelled) return;
+        if ("error" in result) {
+          setCoursesError(result.error);
+          return;
+        }
+        const loaded = result.courses
+          .filter((c) => Boolean(c.canvasUrl))
+          .map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl as string, institution: c.institution ?? null }));
+        setCourses(loaded);
+        setCoursesError(null);
+        // F3: a never-written course with exactly one Canvas-linked course
+        // selects it. Updater form reads the LATEST value (a pick made while
+        // the list loaded wins); courseToAutoSelect never changes a persisted
+        // choice, so a null result keeps prev.
+        setCourseId((prev) => courseToAutoSelect(loaded, prev || null) ?? prev);
+      } catch (err) {
+        if (!cancelled) setCoursesError(err instanceof Error ? err.message : "Could not load your courses.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
 
   const [moduleLabel, setModuleLabel] = useState<string>(() =>
     typeof window === "undefined" ? "" : (window.localStorage.getItem(STORAGE_KEY_MODULE) ?? "")

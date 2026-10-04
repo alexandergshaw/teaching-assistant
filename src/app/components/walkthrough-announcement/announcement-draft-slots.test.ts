@@ -769,9 +769,9 @@ describe("savedFormatsStatusText - G1", () => {
   });
 });
 
-describe("SlotsAction union has exactly 16 members (C1)", () => {
+describe("SlotsAction union has exactly 17 members (C1)", () => {
   it("compile-time exhaustiveness: a Record keyed by every union member fails TypeScript compilation (not merely this test) if a member is added without a matching key here - an array typed SlotsAction['type'][] only checks each element IS a member, never that every member is present, so it cannot catch an addition", () => {
-    // If a 17th SlotsAction member is ever added, tsc reports this object
+    // If an 18th SlotsAction member is ever added, tsc reports this object
     // literal is missing that property - the failure is `npx tsc --noEmit`,
     // not a red assertion below, which is why the runtime check is only the
     // key COUNT, not membership.
@@ -792,7 +792,75 @@ describe("SlotsAction union has exactly 16 members (C1)", () => {
       posting: true,
       "post-result": true,
       "copy-result": true,
+      reset: true,
     };
-    expect(Object.keys(memberTypes)).toHaveLength(16);
+    expect(Object.keys(memberTypes)).toHaveLength(17);
+  });
+});
+
+describe("reset action (SMOOTH-WALKTHROUGH W1-4)", () => {
+  function dirtyState(): readonly DraftSlot[] {
+    const drafted: Drafted = {
+      title: "T",
+      message: "M",
+      builtFrom: { kind: "none" },
+      researchNotice: { kind: "off" },
+      timing: "beginning-of-week",
+    };
+    let state: readonly DraftSlot[] = initialSlots(FIRST_SLOT_ID);
+    state = slotsReducer(state, { type: "add", id: "wta-slot-2", choice: { kind: "default" }, timing: "beginning-of-week" });
+    state = slotsReducer(state, { type: "generate-started", ids: [FIRST_SLOT_ID] });
+    state = slotsReducer(state, { type: "result", id: FIRST_SLOT_ID, result: drafted });
+    state = slotsReducer(state, { type: "set-scheduled-at", id: FIRST_SLOT_ID, raw: "2030-01-01T10:00" });
+    state = slotsReducer(state, { type: "arm-post", id: FIRST_SLOT_ID, signature: "sig" });
+    state = slotsReducer(state, { type: "post-result", id: FIRST_SLOT_ID, result: { course: "Course X", scheduledLabel: null } });
+    state = slotsReducer(state, { type: "copy-result", id: FIRST_SLOT_ID, error: null });
+    return state;
+  }
+
+  it("the dirty input really is multi-slot, drafted, posted and copied", () => {
+    const state = dirtyState();
+    expect(state).toHaveLength(2);
+    expect(state[0].postedTo).toBe("Course X");
+    expect(state[0].copied).toBe(true);
+    expect(state[0].scheduledAt).toBe("2030-01-01T10:00");
+  });
+
+  it("returns exactly the frozen initial single empty slot", () => {
+    expect(slotsReducer(dirtyState(), { type: "reset" })).toEqual([
+      {
+        id: "wta-slot-1",
+        choice: { kind: "default" },
+        timing: "beginning-of-week",
+        scheduledAt: "",
+        draft: { phase: "empty", error: null },
+        postArmedFor: null,
+        regenerateArmed: false,
+        posting: false,
+        postError: null,
+        postedTo: null,
+        postedScheduledLabel: null,
+        copyError: null,
+        copied: false,
+      },
+    ]);
+  });
+});
+
+describe("cannot-overwrite, reducer layer (SMOOTH-WALKTHROUGH W1-4c)", () => {
+  it("generate-started targeting a drafted slot leaves state unchanged", () => {
+    const drafted: Drafted = {
+      title: "T",
+      message: "M",
+      builtFrom: { kind: "none" },
+      researchNotice: { kind: "off" },
+      timing: "beginning-of-week",
+    };
+    let state: readonly DraftSlot[] = initialSlots(FIRST_SLOT_ID);
+    state = slotsReducer(state, { type: "generate-started", ids: [FIRST_SLOT_ID] });
+    state = slotsReducer(state, { type: "result", id: FIRST_SLOT_ID, result: drafted });
+    const after = slotsReducer(state, { type: "generate-started", ids: [FIRST_SLOT_ID] });
+    expect(after).toEqual(state);
+    expect(after[0].draft).toEqual({ phase: "drafted", draft: drafted, error: null });
   });
 });

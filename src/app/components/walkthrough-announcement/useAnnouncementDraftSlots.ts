@@ -325,6 +325,13 @@ export function useAnnouncementDraftSlots(args: {
     dispatch({ type: "add", id, choice, timing });
   }, []);
 
+  // New run (SMOOTH-WALKTHROUGH F4): back to one empty slot AND the id counter
+  // back to 2, so ids stay in step with the reducer's FIRST_SLOT_ID start.
+  const reset = useCallback(() => {
+    nextIdRef.current = 2;
+    dispatch({ type: "reset" });
+  }, []);
+
   const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), []);
   const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), []);
   const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), []);
@@ -505,6 +512,7 @@ export function useAnnouncementDraftSlots(args: {
     readyToDraftCount,
     researching,
     addSlot,
+    reset,
     removeSlot,
     chooseTemplate,
     chooseTiming,

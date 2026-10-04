@@ -401,10 +401,11 @@ export type SlotsAction =
       id: string;
       result: { course: string; scheduledLabel: string | null } | { error: string };
     }
-  | { type: "copy-result"; id: string; error: string | null };
-// 16 members. See announcement-draft-slots.test.ts - the C1 guard there is
+  | { type: "copy-result"; id: string; error: string | null }
+  | { type: "reset" };
+// 17 members. See announcement-draft-slots.test.ts - the C1 guard there is
 // an exhaustive `Record<SlotsAction["type"], true>` literal, which tsc
-// refuses to compile if a 17th member is added here without a matching key
+// refuses to compile if an 18th member is added here without a matching key
 // there ("property is missing"). A plain `SlotsAction["type"][]` array only
 // checks that each listed element IS a member, never that every member is
 // listed, so it cannot catch an addition - only the Record form can.
@@ -545,6 +546,11 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         if (slot.copyError === action.error && slot.copied === copied) return slot;
         return { ...slot, copyError: action.error, copied };
       });
+    }
+    case "reset": {
+      // New run (SMOOTH-WALKTHROUGH F4): the initial single empty slot. The
+      // hook resets its id counter alongside this dispatch.
+      return initialSlots(FIRST_SLOT_ID);
     }
     default:
       return state;

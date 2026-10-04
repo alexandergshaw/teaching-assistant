@@ -70,6 +70,7 @@ import {
   type AnnouncementDraftDispatchContext,
 } from "./useAnnouncementDraftSlots";
 import { MAX_NOTES_CHARS, useWalkthroughSetup } from "./useWalkthroughSetup";
+import { isRunComplete, shouldAutoDraft } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
 import AnnouncementCourseFieldset, {
   type AnnouncementExemplarSummary,
@@ -98,6 +99,10 @@ interface Notice {
   kind: "info" | "danger";
   text: string;
 }
+
+// F1 (c): auto-draft on stop is on. A persisted toggle is a later decision; it
+// would add a sixth ta- key and bump the directory key canary.
+const AUTO_DRAFT_ON = true;
 
 function fmt(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -322,10 +327,16 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const batchBlocksRef = useRef<ExtractedBlock[][]>([]);
   const [legibleBlockCount, setLegibleBlockCount] = useState(0);
   const [extracting, setExtracting] = useState(false);
+  const batchInFlightRef = useRef(false);
 
   const runExtraction = useCallback(async () => {
     const frames = takeFrameBatch(MODULE_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET);
     if (frames.length === 0) return;
+    // Set synchronously, BEFORE the await below: between the take (which can
+    // drop pendingFrames to 0) and setExtracting(true) there is a window in
+    // which neither state shows a batch in flight. The auto-draft effect reads
+    // this ref so it cannot fire into that window with partial material.
+    batchInFlightRef.current = true;
     await Promise.resolve();
     setExtracting(true);
 
@@ -359,6 +370,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       batchBlocksRef.current = [...batchBlocksRef.current, result.blocks];
       setLegibleBlockCount((prev) => prev + result.blocks.length);
     } finally {
+      batchInFlightRef.current = false;
       setExtracting(false);
     }
   }, [takeFrameBatch, moduleLabel, notesText, provider, pushNotice]);
@@ -384,21 +396,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   // --- Start/stop -------------------------------------------------------------
 
   const [startError, setStartError] = useState<string | null>(null);
-
-  const handleStartStop = useCallback(() => {
-    if (capturing) {
-      stop();
-      return;
-    }
-    setStartError(null);
-    (async () => {
-      try {
-        await start({ saveVideo: false });
-      } catch (err) {
-        setStartError(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
-      }
-    })();
-  }, [capturing, start, stop]);
+  const [autoDrafted, setAutoDrafted] = useState(false);
 
   useEffect(() => {
     if (!(capturing || pendingFrames > 0)) return;
@@ -546,6 +544,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     readyToDraftCount,
     researching,
     addSlot,
+    reset,
     removeSlot,
     chooseTemplate,
     chooseTiming,
@@ -562,6 +561,64 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
+
+  // Start / Stop. Starting after a run whose every slot is already posted
+  // begins a FRESH run (F4): the captured material and the slots reset, so last
+  // week's frames never feed this week's draft. isRunComplete is false while
+  // any drafted-but-unposted slot exists, so an unposted draft is never cleared.
+  const handleStartStop = useCallback(() => {
+    if (capturing) {
+      stop();
+      return;
+    }
+    setStartError(null);
+    setAutoDrafted(false);
+    if (isRunComplete(slots)) {
+      batchBlocksRef.current = [];
+      setLegibleBlockCount(0);
+      reset();
+    }
+    (async () => {
+      try {
+        await start({ saveVideo: false });
+      } catch (err) {
+        setStartError(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
+      }
+    })();
+  }, [capturing, start, stop, slots, reset]);
+
+  // Auto-draft on stop (F1). ONCE PER STOP: the pending ref is armed when
+  // capturing falls true -> false (the Stop button OR the browser sharing bar)
+  // and disarmed the moment the draft fires or a new capture starts, so this
+  // can neither repeat nor run from a remount. shouldAutoDraft requires an
+  // empty slot, and the reducer's generate-started guard independently
+  // refuses to touch a drafted slot: an existing draft is never overwritten.
+  const prevCapturingRef = useRef(false);
+  const autoDraftPendingRef = useRef(false);
+  useEffect(() => {
+    if (prevCapturingRef.current && !capturing) autoDraftPendingRef.current = true;
+    if (capturing) autoDraftPendingRef.current = false;
+    prevCapturingRef.current = capturing;
+  }, [capturing]);
+  useEffect(() => {
+    const fire = shouldAutoDraft({
+      autoDraftOn: AUTO_DRAFT_ON,
+      capturing,
+      extracting: extracting || batchInFlightRef.current,
+      pendingFrames,
+      hasMaterial,
+      hasEmptySlot: readyToDraftCount > 0,
+      savedFormatsState,
+      alreadyDraftedThisStop: !autoDraftPendingRef.current,
+    });
+    if (!fire) return;
+    autoDraftPendingRef.current = false;
+    void (async () => {
+      await Promise.resolve();
+      setAutoDrafted(true);
+      await generate();
+    })();
+  }, [capturing, extracting, pendingFrames, hasMaterial, readyToDraftCount, savedFormatsState, generate]);
 
   const handleRemoveExemplar = useCallback(
     async (id: string) => {
@@ -769,6 +826,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       {researching && (
         <p role="status" aria-live="polite" className={styles.fieldHint}>
           Researching resources for this module…
+        </p>
+      )}
+      {autoDrafted && (
+        <p role="status" aria-live="polite" className={styles.fieldHint}>
+          Drafting automatically from this capture. Nothing is posted until you confirm.
         </p>
       )}
       {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}

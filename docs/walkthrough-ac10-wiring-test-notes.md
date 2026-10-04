@@ -254,7 +254,7 @@ rebuild it and say so, per the test-seat rule.
   (`prev ?? null`, hoisting `loaded`, reflow) does NOT false-red -- only the two
   states AC-10 cares about (result not consumed; fallback dropped) red it.
   Adversarial check I ran against it by hand: the passing-but-wrong
-  implementation `setCourseId((prev) => courseToAutoSelect(loaded, prev))` (drop
+  implementation `setCourseId((prev) => courseToAutoSelect(loaded, prev) ?? prev)` (drop
   `|| null`) still passes E2 -- correctly, because `|| null` is an internal
   normalisation the pure function's own A0/A1 rows already cover
   (`walkthrough-run-decisions.test.ts:84-85`), not a wiring fact; E2 is not the

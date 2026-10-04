@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { collectPermittedUrls, stripUnpermittedUrls } from "./walkthrough-announcement-link-guard";
+import { collectPermittedUrls, collectTakePermittedUrls, stripUnpermittedUrls } from "./walkthrough-announcement-link-guard";
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline, type OutlineSection } from "./announcement-outline-types";
 
 function section(overrides: Partial<OutlineSection> = {}): OutlineSection {
@@ -229,5 +229,100 @@ describe("collectPermittedUrls - walks every legitimate carrier field", () => {
   it("does not permit a URL that appears nowhere in any carrier", () => {
     const permitted = collectPermittedUrls(baseCollectArgs());
     expect(permitted.has("https://never-mentioned.example")).toBe(false);
+  });
+});
+
+describe("R-WK-3 - scheme-less www. URLs (widened BARE_URL_RE + normalizeForComparison)", () => {
+  // Sabotage SAB-A: revert BARE_URL_RE to the scheme-only /https?:\/\/[^\s)\]"]+/gi -
+  // REQ1 goes red (the invented www. link is never detected). SAB-B: keep the
+  // widened regex but drop the www. -> https:// prefix in normalizeForComparison -
+  // REQ1 and REQ1b go red (a legitimate transcript www. link normalizes to "" and is
+  // falsely stripped). Restored from a copy afterward.
+  it("REQ1: an invented scheme-less www. URL is stripped and a transcript www. URL is kept byte-for-byte", () => {
+    const permitted = collectPermittedUrls(baseCollectArgs({ materialsText: "Lab notes: www.good.example/lab covers it." }));
+    const draft = "Try www.evil.example/x now, and see www.good.example/lab for the lab.";
+
+    const result = stripUnpermittedUrls(draft, permitted);
+
+    expect(result.text).toBe("Try  now, and see www.good.example/lab for the lab.");
+    expect(result.stripped).toEqual(["www.evil.example/x"]);
+  });
+
+  it("REQ1b: a transcript URL written WITH a scheme keeps a bare www. draft occurrence", () => {
+    const permitted = collectPermittedUrls(baseCollectArgs({ materialsText: "https://www.good.example/lab" }));
+    const draft = "See www.good.example/lab here.";
+
+    const result = stripUnpermittedUrls(draft, permitted);
+
+    expect(result.text).toBe("See www.good.example/lab here.");
+    expect(result.stripped).toEqual([]);
+  });
+
+  it("REQ1b: a bare www. transcript URL keeps a scheme-prefixed draft occurrence", () => {
+    const permitted = collectTakePermittedUrls(["Lab notes: www.good.example/lab covers it."]);
+    const draft = "See https://www.good.example/lab here.";
+
+    const result = stripUnpermittedUrls(draft, permitted);
+
+    expect(result.text).toBe("See https://www.good.example/lab here.");
+    expect(result.stripped).toEqual([]);
+  });
+
+  it("frozen normalized keys: the bare www. form and its https:// form collapse to ONE permitted key", () => {
+    const bare = collectTakePermittedUrls(["www.good.example/lab"]);
+    const schemed = collectTakePermittedUrls(["https://www.good.example/lab"]);
+
+    expect([...bare]).toEqual(["https://www.good.example/lab"]);
+    expect([...schemed]).toEqual(["https://www.good.example/lab"]);
+    expect([...collectTakePermittedUrls(["https://good.example/x"])]).toEqual(["https://good.example/x"]);
+  });
+
+  it("REQ3-new: an invented https:// URL in prose is stripped to a double space", () => {
+    const result = stripUnpermittedUrls("See https://evil.example/x now.", new Set());
+
+    expect(result.text).toBe("See  now.");
+    expect(result.stripped).toEqual(["https://evil.example/x"]);
+  });
+
+  it("REQ3-new: a transcript https:// URL is kept", () => {
+    const permitted = collectTakePermittedUrls(["https://good.example/x"]);
+    const result = stripUnpermittedUrls("See https://good.example/x now.", permitted);
+
+    expect(result.text).toBe("See https://good.example/x now.");
+    expect(result.stripped).toEqual([]);
+  });
+
+  it("REQ3-new: userinfo smuggling and non-http targets keep their frozen behavior", () => {
+    const permitted = collectTakePermittedUrls(["https://permitted.example/x"]);
+    const smuggled = stripUnpermittedUrls("See [Read this](https://permitted.example@evil.example/x) now.", permitted);
+    expect(smuggled.text).toBe("See Read this now.");
+    expect(smuggled.stripped).toEqual(["https://permitted.example@evil.example/x"]);
+
+    for (const target of ["/courses/101/syllabus", "mailto:prof@example.edu", "attachment:12345", "#summary"]) {
+      const draft = `Open [it](${target}) please.`;
+      const r = stripUnpermittedUrls(draft, new Set());
+      expect(r.text).toBe(draft);
+      expect(r.stripped).toEqual([]);
+    }
+
+    const cased = stripUnpermittedUrls("See HTTPS://OK.EXAMPLE/a here.", collectTakePermittedUrls(["https://ok.example/a"]));
+    expect(cased.text).toBe("See HTTPS://OK.EXAMPLE/a here.");
+    expect(cased.stripped).toEqual([]);
+  });
+
+  it("REQ4: prose host-ish tokens (Node.js, e.g., a.m.) are untouched", () => {
+    const draft = "Install Node.js first (e.g. the LTS build), by 9 a.m. tomorrow.";
+    const result = stripUnpermittedUrls(draft, new Set());
+
+    expect(result.text).toBe(draft);
+    expect(result.stripped).toEqual([]);
+  });
+
+  it("a www. embedded mid-word (awww.gov/x) is not treated as a URL", () => {
+    const draft = "Visit awww.gov/x today.";
+    const result = stripUnpermittedUrls(draft, new Set());
+
+    expect(result.text).toBe(draft);
+    expect(result.stripped).toEqual([]);
   });
 });

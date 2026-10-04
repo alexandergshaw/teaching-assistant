@@ -54,7 +54,10 @@ const TAB_CR_RE = /[\t\r]/g;
 // could - rewriting bracket text the renderer would render literally.
 const MARKDOWN_LINK_RE = /\[([^\]\n]*)\]\(([^)\n]+)\)/g;
 
-const BARE_URL_RE = /https?:\/\/[^\s)\]"]+/gi;
+// Scheme branch first so every https?:// match is byte-identical to the
+// scheme-only form; the \bwww\. branch (R-WK-3) catches a scheme-less www. link
+// without matching mid-word (awww.gov).
+const BARE_URL_RE = /(?:https?:\/\/|\bwww\.)[^\s)\]"]+/gi;
 
 // The non-http forms markdown.ts's own ALLOWED_LINK_HREF (markdown.ts:180)
 // permits: mailto:, attachment: (Canvas's own file-link scheme), an in-page
@@ -87,7 +90,11 @@ function isNonHttpAllowedTarget(rawTarget: string): boolean {
  */
 function normalizeForComparison(raw: string): string {
   const stripped = raw.replace(TAB_CR_RE, "");
-  const cleaned = sanitizeResourceUrl(stripped);
+  // R-WK-3: a scheme-less www. form and its https:// form must collapse to one
+  // key, else sanitizeResourceUrl returns "" for the bare form and a legitimate
+  // transcript www. link is never permitted (and is falsely stripped).
+  const schemed = /^www\./i.test(stripped) ? `https://${stripped}` : stripped;
+  const cleaned = sanitizeResourceUrl(schemed);
   if (!cleaned) return "";
   try {
     const u = new URL(cleaned);

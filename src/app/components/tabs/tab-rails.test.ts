@@ -50,10 +50,11 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  */
 
 describe("the Tools rail is one flat list of both families' views (D26)", () => {
-  it("holds exactly the eight Manual views then the three Workflows views, in that order", () => {
+  it("holds exactly the nine Manual views then the three Workflows views, in that order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
+      "manual:announcements",
       "manual:version-control",
       "manual:recording",
       "manual:ppt-design",
@@ -64,7 +65,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "workflows:automations",
       "workflows:drafts",
     ]);
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(12);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {
@@ -102,7 +103,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     }
   });
 
-  it("has no two chips sharing a label, so ten items in one row stay distinguishable", () => {
+  it("has no two chips sharing a label, so twelve items in one row stay distinguishable", () => {
     // The collision question the flattening had to answer before merging two
     // families into one row. They are disjoint today; this says so out loud.
     const labels = TOOLS_RAIL_ITEMS.map((item) => item.label);
@@ -279,6 +280,7 @@ const DEFAULT_STATE: UrlNavState = {
   contentView: "modules",
   gradingView: "run",
   presentationsView: "slide-deck",
+  announcementsView: "post",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,
@@ -303,6 +305,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     "buildView",
     "contentView",
     "gradingView",
+    "announcementsView",
     "tasksView",
     "kbInstitution",
     "kbPage",
@@ -316,6 +319,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       { ...DEFAULT_STATE, tab: "courses", coursesSection: "tasks", tasksView: "recurring" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "content", contentView: "pages" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" },
+      { ...DEFAULT_STATE, tab: "manual", manualView: "announcements", announcementsView: "walkthrough" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", buildView: "new" },
       {
         ...DEFAULT_STATE,
@@ -340,7 +344,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     return [...names].sort();
   }
 
-  it("emits exactly the eleven param names it emits after the drafts-grades retirement (GRAD-SUBTAB wave 3)", () => {
+  it("emits exactly the frozen param names (twelve after ANNOUNCEMENTS-TAB A-W1 added announcementsView; draftsView left in GRAD-SUBTAB wave 3)", () => {
     expect(emittedParamNames()).toEqual([...EXPECTED_PARAM_NAMES].sort());
   });
 

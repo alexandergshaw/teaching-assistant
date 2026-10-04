@@ -153,6 +153,7 @@ describe("the view each rail chip writes persists under its own ta- key", () => 
     { constant: "WORKFLOWS_VIEW_KEY", value: "ta-workflows-view" },
     { constant: "TASKS_VIEW_KEY", value: "ta-tasks-view" },
     { constant: "GRADING_VIEW_KEY", value: "ta-grading-view" },
+    { constant: "ANNOUNCEMENTS_VIEW_KEY", value: "ta-announcements-view" },
   ];
 
   it("declares one ta- key per view family in the rails", () => {
@@ -246,6 +247,25 @@ describe("the popstate ladder restores every inner-nav view's own state (I5)", (
       "presentationsView is missing from the URL-sync effect's dependency array - exhaustive-deps " +
         "would flag this, and until then, picking the pipeline child never pushes a history entry"
     ).toContain("presentationsView");
+  });
+
+  it("ANNOUNCEMENTS-TAB A-W1: reads parsed.announcementsView inside the popstate handler, so the new branch actually restores it", () => {
+    expect(popStateSlice).toContain("parsed.announcementsView");
+  });
+
+  it("ANNOUNCEMENTS-TAB A-W1: lists announcementsView in the URL-sync effect's dependency array, so picking an inner Announcements chip pushes a history entry", () => {
+    const syncEffectStart = source.indexOf("useEffect(() => {\n    const target = buildUrlSearch({");
+    expect(syncEffectStart, "expected to find the URL-sync effect").toBeGreaterThan(-1);
+    const depsStart = source.indexOf("}, [", syncEffectStart);
+    const depsEnd = source.indexOf("]);", depsStart);
+    expect(depsStart, "expected to find the dependency array's opening").toBeGreaterThan(-1);
+    expect(depsEnd, "expected to find the dependency array's closing").toBeGreaterThan(depsStart);
+    const deps = source.slice(depsStart, depsEnd);
+    expect(
+      deps,
+      "announcementsView is missing from the URL-sync effect's dependency array - picking an inner " +
+        "Announcements chip never pushes a history entry, so Back/Forward has nothing to restore"
+    ).toContain("announcementsView");
   });
 });
 

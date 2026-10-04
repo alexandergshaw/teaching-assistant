@@ -8,6 +8,7 @@ import {
   type GradingView,
   type ManualViewType,
   type PresentationsView,
+  type AnnouncementsView,
 } from "./manual-rail";
 import styles from "../../page.module.css";
 import type { ContentView } from "../content-tab/constants";
@@ -39,6 +40,7 @@ export function ManualRail({
   contentView,
   gradingView,
   presentationsView,
+  announcementsView,
   onDestinationClick,
 }: {
   manualView: ManualViewType;
@@ -51,9 +53,12 @@ export function ManualRail({
   // to "slide-deck" - see getActiveDestinationId's own default - so a caller
   // that has not yet threaded this prop still gets the pre-S6.7 behavior).
   presentationsView?: PresentationsView;
+  // ANNOUNCEMENTS-TAB A-W1: which Announcements child is active (defaults to
+  // "post" via getActiveDestinationId's own default).
+  announcementsView?: AnnouncementsView;
   onDestinationClick: (destId: string) => void;
 }) {
-  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView);
+  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView, announcementsView);
   const innerDestinations = getInnerDestinations(manualView);
   const ariaLabel = getInnerNavAriaLabel(manualView);
 

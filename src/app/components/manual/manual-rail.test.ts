@@ -9,6 +9,8 @@ import {
   MANUAL_VIEW_ORDER,
   MANUAL_VIEW_LABELS,
   GRADING_VIEWS,
+  ANNOUNCEMENTS_VIEWS,
+  isAnnouncementsView,
   getInnerDestinations,
   getInnerNavAriaLabel,
   isManualViewType,
@@ -186,8 +188,9 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (the Manual half of the Tools rail)", () => {
-    it("should list the eight subtabs in display order", () => {
-      // Eight, not seven: "presentations" (PRES-1 wave 3) is the newest
+    it("should list the nine subtabs in display order", () => {
+      // Nine: "announcements" (ANNOUNCEMENTS-TAB A-W1) sits at index 2, right
+      // after "content" (LMS). Before that, "presentations" (PRES-1 wave 3) is the newest
       // addition - an inner-nav subtab (a "Presentations" destination group
       // holding "Slide Deck Creation", extensible to more children later),
       // slotted between Artifact Templates and Grading. "course-intel" left
@@ -199,6 +202,7 @@ describe("manual-rail", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
+        "announcements",
         "version-control",
         "recording",
         "ppt-design",
@@ -217,6 +221,11 @@ describe("manual-rail", () => {
     it("should label course-planning as Build Courses and content as LMS", () => {
       expect(MANUAL_VIEW_LABELS["course-planning"]).toBe("Build Courses");
       expect(MANUAL_VIEW_LABELS["content"]).toBe("LMS");
+    });
+
+    it("registers announcements as a Manual view with a non-empty label", () => {
+      expect(isManualViewType("announcements")).toBe(true);
+      expect(MANUAL_VIEW_LABELS["announcements"]).toBeTruthy();
     });
   });
 
@@ -249,6 +258,12 @@ describe("manual-rail", () => {
         "grading-drafts",
         "grading-chat",
       ]);
+    });
+
+    it("should return the Announcements destinations for announcements", () => {
+      const inner = getInnerDestinations("announcements");
+      expect(inner?.map((d) => d.id)).toEqual(["announcements-post", "announcements-walkthrough"]);
+      expect(inner?.map((d) => d.label)).toEqual(["Post an announcement", "From a walkthrough"]);
     });
 
     it("should return null for single-view subtabs", () => {
@@ -624,5 +639,33 @@ describe("isManualViewType", () => {
     const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules", "run");
     expect(state.manualView).toBe("recording");
     expect(state.manualView).not.toBe("live-class");
+  });
+});
+
+// ANNOUNCEMENTS-TAB A-W1: the same derived-guard shape as the LMS_VIEWS and
+// GRADING_VIEWS loops above, over the Announcements sub-tab's own inner
+// selection - looped over ANNOUNCEMENTS_VIEWS, not two hand-written cases.
+describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard over every ANNOUNCEMENTS_VIEWS member", () => {
+  it("resolves 'announcements-<view>' to manualView 'announcements' and announcementsView <view>", () => {
+    for (const view of ANNOUNCEMENTS_VIEWS) {
+      const state = resolveStateFromDestinationId(`announcements-${view}`, "recording", "new", "modules", "run");
+      expect(state.manualView).toBe("announcements");
+      expect(state.announcementsView).toBe(view);
+      expect(isAnnouncementsView(state.announcementsView)).toBe(true);
+    }
+  });
+
+  it("round-trips every ANNOUNCEMENTS_VIEWS member through getActiveDestinationId back to 'announcements-<view>'", () => {
+    for (const view of ANNOUNCEMENTS_VIEWS) {
+      expect(getActiveDestinationId("announcements", "new", "modules", "run", "slide-deck", view)).toBe(
+        `announcements-${view}`
+      );
+    }
+  });
+
+  it("keeps the current announcementsView when the destination id names a different view", () => {
+    expect(resolveStateFromDestinationId("grading-run", "grading", "new", "modules", "run", "slide-deck", "walkthrough").announcementsView).toBe(
+      "walkthrough"
+    );
   });
 });

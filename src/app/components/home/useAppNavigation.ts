@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VIEW_KEY, type ContentView } from "../content-tab/constants";
-import { isManualViewType, type GradingView, type PresentationsView } from "../manual/manual-rail";
+import { isManualViewType, type AnnouncementsView, type GradingView, type PresentationsView } from "../manual/manual-rail";
 import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "../knowledge/knowledge-helpers";
 import {
   type ActiveTab,
@@ -20,6 +20,7 @@ import {
   normalizeContentView,
   normalizeGradingView,
   normalizePresentationsView,
+  normalizeAnnouncementsView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -46,7 +47,8 @@ export type ManualView =
   | "ppt-design"
   | "artifact-design"
   | "presentations"
-  | "grading";
+  | "grading"
+  | "announcements";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 export type BuildView = "new" | "prebuilt";
@@ -57,6 +59,7 @@ const GRADING_VIEW_KEY = "ta-grading-view";
 // two children - the shipped thin "Slide Deck Creation" flow or the new
 // stage-gated pipeline - is showing.
 const PRESENTATIONS_VIEW_KEY = "ta-presentations-view";
+const ANNOUNCEMENTS_VIEW_KEY = "ta-announcements-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Tasks tab groups Term and Recurring as subtabs.
@@ -457,6 +460,20 @@ export function useAppNavigation() {
     if (!urlHasTab || destination.tab !== "courses") return null;
     return urlParams.get("focusCourse");
   });
+  // The Announcements sub-tab's own inner selection (ANNOUNCEMENTS-TAB A-W1):
+  // Post-an-announcement or From-a-walkthrough. Placed after focusCourseId so
+  // the positional guards in useAppNavigation.test.ts (presentationsView's
+  // initializer ends at `const [focusCourseId`) are not churned. Same shape
+  // as presentationsView: URL branch gated on the parent view, then a plain
+  // normalize-the-stored-value fallback.
+  const [announcementsView, setAnnouncementsView] = useState<AnnouncementsView>(() => {
+    if (typeof window === "undefined") return "post";
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "announcements") {
+      return normalizeAnnouncementsView(urlParams.get("announcementsView"));
+    }
+    return normalizeAnnouncementsView(localStorage.getItem(ANNOUNCEMENTS_VIEW_KEY));
+  });
   // Knowledge's institution + selected page (AC1-AC3): unlike every other
   // sub-view above, the institution is not a fixed enum - it is dynamic,
   // per-user data (registered institution acronyms) resolved by
@@ -561,6 +578,10 @@ export function useAppNavigation() {
   }, [presentationsView]);
 
   useEffect(() => {
+    localStorage.setItem(ANNOUNCEMENTS_VIEW_KEY, announcementsView);
+  }, [announcementsView]);
+
+  useEffect(() => {
     localStorage.setItem(COURSES_SECTION_KEY, coursesSection);
   }, [coursesSection]);
 
@@ -634,6 +655,7 @@ export function useAppNavigation() {
       contentView,
       gradingView,
       presentationsView,
+      announcementsView,
       tasksView,
       kbInstitution,
       kbPageId,
@@ -671,6 +693,7 @@ export function useAppNavigation() {
     contentView,
     gradingView,
     presentationsView,
+    announcementsView,
     tasksView,
     kbInstitution,
     kbPageId,
@@ -739,6 +762,9 @@ export function useAppNavigation() {
           // ("presentations-slide-deck", "presentations-pipeline"), so which
           // one is showing is restored the same way gradingView is above.
           if (parsed.manualView === "presentations") setPresentationsView(parsed.presentationsView);
+          // ANNOUNCEMENTS-TAB A-W1: two inner destinations (post, walkthrough),
+          // restored the same way presentationsView is above.
+          if (parsed.manualView === "announcements") setAnnouncementsView(parsed.announcementsView);
         }
         if (parsed.toolsSection === "workflows") {
           setWorkflowsView(parsed.workflowsView);
@@ -781,6 +807,8 @@ export function useAppNavigation() {
     setGradingView,
     presentationsView,
     setPresentationsView,
+    announcementsView,
+    setAnnouncementsView,
     workflowsView,
     setWorkflowsView,
     tasksView,

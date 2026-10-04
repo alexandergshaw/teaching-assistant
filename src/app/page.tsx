@@ -21,6 +21,7 @@ import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
 import PresentationsTab from "./components/presentations";
 import PipelineTab from "./components/presentations/pipeline/PipelineTab";
+import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
@@ -77,7 +78,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -516,11 +517,10 @@ export default function Home() {
 
         {activeTab === "manual" && (
           <>
-            {/* ONE nav level (D26): the seven Manual views and the three
-                Workflows views in a single rail of ten, in place of the
+            {/* ONE nav level (D26): the nine Manual views and the three
+                Workflows views in a single rail of twelve, in place of the
                 Manual/Workflows switch that used to sit above a separate
-                seven-item Manual rail and a separate three-item Workflows
-                subnav. */}
+                Manual rail and a separate Workflows subnav. */}
             <TabRail
               ariaLabel="Tools views"
               options={toolsRailOptions}
@@ -541,6 +541,7 @@ export default function Home() {
                   contentView={contentView}
                   gradingView={gradingView}
                   presentationsView={presentationsView}
+                  announcementsView={announcementsView}
                   onDestinationClick={(destId) => {
                     const resolved = resolveStateFromDestinationId(
                       destId,
@@ -548,13 +549,15 @@ export default function Home() {
                       buildView,
                       contentView,
                       gradingView,
-                      presentationsView
+                      presentationsView,
+                      announcementsView
                     );
                     if (resolved.manualView !== manualView) setManualView(resolved.manualView);
                     if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
                     if (resolved.contentView !== contentView) setContentView(resolved.contentView);
                     if (resolved.gradingView !== gradingView) setGradingView(resolved.gradingView);
                     if (resolved.presentationsView !== presentationsView) setPresentationsView(resolved.presentationsView);
+                    if (resolved.announcementsView !== announcementsView) setAnnouncementsView(resolved.announcementsView);
                   }}
                 />
 
@@ -608,6 +611,12 @@ export default function Home() {
                 {manualView === "artifact-design" && (
                   <TabShell>
                     <ArtifactDesignTab />
+                  </TabShell>
+                )}
+
+                {manualView === "announcements" && (
+                  <TabShell>
+                    <AnnouncementsSubTab view={announcementsView} />
                   </TabShell>
                 )}
 

@@ -5,7 +5,7 @@
 // rail - and the Courses tab equally deep, because the Tasks half carried its
 // own Term/Daily-Weekly switch below the section switch. This module deletes
 // the middle level: each merged tab now shows ONE rail whose items are the
-// individual views of BOTH families it absorbed. Tools is ten items (seven
+// individual views of BOTH families it absorbed. Tools is twelve items (nine
 // Manual views plus three Workflows views); Courses is three (Courses plus the
 // two Tasks views). Library was already flat - its switch was its only nav
 // level and neither half has a sub-rail - so it is untouched and does not
@@ -34,10 +34,10 @@
 // the Workflows branch. The "<section>:<view>" prefix makes the family part of
 // the id, so the mapping is total by construction rather than by coincidence.
 //
-// NO GROUPING INSIDE THE RAIL. Ten chips is a lot, and the obvious relief -
+// NO GROUPING INSIDE THE RAIL. Twelve chips is a lot, and the obvious relief -
 // grouping them under "Manual" and "Workflows" headings - would rebuild the
 // exact level this change removes, wearing a different hat. The order instead
-// carries the grouping implicitly: the seven Manual views in their existing
+// carries the grouping implicitly: the nine Manual views in their existing
 // order, then the three Workflows views in theirs.
 
 import { MANUAL_VIEW_LABELS, MANUAL_VIEW_ORDER, type ManualViewType } from "../manual/manual-rail";

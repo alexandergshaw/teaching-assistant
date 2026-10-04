@@ -19,7 +19,8 @@ export type ManualViewType =
   | "ppt-design"
   | "artifact-design"
   | "grading"
-  | "presentations";
+  | "presentations"
+  | "announcements";
 export type BuildViewType = "new" | "prebuilt";
 
 // The Grading sub-tab's own inner selection: which of its two surfaces is
@@ -64,6 +65,25 @@ export const PRESENTATIONS_VIEWS: readonly PresentationsView[] = Object.keys(
 const PRESENTATIONS_VIEW_SET: ReadonlySet<string> = new Set(PRESENTATIONS_VIEWS);
 export function isPresentationsView(value: unknown): value is PresentationsView {
   return typeof value === "string" && PRESENTATIONS_VIEW_SET.has(value);
+}
+
+// The Announcements sub-tab's own inner selection (ANNOUNCEMENTS-TAB wave
+// A-W1): "post" is Post-an-announcement, "walkthrough" is
+// From-a-walkthrough. Same shape as PresentationsView above; derived from a
+// presence record so the member list and the guard cannot drift apart.
+export type AnnouncementsView = "post" | "walkthrough";
+
+const ANNOUNCEMENTS_VIEW_PRESENCE: Record<AnnouncementsView, true> = {
+  post: true,
+  walkthrough: true,
+};
+export const ANNOUNCEMENTS_VIEWS: readonly AnnouncementsView[] = Object.keys(
+  ANNOUNCEMENTS_VIEW_PRESENCE
+) as AnnouncementsView[];
+
+const ANNOUNCEMENTS_VIEW_SET: ReadonlySet<string> = new Set(ANNOUNCEMENTS_VIEWS);
+export function isAnnouncementsView(value: unknown): value is AnnouncementsView {
+  return typeof value === "string" && ANNOUNCEMENTS_VIEW_SET.has(value);
 }
 
 const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
@@ -141,6 +161,13 @@ export const destinations: DestinationGroup[] = [
     ],
   },
   {
+    name: "Announcements",
+    destinations: [
+      { id: "announcements-post", label: "Post an announcement", description: "Compose and post a course announcement" },
+      { id: "announcements-walkthrough", label: "From a walkthrough", description: "Turn a recorded walkthrough into a course announcement" },
+    ],
+  },
+  {
     name: "Presentations",
     destinations: [
       { id: "presentations-slide-deck", label: "Slide Deck Creation", description: "Generate a lecture outline, activity ideas, and a slide deck from pasted context" },
@@ -168,12 +195,12 @@ export function getDestinationById(id: string): Destination | undefined {
   return undefined;
 }
 
-// The seven Manual views, in display order.
+// The nine Manual views, in display order.
 //
 // This used to be "row 1 of the Manual subnav" - its own rail, sitting below a
-// Manual/Workflows section switch. D26 flattened that away: these seven are
-// now the first seven chips of the Tools tab's single rail, followed by the
-// three Workflows views, built from this very list by
+// Manual/Workflows section switch. D26 flattened that away: these are now the
+// first chips of the Tools tab's single rail (nine, with Announcements added
+// by ANNOUNCEMENTS-TAB), followed by the three Workflows views, built from this very list by
 // components/tabs/tab-rails.ts. The list itself did not change - the order it
 // declares is still the order the chips appear in, and "manualView" is still
 // the param each one writes.
@@ -185,6 +212,7 @@ export function getDestinationById(id: string): Destination | undefined {
 export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "course-planning",
   "content",
+  "announcements",
   "version-control",
   "recording",
   "ppt-design",
@@ -196,6 +224,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   "course-planning": "Build Courses",
   content: "LMS",
+  announcements: "Announcements",
   "version-control": "Version Control",
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
@@ -222,13 +251,14 @@ export function isManualViewType(value: unknown): value is ManualViewType {
 // destinations and a view with an accessible name are the same set BY
 // CONSTRUCTION - there is no second list either reader could fall out of sync
 // with (docs/tools-grading-subtab-architecture.md section 6.1).
-type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading" | "presentations">;
+type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading" | "presentations" | "announcements">;
 
 const INNER_NAV: Record<InnerNavViewType, { groupName: string; ariaLabel: string }> = {
   "course-planning": { groupName: "Build", ariaLabel: "Course build modes" },
   content: { groupName: "LMS", ariaLabel: "LMS views" },
   grading: { groupName: "Grading", ariaLabel: "Grading tools" },
   presentations: { groupName: "Presentations", ariaLabel: "Presentations views" },
+  announcements: { groupName: "Announcements", ariaLabel: "Announcements views" },
 };
 
 // The active Manual view's inner destinations, or null when that view has no
@@ -264,6 +294,7 @@ export function getActiveDestinationId(
   contentView: ContentView,
   gradingView: GradingView,
   presentationsView: PresentationsView = "slide-deck",
+  announcementsView: AnnouncementsView = "post",
 ): string {
   if (manualView === "course-planning") {
     return buildView === "new" ? "build-new" : "build-prebuilt";
@@ -281,6 +312,8 @@ export function getActiveDestinationId(
     return presentationsView === "pipeline" ? "presentations-pipeline" : "presentations-slide-deck";
   } else if (manualView === "grading") {
     return `grading-${gradingView}`;
+  } else if (manualView === "announcements") {
+    return `announcements-${announcementsView}`;
   }
   return "build-new";
 }
@@ -326,12 +359,14 @@ export function resolveStateFromDestinationId(
   currentContentView: ContentView,
   currentGradingView: GradingView,
   currentPresentationsView: PresentationsView = "slide-deck",
+  currentAnnouncementsView: AnnouncementsView = "post",
 ): {
   manualView: ManualViewType;
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
   presentationsView: PresentationsView;
+  announcementsView: AnnouncementsView;
 } {
   const alias = RETIRED_GRADING_POINTERS[id];
   if (alias) {
@@ -341,6 +376,7 @@ export function resolveStateFromDestinationId(
       contentView: currentContentView,
       gradingView: alias.gradingView,
       presentationsView: currentPresentationsView,
+      announcementsView: currentAnnouncementsView,
     };
   }
 
@@ -353,6 +389,7 @@ export function resolveStateFromDestinationId(
     if (id === "artifact-design") return "artifact-design";
     if (id.startsWith("presentations-")) return "presentations";
     if (id.startsWith("grading-")) return "grading";
+    if (id.startsWith("announcements-")) return "announcements";
     return currentManualView;
   })();
 
@@ -389,7 +426,13 @@ export function resolveStateFromDestinationId(
     return currentPresentationsView;
   })();
 
-  return { manualView, buildView, contentView, gradingView, presentationsView };
+  const announcementsView: AnnouncementsView = (() => {
+    if (id === "announcements-post") return "post";
+    if (id === "announcements-walkthrough") return "walkthrough";
+    return currentAnnouncementsView;
+  })();
+
+  return { manualView, buildView, contentView, gradingView, presentationsView, announcementsView };
 }
 
 export function validateLmsViewsCompleteness(): string[] {

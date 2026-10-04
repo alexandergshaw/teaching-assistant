@@ -41,6 +41,7 @@ const DEFAULT_STATE: UrlNavState = {
   contentView: "modules",
   gradingView: "run",
   presentationsView: "slide-deck",
+  announcementsView: "post",
   tasksView: "term",
   kbInstitution: null,
   kbPageId: null,

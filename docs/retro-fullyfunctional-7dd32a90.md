@@ -21,13 +21,17 @@ outcome.
 
 ## Part 1 - Lessons learned
 
-### L1. Test-author notes delivered as handbacks, not files, bounced the first checker three times in this one session
+### L1. Test-author notes delivered as handbacks, not files, forced a documented checker REVISE and recurred across several waves' notes in this one session
 
 The `loop-test-author` seat repeatedly returned its notes only as a subagent
-handback rather than as a committed file, so the first checker dispatched to
-gate those notes could not open the artifact and correctly disposed REVISE for
-"artifact absent from handoff." This recurred across three distinct waves and
-was repaired by follow-up "handoff fix" commits that persist the notes verbatim:
+handback rather than as a committed file, so a checker dispatched to gate those
+notes could not open the artifact. At least ONE case is DOCUMENTED to have
+bounced its gating checker with a correct REVISE for "artifact absent from
+handoff" (grader W1, 903d9bd7); the other handoff-fix commits confirm handback
+DELIVERY that had to be repaired by persisting the files, rather than a
+separately-documented second and third bounce. Handback delivery recurred across
+four waves' worth of notes (W1, W1a, engine, W1b), grouped into three handoff-fix
+commits that persist the notes verbatim:
 
 - Grader W1 driver-state notes: `903d9bd7`, whose body states the test-author
   "delivered its notes as a handback message, not a file, so the first W1 notes
@@ -44,24 +48,29 @@ committed directly as files as part of authoring (`c542441e` creating
 `2f65958a` creating `docs/rec-w2-test-notes.md`), so by mid-session the pattern
 was being pre-empted rather than repaired after a bounced check.
 
-This is a genuine within-session recurrence (three waves), not a one-off. The
-checker self-corrected each time once the file existed, so nothing shipped
-wrong - the cost was an extra orchestrator round trip per wave to message the
-author to persist.
+This is a genuine within-session recurrence of handback-not-file delivery across
+several waves, not a one-off; exactly one bounce (903d9bd7) is documented as a
+checker REVISE, the rest are confirmed handback deliveries repaired by persisting.
+Nothing shipped wrong - the cost was an extra orchestrator round trip per wave to
+message the author to persist. AI1 rests on the recurrence of the handback
+delivery itself, not on a bounce count.
 
-### L2. The `stripComments` governance gate reddens repo-wide for any new test helper named `stripComments`, and it collided with three waves
+### L2. The `stripComments` governance gate reddens repo-wide for any new test file that MENTIONS `stripComments` - a latent naming hazard three waves navigated
 
 `src/tools/strip-comments-agreement.structure.test.ts` walks every
-`*.test.ts` under `src/` (`:45-58` `walkTestFiles`), extracts any
-function/variable literally named `stripComments`
-(`:96-107`, matching on `node.name.text === "stripComments"`), evaluates each
-copy, and asserts behavioural agreement with the production tokenizer imported
-at `:5` (`stripComments as productionTokenizer`). Consequence: any NEW test file
-that defines a comment-strip helper named `stripComments` is pulled into the
-frozen agreement classification and reddens the gate repo-wide unless it matches
-the production tokenizer exactly.
+`*.test.ts` under `src/` and ENUMERATES every file whose text
+`.includes("stripComments")` (`:509`); its invariant fails on any unaccounted
+mention (`:521`) and asserts `ALL_DEFINED.length + EXCLUSIONS == mentioning.length`
+(`:536`). (It also pins that the enumerated copies DIFFER from the production
+tokenizer - the copies are string-unaware/MIME-unsafe while the tokenizer is not
+- NOT that they agree; and a new copy is made green by adding it to a
+classification bucket, not by matching the tokenizer.) Consequence: any NEW test
+file that so much as MENTIONS the literal `stripComments` (helper name, call, or
+comment) reddens the gate repo-wide until it is classified. A helper named
+otherwise (e.g. `withoutLineComments`) is not enumerated and never trips it.
 
-It collided with three concurrent waves in this range:
+Three concurrent waves in this range NAVIGATED this latent hazard (none suffered
+an actual repo-wide red, because each used the safe name):
 
 - Discussion W-B: the test-author notes themselves instructed duplicating the
   risky name - `docs/discussion-wb-test-notes.md:251` ("DUPLICATE the
@@ -158,7 +167,9 @@ remembered.
 
 ### AI1. Make "persist the notes to a committed `docs/*-test-notes.md` file" an explicit authoring obligation in the test-author seat
 
-L1 shows the handback-not-file failure recurred three times in one session. The
+L1 shows the handback-not-file delivery recurred across several waves in one
+session (one documented checker bounce, 903d9bd7; the rest confirmed handback
+deliveries repaired by persisting). The
 seat brief already says "**Write the file**, do not delegate"
 (`.claude/agents/loop-test-author.md:79`), but that line was insufficient to
 prevent the recurrence because it does not say WHERE or tie the file to the
@@ -172,17 +183,18 @@ the seat's standard output path, not in one agent.
 
 ### AI2. Warn against the `stripComments` name in the test-author brief and list the gate in `this-repo.md`
 
-L2 shows the collision hit three waves and that the W-B notes actively told the
+L2 shows three waves navigated this latent naming hazard (none hit an actual
+repo-wide red, by using the safe name) and that the W-B notes actively told the
 implementer to duplicate a helper named `stripComments`
 (`docs/discussion-wb-test-notes.md:251,341`). The seat brief already prescribes
 the correct comment-strip FORM (`.claude/agents/loop-test-author.md:73-75`,
 unanchored `//.*$`) but says nothing about the NAME. Recommended changes:
 (a) at `.claude/agents/loop-test-author.md:71-72` (the "duplicate it" rule for
 cross-test-file helpers), add that a duplicated comment-strip helper must NOT be
-named `stripComments` - that identifier is enumerated by
-`src/tools/strip-comments-agreement.structure.test.ts` and must behaviourally
-match the production tokenizer or it reddens repo-wide; use
-`withoutLineComments`; and (b) add a row for this gate to the structural-gates
+named `stripComments` - any file MENTIONING that literal is enumerated by
+`src/tools/strip-comments-agreement.structure.test.ts` and reddens the gate
+repo-wide until it is added to a classification bucket; use a non-enumerated name
+like `withoutLineComments`; and (b) add a row for this gate to the structural-gates
 table in `docs/loop/this-repo.md` section 3, which currently does not mention it
 (`grep -niE "stripComments|strip-comments-agreement" docs/loop/this-repo.md`
 returns nothing).

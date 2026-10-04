@@ -42,6 +42,12 @@ Read these as your own failure modes, all measured in this repo:
   it is not independently gateable and you must SAY SO rather than letting the
   gate imply otherwise. `seats.md` has one legal exception - a type-only module -
   and it must be declared explicitly.
+- **For a LAYER-SPANNING feature** (lib/leaf -> action/route -> driver ->
+  surface), the plan includes an explicit write-set line for the hop that makes a
+  lower-layer capability REACHABLE from the surface (the surface->driver hop, owned
+  by the wave that owns the surface), so an added option or field is not shipped
+  with no caller. A dead-but-green intermediate layer must be a planned, tracked
+  state, not something a later wave rediscovers.
 - **Derive write sets with a stated command and paste the output.** Include
   files that read your edited files AS SOURCE TEXT: a test that greps a string
   it does not own is how a correct change goes red. A derivation that cannot

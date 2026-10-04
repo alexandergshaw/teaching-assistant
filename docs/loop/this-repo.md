@@ -27,6 +27,18 @@ Run them from **PowerShell**. All four are repo-root commands.
 | Tests | `npm test` | 107.4s | `Test Files 1111 passed (1111)` / `Tests 22454 passed (22454)`, exit 0. Re-measured 2026-09-23; the card said 1017/20200/63.6s, so treat these as a snapshot that drifts upward and re-measure rather than quoting them. |
 | Build | `npm run build` | 66.6s | `(check-mark) Compiled successfully in 16.5s`, then **exit 1**. See below. |
 
+### The pre-push gate runs NO vitest
+
+The pre-push gate is lint + tsc + the build compile-line check; it does not run
+vitest. So the registration / exact-set canaries - the `*.structure.test.ts`
+frozen-list and enumeration canaries (for example
+`wholesale-auth-mock-population.structure.test.ts` and
+`action-guard-coverage-github-cohort.test.ts`) - are NOT caught at push, and a
+drift in one reached main (58f22f08). A wave that adds a file those canaries scan
+must run them in the wave gate (`npm run test:paths ...`) or enumerate them in
+the wave plan. Adding the fast canaries to the pre-push gate is the stronger
+option; the wave-plan enumeration is the floor.
+
 ### Running a named set of test files
 
 `npx vitest run <p1> <p2> ...` silently DROPS any argument that matches no
@@ -155,6 +167,7 @@ These are the ones that catch a change that "should not have broken anything":
 | `src/supabase-migrations.structure.test.ts` | Migration SQL must be lexically well-formed. Exists because an undoubled apostrophe in a `comment on column` string reached production: migrations auto-apply from a GitHub Action on push to main, so the first sign was a red Action after the commit landed, with the TypeScript that depended on the schema already merged. |
 | `src/lib/no-emojis.test.ts` | Owns the no-emoji policy **and its one authorized exception** (`CHECKLIST_DONE_PREFIX`, which the owner asked for explicitly). Pure JS regex, never shells out to grep. Do not hand-roll an emoji scan - see the search traps card for why. |
 | `src/lib/use-server-exports.test.ts` | `"use server"` files export only async functions. |
+| `src/tools/strip-comments-agreement.structure.test.ts` | Enumerates every `*.test.ts` that MENTIONS the comment-strip helper literal and fails repo-wide until each is classified into a bucket. A NEW test that names its helper with that literal reddens the whole gate; name it `withoutLineComments` (CRLF-safe, unanchored `//.*$`) instead. |
 | Feature structure tests | `caption-studio`, `message-replies`, `module-deck-capture`, `walkthrough-announcement`, `workflows/th-scope`, `canvas-pagination-guard`, `supabase/courses`, `workflows/registry`. |
 
 **Two line-counting instruments disagree, measured on one real file:**

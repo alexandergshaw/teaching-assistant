@@ -416,7 +416,9 @@ the code is supposed to do? Only the first is a baseline.
 ## Test seat
 
 **Produces:** the oracle - a generator, the axes, and the expected-value table -
-plus the notes the implementer writes tests from.
+plus the notes the implementer writes tests from. The produced artifact is a
+COMMITTED `docs/<item>-test-notes.md` file, not a handback: the checker and the
+implementer gate on an openable artifact, and a subagent handback is not openable.
 
 **The axes must come from a different source than the generator.** An oracle
 whose generator and expected-value table share the same hardcoded axes has a

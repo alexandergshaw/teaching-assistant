@@ -70,6 +70,11 @@ Read these as your own failure modes:
   sabotage check pass.
 - **Never import a helper from another `*.test.ts`** - it re-runs that file's
   describe blocks. Duplicate it.
+- **Never name a comment-strip helper `stripComments`, and never mention that
+  literal in a new test.** `src/tools/strip-comments-agreement.structure.test.ts`
+  enumerates every `*.test.ts` that MENTIONS it and reddens the gate repo-wide
+  until the file is classified. Use a non-enumerated name such as
+  `withoutLineComments`, with the CRLF-safe unanchored form below.
 - **Comment stripping** is `.split(/\r?\n/)` plus an UNANCHORED `/\/\/.*$/`. The
   anchored `/^[ \t]*\/\/.*$/gm` form is trailing-comment-blind and has an
   executed defeat on record here.
@@ -77,7 +82,10 @@ Read these as your own failure modes:
 - **Measure, do not recall**; every quantity names its command. Open every
   `file:line` you cite.
 - **Write the file**, do not delegate, and say plainly what you could not
-  determine.
+  determine. HARD OBLIGATION OF THIS SEAT'S OUTPUT: authoring is NOT COMPLETE
+  until the notes are committed to a named `docs/<item>-test-notes.md` file. The
+  checker and the implementer gate on an OPENABLE artifact, and a subagent
+  handback is not openable.
 - **Refuse a ruling you can disprove.** Measure, report the conflict, adopt
   neither value silently.
 

@@ -448,9 +448,13 @@ The feature-2 refinement makes the sticky SHELL the frame everything plugs into.
 Land the shell first with today's controls, then populate it.
 
 - **Wave A - the sticky shell + thead (structural root fix).** New
-  `RepoGradesStickyHeader.tsx` container; move the run bar into it; `.gridWrap`
-  becomes the bounded `.stickyShell` (max-height + overflow); thead gains the
-  `top: var(--rg-working-header-h)` offset and z-index 2; the ResizeObserver
+  `RepoGradesStickyHeader.tsx` container; move the run bar into it; a NEW bounded
+  `.stickyShell` (max-height + overflow) ENCLOSES BOTH the working-header tier AND
+  the table (per section 2.2, the load-bearing shape - the two sticky tiers must
+  share one scroll context, or they fight for the top offset); `.gridWrap` loses
+  its unbounded `overflow-x` and stays a plain inner wrapper (so `styles.gridWrap`
+  remains valid). thead gains the `top: var(--rg-working-header-h)` offset and
+  z-index 2; the ResizeObserver
   sets the var. CSS-and-wiring only, no new search/selection logic. Independently
   verifiable: the owner can confirm "header sticks all the way down" with just
   the run bar + thead present. Touches `repo-grades.module.css`, index.tsx (JSX

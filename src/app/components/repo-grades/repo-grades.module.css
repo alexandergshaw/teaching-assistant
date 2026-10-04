@@ -18,8 +18,23 @@
    is added (AC4) - this view's only floating-adjacent elements are native
    <select> dropdowns, which draw their own browser chrome. */
 
+/* RG-SEARCH-STICKY Wave A: the ONE bounded scroll shell. It encloses the
+   working-header tier and the table, so both sticky tiers share this scroll
+   context (max-height idiom: tasks/TasksGrid.module.css). */
+.stickyShell {
+  max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 120px);
+  overflow: auto;
+}
+
+.stickyWorkingHeader {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--field-background);
+}
+
 .gridWrap {
-  overflow-x: auto;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
 }
@@ -49,11 +64,11 @@
    never was one. */
 .grid thead th {
   position: sticky;
-  top: 0;
+  top: var(--rg-working-header-h, 0px);
   background: var(--field-background);
   color: var(--text-secondary);
   font-weight: 600;
-  z-index: 1;
+  z-index: 2;
 }
 
 .grid tbody tr:last-child td {

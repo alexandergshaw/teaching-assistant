@@ -74,7 +74,7 @@ import {
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
 import RepoGradesGrid from "./RepoGradesGrid";
-import RepoGradesRunBar from "./RepoGradesRunBar";
+import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // A16 wave 3: mounts this run's trends above the grid - see
 // classTrendsFolderEntry.ts's header for why the leaf lives in this
@@ -769,17 +769,6 @@ export default function RepoGradesTab() {
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />
 
-      {/* A7 W3: sticky Grade/Post run bar, one folder only; same confirmed handlers as the column header. */}
-      {model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0] && (
-        <RepoGradesRunBar
-          column={displayedColumns[0]} rows={displayedRows} selected={selected} assignments={assignments}
-          cellEdits={cellEdits} columnPosting={columnPosting} bulkRunningFolder={bulkRunningFolder}
-          bulkProgress={bulkProgress} bulkSelectionOnly={uiState.bulkSelectionOnly} scanTruncated={!!scan?.truncated}
-          describeColumnRubric={rubricSource.describeColumn}
-          onGradeColumn={handleGradeColumn} onPostColumn={handlePostColumn}
-        />
-      )}
-
       <RepoGradesStatusBanners
         hasCourse={!!course}
         coursesLoading={coursesLoading}
@@ -905,6 +894,21 @@ export default function RepoGradesTab() {
         </p>
       )}
 
+      {/* RG-SEARCH-STICKY Wave A: one shell encloses the sticky run bar (A7 W3,
+          one folder only, same confirmed handlers as the column header) and the grid. */}
+      <RepoGradesStickyHeader
+        runBar={
+          model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0]
+            ? {
+                column: displayedColumns[0], rows: displayedRows, selected, assignments,
+                cellEdits, columnPosting, bulkRunningFolder,
+                bulkProgress, bulkSelectionOnly: uiState.bulkSelectionOnly, scanTruncated: !!scan?.truncated,
+                describeColumnRubric: rubricSource.describeColumn,
+                onGradeColumn: handleGradeColumn, onPostColumn: handlePostColumn,
+              }
+            : null
+        }
+      >
       {model && (
         <RepoGradesGrid
           columns={displayedColumns}
@@ -940,6 +944,7 @@ export default function RepoGradesTab() {
           codeScoringDisclosure={provider === "embedded" && uiState.runCodeScoring}
         />
       )}
+      </RepoGradesStickyHeader>
 
       {/* L4 item 17: shown for any chosen course, including one whose scan
           failed or whose org is unset - a log of what went wrong is most

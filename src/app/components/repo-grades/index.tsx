@@ -79,7 +79,9 @@ import {
 import { describeRestoredRepoGradeCells } from "./repoGradesResultsStore";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
-import { rowMatchesQuery } from "./repoGradesSearch";
+import { visibleRepoRows } from "./repoGradesVisibleRows";
+import { toggleRepoInGradeSet } from "./repoGradesGradeSet";
+import RepoGradesGradeSetTypeahead from "./RepoGradesGradeSetTypeahead";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // A16 wave 3: mounts this run's trends above the grid - see
 // classTrendsFolderEntry.ts's header for why the leaf lives in this
@@ -108,6 +110,7 @@ import pageStyles from "../../page.module.css";
 // search for the step's real name should still find this text even though
 // the banner no longer instructs anyone to go run that step elsewhere.
 const LINK_GITHUB_USERNAMES_STEP_LABEL = "Link GitHub usernames to roster";
+const NO_GRADE_SET: ReadonlySet<string> = new Set();
 
 export default function RepoGradesTab() {
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
@@ -220,6 +223,7 @@ export default function RepoGradesTab() {
   const confirmableSummary = confirmableBindingSummary(suggestedBindingCandidates);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [showAll, setShowAll] = useState(false); // ephemeral show-all override (no ta- key)
   // AC4 item 23: the persisted selection is restored (and filtered against
   // currently-valid repo ids) once this course's rows are known, not before -
   // done as a render-phase compare-and-adjust (matching CoursePicker.tsx's
@@ -277,9 +281,7 @@ export default function RepoGradesTab() {
   // toggles-in-one-tick scenario here for the functional-updater form to
   // guard against.
   const toggleSelected = (repo: string) => {
-    const next = new Set(selected);
-    if (next.has(repo)) next.delete(repo);
-    else next.add(repo);
+    const next = toggleRepoInGradeSet(selected, repo);
     setSelected(next);
     persistSelectedRepoIds(next);
   };
@@ -402,7 +404,7 @@ export default function RepoGradesTab() {
       : sortedRows.filter((row) => row.cells[currentSelectedFolder]?.status === "ungraded");
   // RG-SEARCH-STICKY Wave B: the search query narrows ONLY the table body.
   // `displayedRows` above stays query-free and feeds every plan surface.
-  const bodyRows = displayedRows.filter((row) => rowMatchesQuery(row, uiState.searchQuery));
+  const bodyRows = visibleRepoRows(displayedRows, uiState.searchQuery, showAll ? NO_GRADE_SET : selected);
   const folderMissingCount =
     currentSelectedFolder === ALL_FOLDERS
       ? 0
@@ -916,6 +918,7 @@ export default function RepoGradesTab() {
           one folder only, same confirmed handlers as the column header) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
+        gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
         runBar={
           model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0]

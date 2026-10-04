@@ -56,6 +56,7 @@ import {
   repoGradePostCandidateRows,
   scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
+import { resolveGradeScope } from "./repoGradesGradeSet";
 import { buildBulkGradePlan, bulkGradeOutcomeFromRun, type BulkGradeOutcome } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
 // A16 wave 3 (docs/a16-wave3-scope.md section 7): the folder-entry adapter.
@@ -781,7 +782,7 @@ export function useRepoGradesGradingActions(
   // establishSharedRubric's own "one rubric per run" rule in the sibling
   // hook.
   const handleGradeColumn = async (folder: string) => {
-    const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: bulkSelectionOnly });
+    const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: resolveGradeScope(selected, bulkSelectionOnly).selectionOnly });
     if (plan.targets.length === 0) {
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);

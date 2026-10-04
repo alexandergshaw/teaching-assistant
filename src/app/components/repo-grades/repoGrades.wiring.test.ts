@@ -611,7 +611,7 @@ describe("index.tsx does not persist the repo-selection Set from a blanket useEf
     const defIdx = indexSource.indexOf("const toggleSelected = (repo: string) => {");
     expect(defIdx).toBeGreaterThan(-1);
     const body = indexSource.slice(defIdx, defIdx + 400);
-    expect(body).toContain("const next = new Set(selected)");
+    expect(body).toContain("toggleRepoInGradeSet(selected, repo)");
     expect(body).toContain("setSelected(next)");
     expect(body).toContain("persistSelectedRepoIds(next)");
     // Not persisted from inside the updater passed to setSelected - there is

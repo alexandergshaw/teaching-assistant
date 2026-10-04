@@ -32,10 +32,12 @@ export interface RepoGradesStickyHeaderProps {
   // folder view, so the working-header tier no longer depends on the run bar.
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  // RG-SEARCH-STICKY Wave C: the grade-set typeahead (index.tsx owns its state).
+  gradeSetControl?: ReactNode;
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = runBar !== null || typeof onSearchChange === "function";
@@ -63,6 +65,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
           {runBar && <RepoGradesRunBar {...runBar} />}
+          {gradeSetControl}
           <input
             type="search"
             style={SEARCH_INPUT_STYLE}

@@ -47,6 +47,7 @@ import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEdits
 import { deriveRepoGradeStudentName, repoGradeLastNameCellText } from "./repoGradeStudentName";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
+import { resolveGradeScope } from "./repoGradesGradeSet";
 import { repoGradesRunPlanLabels } from "./repoGradesRunPlan";
 import { buildRepoGradeRowLinkHref, buildRepoGradeRowLinkText } from "./repoGradeTreeLink";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
@@ -353,9 +354,10 @@ function ColumnHeaderControls({
   // agrees with what handleGradeColumn's own plan will cover, without this
   // file ever calling the dangerous action itself.
   const liveRows: RepoGradeRow[] = mergeRepoGradeLiveScores(rows, cellEdits);
-  const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: bulkSelectionOnly });
+  const gradeScope = resolveGradeScope(selected, bulkSelectionOnly);
+  const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: gradeScope.selectionOnly });
   const gradeTargetCount = gradePlan.targets.length;
-  const scopedToSelection = bulkSelectionOnly && selected.size > 0;
+  const scopedToSelection = gradeScope.scopedToSelection;
   // Resting label wording lives in the pure repoGradesRunPlan leaf; the
   // transient overlays (grading progress here, "Posting" on the Post button)
   // stay in this component because they are render state.

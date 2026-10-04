@@ -18,6 +18,7 @@ import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
+import { resolveGradeScope } from "./repoGradesGradeSet";
 import { repoGradesRunPlanLabels } from "./repoGradesRunPlan";
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import styles from "./repo-grades.module.css";
@@ -63,11 +64,12 @@ export default function RepoGradesRunBar({
     (row) => getRepoGradeCellEdit(cellEdits, row.repo, column.folder).postStatus !== "idle"
   );
   const liveRows: RepoGradeRow[] = mergeRepoGradeLiveScores(rows, cellEdits);
-  const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: bulkSelectionOnly });
+  const gradeScope = resolveGradeScope(selected, bulkSelectionOnly);
+  const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: gradeScope.selectionOnly });
   const { gradeLabel, postLabel } = repoGradesRunPlanLabels({
     folder: column.folder,
     gradeTargetCount: gradePlan.targets.length,
-    scopedToSelection: bulkSelectionOnly && selected.size > 0,
+    scopedToSelection: gradeScope.scopedToSelection,
     scanTruncated,
     alreadyAttempted,
     postableCount: plan.postable.length,

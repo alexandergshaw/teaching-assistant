@@ -114,14 +114,17 @@ describe("Wave A wiring", () => {
   });
 
   it("W-A10: Wave A leaves the run bar plan inputs and Wave C identifiers alone", () => {
-    expect(RUNBAR).toContain("selectionOnly: bulkSelectionOnly");
-    expect(RUNBAR).toContain("scopedToSelection: bulkSelectionOnly && selected.size > 0");
-    expect(RUNBAR).not.toContain("selected.size > 0 || bulkSelectionOnly");
+    // Wave C (F3-c) reverses the pre-F3-c pins: the run bar now routes through
+    // resolveGradeScope and no longer carries the bare bulkSelectionOnly forms.
+    expect(RUNBAR).toContain("resolveGradeScope(selected, bulkSelectionOnly)");
+    expect(RUNBAR).toContain("scopedToSelection: gradeScope.scopedToSelection");
+    expect(RUNBAR).not.toContain("selectionOnly: bulkSelectionOnly");
+    expect(RUNBAR).not.toContain("scopedToSelection: bulkSelectionOnly && selected.size > 0");
     expect(INDEX).toMatch(/rows:\s*displayedRows/);
     // Wave B retires the bodyRows ban for index.tsx ONLY (it legitimately feeds
     // the grid's bodyRows prop); the full ban stays on the header and run bar.
     for (const [name, src, banned] of [
-      ["index.tsx", INDEX, ["visibleRepoRows", "planRows"]],
+      ["index.tsx", INDEX, ["planRows"]],
       ["RepoGradesStickyHeader.tsx", HEADER, ["visibleRepoRows", "bodyRows", "planRows"]],
       ["RepoGradesRunBar.tsx", RUNBAR, ["visibleRepoRows", "bodyRows", "planRows"]],
     ] as const) {

@@ -69,13 +69,15 @@ describe("Wave B display-only: index wiring keeps plan inputs query-free", () =>
 
   it("bodyRows is the folder-scoped set narrowed by the query", () => {
     const def = slice(INDEX, "const bodyRows =", ";");
-    expect(def).toContain("rowMatchesQuery");
+    expect(def).toContain("visibleRepoRows");
     expect(def).toContain("displayedRows");
     expect(def).toContain("searchQuery");
   });
 
-  it("rowMatchesQuery is imported from ./repoGradesSearch", () => {
-    expect(INDEX).toMatch(/import\s*\{[^}]*rowMatchesQuery[^}]*\}\s*from\s*["']\.\/repoGradesSearch["']/);
+  it("visibleRepoRows is imported from ./repoGradesVisibleRows, which imports rowMatchesQuery", () => {
+    expect(INDEX).toMatch(/import\s*\{[^}]*visibleRepoRows[^}]*\}\s*from\s*["']\.\/repoGradesVisibleRows["']/);
+    const leaf = withoutLineComments(read("repoGradesVisibleRows.ts"));
+    expect(leaf).toMatch(/import\s*\{[^}]*rowMatchesQuery[^}]*\}\s*from\s*["']\.\/repoGradesSearch["']/);
   });
 });
 

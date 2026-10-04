@@ -62,6 +62,8 @@ inner nav - exactly the failure mode it must catch for `announcements`.
 | `MANUAL_VIEW_ORDER` frozen oracle | frozen `.toEqual([...8 views...])` | `[READ manual-rail.test.ts:199-208]` |
 | Render-branch canary | loops `MANUAL_VIEW_ORDER`, asserts page.tsx manual slice contains `manualView === "<view>"` | `[READ topLevelTabs.wiring.test.ts:338-344]` |
 | I1 parity | loops `MANUAL_VIEW_ORDER`: `getInnerDestinations(v)!==null` iff `getInnerNavAriaLabel(v)!==null` | `[READ manual-rail.test.ts:268-277]` |
+| I5 popstate branch-existence (derived) | loops `MANUAL_VIEW_ORDER`: every view with `getInnerDestinations(v)!==null` must have a `parsed.manualView === "<v>"` popstate branch (AUTO-FIRES for `announcements`) | `[READ useAppNavigation.test.ts:203-215]` |
+| I5 popstate-read + dep-array precedent | popstate slice contains `parsed.presentationsView` (`:741`); URL-sync dep array contains `presentationsView` - the shape pins (ii)/(iii) mirror | `[READ useAppNavigation.test.ts:234-249]`, `[READ useAppNavigation.ts:625-626,680,737,741]` |
 | LMS/GRADING derived guards | loop `LMS_VIEWS`/`GRADING_VIEWS` through resolve+getActive (coverage by construction) | `[READ manual-rail.test.ts:310-343]` |
 | gradingView persistence | `GRADING_VIEW_KEY = "ta-grading-view"` + initializer + write effect | `[READ useAppNavigation.ts:55,373-413,556]` |
 | storage-key canary | `KEYS` list of `{constant,value}`; asserts each is declared + written | `[READ useAppNavigation.test.ts:151-172]` |
@@ -114,17 +116,31 @@ URL)?**
   `useAppNavigation.ts`), no `url-state.ts` edits. Smaller, but violates the full-coverage
   ruling above.
 
-**Recommended reading: F1-URL.** This note's requirements R5-url and the URL-param rows in
-sections 6-7 assume F1-URL. If the owner/orchestrator chooses F1-LOCAL, DELETE requirement
-R5-url, its sabotage, and the `url-state.ts`/`url-state.test.ts` entries from the gate;
-everything else stands unchanged.
+**RULED 2026-10-04 (orchestrator): F1-URL.** The fork is decided - `announcementsView` is a
+full URL param. The reasoning above is retained as the record of why; the terminating question
+below is ANSWERED and does NOT reopen. Requirements R5-url and the URL-param rows in sections
+4/6/7 are LIVE, not contingent.
 
-**Terminating question for the owner (shaped so every answer ends the activity):**
+**Recommended reading (as ruled): F1-URL.** This note's requirement R5-url and the URL-param
+rows in sections 4-7 assume F1-URL.
+
+**F1-LOCAL contingency - SUPERSEDED by the ruling, corrected for the record (MINOR 2).** Had
+F1-LOCAL been chosen, deletion would NOT have been wholesale. Under F1-LOCAL `announcements`
+STILL has an inner nav, so the derived I5 popstate branch-existence guard
+(`useAppNavigation.test.ts:203-215`) STILL requires a `parsed.manualView === "announcements"`
+popstate branch to EXIST (it loops `MANUAL_VIEW_ORDER` for any view with inner destinations).
+That branch lives in the popstate ladder R5-url adds, so the previous "DELETE R5-url, everything
+else stands unchanged" wording would have left I5 RED. The correct F1-LOCAL delta would have
+dropped only the `url-state.ts`/`url-state.test.ts` param plumbing and the emitted-names/round-trip
+pins, while KEEPING a popstate branch that reads the localStorage-seeded value (not a URL param)
+so I5 stays green - and pin (ii) below would then assert the branch reads that seeded value
+rather than `parsed.announcementsView`. Moot under the ruling; recorded so the error is not
+inherited by any later re-reading.
+
+**Terminating question that was put to the owner (answered F1-URL; retained for the record):**
 "The new Announcements inner nav produces EITHER a deep-linkable URL param (`announcementsView`,
 consistent with every other inner view and with url-state.ts's 'full coverage' ruling) OR a
 localStorage-only selection (smaller change, but the only inner nav not in the URL). Which?"
-F1-URL is the recommended reading already specified below; answering F1-LOCAL only removes
-rows, it does not reopen anything.
 
 ---
 
@@ -151,7 +167,7 @@ ordinal is chosen.
 | `src/app/components/tabs/tab-rails.ts` | stale comment :8-9,:37 ("ten"/"seven") | 193 |
 | `src/app/components/tabs/topLevelTabs.wiring.test.ts` | length 11->12 (:376); stale comment :374-375 | ~650 |
 | `src/app/components/home/useAppNavigation.ts` | `ANNOUNCEMENTS_VIEW_KEY`, state+initializer+write effect, buildUrlSearch args+dep, popstate branch (F1-URL) | 798 |
-| `src/app/components/home/useAppNavigation.test.ts` | add `{constant:"ANNOUNCEMENTS_VIEW_KEY", value:"ta-announcements-view"}` to `KEYS` | - |
+| `src/app/components/home/useAppNavigation.test.ts` | add `{constant:"ANNOUNCEMENTS_VIEW_KEY", value:"ta-announcements-view"}` to `KEYS`; (F1-URL, BLOCKER) add the (ii) popstate-read + (iii) dep-array source-text pins to the I5 describe block (mirror :234-249) | - |
 | `src/app/url-state.ts` (F1-URL only) | `ANNOUNCEMENTS_VIEW_PARAM`, `UrlNavState.announcementsView`, parse/build/normalize | 492 |
 | `src/app/url-state.test.ts` (F1-URL only) | `DEFAULT_STATE` += field; announcementsView round-trip block (mirror :978-990) | - |
 | `src/app/page.tsx` | R4 `manualView==="announcements"` render branch mounting `<AnnouncementsSubTab>`; pass `announcementsView` to `ManualRail` + `resolveStateFromDestinationId`; stale comment :519-523 | 832 `[MEASURED]` |
@@ -281,7 +297,7 @@ Sub-parts; all in `manual-rail.ts` unless noted.
   - Sabotage: declare `ANNOUNCEMENTS_VIEW_KEY` but delete its `localStorage.setItem` effect -> the
     `writes each key back` assertion RED. GREEN restored. DISCRIMINATES the persist-ui-control-state
     failure directly.
-- **R5-url (F1-URL ONLY): `announcementsView` is a URL param.** `url-state.ts` gains
+- **R5-url (F1-URL - RULED live): `announcementsView` is a URL param.** `url-state.ts` gains
   `ANNOUNCEMENTS_VIEW_PARAM="announcementsView"`, `UrlNavState.announcementsView`,
   `normalizeAnnouncementsView` (reuse `isAnnouncementsView`), parse (:398-421 area) and build
   (gated `state.manualView==="announcements" && !== default`, mirror :466-468). `useAppNavigation.ts`
@@ -295,8 +311,57 @@ Sub-parts; all in `manual-rail.ts` unless noted.
   `{...DEFAULT_STATE, tab:"manual", manualView:"announcements", announcementsView:"walkthrough"}`
   state AND add `"announcementsView"` to `EXPECTED_PARAM_NAMES` (:296-309) - WITHOUT this the new
   param is uncovered by the frozen oracle (the exact blind spot presentationsView already sits in).
-  Direction: RED if a non-default value leaks onto a non-announcements branch, is not read back, or
-  the emitted-names oracle disagrees.
+
+  **MANDATORY source-text pins in `useAppNavigation.ts` (BLOCKER fix - the popstate handler body
+  and the URL-sync dep array are production writes R5-url adds with NO other instrument; nothing
+  renders under vitest, so these source-text pins are the ONLY possible guards). These are A-W1
+  BUILD STEPS, not residuals: deep-link + Back/Forward restoration is the entire reason F1-URL
+  beats F1-LOCAL, so it must be INSTRUMENTED, not merely recorded.** The round-trip + emitted-names
+  oracle above test the pure url-state round-trip only; they say NOTHING about the popstate handler
+  body or the hook's dep array. The presentationsView precedent has THREE source-text guards; (i)
+  below is its branch-existence analogue (which this note already relies on), (ii) and (iii) are the
+  two that were missing. All three are modelled EXACTLY on the presentationsView analogues
+  (`useAppNavigation.ts:625-626,680,737,741`; `useAppNavigation.test.ts:203-215,234-249`), confirmed
+  resolvable at HEAD `[MEASURED Grep]`.
+  - **(i) branch EXISTS - already covered, now CREDITED (MINOR 1).** The derived I5 guard
+    `useAppNavigation.test.ts:203-215` loops `MANUAL_VIEW_ORDER` and, for every view with
+    `getInnerDestinations(view)!==null`, requires the popstate slice to contain
+    `parsed.manualView === "<view>"`. Once `announcements` is in the order (R2) with a destinations
+    group (R5-b), this AUTO-FIRES and forces the `parsed.manualView === "announcements"` popstate
+    branch to exist. No new assertion. But it proves only that the branch EXISTS, not that it reads
+    the URL - which is exactly why (ii) is needed.
+  - **(ii) the popstate branch READS the value.** Add an `it(...)` INSIDE the existing I5 describe
+    block, REUSING its `popStateSlice` (whose both-end anchor-resolves is the block's existing
+    "finds the popstate handler" test at `:198-201` - `popStateStart > -1` and `popStateEnd >
+    popStateStart`), mirroring `:234-236` verbatim:
+    `expect(popStateSlice).toContain("parsed.announcementsView")`.
+    - Sabotage (named): implement the branch as `setAnnouncementsView("post")` - hardcode, ignore
+      the URL -> popstate slice lacks `parsed.announcementsView` -> (ii) RED. Restore to
+      `setAnnouncementsView(parsed.announcementsView)` -> GREEN. DISCRIMINATES. Without (ii), I5
+      stays GREEN on the hardcode (the branch still exists) and Back/Forward silently fails to
+      restore the inner view - the precise silent-green this BLOCKER closes.
+  - **(iii) the inner view is in the URL-sync effect DEP ARRAY.** Add an `it(...)` mirroring
+    `:238-249` verbatim: `syncEffectStart = source.indexOf("useEffect(() => {\n    const target = buildUrlSearch({")`,
+    `depsStart = source.indexOf("}, [", syncEffectStart)`, `depsEnd = source.indexOf("]);", depsStart)`,
+    `deps = source.slice(depsStart, depsEnd)`, then `expect(deps).toContain("announcementsView")`.
+    SLICE-ANCHOR REQUIREMENT (test seat brief: every slice is anchor-resolved at BOTH ends, else
+    `slice(depsStart, -1)` on an unresolved `depsEnd` silently widens to the whole file tail and the
+    drop-sabotage below could match `announcementsView` elsewhere and stay GREEN): the precedent
+    asserts only `syncEffectStart > -1`, so ADD `expect(depsStart).toBeGreaterThan(-1)` and
+    `expect(depsEnd).toBeGreaterThan(depsStart)`. This is the one deliberate strengthening over the
+    verbatim precedent; it changes no fact, only closes the silent-widen hole.
+    - Sabotage (named): drop `announcementsView` from the URL-sync effect's dep array -> (iii) RED.
+      Restore -> GREEN. DISCRIMINATES. Without (iii), picking the inner chip never pushes a history
+      entry, so Back/Forward has nothing to restore even with (ii) correct.
+  - **Discrimination basis (honest label):** (ii) and (iii) are ARGUED by mirroring the SHIPPED,
+    currently-green presentationsView precedent (`:234-249`), which reds under the exact analogous
+    mutation - they are NOT re-proven in `sab.mjs` (section 0's scratch ref-impl covered the registry
+    construction, not this hook's source text). The anchor strings were MEASURED resolvable at HEAD;
+    the sabotage behaviour is argued from the precedent's identical shape, not independently executed
+    here.
+  Direction: RED if a non-default value leaks onto a non-announcements branch, is not read back, the
+  emitted-names oracle disagrees, the popstate branch does not read `parsed.announcementsView` (ii),
+  or `announcementsView` is absent from the URL-sync dep array (iii).
   - Sabotage: in `buildUrlSearch`, drop the `state.manualView==="announcements"` guard so the param
     emits on every manual branch -> the "dropped elsewhere" round-trip assertion RED AND the
     emitted-names oracle RED. GREEN restored. DISCRIMINATES.
@@ -349,8 +414,11 @@ Sub-parts; all in `manual-rail.ts` unless noted.
 
 **Executable (MACHINE, go red on the sabotage):** R1 (tsc), R2 (frozen order + label), R3 (both
 counts + ordered list), R4 (render-branch canary), R5-a/b/c/d (frozen lists, I1 parity, derived
-guard), R5-f (storage-key canary), R5-url round-trip + emitted-names oracle (F1-URL), R-shell negative
-guard (recording-split + LMS validator). Satisfiability and sabotage discrimination PROVEN in section 0.
+guard), R5-f (storage-key canary), R5-url round-trip + emitted-names oracle + the I5 branch-existence
+guard (auto-fires) + the (ii) popstate-read and (iii) dep-array source-text pins (F1-URL), R-shell
+negative guard (recording-split + LMS validator). Satisfiability and the REGISTRY sabotages are PROVEN
+in section 0; the (ii)/(iii) source-text sabotages are ARGUED from the shipped presentationsView
+precedent (`:234-249`), labelled as such in R5-url, not executed in `sab.mjs`.
 
 **ARGUED ONLY (no render under vitest - say so, never assert as verified):**
 - R5-e runtime inner-chip highlight tracking the selection (source-text pins the FACT the identifier
@@ -413,7 +481,7 @@ and that is what is specified.
 | RR-2 | The empty shell + inner chips RENDER and the inner-chip highlight tracks the selection | repo owner | owner click-through (no component renders under vitest) | A-W3 owner nav check |
 | RR-3 | `PRESENTATIONS_VIEW_KEY`'s declare+write is UNGUARDED (omitted from `useAppNavigation.test.ts` `KEYS`) - a pre-existing gap, NOT introduced by A-W1 | loop-implementer / data seat | add `{constant:"PRESENTATIONS_VIEW_KEY", value:"ta-presentations-view"}` to `KEYS` (one line) | optional in A-W1; else a follow-up row |
 | RR-4 | The frozen URL param oracle does NOT exercise `presentationsView` (pre-existing blind spot) - A-W1 closes it for `announcementsView` (R5-url) but not for `presentationsView` | loop-implementer / test seat | add a `manualView:"presentations"` state to `emittedParamNames()` + `presentationsView` to `EXPECTED_PARAM_NAMES` | follow-up row (out of A-W1 scope) |
-| RR-5 | F1 (URL-param vs localStorage-only) is a design fork | repo owner / orchestrator | the terminating question in section 2 | before A-W1 build dispatch |
+| RR-5 | F1 (URL-param vs localStorage-only) - RULED 2026-10-04: F1-URL (closed; no longer blocking) | repo owner / orchestrator | terminating question in section 2 (answered) | DONE - R5-url is live | 
 
 RR-3 and RR-4 are flagged, not fixed, to keep A-W1 scoped to the announcements registry; each is a
 one-to-two-line change the implementer MAY fold in, but neither is required for A-W1 to be correct.
@@ -427,7 +495,9 @@ one-to-two-line change the implementer MAY fold in, but neither is required for 
 `src/app/components/manual/manual-rail.ts` (whole), `manual-rail.test.ts` (whole),
 `src/app/components/tabs/tab-rails.ts` (whole), `tab-rails.test.ts` (whole),
 `src/app/components/tabs/tab-sections.ts` (whole),
-`src/app/components/home/useAppNavigation.ts` (whole), `useAppNavigation.test.ts:130-199`,
+`src/app/components/home/useAppNavigation.ts` (whole; round-2 re-measure of the popstate/URL-sync
+anchors `:625-626,680,737,741` via `[MEASURED Grep]`), `useAppNavigation.test.ts:130-259` (incl. the
+I5 popstate describe block `:193-250` mirrored by pins (ii)/(iii)),
 `src/app/page.tsx:510-669`, `src/app/url-state.ts` (whole), `url-state.test.ts` (grep: param/round-trip),
 `src/app/components/tabs/topLevelTabs.wiring.test.ts:338-409`.
 Not opened (so not claimed): `ManualRail.tsx` body (only its documented role + size 80),

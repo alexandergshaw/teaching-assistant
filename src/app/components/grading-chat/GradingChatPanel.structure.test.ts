@@ -122,3 +122,69 @@ describe("GradingChatPanel - New session control wires the previously-dead drive
     expect(source).toMatch(/onClick=\{handleNewSession\}/);
   });
 });
+
+// GRADER W2 (docs/grader-w2-test-notes.md O1/O2/O3-panel/O4-half-2). Source-text
+// canaries: they prove the panel HANDS the driver values on, not on-screen
+// behaviour (nothing renders under vitest; the live walk is OWNER).
+function withoutLineComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n\r]*/g, "");
+}
+
+function resultsMountSlice(source: string): string {
+  const start = source.indexOf("<GradingResults");
+  expect(start, "expected a <GradingResults mount").toBeGreaterThan(-1);
+  const end = source.indexOf("/>", start);
+  return source.slice(start, end);
+}
+
+describe("GradingChatPanel - W2 O1: canvasUrl and runKey come from the driver", () => {
+  it("does not hardcode an empty canvasUrl", () => {
+    expect(withoutLineComments(read(PANEL))).not.toMatch(/canvasUrl\s*=\s*(""|\{""\}|\{''\}|'')/);
+  });
+
+  it("feeds canvasUrl from driver.canvasUrl on the GradingResults mount", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain("driver.canvasUrl");
+    expect(resultsMountSlice(source)).toMatch(/canvasUrl=\{\s*driver\.canvasUrl\s*\}/);
+  });
+
+  it("feeds runKey from driver.runKey on the GradingResults mount", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain("driver.runKey");
+    expect(resultsMountSlice(source)).toMatch(/\brunKey=\{\s*driver\.runKey\s*\}/);
+  });
+});
+
+describe("GradingChatPanel - W2 O2: provenance components are imported AND rendered from driver values", () => {
+  it("imports both components from the grading-results directory", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toMatch(/import\s+RubricProvenance\s+from\s+"\.\.\/grading-results\/RubricProvenance"/);
+    expect(source).toMatch(/import\s+GeneratedRubricCard\s+from\s+"\.\.\/grading-results\/GeneratedRubricCard"/);
+  });
+
+  it("renders RubricProvenance with run={driver.run}", () => {
+    expect(withoutLineComments(read(PANEL))).toMatch(/<RubricProvenance\s+run=\{\s*driver\.run\s*\}/);
+  });
+
+  it("renders GeneratedRubricCard with generatedRubric={driver.generatedRubric}", () => {
+    expect(withoutLineComments(read(PANEL))).toMatch(/<GeneratedRubricCard\s+generatedRubric=\{\s*driver\.generatedRubric\s*\}/);
+  });
+});
+
+describe("GradingChatPanel - W2 O4 half 2: the edits key is session-scoped", () => {
+  it("feeds editsSurface from driver.runKey, not a constant", () => {
+    const slice = resultsMountSlice(withoutLineComments(read(PANEL)));
+    expect(slice).toMatch(/editsSurface=\{\s*driver\.runKey\s*\}/);
+    expect(slice).not.toMatch(/editsSurface="grading-chat"/);
+  });
+});
+
+describe("GradingChatPanel - W2 O3 panel-feed: the driver is constructed with commentSplit: true", () => {
+  it("the useContinuousGradingRun( construction call carries commentSplit: true", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("useContinuousGradingRun(");
+    expect(start, "expected the driver construction call").toBeGreaterThan(-1);
+    const end = source.indexOf(");", start);
+    expect(source.slice(start, end)).toMatch(/commentSplit\s*:\s*true/);
+  });
+});

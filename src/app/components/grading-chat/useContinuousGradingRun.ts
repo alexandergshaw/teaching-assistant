@@ -74,6 +74,9 @@ export interface UseContinuousGradingRunParams {
   readonly dispatchItem?: (request: GradeRunItemRequestBody) => Promise<GradeResult>;
   /** The per-session entry ceiling (R4). Defaults to DEFAULT_MAX_ENTRIES. */
   readonly maxEntries?: number;
+  /** Opt in to the did-right/did-wrong comment split on every grade request.
+   * Absent = body byte-identical to before. */
+  readonly commentSplit?: boolean;
 }
 
 export interface UseContinuousGradingRunResult {
@@ -124,7 +127,7 @@ async function postGradeRunItem(request: GradeRunItemRequestBody): Promise<Grade
 }
 
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
-  const { provider, maxEntries = DEFAULT_MAX_ENTRIES } = params;
+  const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
@@ -299,6 +302,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         rubric: header.effectiveRubric,
         provider,
         pointsPossible,
+        ...(commentSplit ? { commentSplit: true } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
       pendingRef.current.add(sourceIndex);

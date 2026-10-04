@@ -18,6 +18,8 @@ import { useState } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import GradingResults from "../GradingResults";
+import RubricProvenance from "../grading-results/RubricProvenance";
+import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import { ChatComposer } from "./ChatComposer";
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
 import type { PreviewFile } from "../FilePreviewModal";
@@ -62,7 +64,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [rubric, setRubric] = useState(() => loadPersisted(RUBRIC_STORAGE_KEY));
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const driver = useContinuousGradingRun({ provider: "gemini" });
+  const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
 
   const handleInstructionsChange = (value: string) => {
     setInstructions(value);
@@ -170,15 +172,20 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       {hasRows && driver.run ? (
+        <>
+        {driver.run && <RubricProvenance run={driver.run} />}
+        {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
           run={driver.run}
-          canvasUrl=""
-          editsSurface="grading-chat"
+          canvasUrl={driver.canvasUrl}
+          runKey={driver.runKey}
+          editsSurface={driver.runKey}
           assignmentName=""
           copiedKey={copiedKey}
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}
         />
+        </>
       ) : (
         <p className={styles.ghMeta}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}

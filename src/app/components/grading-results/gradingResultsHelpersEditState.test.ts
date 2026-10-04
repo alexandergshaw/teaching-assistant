@@ -518,3 +518,23 @@ describe("localStorage-backed persistence (loadGradingResultsEdits / persistGrad
     expect(restored["Alice Smith"].strengths).toBe("Stored before the A36 fix shipped.");
   });
 });
+
+describe("gradingResultsEditsKey - W2 WK-5c: session-scoped key for non-legacy surfaces", () => {
+  const URL = "https://canvas.example.edu/courses/1/assignments/2";
+
+  it("WK5c-1: two sessions on the SAME non-empty canvasUrl get DIFFERENT keys", () => {
+    expect(gradingResultsEditsKey(URL, "grading-chat-0")).not.toBe(gradingResultsEditsKey(URL, "grading-chat-1"));
+  });
+
+  it("WK5c-3: a chat session key is distinct from the bare shared assignment key", () => {
+    expect(gradingResultsEditsKey(URL, "grading-chat-0")).not.toBe(`ta-grading-results-edits:${URL}`);
+  });
+
+  it("WK5c-2: the key is deterministic within a session", () => {
+    expect(gradingResultsEditsKey(URL, "grading-chat-0")).toBe(gradingResultsEditsKey(URL, "grading-chat-0"));
+  });
+
+  it("WK5c-5 (protective): empty-url text/file rows stay session-scoped", () => {
+    expect(gradingResultsEditsKey("", "grading-chat-0")).not.toBe(gradingResultsEditsKey("", "grading-chat-1"));
+  });
+});

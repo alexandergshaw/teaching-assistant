@@ -541,3 +541,25 @@ describe("W1 B1 - reset() clears every per-session ref (F3=A is per session)", (
     expect(dispatchItemMock).toHaveBeenCalledTimes(0);
   });
 });
+
+describe("useContinuousGradingRun - W2 O3-A: commentSplit reaches the dispatched body", () => {
+  it("a driver constructed with commentSplit: true dispatches commentSplit === true", async () => {
+    h0.begin();
+    let driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatchItemMock, commentSplit: true });
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    h0.begin();
+    driver = useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatchItemMock, commentSplit: true });
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "text", content: "x" });
+    expect(dispatchItemMock.mock.calls[0][0].commentSplit).toBe(true);
+  });
+
+  it("the default driver (no commentSplit) dispatches commentSplit === undefined (opt-in, no over-fire)", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "text", content: "x" });
+    expect(dispatchItemMock.mock.calls[0][0].commentSplit).toBeUndefined();
+  });
+});

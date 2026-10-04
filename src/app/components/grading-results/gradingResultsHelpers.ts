@@ -555,8 +555,20 @@ export function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>)
 // the previously-colliding empty-canvasUrl case gets the new shape - see
 // loadGradingResultsEdits's legacy-key fallback for what happens to edits
 // already stored under the old shared empty key.
+//
+// W2: the legacy-key shape above is kept ONLY for the closed set of surfaces
+// that have stored data in the wild ({canvas, github}). Every other surface
+// (the grading chat passes a per-session runKey) is session-scoped even on a
+// non-empty canvasUrl, so two sessions on one assignment never share edits.
+const LEGACY_EDITS_SURFACES: ReadonlySet<string> = new Set(["canvas", "github"]);
+
 export function gradingResultsEditsKey(canvasUrl: string, surface: string): string {
-  return canvasUrl ? `ta-grading-results-edits:${canvasUrl}` : `ta-grading-results-edits::${surface}`;
+  if (canvasUrl) {
+    return LEGACY_EDITS_SURFACES.has(surface)
+      ? `ta-grading-results-edits:${canvasUrl}`
+      : `ta-grading-results-edits:${canvasUrl}::${surface}`;
+  }
+  return `ta-grading-results-edits::${surface}`;
 }
 
 // The bare key every surface shared before A36, for the empty-canvasUrl case

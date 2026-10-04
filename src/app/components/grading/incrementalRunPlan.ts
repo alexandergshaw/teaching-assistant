@@ -62,6 +62,8 @@ export interface GradeRunItemRequestBody {
   readonly rubric: string;
   readonly provider: LlmProvider;
   readonly pointsPossible: number | null;
+  /** Opt-in did-right/did-wrong comment split; only a literal true opts in. */
+  readonly commentSplit?: boolean;
 }
 
 export interface ArrivedItemResult {

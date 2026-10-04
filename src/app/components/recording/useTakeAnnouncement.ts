@@ -38,6 +38,7 @@ import {
   DEFAULT_ANNOUNCEMENT_COMPOSITION,
   type AnnouncementCompositionSettings,
 } from "@/lib/take-announcement";
+import { finalizeTakeDraft } from "@/lib/take-announcement-draft";
 import { coerceAnnouncementComposition } from "./announcement-composition";
 import { announcementImageFileName } from "./announcement-image-filename";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -525,8 +526,23 @@ export function useTakeAnnouncement({
       },
       composition
     );
-    const result = await draftAnnouncementAction(instruction, getStoredProvider());
-    if ("error" in result) {
+    const provider = getStoredProvider();
+    const raw = await draftAnnouncementAction(instruction, provider);
+    // Refuses the embedded scaffold, blank drafts, and invented URLs before
+    // anything reaches review (take-announcement-draft.ts).
+    const result = finalizeTakeDraft(raw, {
+      provider,
+      transcript,
+      context: {
+        takeName: take.name,
+        durationSec: take.durationSec,
+        topic: context.topic,
+        objectives: context.objectives,
+        cardTitle: context.cardTitle,
+        cardSubtitle: context.cardSubtitle,
+      },
+    });
+    if (!result.ok) {
       setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: result.error }]);
       setStage({ phase: "failed", stage: "draft", message: result.error });
       announce(`Could not draft the announcement - ${result.error}`);

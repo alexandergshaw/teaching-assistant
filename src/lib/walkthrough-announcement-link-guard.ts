@@ -141,6 +141,24 @@ export function collectPermittedUrls(args: {
 }
 
 /**
+ * The take-announcement drafter's collector: the permitted set is every bare
+ * URL found in the supplied carrier strings (transcript plus the typed
+ * context fields). Co-located here so it shares normalizeForComparison and
+ * BARE_URL_RE with stripUnpermittedUrls - a separate normalizer would drift
+ * and silently strip legitimate transcript URLs.
+ */
+export function collectTakePermittedUrls(carriers: readonly string[]): ReadonlySet<string> {
+  const permitted = new Set<string>();
+  for (const text of carriers) {
+    for (const raw of text.match(BARE_URL_RE) ?? []) {
+      const n = normalizeForComparison(raw);
+      if (n) permitted.add(n);
+    }
+  }
+  return permitted;
+}
+
+/**
  * Returns the original `draftText` with every unpermitted URL spliced out -
  * per match, never rewriting anything this function did not decide to
  * strip (Ruling 20). A permitted link construct or bare URL survives

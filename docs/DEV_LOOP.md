@@ -50,6 +50,8 @@ re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
 | `loop-test-author` | opus | Test notes, acceptance-criteria instruments, frozen oracles, sabotage design - the seat that decides WHAT IS MEASURED and HOW IT FAILS |
 | `loop-seat` | sonnet | The remaining authoring seats: verification reports, remediation, root-cause analysis, and the UX/data/security/reliability passes |
 | `loop-implementer` | sonnet | Code, fixes, tests WRITTEN FROM a test-author's notes, mechanical sweeps |
+| `loop-retro` | opus | On-demand, report-only retrospective over an explicit commit range: lessons learned and areas for improvement, every item citing evidence; changes nothing |
+| `loop-retro-reviewer` | opus | The adversarial review of a `loop-retro` report: rejects ungrounded, over-claimed and generic items; report-only |
 
 **Two seats are exceptions to that principle, elevated by the repo owner on
 2026-09-20 because their mistakes have KNOCK-ON EFFECTS a checker catches too

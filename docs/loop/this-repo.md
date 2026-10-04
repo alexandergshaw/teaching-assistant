@@ -310,6 +310,8 @@ Two things to know before acting on that row:
 | `loop-test-author` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
 | `loop-seat` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 | `loop-implementer` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
+| `loop-retro` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
+| `loop-retro-reviewer` | Claude Opus 4.8 | `claude-opus-4-8` | 5.00 | 25.00 |
 
 Fable is not used at any tier.
 

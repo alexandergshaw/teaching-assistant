@@ -601,6 +601,8 @@ const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
   // shape as postWalkthroughAnnouncementAction (RULING 84).
   sendBulkCourseMessageAction:
     "GitHub reachability is import-only; its call set is requireUser/getCourse/canLms/countActiveCourseStudents/classifyRecipientCount/createCourseConversation - a non-owner caller cannot spend the owner's Canvas token because resolveCanvasCredential only reaches the owner's env pair when the CALLING identity's own role is 'owner', and nothing in the call set reaches the GitHub PAT",
+  previewBulkCourseMessageAction:
+    "the read-only preview half of bulk-course-message; shares resolveBulkCourse/requireUser with sendBulkCourseMessageAction (same import-only GitHub reachability, docs/bulk-course-message-guard-review.md section 6) but its call set stops at getCourse/canLms/countActiveCourseStudents/classifyRecipientCount - it never reaches createCourseConversation (sends nothing) and never reaches the GitHub PAT",
 };
 
 // WAVE-0 FINDING, not an R2-scoped classification (see the "tracks the live
@@ -650,7 +652,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(70);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(71);
     }
   );
 

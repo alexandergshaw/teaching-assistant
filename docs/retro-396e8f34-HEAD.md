@@ -1,12 +1,13 @@
 # Retrospective: 396e8f34..HEAD (session of 2026-09-29, resumed 2026-10-04)
 
-Range defined from `git log --oneline 396e8f34..HEAD`: 32 commits, oldest
+Range defined from `git log --oneline 396e8f34..4e4487e6`: 33 commits, oldest
 `6464a523` (PRES-1 Wave 1), newest `4e4487e6` (L-RETRO citation). Two clusters:
 feature/grading work on 2026-09-29 (15:29-21:15, author dates) and the L-RETRO
 loop-role additions on 2026-10-04 (09:10-09:25). Work in range: PRES-1
 (waves 1-3 + drag-drop), A43-C (conversational ask), PRES-2 (S1-S6 13-stage
-pipeline), A38 grading (waves 0-2), three test-greening commits, and the
-loop-retro / loop-retro-reviewer roles themselves.
+pipeline), A38 grading (waves 0-2), two dedicated test-greening commits
+(`9bcbe79e`, `931616c9`; a third reconciliation landed inside feature commit
+`5bd60985`), and the loop-retro / loop-retro-reviewer roles themselves.
 
 This report changes nothing but itself. Quantities name the command that
 produced them; every lesson and area opens an evidence handle you can resolve.
@@ -15,7 +16,7 @@ produced them; every lesson and area opens an evidence handle you can resolve.
 
 ## Part 1 - Lessons learned
 
-### L1. Registration-canary drift recurred FOUR times in this range, and in every case the wave that caused the drift did not run the test that guards it
+### L1. Registration-canary drift recurred FOUR times in this range; for the two in-range causes it is shown by gate-run evidence that the causing wave did not run the guard, and the two pre-range causes follow from the same exact-set mechanism by inference
 
 Four hand-maintained enumeration tests had to be reconciled in range:
 
@@ -52,7 +53,7 @@ the pattern ("a registration list that grew while a hand-maintained canary did
 not"). The session re-proved it four times, so this is a standing structural
 fact of the gate, not a one-off.
 
-### L2. Two of those reds persisted undetected across a push boundary (and at least one across a session boundary)
+### L2. Two of those reds persisted undetected across a push boundary (inferred from exact-set semantics, not from a re-run checkout; all relevant commits are same-day 2026-09-29, so no session-boundary claim is made)
 
 `wholesale-auth-mock` (cause `9f5f1fd3`, pre-range) and `gradingResults` (cause
 `4e46fadb`, pre-range) were both first greened at `9bcbe79e`, in range. By

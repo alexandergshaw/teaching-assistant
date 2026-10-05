@@ -334,6 +334,8 @@ const SAFE_FILES: readonly string[] = [
   "src/app/actions/current-events-assignments.test.ts",
   "src/app/actions/guard-overtightening.test.ts",
   "src/app/components/chat/institutionTriggerWiring.test.ts",
+  // N15 W3: classic safe idiom (block-comment replace, then /\/\/.*$/gm); the m-flag $ stops before a CR, so CRLF-safe and trailing-comment-safe.
+  "src/app/components/grading/gradingPictureWiring.wiring.test.ts",
   "src/lib/grade/class-trends-draft.test.ts",
   "src/app/components/content-tab/CourseItemRow.wiring.test.ts",
   "src/app/components/content-tab/courseItemsView.wiring.test.ts",
@@ -768,6 +770,8 @@ const A42_MIME_TRIGGERS: readonly string[] = [
   "src/app/components/course-planning/SyllabusMode.tsx",
   "src/app/components/courses/AddCourseForm.tsx",
   "src/app/components/courses/TextbookPhotoModal.tsx",
+  // N15 W3: new file, accept="image/*" matches MIME_ATTR_RE.
+  "src/app/components/grading/GradingPictureField.tsx",
   "src/app/components/recording/SourceDevicesPanel.tsx",
   "src/app/components/recording/SpeedPanel.tsx",
   "src/app/components/slide-studio/VideoModeSection.tsx",
@@ -805,14 +809,14 @@ describe("A42 W1 O1: the string-aware tokenizer equals the TypeScript-parser gro
     const rows = corpus();
     const triggers = rows.filter((r) => !r.rel.includes(".test.") && MIME_ATTR_RE.test(r.text)).map((r) => r.rel);
     expect([...triggers].sort()).toEqual([...A42_MIME_TRIGGERS].sort());
-    expect(triggers.length).toBe(9);
+    expect(triggers.length).toBe(10);
     const corruptible = rows.filter((r) => r.corruptible).map((r) => r.rel);
     expect([...corruptible].sort()).toEqual([...A42_CORRUPTIBLE].sort());
     expect(corruptible.length).toBe(21);
     for (const t of A42_TARGETS) expect(rows.some((r) => r.rel === t), t).toBe(true);
   }, 120_000);
 
-  it("tokenizer output equals ground truth on the 5 targets + 9 MIME triggers + 21 corruptible files", () => {
+  it("tokenizer output equals ground truth on the 5 targets + 10 MIME triggers + 21 corruptible files", () => {
     const named = new Set([...A42_TARGETS, ...A42_MIME_TRIGGERS, ...A42_CORRUPTIBLE]);
     const rows = corpus().filter((r) => named.has(r.rel));
     expect(rows.length).toBe(named.size);

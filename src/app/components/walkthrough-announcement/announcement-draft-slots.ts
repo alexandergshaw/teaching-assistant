@@ -93,6 +93,15 @@ export type SlotDraft =
   | { readonly phase: "drafting"; readonly restore: Drafted | null }
   | { readonly phase: "drafted"; readonly draft: Drafted; readonly error: string | null };
 
+export type SlotDraftPhase = SlotDraft["phase"];
+
+/** M8: scroll the draft root into view only on the generate-completion edge
+ * (drafting -> drafted), the sole path into "drafted". Pure so the "not on
+ * every render" property is testable without rendering. */
+export function shouldScrollDraftIntoView(prev: SlotDraftPhase | null, next: SlotDraftPhase): boolean {
+  return prev === "drafting" && next === "drafted";
+}
+
 export interface DraftSlot {
   readonly id: string;
   readonly choice: TemplateChoice;

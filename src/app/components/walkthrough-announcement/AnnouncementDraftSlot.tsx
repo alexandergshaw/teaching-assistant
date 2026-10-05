@@ -11,7 +11,7 @@
 // CLAIM - vitest here is node-env and collects only src/**/*.test.ts, so no
 // test in this repo renders this component.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -24,9 +24,11 @@ import {
   optionsForSlot,
   receiptLabel,
   savedFormatsStatusText,
+  shouldScrollDraftIntoView,
   timingLabel,
   type AnnouncementTiming,
   type DraftSlot,
+  type SlotDraftPhase,
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
@@ -99,6 +101,15 @@ export default function AnnouncementDraftSlot({
     return markdownToHtml(slot.draft.phase === "drafted" ? slot.draft.draft.message : "");
   }, [phase, slot.draft]);
 
+  const rootRef = useRef<HTMLFieldSetElement>(null);
+  const prevPhaseRef = useRef<SlotDraftPhase | null>(null);
+  useEffect(() => {
+    if (shouldScrollDraftIntoView(prevPhaseRef.current, phase)) {
+      rootRef.current?.scrollIntoView({ block: "nearest" });
+    }
+    prevPhaseRef.current = phase;
+  }, [phase]);
+
   const staleChoice =
     phase === "drafted" && slot.draft.phase === "drafted" ? choiceId(slot.choice) !== builtFromId(slot.draft.draft.builtFrom) : false;
 
@@ -115,41 +126,43 @@ export default function AnnouncementDraftSlot({
   const isScheduled = visibility.kind === "scheduled";
 
   return (
-    <fieldset className={controls.section}>
+    <fieldset ref={rootRef} className={controls.section}>
       <legend className={controls.sectionLegend}>Draft {ordinal}</legend>
 
-      <TextField
-        select
-        size="small"
-        label="Format to match"
-        className={controls.fieldMd}
-        value={selectedOption.id}
-        onChange={(e) => {
-          const chosen = options.find((o) => o.id === e.target.value);
-          if (chosen) onChooseTemplate(slot.id, chosen.choice);
-        }}
-      >
-        {options.map((option) => (
-          <MenuItem key={option.id} value={option.id}>
-            {option.unavailable ? `${option.label} (no longer available)` : option.label}
-          </MenuItem>
-        ))}
-      </TextField>
+      <div className={styles.adaptRow}>
+        <TextField
+          select
+          size="small"
+          label="Format to match"
+          className={controls.fieldMd}
+          value={selectedOption.id}
+          onChange={(e) => {
+            const chosen = options.find((o) => o.id === e.target.value);
+            if (chosen) onChooseTemplate(slot.id, chosen.choice);
+          }}
+        >
+          {options.map((option) => (
+            <MenuItem key={option.id} value={option.id}>
+              {option.unavailable ? `${option.label} (no longer available)` : option.label}
+            </MenuItem>
+          ))}
+        </TextField>
 
-      <TextField
-        select
-        size="small"
-        label="Written for"
-        className={controls.fieldMd}
-        value={slot.timing}
-        onChange={(e) => onChooseTiming(slot.id, e.target.value as AnnouncementTiming)}
-      >
-        {TIMING_OPTIONS.map((option) => (
-          <MenuItem key={option.value} value={option.value}>
-            {option.label}
-          </MenuItem>
-        ))}
-      </TextField>
+        <TextField
+          select
+          size="small"
+          label="Written for"
+          className={controls.fieldMd}
+          value={slot.timing}
+          onChange={(e) => onChooseTiming(slot.id, e.target.value as AnnouncementTiming)}
+        >
+          {TIMING_OPTIONS.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              {option.label}
+            </MenuItem>
+          ))}
+        </TextField>
+      </div>
 
       {(() => {
         const statusText = savedFormatsStatusText(optionSource.savedState, optionSource.saved.length);

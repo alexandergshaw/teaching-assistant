@@ -3,7 +3,14 @@
 // calling the function under test.
 
 import { describe, it, expect } from "vitest";
-import { shouldAutoDraft, isRunComplete, courseToAutoSelect, type AutoDraftState } from "./walkthrough-run-decisions";
+import {
+  shouldAutoDraft,
+  isRunComplete,
+  courseToAutoSelect,
+  shouldWarnBeforeUnload,
+  type AutoDraftState,
+} from "./walkthrough-run-decisions";
+import { makeSlot, type DraftSlot, type Drafted } from "./announcement-draft-slots";
 
 function baseline(): AutoDraftState {
   return {
@@ -93,6 +100,69 @@ describe("courseToAutoSelect (reading R; row A8 is the owner-routed T-RULING-1)"
   for (const r of rows) {
     it(`${r.row}`, () => {
       expect(courseToAutoSelect(r.courses, r.stored)).toBe(r.expected);
+    });
+  }
+});
+
+describe("shouldWarnBeforeUnload (WA-DRAFT-LOSS AC-A1, frozen literal table)", () => {
+  const DRAFTED: Drafted = {
+    title: "Week 3",
+    message: "Hello",
+    builtFrom: { kind: "pasted" },
+    researchNotice: { kind: "off" },
+    timing: "beginning-of-week",
+  };
+
+  function slot(over: Partial<DraftSlot> = {}): DraftSlot {
+    return { ...makeSlot("wta-slot-1", { kind: "default" }, "beginning-of-week"), ...over };
+  }
+  const drafted = (over: Partial<DraftSlot> = {}): DraftSlot =>
+    slot({ draft: { phase: "drafted", draft: DRAFTED, error: null }, ...over });
+  const drafting = (restore: Drafted | null, over: Partial<DraftSlot> = {}): DraftSlot =>
+    slot({ draft: { phase: "drafting", restore }, ...over });
+
+  const rows: ReadonlyArray<{ row: string; capturing: boolean; pendingFrames: number; slots: DraftSlot[]; expected: boolean }> = [
+    { row: "R0 idle", capturing: false, pendingFrames: 0, slots: [slot()], expected: false },
+    { row: "R1 capturing", capturing: true, pendingFrames: 0, slots: [slot()], expected: true },
+    { row: "R2 frames pending", capturing: false, pendingFrames: 3, slots: [slot()], expected: true },
+    { row: "R3 drafted, unlocked", capturing: false, pendingFrames: 0, slots: [drafted({ postLocked: false })], expected: true },
+    { row: "R4 drafted, locked", capturing: false, pendingFrames: 0, slots: [drafted({ postLocked: true })], expected: false },
+    { row: "R5 drafting, no prior draft", capturing: false, pendingFrames: 0, slots: [drafting(null)], expected: true },
+    { row: "R6 drafting over a prior draft", capturing: false, pendingFrames: 0, slots: [drafting(DRAFTED)], expected: true },
+    {
+      row: "R7 posting in flight",
+      capturing: false,
+      pendingFrames: 0,
+      slots: [drafted({ postLocked: false, posting: true })],
+      expected: true,
+    },
+    {
+      row: "R8 edited after a post (postedTo set, not locked)",
+      capturing: false,
+      pendingFrames: 0,
+      slots: [drafted({ postedTo: "Course X", postLocked: false })],
+      expected: true,
+    },
+    {
+      row: "R9 locked slot regenerating",
+      capturing: false,
+      pendingFrames: 0,
+      slots: [drafting(DRAFTED, { postLocked: true })],
+      expected: true,
+    },
+    { row: "R10 locked plus empty", capturing: false, pendingFrames: 0, slots: [drafted({ postLocked: true }), slot({ id: "wta-slot-2" })], expected: false },
+    {
+      row: "R11 locked plus unlocked",
+      capturing: false,
+      pendingFrames: 0,
+      slots: [drafted({ postLocked: true }), drafted({ id: "wta-slot-2", postLocked: false })],
+      expected: true,
+    },
+    { row: "R12 empty slot list", capturing: false, pendingFrames: 0, slots: [], expected: false },
+  ];
+  for (const r of rows) {
+    it(`${r.row} -> ${r.expected}`, () => {
+      expect(shouldWarnBeforeUnload({ capturing: r.capturing, pendingFrames: r.pendingFrames, slots: r.slots })).toBe(r.expected);
     });
   }
 });

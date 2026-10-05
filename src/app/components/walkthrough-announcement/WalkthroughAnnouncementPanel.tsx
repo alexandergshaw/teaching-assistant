@@ -64,7 +64,7 @@ import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from 
 import { MAX_NOTES_CHARS, useWalkthroughSetup } from "./useWalkthroughSetup";
 import { useWalkthroughAutoDraft } from "./useWalkthroughAutoDraft";
 import { useWalkthroughGenerationAdapters } from "./useWalkthroughGenerationAdapters";
-import { isRunComplete } from "./walkthrough-run-decisions";
+import { isRunComplete, shouldWarnBeforeUnload } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
 import AnnouncementCourseFieldset, {
   type AnnouncementExemplarSummary,
@@ -388,16 +388,6 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const [startError, setStartError] = useState<string | null>(null);
   const [autoDrafted, setAutoDrafted] = useState(false);
 
-  useEffect(() => {
-    if (!(capturing || pendingFrames > 0)) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [capturing, pendingFrames]);
-
   // --- Legibility probe --------------------------------------------------------
 
   const [probeOpen, setProbeOpen] = useState(false);
@@ -479,6 +469,18 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     cancelRegenerate,
     postSignatureFor,
   } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
+
+  // WA-DRAFT-LOSS: warn on a full page unload while a capture, a draft, or an
+  // unposted drafted slot would be lost. Declared after `slots` on purpose.
+  useEffect(() => {
+    if (!shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [capturing, pendingFrames, slots]);
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 

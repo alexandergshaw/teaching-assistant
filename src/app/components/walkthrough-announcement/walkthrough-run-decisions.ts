@@ -44,6 +44,24 @@ export function isRunComplete(slots: readonly Pick<DraftSlot, "postedTo">[]): bo
   return slots.length > 0 && slots.every((s) => s.postedTo !== null);
 }
 
+export interface BeforeUnloadState {
+  readonly capturing: boolean;
+  readonly pendingFrames: number;
+  readonly slots: readonly Pick<DraftSlot, "draft" | "postLocked">[];
+}
+
+/** WA-DRAFT-LOSS: true when a full page unload would silently lose work - a
+ * live capture, frames still queued, an in-flight draft, or a drafted slot
+ * that has not been posted. Reads postLocked, NOT postedTo: an edit after a
+ * post clears the lock but not postedTo, and that corrected draft is unposted. */
+export function shouldWarnBeforeUnload(s: BeforeUnloadState): boolean {
+  return (
+    s.capturing ||
+    s.pendingFrames > 0 ||
+    s.slots.some((slot) => slot.draft.phase === "drafting" || (slot.draft.phase === "drafted" && !slot.postLocked))
+  );
+}
+
 /**
  * The course id to select once the course list has loaded, or null for "change
  * nothing". Never changes a persisted choice: a stored id that is still in the

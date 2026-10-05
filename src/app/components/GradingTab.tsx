@@ -31,6 +31,7 @@ import { selectDisplayRun, selectRunKey, isTerminal } from "./grading/incrementa
 import { describeRunProgress, shouldShowEmptyState } from "./grading/runProgressCopy";
 import { runResetKey } from "./grading-results/gradingResultsHelpers";
 import GradingPictureField from "./grading/GradingPictureField";
+import ReplySectionInsertField from "./grading/ReplySectionInsertField";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -249,8 +250,6 @@ export default function GradingTab({
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => setAssignmentInstructions(e.target.value);
 
-  const handleRubricChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setRubric(e.target.value);
 
   // A39 wave 2, path A (docs/a39-architecture.md 6.2.1): nothing is
   // restored until a file is chosen, scoped to that file's own name; an
@@ -453,9 +452,10 @@ export default function GradingTab({
                   name="rubric"
                   slotProps={{ input: { readOnly: source === "canvas" } }}
                   value={rubric}
-                  onChange={handleRubricChange}
+                  onChange={(e) => setRubric(e.target.value)}
                   placeholder="Paste the grading rubric, expectations, and scoring guidance."
                 />
+                <ReplySectionInsertField rubric={rubric} onChange={setRubric} />
                 {source === "zip" && (<GradingPictureField kind="rubric" provider={selectedProvider} onExtracted={setRubric} />)}
                 {rubricOrigin && source === "zip" && (
                   <p className={styles.fieldHint}>{rubricOrigin}</p>

@@ -16,7 +16,7 @@ These are CANDIDATES identified by a static text scan (every `.class` defined in
 
 **Global-selector caveat:** 2 of the orphan(s) below are classes referenced only inside a `:global(...)` wrapper (e.g. `.cellMenu :global(.MuiButtonBase-root):focus-visible`), used to target a class a third-party library (MUI) puts directly in the DOM. These are NOT CSS Modules exports - they structurally cannot be reached via `styles.foo` and are not dead code; they are marked `(global selector, not a JS-reachable export)` below instead of being ordinary deletion candidates.
 
-Total: 118 orphan candidate(s) of 1293 defined classes across 32 stylesheets (of which 2 are the global-selector case above, not real dead-code candidates).
+Total: 118 orphan candidate(s) of 1295 defined classes across 32 stylesheets (of which 2 are the global-selector case above, not real dead-code candidates).
 
 ## src/app/components/courses/CoursesTable.module.css
 
@@ -41,7 +41,7 @@ Total: 118 orphan candidate(s) of 1293 defined classes across 32 stylesheets (of
 
 ## src/app/components/repo-grades/repo-grades.module.css
 
-1 orphan candidate(s) of 75 defined classes.
+1 orphan candidate(s) of 77 defined classes.
 
 - `.srOnly`
 

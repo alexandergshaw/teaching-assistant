@@ -35,30 +35,33 @@ export default function RepoGradesGradeSetTypeahead({ rows, selected, onToggleRe
 
   return (
     <div className={styles.gradeSet}>
-      <input
-        type="text"
-        role="combobox"
-        aria-label="Choose repositories to grade"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        className={styles.headerInput}
-        placeholder="Add repos to grade (default: all)"
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setOpen(false);
-          else if (e.key === "Enter" && matches[0]) {
-            e.preventDefault();
-            onToggleRepo(matches[0].repo);
-          }
-        }}
-      />
+      <label className={styles.headerField}>
+        <span className={styles.headerInputLabel}>Grade set</span>
+        <input
+          type="text"
+          role="combobox"
+          aria-label="Choose repositories to grade"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          className={styles.headerInput}
+          placeholder="Add repos to grade (default: all)"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+            else if (e.key === "Enter" && matches[0]) {
+              e.preventDefault();
+              onToggleRepo(matches[0].repo);
+            }
+          }}
+        />
+      </label>
       {open && (
         <ul id={listId} role="listbox" aria-multiselectable="true" className={styles.gradeSetList}>
           {matches.length === 0 && <li className={styles.gradeSetOption}>No matching repos</li>}

@@ -103,7 +103,7 @@ export default function RepoGradesRunBar({
       </Button>
       <Button
         type="button"
-        variant="contained"
+        variant="outlined"
         size="small"
         disabled={busy || plan.postable.length === 0}
         onClick={() => {

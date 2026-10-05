@@ -54,14 +54,17 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
           {runBar && <RepoGradesRunBar {...runBar} />}
           {gradeSetControl}
-          <input
-            type="search"
-            className={styles.headerInput}
-            aria-label="Search repositories"
-            placeholder="Search repo, student or binding"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-          />
+          <label className={styles.headerField}>
+            <span className={styles.headerInputLabel}>Search</span>
+            <input
+              type="search"
+              className={styles.headerInput}
+              aria-label="Search repositories"
+              placeholder="Search repo, student or binding"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+            />
+          </label>
         </div>
       )}
       {children}

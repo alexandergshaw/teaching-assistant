@@ -59,6 +59,25 @@
   font-size: var(--font-size-md);
 }
 
+.headerField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 1 320px;
+  min-width: 0;
+}
+
+.headerField .headerInput {
+  flex: 0 0 auto;
+}
+
+.headerInputLabel {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
 .headerInput::placeholder {
   color: var(--text-muted);
 }

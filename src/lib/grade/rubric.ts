@@ -30,16 +30,43 @@ export function extractRubricCriteria(rubric: string): RubricCriterion[] {
   return extractRubricCriteriaWidened(rubric);
 }
 
+// REPLY-SECTION MARKER (A8 Wave A, docs/a8-scoring-architecture.md section 5.1).
+// A line whose trimmed, lowercased text begins with "replies" or "reply
+// section" AND carries no "(number [pts|points|%])" parenthetical. Both
+// criterion matchers below REQUIRE such a parenthetical, so a marker can never
+// be read as a criterion, and a legacy "Replies (10 pts):" line (which has one)
+// is still a criterion, not a marker.
+export const CANONICAL_REPLY_MARKER = "Reply section:";
+
+const REPLY_MARKER_START = /^(?:replies|reply section)\b/;
+const POINTS_PARENTHETICAL = /\(\s*\d+(?:\.\d+)?\s*(?:pts?|points?|%)?\s*\)/i;
+
+export function isReplySectionMarker(line: string): boolean {
+  const text = line.trim().toLowerCase();
+  if (!REPLY_MARKER_START.test(text)) return false;
+  return !POINTS_PARENTHETICAL.test(text);
+}
+
 // The original matcher. UNCHANGED by backlog 4.3 - indent-skip and mandatory
 // colon and all - per ruling B43-7: no rubric this already parses may ever
 // change behaviour.
 function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
   const out: RubricCriterion[] = [];
   const seen = new Set<string>();
-  for (const raw of rubric.split(/\r?\n/)) {
+  const lines = rubric.split(/\r?\n/);
+  // Axis is tagged only when the rubric carries a marker (AC-R2: a marker-free
+  // rubric must parse byte-identically, with no axis key at all). Strict keeps
+  // its indent-skip, so an indented line is never a marker either.
+  const hasMarker = lines.some((raw) => !/^\s/.test(raw) && isReplySectionMarker(raw));
+  let currentAxis: RubricCriterion["axis"] = hasMarker ? "initial-post" : undefined;
+  for (const raw of lines) {
     if (/^\s/.test(raw)) continue; // indented = rating/subcategory line, not a criterion
     const line = raw.trim();
     if (!line) continue;
+    if (isReplySectionMarker(line)) {
+      currentAxis = "reply";
+      continue;
+    }
     const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(pts?|points?|%)?\s*\)\s*:/i);
     if (!match) continue;
     const name = match[1].trim();
@@ -49,7 +76,8 @@ function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
     seen.add(key);
     const unit = (match[3] ?? "").toLowerCase();
     const value = Number(match[2]);
-    out.push({ name, points: unit.startsWith("p") && Number.isFinite(value) ? value : null });
+    const points = unit.startsWith("p") && Number.isFinite(value) ? value : null;
+    out.push(currentAxis ? { name, points, axis: currentAxis } : { name, points });
   }
   return out;
 }
@@ -97,9 +125,16 @@ function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
 function extractRubricCriteriaWidened(rubric: string): RubricCriterion[] {
   const out: RubricCriterion[] = [];
   const seen = new Set<string>();
-  for (const raw of rubric.split(/\r?\n/)) {
+  const lines = rubric.split(/\r?\n/);
+  const hasMarker = lines.some((raw) => isReplySectionMarker(raw));
+  let currentAxis: RubricCriterion["axis"] = hasMarker ? "initial-post" : undefined;
+  for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    if (isReplySectionMarker(line)) {
+      currentAxis = "reply";
+      continue;
+    }
     const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(pts?|points?|%)?\s*\)\s*$/i);
     if (!match) continue;
     const name = match[1].trim();
@@ -109,7 +144,8 @@ function extractRubricCriteriaWidened(rubric: string): RubricCriterion[] {
     seen.add(key);
     const unit = (match[3] ?? "").toLowerCase();
     const value = Number(match[2]);
-    out.push({ name, points: unit.startsWith("p") && Number.isFinite(value) ? value : null });
+    const points = unit.startsWith("p") && Number.isFinite(value) ? value : null;
+    out.push(currentAxis ? { name, points, axis: currentAxis } : { name, points });
   }
   return out;
 }

@@ -14,7 +14,13 @@ vi.mock("../llm", async () => {
 });
 
 import { callLlm } from "../llm";
-import { synthesizeFullCreditChecklist, deriveFullCreditChecklist, extractRubricCriteria } from "./rubric";
+import {
+  synthesizeFullCreditChecklist,
+  deriveFullCreditChecklist,
+  extractRubricCriteria,
+  isReplySectionMarker,
+  CANONICAL_REPLY_MARKER,
+} from "./rubric";
 
 const checklistResponse = (items: string[]) => ({
   ok: true as const,
@@ -150,5 +156,111 @@ describe("extractRubricCriteria (fallback mode - backlog 4.3)", () => {
     );
 
     expect(extractRubricCriteria(rubric)).toEqual([]);
+  });
+});
+
+// A8 Wave A: the reply-section marker and the per-criterion axis tag.
+// toStrictEqual is deliberate: it treats a present-but-undefined `axis` key as
+// different from an absent one, so AC-R2 (no key at all) is pinned exactly.
+describe("extractRubricCriteria (A8 reply-section axis tagging)", () => {
+  // AC-R2. Sabotage: always emitting `axis: currentAxis` (even when undefined)
+  // or defaulting the axis to "initial-post" without a marker turns this red.
+  it("parses a marker-free rubric with no axis key at all (strict pass)", () => {
+    const rubric = ["Thesis (20 pts): clear", "Grammar (10 pts): mechanics"].join("\n");
+
+    expect(extractRubricCriteria(rubric)).toStrictEqual([
+      { name: "Thesis", points: 20 },
+      { name: "Grammar", points: 10 },
+    ]);
+  });
+
+  it("parses a marker-free rubric with no axis key at all (widened pass)", () => {
+    const rubric = ["Some Rubric Title", "  Code Style (20pt)", "  Correctness (30pt)"].join("\n");
+
+    expect(extractRubricCriteria(rubric)).toStrictEqual([
+      { name: "Code Style", points: 20 },
+      { name: "Correctness", points: 30 },
+    ]);
+  });
+
+  // AC-R1, strict pass. Sabotage: dropping the `currentAxis = "reply"` switch
+  // leaves every criterion "initial-post" and turns this red; dropping the
+  // parenthetical exclusion is covered by the recognizer tests below.
+  it("tags criteria before the marker initial-post and after it reply (strict pass)", () => {
+    const rubric = [
+      "Thesis (20 pts): clear",
+      "Evidence (20 pts): cited",
+      "Reply section:",
+      "Engagement (10 pts): responds to peers",
+      "Tone (5 pts): civil",
+    ].join("\n");
+
+    expect(extractRubricCriteria(rubric)).toStrictEqual([
+      { name: "Thesis", points: 20, axis: "initial-post" },
+      { name: "Evidence", points: 20, axis: "initial-post" },
+      { name: "Engagement", points: 10, axis: "reply" },
+      { name: "Tone", points: 5, axis: "reply" },
+    ]);
+  });
+
+  // AC-R1, widened pass (colonless, indented): the same threading must exist
+  // in the second pass. Sabotage: removing the marker handling from the widened
+  // loop leaves all axes absent and turns this red.
+  it("tags criteria before the marker initial-post and after it reply (widened pass)", () => {
+    const rubric = [
+      "Some Rubric Title",
+      "  Thesis (20pt)",
+      "Replies to classmates",
+      "  Engagement (10pt)",
+    ].join("\n");
+
+    expect(extractRubricCriteria(rubric)).toStrictEqual([
+      { name: "Thesis", points: 20, axis: "initial-post" },
+      { name: "Engagement", points: 10, axis: "reply" },
+    ]);
+  });
+
+  it("never emits the marker line itself as a criterion", () => {
+    const rubric = ["Thesis (20 pts): clear", "Reply section", "Tone (5 pts): civil"].join("\n");
+
+    expect(extractRubricCriteria(rubric).map((c) => c.name)).toStrictEqual(["Thesis", "Tone"]);
+  });
+
+  // Backward compatibility. Sabotage: loosening the parenthetical exclusion so
+  // "Replies (10 pts):" counts as a marker turns this red (it would vanish).
+  it("keeps a legacy 'Replies (10 pts):' line as an ordinary criterion with no axis", () => {
+    const rubric = ["Posts (20 pts): initial post", "Replies (10 pts): reply to peers"].join("\n");
+
+    expect(extractRubricCriteria(rubric)).toStrictEqual([
+      { name: "Posts", points: 20 },
+      { name: "Replies", points: 10 },
+    ]);
+  });
+});
+
+describe("isReplySectionMarker", () => {
+  it("recognizes a parenthetical-free line starting with 'replies' or 'reply section'", () => {
+    expect(isReplySectionMarker("Replies")).toBe(true);
+    expect(isReplySectionMarker("  REPLIES to classmates:")).toBe(true);
+    expect(isReplySectionMarker("Reply section")).toBe(true);
+    expect(isReplySectionMarker("reply section: peer responses")).toBe(true);
+  });
+
+  it("rejects a line that carries a points parenthetical", () => {
+    expect(isReplySectionMarker("Replies (10 pts):")).toBe(false);
+    expect(isReplySectionMarker("Reply section (10 points)")).toBe(false);
+    expect(isReplySectionMarker("Replies (25%)")).toBe(false);
+    expect(isReplySectionMarker("Replies (10)")).toBe(false);
+  });
+
+  it("rejects lines that merely resemble the marker", () => {
+    expect(isReplySectionMarker("Reply quality: be thoughtful")).toBe(false);
+    expect(isReplySectionMarker("Repliesx")).toBe(false);
+    expect(isReplySectionMarker("Thesis (20 pts): replies are due Friday")).toBe(false);
+    expect(isReplySectionMarker("")).toBe(false);
+  });
+
+  it("recognizes the canonical marker", () => {
+    expect(isReplySectionMarker(CANONICAL_REPLY_MARKER)).toBe(true);
   });
 });

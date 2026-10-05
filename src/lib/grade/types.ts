@@ -443,6 +443,9 @@ export interface StudentSubmissionEntry {
   gradedRepo?: string | null;
   gradedRef?: string | null;
   repoReadNote?: string | null;
+  // Per-axis slices of a discussion entry. TYPE-ONLY forward declaration
+  // (A8 Wave A): no producer or consumer until Wave B.
+  discussionAxes?: { initialPostContent: string; replyContent: string; replyCount: number };
 }
 
 // Internal interfaces used by parsing/rubric modules
@@ -459,4 +462,9 @@ export interface RubricCriterion {
   name: string;
   /** Points the criterion is scored out of, when the rubric states them. */
   points: number | null;
+  /**
+   * Discussion axis. Set by the rubric parser ONLY when the rubric contains a
+   * reply-section marker; left absent otherwise.
+   */
+  axis?: "initial-post" | "reply";
 }

@@ -196,6 +196,20 @@ export interface AreaAttribution {
   area: string;
   displayArea: string;
   students: { displayName: string; deductionLabel: string }[];
+  /** R-N13b-2 (AC-4 disclosure): how many students on this area were left out
+   * of the subset denominator because their score was on an unknown scale.
+   * Copied from `missedSubset.unknownExcludedCount`; absent means 0. Numbers
+   * only - carries no identity. */
+  unknownExcludedCount?: number;
+}
+
+/** Instructor-facing disclosure for students excluded from a subset because
+ * their score scale is unknown (AC-4). Returns null when there is nothing to
+ * disclose, so callers never render an empty parenthetical. */
+export function describeUnknownExcluded(count: number | undefined): string | null {
+  if (count === undefined || count <= 0) return null;
+  const noun = count === 1 ? "student" : "students";
+  return `${count} ${noun} excluded: score scale unknown`;
 }
 
 /** True when an area's distinct-student missed-subset count clears the
@@ -537,6 +551,7 @@ export function computeClassTrends(
       area: trend.area,
       displayArea: trend.displayArea,
       students: attributionByArea.get(trend.area)!,
+      unknownExcludedCount: trend.missedSubset?.unknownExcludedCount ?? 0,
     }));
 
   return {

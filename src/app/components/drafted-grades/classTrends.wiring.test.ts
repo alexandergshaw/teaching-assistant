@@ -313,3 +313,9 @@ describe("blocker fix: the unavailable identity surfaces its reason instead of S
     expect(branchIdx, "mutant has no unavailableReason guard, as expected").toBe(-1);
   });
 });
+
+describe("R-N13b-2: the student-list leaf renders the unknown-scale exclusion disclosure (source-text pin; nothing renders under vitest)", () => {
+  it("calls describeUnknownExcluded on the attribution's unknownExcludedCount and gates the render on a non-null result", () => {
+    expect(strippedStudentList).toMatch(/describeUnknownExcluded\(attribution\.unknownExcludedCount\)\s*!==\s*null\s*&&/);
+  });
+});

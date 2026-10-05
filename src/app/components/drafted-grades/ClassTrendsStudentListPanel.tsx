@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@mui/material";
 import styles from "../../page.module.css";
-import type { AreaAttribution } from "@/lib/grade/class-trends";
+import { describeUnknownExcluded, type AreaAttribution } from "@/lib/grade/class-trends";
 import { writeClipboardText } from "../ui/clipboard";
 
 // N13b Wave 2 (option X): the instructor-only, NAMED counterpart to the
@@ -100,6 +100,9 @@ export default function ClassTrendsStudentListPanel({
           <li key={attribution.area} className={styles.draftFeedback} style={{ margin: 0 }}>
             {attribution.displayArea} - {attribution.students.length} students missed points:{" "}
             {attribution.students.map((s) => s.displayName).join(", ")}
+            {describeUnknownExcluded(attribution.unknownExcludedCount) !== null && (
+              <span className={styles.fieldHint}> ({describeUnknownExcluded(attribution.unknownExcludedCount)})</span>
+            )}
           </li>
         ))}
       </ul>

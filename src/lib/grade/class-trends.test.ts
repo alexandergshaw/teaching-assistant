@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeClassTrends,
   containsForbiddenCompletenessPhrase,
+  describeUnknownExcluded,
   isSubsetTrend,
   parseScoreValue,
   SUBSET_MIN_STUDENTS,
@@ -619,5 +620,40 @@ describe("computeClassTrends - INFO-2: under 'unavailable' identity, missedSubse
     // (`identity.kind !== "unavailable" ? collect(...) : []`) would make this
     // assertion fail (knownIdentifiers would be []).
     expect(report.knownIdentifiers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("R-N13b-2: unknown-scale exclusions are disclosed on the instructor attribution (AC-4)", () => {
+  it("describeUnknownExcluded: 0 or undefined -> null, 1 -> singular, 2 -> plural", () => {
+    expect(describeUnknownExcluded(0)).toBeNull();
+    expect(describeUnknownExcluded(undefined)).toBeNull();
+    expect(describeUnknownExcluded(1)).toBe("1 student excluded: score scale unknown");
+    expect(describeUnknownExcluded(2)).toBe("2 students excluded: score scale unknown");
+  });
+
+  it("3 missed + 2 unknown-scale students -> attribution carries unknownExcludedCount 2", () => {
+    const entry = makeEntry([
+      makeResult("Ada Lovelace", [makeRubricArea("Thesis", "50%")]),
+      makeResult("Ben Franklin", [makeRubricArea("Thesis", "40%")]),
+      makeResult("Cara Diaz", [makeRubricArea("Thesis", "55%")]),
+      makeResult("Dan Ek", [makeRubricArea("Thesis", "8")]),
+      makeResult("Eve Fox", [makeRubricArea("Thesis", "N/A")]),
+    ]);
+    const report = computeClassTrends(entry);
+    const attribution = report.instructorAttribution.find((a) => a.area === "thesis")!;
+    expect(attribution.unknownExcludedCount).toBe(2);
+    expect(describeUnknownExcluded(attribution.unknownExcludedCount)).not.toBeNull();
+  });
+
+  it("no unknown-scale students -> attribution carries unknownExcludedCount 0 and nothing to disclose", () => {
+    const entry = makeEntry([
+      makeResult("Ada Lovelace", [makeRubricArea("Thesis", "50%")]),
+      makeResult("Ben Franklin", [makeRubricArea("Thesis", "40%")]),
+      makeResult("Cara Diaz", [makeRubricArea("Thesis", "55%")]),
+    ]);
+    const report = computeClassTrends(entry);
+    const attribution = report.instructorAttribution.find((a) => a.area === "thesis")!;
+    expect(attribution.unknownExcludedCount).toBe(0);
+    expect(describeUnknownExcluded(attribution.unknownExcludedCount)).toBeNull();
   });
 });

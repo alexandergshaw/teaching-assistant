@@ -80,15 +80,18 @@ When the owner asks for a retrospective over a commit range, it runs as its own
 small loop and FEEDS THE BACKLOG:
 
 1. `loop-retro` reads the range and writes `docs/retro-<range>.md`: lessons
-   learned, plus loop-improvement recommendations PRIORITIZED by the three
-   standing objectives - lower defects, lower token spend, more effective agents
-   - each recommendation naming its change-and-where, the objective it serves,
-   its cost and any regression risk to another objective, and its evidence.
+   learned, plus loop-improvement recommendations RANKED by the top objective -
+   LOWER TOKEN SPEND WITHOUT SACRIFICING QUALITY (that "without sacrificing
+   quality" is a hard constraint, not a tie-breaker) - with fewer-defects and
+   more-effective-agents as secondary objectives that usually also reduce
+   re-spend. Each recommendation names its change-and-where, what it SAVES (in
+   rounds/re-dispatches/tier), its quality risk, and its evidence.
 2. `loop-retro-reviewer` adversarially vets the report: it rejects ungrounded or
-   over-claimed lessons as before, AND rejects any recommendation that is
-   generic, fails its own objective claim, or buys a win on one objective with a
-   larger unowned loss on another. It reports the confirmed, backloggable
-   recommendations.
+   over-claimed lessons as before, AND rejects any recommendation that is generic,
+   whose token saving is not real, or - the hard constraint - buys its token
+   saving by sacrificing quality (weakening a gate/pin/brief that was catching a
+   real defect class). It reports the confirmed, backloggable recommendations in
+   token-saving rank.
 3. The ORCHESTRATOR files each surviving recommendation as a backlog row (area
    `loop-maintenance` or the fitting loop area), with the retro report + the
    reviewer's confirmation as its `from`. The retro agents are report-only and

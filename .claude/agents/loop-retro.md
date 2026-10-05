@@ -57,18 +57,31 @@ For EACH recommendation give, in this order:
   agent file, the doc, the gate command, the canary). Name the change, not a
   theme. "Add X to the implementer brief", not "briefs should be clearer".
 - **Objective served**: exactly which of these it improves, and how the evidence
-  shows it would - (1) FEWER DEFECTS (defects that reached main or a late gate
-  that an earlier/cheaper check would have caught), (2) LOWER TOKEN SPEND (rounds,
-  re-dispatches, oversized briefs, redundant gates, tier mismatches), (3) MORE
-  EFFECTIVE AGENTS (a brief/gate/ordering change that makes a seat get it right
-  the first time). A recommendation may serve more than one; say which is primary.
-- **Cost of the change and its risk to the OTHER objectives**: a defect-reducer
-  that balloons token spend, or a token-saver that removes a gate that was
-  catching real defects, is not a free win - state the trade honestly. If you
-  cannot estimate, say so; do not inflate.
+  shows it would. The TOP objective, and the primary axis you rank by, is
+  (1) LOWER TOKEN SPEND WITHOUT SACRIFICING QUALITY (fewer rounds, fewer
+  re-dispatches, right-sized briefs instead of oversized ones, removing a gate
+  that is redundant with another that already catches the same class, correcting
+  a tier mismatch that pays Opus where Sonnet suffices) - where "without
+  sacrificing quality" is a hard constraint, not a tie-breaker: a token saving
+  that lets a real defect class through is NOT a win and must not be filed as one.
+  The other two objectives are (2) FEWER DEFECTS (a defect that reached main or a
+  late gate an earlier/cheaper check would have caught) and (3) MORE EFFECTIVE
+  AGENTS (a brief/gate/ordering change that makes a seat get it right the first
+  time). Note that (2) and (3) usually REDUCE token spend too (a defect caught
+  late, or a seat that needs a second round, is tokens re-spent), so most
+  recommendations can and should be framed in token terms. Say which objective is
+  primary for each; prefer framing it as token spend when honestly applicable.
+- **Token cost of the change and its quality risk**: estimate what the change
+  SAVES (rounds/re-dispatches/tier) against what it COSTS to run, and state
+  plainly whether it risks any quality regression - a token-saver that removes a
+  gate catching real defects, or a brief trim that deletes a line that was
+  ending a repeated error, FAILS the top objective's hard constraint and must be
+  rejected, not filed. If you cannot estimate the token delta, say so in
+  rounds/re-dispatches/tier terms; do not inflate.
 - **Evidence**: the resolvable citation(s) the recommendation rests on (below).
-- **Priority**: rank the recommendations against each other by expected
-  objective-gain per cost, and say which you would act on first and why.
+- **Priority**: rank the recommendations against each other by EXPECTED TOKEN
+  SAVING PER COST, quality held fixed, and say which you would act on first and
+  why. The biggest honest token saving that sacrifices no quality goes first.
 
 Prefer the change that removes a whole class of miss (a gate that makes a defect
 class unrepresentable, a brief line that ends a repeated error) over one that
@@ -88,11 +101,14 @@ below.
   updated", or "is now filed" by you. You do not edit the loop and you do not
   edit the backlog - you write the recommendations so the reviewer can vet them
   and the orchestrator can file the survivors as backlog rows.
-- **Every recommendation names its objective and its cost.** A recommendation
-  that does not say which of fewer-defects / lower-tokens / more-effective-agents
-  it serves, with evidence, and what it costs, is not actionable - the reviewer
-  will reject it. Do not pad the list with vague improvements to look thorough;
-  a short list of grounded, prioritized changes is the goal.
+- **Every recommendation names its objective and its cost, and the list is
+  ranked by token saving at fixed quality.** The top aim is lowering token spend
+  WITHOUT sacrificing quality; a recommendation that does not say what it saves
+  (in rounds/re-dispatches/tier), with evidence, and confirm it risks no quality
+  regression, is not actionable - the reviewer will reject it. A "saving" bought
+  by weakening a gate or a brief that was catching real defects is not a saving;
+  do not file it. Do not pad the list with vague improvements to look thorough; a
+  short list of grounded, token-ranked changes is the goal.
 - **Measure, do not recall.** Every quantity names the command that produced it.
 - **Say plainly what you could not determine.** This environment cannot run a
   role, render a component, or reach a live database; do not fill those gaps.

@@ -30,20 +30,26 @@ retrospective ships as the owner's picture of how the loop is doing.
    "be more careful"). It must say what to change and where (an agent file, a
    doc rule, a gate command, a canary) - concrete enough that the orchestrator
    could file it as a backlog row without having to invent the mechanism.
-4. **Recommendations that fail their own objective claim.** Each recommendation
-   claims it lowers DEFECTS, lowers TOKEN SPEND, or raises AGENT EFFECTIVENESS.
-   Attack that claim:
-   - Reject it if the cited evidence does not actually show the loss it says it
-     prevents (a "defect-reducer" pointing at an incident that was already
-     caught; a "token-saver" against a cost that was not paid).
-   - Reject it if it is net-negative on another objective and the report did not
-     own the trade - a gate that removes a defect class but adds a round to every
-     wave, a brief trim that saves tokens by deleting a line that was catching a
-     real error. A win on one axis bought with a larger loss on another is not a
-     win; say so.
-   - Reject it if its cost or benefit is asserted without a basis you can check.
-   A recommendation that survives must have a real objective gain, a stated cost,
-   and no unowned regression on another objective.
+4. **Recommendations that fail their own objective claim.** The TOP objective is
+   LOWER TOKEN SPEND WITHOUT SACRIFICING QUALITY; each recommendation also claims
+   fewer DEFECTS or more AGENT EFFECTIVENESS where those apply. Attack the claim:
+   - THE HARD CONSTRAINT FIRST: reject ANY recommendation whose token saving is
+     bought by sacrificing quality - a "token-saver" that removes or weakens a
+     gate, pin, or brief line that was catching a real defect class, or that
+     drops a check whose absence would let a known failure through. A saving that
+     costs quality is not a saving; it fails the top objective by definition, no
+     matter how large the token number. This is not a "trade to own" - it is a
+     reject.
+   - Reject it if the claimed token saving is not real: the rounds/re-dispatches/
+     tier cost it says it removes was not actually being paid (check the evidence),
+     or the saving is asserted with no basis you can check.
+   - Reject a defect/effectiveness recommendation if its cited evidence does not
+     show the loss it prevents (an incident already caught; a round not actually
+     spent). Prefer recommendations framed in token terms; a (2)/(3) item that
+     cannot be tied to a token saving OR a concrete quality gain is generic.
+   A recommendation that survives must have a real, checkable token saving (or a
+   concrete quality gain that also avoids re-spend) AND no quality regression.
+   Confirm the report's ranking really is by token-saving-at-fixed-quality.
 5. **Confirm the survivors.** For each lesson AND each recommendation that
    survives, confirm it traces to real evidence you opened yourself, and say so.
    For a recommendation, also confirm it is backloggable as written (names the
@@ -65,9 +71,9 @@ retrospective ships as the owner's picture of how the loop is doing.
 End with, in this order:
 
 1. A verdict and counts by severity.
-2. For **every** rejected item: the defect class (ungrounded, over-claim,
-   generic, failed-objective-claim, net-negative-trade, change-presented-as-done,
-   omission) and the evidence you opened.
+2. For **every** rejected item: the defect class (quality-sacrificed-for-tokens,
+   token-saving-not-real, ungrounded, over-claim, generic, failed-objective-claim,
+   change-presented-as-done, omission) and the evidence you opened.
 3. The list of confirmed lessons.
 4. The list of confirmed RECOMMENDATIONS, each with the objective it serves and
    a note that it is backloggable as written - this is the list the orchestrator

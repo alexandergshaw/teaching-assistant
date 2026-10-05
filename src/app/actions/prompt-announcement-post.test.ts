@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 vi.mock("@/lib/supabase/auth", () => ({
   requireUser: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
@@ -23,7 +24,7 @@ beforeEach(() => {
 describe("AC-16: export shape", () => {
   it("the single export is `export async function` at column zero", () => {
     const source = readFileSync(join(process.cwd(), "src/app/actions/prompt-announcement-post.ts"), "utf8");
-    const stripped = source.replace(/\/\*[^]*?\*\//g, "").split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+    const stripped = stripComments(source);
     const exportLines = stripped.split("\n").filter((l) => /^export\b/.test(l.trim()));
     expect(exportLines.length).toBe(1);
     expect(exportLines[0].trim()).toMatch(/^export async function postPromptAnnouncementAction/);

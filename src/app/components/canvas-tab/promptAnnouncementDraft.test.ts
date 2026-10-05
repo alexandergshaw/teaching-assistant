@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 import { buildPromptDraftRequest, applyPromptDraftResult } from "./promptAnnouncementDraft";
 import {
   type LiveDefaults,
@@ -19,7 +20,7 @@ describe("AC-1(d): the leaf calls resolveChoice and promptDraftReceipt", () => {
       join(process.cwd(), "src/app/components/canvas-tab/promptAnnouncementDraft.ts"),
       "utf8"
     );
-    const stripped = source.replace(/\/\*[^]*?\*\//g, "").split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+    const stripped = stripComments(source);
     expect(stripped).toContain("buildPromptDraftRequest");
     expect(stripped).toContain("resolveChoice(");
     expect(stripped).toContain("promptDraftReceipt(");

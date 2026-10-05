@@ -333,7 +333,6 @@ const SAFE_FILES: readonly string[] = [
   "src/app/actions/carry-module-pattern.test.ts",
   "src/app/actions/current-events-assignments.test.ts",
   "src/app/actions/guard-overtightening.test.ts",
-  "src/app/components/canvas-tab/announcements-panel.wiring.test.ts",
   "src/app/components/chat/institutionTriggerWiring.test.ts",
   "src/lib/grade/class-trends-draft.test.ts",
   "src/app/components/content-tab/CourseItemRow.wiring.test.ts",
@@ -390,7 +389,6 @@ const SAFE_FILES: readonly string[] = [
   "src/lib/grade/postable.test.ts",
   "src/lib/lms-generation/selection-archive.test.ts",
   "src/lib/module-pattern-transpose.test.ts",
-  "src/lib/prompt-announcement-types.test.ts",
   "src/lib/recording-files.kinds.test.ts",
   "src/lib/supabase/courses.structure.test.ts",
   "src/lib/workflow-schedule-blocking-fields.test.ts",
@@ -465,6 +463,16 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
     "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
   "src/app/components/ui/confirmArmButtons.test.ts":
     "A42: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/actions/prompt-announcement-draft.test.ts":
+    "A42 W2: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/actions/prompt-announcement-post.test.ts":
+    "A42 W2: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/canvas-tab/announcements-panel.wiring.test.ts":
+    "A42 W2: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/canvas-tab/promptAnnouncementDraft.test.ts":
+    "A42 W2: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/lib/prompt-announcement-types.test.ts":
+    "A42 W2: converted to import stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
   "src/app/api/visualizer/create/route.test.ts":
     "prose comment referencing another file's stripComments helper - no code use",
   "src/app/components/message-replies/useMessageReplies.wiring.test.ts":
@@ -862,11 +870,11 @@ function extractStripExpressions(fileText: string): StripFn[] {
 }
 
 const A42_SCANNER_EXPRESSION_COUNTS: ReadonlyArray<readonly [string, number]> = [
-  ["src/app/actions/prompt-announcement-draft.test.ts", 2],
-  ["src/app/actions/prompt-announcement-post.test.ts", 1],
-  ["src/app/components/canvas-tab/announcements-panel.wiring.test.ts", 2],
-  ["src/app/components/canvas-tab/promptAnnouncementDraft.test.ts", 1],
-  ["src/lib/prompt-announcement-types.test.ts", 1],
+  ["src/app/actions/prompt-announcement-draft.test.ts", 0],
+  ["src/app/actions/prompt-announcement-post.test.ts", 0],
+  ["src/app/components/canvas-tab/announcements-panel.wiring.test.ts", 0],
+  ["src/app/components/canvas-tab/promptAnnouncementDraft.test.ts", 0],
+  ["src/lib/prompt-announcement-types.test.ts", 0],
 ];
 
 const D1_FIXTURE =
@@ -879,25 +887,27 @@ const A42_DEFECT_FIXTURES: ReadonlyArray<readonly [string, string]> = [
   ["D3_SURVIVOR_TOKEN", D3_FIXTURE],
 ];
 
-describe("A42 W1 O2: the five scanners' real strip expressions lose a marker the tokenizer keeps", () => {
-  it("pins the per-file strip-expression counts (the W2 tripwire: 2+1+2+1+1 = 7)", () => {
+describe("A42 W2 O2: the five scanners route through the tokenizer (no local strip expression remains)", () => {
+  it("pins the per-file strip-expression counts at 0 (post-W2: every scanner uses the tokenizer)", () => {
     let total = 0;
     for (const [file, expected] of A42_SCANNER_EXPRESSION_COUNTS) {
       const found = extractStripExpressions(fs.readFileSync(path.join(REPO_ROOT, file), "utf8")).length;
       expect(found, file).toBe(expected);
       total += found;
     }
-    expect(total).toBe(7);
+    expect(total).toBe(0);
   });
 
-  it("every extracted expression loses the D1, D2 and D3 markers (documented finding, RED the moment a copy becomes safe)", () => {
+  it("each converted scanner imports the tokenizer and spells NO block-comment regex (protective value O2 moves to)", () => {
+    const SSS_BLOCK_NEEDLE = "[\\s\\S]" + "*?\\*\\/"; // the OTHER string-unaware spelling
     for (const [file] of A42_SCANNER_EXPRESSION_COUNTS) {
-      const fns = extractStripExpressions(fs.readFileSync(path.join(REPO_ROOT, file), "utf8"));
-      fns.forEach((fn, idx) => {
-        for (const [marker, fixture] of A42_DEFECT_FIXTURES) {
-          expect(fn(fixture), `${file} expression #${idx} should lose ${marker}`).not.toContain(marker);
-        }
-      });
+      const text = fs.readFileSync(path.join(REPO_ROOT, file), "utf8");
+      expect(
+        text,
+        `${file} must import stripComments from modalAdoptionSourceScan`
+      ).toMatch(/import\s*\{[^}]*\bstripComments\b[^}]*\}\s*from\s*["']@\/app\/components\/ui\/modalAdoptionSourceScan["']/);
+      expect(hasCaretBlockRegex(text), `${file} still spells a [^] block regex`).toBe(false);
+      expect(text.includes(SSS_BLOCK_NEEDLE), `${file} still spells a [\\s\\S] block regex`).toBe(false);
     }
   });
 
@@ -922,25 +932,25 @@ describe("A42 W1 O2: the five scanners' real strip expressions lose a marker the
 // O3 (count-free): the caret-spelled block-comment regex set is exactly the
 // five scanners. The whole-corpus total is a moving target and is NOT pinned.
 const CARET_BLOCK_NEEDLE = "[^]" + "*?\\*\\/";
-const A42_CARET_SPELLED_FILES: readonly string[] = A42_SCANNER_EXPRESSION_COUNTS.map(([f]) => f);
+const A42_CARET_SPELLED_FILES: readonly string[] = [];
 
 function hasCaretBlockRegex(text: string): boolean {
   return text.includes(CARET_BLOCK_NEEDLE);
 }
 
-describe("A42 W1 O3: the caret-spelled block-comment regex set is exactly the five scanners", () => {
+describe("A42 W2 O3: no *.test.ts spells a caret block-comment regex anymore", () => {
   it("canary: the enumerator matches a caret block regex and not a regex lacking the closer", () => {
     expect(hasCaretBlockRegex("x.replace(/\\/\\*" + CARET_BLOCK_NEEDLE + "/g, '')")).toBe(true);
     expect(hasCaretBlockRegex("x.replace(/\\/\\*" + "[^]" + "*?/g, '')")).toBe(false);
   });
 
-  it("the set of *.test.ts files with a caret block regex equals the frozen five (W2 shrinks it; update in the same commit)", () => {
+  it("no *.test.ts spells a caret block-comment regex (all five route through the tokenizer; a new one reddens this)", () => {
     const found = walkTestFiles(SRC_DIR)
       .map(toRepoRelative)
       .filter((rel) => rel !== PROBE_FILE_REL)
       .filter((rel) => hasCaretBlockRegex(fs.readFileSync(path.join(REPO_ROOT, rel), "utf8")))
       .sort();
     expect(found).toEqual([...A42_CARET_SPELLED_FILES].sort());
-    expect(found.length).toBe(5);
+    expect(found.length).toBe(0);
   });
 });

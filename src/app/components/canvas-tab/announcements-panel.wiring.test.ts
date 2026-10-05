@@ -4,6 +4,7 @@ import { readFileSync, statSync, readdirSync } from "node:fs";
 import { join, dirname, normalize, relative, sep } from "node:path";
 import { createRequire } from "node:module";
 import { scanRuntimeEdges } from "@/lib/module-graph/runtime-import-graph";
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -22,14 +23,6 @@ vi.setConfig({ testTimeout: 30_000 });
 const ts = createRequire(import.meta.url)("typescript") as typeof import("typescript");
 
 const FILE = join(process.cwd(), "src/app/components/canvas-tab/announcements-panel.tsx");
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[^]*?\*\//g, "")
-    .split(/\r?\n/)
-    .map((l) => l.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
 
 describe("AC-1: the capability is reachable from the Announcements panel", () => {
   const stripped = stripComments(readFileSync(FILE, "utf8"));
@@ -286,14 +279,6 @@ function valueImportSpecifiers(source: string, fileName: string): string[] {
 // IDENTITY DOES NOT EXIST IN THE CAPTURE PIPELINE. getDisplayMedia ..." -
 // registers as a capability the moment anything imports it, which is a false
 // positive this test's own real check (below) measured directly.
-function stripCommentsForScan(source: string): string {
-  const noBlockComments = source.replace(/\/\*[^]*?\*\//g, "");
-  return noBlockComments
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
-
 function deriveCaptureForbiddenFiles(): Set<string> {
   const out = new Set<string>();
   const walk = (dir: string) => {
@@ -315,7 +300,7 @@ function deriveCaptureForbiddenFiles(): Set<string> {
         if (["node_modules", ".git", ".next"].includes(entry)) continue;
         walk(full);
       } else if (/\.(ts|tsx)$/.test(entry) && !entry.includes(".test.")) {
-        const text = stripCommentsForScan(readOrEmpty(full));
+        const text = stripComments(readOrEmpty(full));
         if (/getUserMedia|getDisplayMedia|new MediaRecorder/.test(text)) out.add(full);
       }
     }

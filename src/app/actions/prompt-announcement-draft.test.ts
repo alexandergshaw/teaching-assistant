@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync, statSync, readdirSync } from "node:fs";
 import { join, dirname, normalize, relative, sep } from "node:path";
 import { scanRuntimeEdges } from "@/lib/module-graph/runtime-import-graph";
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -83,11 +84,7 @@ beforeEach(() => {
 describe("AC-16: export shape", () => {
   it("every export line is `export async function` at column zero", () => {
     const source = readFileSync(join(process.cwd(), "src/app/actions/prompt-announcement-draft.ts"), "utf8");
-    const stripped = source
-      .replace(/\/\*[^]*?\*\//g, "")
-      .split(/\r?\n/)
-      .map((l) => l.replace(/\/\/.*$/, ""))
-      .join("\n");
+    const stripped = stripComments(source);
     const exportLines = stripped.split("\n").filter((l) => /^export\b/.test(l.trim()));
     expect(exportLines.length).toBe(1);
     for (const line of exportLines) {
@@ -133,7 +130,7 @@ describe("AC-10(d): embedded reaches no model call, at the live action", () => {
 describe("AC-10(e): the action's own source text does not mention the model client directly", () => {
   it("contains routePromptAnnouncement, not @/lib/llm or callLlm", () => {
     const source = readFileSync(join(process.cwd(), "src/app/actions/prompt-announcement-draft.ts"), "utf8");
-    const stripped = source.replace(/\/\*[^]*?\*\//g, "").split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+    const stripped = stripComments(source);
     expect(stripped).toContain("routePromptAnnouncement");
     expect(stripped).not.toContain("@/lib/llm");
     expect(stripped).not.toContain("callLlm");

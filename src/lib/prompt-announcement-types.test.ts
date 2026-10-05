@@ -1,22 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
 
 // AC-23: prompt-announcement-types.ts must stay TYPE-ONLY - it is the one
 // legal exception to "every wave's file list must include the file that
 // CALLS each new export" (no runtime binding means no caller to include).
-// Duplicated comment-stripping helpers, per this repo's own rule against
-// importing from another *.test.ts file.
+// Comments are stripped with the shared string-aware tokenizer.
 
 const FILE = join(process.cwd(), "src/lib/prompt-announcement-types.ts");
-
-function stripComments(source: string): string {
-  const noBlockComments = source.replace(/\/\*[^]*?\*\//g, "");
-  return noBlockComments
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
 
 describe("prompt-announcement-types.ts is type-only (AC-23)", () => {
   const stripped = stripComments(readFileSync(FILE, "utf8"));

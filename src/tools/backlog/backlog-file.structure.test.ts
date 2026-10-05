@@ -74,7 +74,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // WA-MOVE-WALK (R-3 end-to-end browser walk), WA-SWITCHER-PLACEMENT (R-5
 // switcher placement reads well), WA-RETIRED-POINTER (R-12 stale-pointer
 // redirect, owner decision) - all owner-state follow-ups of the completed move.
-const EXPECTED_ROW_COUNT = 110;
+// 110 -> 111: WA-S2M8-WALK filed 2026-10-04 at WALKTHROUGH-OVERHAUL close -
+// the consolidated owner/browser walk residual for the S2 one-row + M8
+// scroll-to-draft changes (felt/rendered behavior vitest cannot certify).
+const EXPECTED_ROW_COUNT = 111;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

@@ -155,7 +155,28 @@ export async function extractStudentEntries(
   zipBuffer: ArrayBuffer,
   options?: { readonly inferFileNamesWith?: LlmProvider }
 ): Promise<StudentSubmissionEntry[]> {
-  const { submissions, rawData, zipParents } = await extractSubmissions(zipBuffer);
+  const { entries } = await ingestZipEntries(zipBuffer, options);
+  return entries;
+}
+
+/**
+ * The shared ingestion chain (extract -> refuse -> infer -> group) that
+ * extractStudentEntries and gradeSubmissions (engine.ts) both run. Inference
+ * is opt-in here (`inferFileNamesWith`): extraction passes it only when asked,
+ * the engine always passes its provider. Returns the grouped entries plus the
+ * supported-file counters the engine's zero-entry policy reads; it never
+ * applies a zero-entry policy itself.
+ */
+export async function ingestZipEntries(
+  zipBuffer: ArrayBuffer,
+  options?: { readonly inferFileNamesWith?: LlmProvider }
+): Promise<{
+  entries: StudentSubmissionEntry[];
+  attemptedSupportedFiles: number;
+  failedSupportedFiles: string[];
+}> {
+  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles } =
+    await extractSubmissions(zipBuffer);
   // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
   // before grouping - the same seam Wave 1's fold lives in - and NOT inside
   // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
@@ -171,7 +192,8 @@ export async function extractStudentEntries(
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
-  return groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
+  const entries = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
+  return { entries, attemptedSupportedFiles, failedSupportedFiles };
 }
 
 /**

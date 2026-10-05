@@ -141,8 +141,8 @@ describe("A14: both real callers of groupSubmissionsByStudent are wired to the R
     expect(isWiredToRealZipParents(EXTRACTION)).toBe(true);
   });
 
-  it("engine.ts's gradeSubmissions destructures zipParents from extractSubmissions and forwards it", () => {
-    expect(ENGINE).toMatch(/groupSubmissionsByStudent\(/);
-    expect(isWiredToRealZipParents(ENGINE)).toBe(true);
+  it("engine.ts's gradeSubmissions calls ingestZipEntries and owns no groupSubmissionsByStudent( call (one call site owns grouping)", () => {
+    expect(ENGINE).toMatch(/ingestZipEntries\(/);
+    expect(ENGINE).not.toMatch(/groupSubmissionsByStudent\(/);
   });
 });

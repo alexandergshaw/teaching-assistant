@@ -396,31 +396,16 @@ export async function gradeSubmissions(
   provider: LlmProvider = "gemini",
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { extractSubmissions } = await import("./extraction");
-  const { inferFileNameConvention } = await import("./rubric");
-  const { groupSubmissionsByStudent } = await import("./utils");
-  const { decideCollisionRefusal, describeCollisionRefusal } = await import("./collisionRefusal");
+  const { ingestZipEntries } = await import("./extraction");
 
-  const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles, zipParents } =
-    await extractSubmissions(zipBuffer);
-
-  // A44 wave 2: refuse before the model call rather than after (no zero-spend
-  // guarantee is claimed either way - inferFileNameConvention below is a
-  // separate ground-truth-only concern - but there is no reason to spend one
-  // when the parse itself already cannot distinguish the students).
-  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
-  if (collisionMessage) {
-    throw new Error(collisionMessage);
-  }
-
-  const rawFileNames = Object.keys(submissions);
-  const inferredFileNameLookup = await inferFileNameConvention(rawFileNames, provider);
-  const studentSubmissions = groupSubmissionsByStudent(
-    submissions,
-    inferredFileNameLookup,
-    rawData,
-    zipParents
-  );
+  // Extract -> refuse -> infer -> group is the shared chain in ingestZipEntries
+  // (extraction.ts); the engine always infers (D1), so it always passes its
+  // provider. The zero-entry policy below stays the engine's own.
+  const {
+    entries: studentSubmissions,
+    attemptedSupportedFiles,
+    failedSupportedFiles,
+  } = await ingestZipEntries(zipBuffer, { inferFileNamesWith: provider });
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {
       const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");

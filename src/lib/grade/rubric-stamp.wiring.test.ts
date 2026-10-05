@@ -41,13 +41,16 @@ vi.mock("../code-runner", () => ({
 
 // gradeSubmissions dynamically imports "./extraction" (`await import(...)`);
 // vi.mock intercepts a dynamic import the same as a static one. Only
-// extractSubmissions is driven by these tests (the empty-students branch);
+// ingestZipEntries is driven by these tests (the empty-students branch);
 // the real ./rubric (inferFileNameConvention), ./utils
 // (groupSubmissionsByStudent) and ./collisionRefusal modules run unmocked and
 // behave correctly on the empty input this drives them with, per the design
 // notes' per-producer table.
 vi.mock("./extraction", () => ({
-  extractSubmissions: vi.fn(),
+  // gradeSubmissions now reads the shared ingestion chain from this module;
+  // the helper is mocked too, so the empty branch is driven by what this mock
+  // returns (real zero-entry coverage lives in the W1 oracle Z1-Z3).
+  ingestZipEntries: vi.fn(),
   // gradeCanvasUrl destructures these from the same dynamic import; the
   // empty-students branch this file drives returns before either is ever
   // called, but the destructure itself requires the mock module to export
@@ -66,7 +69,7 @@ vi.mock("../canvas", () => ({
 
 import { callLlm } from "../llm";
 import { gradeEntries, gradeSubmissions, gradeCanvasUrl } from "./engine";
-import { extractSubmissions } from "./extraction";
+import { ingestZipEntries } from "./extraction";
 import { fetchCanvasWork, fetchAssignmentPointsPossible } from "../canvas";
 import { rubricFingerprint } from "../research/rubric-fingerprint";
 import { stampRubricProvenance } from "./rubric-provenance-stamp";
@@ -85,7 +88,7 @@ import { buildIncrementalRun } from "@/app/components/grading/incrementalRunPlan
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 
 const mockCallLlm = vi.mocked(callLlm);
-const mockExtractSubmissions = vi.mocked(extractSubmissions);
+const mockIngestZipEntries = vi.mocked(ingestZipEntries);
 const mockFetchCanvasWork = vi.mocked(fetchCanvasWork);
 const mockFetchAssignmentPointsPossible = vi.mocked(fetchAssignmentPointsPossible);
 
@@ -141,12 +144,10 @@ describe("grading actually stamps the rubricUsed/rubricFingerprint pair on the p
   });
 
   it("gradeSubmissions' empty-students branch stamps the rubric it was given, without delegating to gradeStudentEntries", async () => {
-    mockExtractSubmissions.mockResolvedValueOnce({
-      submissions: {},
-      rawData: {},
+    mockIngestZipEntries.mockResolvedValueOnce({
+      entries: [],
       attemptedSupportedFiles: 0,
       failedSupportedFiles: [],
-      zipParents: {},
     });
 
     const rubricText = "Criterion A (100%): completeness.";

@@ -93,7 +93,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 115 -> 117: two visual-overhaul requests filed 2026-10-05 (owner, direct chat) -
 // REPO-HEADER-VISUAL (repo-grades table header) + GRADING-CHAT-VISUAL (llm-like
 // grading tool); both look-and-feel only, disjoint file sets, worked concurrently.
-const EXPECTED_ROW_COUNT = 117;
+// 117 -> 118: ONE-OFF-TASKS filed 2026-10-05 (owner, direct chat) - a new top-level
+// "One-Off Tasks" tab + a simple cross-college task-management tool.
+const EXPECTED_ROW_COUNT = 118;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

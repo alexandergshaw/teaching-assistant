@@ -1133,6 +1133,30 @@
   from: 'docs/walkthrough-announcement-clicks-scope.md section 2.3 O2 and section 10 residual R-7 (orchestrator-routed, filed 2026-10-04)'
   note: 'UNSCOPED: two candidate shapes, none chosen. (a) Extend the beforeunload condition to cover any slot that is drafted and not posted: no new storage, no new ta- key, the cheaper one; (b) persist drafts: a new key (the five-key canary would move, 5 to 6, in the same commit), a mount-effect restore because a lazy useState initializer does not show on first paint in this SSR''d component (panel comment at WalkthroughAnnouncementPanel.tsx:209-216), and a decision on whether a restored draft may be posted without re-reading it. Note the schedule time is DELIBERATELY unpersisted (owner Branch A, docs/owner-decisions-2026-09-23.md:164 per the scope) and must stay that way. Interacts with SMOOTH-WALKTHROUGH fork F4: an automatic fresh run must never discard an unposted draft, which is the same hazard from the other side. Same file collision as WA-POST-LOCK: the panel and the hook are in SMOOTH-WALKTHROUGH W0 to W3 write sets.'
   question: null
+- id: 'WA-POST-RETRY'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'announcement-composition-surfaces'
+  title: 'Announcement draft slot: after an AMBIGUOUS post failure (rejected promise - "may or may not have gone through"), the error arm leaves postArmedFor set, so ONE click re-posts to every student. Arguably MORE severe than WA-POST-LOCK (one click, triggered exactly when the user is confused by an error). Found as ADJ-1 during WA-POST-LOCK recon; WA-POST-LOCK''s postLocked only sets on SUCCESS, so it does NOT close this path.'
+  owns: []
+  verify: null
+  blocked_by: ['WA-POST-LOCK']
+  instrument: 'Confirm at announcement-draft-slots.ts post-result ERROR arm (~:540-542, `return { ...slot, posting:false, postError:... }` preserves postArmedFor by spread). Fix must DISTINGUISH a Canvas refusal ("Nothing was posted" - safe to retry, clear the arm) from a rejected promise ("uncertain" - do NOT leave a one-click re-post armed). PRODUCT FORK the scope flagged: (a) clear-arm-on-rejection (forces a fresh arm-then-confirm after an uncertain failure) vs (b) an explicit "uncertain" slot state surfaced to the user. Machine AC = reducer tests over the error arm + a pure decision; nothing renders under vitest. blocked_by WA-POST-LOCK (shares announcement-draft-slots.ts + useAnnouncementDraftSlots.ts - serialize after it).'
+  from: 'WA-POST-LOCK scope recon (a7486132) ADJ-1 + the scope check (a676debd) orchestrator-must-not-drop flag: a one-click mass-republish path WA-POST-LOCK does NOT close; filed 2026-10-04'
+  note: 'DISPATCHABLE after WA-POST-LOCK lands (scope recon to settle the (a)/(b) fork, recommended (a) clear-arm-on-rejection). The WA-POST-LOCK push MUST NOT claim "re-publish is fixed" - it closes the two-click success path for one tab only; this row is the one-click error path. Pairs with WA-POST-DEDUP (the durable cross-tab/reload close).'
+  question: null
+- id: 'WA-POST-DEDUP'
+  state: 'owner'
+  kind: 'feature'
+  area: 'announcement-composition-surfaces'
+  title: 'Server-side duplicate-announcement refusal: the only shape that closes the mass-republish across a second tab, a reload, and the ambiguous-retry case at once. createAnnouncementFromMarkdown posts a fresh course-wide topic with NO idempotency key, so client-side locks (WA-POST-LOCK, WA-POST-RETRY) cannot cover cross-tab/cross-device/reload re-publish.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'An idempotency/dedupe check before createAnnouncementFromMarkdown (lib/canvas/announcements.ts:~420-458): e.g. read recent course announcements and refuse/warn on a same-title+same-window duplicate. Owner-blocked: costs an extra Canvas read (network, not available in this checkout), needs a fail-open vs fail-closed decision, and carries a title-reuse false-positive risk (a legitimately-repeated title). Not verifiable here.'
+  from: 'WA-POST-LOCK scope recon (a7486132) R-2; filed 2026-10-04'
+  note: 'The durable backstop behind the client-side locks. Depends on a live Canvas environment + an owner policy call (fail-open vs fail-closed, and the title-reuse tolerance). WA-POST-LOCK + WA-POST-RETRY reduce the client-side blast radius; this is the server-side close.'
+  question: 'Do you want a server-side duplicate-announcement guard before posting (read recent announcements, refuse/warn on a same-title duplicate)? If yes, should it fail-OPEN (post anyway if the check errors) or fail-CLOSED (block), and how should it treat a legitimately-reused title? If no, close this row and rely on the client-side locks.'
 - id: 'GR-POST-ONE-CONFIRM'
   state: 'owner'
   kind: 'bug'

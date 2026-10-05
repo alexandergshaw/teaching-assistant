@@ -77,7 +77,12 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 110 -> 111: WA-S2M8-WALK filed 2026-10-04 at WALKTHROUGH-OVERHAUL close -
 // the consolidated owner/browser walk residual for the S2 one-row + M8
 // scroll-to-draft changes (felt/rendered behavior vitest cannot certify).
-const EXPECTED_ROW_COUNT = 111;
+// 111 -> 113: WA-POST-LOCK recon (a7486132) surfaced two more announcement
+// mass-republish paths its own fix does not close - WA-POST-RETRY (one-click
+// re-post after an ambiguous failure, dispatchable after WA-POST-LOCK) and
+// WA-POST-DEDUP (server-side idempotency, owner-blocked on a live Canvas +
+// fail-open/closed policy). Filed 2026-10-04.
+const EXPECTED_ROW_COUNT = 113;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

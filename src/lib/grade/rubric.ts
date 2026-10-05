@@ -6,6 +6,7 @@ import { normalizeAreaName, buildSystemPrompt, buildChecklistPrompt, buildFileNa
 import { normalizeGeminiError } from "./parsing";
 import { rubricTierPromptLines } from "./rubric-tiers";
 import type { RubricCriterion, InferredFileNameLookup, InferredFileNameParts } from "./types";
+import { CANONICAL_REPLY_MARKER, isReplySectionMarker } from "./rubric-reply-marker";
 
 // FALLBACK MODE (backlog 4.3, ruling B43-7 in scratchpad/b43-rulings.md): the
 // owner grades by screenshotting a rubric, and a flattened screenshot often
@@ -30,22 +31,9 @@ export function extractRubricCriteria(rubric: string): RubricCriterion[] {
   return extractRubricCriteriaWidened(rubric);
 }
 
-// REPLY-SECTION MARKER (A8 Wave A, docs/a8-scoring-architecture.md section 5.1).
-// A line whose trimmed, lowercased text begins with "replies" or "reply
-// section" AND carries no "(number [pts|points|%])" parenthetical. Both
-// criterion matchers below REQUIRE such a parenthetical, so a marker can never
-// be read as a criterion, and a legacy "Replies (10 pts):" line (which has one)
-// is still a criterion, not a marker.
-export const CANONICAL_REPLY_MARKER = "Reply section:";
-
-const REPLY_MARKER_START = /^(?:replies|reply section)\b/;
-const POINTS_PARENTHETICAL = /\(\s*\d+(?:\.\d+)?\s*(?:pts?|points?|%)?\s*\)/i;
-
-export function isReplySectionMarker(line: string): boolean {
-  const text = line.trim().toLowerCase();
-  if (!REPLY_MARKER_START.test(text)) return false;
-  return !POINTS_PARENTHETICAL.test(text);
-}
+// The reply-section marker lives in a dependency-free leaf so client
+// components can import it; re-exported here so existing consumers are unchanged.
+export { CANONICAL_REPLY_MARKER, isReplySectionMarker };
 
 // The original matcher. UNCHANGED by backlog 4.3 - indent-skip and mandatory
 // colon and all - per ruling B43-7: no rubric this already parses may ever

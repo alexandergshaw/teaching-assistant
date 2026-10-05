@@ -1,12 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { extractRubricCriteria } from "@/lib/grade/rubric";
+import { CANONICAL_REPLY_MARKER, isReplySectionMarker } from "@/lib/grade/rubric-reply-marker";
+import * as rubricModule from "@/lib/grade/rubric";
 import {
-  CANONICAL_REPLY_MARKER,
-  extractRubricCriteria,
-  isReplySectionMarker,
-} from "@/lib/grade/rubric";
-import {
-  REPLY_SECTION_MARKER,
   hasReplySectionMarker,
   insertReplySectionMarker,
 } from "./ReplySectionInsertField";
@@ -31,8 +28,14 @@ describe("A8 Wave C reply-section marker wiring", () => {
     expect(isReplySectionMarker(CANONICAL_REPLY_MARKER)).toBe(true);
   });
 
-  it("anti-drift: the UI literal equals the parser constant, and its presence check is sound", () => {
-    expect(REPLY_SECTION_MARKER).toBe(CANONICAL_REPLY_MARKER);
+  it("rubric.ts re-exports the leaf's marker and recognizer (one definition, no mirror)", () => {
+    expect(rubricModule.CANONICAL_REPLY_MARKER).toBe(CANONICAL_REPLY_MARKER);
+    expect(rubricModule.isReplySectionMarker).toBe(isReplySectionMarker);
+    expect(field).toMatch(/from "@\/lib\/grade\/rubric-reply-marker"/);
+    expect(field).not.toMatch(/"Reply section:"/);
+  });
+
+  it("the UI presence check agrees with the parser's recognizer", () => {
     for (const line of ["Reply section:", "  reply section:  ", "REPLY SECTION:"]) {
       expect(hasReplySectionMarker(line)).toBe(true);
       expect(isReplySectionMarker(line)).toBe(true);

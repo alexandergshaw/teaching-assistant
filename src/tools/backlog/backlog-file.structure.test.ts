@@ -82,7 +82,11 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // re-post after an ambiguous failure, dispatchable after WA-POST-LOCK) and
 // WA-POST-DEDUP (server-side idempotency, owner-blocked on a live Canvas +
 // fail-open/closed policy). Filed 2026-10-04.
-const EXPECTED_ROW_COUNT = 113;
+// 113 -> 114: GRADE-INFER-MERGE filed 2026-10-04 from the RES-FILL-3 scope
+// recon (F15/R-4) - a wrong-student grade mis-attribution under model inference
+// (byBase merges two distinct submitters), higher-severity than the refactor
+// it was found under; the RES-FILL-3 oracle freezes its buggy before-state.
+const EXPECTED_ROW_COUNT = 114;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

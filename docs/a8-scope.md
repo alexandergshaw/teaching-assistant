@@ -1,515 +1,499 @@
-# A8 scope + acceptance criteria (round 1)
-
-Scope and AC only. No production code, no test code, touched in producing
-this document. Sources: `docs/backlog.yml` id `A8` (lines 307-318, read in
-full 2026-09-29) and a direct read of the current tree, commands cited inline.
-A fresh `loop-checker` gates this before any consumer acts on it.
-
-## 0. What this document covers, and what it does not
-
-The A8 row (`docs/backlog.yml:307-318`, `state: 'unscoped'`, `owns: []`,
-`verify: null`) carries an extremely long note recording several prior
-scoping rounds, rulings, and one already-shipped sub-chunk. Before scoping
-anything I confirmed from the tree, not from the note, which parts are
-already built:
-
-- `src/lib/grade/submission-kind.ts` exists and exports
-  `GradingSubmissionKind = "initial-post" | "reply" | "other" | "unknown"`
-  (`submission-kind.ts:29-31`).
-- `src/app/components/grading-recording/` contains the screen-capture
-  recognition/labelling code the note describes (confirmed via
-  `grep -rn "SubmissionKind\|submissionKind" src`, 52 files hit, including
-  `GradingTableRow.tsx`, `grading-submission-merge.ts`,
-  `grading-extraction-prompt.ts`).
-- The five commits the note cites as having shipped this
-  (`58a4254`, `d5a3e2c`, `db747cc`, `75bd7d4`, `ad3dd61`) all exist in this
-  repo's history (`git cat-file -t <sha>`, each returned `commit`).
-
-I did not re-audit those commits' diffs line by line; I only confirmed (a)
-the commits exist and (b) the files/exports the note says they produced are
-present in the current tree. That satisfies "brief from the tree" for the
-purpose of scoping what is *left*, not a re-verification of already-shipped
-work.
-
-**What is left**, per the note's own chunking (it called the remainder
-"A8-P": "the LMS-connected AI paths, routes a+g, 10 files"), and per my own
-trace below, is the **Canvas-API-connected AI grading paths** - the routes
-where an instructor grades a discussion pulled live from Canvas (not a
-screenshot). This document scopes that remainder. It supersedes no other
-docs/a8*.md file: `docs/a8r-scope.md` is the already-shipped screen-capture
-chunk's own scope doc and is untouched by this one (confirmed via
-`ls docs/a8*.md`: only `a8r-scope.md` exists today, this file is new).
-
-I did not touch any `src` file, any N13b file, or any A42 file. Verified:
-`git status --short` at the end of this session (below, section 6) shows
-only `docs/a8-scope.md` as new/changed.
-
-## 1. Blast radius (measured)
-
-### 1.1 The data layer already splits initial post from reply
-
-`src/lib/canvas/discussions.ts`:
-- `DiscussionPost` (`:9-16`) carries `isReply: boolean` and
-  `parentUserId: number | null`.
-- `DiscussionActivity` (`:19-22`) is `{ initialPosts: DiscussionPost[]; replies: DiscussionPost[] }`.
-- `extractDiscussionActivity` (`:39-79`) computes `isReply` from thread depth
-  (`:61`, `const isReply = depth > 0`) and pushes into the right bucket
-  (`:69-70`).
-- `CanvasStudentWork` (`:106-119`) carries `discussion?: DiscussionActivity`
-  (`:116`) alongside a flat `text: string` (`:110`) and
-  `contributionCount: number` (`:114`).
-- `fetchDiscussion` (`:122-158`) builds the flat `text` by concatenating
-  `[...initialPosts, ...replies]`, each line prefixed `"Post: "` or
-  `"Reply: "` and joined by `\n\n---\n\n` (`:144-146`), and sets
-  `contributionCount: activity.initialPosts.length + activity.replies.length`
-  (`:152`). It also sets `discussion: activity` (`:153`) - the split data
-  rides alongside the flattened text on every `CanvasStudentWork` a
-  discussion produces.
-
-So for a **discussion fetched via Canvas's `/view` endpoint**, the
-initial-vs-reply distinction is present in `CanvasStudentWork.discussion` the
-moment the object is built. This confirms the row's "the data layer already
-knows" claim (`docs/backlog.yml:317`) still holds in the current tree.
-
-### 1.2 Where the distinction is dropped, per route
-
-I traced every caller of `canvasWorkToEntry` (`src/lib/grade/extraction.ts:238`,
-the function that turns one `CanvasStudentWork` into a gradable
-`StudentSubmissionEntry`) and every place a discussion reaches the model,
-rather than trusting the note's route list, because the note itself records
-two prior passes that mis-identified surfaces by grepping type names instead
-of reading call graphs.
-
-**Route A - `gradeCanvasUrl` (the default/Gemini AI path).**
-`src/app/actions/grading.ts:816-825` calls `gradeCanvasUrl` for any Canvas
-URL when the provider is neither `"other"` nor `"embedded"`. `gradeCanvasUrl`
-(`src/lib/grade/engine.ts:446-478`) calls `fetchCanvasWork` (`:454`), which
-for a discussion URL calls `fetchDiscussion`
-(`src/lib/canvas/work.ts:27-29`) - so `students[].discussion` **is**
-populated here. It then loops `for (const work of students) entries.push(await canvasWorkToEntry(work))`
-(`engine.ts:471-472`). `canvasWorkToEntry` (`extraction.ts:238-253`) reads
-only `work.text` (`:245-247`) to build the model-facing content and never
-reads `work.discussion` (confirmed: `grep -n "\.discussion\b" src/lib/grade/extraction.ts`
-returns no hits). **Data is present; this function drops it.** This is the
-single wiring point for Route A: fixing `canvasWorkToEntry` is necessary and
-(per this trace) sufficient for Route A, because it is the only place
-between `fetchCanvasWork` and the model that ever sees the `work` object.
-
-**Route B - `extractCanvasEntries` (embedded engine, non-discussion
-fallback).** Same function, called from `src/lib/grade/extraction.ts:176-188`,
-same `canvasWorkToEntry` loop (`:185`). However, under the current control
-flow this path **never actually receives a discussion `work` object**:
-`src/app/actions/grading.ts:770-793` routes any Canvas URL whose kind is
-`"discussion"` (via `detectCanvasUrlKind`, `:773`) to
-`buildDiscussionRubric`/`gradeDiscussion` (the deterministic embedded
-discussion grader, see 1.3) and returns *before* reaching
-`extractCanvasEntries` at `:796`. So Route B is a dead branch for discussions
-today - a real fact worth stating so no one scopes work here expecting it to
-matter.
-
-**Route C - `gradeOneSubmissionAction`.**
-`src/app/actions/grading.ts:601-652`. This is a materially different and
-harder case: it never calls `fetchCanvasWork`/`fetchDiscussion` at all. It
-calls `fetchSubmissionDetail` (`src/lib/canvas/submission-detail.ts:94`),
-which hits Canvas's generic
-`.../assignments/{assignmentId}/submissions/{userId}` endpoint and builds
-`text` from `submission.body` (`submission-detail.ts:120`,
-`const text = submission.body ? htmlToText(submission.body) : "";`) - there
-is no call to the discussion `/view` endpoint, so there is **no
-`DiscussionActivity` to have**. The `CanvasStudentWork` built at
-`grading.ts:615-622` never sets a `discussion` field at all. **The
-initial-vs-reply distinction is not reachable on this route without a new
-Canvas API call** (fetching that student's discussion view), which is a
-materially different, larger change than "read a field that is already
-there." I did not scope that call here - see Residual R1.
-
-**Route D - the external "other" (Deterministic Grading API) engine.**
-`src/app/actions/grading.ts:752-766` (Canvas-URL case) and `:852-854`
-(zip-upload case) both route through `gradeZipViaEngine`. For the Canvas-URL
-case, `students` again comes from `fetchCanvasWork` (`:753-754`), so
-`work.discussion` **is** populated for a discussion URL. But
-`canvasWorkToZipBase64` (`src/lib/canvas/submissions.ts:166-188`) only ever
-packs `work.text` into a file literally named `` `${prefix}_${seq}_post.txt` ``
-(`:182-183`) and never touches `work.discussion`. Nothing in this repo reads
-that file back (`grep -rn "_post" src`, excluding tests, finds only the
-writer and unrelated `delayed_post_at`/`initial_post` hits) - it is consumed
-only by the external Deterministic Grading API. So Route D has the *same*
-data-availability profile as Route A (present, dropped at the packing step),
-but its correctness after any change is **unverifiable from this repo**: we
-cannot know whether that external service would even understand a
-differently-shaped zip entry. See Residual R2.
-
-**The discussion-aware deterministic engine (not a gap).**
-`src/app/actions/grading.ts:770-793`, for `provider === "embedded"` and a
-discussion URL, builds `discussionStudents` directly from
-`s.discussion` (`:778-780`, `.filter((s) => s.discussion)`) and calls
-`buildDiscussionRubric`/`gradeDiscussion`
-(`src/lib/embedded-grader/discussion.ts`), which already computes
-`initialCount`, `replyCount`, and `peerReplyCount` as separate numbers
-(`discussion.ts:79-114`) and already has a distinct "no initial post" label
-(`:138`, `:150`). **This route is not part of A8's remaining blast radius** -
-it already respects the split. It is a separate rubric mechanism (regex/text
-"signals" detected from free text, not the criterion-parsing the AI path
-uses - see 2.1) and nothing here proposes reusing or changing it.
-
-### 1.3 `contributionCount`: still write-only
-
-`grep -rn "contributionCount" src` (run 2026-09-29) returns 9 hits: the
-field declaration (`discussions.ts:114`), three writers
-(`discussions.ts:152`, `submissions.ts:158` always `1`,
-`grading.ts:620` a files/text-derived count for Route C), and five test
-fixtures in `src/lib/grade/extraction.test.ts`. (CORRECTED by the round-1
-check: an earlier draft said "8"; the enumeration above sums to 9 and
-`grep -rn "contributionCount" src | wc -l` = 9. There was no drop from the
-note's "NINE" - still 9.) None of the 9 is a read used in scoring or routing
-logic. Splitting this field into
-two counts (implication 3) is therefore a change with **no currently
-measurable downstream effect** other than the field itself - low risk,
-fork-independent, and its own AC below is correspondingly modest.
-
-
-### 1.3a Round-1 check reconciliations (INFO-2, INFO-3)
-
-- INFO-2 (stale ruling): an EARLY orchestrator ruling still in the A8 row -
-  "A8-1's wiring file is `src/lib/canvas/discussions.ts`, NOT
-  `src/lib/grade/extraction.ts`" - is SUPERSEDED by the row's later G1
-  guarantee design (read `work.discussion` inside `canvasWorkToEntry`). This
-  scope follows G1, so the choke point is `extraction.ts:238-255`, NOT
-  `discussions.ts`. An implementer reading the stale ruling (d) must ignore it
-  in favour of G1 / this scope.
-- INFO-3 (truncation survival, routes to the architect): AC-2's object is "the
-  actual API request Gemini receives," but the reply text is appended after the
-  initial post and can be truncated away at a small
-  `getGeminiMaxCharsPerSubmission` cap - so a PRE-truncation assertion can pass
-  while the model never sees the reply. The architect/test-author must ensure
-  the reply distinction SURVIVES truncation (or test AC-2 post-truncation with a
-  realistic cap). Also confirm `disambiguateCanvasEntries` (`engine.ts:480`)
-  does not re-flatten per-entry `submittedFiles` after the loop.
-
-### 1.4 The Canvas grade-post path already carries more than one number
-
-`src/lib/canvas/grades.ts`, `postCanvasGrades` (`:55` on). Per student
-(`:128-151`):
-- `submission[posted_grade]` is set once, from a single `grade` string
-  (`:130`).
-- For **each** entry in `rubricAreas` whose `area` name matches (via
-  `normalizeCriterionName`) a criterion on the Canvas assignment's *own*
-  attached rubric, a **separate** `rubric_assessment[<criterionId>][points]`
-  (and `[comments]`) pair is appended (`:133-143`).
-
-So the wire format Canvas accepts is not "one number" - it is one aggregate
-plus N named per-criterion scores, and the app already produces N named
-scores: `GradeResultBase.rubricAreas: RubricAreaResult[]`
-(`src/lib/grade/types.ts:237`, `RubricAreaResult = { area: string; score: string; comment: string }`,
-`:39-43`) sits alongside the single `totalScore: string` (`types.ts:238`).
-`deriveTotalScore` (`src/lib/grade/parsing.ts:175-203`) only *computes* the
-aggregate from the sum of `rubricAreas` when the model did not supply an
-explicit total (`:179-181`); when the model does supply one (the normal case
-on the Gemini path), that model-supplied string is used as-is and the
-per-area sum is not enforced against it.
-
-This directly grounds Fork B - see 2.2.
-
-### 1.5 The AI-path rubric has no concept of a "section"
-
-`extractRubricCriteria` (`src/lib/grade/rubric.ts:27-30`, delegating to
-`extractRubricCriteriaStrict`/`extractRubricCriteriaWidened`) parses rubric
-text into a **flat list** of `{ name, points }` criteria, one per
-non-indented line (`rubric.ts:36-40`). There is no boundary marker, no
-grouping, nothing that would let a criterion be tagged "this one applies to
-replies." Implementing Fork A's owner-decided shape ("one rubric with a
-reply section") requires a **new parsing convention** on top of this parser.
-That convention is a design decision (what marks the boundary, how it
-survives the strict/widened fallback in `extractRubricCriteria`) that this
-scoping pass does not make - it belongs to an architecture pass, not to AC.
-Stated as a residual (R3), not silently deferred.
-
-### 1.6 A UI surface for per-contribution labelling already exists and is reusable
-
-`canvasWorkToEntry` currently pushes exactly **one** `SubmittedFileInfo` per
-discussion, named `"Discussion post"` or `"Submission text"`
-(`extraction.ts:247-253`). The results table already renders
-`StudentSubmissionEntry`/`GradeResult.submittedFiles` as a **list**, one
-`<li>` per file, keyed and labelled by `file.name`
-(`src/app/components/grading-results/FilesCell.tsx:41-47`; a sibling,
-`SubmittedFilesPanel.tsx`, does the same for the expanded view). If
-`canvasWorkToEntry` instead pushed one `SubmittedFileInfo` per initial post
-and one per reply (each carrying a distinguishing `name`, e.g. `"Initial post"`
-/ `"Reply"`), the **existing** list UI would render them as separate,
-labelled items with no new UI component required. This is a reading claim,
-not a rendered one - see the OV note in section 4.
-
-One concrete gap this surfaces: labelling a reply usefully (e.g. "Reply to
-Seth Vander Vorst") needs the replied-to student's *name*, but
-`DiscussionPost.parentUserId` (`discussions.ts:15-16`) is a bare
-`number | null`. The display-name map is computed in
-`extractDiscussionActivity` (`names: Map<number, string>`, `:47-79`) but is
-only used to name the *acting* student (`fetchDiscussion:140`,
-`names.get(userId)`) - it is never threaded down to resolve a
-`parentUserId`. Recorded as Residual R7, since it is buildable but not
-scoped in the AC below (the AC below requires only that a reply be
-labelled as a reply, not that it name who it replied to).
-
-### 1.7 Line budget on the one file most likely to change
-
-`src/app/actions/grading.ts` is **977 lines** today
-(`@(Get-Content src/app/actions/grading.ts).Count`, PowerShell, run
-2026-09-29), against `LIMIT = 1000` in
-`src/file-size-ceiling.structure.test.ts:41`, with **no**
-`ALLOWED_OVERAGE` entry for this path
-(`grep -n "grading.ts" src/file-size-ceiling.structure.test.ts` returns
-nothing). That is 23 lines of headroom. The note recorded 905/1000 on
-2026-09-20; it has grown 72 lines since (most likely the A8-R and other
-work that landed since). Any wave that adds a discussion-recognition branch
-to `gradeOneSubmissionAction` or extends the Canvas-URL branching in
-`gradeAction` **must** re-measure this before writing code and extract
-first if the addition would exceed 1000. Carried as Residual R6 rather than
-guessed at, because 23 lines is not enough margin to state confidently now
-that any specific future change fits.
-
-## 2. The two product forks
-
-### 2.1 Fork A (rubric's second axis) - ALREADY DECIDED, NOT YET BUILT
-
-The task briefing for this scope treats this as open and asks for a
-recommendation. Reading the row directly shows it is **not open**: `docs/backlog.yml:317`
-contains "SECOND OWNER DECISION 2026-09-15, closing implication (1)... ONE
-RUBRIC WITH A REPLY SECTION... Not two instructor-supplied rubrics, and not
-an app-side split of a single rubric by convention." That is an owner
-decision already on record, not a fork awaiting a recommendation. I am not
-re-opening it, and I am not asking the owner to re-answer a question they
-already answered.
-
-What **is** still true, per 1.5, is that this decision has not been built:
-no rubric-parsing code recognizes a "reply section" anywhere in the tree.
-Building it is out of this scope's fork-independent AC (section 3) because
-`RULING A` in the same row note - "EXCLUSION IS DEFERRED; RECOGNITION SHIPS
-FIRST... exclusion waits until a rubric can actually carry a reply section"
-- makes the reply-section-authoring surface a prerequisite for anything that
-*uses* it, and that surface does not exist. Building the authoring surface
-and its parsing convention is the natural next scoping activity after this
-one lands; it is recorded as Residual R3, not silently dropped.
-
-### 2.2 Fork B (is the score still one number) - RECOMMENDED READING, grounded in the traced post path
-
-**The fork as stated:** can the grade path carry two component scores, or
-must they be combined before posting to Canvas, and if combined, by what
-rule and does the instructor set it?
-
-**Recommended reading:** use the existing multi-component carrier as-is; do
-not build a new combination mechanism now.
-
-Grounds, from 1.4: `rubricAreas: RubricAreaResult[]` already carries any
-number of named, independently-scored components, and `postCanvasGrades`
-already posts each one to Canvas as its own `rubric_assessment[...]` entry
-when its name matches a Canvas criterion. A reply-section score, once Fork
-A's authoring surface exists, is simply one more `RubricAreaResult` with an
-`area` name matching the Canvas rubric's reply criterion - no new plumbing
-between the grader and Canvas is needed for the *per-criterion* half. The
-*aggregate* half (`posted_grade`/`totalScore`) already has a code-computed
-fallback (`deriveTotalScore`, sums `rubricAreas` when the model does not
-supply its own total) but does not currently *enforce* that sum against a
-model-supplied total - whether that should change is a real question, but
-it is not blocking, because of the next paragraph.
-
-**Why this does not block anything in this round:** the owner's separate,
-already-recorded decision for the no-reply-section case (`docs/backlog.yml:317`,
-"REPLY SCORING when the rubric has no reply section: EXCLUDE the replies
-... and DISCLOSE the gap") produces **zero** new score components - replies
-are excluded from scoring entirely, not scored on a second axis, in that
-state. Since the reply-section-authoring surface does not exist yet (2.1),
-every rubric is in the "no reply section" state today, so Fork B's
-"two components" case cannot currently occur. Fork B only becomes live once
-Fork A's authoring surface ships. I am recommending the existing-carrier
-reading now (a cheap, load-bearing recommendation that this round's AC does
-not depend on), and filing the real decision - whether to enforce
-code-derived totals once a reply criterion exists - as Residual R4, owned by
-whoever scopes the authoring surface.
-
-**Cost of being wrong:** if the owner instead wants an app-authored
-combination *rule* (e.g., a fixed weighting between the initial-post and
-reply components) rather than letting `rubricAreas` + `deriveTotalScore`
-handle it, that changes the shape of the authoring-surface work in 2.1's
-follow-on scope, not anything in this round's AC - none of AC-1 through
-AC-6 below reads or writes `rubricAreas`.
-
-## 3. Fork-independent acceptance criteria
-
-Each AC names the object under comparison, the instrument that produces
-each quantity, and the direction of failure. "NEW" instruments (nothing in
-the repo measures this today) are marked; where a test file is implied it
-does not exist yet - these are AC, not test notes, and a future test-author
-seat still owns choosing exact fixtures/oracles.
-
-**AC-1 (Route A recognition, not blocked).** Object: the request body
-`canvasWorkToEntry` builds from a `CanvasStudentWork` whose `discussion` is
-set. Instrument (NEW): a unit test on `canvasWorkToEntry` with a
-`DiscussionActivity` fixture containing at least one initial post and one
-reply, asserting the built content distinguishes them (e.g. two separate
-`SubmittedFileInfo` entries, or an equivalent code-held marker - the exact
-representation is an implementation choice, not fixed here). Direction of
-failure: red if the initial post and any reply are indistinguishable in the
-entry `canvasWorkToEntry` returns for a `work.discussion` that has both.
-
-**AC-2 (Route A reaches the model unmerged).** Object: the actual API
-request Gemini receives when `gradeCanvasUrl` grades a discussion (i.e. the
-built `StudentSubmissionEntry.content`/`submittedFiles`, since that is what
-downstream prompt-building serializes). Instrument (NEW): a test at the
-`canvasWorkToEntry`/`gradeCanvasUrl` boundary asserting the reply text is
-present and distinguishably labelled, not folded into the same unlabelled
-blob as the initial post. Direction of failure: red if the built entry for
-a discussion with replies is byte-identical in shape to the pre-fix
-`work.text`-only entry (a regression to the current behavior this AC exists
-to fix).
-
-**AC-3 (`contributionCount` split, not blocked, low blast radius per 1.3).**
-Object: `CanvasStudentWork.contributionCount`. Instrument (NEW): a unit
-test on `fetchDiscussion`/`extractDiscussionActivity` (or wherever the
-split lands) asserting two distinct counts are available - initial-post
-count and reply count - for a fixture with, e.g., 1 initial post and 2
-replies. Direction of failure: red if only one combined number remains
-reachable, or if either count silently equals the other for an activity
-where they differ. Note: per 1.3, no existing caller reads
-`contributionCount` today, so this AC's pass condition is about the field's
-shape, not about any currently-observable behavior change.
-
-**AC-4 (two distinct "nothing here" states, not blocked).** Object: a
-student's `DiscussionActivity` where exactly one of `initialPosts`/
-`replies` is empty. Instrument (NEW): a unit test asserting that "wrote
-replies but no initial post" and "wrote an initial post but no replies"
-produce distinguishable results (distinct messages, flags, or codes - not
-fixed here) from whichever component consumes the split (the AI-path
-recognition built in AC-1, at minimum). Direction of failure: red if both
-states collapse to the same signal (e.g. both read only as "low
-contribution count") anywhere in the code this AC's instrument exercises.
-Explicitly out of AC-4's scope: the *embedded* discussion engine
-(`src/lib/embedded-grader/discussion.ts`) already partially does this
-(1.2) and is not touched by this AC.
-
-**AC-5 (UI marks which contribution is which, not blocked, reading-grounded per 1.6).**
-Object: the list of `submittedFiles` a discussion entry produces for the
-Canvas-API-connected results table (`FilesCell.tsx`/
-`SubmittedFilesPanel.tsx`). Instrument: OV (observation via reading source -
-no component renders under vitest in this repo; this is a reading claim
-about what the existing list-rendering code does with distinctly-named
-entries, not a rendered screenshot). Pass condition: each `SubmittedFileInfo.name`
-this route produces for a discussion is either `"Initial post"`,
-`"Reply"`/a reply-specific label, or otherwise textually distinguishes an
-initial post from a reply - never both under the same generic name (today:
-always `"Discussion post"`, per 1.6). Direction of failure: an implementer
-report or checker read of the built `submittedFiles` array showing two
-entries (one initial post, one reply) with the same or an ambiguous `name`.
-
-**AC-6 (Route D data made available for future use, not blocked, scoped narrowly).**
-Object: `canvasWorkToZipBase64`'s inputs. Instrument: none required by this
-AC beyond what AC-1 already produces, because `work.discussion` becomes
-available to any caller the moment AC-1's fix lands upstream in the shared
-`CanvasStudentWork` shape - AC-6 exists only to state explicitly that
-**no change to `canvasWorkToZipBase64` itself is in scope this round**
-(Residual R2 covers why). Direction of failure: n/a - this AC is a
-scope boundary statement, not a testable behavior.
-
-**AC-7 (BLOCKED on Fork A - not scoped this round).** Any AC that would
-require the app to *score* a reply against criteria (as opposed to
-recognizing/labelling it, or excluding it and disclosing the exclusion) is
-blocked on the reply-section-authoring surface (2.1, Residual R3) and is
-explicitly **not** part of this round's AC.
-
-**AC-8 (BLOCKED on Route C's missing data - not scoped this round).** Any
-AC for `gradeOneSubmissionAction` recognizing a discussion's replies is
-blocked on giving that route a discussion `/view` call it does not have
-today (1.2, Residual R1) and is explicitly **not** part of this round's AC.
-The narrower, currently-buildable fact - that Route C's `CanvasStudentWork`
-never sets `discussion` and its text has no Post/Reply structure at all
-(submission-detail.ts:120) - is recorded in 1.2 so a future scope does not
-have to re-derive it.
-
-## 4. What could not be determined here (environment limits, `docs/loop/this-repo.md` section 6)
-
-- No live Canvas call, so none of the above was exercised against a real
-  discussion topic; every claim about what data Canvas returns is grounded
-  in reading the existing fetch code and its own type shapes, not a live
-  response.
-- No component renders under vitest in this repo (`docs/loop/this-repo.md`;
-  also `AGENTS.md`'s dev-loop pointer). AC-5's UI claim is explicitly OV
-  (observation via reading), not a rendered or interactive check.
-- No live external Deterministic Grading API call, so Route D's actual
-  tolerance for a changed zip-entry shape is unknown and not guessed at
-  (Residual R2).
-
-## 5. Disposition of prior artifact content
-
-No prior `docs/a8-scope.md` existed (`ls docs/a8*.md` before this write:
-only `a8r-scope.md`), so there is no prior version of *this* document to map
-requirement-by-requirement. What this document does instead, to avoid
-silently dropping the row's own prior findings: every residual the row's
-own rulings had already established for the remaining work (routes C and D)
-is carried forward unchanged in section 6, with the same owner/instrument/
-step shape the row used, rather than re-litigated or dropped.
-
-## 6. Residual register
-
-Each entry: owner, instrument, step.
-
-**R1 - Route C (`gradeOneSubmissionAction`) discussion recognition is
-unverifiable without a live Canvas call.** Carried forward from the row's
-own RULING J. Owner: repo owner. Instrument: one live single-submission
-grade against a real graded discussion through `gradeOneSubmissionAction`.
-Step: after any code change giving this route a discussion `/view` call is
-built and mock-tested (not scoped this round - see AC-8).
-
-**R2 - Route D (`_post.txt` / the external Deterministic Grading API) is
-unverifiable without a live call to that external service.** Carried
-forward from the row's own RULING J, re-measured: `grep -rn "_post" src`
-(excluding tests) still shows no in-repo reader. Owner: repo owner.
-Instrument: one run against the live external Deterministic Grading API.
-Step: before any change to what `canvasWorkToZipBase64` writes for a
-discussion (not scoped this round - see AC-6).
-
-**R3 - Fork A's authoring surface and parsing convention are not designed
-here.** Owner: an architecture pass (next activity on A8, per this repo's
-two-rounds-then-ask cadence - this is a new activity, not a third round of
-this one). Instrument: a design artifact fixing how a rubric marks a reply
-section text and how `extractRubricCriteria` (`rubric.ts:27`) recognizes
-the boundary without changing behavior for any rubric that parses today
-(the same non-regression bar `rubric.ts`'s own header comment already
-states for its strict/widened split). Step: before any implementer wave
-touches `rubric.ts` for this feature.
-
-**R4 - Fork B's real decision (enforce a code-derived aggregate vs. trust
-the model's combined total) is moot until R3 ships, and is not decided
-here.** Owner: whoever scopes the authoring surface in R3. Instrument:
-re-examine `deriveTotalScore` (`parsing.ts:175-203`) and `postCanvasGrades`
-(`grades.ts:128-151`) once a rubric can actually carry a reply-section
-criterion, asking whether a model-supplied total that ignores the reply
-component should be trusted or overridden. Step: that future scoping pass,
-not this one.
-
-**R5 - AC-5's UI claim is a reading claim, not a rendered one.** Owner: the
-verify/UX pass at implementation time. Instrument: a manual check in the
-running app (or a screenshot), since this repo renders no component under
-vitest. Step: after AC-1/AC-5's implementer wave, before that wave ships.
-
-**R6 - `grading.ts`'s line budget (977/1000, 23 lines of headroom,
-`file-size-ceiling.structure.test.ts:41`, no `ALLOWED_OVERAGE` entry) will
-likely have moved by the time any wave lands.** Owner: the wave-plan seat
-for whichever wave touches `grading.ts`. Instrument:
-`@(Get-Content src/app/actions/grading.ts).Count` compared against `LIMIT`
-in `src/file-size-ceiling.structure.test.ts`. Step: immediately before that
-wave's implementer starts; extract first if the budget does not fit.
-
-**R7 - Labelling a reply with who it replied to needs a name lookup that
-does not exist yet.** `DiscussionPost.parentUserId` (`discussions.ts:15-16`)
-is a bare `number`; the `names: Map<number, string>` built in
-`extractDiscussionActivity` (`:47-79`) is never threaded to resolve it.
-Owner: the implementer of AC-5, if a future revision of that AC asks for a
-named label rather than just a "Reply" label (AC-5 as written above does
-not require the name). Instrument: a unit test on the labelling function
-asserting a resolved display name, not a bare user id, appears. Step: the
-wave that builds AC-5, only if the AC is later tightened to require it.
-
-**R8 - `contributionCount`'s zero-readers state (1.3) should be
-re-confirmed at implementation time, not assumed to still hold.** Owner:
-the implementer of AC-3. Instrument: `grep -rn "contributionCount" src`
-re-run immediately before that change, plus `tsc` after. Step: the wave
-implementing AC-3.
+# A8 scope + recon - the reply-section SCORING round
+
+Scope and recon only. No production code and no test code was written or changed
+to produce this document. Consumer: a `loop-plan`/`loop-architect`/`loop-ac`
+chain for the remaining A8 build. A fresh `loop-checker` gates this before any
+consumer acts on it. Every quantity below names the command that produced it;
+every `file:line` was opened in this session.
+
+> THIS DOCUMENT REPLACES a prior `docs/a8-scope.md` that scoped the
+> RECOGNITION-ONLY remainder of A8, which has since SHIPPED (section 1). The
+> prior content is preserved in git (`git show HEAD:docs/a8-scope.md` before this
+> commit) and every one of its requirements is accounted for in the disposition
+> table (section 7) - nothing is silently dropped. The reframe is forced by the
+> tree: the thing the old scope scoped is done, so a document that still scoped
+> it would mislead the next reader into redoing shipped work. The companion
+> design docs `docs/a8-architecture.md`, `docs/a8-waves.md`, `docs/a8-test-notes.md`
+> describe that SAME shipped recognition round and are NOT rewritten here; this
+> document cites them where their section 9 / "designed not built" content is the
+> starting point for the remaining round.
+
+## 0. The headline: what already exists vs what A8 still needs
+
+A8's owner intent, verbatim from the row (`docs/BACKLOG.md:168`): "REPLIES ARE
+GRADED SEPARATELY, AGAINST DIFFERENT CRITERIA. Not excluded, not merely
+labelled." That is the whole bug and it is only PARTLY delivered.
+
+**ALREADY SHIPPED (measured, section 1):**
+
+- **Recognition on the screen-capture surface (A8-R, routes b+e).** Shipped
+  2026-09-20..22 (`58a4254`, `d5a3e2c`, `db747cc`, `75bd7d4`, `ad3dd61`). An
+  unconfirmed contribution no longer reads "Submission"; the submission-kind
+  union, its transport, and the neutral/hedged default landed.
+- **Recognition on the Canvas-API Gemini path (Route A).** Shipped 2026-09-29 in
+  two waves: Wave 1 `d82d18ae` (`DiscussionPost.parentName`, shape-only
+  `CanvasStudentWork.initialPostCount`/`replyCount`), Wave 2 `20e8af54`
+  (`canvasWorkToEntry` builds a labelled entry from `work.discussion`: a
+  front-loaded manifest plus `=== INITIAL POST ===` / `=== REPLIES TO
+  CLASSMATES ===` sections, early-return so the flat `work.text` branch does not
+  double-emit). Regression entry 444 (`docs/REGRESSION.md:45900`, `95a52756`).
+  Opus verify: SHIP.
+
+So TODAY the grading model is TOLD which contribution is a reply and which is an
+initial post. That closes the "merely labelled / misread as a second post" half.
+
+**WHAT IS STILL NOT BUILT - and it is the owner's actual decision, not a
+nice-to-have:**
+
+The model is told the distinction, but every rubric is still a single flat list
+of criteria, so a reply is still SCORED against the initial-post criteria. The
+owner decided replies must be scored SEPARATELY against DIFFERENT criteria, via
+a specific surface (section 2). None of the SCORING machinery exists:
+
+- `grep -rn "axis\|replySection\|reply.section" src/lib/grade` (2026-10-05)
+  returns only the recognition content labels in `src/lib/grade/extraction.ts:349-356`
+  (`=== REPLIES TO CLASSMATES ===`). There is NO axis/section concept in the
+  rubric parser, the prompt builder, the engine, or the score types.
+- `RubricCriterion` (`src/lib/grade/types.ts:458-462`) is `{ name: string;
+  points: number | null }` - no axis tag.
+- `extractRubricCriteria(rubric: string): RubricCriterion[]`
+  (`src/lib/grade/rubric.ts:27`) parses a flat list; no section marker.
+- `grep -n "reply" src/lib/grade/engine.ts` returns nothing - the engine has no
+  reply-aware scoring branch.
+- No authoring surface lets an instructor MARK a reply section (section 4.1).
+
+This remaining work is the reply-section SCORING round. It is a genuine,
+substantial build, NOT a redundant re-scope of shipped work. It is also
+deliberately deferred by an orchestrator ruling that this document does not
+re-open (RULING A, in the row): exclusion/scoring ships only once a rubric can
+carry a reply section AND the model-facing instructions are narrowed in the same
+change - because exclusion alone, with the assignment still demanding replies,
+would make the model deduct for work it can no longer see (`prompts.ts:83-90`
+semantics), which is strictly worse than the defect.
+
+**RECOMMENDATION:** do not close A8 and do not narrow it to recognition. Scope
+and build the reply-section scoring round described below. Routes C and D stay
+owner-only residuals (section 8). This document is that scope.
+
+## 1. Measured state of the tree
+
+Commands run 2026-10-05 from the repo root unless noted.
+
+### 1.1 Recognition shipped on Route A (the Gemini/Canvas-API path)
+
+- `grep -rln "buildDiscussionEntry" src` -> `src/lib/grade/extraction.ts` only
+  (real tree; `.claude/worktrees/friendly-meninsky-8032bc/` exists but the grep
+  over `src` is the main checkout). `canvasWorkToEntry` early-returns on
+  `work.discussion` (`extraction.ts:372-389`, opened), building `content` from
+  `buildDiscussionEntry` (`:304-364`): manifest first, then the two labelled
+  sections, one `SubmittedFileInfo` per contribution with `extension: "(none)"`
+  and dot-free names.
+- `src/lib/canvas/discussions.ts`: `DiscussionPost.parentName?` (`:17-19`),
+  resolved in `extractDiscussionActivity` (`:70`); `CanvasStudentWork`
+  `initialPostCount?`/`replyCount?` (`:118-124`) set in `fetchDiscussion`
+  (`:163-164`). Both carry a comment "shape-only; no runtime reader - see
+  docs/a8-architecture.md section 5".
+- `fetchDiscussion` STILL builds the flat `text` by concatenating
+  `[...initialPosts, ...replies]` (`discussions.ts:153-156`) - correctly: that
+  flat `text` is a fallback for non-discussion consumers; the fix is that
+  `canvasWorkToEntry` now reads `work.discussion` FIRST and never reaches the
+  flat text for a discussion.
+
+### 1.2 Recognition shipped on the screen-capture surface
+
+`src/lib/grade/submission-kind.ts` exists; `git show --stat ad3dd61` (per the
+row) mapped `unknown` to "Not identified" and a hedged prompt header. Not
+re-audited line by line here (it is shipped and verified); confirmed present via
+the row's citations and the commits existing in `git log`.
+
+### 1.3 The flat rubric parser and the score carrier (the remaining round's seams)
+
+- `extractRubricCriteria(rubric)` (`rubric.ts:27`) -> flat `RubricCriterion[]`,
+  fed to `buildSystemPrompt(assignmentInstructions, rubric, criteria, ...)` and
+  pinned once per batch at `src/lib/grade/engine.ts:232-235` (opened). This is
+  the single choke where axis-tagging would plug in.
+- The score-to-Canvas carrier ALREADY holds N named scores (Fork B, section 2.2):
+  `postCanvasGrades` (`src/lib/canvas/grades.ts:128-140`, opened) sets one
+  `submission[posted_grade]` (`:130`) plus, per matched `rubricArea`, a separate
+  `rubric_assessment[<criterionId>][points]`/`[comments]` (`:134-140`).
+  `deriveTotalScore` (`src/lib/grade/parsing.ts:208-213`, opened) trusts an
+  explicit model total when present, else sums `rubricAreas`.
+
+### 1.4 Sizes (both mandated instruments; they AGREE on every file, 2026-10-05)
+
+`@(Get-Content <path>).Count` (PowerShell) and `wc -l <path>` (Git Bash):
+
+| File | Get-Content | wc -l | Role in remaining round |
+|---|---|---|---|
+| `src/lib/grade/rubric.ts` | 420 | 420 | axis parsing (section 4.2) |
+| `src/lib/grade/engine.ts` | 499 | 499 | per-axis scoring + exclusion (4.3) |
+| `src/lib/grade/prompts.ts` | 415 | 415 | narrowed instructions + axis labels (4.3) |
+| `src/lib/grade/types.ts` | 462 | 462 | `RubricCriterion.axis?` (4.2) |
+| `src/app/actions/grading.ts` | 977 | 977 | NOT expected to change (R6) |
+| `src/app/components/grading-recording/RubricInputModal.tsx` | 389 | 389 | authoring surface (4.1) |
+| `src/lib/grade/extraction.ts` | 527 | 527 | shipped; exclusion may touch (4.3) |
+| `src/lib/canvas/discussions.ts` | 170 | 170 | shipped; no change expected |
+
+`LIMIT = 1000` at `src/file-size-ceiling.structure.test.ts:41`
+(`Select-String`, 2026-10-05); no `ALLOWED_OVERAGE` entry matched for any file
+above. All have > 420 lines of headroom; none is near the ceiling. NOTE the
+drift from the prior docs: `rubric.ts` was 443 on 2026-09-29 and is 420 today,
+`extraction.ts` was 372 and is 527 (the shipped Wave 2), `discussions.ts` 158 ->
+170 (shipped Wave 1). Re-measure at build time; do not trust the prior docs'
+line pins.
+
+## 2. The surface-deciding fork - ALREADY OWNER-DECIDED (do not re-open)
+
+The task brief asks for a recommendation on how the rubric gains a second axis
+and flags it "do not default it - it decides the whole surface". Measured against
+the row, this fork is NOT open: the owner answered it.
+
+**Fork A (how the rubric gains a second axis).** `docs/BACKLOG.md:168`, verbatim:
+"SECOND OWNER DECISION 2026-09-15, closing implication (1), the one the scoping
+pass was told not to default: ONE RUBRIC WITH A REPLY SECTION ... Not two
+instructor-supplied rubrics, and not an app-side split of a single rubric by
+convention."
+
+So the decided reading is **(b) one rubric with a dedicated reply section the
+instructor authors.** I am NOT re-litigating it. The task brief's three options
+map to the row's wording: (a) two rubrics = rejected; (b) one rubric with a reply
+section = CHOSEN; (c) app-side convention split = rejected.
+
+This recon scopes on (b). If I were asked to recommend from scratch, (b) is also
+what I would recommend, and the reasoning is worth recording because it is why
+the decision holds:
+
+- Least instructor friction: one rubric field already exists
+  (`RubricInputModal.tsx`); (a) would need a whole second authoring surface and a
+  second parse/stamp/provenance path.
+- Reuse: `extractRubricCriteria` already parses one rubric string; (b) adds a
+  marker line inside it, (a) duplicates the entire pipeline.
+- How rubrics are actually written: most discussion rubrics are a single
+  document with an "initial post" group and a "replies" group - (b) matches the
+  authored artifact; (c) forces the app to GUESS the grouping, which the owner
+  explicitly rejected ("the app never has to guess").
+
+**The ONE owner-facing item that rides alongside (SHAPE-5), as a CONFIRMATION,
+not a gate:** the decision was made 2026-09-15; it has not been exercised because
+nothing built it. Before the authoring surface is built, confirm the decision
+still holds. If the owner has since changed to (a) or (c), the switch cost is:
+(a) a second authoring field + a second `extractRubricCriteria` call + two
+`rubricAreas` provenance stamps + the plan's Wave structure roughly doubles; (c)
+drops the authoring surface entirely but moves all risk into a heuristic that
+splits a flat rubric, which is the guess the owner rejected and which has no
+code-held guarantee. This confirmation is startable work for the orchestrator to
+put to the owner WHILE the architect designs on (b); it does not block the
+design, because (b) is the decision of record.
+
+**Fork B (is the score still one number).** Recommended reading, grounded in
+1.3: reuse the existing multi-component carrier. A reply-section criterion is
+simply one more `RubricAreaResult` whose `area` name matches the Canvas rubric's
+reply criterion; `postCanvasGrades` already posts it as its own
+`rubric_assessment[...]` entry (`grades.ts:134-140`). No new combination
+mechanism is needed for the per-criterion half. The only real open question -
+whether a model-supplied aggregate that ignores the reply component should be
+OVERRIDDEN by the code-derived sum (`deriveTotalScore`, `parsing.ts:208-213`) -
+is live in THIS round (it was moot until a reply criterion could exist) and is
+AC-R6 below, not a separate residual.
+
+## 3. Acceptance criteria for the remaining round
+
+Each AC names the object under comparison, the instrument producing each
+quantity, and the direction of failure. "NEW" marks an instrument nothing in the
+repo provides today. Where the only possible enforcer is a render or a live call,
+the AC is an OWNER RESIDUAL and is marked so - never a machine AC.
+
+**AC-R1 (the parser recognizes a reply section).** Object: the `RubricCriterion[]`
+returned by `extractRubricCriteria` for a rubric containing a reply-section
+marker line (the marker convention is the architect's, seeded by
+`docs/a8-architecture.md` section 9). Instrument (NEW): a unit test in
+`src/lib/grade/rubric.test.ts`. Direction of failure: RED if criteria authored
+after the marker are not tagged with the reply axis, or criteria before it lose
+their initial-post axis, or the marker line is itself parsed as a criterion.
+
+**AC-R2 (no regression for a rubric with no reply section).** Object: the
+`RubricCriterion[]` for every rubric that parses today. Instrument: a frozen
+oracle over existing `rubric.test.ts` fixtures (the same non-regression bar
+`rubric.ts` already states for its strict/widened split, `rubric.ts:33-35`
+region). Direction of failure: RED if any rubric that has no marker parses to a
+different criteria set than before the axis feature.
+
+**AC-R3 (reply criteria score the replies; initial criteria score the initial
+post).** Object: the model-facing request composed by `buildSystemPrompt` /
+`gradeStudentEntries` for a discussion whose rubric has a reply section.
+Instrument (NEW): a unit test asserting the prompt pairs the reply-axis criteria
+with the reply content and the initial-axis criteria with the initial-post
+content (the exact composition is the architect's; the test pins that a
+reply-axis criterion name appears in the reply-scoring context and NOT only in
+the initial-post context). Direction of failure: RED if a reply-axis criterion is
+presented to the model as applying to the initial post, or vice versa.
+
+**AC-R4 (no reply section -> replies EXCLUDED from initial criteria, and the
+exclusion is DISCLOSED by code).** Object: the scored content and the disclosure
+text for a discussion graded against a rubric with NO reply section. Instrument
+(NEW): a unit test on the code-composed disclosure (a pure function, like the
+existing `composeOverallComment`/`RESUBMIT_NOTICE` mechanism, so it survives the
+model returning an empty string - the GUARANTEED class the row demands).
+Direction of failure: RED if the reply text is scored against the initial-post
+criteria, or if the exclusion is not disclosed, or if the disclosure is
+model-generated rather than code-composed.
+
+**AC-R5 (the model instructions are narrowed in the SAME change as exclusion -
+RULING A).** Object: the assignment-instruction text the model receives for a
+discussion whose replies are being excluded. Instrument (NEW): a unit test
+asserting that when replies are excluded, the model is NOT instructed to demand
+them on the scored axis (so it cannot deduct for work removed from the request).
+Direction of failure: RED if exclusion fires while the model is still told to
+require the replies - the disposed "exclusion without narrowing" class.
+
+**AC-R6 (the aggregate is carried, not silently recombined wrongly).** Object:
+`deriveTotalScore` / the posted `submission[posted_grade]` for a two-axis grade.
+Instrument: a unit test over `deriveTotalScore` (`parsing.ts:208`) plus a
+source-read of `postCanvasGrades` (`grades.ts:128-140`) confirming each axis'
+`rubricArea` posts as its own `rubric_assessment[...]`. Direction of failure: RED
+if a reply-axis component is dropped from the posted assessment, or if the
+aggregate rule changes behaviour for a single-axis (no-reply-section) rubric.
+The decision WHICH aggregate rule to apply when the model total ignores the reply
+component is Fork B's live half - the architect/owner must fix it here, not defer
+it.
+
+**AC-R7 (OWNER RESIDUAL - the authoring surface renders and persists).** Object:
+the `RubricInputModal` control by which an instructor marks a reply section.
+Instrument: OWNER - no component renders under vitest in this repo. The
+source-checkable half (the marker reaches `extractRubricCriteria`) is covered by
+AC-R1; the rendered control, its persistence (memory: persist-ui-control-state,
+`ta-` keys), and keyboard behaviour are owner/UX. Direction of failure: owner
+walk in the running app.
+
+**AC-R8 (OWNER RESIDUAL - the model actually scores separately).** Object: a live
+`gradeCanvasUrl` grade of a real graded discussion with a reply-section rubric.
+Instrument: OWNER - no live Gemini, no live Canvas, no API key in this checkout.
+The machine ACs verify the model RECEIVES the two-axis structure; whether its
+OUTPUT honours it is argued, not measured. Direction of failure: owner walk.
+
+## 4. Architecture sketch (consumed, not re-derived, from a8-architecture section 9)
+
+This recon does not redo the architecture; it states the shape the architect
+must harden and the seams the plan must cut. `docs/a8-architecture.md` section 9
+already proposes a marker convention ("a non-indented line beginning `replies` or
+`reply section` with no `(N pts)` parenthetical") and the `axis` tag on
+`RubricCriterion`. That is the starting point; the architect owns finalising it
+and MUST re-measure (section 9 cited `rubric.ts` at 443; it is 420 today).
+
+### 4.1 Authoring surface (the layer the instructor reaches)
+
+THE SURFACE IS A LAYER. Today an instructor authors a rubric as free text in
+`RubricInputModal.tsx` (389 lines) and, for built rubrics, `RubricBuilderModal.tsx`
+(`grep -rln "extractRubricCriteria\|RubricCriterion" src` lists both as
+consumers). The reply section is authored HERE - either by the instructor typing
+the marker line into the existing field (lowest friction, no new control, pairs
+directly with AC-R1) or by a dedicated "reply section" affordance. The architect
+decides which; the plan MUST name the authoring file in the wave that builds the
+parser, or the parser ships dead (memory: assignment-must-include-the-wiring-file;
+the row's RULING A names exactly this dead-code risk).
+
+### 4.2 Parser axis-tagging (rubric.ts + types.ts)
+
+`RubricCriterion` gains `axis?: "initial-post" | "reply"` (optional, so the wide
+blast radius below keeps compiling). `extractRubricCriteria` detects the marker
+in its existing per-line loop and tags criteria before/after it. BLAST RADIUS
+(measured, `grep -rln "extractRubricCriteria\|RubricCriterion" src`, 33 files):
+the type is consumed across cartridge import (`cartridge-import*.ts`), canvas
+modules (`canvas-modules/*`), snapshot grading (`snapshot-*`), workflows
+(`workflows/registry/steps.rubrics.ts`), and rubric rendering (`rubric-render.ts`,
+`rubric-bulk-plan.ts`). Making `axis` OPTIONAL is what keeps all of them
+compiling unchanged - the architect must confirm no structure test enumerates
+`RubricCriterion` keys (a field-count canary), and the plan must list any
+source-text reader of `rubric.ts`/`types.ts` in its write set
+(`grep -rln "readFileSync" src | xargs grep -l "grade/rubric\|grade/engine"`
+returned 10 candidate readers this session - the plan intersects them precisely).
+
+### 4.3 Per-axis scoring, exclusion, and narrowed instructions (engine.ts + prompts.ts)
+
+The engine pins criteria once per batch (`engine.ts:232-235`). The two-axis
+scoring plugs in here and in `buildSystemPrompt` (`prompts.ts`): initial-axis
+criteria apply to the initial-post content, reply-axis criteria to the reply
+content. When the rubric has NO reply section, replies are excluded from the
+scored content and the exclusion is disclosed by code (AC-R4), AND the model
+instructions are narrowed in the SAME change (AC-R5, RULING A). The GUARANTEED
+class the row demands (G1/G2/G3 in `docs/BACKLOG.md:168`): the disclosure is
+code-composed (survives an empty model string), and the excluded count is a
+TypeScript integer from `replies.length` - not model-supplied.
+
+### 4.4 Score carrying (no new plumbing - Fork B)
+
+Reuse `rubricAreas` + `postCanvasGrades` as-is (1.3, 2.2). The only decision is
+AC-R6's aggregate rule.
+
+## 5. Downstream implications from the owner's note - each addressed
+
+The row lists five implications. State of each against the tree:
+
+1. **Rubric gains a second axis** - DECIDED (one rubric with a reply section,
+   section 2). The build is sections 4.1-4.3.
+2. **Score no longer one number** - the carrier already holds N named scores
+   (1.3). The per-criterion half needs no plumbing; the aggregate half is AC-R6.
+   The instructor does NOT set a combination rule unless AC-R6's decision says so.
+3. **`contributionCount` must become two counts** - ALREADY SHIPPED as
+   `initialPostCount`/`replyCount` (Wave 1, `discussions.ts:118-124`), shape-only
+   with no runtime reader (that is accepted; they mirror `contributionCount`'s
+   own zero-reader state). A reader MAY appear in this round if the exclusion
+   disclosure needs the count - if so, the shape fields finally gain their reader
+   (discharges RT-5). Re-measure with `grep -rn "initialPostCount\|replyCount" src`.
+4. **No-replies vs no-initial-post read differently** - ALREADY SHIPPED on
+   Route A (Wave 2 manifest + the `[This student did not write an initial post.]`
+   content line, `extraction.ts:335-336`). This round extends it to the SCORING
+   feedback: "no initial post" and "no replies" must produce different scored
+   outcomes once each axis scores its own content.
+5. **The UI lists every contribution as a peer item** - the screen-capture
+   surface's recognition SHIPPED (A8-R). The remaining UI is the authoring
+   surface (4.1, AC-R7, owner residual) and the per-axis score display, which is
+   OV/owner (no render under vitest).
+
+## 6. Wave plan (independently gateable and pushable)
+
+Dependency-ordered; exact write sets and disjointness are the `loop-plan` seat's
+to finalise with pasted `sort | uniq -d`. The shape:
+
+- **WAVE A - parser axis-tag (foundation).** Write set:
+  `src/lib/grade/rubric.ts`, `src/lib/grade/types.ts`, and the owned test
+  `src/lib/grade/rubric.test.ts`. Delivers AC-R1, AC-R2. Independently gateable:
+  the parser is a pure function driven directly. Gate (all from PowerShell):
+  `npx tsc --noEmit`; `npm run lint`; tests - `rubric.test.ts` is one owned file,
+  but if any source-text reader of `rubric.ts` is in the write set, use
+  `npm run test:paths -- src/lib/grade/rubric.test.ts <reader2> ...` (one path per
+  arg; never a raw multi-path `vitest`); `npm test` (full regression for the
+  33-file `RubricCriterion` blast radius); `npm run build`; `git status --short`
+  against the assignment; AND `npx vitest run src/file-size-ceiling.structure.test.ts`
+  unconditionally (the file-size ceiling canary - re-measure `rubric.ts`/`types.ts`).
+- **WAVE B - per-axis scoring + exclusion + narrowed instructions.** Depends on
+  Wave A (reads `RubricCriterion.axis`). Write set: `src/lib/grade/engine.ts`,
+  `src/lib/grade/prompts.ts`, possibly `src/lib/grade/extraction.ts` for the
+  exclusion content, their owned tests, and any pure disclosure-compose leaf.
+  Delivers AC-R3, AC-R4, AC-R5, AC-R6. Gate: as Wave A, with `test:paths`
+  mandatory (multiple owned + source-text-reader files), plus the file-size
+  ceiling canary unconditionally.
+- **WAVE C - authoring surface.** Depends on Wave A (produces the marker the
+  parser reads). Write set: `RubricInputModal.tsx` (and/or `RubricBuilderModal.tsx`),
+  its wiring test, persistence (`ta-` key). Delivers AC-R1's wiring (the marker
+  reaches the parser from the UI) and AC-R7's source-checkable half; the rendered
+  control is owner residual R5/RT-1. Gate: as above; AC-R7's render is owner.
+
+Sequencing: A before B and C (both read the axis). B and C are path-disjoint from
+each other and MAY run concurrently IF the plan proves it with `sort | uniq -d`
+AND neither establishes a fact the other designs against. Each wave is its own
+push.
+
+## 7. Disposition of the prior `docs/a8-scope.md` (the recognition round)
+
+Each prior requirement -> kept(with state) / handed over(receiver+obligation) /
+withdrawn(reason). Id column re-derived last.
+
+| Prior | Disposition | Detail |
+|---|---|---|
+| AC-1 Route A recognition | KEPT -> SHIPPED | Wave 2 `20e8af54`; `canvasWorkToEntry` discussion branch. |
+| AC-2 reaches model unmerged + truncation survival | KEPT -> SHIPPED | Wave 2; front-loaded manifest. |
+| AC-3 `contributionCount` split | KEPT -> SHIPPED | Wave 1 `d82d18ae`; shape-only `initialPostCount`/`replyCount`. |
+| AC-4 two empty states | KEPT -> SHIPPED | Wave 2; manifest + "did not write an initial post" line. |
+| AC-5 UI marks which is which | KEPT -> SHIPPED (source half) | Wave 2 `submittedFiles` names; rendered half -> AC-R7 / R5 (owner). |
+| AC-6 Route D no change this round | KEPT | Route D stays owner residual R2 (section 8). |
+| AC-7 BLOCKED on Fork A scoring | HANDED OVER -> THIS round | Receiver: the reply-section scoring round (AC-R1..AC-R6). It is now the core of A8's remainder. |
+| AC-8 BLOCKED on Route C data | HANDED OVER -> owner residual R1 | Route C needs a live `/view` call this route does not make. |
+| R1 Route C | KEPT -> R1 (section 8) | Owner. |
+| R2 Route D | KEPT -> R2 (section 8) | Owner. |
+| R3 reply-section rubric authoring+parser+grader | HANDED OVER -> THIS round | Now sections 4.1-4.3 / AC-R1..AC-R5. |
+| R4 model-total-vs-code-sum | KEPT, now LIVE -> AC-R6 | Was moot; becomes decidable once a reply criterion can exist. |
+| R5 AC-5 rendered UI | KEPT -> R5 (section 8) | Owner/UX. |
+| R6 `grading.ts` line budget | KEPT -> R6 (section 8) | 977/1000; this round is not expected to touch it. |
+| R7 `parentName` | WITHDRAWN -> DISCHARGED | Shipped in Waves 1-2 (`discussions.ts:70`, `extraction.ts:351`). |
+| R8 `contributionCount` re-confirm | WITHDRAWN -> DISCHARGED | Shipped; fields added, not removed. |
+
+## 8. Residual register (owner, instrument, step)
+
+A residual not in `docs/BACKLOG.md` does not exist; the push that lands any wave
+of this round must reconcile these into the A8 row.
+
+- **R1 - Route C (`gradeOneSubmissionAction`) discussion recognition.** Owner:
+  repo owner. Instrument: one live single-submission grade through
+  `gradeOneSubmissionAction` against a real graded discussion (the route has no
+  `/view` call; `submission-detail.ts` body has no Post/Reply structure). Step:
+  after a future wave gives that route a `/view` call. In NO wave this round.
+- **R2 - Route D (external Deterministic Grading API / `_post.txt`).** Owner:
+  repo owner. Instrument: one run against the live external service
+  (`grep -rn "_post" src` excluding tests still finds no in-repo reader). Step:
+  before any change to what `canvasWorkToZipBase64` writes. In NO wave this round.
+- **R5 - the authoring surface and per-axis score DISPLAY render.** Owner:
+  verify/UX pass at implementation time. Instrument: a manual walk/screenshot in
+  the running app (no component renders under vitest). Step: after Wave C, before
+  it ships.
+- **R6 - `grading.ts` line budget (977/1000, no `ALLOWED_OVERAGE`,
+  `file-size-ceiling.structure.test.ts:41`).** Owner: the `loop-plan` seat of any
+  wave that edits `grading.ts`. Instrument:
+  `@(Get-Content src/app/actions/grading.ts).Count` vs `LIMIT`. Step: before that
+  wave; this round is NOT expected to edit it, but re-measure if a wave reaches it.
+- **R-AXIS-BLAST - the 33-file `RubricCriterion` consumer set.** Owner: the
+  `loop-plan` seat. Instrument: `grep -rln "extractRubricCriteria\|RubricCriterion" src`
+  plus the source-text readers from `grep -rln "readFileSync" src | xargs grep -l
+  "grade/rubric\|grade/engine"`. Step: before Wave A dispatch - every reader is
+  classified owned/checked-safe and any that reads the edited file AS SOURCE TEXT
+  is in the gate. Missing this is how an optional-field addition goes red in a
+  file nobody listed.
+- **R-FORK-A-CONFIRM - the owner-decision confirmation.** Owner: repo owner.
+  Instrument: re-affirm "one rubric with a reply section" (decided 2026-09-15,
+  unexercised since) before Wave C authors the surface; section 2 states the
+  switch cost if it changed. Step: alongside the architect pass, not as a gate.
+- **RT-5 (carried) - `initialPostCount`/`replyCount` are shape-only.** Owner:
+  this round, IF the exclusion disclosure reads a count. Instrument:
+  `grep -rn "initialPostCount\|replyCount" src`. Step: Wave B. If a reader
+  appears, mark RT-5 discharged; if not, it remains a known shape-only state.
+
+## 9. What could not be determined here (environment limits, `docs/loop/this-repo.md` section 6)
+
+- **No live Canvas**: recognition's behavioural effect and Route C's missing
+  `/view` data are unexercised (R1, AC-R8).
+- **No live Gemini / no API key**: whether the model's OUTPUT honours the two-axis
+  structure is argued, not measured (AC-R8). The machine ACs verify the model
+  RECEIVES it.
+- **No component renders under vitest**: the authoring surface and per-axis score
+  display are OV/owner (AC-R7, R5). No requirement in this scope is enforced only
+  by a render.
+- **No live external Deterministic Grading API**: Route D's tolerance is unknown
+  (R2).
+
+## 10. owns / blast-radius list (derived, command stated, output pasted)
+
+Commands run 2026-10-05:
+
+```
+grep -rln "extractRubricCriteria\|RubricCriterion" src
+```
+(33 files) EDITED (production, this round): `src/lib/grade/rubric.ts`,
+`src/lib/grade/types.ts`, `src/lib/grade/engine.ts`, `src/lib/grade/prompts.ts`,
+and one of `src/app/components/grading-recording/RubricInputModal.tsx` /
+`src/app/components/content-tab/RubricBuilderModal.tsx` (authoring surface, Wave C).
+CHECKED-SAFE (optional `axis` keeps them compiling; must stay green under
+`npm test`): `src/app/actions/snapshot-grade.ts`, `snapshot-parse-rubric.ts`,
+`src/app/components/snapshot-grading/snapshot-grade-prompt.ts`,
+`src/lib/canvas/metadata.ts`, `src/lib/canvas-modules/{rubrics,types,raw-types}.ts`,
+`src/lib/cartridge-import*.ts`, `src/lib/rubric-{render,bulk-plan}.ts`,
+`src/lib/grade/{reconcile,run-header}.ts`, `src/lib/grade.ts`,
+`src/lib/workflows/registry/steps.rubrics.ts`, and the test files in that list.
+
+```
+grep -rln "readFileSync" src | xargs grep -l "grade/rubric\|grade/engine\|RubricInputModal"
+```
+Source-text readers to classify before dispatch (reads an edited file AS TEXT, so
+a correct change can turn one red): `src/app/api/grade-run-item/route.test.ts`,
+`src/app/components/grading-recording/grading-rows.test.ts`,
+`src/app/components/grading-results/gradingResultsHelpersWiring.test.ts`,
+`src/app/components/grading-results/ungradedDisclosure.test.ts`,
+`src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts`,
+`src/app/components/snapshot-grading/snapshot-grading.structure.test.ts`,
+`src/app/components/ui/buttonVariant.test.ts`,
+`src/app/components/ui/modalAdoption.wiring.test.ts`,
+`src/lib/cartridge-drops.origin.test.ts`,
+`src/lib/grade/grouping-zip-parents.wiring.test.ts`.
+The `loop-plan` seat intersects each against the per-wave write set with
+`sort | uniq -d` and pastes the result; this list is the input to that, not a
+substitute for it.
+```

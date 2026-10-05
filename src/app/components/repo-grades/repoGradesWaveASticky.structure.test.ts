@@ -37,6 +37,18 @@ const CSS = withoutCssComments(read("repo-grades.module.css"));
 const INDEX = withoutLineComments(read("index.tsx"));
 const HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
 const RUNBAR = withoutLineComments(read("RepoGradesRunBar.tsx"));
+const TYPEAHEAD = withoutLineComments(read("RepoGradesGradeSetTypeahead.tsx"));
+
+// Slice one element by its own anchors; both ends must resolve or the test
+// fails here rather than silently widening to the whole file. Duplicated on
+// purpose (importing from another test file would re-run its describe blocks).
+function sliceBetween(src: string, start: string, end: string): string {
+  const a = src.indexOf(start);
+  expect(a, `start anchor ${start}`).toBeGreaterThan(-1);
+  const b = src.indexOf(end, a);
+  expect(b, `end anchor ${end} after ${start}`).toBeGreaterThan(a);
+  return src.slice(a, b);
+}
 
 describe("Wave A CSS: the sticky shell", () => {
   it("W-A1: .stickyShell is bounded and scrolls", () => {
@@ -132,5 +144,33 @@ describe("Wave A wiring", () => {
         expect(src, `${name} must not contain ${id}`).not.toContain(id);
       }
     }
+  });
+});
+
+describe("REPO-HEADER-VISUAL VH-10 pins", () => {
+  it("VH-10(a): .stickyWorkingHeader never clips (no overflow => popup escapes)", () => {
+    const block = ruleBlock(CSS, ".stickyWorkingHeader");
+    expect(block).not.toMatch(/overflow(?:-x|-y)?\s*:/);
+  });
+
+  it("VH-10(b): both header inputs carry the shared .headerInput class", () => {
+    const searchInput = sliceBetween(HEADER, "<input", "/>");
+    expect(searchInput, "search input (StickyHeader) must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
+    const typeaheadInput = sliceBetween(TYPEAHEAD, "<input", "/>");
+    expect(typeaheadInput, "typeahead input must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
+  });
+
+  it("VH-10(c): .gradeSetList hangs below the header, above the thead, and is bounded", () => {
+    const block = ruleBlock(CSS, ".gradeSetList");
+    expect(block).toMatch(/position\s*:\s*absolute/);
+    expect(block).toMatch(/top\s*:\s*100%/);
+    expect(block).toMatch(/z-index\s*:\s*5\b/);
+    expect(block).toMatch(/(^|[\s;{])max-height\s*:/);
+  });
+
+  it("VH-10(d): the chip remove button keeps its grade-set remove aria-label", () => {
+    const removeBtn = sliceBetween(TYPEAHEAD, "<button", "</button>");
+    expect(removeBtn).toContain("aria-label");
+    expect(removeBtn).toContain("from the grade set");
   });
 });

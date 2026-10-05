@@ -8,21 +8,9 @@
 // --rg-working-header-h on the shell so the column header (thead) sticks just
 // below it. Imports only browser-safe leaves (React, the run bar, the CSS
 // module); ResizeObserver is a DOM API, not an import.
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import RepoGradesRunBar, { type RepoGradesRunBarProps } from "./RepoGradesRunBar";
 import styles from "./repo-grades.module.css";
-
-// House-token inline styling (no new CSS class: the orphan ratchet is exact).
-const SEARCH_INPUT_STYLE: CSSProperties = {
-  width: "100%",
-  maxWidth: 320,
-  padding: "var(--space-2) var(--space-3)",
-  border: "1px solid var(--field-border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--field-background)",
-  color: "var(--text-primary)",
-  font: "inherit",
-};
 
 export interface RepoGradesStickyHeaderProps {
   // Null when no run bar applies (no folder, or the all-folders view).
@@ -68,7 +56,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
           {gradeSetControl}
           <input
             type="search"
-            style={SEARCH_INPUT_STYLE}
+            className={styles.headerInput}
             aria-label="Search repositories"
             placeholder="Search repo, student or binding"
             value={searchQuery}

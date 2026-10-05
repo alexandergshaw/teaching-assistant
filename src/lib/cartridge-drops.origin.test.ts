@@ -192,6 +192,13 @@ describe("R2: CartridgeDrop carries the origin, the mapper populates it, origin 
     const columns = new Set([
       ...extractCreateTableColumns(baseMigrationSql, "cartridge_drops"),
       ...extractAddColumns(newMigrationRaw),
+      // RES-A39-3B: the assignment_description column's own migration.
+      ...extractAddColumns(
+        fs.readFileSync(
+          path.join(process.cwd(), "supabase/migrations/20261028000000_add_cartridge_drop_assignment_description.sql"),
+          "utf8"
+        )
+      ),
     ]);
     const missing = Object.keys(inserts[0]).filter((key) => !columns.has(key));
     expect(missing, `insert payload key(s) with no matching migration column: ${missing.join(", ")}`).toEqual([]);

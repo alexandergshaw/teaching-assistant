@@ -87,7 +87,7 @@
 //   console.log(files.length, found.size);
 //   '
 //
-// Output: 83 non-test files, 81 distinct keys. (The quoted-only baseline
+// Output: 83 non-test files, 82 distinct keys. (The quoted-only baseline
 // over the same 83 files gives 75 - confirming RULING 110's "floor" claim by
 // direct comparison; the 6-key difference is ta-vc-copy-name, ta-vc-copy-msg,
 // ta-workflow-values, ta-tasks (all four real template-literal prefixes) plus
@@ -125,7 +125,7 @@ function collectTaKeys(source: string): string[] {
   return Array.from(found).sort();
 }
 
-// Frozen at 81 keys, measured by the command in the header comment above.
+// Frozen at 82 keys, measured by the command in the header comment above.
 // Sorted; do not reorder by hand - EXPECTED_TA_KEYS.sort() below is the
 // actual comparison basis, this literal ordering is only for a readable
 // diff when this test goes red.
@@ -134,6 +134,7 @@ const EXPECTED_TA_KEYS = [
   "ta-canvas-saved-courses",
   "ta-cartridge-assignment",
   "ta-cartridge-course",
+  "ta-cartridge-description",
   "ta-cartridge-lms",
   "ta-cartridge-lms-chosen",
   "ta-cartridge-points",

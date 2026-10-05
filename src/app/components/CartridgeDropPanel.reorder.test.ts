@@ -51,6 +51,7 @@ const NON_FILE_FIELD_IDS = [
   "cartridge-assignment",
   "cartridge-points",
   "cartridge-lms",
+  "cartridge-description",
   "cartridge-rubric",
 ] as const;
 

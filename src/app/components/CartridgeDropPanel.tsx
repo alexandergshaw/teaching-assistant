@@ -70,6 +70,10 @@ export default function CartridgeDropPanel() {
     const saved = localStorage.getItem("ta-cartridge-lms");
     return saved === "brightspace" || saved === "blackboard" || saved === "moodle" ? saved : "canvas";
   });
+  const [assignmentDescription, setAssignmentDescription] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-cartridge-description") ?? "";
+  });
   const [rubricText, setRubricText] = useState("");
   // A39 wave 2: the visible rubric-memory origin label, and what THIS
   // component last restored (so a later edit is never overwritten).
@@ -105,6 +109,12 @@ export default function CartridgeDropPanel() {
       localStorage.setItem("ta-cartridge-points", pointsPossible);
     }
   }, [pointsPossible]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ta-cartridge-description", assignmentDescription);
+    }
+  }, [assignmentDescription]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -285,6 +295,7 @@ export default function CartridgeDropPanel() {
         rubricText: effective.rubricText,
         lms: effective.lms,
         rubricOriginScope,
+        assignmentDescription: assignmentDescription.trim() || null,
       });
       setDrops((prev) => [drop, ...prev]);
 
@@ -467,6 +478,21 @@ export default function CartridgeDropPanel() {
             <MenuItem value="blackboard">Blackboard</MenuItem>
             <MenuItem value="moodle">Moodle</MenuItem>
           </TextField>
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="cartridge-description">Assignment description (optional)</label>
+          <TextField
+            multiline
+            minRows={3}
+            maxRows={10}
+            fullWidth
+            id="cartridge-description"
+            value={assignmentDescription}
+            onChange={(e) => setAssignmentDescription(e.target.value)}
+            placeholder="Paste the assignment instructions students were given. Grading uses this; without it only the course and assignment names are used."
+            disabled={loading}
+          />
         </div>
 
         <div className={styles.field}>

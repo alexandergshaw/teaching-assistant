@@ -53,6 +53,7 @@ export async function listNewCartridgeDropsAction(
   assignmentLabel: string;
   pointsPossible: number | null;
   rubricText: string | null;
+  assignmentDescription: string | null;
   lms: string;
   storagePath: string;
   sizeBytes: number;
@@ -64,7 +65,7 @@ export async function listNewCartridgeDropsAction(
     const { data: rows, error } = await (supabase
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .from("cartridge_drops") as any)
-      .select("id, name, course_label, assignment_label, points_possible, rubric_text, lms, storage_path, size_bytes")
+      .select("id, name, course_label, assignment_label, points_possible, rubric_text, assignment_description, lms, storage_path, size_bytes")
       .eq("user_id", user.id)
       .eq("status", "new")
       .order("created_at", { ascending: true })
@@ -81,6 +82,7 @@ export async function listNewCartridgeDropsAction(
       assignment_label: string;
       points_possible: number | null;
       rubric_text: string | null;
+      assignment_description: string | null;
       lms: string;
       storage_path: string;
       size_bytes: number;
@@ -91,6 +93,7 @@ export async function listNewCartridgeDropsAction(
       assignmentLabel: r.assignment_label,
       pointsPossible: r.points_possible,
       rubricText: r.rubric_text,
+      assignmentDescription: r.assignment_description ?? null,
       lms: r.lms,
       storagePath: r.storage_path,
       sizeBytes: r.size_bytes,

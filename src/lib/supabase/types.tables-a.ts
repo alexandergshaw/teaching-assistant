@@ -132,6 +132,7 @@ export interface CartridgeDropsRow {
   created_at: string;
   updated_at: string;
   rubric_origin_scope: string | null;
+  assignment_description: string | null;
 }
 
 export interface CartridgeDropsInsert {
@@ -153,6 +154,7 @@ export interface CartridgeDropsInsert {
   created_at?: string;
   updated_at?: string;
   rubric_origin_scope?: string | null;
+  assignment_description?: string | null;
 }
 
 export interface CartridgeDropsUpdate {
@@ -174,6 +176,7 @@ export interface CartridgeDropsUpdate {
   created_at?: string;
   updated_at?: string;
   rubric_origin_scope?: string | null;
+  assignment_description?: string | null;
 }
 
 export interface ClassSessionTranscriptsRow {

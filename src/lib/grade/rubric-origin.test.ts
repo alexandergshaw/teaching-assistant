@@ -260,7 +260,7 @@ describe("R4i: the drops table gains no column", () => {
 // ---------------------------------------------------------------------------
 
 describe("R5: zero added interactions (source-text proxy; see A40-D1)", () => {
-  const FROZEN_ON_HANDLERS: Record<string, number> = { onChange: 6, onClick: 4 };
+  const FROZEN_ON_HANDLERS: Record<string, number> = { onChange: 7, onClick: 4 };
   const FROZEN_STYLE_CLASS_COUNT = 14;
 
   // RULING 123 MA1: R5b's own framing claimed it catches "any NEW token, of
@@ -283,11 +283,11 @@ describe("R5: zero added interactions (source-text proxy; see A40-D1)", () => {
     string: 5,
     WorkflowTrigger: 1,
     HTMLInputElement: 2,
-    div: 16,
+    div: 17,
     h2: 1,
     p: 15,
-    label: 6,
-    TextField: 5,
+    label: 7,
+    TextField: 6,
     MenuItem: 4,
     input: 1,
     Button: 4,

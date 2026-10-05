@@ -92,7 +92,12 @@ export const gradingCartridgeSteps: StepDefinition[] = [
             type: "application/zip",
           });
           formData.append("studentSubmissions", zipFile);
-          formData.append("assignmentInstructions", `${drop.courseLabel} - ${drop.assignmentLabel}`);
+          // RES-A39-3B: grade against the instructor's stored description; only
+          // drops saved before that column existed fall back to the two labels.
+          formData.append(
+            "assignmentInstructions",
+            drop.assignmentDescription?.trim() || `${drop.courseLabel} - ${drop.assignmentLabel}`
+          );
           if (takeResult.rubricText) {
             formData.append("rubric", takeResult.rubricText);
           }

@@ -26,6 +26,9 @@ export interface CartridgeDrop {
   // persisted rubric text actually came from - null when no rubric was
   // carried. Populated by mapCartridgeDrop from the new column below.
   rubricOriginScope: string | null;
+  // RES-A39-3B: the instructor's real assignment description; null on drops
+  // saved before the column existed (the step then falls back to two labels).
+  assignmentDescription: string | null;
 }
 
 export async function saveCartridgeDrop(
@@ -39,6 +42,8 @@ export async function saveCartridgeDrop(
     rubricText: string | null;
     lms: "canvas" | "brightspace" | "blackboard" | "moodle";
     rubricOriginScope: string | null;
+    // Optional: callers that carry no description leave the column null.
+    assignmentDescription?: string | null;
   }
 ): Promise<CartridgeDrop> {
   const id = crypto.randomUUID();
@@ -68,6 +73,7 @@ export async function saveCartridgeDrop(
       storage_path: path,
       size_bytes: file.size,
       rubric_origin_scope: meta.rubricOriginScope,
+      assignment_description: meta.assignmentDescription ?? null,
     })
     .select()
     .single();
@@ -154,5 +160,6 @@ function mapCartridgeDrop(row: Database["public"]["Tables"]["cartridge_drops"]["
     gradedAt: row.graded_at,
     createdAt: row.created_at,
     rubricOriginScope: row.rubric_origin_scope,
+    assignmentDescription: row.assignment_description,
   };
 }

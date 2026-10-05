@@ -101,6 +101,7 @@ describe("grade-cartridge-submissions: A35 - the per-drop line reports graded wo
         assignmentLabel: "Homework 3",
         pointsPossible: 10,
         rubricText: "Rubric text",
+        assignmentDescription: null,
         lms: "canvas",
         storagePath: "path/to/drop",
         sizeBytes: 1024,
@@ -142,5 +143,67 @@ describe("grade-cartridge-submissions: A35 - the per-drop line reports graded wo
     // row). RED today: the digit captured here is "2".
     const digitBeforeStudents = dropLine?.match(/(\d+)\s+students?/)?.[1];
     expect(digitBeforeStudents).toBe("1");
+  });
+});
+
+function dropFixture(assignmentDescription: string | null): Awaited<
+  ReturnType<typeof listNewCartridgeDropsAction>
+> {
+  return [
+    {
+      id: "drop-d",
+      name: "cs101-hw4.zip",
+      courseLabel: "CS 101",
+      assignmentLabel: "Homework 4",
+      pointsPossible: 10,
+      rubricText: null,
+      assignmentDescription,
+      lms: "canvas",
+      storagePath: "path/to/drop",
+      sizeBytes: 1024,
+    },
+  ];
+}
+
+async function runAndCaptureInstructions(assignmentDescription: string | null): Promise<unknown> {
+  mockListNewCartridgeDropsAction.mockResolvedValue(dropFixture(assignmentDescription));
+  mockTakeCartridgeDropAction.mockResolvedValue({
+    id: "drop-d",
+    courseLabel: "CS 101",
+    assignmentLabel: "Homework 4",
+    pointsPossible: 10,
+    rubricText: null,
+    lms: "canvas",
+    zipBase64: Buffer.from("zip-bytes").toString("base64"),
+  });
+  mockFinishCartridgeDropAction.mockResolvedValue({ ok: true });
+  mockSaveGradingDraftAction.mockResolvedValue({ id: "draft-1" });
+  mockGradeAction.mockReset();
+  mockGradeAction.mockResolvedValue({
+    run: {
+      results: [makeGradedResult("Alice")],
+      rubricAreaNames: ["Correctness"],
+      fullCreditChecklist: [],
+    },
+    error: null,
+  });
+  await step.run({ maxDrops: 1 }, testHelpers(), () => {});
+  const formData = mockGradeAction.mock.calls[0][1] as FormData;
+  return formData.get("assignmentInstructions");
+}
+
+describe("grade-cartridge-submissions: RES-A39-3B - grades against the stored assignment description", () => {
+  it("sends the stored description, not the two-label string, when one exists", async () => {
+    const sent = await runAndCaptureInstructions("Implement a binary search tree with insert and delete.");
+    expect(sent).toBe("Implement a binary search tree with insert and delete.");
+    expect(sent).not.toBe("CS 101 - Homework 4");
+  });
+
+  it("falls back to the two-label string for older drops with no stored description", async () => {
+    expect(await runAndCaptureInstructions(null)).toBe("CS 101 - Homework 4");
+  });
+
+  it("treats a whitespace-only description as absent", async () => {
+    expect(await runAndCaptureInstructions("   ")).toBe("CS 101 - Homework 4");
   });
 });

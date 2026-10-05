@@ -16,6 +16,8 @@ import {
   type UngradedResult,
   type UngradedOutcome,
   type GradingRun,
+  type RubricAreaResult,
+  type RubricCriterion,
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
 } from "./types";
@@ -23,7 +25,7 @@ import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
-import { buildSubmittedFileNamesBlock, SUBMISSION_FRAMING_HEADER } from "./prompts";
+import { buildSubmittedFileNamesBlock, composeReplyExclusionDisclosure, SUBMISSION_FRAMING_HEADER } from "./prompts";
 // A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
 // that used to be inline here is now a PURE projection (reconcile.ts),
 // called once after the loop closes - this is a call, not the logic itself.
@@ -37,16 +39,28 @@ import { reconcileRun } from "./reconcile";
 // (runtime-import-graph.test.ts is the instrument, W2-5).
 import { stampRubricProvenance } from "./rubric-provenance-stamp";
 
-/** Grade a single student submission. */
-async function gradeSubmission(
+/**
+ * A8 Wave B (docs/a8-scoring-architecture.md 3.1): what ONE scored axis yields
+ * before any aggregate is finalised. An object literal type, deliberately NOT
+ * a GradingRun / GradedResult, so it adds no producer to the
+ * rubric-provenance-producers canary. `modelTotalScore` is the model's own
+ * total for the pass; the single-axis finalise trusts it (today's behaviour),
+ * the two-axis finalise ignores it.
+ */
+interface AxisScore {
+  rubricAreas: RubricAreaResult[];
+  strengths: string;
+  improvements: string;
+  modelTotalScore: string;
+}
+
+/** Score ONE axis: the model call, the guards and the parse. No aggregate. */
+async function scoreAxis(
   systemPrompt: string,
   studentName: string,
   content: string,
   provider: LlmProvider,
   imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
-  // When set (the Canvas path), re-base the total onto the assignment's real
-  // points so the tool grades out of the same total Canvas shows.
-  pointsPossible: number | null = null,
   codeRun: CodeRunResult | null = null,
   // The real submitted file names, given to the model as an explicit list
   // (see buildSubmittedFileNamesBlock) so it can check a stated filename
@@ -57,7 +71,7 @@ async function gradeSubmission(
   // model's praise is in parsed.strengths and its deductions are in
   // overallComment (see the routing below).
   commentSplit = false
-): Promise<GradedResult> {
+): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
   const imageNote =
@@ -114,12 +128,6 @@ async function gradeSubmission(
 
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
-  const derivedTotal = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
-  const { rubricAreas, totalScore } = scaleResultToPoints(
-    parsed.rubricAreas,
-    derivedTotal,
-    pointsPossible
-  );
 
   // docs/grading-results-feedback-boxes-acceptance-criteria.md, A1: the model
   // supplies strengths (still called overallComment in its JSON response -
@@ -134,6 +142,30 @@ async function gradeSubmission(
   const improvements = commentSplit
     ? [parsed.overallComment, parsed.improvements].filter((t) => t.trim()).join("\n\n")
     : parsed.improvements;
+
+  return {
+    rubricAreas: parsed.rubricAreas,
+    strengths,
+    improvements,
+    modelTotalScore: parsed.totalScore,
+  };
+}
+
+/**
+ * Finalise a graded result from already-scored areas: scale onto the real
+ * points, derive the resubmit notice, compose the comment and the feedback.
+ * `derivedTotal` is the caller's aggregate (the single-axis path derives it
+ * from the model total, the two-axis path from the code sum).
+ */
+function finalizeGrade(
+  studentName: string,
+  areas: RubricAreaResult[],
+  derivedTotal: string,
+  strengths: string,
+  improvements: string,
+  pointsPossible: number | null
+): GradedResult {
+  const { rubricAreas, totalScore } = scaleResultToPoints(areas, derivedTotal, pointsPossible);
   const resubmitNotice = pointsWereDeducted(totalScore, rubricAreas) ? RESUBMIT_NOTICE : "";
   const overallComment = composeOverallComment(strengths, improvements, resubmitNotice);
 
@@ -149,6 +181,93 @@ async function gradeSubmission(
     submittedFiles: [],
     feedback: formatFeedback(overallComment, rubricAreas, totalScore),
   };
+}
+
+/** Grade a single student submission (the single-axis path, unchanged). */
+async function gradeSubmission(
+  systemPrompt: string,
+  studentName: string,
+  content: string,
+  provider: LlmProvider,
+  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  // When set (the Canvas path), re-base the total onto the assignment's real
+  // points so the tool grades out of the same total Canvas shows.
+  pointsPossible: number | null = null,
+  codeRun: CodeRunResult | null = null,
+  submittedFiles: SubmittedFileInfo[] = [],
+  commentSplit = false
+): Promise<GradedResult> {
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, imageFiles, codeRun, submittedFiles, commentSplit);
+  const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
+  return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
+}
+
+/**
+ * RS-1 (docs/a8-scoring-architecture.md 3.4): a reply section exists but the
+ * student made no replies. No model call on empty content; each reply
+ * criterion is a code-composed zero so "no replies" reads differently from
+ * "no initial post" and the area still posts.
+ */
+function absentReplyAreas(replyCriteria: RubricCriterion[]): RubricAreaResult[] {
+  return replyCriteria.map((c) => ({
+    area: c.name,
+    score: c.points != null ? `0/${c.points}` : "0",
+    comment: "No replies were submitted.",
+  }));
+}
+
+/**
+ * A8 Wave B (docs/a8-scoring-architecture.md 3.3/3.4/7): grade a discussion
+ * entry that carries structured axes. The initial-post axis is ALWAYS scored
+ * against initialText (built from discussionAxes.initialPostContent, which
+ * contains no reply prose), so a reply can never be scored on that axis. With
+ * a reply section the replies are scored as a second pass and the aggregate is
+ * the CODE sum over the merged areas; without one the replies are excluded and
+ * the fixed disclosure is appended. A throw in either pass fails the whole
+ * student (RS-2: the caller's catch builds the grading-failed row).
+ */
+async function gradeDiscussionAxes(a: {
+  student: string;
+  initialPrompt: string;
+  replyPrompt: string | null;
+  replyCriteria: RubricCriterion[];
+  initialText: string;
+  replyText: string | null;
+  replyCount: number;
+  provider: LlmProvider;
+  imageFiles: Array<{ name: string; base64: string; mimeType: string }>;
+  codeRun: CodeRunResult | null;
+  submittedFiles: SubmittedFileInfo[];
+  commentSplit: boolean;
+  pointsPossible: number | null;
+}): Promise<GradedResult> {
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.imageFiles, a.codeRun, a.submittedFiles, a.commentSplit);
+
+  if (a.replyPrompt === null) {
+    const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
+    const improvements =
+      a.replyCount > 0
+        ? [initial.improvements, composeReplyExclusionDisclosure(a.replyCount)].filter((t) => t.trim()).join("\n\n")
+        : initial.improvements;
+    return finalizeGrade(a.student, initial.rubricAreas, total, initial.strengths, improvements, a.pointsPossible);
+  }
+
+  let replyAreas: RubricAreaResult[];
+  let replyStrengths = "";
+  let replyImprovements = "";
+  if (a.replyCount > 0 && a.replyText !== null) {
+    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit);
+    replyAreas = reply.rubricAreas;
+    replyStrengths = reply.strengths;
+    replyImprovements = reply.improvements;
+  } else {
+    replyAreas = absentReplyAreas(a.replyCriteria);
+  }
+  const areas = [...initial.rubricAreas, ...replyAreas];
+  // The code sum, never a model total: each pass saw only one axis.
+  const total = deriveTotalScore("", areas);
+  const join = (x: string, y: string): string => [x, y].filter((t) => t.trim()).join("\n\n");
+  return finalizeGrade(a.student, areas, total, join(initial.strengths, replyStrengths), join(initial.improvements, replyImprovements), a.pointsPossible);
 }
 
 /**
@@ -230,9 +349,22 @@ async function gradeStudentEntries(
   // the same names (otherwise the per-student LLM calls drift, and the results
   // table shows mismatched, half-filled columns).
   const criteria = extractRubricCriteria(rubric);
-  const systemPrompt = commentSplit
+  // A8 Wave B (docs/a8-scoring-architecture.md 3.2): THREE prompts, built
+  // once; WHICH one an entry uses is chosen PER ENTRY (3.3/3.6). singleAxisPrompt
+  // is today's call, byte for byte (ALL criteria, axisScope "all").
+  const singleAxisPrompt = commentSplit
     ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths")
     : buildSystemPrompt(assignmentInstructions, rubric, criteria);
+  const [axisMode, axisRouting] = commentSplit
+    ? (["some", "separate-strengths"] as const)
+    : (["some", "in-overall-comment"] as const);
+  const initialCriteria = criteria.filter((c) => c.axis !== "reply");
+  const replyCriteria = criteria.filter((c) => c.axis === "reply");
+  const hasReplySection = replyCriteria.length > 0;
+  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only");
+  const replyAxisPrompt = hasReplySection
+    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only")
+    : null;
   const results: GradeResult[] = [];
 
   // N13a: entry 0 always STARTS (it does not follow that results[0] is a
@@ -247,10 +379,21 @@ async function gradeStudentEntries(
       break;
     }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef } = limitedEntries[i];
-    const { text: truncatedContent, truncated: submissionTruncated } = truncateSubmission(
+    const axes = limitedEntries[i].discussionAxes;
+    const { text: truncatedContent, truncated: contentTruncated } = truncateSubmission(
       content,
       maxCharsPerSubmission
     );
+    // Each axis slice is truncated independently (3.3); the single-axis path
+    // truncates `content` exactly as before.
+    const initialTrunc = axes ? truncateSubmission(axes.initialPostContent, maxCharsPerSubmission) : null;
+    const replyTrunc =
+      axes && hasReplySection && axes.replyCount > 0
+        ? truncateSubmission(axes.replyContent, maxCharsPerSubmission)
+        : null;
+    const submissionTruncated = initialTrunc
+      ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
+      : contentTruncated;
 
     const imageFiles = submittedFiles
       .filter(
@@ -263,17 +406,33 @@ async function gradeStudentEntries(
     const codeRun = precomputedCodeRun ?? (await runSubmittedCode(submittedFiles));
 
     try {
-      const result = await gradeSubmission(
-        systemPrompt,
-        student,
-        truncatedContent,
-        provider,
-        imageFiles,
-        pointsPossible,
-        codeRun,
-        submittedFiles,
-        commentSplit === true
-      );
+      const result = initialTrunc
+        ? await gradeDiscussionAxes({
+            student,
+            initialPrompt: initialAxisPrompt,
+            replyPrompt: replyAxisPrompt,
+            replyCriteria,
+            initialText: initialTrunc.text,
+            replyText: replyTrunc?.text ?? null,
+            replyCount: axes?.replyCount ?? 0,
+            provider,
+            imageFiles,
+            codeRun,
+            submittedFiles,
+            commentSplit: commentSplit === true,
+            pointsPossible,
+          })
+        : await gradeSubmission(
+            singleAxisPrompt,
+            student,
+            truncatedContent,
+            provider,
+            imageFiles,
+            pointsPossible,
+            codeRun,
+            submittedFiles,
+            commentSplit === true
+          );
       results.push({
         ...result,
         mergedFileCount,

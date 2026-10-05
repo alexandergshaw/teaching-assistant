@@ -305,6 +305,7 @@ function buildDiscussionEntry(discussion: DiscussionActivity): {
   content: string;
   submittedFiles: SubmittedFileInfo[];
   mergedFileCount: number;
+  discussionAxes: NonNullable<StudentSubmissionEntry["discussionAxes"]>;
 } {
   const initialPosts = discussion.initialPosts;
   const replies = discussion.replies;
@@ -343,7 +344,13 @@ function buildDiscussionEntry(discussion: DiscussionActivity): {
     });
   }
 
-  const contentSections: string[] = [manifest, initialSectionParts.join("\n\n")];
+  const initialSection = initialSectionParts.join("\n\n");
+  const contentSections: string[] = [manifest, initialSection];
+  // A8 Wave B (docs/a8-scoring-architecture.md 2): the per-axis slices, built
+  // from the SAME two section strings `content` is joined from, so they cannot
+  // drift from it. initialPostContent carries NO reply prose, ever - the
+  // code-held exclusion guarantee the engine's initial-axis pass relies on.
+  let replyContent = "";
 
   if (replyCount > 0) {
     const replySectionParts: string[] = ["=== REPLIES TO CLASSMATES ==="];
@@ -353,13 +360,24 @@ function buildDiscussionEntry(discussion: DiscussionActivity): {
       replySectionParts.push(reply.text);
       pushContribution(label, reply.text);
     });
-    contentSections.push(replySectionParts.join("\n\n"));
+    const replySection = replySectionParts.join("\n\n");
+    contentSections.push(replySection);
+    replyContent = [
+      `This is the replies portion of a discussion contribution: ${replyCount} repl${replyCount === 1 ? "y" : "ies"} to classmates. Evaluate only these replies.`,
+      replySection,
+    ].join("\n\n");
   }
+
+  const initialPostContent = [
+    `This is the initial-post portion of a discussion contribution: ${initialCount} initial post${initialCount === 1 ? "" : "s"}. Evaluate only the initial post.`,
+    initialSection,
+  ].join("\n\n");
 
   return {
     content: contentSections.join("\n\n"),
     submittedFiles,
     mergedFileCount: Math.max(1, initialCount + replyCount),
+    discussionAxes: { initialPostContent, replyContent, replyCount },
   };
 }
 
@@ -377,10 +395,11 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
   // docs/a8-architecture.md section 1.1/3 and docs/a8-test-notes.md REQ-1
   // assertion 4, which pins that a double-emit never ships).
   if (work.discussion) {
-    const { content, submittedFiles, mergedFileCount } = buildDiscussionEntry(work.discussion);
+    const { content, submittedFiles, mergedFileCount, discussionAxes } = buildDiscussionEntry(work.discussion);
     return {
       student: work.student,
       content,
+      discussionAxes,
       mergedFileCount,
       submittedFiles,
       userId: work.userId,

@@ -336,6 +336,8 @@ const SAFE_FILES: readonly string[] = [
   "src/app/components/chat/institutionTriggerWiring.test.ts",
   // N15 W3: classic safe idiom (block-comment replace, then /\/\/.*$/gm); the m-flag $ stops before a CR, so CRLF-safe and trailing-comment-safe.
   "src/app/components/grading/gradingPictureWiring.wiring.test.ts",
+  // A8 Wave C: same classic safe idiom as gradingPictureWiring above (block-comment replace, then /\/\/.*$/gm, m-flag $ stops before CR).
+  "src/app/components/grading/replySectionMarker.wiring.test.ts",
   "src/lib/grade/class-trends-draft.test.ts",
   "src/app/components/content-tab/CourseItemRow.wiring.test.ts",
   "src/app/components/content-tab/courseItemsView.wiring.test.ts",

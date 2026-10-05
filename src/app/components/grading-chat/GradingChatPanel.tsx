@@ -31,6 +31,7 @@ import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChat
 import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
+import controls from "../recording/RecordingControls.module.css";
 
 // RG-CLEANUP: the two older global slots (ta-grading-chat-instructions and
 // ta-grading-chat-rubric) are FROZEN pre-upgrade values and are no longer read
@@ -160,7 +161,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const hasRows = driver.run !== null && driver.run.results.length > 0;
 
   return (
-    <div className={styles.form}>
+    <div className={`${styles.card} ${styles.form}`}>
       {!sessionReady ? (
         <>
           <div className={chatStyles.compactField}>
@@ -195,19 +196,21 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
       )}
 
-      <div className={styles.ghActions}>
-        <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
-        {sessionReady && (
-          <p className={styles.ghMeta}>Instructions and rubric are locked for this session.</p>
-        )}
-        {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
+      <div className={chatStyles.sessionBar}>
+        <div className={chatStyles.sessionMeta}>
+          <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
+          {sessionReady && (
+            <p className={styles.ghMeta}>Instructions and rubric are locked for this session.</p>
+          )}
+          {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
+        </div>
         <Button variant="outlined" size="small" disabled={driver.headerState === "unset"} onClick={handleNewSession}>
           New session
         </Button>
       </div>
 
       {hasRows && driver.run ? (
-        <>
+        <div className={chatStyles.stream}>
         {driver.run && <RubricProvenance run={driver.run} />}
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
@@ -220,15 +223,15 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}
         />
-        </>
+        </div>
       ) : (
-        <p className={styles.ghMeta}>Set instructions and a rubric above, then drop in your first submission below.</p>
+        <p className={chatStyles.streamEmpty}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
       <div className={chatStyles.stickyComposer}>
         {hasRows && driver.run && <LatestResultCard result={selectLatestResult(driver.run)} />}
         {submitError && (
-          <p role="alert" className={styles.ghMeta}>
+          <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
             {submitError}
           </p>
         )}

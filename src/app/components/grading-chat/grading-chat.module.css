@@ -1,5 +1,6 @@
-/* GRADING-CHAT W3 surface (SMOOTH-GRADER). Applied only from GradingChatPanel.tsx
-   through the local binding `chat`. */
+/* GRADING-CHAT surface (SMOOTH-GRADER). Applied from GradingChatPanel.tsx,
+   ChatComposer.tsx and LatestResultCard.tsx through the local binding
+   `chatStyles`. */
 
 /* Composer pinned to the bottom of the viewport so it stays reachable while the
    results table grows above it. Mechanism proxy only: sticking needs no clipping
@@ -10,9 +11,60 @@
   z-index: 2;
   display: flex;
   flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-4);
+  background: var(--card-background);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Session bar: meta column on the left, New session button on the right. */
+.sessionBar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.sessionMeta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+/* Results region: keeps the provenance hint and rubric card close to the table. */
+.stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.streamEmpty {
+  padding: var(--space-6) var(--space-4);
+  border: 1px dashed var(--field-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+/* Composer rows inside the dock. */
+.composer {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
-  padding-top: var(--space-2);
-  background: var(--surface-background, var(--field-background));
+}
+
+.composerGrow {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.composerLabel {
+  flex: 0 1 180px;
 }
 
 /* Setup field wrapper that replaces styles.field on the two setup fields. It
@@ -35,28 +87,20 @@
 .compactField textarea {
   width: 100%;
   min-height: 72px;
-  padding: var(--space-4) var(--space-4);
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-sm);
-  background: var(--field-background);
-  resize: vertical;
   font: inherit;
-  color: var(--text-primary);
+  color: inherit;
   line-height: var(--line-normal);
-}
-
-.compactField textarea::placeholder {
-  color: var(--text-muted);
-}
-
-.compactField textarea:focus {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: 2px;
-  border-color: var(--accent);
 }
 
 /* One-line strip shown in place of the setup fields once the session is ready. */
 .setupSummary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
   font-size: var(--font-size-md);
   color: var(--text-secondary);
   line-height: var(--line-normal);
@@ -68,28 +112,34 @@
 .latestCard {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   max-height: 30vh;
   overflow-y: auto;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-sm);
-  background: var(--field-background);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
 }
 
 .latestCardHeader {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: var(--space-4);
 }
 
 .latestCardStudent {
   font-weight: 700;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
 .latestCardScore {
-  color: var(--text-secondary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+  flex-shrink: 0;
 }
 
 .latestCardField {
@@ -109,6 +159,7 @@
 .latestCardText {
   margin: 0;
   white-space: pre-wrap;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   line-height: var(--line-normal);
 }

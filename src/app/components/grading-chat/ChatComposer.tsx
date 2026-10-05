@@ -19,11 +19,11 @@
 // pressing Enter does not move focus at all).
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import TextField from "@mui/material/TextField";
-import IconButton from "@mui/material/IconButton";
 import Button from "@mui/material/Button";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
+import chatStyles from "./grading-chat.module.css";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -97,7 +97,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
   };
 
   return (
-    <div className={styles.form}>
+    <div className={chatStyles.composer}>
       <div className={styles.ghActions}>
         <SegmentedToggle
           label="Submission type"
@@ -113,9 +113,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         {mode === "file" && (
           <>
             <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handlePickFile} disabled={disabled} />
-            <IconButton size="small" aria-label="Attach a file" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
-              +
-            </IconButton>
+            <Button variant="outlined" size="small" aria-label="Attach a file" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
+              Add files
+            </Button>
           </>
         )}
       </div>
@@ -126,7 +126,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             inputRef={textFieldRef}
             multiline
             maxRows={6}
-            fullWidth
+            className={chatStyles.composerGrow}
             size="small"
             label="Submission text"
             placeholder="Paste a student's submission"
@@ -139,14 +139,15 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           />
           <TextField
             size="small"
+            className={chatStyles.composerLabel}
             label="Label (optional)"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             disabled={disabled}
           />
-          <IconButton aria-label="Send submission" disabled={disabled || !text.trim()} onClick={handleSendText}>
+          <Button variant="outlined" aria-label="Send submission" disabled={disabled || !text.trim()} onClick={handleSendText}>
             Send
-          </IconButton>
+          </Button>
         </div>
       )}
 
@@ -154,7 +155,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         <div className={styles.adaptRow}>
           <TextField
             type="url"
-            fullWidth
+            className={chatStyles.composerGrow}
             size="small"
             label="Canvas or GitHub repo URL"
             value={url}

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   validateTaskTitle,
+  validateNotes,
+  NOTES_MAX,
   groupTasksByCollege,
   filterTasks,
   type OneOffTask,
@@ -102,5 +104,24 @@ describe("filterTasks", () => {
 
   it("ANDs the college and status filters", () => {
     expect(filterTasks(ts, { college: "MCC", status: "done" }).map((t) => t.id)).toEqual(["b"]);
+  });
+});
+
+describe("validateNotes", () => {
+  it("rejects notes one over the cap", () => {
+    expect(validateNotes("x".repeat(NOTES_MAX + 1))).toEqual({ ok: false, reason: "too-long" });
+  });
+
+  it("accepts notes exactly at the cap", () => {
+    expect(validateNotes("x".repeat(NOTES_MAX)).ok).toBe(true);
+  });
+
+  it("treats empty and absent notes as valid and normalises to empty", () => {
+    expect(validateNotes("")).toEqual({ ok: true, notes: "" });
+    expect(validateNotes(undefined)).toEqual({ ok: true, notes: "" });
+  });
+
+  it("keeps surrounding whitespace (notes are not trimmed, unlike titles)", () => {
+    expect(validateNotes("  keep me  ")).toEqual({ ok: true, notes: "  keep me  " });
   });
 });

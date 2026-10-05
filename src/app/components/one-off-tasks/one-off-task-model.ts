@@ -39,6 +39,17 @@ export function validateTaskTitle(raw: string): ValidateTaskTitleResult {
   return { ok: true, title };
 }
 
+export type ValidateNotesResult =
+  | { ok: true; notes: string }
+  | { ok: false; reason: "too-long" };
+
+/** Empty or absent notes are valid and normalise to "". Whitespace is kept. */
+export function validateNotes(raw: string | undefined): ValidateNotesResult {
+  const notes = raw ?? "";
+  if (notes.length > NOTES_MAX) return { ok: false, reason: "too-long" };
+  return { ok: true, notes };
+}
+
 export interface CollegeGroup {
   college: string | null;
   tasks: OneOffTask[];

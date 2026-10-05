@@ -9,6 +9,7 @@ import {
   updateOneOffTask,
 } from "@/lib/supabase/one-off-tasks";
 import {
+  validateNotes,
   validateTaskTitle,
   type NewTaskInput,
   type OneOffTask,
@@ -37,6 +38,8 @@ export async function addOneOffTaskAction(
     const user = await requireUser();
     const checked = validateTaskTitle(input.title);
     if (!checked.ok) return { error: `Invalid title: ${checked.reason}.` };
+    const notes = validateNotes(input.notes);
+    if (!notes.ok) return { error: `Invalid notes: ${notes.reason}.` };
     const task = await createOneOffTask(createServiceClient(), user.id, {
       title: checked.title,
       college: input.college,
@@ -60,6 +63,10 @@ export async function updateOneOffTaskAction(
       const checked = validateTaskTitle(title);
       if (!checked.ok) return { error: `Invalid title: ${checked.reason}.` };
       title = checked.title;
+    }
+    if (patch.notes !== undefined) {
+      const notes = validateNotes(patch.notes);
+      if (!notes.ok) return { error: `Invalid notes: ${notes.reason}.` };
     }
     const task = await updateOneOffTask(createServiceClient(), user.id, id, {
       title,

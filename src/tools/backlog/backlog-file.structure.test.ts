@@ -95,7 +95,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // grading tool); both look-and-feel only, disjoint file sets, worked concurrently.
 // 117 -> 118: ONE-OFF-TASKS filed 2026-10-05 (owner, direct chat) - a new top-level
 // "One-Off Tasks" tab + a simple cross-college task-management tool.
-const EXPECTED_ROW_COUNT = 118;
+// 118 -> 119: N15-PHOTO-DOWNSCALE filed 2026-10-05 at the N15 W3 push - the phone-photo
+// downscale fast-follow surfaced by the W3 scope check (F4/RES-N15-5), owner-gated on
+// measuring one real photo against the 2752512-byte wire budget.
+const EXPECTED_ROW_COUNT = 119;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

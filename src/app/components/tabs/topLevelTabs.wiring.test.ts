@@ -129,7 +129,7 @@ function branchSlice(source: string, tab: ActiveTab): string {
   return source.slice(start, end);
 }
 
-describe("the four top-level tabs are registered, in the strip, and rendered", () => {
+describe("the five top-level tabs are registered, in the strip, and rendered", () => {
   it("finds the page at all, so a moved file cannot make this vacuously pass", () => {
     // Every assertion below reads one file. If that read ever returns an empty
     // string - a moved page, a renamed directory - `indexOf` returns -1 and
@@ -141,8 +141,9 @@ describe("the four top-level tabs are registered, in the strip, and rendered", (
     expect(source).toContain("activeTab");
   });
 
-  it("registers exactly the four tabs D25a names, with a label each", () => {
-    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel"]);
+  it("registers exactly the five tabs D25a names, with a label each", () => {
+    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel", "one-off-tasks"]);
+    expect(TAB_LABELS["one-off-tasks"]).toBe("One-Off Tasks");
     expect(TAB_LABELS.courses).toBe("Courses");
     expect(TAB_LABELS.manual).toBe("Tools");
     expect(TAB_LABELS.files).toBe("Library");

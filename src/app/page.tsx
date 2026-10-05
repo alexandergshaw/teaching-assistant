@@ -25,6 +25,7 @@ import PipelineTab from "./components/presentations/pipeline/PipelineTab";
 import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
+import OneOffTasksTab from "./components/one-off-tasks/OneOffTasksTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -840,6 +841,14 @@ export default function Home() {
         {activeTab === "course-intel" && (
           <TabShell>
             <CourseIntelTab />
+          </TabShell>
+        )}
+
+        {/* One-Off Tasks: a stateless, rail-less top-level tab like Course
+            Intel. Wave 1 renders an empty shell only. */}
+        {activeTab === "one-off-tasks" && (
+          <TabShell>
+            <OneOffTasksTab />
           </TabShell>
         )}
 

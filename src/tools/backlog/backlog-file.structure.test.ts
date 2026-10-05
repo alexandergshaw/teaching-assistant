@@ -86,7 +86,11 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // recon (F15/R-4) - a wrong-student grade mis-attribution under model inference
 // (byBase merges two distinct submitters), higher-severity than the refactor
 // it was found under; the RES-FILL-3 oracle freezes its buggy before-state.
-const EXPECTED_ROW_COUNT = 114;
+// 114 -> 115: WA-POST-RETRY-TAKE filed 2026-10-04 from the WA-POST-RETRY scope
+// recon (F-1/R-4) - the take/recording announcement path shares the same
+// arm-survives-error one-click re-post + over-claiming "Nothing was posted"
+// copy; serializes after WA-POST-RETRY to copy its landed fix shape.
+const EXPECTED_ROW_COUNT = 115;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

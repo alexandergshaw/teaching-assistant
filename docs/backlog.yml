@@ -1157,6 +1157,18 @@
   from: 'WA-POST-LOCK scope recon (a7486132) ADJ-1 + the scope check (a676debd) orchestrator-must-not-drop flag: a one-click mass-republish path WA-POST-LOCK does NOT close; filed 2026-10-04'
   note: 'DISPATCHABLE after WA-POST-LOCK lands (scope recon to settle the (a)/(b) fork, recommended (a) clear-arm-on-rejection). The WA-POST-LOCK push MUST NOT claim "re-publish is fixed" - it closes the two-click success path for one tab only; this row is the one-click error path. Pairs with WA-POST-DEDUP (the durable cross-tab/reload close).'
   question: null
+- id: 'WA-POST-RETRY-TAKE'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'announcement-composition-surfaces'
+  title: 'The take/recording announcement path (recording/useTakeAnnouncement.ts) has the SAME arm-survives-error shape as WA-POST-RETRY: after a failed post the arm is preserved (cleared only on success :812), so one click can re-post; and it shows the same over-claiming "Nothing was posted." copy (:798) that may be false when the post actually landed. Found in passing during WA-POST-RETRY recon (F-1/R-4).'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Confirm at recording/useTakeAnnouncement.ts the arm-survives-error (:740, :762, :796-806 preserve; cleared only :812) and the "Nothing was posted." copy (:798). The rejected-promise path was NOT traced during the WA-POST-RETRY recon - trace it to confirm the one-click duplicate is reachable here too. Fix shape SHOULD mirror whatever WA-POST-RETRY lands (clear-arm-on-error + honest copy) for consistency. Machine AC = reducer/hook tests over the error arm; nothing renders under vitest.'
+  from: 'WA-POST-RETRY scope recon (adcd311b) finding F-1/R-4: the take-announcement sibling shares the arm-survives-error + over-claiming-copy shape; filed 2026-10-04'
+  note: 'DISPATCHABLE. Serialize AFTER WA-POST-RETRY so it copies the landed fix shape (clear-arm-on-error, honest "may or may not have posted - check Canvas" copy). Different file/surface (recording take path, not the walkthrough draft slot), so carved out of WA-POST-RETRY. Same irreversible-publish safety class.'
+  question: null
 - id: 'WA-POST-DEDUP'
   state: 'owner'
   kind: 'feature'

@@ -98,7 +98,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 118 -> 119: N15-PHOTO-DOWNSCALE filed 2026-10-05 at the N15 W3 push - the phone-photo
 // downscale fast-follow surfaced by the W3 scope check (F4/RES-N15-5), owner-gated on
 // measuring one real photo against the 2752512-byte wire budget.
-const EXPECTED_ROW_COUNT = 119;
+// 119 -> 120: RES-A39-3B filed 2026-10-05 from the A39 interaction-cost recon - the
+// cartridge path grades against a two-label string, not a real assignment description
+// (carved out of A39, previously unfiled per a39-census section 8 / A40 note).
+const EXPECTED_ROW_COUNT = 120;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

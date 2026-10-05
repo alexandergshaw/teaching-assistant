@@ -30,6 +30,8 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 
+import { stripComments } from "@/app/components/ui/modalAdoptionSourceScan";
+
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
 // run alone, and as a false timeout under concurrent `npm test` load from
@@ -73,10 +75,18 @@ function callsBuilder(source: string, name: string): boolean {
 }
 
 /** True when `source` shows any awareness of the ungraded flag - either
- *  spelling, anywhere in the file. Deliberately loose (this pins the FACT of
- *  awareness, not a particular predicate's spelling). */
+ *  spelling, or the real filters `ungradedResults` / `gradedResults` that keep
+ *  ungraded rows out, anywhere in the file. Deliberately loose (this pins the
+ *  FACT of awareness, not a particular predicate's spelling). The scanned text
+ *  is comment-stripped (L9 F1): the old raw-text predicate was satisfied for
+ *  steps.grading-draft-flow.ts only by a comment, never by its live
+ *  ungradedResults/gradedResults calls. */
 function referencesUngradedFlag(source: string): boolean {
-  return /\bungraded\b/i.test(source) || /\bisUngraded\b/.test(source);
+  return (
+    /\bungraded\b/i.test(source) ||
+    /\bisUngraded\b/.test(source) ||
+    /\b(?:ungradedResults|gradedResults)\b/.test(source)
+  );
 }
 
 describe("canary: callsBuilder / referencesUngradedFlag can actually tell hit from miss", () => {
@@ -91,13 +101,18 @@ describe("canary: callsBuilder / referencesUngradedFlag can actually tell hit fr
     expect(referencesUngradedFlag("const x = result.ungraded;")).toBe(true);
     expect(referencesUngradedFlag("// nothing relevant in this file at all")).toBe(false);
   });
+
+  it("referencesUngradedFlag reads real calls, not comments (L9 F1)", () => {
+    expect(referencesUngradedFlag(stripComments("// the ungraded flag lives elsewhere\nconst x = 1;"))).toBe(false);
+    expect(referencesUngradedFlag(stripComments("const rows = ungradedResults(rows);"))).toBe(true);
+  });
 });
 
 describe("every non-test module that calls a gradebook/Canvas-posting door builder also references the ungraded flag", () => {
   const files = collectSourceFiles(SRC_ROOT);
   const fileSources = new Map<string, string>();
   for (const file of files) {
-    fileSources.set(file, fs.readFileSync(file, "utf8"));
+    fileSources.set(file, stripComments(fs.readFileSync(file, "utf8")));
   }
 
   // Canary that the seed itself is non-trivial: at least one real file in

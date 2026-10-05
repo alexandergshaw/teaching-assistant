@@ -495,6 +495,8 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
     "SQL-dialect stripper: removes -- and /* */, never // - fails the dialect probe (does not touch a plain-LF // comment at all), so it is not comparable to the JS-// copies and is excluded rather than classified mode1-blind",
   "src/tools/backlog/backlog-file.structure.test.ts":
     "prose comment mentioning the stripComments backlog item - no code use",
+  "src/lib/grade/grade-result-doors.wiring.test.ts":
+    "L9 F1: imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
 };
 
 // Files excluded above specifically because they fail the JS-// dialect

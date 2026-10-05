@@ -103,3 +103,5 @@ The fix in `src/tools/vitest-paths/`: every flag passed to vitest is in joined
 `--flag=value` form, never a bare flag followed by a separate value token, and
 its JSON report path is built under the OS temp directory, never inside the
 repository.
+
+**A presence or absence assertion over a code-behaviour subject, run on raw source, is satisfied (or broken) by a comment.** L9 F1: the doors wiring test required `ungraded` in raw text and passed for steps.grading-draft-flow.ts only because of a comment, while the real `ungradedResults`/`gradedResults` calls did not match. Strip with the tokenizer imported from `@/app/components/ui/modalAdoptionSourceScan` (never a hand-rolled regex) and classify the file in `src/tools/strip-comments-agreement.structure.test.ts` EXCLUSIONS; leave file-content subjects (docs, SQL, CSS text) raw.

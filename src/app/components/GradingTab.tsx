@@ -30,6 +30,7 @@ import { useIncrementalGradingRun } from "./grading/useIncrementalGradingRun";
 import { selectDisplayRun, selectRunKey, isTerminal } from "./grading/incrementalRunPlan";
 import { describeRunProgress, shouldShowEmptyState } from "./grading/runProgressCopy";
 import { runResetKey } from "./grading-results/gradingResultsHelpers";
+import GradingPictureField from "./grading/GradingPictureField";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -437,6 +438,7 @@ export default function GradingTab({
                 onChange={handleAssignmentInstructionsChange}
                 placeholder="Paste the assignment brief, requirements, and any special directions."
               />
+              {source === "zip" && (<GradingPictureField kind="assignment description" provider={selectedProvider} onExtracted={setAssignmentInstructions} />)}
             </div>
 
             {(source === "zip" || rubric.trim()) && (
@@ -454,6 +456,7 @@ export default function GradingTab({
                   onChange={handleRubricChange}
                   placeholder="Paste the grading rubric, expectations, and scoring guidance."
                 />
+                {source === "zip" && (<GradingPictureField kind="rubric" provider={selectedProvider} onExtracted={setRubric} />)}
                 {rubricOrigin && source === "zip" && (
                   <p className={styles.fieldHint}>{rubricOrigin}</p>
                 )}

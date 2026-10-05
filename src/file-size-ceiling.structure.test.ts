@@ -148,4 +148,17 @@ describe("repo-wide file size ceiling (honours DEV_LOOP.md's 1000-line rule)", (
 
     expect(violations, `\n${violations.join("\n")}`).toEqual([]);
   });
+
+  // RES-GRAD-5 sub-1000 size ratchet (N15 wave 3). A dedicated assertion rather
+  // than an ALLOWED_OVERAGE entry, because that map is documented as "files
+  // already over 1000". Pinned at the measured post-wave count; the next writer
+  // of GradingTab.tsx re-pins it (never raise it to fit growth - extract).
+  it("keeps GradingTab.tsx at or under its RES-GRAD-5 ratchet", () => {
+    const GRADING_TAB_RATCHET = 620;
+    const content = fs.readFileSync(
+      path.resolve(repoRoot, "src/app/components/GradingTab.tsx"),
+      "utf-8"
+    );
+    expect(countLines(content)).toBeLessThanOrEqual(GRADING_TAB_RATCHET);
+  });
 });

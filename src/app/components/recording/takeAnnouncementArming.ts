@@ -32,3 +32,26 @@ export function takePostArmSignature(takeId: string, hubCourseId: string, instit
     institution,
   ]);
 }
+
+// What a failed take post can hand back: Canvas answered with an error, or the
+// call itself rejected (connection dropped, so the outcome is unknown).
+export type TakePostFailure = { error: string } | { transport: true };
+
+// Failure copy plus the arm to apply. armedFor is typed null so a failure can
+// never leave the confirm armed: the next click must re-arm, it cannot commit.
+export function resolveTakePostFailure(failure: TakePostFailure): { message: string; armedFor: null } {
+  if ("transport" in failure) {
+    return {
+      message:
+        "Could not reach the server - the post may or may not have gone through. " +
+        "Check the course's announcements in Canvas before posting again.",
+      armedFor: null,
+    };
+  }
+  return {
+    message:
+      `Canvas did not confirm the announcement - ${failure.error}. ` +
+      "Check the course's announcements in Canvas before posting again.",
+    armedFor: null,
+  };
+}

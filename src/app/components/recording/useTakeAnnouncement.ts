@@ -48,7 +48,7 @@ import { announcementImageFileName } from "./announcement-image-filename";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { isConfirmArmed, mayPostCommit } from "../content-tab/modules/postConfirmArming";
-import { takePostArmSignature } from "./takeAnnouncementArming";
+import { resolveTakePostFailure, takePostArmSignature } from "./takeAnnouncementArming";
 import { useAnnouncementBusy, setAnnouncementBusy } from "./announcementBusyStore";
 // The image companion (see this file's own note above imageState in
 // UseTakeAnnouncementReturn) was split out into announcementImagePipeline.ts
@@ -727,7 +727,6 @@ export function useTakeAnnouncement({
   }
 
   function backToReviewAfterPostFailure() {
-    setPostError(null);
     setStage({ phase: "review" });
   }
 
@@ -792,10 +791,12 @@ export function useTakeAnnouncement({
       institution || undefined,
       undefined,
       image
-    );
+    ).catch(() => ({ transport: true as const }));
     setPosting(false);
-    if ("error" in result) {
-      const message = `Canvas refused the announcement - ${result.error}. Nothing was posted.`;
+    if ("error" in result || "transport" in result) {
+      const outcome = resolveTakePostFailure(result);
+      const message = outcome.message;
+      setArmedFor(outcome.armedFor);
       setLogPostAttempts((prev) => [
         ...prev,
         { at: new Date().toISOString(), ok: false, error: message, imageUploadFailed: false, course: selectedCourse.name },

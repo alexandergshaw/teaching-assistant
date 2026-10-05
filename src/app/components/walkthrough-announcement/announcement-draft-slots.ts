@@ -553,7 +553,8 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     case "post-result": {
       return updateSlot(state, action.id, (slot) => {
         if ("error" in action.result) {
-          return { ...slot, posting: false, postError: action.result.error };
+          // A failed post clears the arm: a retry needs a fresh arm-then-confirm.
+          return { ...slot, posting: false, postError: action.result.error, postArmedFor: null };
         }
         return {
           ...slot,

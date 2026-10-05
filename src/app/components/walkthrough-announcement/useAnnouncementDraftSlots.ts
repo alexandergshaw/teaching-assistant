@@ -203,6 +203,11 @@ export function postResultFor(
  * pure function (it closed over nothing even as a useCallback) so a test
  * can exercise it directly.
  */
+/** Shown when the post request itself rejects (no server answer). The post may
+ * have landed, so the copy never claims otherwise and points at Canvas. */
+export const POST_TRANSPORT_FAILURE_MESSAGE =
+  "Could not reach the server - the post may or may not have gone through. Check the course's announcements in Canvas before posting again.";
+
 export function postSignatureFor(slot: DraftSlot): string | null {
   if (slot.draft.phase !== "drafted") return null;
   return JSON.stringify([
@@ -460,7 +465,7 @@ export function useAnnouncementDraftSlots(args: {
           dispatch({
             type: "post-result",
             id,
-            result: { error: "Could not reach the server - the post may or may not have gone through." },
+            result: { error: POST_TRANSPORT_FAILURE_MESSAGE },
           })
       );
     },

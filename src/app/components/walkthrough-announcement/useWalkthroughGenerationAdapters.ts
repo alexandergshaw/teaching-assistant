@@ -87,7 +87,9 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
         delayedPostAt
       ).then((result) => {
         if ("error" in result) {
-          return { error: `Canvas refused the announcement - ${result.error}. Nothing was posted.` };
+          return {
+            error: `Canvas did not confirm the announcement - ${result.error}. Check the course's announcements in Canvas before posting again.`,
+          };
         }
         return { course: selectedCourse.name };
       });

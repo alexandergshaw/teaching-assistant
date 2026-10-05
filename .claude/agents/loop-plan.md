@@ -88,6 +88,13 @@ Read these as your own failure modes, all measured in this repo:
   Any gate or instrument naming two or more test files is spelled with
   `npm run test:paths <p1> <p2> ...`, never a raw multi-path `vitest`/`npm test`
   command - that form silently drops any argument it does not match.
+- `src/file-size-ceiling.structure.test.ts` is in EVERY wave gate and verify
+  list, unconditionally - not only when the wave adds lines to an existing file.
+  It scans the whole `src/` tree in one ~0.5s run, so a new or grown file is
+  covered with no per-file bookkeeping; there is no pre-push or CI vitest to
+  catch a breach otherwise (see `this-repo.md`), so a wave that omits it can ship
+  a >1000-line file red and silent. The "only when adding lines" trigger is a
+  judgement that has failed; always-include costs nothing worth saving.
 - Any line-shift obligation it creates, with the delta and the owner.
 - A residual register: owner, instrument, and the step that will measure it.
   Missing any of the three it is a deletion; call it that.

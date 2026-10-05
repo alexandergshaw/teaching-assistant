@@ -39,6 +39,15 @@ must run them in the wave gate (`npm run test:paths ...`) or enumerate them in
 the wave plan. Adding the fast canaries to the pre-push gate is the stronger
 option; the wave-plan enumeration is the floor.
 
+`src/file-size-ceiling.structure.test.ts` (LIMIT = 1000, `:41`) is the one canary
+every wave gate and verify list carries UNCONDITIONALLY. It walks all of `src/`
+recursively (`listSourceFiles`, `:101-111`), so one ~0.5s run covers the whole
+tree including any new file - no per-file bookkeeping. Because nothing runs
+vitest at push (no installed hook, no CI workflow runs it), a wave whose scoped
+gate omits this test can land a file over 1000 lines red and silent; several
+files sit at exactly 1000 or 999, so the risk is live. Always include it; do not
+make it conditional on "the wave added lines".
+
 ### Running a named set of test files
 
 `npx vitest run <p1> <p2> ...` silently DROPS any argument that matches no

@@ -90,7 +90,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // recon (F-1/R-4) - the take/recording announcement path shares the same
 // arm-survives-error one-click re-post + over-claiming "Nothing was posted"
 // copy; serializes after WA-POST-RETRY to copy its landed fix shape.
-const EXPECTED_ROW_COUNT = 115;
+// 115 -> 117: two visual-overhaul requests filed 2026-10-05 (owner, direct chat) -
+// REPO-HEADER-VISUAL (repo-grades table header) + GRADING-CHAT-VISUAL (llm-like
+// grading tool); both look-and-feel only, disjoint file sets, worked concurrently.
+const EXPECTED_ROW_COUNT = 117;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

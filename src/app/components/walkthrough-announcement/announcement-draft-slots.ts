@@ -137,6 +137,11 @@ export interface DraftSlot {
    * post itself. Cleared alongside `postedTo` whenever a fresh draft
    * result arrives. */
   readonly postedScheduledLabel: string | null;
+  /** WA-POST-LOCK: true once the on-screen draft has been posted successfully.
+   * A hard lock so a second arm-then-confirm cannot re-publish the same text
+   * to every student. Set by a successful post-result; cleared only by an edit
+   * or a fresh draft result (different content). In-memory, never persisted. */
+  readonly postLocked: boolean;
   readonly copyError: string | null;
   /** True immediately after a successful Copy, cleared by the next edit,
    * template choice, regenerate, or copy attempt - a minor confirmation
@@ -377,9 +382,17 @@ export function makeSlot(id: string, choice: TemplateChoice, timing: Announcemen
     postError: null,
     postedTo: null,
     postedScheduledLabel: null,
+    postLocked: false,
     copyError: null,
     copied: false,
   };
+}
+
+/** WA-POST-LOCK: the one decision for whether a post may be committed. Closes
+ * the cross-tick double; the same-tick window rests on the button's loading
+ * state (see the stale-ref note in useAnnouncementDraftSlots.ts). */
+export function mayCommitPost(slot: DraftSlot): boolean {
+  return slot.draft.phase === "drafted" && !slot.postLocked && !slot.posting;
 }
 
 export function initialSlots(id: string): readonly DraftSlot[] {
@@ -457,6 +470,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         return {
           ...slot,
           draft: { ...slot.draft, draft },
+          postLocked: false,
           postArmedFor: null,
           regenerateArmed: false,
           copyError: null,
@@ -510,6 +524,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
         return {
           ...slot,
           draft: { phase: "drafted", draft: action.result, error: null },
+          postLocked: false,
           postArmedFor: null,
           postedTo: null,
           postedScheduledLabel: null,
@@ -545,6 +560,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
           posting: false,
           postedTo: action.result.course,
           postedScheduledLabel: action.result.scheduledLabel,
+          postLocked: true,
           postArmedFor: null,
         };
       });

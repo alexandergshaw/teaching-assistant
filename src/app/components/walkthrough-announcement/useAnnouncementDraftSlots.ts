@@ -27,6 +27,7 @@ import {
   emptySlotIds,
   makeSlot,
   resolveChoice,
+  mayCommitPost,
   slotsReducer,
   type AnnouncementTiming,
   type DraftSlot,
@@ -424,6 +425,8 @@ export function useAnnouncementDraftSlots(args: {
     (id: string) => {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot || slot.draft.phase !== "drafted") return;
+      // WA-POST-LOCK: a locked (already posted) or in-flight slot never commits.
+      if (!mayCommitPost(slot)) return;
       // A32/REQ-A32-1, RULING 65: resolve ONCE, through resolvePostCommit -
       // the SAME resolveScheduledVisibility call AnnouncementDraftSlot.tsx
       // reads for its consequence copy and all five ConfirmArmButtons
@@ -468,6 +471,8 @@ export function useAnnouncementDraftSlots(args: {
     (id: string) => {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot) return;
+      // WA-POST-LOCK: nothing arms or commits while locked or in flight.
+      if (!mayCommitPost(slot)) return;
       const signature = postSignatureFor(slot);
       if (signature === null) return;
       if (slot.postArmedFor === signature) {

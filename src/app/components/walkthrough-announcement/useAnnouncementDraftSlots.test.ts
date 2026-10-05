@@ -249,3 +249,26 @@ describe("BLOCKER R2-1: commitPost forwards through postArgsFor/postResultFor, n
     expect(slice).not.toMatch(/scheduledLabel:\s*decision\.scheduledLabel/);
   });
 });
+
+// WA-POST-LOCK W1, AC-7 / AC-10: the commit layer consults the gate, and the
+// arm-then-confirm contract is intact. Source pins - armPost reads a ref, so a
+// unit test cannot drive it. The same-tick double is NOT closed by this pin; it
+// rests on the button's loading state (owner walk).
+describe("WA-POST-LOCK: armPost is gated and still arm-then-confirm", () => {
+  const hookSource = fs.readFileSync(path.join(__dirname, "useAnnouncementDraftSlots.ts"), "utf-8");
+  const start = hookSource.indexOf("const armPost = useCallback(");
+  const end = hookSource.indexOf("const cancelPost = useCallback(");
+  const slice = start > -1 && end > start ? hookSource.slice(start, end) : "";
+
+  it("both anchors resolve", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+  });
+  it("AC-7: armPost consults mayCommitPost", () => {
+    expect(slice).toContain("mayCommitPost(");
+  });
+  it("AC-10: commit still happens only on the second call", () => {
+    expect(slice).toContain("commitPost(");
+    expect(slice).toMatch(/postArmedFor\s*===\s*signature/);
+  });
+});

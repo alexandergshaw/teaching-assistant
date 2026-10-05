@@ -79,3 +79,50 @@ describe("M8: scroll gated inside one effect on the phase edge", () => {
     expect(win).toMatch(/prevPhaseRef\.current\s*=\s*phase/);
   });
 });
+
+// WA-POST-LOCK W1 (docs/wa-post-lock-w1-test-notes.md AC-8..AC-11). Source
+// pins only - nothing renders, so the rendered disabled state, the announced
+// hint and focus are owner-walk items.
+describe("WA-POST-LOCK: Post control and hint", () => {
+  const postStart = src.indexOf('idleLabel={isScheduled ? "Schedule post"');
+  const postEnd = src.indexOf("onArm={() => onPostArm(slot.id)}");
+  const postSlice = postStart > -1 && postEnd > postStart ? src.slice(postStart, postEnd) : "";
+
+  it("AC-8: anchors resolve", () => {
+    expect(postStart).toBeGreaterThan(-1);
+    expect(postEnd).toBeGreaterThan(postStart);
+  });
+  it("AC-8: Post disabled= reads slot.postLocked and keeps the four existing conditions", () => {
+    expect(postSlice).toContain("slot.postLocked");
+    expect(postSlice).toContain("!courseName");
+    expect(postSlice).toContain(".title.trim()");
+    expect(postSlice).toContain(".message.trim()");
+    expect(postSlice).toContain('visibility.kind === "invalid"');
+  });
+
+  const regenStart = src.indexOf('idleLabel="Regenerate"');
+  const regenEnd = src.indexOf('<Button size="small" variant="outlined" onClick={() => onCopy');
+  const regenSlice = regenStart > -1 && regenEnd > regenStart ? src.slice(regenStart, regenEnd) : "";
+
+  it("AC-9: Regenerate block is non-empty and never mentions postLocked", () => {
+    expect(regenStart).toBeGreaterThan(-1);
+    expect(regenEnd).toBeGreaterThan(regenStart);
+    expect(regenSlice.length).toBeGreaterThan(0);
+    expect(regenSlice).not.toContain("postLocked");
+  });
+
+  it("AC-10: both Post handlers are present", () => {
+    expect(src).toContain("onArm={() => onPostArm(slot.id)}");
+    expect(src).toContain("onConfirm={() => onPostArm(slot.id)}");
+  });
+
+  it("AC-11: the already-posted hint is a sibling opening after the postedTo block closes", () => {
+    const postedStart = src.indexOf("{slot.postedTo && (");
+    const postedEnd = src.indexOf(")}", postedStart);
+    const hintIdx = src.indexOf("slot.postLocked && (");
+    expect(postedStart).toBeGreaterThan(-1);
+    expect(postedEnd).toBeGreaterThan(postedStart);
+    expect(hintIdx).toBeGreaterThan(-1);
+    expect(hintIdx).toBeGreaterThan(postedEnd);
+  });
+});

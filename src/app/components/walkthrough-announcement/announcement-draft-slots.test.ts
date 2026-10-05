@@ -840,6 +840,7 @@ describe("reset action (SMOOTH-WALKTHROUGH W1-4)", () => {
         postError: null,
         postedTo: null,
         postedScheduledLabel: null,
+        postLocked: false,
         copyError: null,
         copied: false,
       },

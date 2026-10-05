@@ -276,6 +276,7 @@ export default function AnnouncementDraftSlot({
               loading={slot.posting}
               loadingLabel={isScheduled ? "Scheduling…" : "Posting…"}
               disabled={
+                slot.postLocked ||
                 !courseName ||
                 !slot.draft.draft.title.trim() ||
                 !slot.draft.draft.message.trim() ||
@@ -373,6 +374,11 @@ export default function AnnouncementDraftSlot({
               {slot.postedScheduledLabel
                 ? `Announcement scheduled. Students will see it ${slot.postedScheduledLabel}.`
                 : `Posted to ${slot.postedTo}. Students can see it now.`}
+            </p>
+          )}
+          {slot.postLocked && (
+            <p role="status" aria-live="polite" className={styles.fieldHint}>
+              This draft is already on Canvas. Edit the subject or message, or Regenerate, to post it again.
             </p>
           )}
         </>

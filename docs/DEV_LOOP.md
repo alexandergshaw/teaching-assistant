@@ -50,8 +50,8 @@ re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
 | `loop-test-author` | opus | Test notes, acceptance-criteria instruments, frozen oracles, sabotage design - the seat that decides WHAT IS MEASURED and HOW IT FAILS |
 | `loop-seat` | sonnet | The remaining authoring seats: verification reports, remediation, root-cause analysis, and the UX/data/security/reliability passes |
 | `loop-implementer` | sonnet | Code, fixes, tests WRITTEN FROM a test-author's notes, mechanical sweeps |
-| `loop-retro` | opus | On-demand, report-only retrospective over an explicit commit range: lessons learned and areas for improvement, every item citing evidence; changes nothing |
-| `loop-retro-reviewer` | opus | The adversarial review of a `loop-retro` report: rejects ungrounded, over-claimed and generic items; report-only |
+| `loop-retro` | opus | On-demand, report-only retrospective over an explicit commit range: lessons learned plus PRIORITIZED loop-improvement recommendations (lower defects / lower token spend / more effective agents), each citing evidence and shaped as a backlog row; changes nothing itself |
+| `loop-retro-reviewer` | opus | The adversarial review of a `loop-retro` report: rejects ungrounded, over-claimed and generic lessons, and vets each recommendation (grounded, serves its claimed objective, backloggable, no unowned regression on another objective); report-only |
 
 **Two seats are exceptions to that principle, elevated by the repo owner on
 2026-09-20 because their mistakes have KNOCK-ON EFFECTS a checker catches too
@@ -73,6 +73,31 @@ Opus is exactly 2.5x Sonnet per token, at any mix of input and output: input is
 $5 against $2, output $25 against $10, and both ratios are 2.5. So the cost of
 this policy is easy to reason about without knowing the input/output split of
 any particular run.
+
+### The retrospective flow (on demand, owner-triggered)
+
+When the owner asks for a retrospective over a commit range, it runs as its own
+small loop and FEEDS THE BACKLOG:
+
+1. `loop-retro` reads the range and writes `docs/retro-<range>.md`: lessons
+   learned, plus loop-improvement recommendations PRIORITIZED by the three
+   standing objectives - lower defects, lower token spend, more effective agents
+   - each recommendation naming its change-and-where, the objective it serves,
+   its cost and any regression risk to another objective, and its evidence.
+2. `loop-retro-reviewer` adversarially vets the report: it rejects ungrounded or
+   over-claimed lessons as before, AND rejects any recommendation that is
+   generic, fails its own objective claim, or buys a win on one objective with a
+   larger unowned loss on another. It reports the confirmed, backloggable
+   recommendations.
+3. The ORCHESTRATOR files each surviving recommendation as a backlog row (area
+   `loop-maintenance` or the fitting loop area), with the retro report + the
+   reviewer's confirmation as its `from`. The retro agents are report-only and
+   never edit the backlog themselves; the filing is the orchestrator's step, and
+   from there a loop-improvement row is an ordinary backlog item subject to the
+   same scope -> check -> build -> verify discipline as any other.
+
+So a retrospective does not end at a report the owner reads and forgets: its
+vetted recommendations become queued, trackable work.
 
 ---
 

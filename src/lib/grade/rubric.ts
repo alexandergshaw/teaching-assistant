@@ -134,7 +134,6 @@ function parseInferredFileNameLookup(
 ): InferredFileNameLookup {
   const empty: InferredFileNameLookup = {
     byRaw: new Map<string, InferredFileNameParts>(),
-    byBase: new Map<string, InferredFileNameParts>(),
   };
 
   const jsonText = extractJsonObject(raw);
@@ -157,7 +156,6 @@ function parseInferredFileNameLookup(
 
     const requestedSet = new Set(requestedRawFileNames);
     const byRaw = new Map<string, InferredFileNameParts>();
-    const byBaseCandidates = new Map<string, InferredFileNameParts[]>();
 
     for (const item of parsed.items) {
       const rawFileName = typeof item.rawFileName === "string" ? item.rawFileName : "";
@@ -178,32 +176,12 @@ function parseInferredFileNameLookup(
 
       const inferred = { studentDisplay, citationFileName };
       byRaw.set(rawFileName, inferred);
-
-      const baseName = getBaseFileName(rawFileName);
-      const candidates = byBaseCandidates.get(baseName) ?? [];
-      candidates.push(inferred);
-      byBaseCandidates.set(baseName, candidates);
     }
 
-    const byBase = new Map<string, InferredFileNameParts>();
-    for (const [baseName, candidates] of byBaseCandidates.entries()) {
-      if (candidates.length !== 1) {
-        continue;
-      }
-
-      byBase.set(baseName, candidates[0]);
-    }
-
-    return { byRaw, byBase };
+    return { byRaw };
   } catch {
     return empty;
   }
-}
-
-function getBaseFileName(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const segments = normalized.split("/");
-  return segments[segments.length - 1] ?? path;
 }
 
 export async function inferFileNameConvention(
@@ -212,7 +190,6 @@ export async function inferFileNameConvention(
 ): Promise<InferredFileNameLookup> {
   const fallback: InferredFileNameLookup = {
     byRaw: new Map<string, InferredFileNameParts>(),
-    byBase: new Map<string, InferredFileNameParts>(),
   };
 
   if (rawFileNames.length === 0) {

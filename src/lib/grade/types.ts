@@ -453,7 +453,6 @@ export interface InferredFileNameParts {
 
 export interface InferredFileNameLookup {
   byRaw: Map<string, InferredFileNameParts>;
-  byBase: Map<string, InferredFileNameParts>;
 }
 
 export interface RubricCriterion {

@@ -273,11 +273,9 @@ function a44Fold(
  *      check first (e.g. a wrapper literally named
  *      "CS101_Fall_2026_submissions.zip", which itself has four
  *      underscore-separated parts). This is a crossing-derived, ground-truth
- *      identity - ruling M2 says it must outrank inferredLookup.byBase (a
- *      mere base-name guess), which is why byBase is not consulted until
- *      after this step.
- *   4. inferredLookup.byBase - a base-name guess, consulted only once
- *      neither the leaf nor any crossing produced a ground-truth identity.
+ *      identity. (The former step 4, a base-name guess from the model's
+ *      inference, was deleted by GRADE-INFER-MERGE: it attributed an
+ *      un-named file to a DIFFERENT file's inferred submitter.)
  *   5. THE INNERMOST CROSSING's stem, when the chain is non-empty - the
  *      per-student zip in the ordinary nested case. This is what fixes the
  *      filed bug (two students' zips each holding main.py/report.docx no
@@ -298,7 +296,7 @@ export function parseSubmissionFileName(
   /**
    * A44 wave 2: whether THIS return came from step 5 or step 6 - the two
    * stem-fallback steps RULE K/D fold a directory into - as opposed to a
-   * ground-truth model inference (1, 4) or a convention match (2, 3). A
+   * ground-truth model inference (1) or a convention match (2, 3). A
    * decoded key's arity alone cannot make this distinction: a convention
    * match at step 2/3 and a directory-less stem fallback at step 6 both
    * decode to one part (docs/a44-waves.md 3.3). `collisionRefusal.ts`'s
@@ -351,19 +349,8 @@ export function parseSubmissionFileName(
     }
   }
 
-  // 4. byBase - a guess, and per ruling M2 it must not outrank the
-  // ground-truth crossing-chain identity above, which is why it is only
-  // consulted here.
-  const baseInferred = inferredLookup?.byBase.get(baseName);
-  if (baseInferred) {
-    return {
-      studentKey: a44Encode([baseInferred.studentDisplay.toLowerCase()]),
-      studentDisplay: baseInferred.studentDisplay,
-      citationFileName: baseInferred.citationFileName,
-      extension: getFileExtension(baseName) || getFileExtension(baseInferred.citationFileName) || "(none)",
-      reachedStemFallback: false,
-    };
-  }
+  // (Former step 4, the base-name inference rung, removed by
+  // GRADE-INFER-MERGE: cross-path extrapolation merged distinct submitters.)
 
   // 5. THE INNERMOST CROSSING's stem - the per-student zip in the ordinary
   // nested case, and the fix for the filed bug. A44 RULE K/D: the container-

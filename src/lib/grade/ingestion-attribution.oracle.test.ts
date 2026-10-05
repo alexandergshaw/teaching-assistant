@@ -361,13 +361,14 @@ const FIXTURES: ReadonlyArray<Fixture> = [
     sentinels: { essay: ["S_ONLY"] },
   },
   {
-    // KNOWN-DEFECT (R-4): wrong-student merge. Two distinct submitters (AdaL,
-    // AdaM) collapse under one model-inferred name, because the collision
-    // refusal is computed without the inferred lookup. Same class as F15. The
-    // literal below is the CURRENT (defective) output; only the owner-ruled R-4
-    // fix (GRADE-INFER-MERGE) may flip it.
+    // ACCEPTED MODEL-TRUST BOUNDARY (GRADE-INFER-MERGE, residual R-1): the
+    // model gave two distinct submitters (AdaL, AdaM) the SAME name for both
+    // files. That is byRaw-identical to the legitimate single-student F2, so
+    // the code has no ground-truth signal to tell them apart and this is not
+    // deterministically fixable. The literals below stay frozen; the row is
+    // relabelled from a defect to the boundary it is.
     id: "F10",
-    label: "KNOWN-DEFECT (R-4) duplicate model name merges two submitters",
+    label: "accepted-model-trust-boundary: duplicate model name merges two submitters (R-1)",
     files: [
       { path: "essay1-AdaL.txt", sentinel: "S_X" },
       { path: "code1-AdaM.txt", sentinel: "S_Y" },
@@ -444,19 +445,23 @@ const FIXTURES: ReadonlyArray<Fixture> = [
     relaxed: true,
   },
   {
-    // KNOWN-DEFECT (R-4): wrong-student merge via the step-4 byBase rung
-    // (utils.ts:357-366). BrownTom's uninferred file inherits the one inferred
-    // student's name. Same class as F10. The literal is the CURRENT (defective)
-    // output; only the owner-ruled R-4 fix may flip it.
+    // FIXED (GRADE-INFER-MERGE): the step-4 byBase rung is deleted, so
+    // BrownTom's file the model did not name no longer inherits the one named
+    // student's name. It falls to the folder-folded stem and stays its own row.
+    // The literal below is the post-fix output (the deliberate flip of the
+    // frozen before-state).
     id: "F15",
-    label: "KNOWN-DEFECT (R-4) byBase inheritance merges two submitters",
+    label: "folder-distinct submitter the model did not name stays its own row (R-4 closed)",
     files: [
       { path: "AlvarezMaria/essay.txt", sentinel: "S_ALV" },
       { path: "BrownTom/essay.txt", sentinel: "S_BRO" },
     ],
     reply: [["AlvarezMaria/essay.txt", "Maria Alvarez", "essay.txt"]],
-    L: [{ student: "Maria Alvarez", files: ["essay.txt", "essay.txt"] }],
-    sentinels: { "Maria Alvarez": ["S_ALV", "S_BRO"] },
+    L: [
+      { student: "BrownTom/essay", files: ["essay.txt"] },
+      { student: "Maria Alvarez", files: ["essay.txt"] },
+    ],
+    sentinels: { "BrownTom/essay": ["S_BRO"], "Maria Alvarez": ["S_ALV"] },
     N: ["AlvarezMaria/essay", "BrownTom/essay"],
   },
 ];

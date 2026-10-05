@@ -81,7 +81,7 @@ describe("buildCodeExecutionNote", () => {
 // in scratchpad/a14-rulings.md: leaf-first, then the WHOLE zip-crossing
 // chain extraction.ts now threads through, scanned NARROWEST FIRST
 // (innermost to outermost - A14 rulings v2 CORRECTION 1), ground truth (a
-// crossing match) outranking a byBase guess. CORRECTION 2 withdrew the
+// crossing match) outranking any model inference. CORRECTION 2 withdrew the
 // userId fold this comment used to describe here: a sanitized-name
 // collision is a known-open merge, not disambiguated (see the "known-open
 // merge" describe block below, which pins exactly that).
@@ -139,16 +139,14 @@ describe("parseSubmissionFileName - nested-zip identity via the crossing chain (
   });
 });
 
-describe("parseSubmissionFileName - ground truth (the crossing chain) outranks byBase (A14 ruling M2)", () => {
-  it("uses the crossing-derived identity over a byBase guess for the same file, when byRaw has no exact hit", () => {
-    // Simulates a partial/degraded model inference: byRaw missed this exact
-    // file (so it fell through to the deterministic path further down in
-    // rubric.ts), and byBase's guess for this base name ("main.py") points at
-    // the WRONG student. The crossing chain (ground truth, populated by
-    // extraction.ts regardless of any model call) must win.
+describe("parseSubmissionFileName - a different path's inference never leaks by leaf name (characterization)", () => {
+  it("keeps the crossing-derived identity when byRaw holds a DIFFERENT path with the same leaf name", () => {
+    // Characterization, not a bug-kill: byRaw is keyed on the exact full path,
+    // so an entry for "someother/main.py" must not touch this file. (The old
+    // byBase rung that could leak by leaf name was deleted by
+    // GRADE-INFER-MERGE; the kill is inference-no-extrapolation.test.ts.)
     const inferredLookup: InferredFileNameLookup = {
-      byRaw: new Map(),
-      byBase: new Map([["main.py", { studentDisplay: "WrongGuess", citationFileName: "main.py" }]]),
+      byRaw: new Map([["someother/main.py", { studentDisplay: "WrongGuess", citationFileName: "main.py" }]]),
     };
     const parsed = parseSubmissionFileName(
       "janedoe_2024-01-01_120000_project.zip/main.py",

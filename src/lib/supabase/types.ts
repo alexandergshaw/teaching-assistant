@@ -76,6 +76,9 @@ import type {
   InstitutionAccommodationsRow,
   InstitutionAccommodationsInsert,
   InstitutionAccommodationsUpdate,
+  OneOffTasksRow,
+  OneOffTasksInsert,
+  OneOffTasksUpdate,
 } from "./types.tables-c";
 import type {
   AppUsersRow,
@@ -521,6 +524,12 @@ export interface Database {
         Row: Expand<MicrosoftCredentialsRow>;
         Insert: Expand<MicrosoftCredentialsInsert>;
         Update: Expand<MicrosoftCredentialsUpdate>;
+        Relationships: [];
+      };
+      one_off_tasks: {
+        Row: Expand<OneOffTasksRow>;
+        Insert: Expand<OneOffTasksInsert>;
+        Update: Expand<OneOffTasksUpdate>;
         Relationships: [];
       };
       presentation_drafts: {

@@ -123,3 +123,40 @@ export interface InstitutionAccommodationsUpdate {
   created_at?: string;
   updated_at?: string;
 }
+
+// supabase/migrations/20261027000000_create_one_off_tasks.sql
+export interface OneOffTasksRow {
+  id: string;
+  user_id: string;
+  title: string;
+  college: string | null;
+  done: boolean;
+  notes: string;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OneOffTasksInsert {
+  id?: string;
+  user_id: string;
+  title: string;
+  college?: string | null;
+  done?: boolean;
+  notes?: string;
+  due_date?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface OneOffTasksUpdate {
+  id?: string;
+  user_id?: string;
+  title?: string;
+  college?: string | null;
+  done?: boolean;
+  notes?: string;
+  due_date?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}

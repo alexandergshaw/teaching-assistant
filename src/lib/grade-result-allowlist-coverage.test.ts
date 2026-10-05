@@ -15,6 +15,18 @@
 //    assertion below - this is the same "widen the union, confirm tsc fails"
 //    idiom entry 370 (docs/REGRESSION.md) verifies its own exhaustiveness
 //    check with.
+//    The guard enumerates AllKeys<GradeResult> (a distributive keyof), not
+//    keyof GradeResult: GradeResult is a union, so plain keyof is the
+//    INTERSECTION and missed a field added to only one member. Measured on
+//    the real types: adding an optional field to UngradedResult alone exited
+//    tsc 0 before this fix; after it, tsc reports TS2322 at the check below
+//    naming the field ("probeOnlyUngraded").
+//    RESIDUAL: for an OPTIONAL field, bumping the array alone satisfies tsc
+//    (measured: exit 0), and only the runtime sentinel half (2.) then fails,
+//    on "a sentinel is missing field". The stronger ReturnType-derived form
+//    is in snapshot-row-serialization.ts:119-145; adopting it here was
+//    assessed WONT-DO because this array also serves as the runtime
+//    iteration list.
 // 2. Runtime: two sentinel GradeResults - one GradedResult, one
 //    UngradedResult - each with every field it CAN carry set to a
 //    distinctive, detectable value, are pushed through each of the three
@@ -67,11 +79,14 @@ const ALL_GRADE_RESULT_FIELDS = [
 ] as const;
 
 // If a field is added to GradeResult without being added to the array above,
-// `Exclude<keyof GradeResult, (typeof ALL_GRADE_RESULT_FIELDS)[number]>`
+// `Exclude<AllKeys<GradeResult>, (typeof ALL_GRADE_RESULT_FIELDS)[number]>`
 // becomes non-empty, so `MissingFields` stops being `never`, and the
 // assignment below fails to compile - `npx tsc --noEmit` catches it even
 // though this test file never runs that field through anything at runtime.
-type MissingFields = Exclude<keyof GradeResult, (typeof ALL_GRADE_RESULT_FIELDS)[number]>;
+// AllKeys distributes over the union: `keyof (A | B)` is the INTERSECTION of
+// the members' keys and would hide a field added to only one member.
+type AllKeys<T> = T extends unknown ? keyof T : never;
+type MissingFields = Exclude<AllKeys<GradeResult>, (typeof ALL_GRADE_RESULT_FIELDS)[number]>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _exhaustiveFieldCheck: MissingFields extends never ? true : ["add the missing field(s) to ALL_GRADE_RESULT_FIELDS above", MissingFields] = true;
 

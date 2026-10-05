@@ -647,3 +647,300 @@ describe("stripComments test-helper agreement (L13 behavioural probe)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// A42 W1: the tokenizer/regex AGREEMENT pins (before-state for W2). Every
+// quantity below is derived at test time from the tree by its construction
+// command; the frozen literals are the only things W2 is expected to edit.
+// ---------------------------------------------------------------------------
+
+// Independent ground truth: the TypeScript parser, never the tokenizer.
+function commentRanges(text: string, name: string): Array<[number, number]> {
+  const kind = name.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sf = ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, kind);
+  const seen = new Set<string>();
+  const out: Array<[number, number]> = [];
+  const add = (rs: ts.CommentRange[] | undefined): void => {
+    for (const r of rs ?? []) {
+      const k = r.pos + ":" + r.end;
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push([r.pos, r.end]);
+      }
+    }
+  };
+  const visit = (n: ts.Node): void => {
+    if (n.kind === ts.SyntaxKind.JsxText || ts.isJSDoc(n)) return;
+    const kids = n.getChildren(sf);
+    add(ts.getLeadingCommentRanges(text, n.getFullStart()));
+    if (kids.length === 0 || n.kind === ts.SyntaxKind.EndOfFileToken) {
+      add(ts.getTrailingCommentRanges(text, n.end));
+      return;
+    }
+    for (const c of kids) visit(c);
+  };
+  visit(sf);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+function groundTruth(text: string, name: string): string {
+  let out = "";
+  let at = 0;
+  for (const [a, b] of commentRanges(text, name)) {
+    if (a < at) continue;
+    out += text.slice(at, a);
+    at = b;
+  }
+  return out + text.slice(at);
+}
+
+const noCr = (s: string): string => s.split(CR).join("");
+
+function walkSourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...walkSourceFiles(full));
+    else if (entry.isFile() && /\.tsx?$/.test(entry.name)) found.push(full);
+  }
+  return found;
+}
+
+const BLOCK_RE = new RegExp("/\\*[\\s\\S]*?\\*/", "g");
+
+interface CorpusRow {
+  rel: string;
+  text: string;
+  truth: string;
+  mismatch: boolean;
+  corruptible: boolean;
+}
+
+let corpusCache: CorpusRow[] | null = null;
+function corpus(): CorpusRow[] {
+  if (corpusCache) return corpusCache;
+  corpusCache = walkSourceFiles(SRC_DIR).map((abs): CorpusRow => {
+    const rel = toRepoRelative(abs);
+    const text = fs.readFileSync(abs, "utf8");
+    const truth = groundTruth(text, rel);
+    const mismatch = noCr(productionTokenizer(text)) !== noCr(truth);
+    let corruptible = false;
+    if (!rel.includes(".test.") && text.includes("/*")) {
+      const mask = new Uint8Array(text.length);
+      for (const [a, b] of commentRanges(text, rel)) mask.fill(1, a, b);
+      BLOCK_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while (!corruptible && (m = BLOCK_RE.exec(text))) {
+        for (let i = m.index; i < m.index + m[0].length; i++) {
+          if (!mask[i] && !/\s/.test(text[i])) {
+            corruptible = true;
+            break;
+          }
+        }
+      }
+    }
+    return { rel, text, truth, mismatch, corruptible };
+  });
+  return corpusCache;
+}
+
+const A42_TARGETS: readonly string[] = [
+  "src/app/actions/prompt-announcement-draft.ts",
+  "src/app/actions/prompt-announcement-post.ts",
+  "src/app/components/canvas-tab/announcements-panel.tsx",
+  "src/app/components/canvas-tab/promptAnnouncementDraft.ts",
+  "src/lib/prompt-announcement-types.ts",
+];
+
+const A42_MIME_TRIGGERS: readonly string[] = [
+  "src/app/account/voice-style/page.tsx",
+  "src/app/components/caption-studio/VideoSource.tsx",
+  "src/app/components/course-planning/SyllabusMode.tsx",
+  "src/app/components/courses/AddCourseForm.tsx",
+  "src/app/components/courses/TextbookPhotoModal.tsx",
+  "src/app/components/recording/SourceDevicesPanel.tsx",
+  "src/app/components/recording/SpeedPanel.tsx",
+  "src/app/components/slide-studio/VideoModeSection.tsx",
+  "src/app/components/slide-studio/VoiceCloneSection.tsx",
+];
+
+const A42_CORRUPTIBLE: readonly string[] = [
+  "src/app/account/integrations/LmsCredentialSection.tsx",
+  "src/app/account/voice-style/page.tsx",
+  "src/app/actions/github-repos.ts",
+  "src/app/actions/grading-submission-grade.ts",
+  "src/app/actions/live-class.ts",
+  "src/app/actions/lms-generation.ts",
+  "src/app/components/content-tab/modules/useLmsGeneration.ts",
+  "src/app/components/content-tab/utils.ts",
+  "src/app/components/courses/AddCourseForm.tsx",
+  "src/app/components/courses/TextbookPhotoModal.tsx",
+  "src/app/components/grading-recording/grading-feedback-prompt.ts",
+  "src/app/components/recording/SpeedPanel.tsx",
+  "src/app/components/TopBar.tsx",
+  "src/app/components/workflows/run-input/run-input-file-preview.ts",
+  "src/app/components/workflows/WorkflowDescription.tsx",
+  "src/app/page.tsx",
+  "src/lib/course-intel/join.ts",
+  "src/lib/github-test-workflow.ts",
+  "src/lib/google-oauth.ts",
+  "src/lib/grade/submission-kind.ts",
+  "src/tools/backlog/glob-intersect.ts",
+];
+
+const MIME_ATTR_RE = /accept="[^"]*(image|video|audio|text|application)\/\*|accept="\*\/\*"/;
+
+describe("A42 W1 O1: the string-aware tokenizer equals the TypeScript-parser ground truth", () => {
+  it("the frozen named sets equal their by-construction derivations (STOP-and-report on disagreement, never edit to match)", () => {
+    const rows = corpus();
+    const triggers = rows.filter((r) => !r.rel.includes(".test.") && MIME_ATTR_RE.test(r.text)).map((r) => r.rel);
+    expect([...triggers].sort()).toEqual([...A42_MIME_TRIGGERS].sort());
+    expect(triggers.length).toBe(9);
+    const corruptible = rows.filter((r) => r.corruptible).map((r) => r.rel);
+    expect([...corruptible].sort()).toEqual([...A42_CORRUPTIBLE].sort());
+    expect(corruptible.length).toBe(21);
+    for (const t of A42_TARGETS) expect(rows.some((r) => r.rel === t), t).toBe(true);
+  }, 120_000);
+
+  it("tokenizer output equals ground truth on the 5 targets + 9 MIME triggers + 21 corruptible files", () => {
+    const named = new Set([...A42_TARGETS, ...A42_MIME_TRIGGERS, ...A42_CORRUPTIBLE]);
+    const rows = corpus().filter((r) => named.has(r.rel));
+    expect(rows.length).toBe(named.size);
+    const bad = rows.filter((r) => r.mismatch).map((r) => r.rel);
+    expect(bad, "tokenizer differs from the parser truth on named file(s)").toEqual([]);
+    // Non-vacuity: the truth must actually remove a comment somewhere, else
+    // "equal" could mean "both left the raw file alone".
+    expect(rows.some((r) => noCr(r.truth) !== noCr(r.text))).toBe(true);
+  }, 120_000);
+
+  it("corpus-wide: no src/**/*.{ts,tsx} file has a tokenizer/truth mismatch", () => {
+    const rows = corpus();
+    expect(rows.length).toBeGreaterThan(1000);
+    const mismatches = rows.filter((r) => r.mismatch).map((r) => r.rel);
+    expect(
+      mismatches,
+      "a NEW tokenizer limit (e.g. a regex literal after a bare ')' or '}') is STOP-and-report, not an expected edit"
+    ).toEqual([]);
+  }, 120_000);
+});
+
+// O2: extract each scanner's ACTUAL strip expressions from the file itself.
+const STRIP_NAMES = new Set(["stripComments", "stripCommentsForScan"]);
+
+function extractStripExpressions(fileText: string): StripFn[] {
+  const transpiled = ts.transpileModule(fileText, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+  }).outputText;
+  const sf = ts.createSourceFile("extracted.js", transpiled, ts.ScriptTarget.ES2019, true);
+  const fns: StripFn[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name && STRIP_NAMES.has(node.name.text)) {
+      const fn = toCallable(node.getText(sf));
+      if (fn) fns.push(fn);
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const init = node.initializer.getText(sf);
+      if (STRIP_NAMES.has(node.name.text)) {
+        const fn = toCallable(init);
+        if (fn) fns.push(fn);
+      } else if (
+        node.name.text === "stripped" &&
+        init.includes("\\*\\/") &&
+        init.includes("\\/\\/") &&
+        /\bsource\b/.test(init)
+      ) {
+        try {
+          fns.push(new Function("source", "return (" + init + ");") as StripFn);
+        } catch {
+          // an unevaluable initializer is not counted; the count pin then fails loudly
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return fns;
+}
+
+const A42_SCANNER_EXPRESSION_COUNTS: ReadonlyArray<readonly [string, number]> = [
+  ["src/app/actions/prompt-announcement-draft.test.ts", 2],
+  ["src/app/actions/prompt-announcement-post.test.ts", 1],
+  ["src/app/components/canvas-tab/announcements-panel.wiring.test.ts", 2],
+  ["src/app/components/canvas-tab/promptAnnouncementDraft.test.ts", 1],
+  ["src/lib/prompt-announcement-types.test.ts", 1],
+];
+
+const D1_FIXTURE =
+  'const a = <input accept="image/*" />;' + LF + "const k = D1_SURVIVOR_TOKEN;" + LF + "/* real tail */" + LF + "const z = 1;";
+const D2_FIXTURE = "// scan dir/* here" + LF + "const k = D2_SURVIVOR_TOKEN;" + LF + "const q = 1; /* tail */" + LF;
+const D3_FIXTURE = 'const u = "https://x.example"; const k = D3_SURVIVOR_TOKEN;';
+const A42_DEFECT_FIXTURES: ReadonlyArray<readonly [string, string]> = [
+  ["D1_SURVIVOR_TOKEN", D1_FIXTURE],
+  ["D2_SURVIVOR_TOKEN", D2_FIXTURE],
+  ["D3_SURVIVOR_TOKEN", D3_FIXTURE],
+];
+
+describe("A42 W1 O2: the five scanners' real strip expressions lose a marker the tokenizer keeps", () => {
+  it("pins the per-file strip-expression counts (the W2 tripwire: 2+1+2+1+1 = 7)", () => {
+    let total = 0;
+    for (const [file, expected] of A42_SCANNER_EXPRESSION_COUNTS) {
+      const found = extractStripExpressions(fs.readFileSync(path.join(REPO_ROOT, file), "utf8")).length;
+      expect(found, file).toBe(expected);
+      total += found;
+    }
+    expect(total).toBe(7);
+  });
+
+  it("every extracted expression loses the D1, D2 and D3 markers (documented finding, RED the moment a copy becomes safe)", () => {
+    for (const [file] of A42_SCANNER_EXPRESSION_COUNTS) {
+      const fns = extractStripExpressions(fs.readFileSync(path.join(REPO_ROOT, file), "utf8"));
+      fns.forEach((fn, idx) => {
+        for (const [marker, fixture] of A42_DEFECT_FIXTURES) {
+          expect(fn(fixture), `${file} expression #${idx} should lose ${marker}`).not.toContain(marker);
+        }
+      });
+    }
+  });
+
+  it("the production tokenizer keeps every marker the regex pipelines lose", () => {
+    for (const [marker, fixture] of A42_DEFECT_FIXTURES) {
+      expect(productionTokenizer(fixture), marker).toContain(marker);
+    }
+    expect(productionTokenizer(D2_FIXTURE)).not.toContain("tail");
+  });
+
+  it("KNOWN tokenizer limit (frozen, deliberate): a JSX-text apostrophe opens a string, so a trailing comment survives", () => {
+    const fixture = "const a = () => <p>Don't</p>; // APOS_COMMENT_MARKER";
+    expect(productionTokenizer(fixture)).toContain("APOS_COMMENT_MARKER");
+  });
+
+  it("KNOWN tokenizer limit (frozen, deliberate): a '/' after a bare ')' reads as division, so a trailing comment survives", () => {
+    const fixture = "if (x) /'/.test(y); // DIV_COMMENT_MARKER" + LF + 'const k = "a";';
+    expect(productionTokenizer(fixture)).toContain("DIV_COMMENT_MARKER");
+  });
+});
+
+// O3 (count-free): the caret-spelled block-comment regex set is exactly the
+// five scanners. The whole-corpus total is a moving target and is NOT pinned.
+const CARET_BLOCK_NEEDLE = "[^]" + "*?\\*\\/";
+const A42_CARET_SPELLED_FILES: readonly string[] = A42_SCANNER_EXPRESSION_COUNTS.map(([f]) => f);
+
+function hasCaretBlockRegex(text: string): boolean {
+  return text.includes(CARET_BLOCK_NEEDLE);
+}
+
+describe("A42 W1 O3: the caret-spelled block-comment regex set is exactly the five scanners", () => {
+  it("canary: the enumerator matches a caret block regex and not a regex lacking the closer", () => {
+    expect(hasCaretBlockRegex("x.replace(/\\/\\*" + CARET_BLOCK_NEEDLE + "/g, '')")).toBe(true);
+    expect(hasCaretBlockRegex("x.replace(/\\/\\*" + "[^]" + "*?/g, '')")).toBe(false);
+  });
+
+  it("the set of *.test.ts files with a caret block regex equals the frozen five (W2 shrinks it; update in the same commit)", () => {
+    const found = walkTestFiles(SRC_DIR)
+      .map(toRepoRelative)
+      .filter((rel) => rel !== PROBE_FILE_REL)
+      .filter((rel) => hasCaretBlockRegex(fs.readFileSync(path.join(REPO_ROOT, rel), "utf8")))
+      .sort();
+    expect(found).toEqual([...A42_CARET_SPELLED_FILES].sort());
+    expect(found.length).toBe(5);
+  });
+});

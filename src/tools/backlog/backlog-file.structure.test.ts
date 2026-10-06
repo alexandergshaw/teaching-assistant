@@ -106,7 +106,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // (in-my-voice vs informational toggle in the Ask AI chat modal).
 // 122 -> 123: KNOWLEDGE-SWITCH-SPEED filed 2026-10-06 - institution switch on the
 // Knowledge tab blocks on a full-body page reload; render the tree from summaries first.
-const EXPECTED_ROW_COUNT = 123;
+// 123 -> 126: three owner direct requests filed 2026-10-06 - ONE-OFF-TASKS-MOVE
+// (move the tab to a Courses rail item, resolving ONE-OFF-TASKS FORK 1),
+// COURSES-COLUMN-SEARCH (per-column search), COURSES-TABLE-SPEED (slow load).
+const EXPECTED_ROW_COUNT = 126;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

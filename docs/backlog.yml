@@ -1506,7 +1506,7 @@
   note: 'Loop: recon (shared doc) -> check -> build -> owner walk. Recon dispatched. Column selector beside the search box; default All (byte-identical). Fork: selector lists all vs only-visible columns (recommend in recon). Persist the choice.'
   question: null
 - id: 'COURSES-TABLE-SPEED'
-  state: 'actionable'
+  state: 'verification'
   kind: 'bug'
   area: 'rich-text-copy-fidelity'
   title: 'Owner 2026-10-06: "the courses table also loads really slow." Diagnose + speed up the courses table initial load (same class as KNOWLEDGE-SWITCH-SPEED - likely eager/serial/N+1 fetching of heavy per-course/per-cell data before the table can paint).'
@@ -1515,5 +1515,5 @@
   blocked_by: []
   instrument: 'Code-level diagnosis (nothing profiles here): trace the courses data-load path + who blocks first paint. Machine-checkable where the fix is a data-shape/sequencing change (table renders from the base list; heavy per-cell data deferred/parallel). FELT speed is an owner/browser walk. SHARES CoursesTable.tsx with COURSES-COLUMN-SEARCH - serialize those builds.'
   from: 'Owner request 2026-10-06 (direct chat); scoped with COURSES-COLUMN-SEARCH in docs/courses-table-search-and-speed-scope.md.'
-  note: 'Loop: recon (shared doc) -> check -> build -> owner speed walk. Recon dispatched. Highest-leverage lowest-risk fix TBD from the diagnosis (render rows immediately + lazy heavy cells / parallelize / cache). Owner pain = the table not appearing fast.'
+  note: 'Loop: recon (shared doc) -> check -> build -> owner speed walk. Recon dispatched. Highest-leverage lowest-risk fix TBD from the diagnosis (render rows immediately + lazy heavy cells / parallelize / cache). Owner pain = the table not appearing fast. SCOPE CHECKED SHIP (a8232abc); fork = Shape B (two-phase, recommended) over Shape C - proceeded on B. SHIPPED df7c2a3e (verified a27c3dd5, data-integrity weighted - no heavy-field writer fires outside the inert guard): new listCoursesLight (38 light cols, SEPARATE fn; listCourses byte-untouched) paints the table, then the 17 heavy cols merge in the background (heavyReady); heavy cells show aria-busy placeholders; inert <tbody> blocks row writers until heavyReady so a save cannot wipe real heavy data; courses.light.test pins light+heavy===COLUMNS. 2 sabotages red-then-green. COMPLETE - verification. Owner walk = the table paints noticeably sooner. ASK1 column-search builds next; it must handle heavy-column search vs heavyReady (notes/heavy cols can''t match until bodies load).'
   question: null

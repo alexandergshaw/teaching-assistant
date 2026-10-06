@@ -30,7 +30,26 @@ describe("responseMode survives the route half of the wire", () => {
 
   it("the route passes it through chatStyleBlockForMode into buildChatSystemInstruction", () => {
     expect(routeSource).toMatch(
-      /buildChatSystemInstruction\(\s*chatStyleBlockForMode\(\s*styleBlock\s*,\s*body\.responseMode\s*\)\s*\)/,
+      /buildChatSystemInstruction\(\s*chatStyleBlockForMode\(\s*styleBlock\s*,\s*body\.responseMode\s*\)/,
+    );
+  });
+});
+
+describe("formality survives the route half of the wire", () => {
+  it("the route declares formality on its RequestBody type", () => {
+    const start = routeSource.indexOf("interface RequestBody {");
+    expect(start).toBeGreaterThan(-1);
+    const end = routeSource.indexOf("\n}", start);
+    expect(routeSource.slice(start, end)).toContain("formality");
+  });
+
+  it("the route reads body.formality", () => {
+    expect(routeSource).toContain("body.formality");
+  });
+
+  it("the route threads formalityDirectiveForLevel(body.formality) into buildChatSystemInstruction", () => {
+    expect(routeSource).toMatch(
+      /buildChatSystemInstruction\([\s\S]*?formalityDirectiveForLevel\(\s*body\.formality\s*\)/,
     );
   });
 });

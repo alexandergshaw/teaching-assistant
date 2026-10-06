@@ -7,7 +7,7 @@
  * `src/app/actions/shared.ts`) and passing it in.
  */
 
-import type { ChatResponseMode } from "./types";
+import type { ChatFormality, ChatResponseMode } from "./types";
 
 /**
  * Who the model is actually talking to. Without this, an app that is wall to
@@ -38,10 +38,31 @@ export const PLAIN_TEXT_ONLY_INSTRUCTION =
  * instruction to mimic that tone — after, and therefore subordinate to, the
  * plain-text rule.
  */
-export function buildChatSystemInstruction(styleBlock: string): string {
+export function buildChatSystemInstruction(styleBlock: string, formalityDirective: string = ""): string {
   const base = `${INSTRUCTOR_AUDIENCE_INSTRUCTION}\n\n${PLAIN_TEXT_ONLY_INSTRUCTION}`;
-  if (!styleBlock) return base;
-  return `${base}${styleBlock}\n\nMimic this writing tone (word choice, rhythm, sentence length, personality) in every reply, while still strictly obeying the plain-text formatting rule above.`;
+  const styled = styleBlock
+    ? `${base}${styleBlock}\n\nMimic this writing tone (word choice, rhythm, sentence length, personality) in every reply, while still strictly obeying the plain-text formatting rule above.`
+    : base;
+  // The formality directive goes LAST so it has recency precedence over the
+  // voice/mimic clause. An empty directive leaves the output unchanged.
+  return formalityDirective ? `${styled}\n\n${formalityDirective}` : styled;
+}
+
+export const CASUAL_FORMALITY_DIRECTIVE =
+  "Register: keep replies casual and conversational, like a quick exchange between colleagues. Use contractions and short, relaxed sentences, and skip ceremony. This still obeys the plain-text formatting rule above.";
+
+export const FORMAL_FORMALITY_DIRECTIVE =
+  "Register: keep replies formal and precise, in the measured tone of professional academic correspondence. Avoid contractions, slang and colloquialisms, and prefer complete, carefully constructed sentences. This still obeys the plain-text formatting rule above.";
+
+/**
+ * The directive for a requested formality level. Only "casual" and "formal"
+ * add text; "neutral", an absent level, or anything unrecognised returns "" so
+ * every client that does not send the field behaves exactly as before.
+ */
+export function formalityDirectiveForLevel(level: ChatFormality | undefined): string {
+  if (level === "casual") return CASUAL_FORMALITY_DIRECTIVE;
+  if (level === "formal") return FORMAL_FORMALITY_DIRECTIVE;
+  return "";
 }
 
 /**

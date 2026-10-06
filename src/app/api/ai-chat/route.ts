@@ -4,9 +4,9 @@ import { routeRequest, GUIDANCE_REPLY } from "@/lib/embedded/router";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { getWritingStyleBlock } from "@/app/actions/shared";
-import { buildChatSystemInstruction, chatStyleBlockForMode } from "@/lib/chat/system-instruction";
+import { buildChatSystemInstruction, chatStyleBlockForMode, formalityDirectiveForLevel } from "@/lib/chat/system-instruction";
 import { filesToLlmPartsDetailed } from "@/lib/llm-files";
-import type { ChatMessage, ChatResponseMode } from "@/lib/chat/types";
+import type { ChatFormality, ChatMessage, ChatResponseMode } from "@/lib/chat/types";
 import { listCourses } from "@/lib/supabase/courses";
 import {
   listInstitutionPages,
@@ -87,6 +87,7 @@ interface RequestBody {
    * writing-style block, i.e. today's behaviour.
    */
   responseMode?: ChatResponseMode;
+  formality?: ChatFormality;
 }
 
 // ---------------------------------------------------------------------------
@@ -653,7 +654,10 @@ export async function POST(req: NextRequest) {
         {
           contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-          systemInstruction: buildChatSystemInstruction(chatStyleBlockForMode(styleBlock, body.responseMode)),
+          systemInstruction: buildChatSystemInstruction(
+            chatStyleBlockForMode(styleBlock, body.responseMode),
+            formalityDirectiveForLevel(body.formality),
+          ),
         },
         provider
       );

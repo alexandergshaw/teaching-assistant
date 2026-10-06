@@ -12,6 +12,9 @@ export interface ChatAttachment {
 /** How the FAB chat answers: "voice" mimics the instructor's writing style (today's behaviour), "informational" is a plain answer. */
 export type ChatResponseMode = "voice" | "informational";
 
+/** How formal the FAB chat's replies should be. "neutral" adds no directive. */
+export type ChatFormality = "casual" | "neutral" | "formal";
+
 export interface ChatMessage {
   role: "user" | "assistant";
   text: string;

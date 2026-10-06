@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { ChatResponseMode } from "./types";
+import type { ChatFormality, ChatResponseMode } from "./types";
 import {
   buildChatSystemInstruction,
   chatStyleBlockForMode,
+  formalityDirectiveForLevel,
+  CASUAL_FORMALITY_DIRECTIVE,
+  FORMAL_FORMALITY_DIRECTIVE,
   PLAIN_TEXT_ONLY_INSTRUCTION,
   INSTRUCTOR_AUDIENCE_INSTRUCTION,
 } from "./system-instruction";
@@ -62,6 +65,51 @@ describe("buildChatSystemInstruction", () => {
     for (const phrase of ["you are a student", "the user is a student", "explain to the student"]) {
       expect(lowered).not.toContain(phrase);
     }
+  });
+});
+
+describe("formalityDirectiveForLevel", () => {
+  it("casual and formal return distinct non-empty directives", () => {
+    const casual = formalityDirectiveForLevel("casual");
+    const formal = formalityDirectiveForLevel("formal");
+    expect(casual).toBe(CASUAL_FORMALITY_DIRECTIVE);
+    expect(formal).toBe(FORMAL_FORMALITY_DIRECTIVE);
+    expect(casual.length).toBeGreaterThan(0);
+    expect(formal.length).toBeGreaterThan(0);
+    expect(casual).not.toBe(formal);
+  });
+
+  it("neutral, absent and unknown levels return an empty string", () => {
+    expect(formalityDirectiveForLevel("neutral")).toBe("");
+    expect(formalityDirectiveForLevel(undefined)).toBe("");
+    expect(formalityDirectiveForLevel("garbage" as unknown as ChatFormality)).toBe("");
+  });
+});
+
+describe("buildChatSystemInstruction formality directive", () => {
+  const STYLE = "\n\nWRITING SAMPLE\nSome prose.";
+
+  it("an empty directive is byte-identical to the one-argument form", () => {
+    expect(buildChatSystemInstruction("", "")).toBe(buildChatSystemInstruction(""));
+    expect(buildChatSystemInstruction(STYLE, "")).toBe(buildChatSystemInstruction(STYLE));
+    expect(buildChatSystemInstruction("")).toBe(
+      `${INSTRUCTOR_AUDIENCE_INSTRUCTION}\n\n${PLAIN_TEXT_ONLY_INSTRUCTION}`,
+    );
+  });
+
+  it("a non-empty directive is appended last, after the mimic clause", () => {
+    const directive = formalityDirectiveForLevel("formal");
+    const result = buildChatSystemInstruction(STYLE, directive);
+    expect(result.endsWith(directive)).toBe(true);
+    expect(result.indexOf(directive)).toBeGreaterThan(result.toLowerCase().indexOf("mimic"));
+    expect(result.startsWith(buildChatSystemInstruction(STYLE))).toBe(true);
+  });
+
+  it("a non-empty directive is appended last when there is no style block", () => {
+    const directive = formalityDirectiveForLevel("casual");
+    const result = buildChatSystemInstruction("", directive);
+    expect(result.endsWith(directive)).toBe(true);
+    expect(result.startsWith(buildChatSystemInstruction(""))).toBe(true);
   });
 });
 

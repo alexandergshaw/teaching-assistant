@@ -142,6 +142,8 @@ const EXPECTED_TA_KEYS = [
   "ta-content-course-url",
   "ta-content-saved",
   "ta-course-changed",
+  "ta-courses-columns",
+  "ta-courses-search-column",
   "ta-drafts-collapsed",
   "ta-drafts-course",
   "ta-drafts-search",

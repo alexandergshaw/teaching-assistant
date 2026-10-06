@@ -115,7 +115,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // every page body via refresh(); fix = optimistic insert.
 // 128 -> 129: KNOWLEDGE-ASK-AI-INDEPENDENT filed 2026-10-06 - Ask AI persists across
 // page/institution nav + citations link out to the cited page.
-const EXPECTED_ROW_COUNT = 129;
+const EXPECTED_ROW_COUNT = 131;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

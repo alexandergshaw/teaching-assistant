@@ -1553,4 +1553,28 @@
   from: 'Owner request 2026-10-06 (direct chat).'
   note: 'Loop: recon -> check -> build -> owner walk. Recon dispatched (docs/knowledge-ask-ai-independent-scope.md). FORK F1 (query scope, the crux): a page/institution-independent Ask AI must search (a) ALL institutions [recommended, the literal reading of "regardless of institution"; needs askKnowledgeOverviewAction to go cross-institution + citations to carry their institution] vs (b) a sticky user-chosen scope decoupled from nav. PART A = pull Ask AI out of the scope-keyed useKnowledgeOverview reset so it persists across nav + mounts as a standalone always-visible section (summary likely stays per-scope). PART B = citations navigate OUT to the cited page even in another institution (switch active institution + select page). Reuses + supersedes the earlier KNOWLEDGE-ASK-AI-UNGATE direction.'
   question: null
+- id: 'KNOWLEDGE-MUTATION-LAG'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'ask-ai-modal'
+  title: 'Follow-up to KNOWLEDGE-CREATE-LAG: rename/reorder/reparent (and delete) also full-refetch every page body via refresh() (useKbTreeActions.ts rename :148-158 / reorder+reparent :208/:226 / delete :178), so those mutations lag the same way create did. Apply the optimistic-local-update pattern (they send PARTIAL updates, so the local list can be updated in place instead of a full listInstitutionPagesAction reload).'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Reuse the KNOWLEDGE-CREATE-LAG model (94f6d56d): optimistic local update gated on bodiesReady with a refresh() fallback during the background-bodies window; preserve applySelection + the frozen setBodiesReady(true) count (exactly 2, invariant "flips only from a full read"). Machine-checkable = the mutation handlers update pages locally + do not call listInstitutionPagesAction in the optimistic branch (source-text wiring); felt speed is an owner walk.'
+  from: 'KNOWLEDGE-CREATE-LAG recon (ad4a9be4) R3 / check (ad9eee6f); filed 2026-10-06.'
+  note: 'Loop: recon -> check -> build. Feasibility (per the create-lag recon): rename HIGH, reorder/reparent MEDIUM, delete LOW/RISKY (server cascade - deleteInstitutionPageAndAttachments; may keep refresh() for delete). Recon decides which mutations to convert and whether delete stays on refresh. Shares useKbPageTree/useKbTreeActions/KnowledgeTab with KNOWLEDGE-ASK-AI-INDEPENDENT - serialize builds on those files.'
+  question: null
+- id: 'CHATBOT-MODAL-VISUAL'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06: the chatbot modal needs an aesthetic overhaul. A VISUAL/look-and-feel overhaul of the app-wide chat FAB window (AiChatWindow.tsx + AiChatFab.tsx + its CSS module) - NOT a functional change (the chat flow, the voice toggle shipped 68982439, Enter-to-send, context strips, tone chips all work). Reuse the app visual language (professional, modern, minimal, no emojis per the UI/UX standard); do not regress the sticky composer, the ResponseModeStrip, the no-sample chip, or the knowledge-context strips.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Nothing renders under vitest, so machine-checkable = CSS-class/structure pins (classes applied + the css-module class guard / orphan ratchet green; composer stickiness + the ResponseModeStrip/tone-chip structure preserved) + file-size ceiling (AiChatWindow 978 / AiChatFab 943 - near-ish; a CSS-heavy overhaul may need care or an extraction). The LOOK is an OWNER/BROWSER walk. Recon must inventory the current AiChatWindow DOM/CSS, name what "doesn''t look good", and survey the app visual language (the grading-chat + repo-header overhauls set the frame-as-card direction).'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'Loop: UX+architect scope/recon -> check -> build -> owner walk. Token-efficient pipeline: UX primary + architect for layout; data/admin/security/SRE N/A for a CSS overhaul. DISJOINT from KNOWLEDGE-ASK-AI-INDEPENDENT (that is the knowledge-tab Ask AI panel; this is the app-wide FAB AiChatWindow) and from KNOWLEDGE-MUTATION-LAG. Watch the css-module class guard + any orphan ratchet over the chat CSS; preserve the VH-style structure pins if any exist on the chat window.'
+  question: null
 

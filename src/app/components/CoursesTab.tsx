@@ -16,6 +16,8 @@ import {
   syncAllCoursesCalendarAction,
   type SyncAllCoursesCalendarResult,
 } from "../actions";
+import { filterCoursesBySearch, parseSearchColumn, type SearchColumn } from "@/lib/courses-table-search";
+import { parseColumnSet, type SortContext } from "@/lib/courses-table-helpers";
 import { downloadDocx } from "@/lib/courses-tab-helpers";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
@@ -36,6 +38,8 @@ import { useCourseImportActions } from "./courses/useCourseImportActions";
 import { useInlineFieldSave } from "./courses/useInlineFieldSave";
 import CoursesTable from "./courses/CoursesTable";
 import AddCourseForm from "./courses/AddCourseForm";
+
+const SEARCH_COLUMN_KEY = "ta-courses-search-column";
 
 export interface CoursesTabProps {
   onNavigate: (tab: "course-planning" | "version-control" | "workflows") => void;
@@ -73,6 +77,25 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
   } = useCoursesData();
 
   const [search, setSearch] = useState("");
+  // Which column the search is scoped to ("all" = the legacy global search).
+  // Lazy-initialized from localStorage like CoursesTable's own persisted
+  // state; validated against the currently visible columns.
+  const [searchColumn, setSearchColumnState] = useState<SearchColumn>(() =>
+    typeof window === "undefined"
+      ? "all"
+      : parseSearchColumn(
+          localStorage.getItem(SEARCH_COLUMN_KEY),
+          parseColumnSet(localStorage.getItem("ta-courses-columns"))
+        )
+  );
+  const setSearchColumn = (column: SearchColumn) => {
+    setSearchColumnState(column);
+    try {
+      localStorage.setItem(SEARCH_COLUMN_KEY, column);
+    } catch {
+      // Persistence is a convenience; the in-memory choice still applies.
+    }
+  };
   const [syncingAllCalendars, setSyncingAllCalendars] = useState(false);
   const [calendarSyncResult, setCalendarSyncResult] = useState<SyncAllCoursesCalendarResult | null>(null);
   const [formState, setFormState] = useState<{ mode: "new" } | { mode: "edit"; course: Course } | null>(null);
@@ -112,27 +135,11 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
   });
   const { saveField, savePatch } = useInlineFieldSave(onCourseUpdated, setError);
 
-  const query = search.trim().toLowerCase();
-  const filteredCourses = courses.filter((c) => {
-    if (!query) return true;
-    const hay = [
-      c.name,
-      c.courseCode,
-      c.term,
-      c.institution,
-      c.textbook,
-      c.notes,
-      c.topics,
-      c.csvName,
-      c.githubOrg,
-      ...c.repos.map((r) => r.repo),
-      ...c.integrations.map((i) => i.name),
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return hay.includes(query);
-  });
+  const sortCtx: SortContext = {
+    syllabusNameById: new Map(syllabi.map((s) => [s.id, s.name])),
+    syllabusTemplateNameById: new Map(templates.map((t) => [t.id, t.name])),
+  };
+  const filteredCourses = filterCoursesBySearch(courses, search, searchColumn, sortCtx);
 
   // How long the arrived-at row stays tinted. Long enough to find with the
   // eye after the scroll settles, short enough that it reads as "here it is"
@@ -349,6 +356,8 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         onNewCourse={() => setFormState({ mode: "new" })}
         search={search}
         onSearchChange={setSearch}
+        searchColumn={searchColumn}
+        onSearchColumnChange={setSearchColumn}
         totalCourseCount={courses.length}
         syllabi={syllabi}
         syllabusTemplates={templates}

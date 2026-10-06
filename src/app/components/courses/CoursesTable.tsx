@@ -6,6 +6,7 @@
 // column-visibility dropdown, and per-row inline editing (CourseRow).
 import { useEffect, useId, useRef, useState } from "react";
 import Button from "@mui/material/Button";
+import Select from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
@@ -43,6 +44,7 @@ import { CELL_COLUMN_LABELS } from "@/lib/courses-table-labels";
 import { syncCourseCalendarAction } from "@/app/actions";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import { heavyReadReady } from "@/lib/courses-hydration";
+import type { SearchColumn } from "@/lib/courses-table-search";
 import CourseRow from "./CourseRow";
 import CellMenu, { type CellMenuItem } from "./CellMenu";
 import styles from "../../page.module.css";
@@ -137,6 +139,9 @@ export interface CoursesTableProps {
   onNewCourse: () => void;
   search: string;
   onSearchChange: (value: string) => void;
+  /** Which column the search is scoped to; "all" is the legacy global search. */
+  searchColumn: SearchColumn;
+  onSearchColumnChange: (column: SearchColumn) => void;
   totalCourseCount: number;
   syllabi: FinalizedSyllabusMeta[];
   syllabusTemplates: SyllabusTemplateMeta[];
@@ -190,6 +195,8 @@ export default function CoursesTable({
   onNewCourse,
   search,
   onSearchChange,
+  searchColumn,
+  onSearchColumnChange,
   totalCourseCount,
   syllabi,
   syllabusTemplates,
@@ -285,6 +292,9 @@ export default function CoursesTable({
       localStorage.setItem(COLUMNS_KEY, serializeColumnSet(next));
       return next;
     });
+    // Hiding the column the search is scoped to would leave it silently
+    // scoped to an invisible column, so fall back to the global search.
+    if (searchColumn === id) onSearchColumnChange("all");
   };
 
   const sortIndicator = (field: SortField) => (sort.field === field ? (sort.direction === "asc" ? " ▲" : " ▼") : "");
@@ -512,6 +522,22 @@ export default function CoursesTable({
           </Button>
         )}
         {totalCourseCount > 0 && (
+          <Select
+            size="small"
+            value={searchColumn}
+            onChange={(e) => onSearchColumnChange(e.target.value as SearchColumn)}
+            aria-label="Search in"
+          >
+            <MenuItem value="all">All columns</MenuItem>
+            <MenuItem value="name">{CELL_COLUMN_LABELS.name}</MenuItem>
+            {orderedVisibleColumns.map((id) => (
+              <MenuItem key={id} value={id}>
+                {CELL_COLUMN_LABELS[id]}
+              </MenuItem>
+            ))}
+          </Select>
+        )}
+        {totalCourseCount > 0 && (
           <TextField
             size="small"
             type="search"
@@ -520,6 +546,11 @@ export default function CoursesTable({
             onChange={(e) => onSearchChange(e.target.value)}
             sx={{ flex: "1 1 220px" }}
           />
+        )}
+        {totalCourseCount > 0 && searchColumn !== "all" && !heavyReadReady(heavyReady, searchColumn) && (
+          <span role="status" style={{ fontSize: "0.8125rem" }}>
+            Still loading content - searching {CELL_COLUMN_LABELS[searchColumn]} once it finishes
+          </span>
         )}
         <Button variant="text" size="small" onClick={(e) => setColumnsMenuAnchor(e.currentTarget)}>
           Columns

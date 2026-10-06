@@ -7,6 +7,8 @@
  * `src/app/actions/shared.ts`) and passing it in.
  */
 
+import type { ChatResponseMode } from "./types";
+
 /**
  * Who the model is actually talking to. Without this, an app that is wall to
  * wall course material gives the model nothing to infer the reader from
@@ -40,4 +42,13 @@ export function buildChatSystemInstruction(styleBlock: string): string {
   const base = `${INSTRUCTOR_AUDIENCE_INSTRUCTION}\n\n${PLAIN_TEXT_ONLY_INSTRUCTION}`;
   if (!styleBlock) return base;
   return `${base}${styleBlock}\n\nMimic this writing tone (word choice, rhythm, sentence length, personality) in every reply, while still strictly obeying the plain-text formatting rule above.`;
+}
+
+/**
+ * The style block to use for a requested response mode. Only an explicit
+ * "informational" drops it; an absent or unrecognised mode keeps it, so every
+ * client that does not send the field behaves exactly as before.
+ */
+export function chatStyleBlockForMode(styleBlock: string, mode: ChatResponseMode | undefined): string {
+  return mode === "informational" ? "" : styleBlock;
 }

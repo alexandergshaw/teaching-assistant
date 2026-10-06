@@ -9,6 +9,9 @@ export interface ChatAttachment {
 }
 
 /** A single turn in an AI chat conversation. */
+/** How the FAB chat answers: "voice" mimics the instructor's writing style (today's behaviour), "informational" is a plain answer. */
+export type ChatResponseMode = "voice" | "informational";
+
 export interface ChatMessage {
   role: "user" | "assistant";
   text: string;

@@ -4,9 +4,9 @@ import { routeRequest, GUIDANCE_REPLY } from "@/lib/embedded/router";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { getWritingStyleBlock } from "@/app/actions/shared";
-import { buildChatSystemInstruction } from "@/lib/chat/system-instruction";
+import { buildChatSystemInstruction, chatStyleBlockForMode } from "@/lib/chat/system-instruction";
 import { filesToLlmPartsDetailed } from "@/lib/llm-files";
-import type { ChatMessage } from "@/lib/chat/types";
+import type { ChatMessage, ChatResponseMode } from "@/lib/chat/types";
 import { listCourses } from "@/lib/supabase/courses";
 import {
   listInstitutionPages,
@@ -82,6 +82,11 @@ interface RequestBody {
    * `knowledgeContext` response field - completely unchanged.
    */
   selectionContextText?: string;
+  /**
+   * Optional answer mode. Absent (or anything but "informational") keeps the
+   * writing-style block, i.e. today's behaviour.
+   */
+  responseMode?: ChatResponseMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -648,7 +653,7 @@ export async function POST(req: NextRequest) {
         {
           contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-          systemInstruction: buildChatSystemInstruction(styleBlock),
+          systemInstruction: buildChatSystemInstruction(chatStyleBlockForMode(styleBlock, body.responseMode)),
         },
         provider
       );

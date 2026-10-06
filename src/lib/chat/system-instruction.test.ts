@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import type { ChatResponseMode } from "./types";
 import {
   buildChatSystemInstruction,
+  chatStyleBlockForMode,
   PLAIN_TEXT_ONLY_INSTRUCTION,
   INSTRUCTOR_AUDIENCE_INSTRUCTION,
 } from "./system-instruction";
@@ -60,5 +62,31 @@ describe("buildChatSystemInstruction", () => {
     for (const phrase of ["you are a student", "the user is a student", "explain to the student"]) {
       expect(lowered).not.toContain(phrase);
     }
+  });
+});
+
+describe("chatStyleBlockForMode", () => {
+  const STYLE = "\n\nWRITING SAMPLE: terse and dry.";
+
+  it("informational drops the style block", () => {
+    expect(chatStyleBlockForMode(STYLE, "informational")).toBe("");
+  });
+
+  it("voice keeps the style block", () => {
+    expect(chatStyleBlockForMode(STYLE, "voice")).toBe(STYLE);
+  });
+
+  it("an absent mode keeps the style block (every existing client)", () => {
+    expect(chatStyleBlockForMode(STYLE, undefined)).toBe(STYLE);
+  });
+
+  it("an unknown mode keeps the style block (backward compatible)", () => {
+    expect(chatStyleBlockForMode(STYLE, "garbage" as unknown as ChatResponseMode)).toBe(STYLE);
+  });
+
+  it("an empty style block stays empty in every mode", () => {
+    expect(chatStyleBlockForMode("", "informational")).toBe("");
+    expect(chatStyleBlockForMode("", "voice")).toBe("");
+    expect(chatStyleBlockForMode("", undefined)).toBe("");
   });
 });

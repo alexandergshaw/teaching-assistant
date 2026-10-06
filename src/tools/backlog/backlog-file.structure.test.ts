@@ -104,7 +104,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 120 -> 122: two owner direct requests filed 2026-10-06 - KNOWLEDGE-ASK-AI-UNGATE
 // (Ask AI no longer hidden until the summary, shipped a441617f) + ASK-AI-VOICE-TOGGLE
 // (in-my-voice vs informational toggle in the Ask AI chat modal).
-const EXPECTED_ROW_COUNT = 122;
+// 122 -> 123: KNOWLEDGE-SWITCH-SPEED filed 2026-10-06 - institution switch on the
+// Knowledge tab blocks on a full-body page reload; render the tree from summaries first.
+const EXPECTED_ROW_COUNT = 123;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

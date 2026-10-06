@@ -1469,3 +1469,15 @@
   from: 'Owner request 2026-10-06 (direct chat), taken mid-turn after KNOWLEDGE-ASK-AI-UNGATE.'
   note: 'Loop: UX+architect recon -> check -> (notes -> check) -> build -> owner walk. Recon dispatched (docs/ask-ai-voice-toggle-scope.md). FORKS riding to owner: F1 target modal (recommend the app-wide chat FAB AiChatFab.tsx - the "chat bot that opens up"; vs courses/AskAiModal.tsx vs the inline knowledge Ask AI); F2 no-writing-sample case (recommend disable the voice toggle + link to the voice-style page); F3 default mode (recommend informational, so nothing changes for existing users until they opt into voice). Persist the toggle (ta- key). AiChatFab is 924 lines - check ceiling headroom / extraction. Reuses the writing-style profile (do not invent a new voice system; in-house AI only).'
   question: null
+- id: 'KNOWLEDGE-SWITCH-SPEED'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06: switching the institution on the Knowledge tab is slow to show the pages ("it takes a while for the pages to load in ... whenever i switch the institution"). Measured cause: on institution switch the tab reloads ALL pages WITH FULL BODIES (listInstitutionPagesAction, knowledge-base.ts:27, via useKbPageTree) before the tree can render, but the sidebar tree only needs TITLES; the full-body payload (bodies can embed attachments) blocks the first paint.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Nothing profiles under vitest/no live DB, so the diagnosis is code-level and the fix is testable as pure/structure: pin that the tree render no longer depends on bodies (builds from the already-existing body-less listInstitutionPageSummariesAction/InstitutionPageSummary) and that bodies load on-demand/background via getInstitutionPagesByIdsAction, with search (searchPages, KnowledgeTab.tsx:487) + hasContent (useKnowledgeOverview) + PageBody degrading gracefully while bodies are pending. The FELT switch speed is an owner/browser walk.'
+  from: 'Owner request 2026-10-06 (direct chat), two messages (initial-load then clarified to institution-switch).'
+  note: 'Loop: data/architect recon -> check -> (notes -> check) -> build -> owner speed walk. Recon dispatched (docs/knowledge-switch-speed-scope.md). Reuse the EXISTING faster reads (listInstitutionPageSummariesAction titles-only + getInstitutionPagesByIdsAction on-demand bodies) - the Recording picker already uses them; do NOT invent a new query. RECOMMENDED shape: summaries-first (instant tree render on switch) + background/on-demand bodies, keeping search/hasContent/PageBody working as bodies land. Fork rides to owner (summaries-first+background vs on-demand-only+server-side-search vs per-institution cache). The owner pain is the TREE not appearing fast on switch - prioritize instant tree render.'
+  question: null

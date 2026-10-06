@@ -1494,7 +1494,7 @@
   note: 'Loop: recon -> check -> build (one wave, a move) -> owner walk. Recon dispatched (docs/one-off-tasks-move-scope.md). Determines the exact rail structure (new TASKS_VIEW chip vs a new coursesSection peer) that makes one-off-tasks a sibling of courses+term-setup+daily-weekly. REVERSES W1 top-level registration; keeps W2/W3. SCOPE CHECKED SHIP (afe121d5; 1 blocker = missed canary tab-sections.test.ts:48 COURSES_SECTION_ORDER, folded into the build). SHIPPED a6827bf6: new CoursesSection oneoff + rail chip + page.tsx courses-branch render (TabShell kept); removed from top-level; LOAD-BEARING retired alias one-off-tasks -> courses/oneoff; all canaries bumped incl. :48 + C7 reachability (cannot ship blank) + C8/C9; component + data layer untouched; tsc/eslint/11 test files green. Deviation: url-state.test.ts now exactly 1000 lines (a later edit must split it first). Moved to verification; owner walk = the rail chip renders + the stored-tab reload redirect works.'
   question: null
 - id: 'COURSES-COLUMN-SEARCH'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'rich-text-copy-fidelity'
   title: 'Owner 2026-10-06: "give me the ability to search for a specific column in the courses table." Today the courses table has a GLOBAL search; add the ability to scope the search to a CHOSEN column (default All = today, byte-identical).'
@@ -1503,7 +1503,7 @@
   blocked_by: []
   instrument: 'Reuse the existing column system (ColumnId/ALL_COLUMN_IDS, CellColumnId/CELL_COLUMN_LABELS, cellTextValue src/lib/cell-copy.ts:84). Machine-checkable = a pure filter over (courses, search, searchColumn): All == today result; a specific column matches only that column cellTextValue (frozen oracle) + the persisted ta- key. Rendered selector is an owner walk. SHARES CoursesTable.tsx with COURSES-TABLE-SPEED - serialize those builds.'
   from: 'Owner request 2026-10-06 (direct chat); scoped with COURSES-TABLE-SPEED in docs/courses-table-search-and-speed-scope.md.'
-  note: 'Loop: recon (shared doc) -> check -> build -> owner walk. Recon dispatched. Column selector beside the search box; default All (byte-identical). Fork: selector lists all vs only-visible columns (recommend in recon). Persist the choice.'
+  note: 'Loop: recon (shared doc) -> check -> build -> owner walk. Recon dispatched. Column selector beside the search box; default All (byte-identical). Fork resolved: selector lists VISIBLE columns + Name + All (recommended). SCOPE CHECKED SHIP (a8232abc). SHIPPED d999dbfc: new pure leaf courses-table-search.ts (filterCoursesBySearch; "all" = the legacy hay predicate moved VERBATIM, byte-identical - frozen-oracle proven via discriminating cases; a named column matches only its cellTextValue); CoursesTab persists ta-courses-search-column + validates/resets on hidden column; CoursesTable renders a MUI Select; heavy-column-selected-while-!heavyReady shows a loading hint (reuses the speed fix''s heavyReadReady). 5 sabotages red-then-green; 256 tests green; load path untouched. COMPLETE - verification. Owner walk = the Select renders/reads right beside the search box.'
   question: null
 - id: 'COURSES-TABLE-SPEED'
   state: 'verification'

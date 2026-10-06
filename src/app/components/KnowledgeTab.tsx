@@ -59,6 +59,7 @@ import ParentPicker from "./knowledge/ParentPicker";
 import AttachmentsPanel from "./knowledge/AttachmentsPanel";
 import PageBody from "./knowledge/PageBody";
 import KnowledgeBulkBar from "./knowledge/KnowledgeBulkBar";
+import KnowledgeSearchPanel from "./knowledge/KnowledgeSearchPanel";
 import KnowledgeOverviewPanel from "./knowledge/KnowledgeOverviewPanel";
 import { scopeHasDescendants } from "@/lib/knowledge-overview-scope";
 import { useKbPageTree } from "./knowledge/useKbPageTree";
@@ -605,53 +606,15 @@ export default function KnowledgeTab({
       <div className={styles.kbLayout}>
         {/* Left pane: search, toolbar, tree */}
         <div className={styles.kbTreePane}>
-          <TextField
-            size="small"
-            placeholder={`Search ${active} pages`}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            fullWidth
+          <KnowledgeSearchPanel
+            active={active}
+            search={search}
+            onSearchChange={setSearch}
+            searchHits={searchHits}
+            selectedIds={kbSelection.selected}
+            onToggle={kbSelection.toggle}
+            onOpenHit={openSearchHit}
           />
-
-          {/* K2: wrapped in .kbOverlayAnchor (this file's own class - see its
-              doc comment in KnowledgeTab.module.css) so mounting/unmounting
-              this panel as the search box is typed into never pushes the
-              tree below. */}
-          <div className={kbStyles.kbOverlayAnchor}>
-            {search.trim() && (
-              <div className={`${styles.kbSearchPanel} ${kbStyles.kbOverlayCard}`}>
-                {searchHits.length === 0 ? (
-                  <p className={styles.kbTreeEmpty}>No pages match &ldquo;{search.trim()}&rdquo;.</p>
-                ) : (
-                  searchHits.map((hit) => (
-                    <div key={hit.page.id} className={kbStyles.kbSearchHitRow}>
-                      {/* K6: search used to render a hit panel with no
-                          checkboxes at all, so "select the pages matching
-                          X" was not expressible without opening each hit
-                          from the tree. Wired to the SAME selection
-                          toggle() every tree-row checkbox uses. */}
-                      <Checkbox
-                        size="small"
-                        checked={kbSelection.selected.has(hit.page.id)}
-                        onChange={() => kbSelection.toggle(hit.page.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label={`Select ${hit.page.title.trim() || "Untitled page"}`}
-                        sx={{ padding: "var(--space-1)", flexShrink: 0 }}
-                      />
-                      <button
-                        type="button"
-                        className={`${styles.kbSearchHit} ${kbStyles.kbSearchHitButton}`}
-                        onClick={() => openSearchHit(hit.page.id)}
-                      >
-                        <span className={styles.kbSearchHitTitle}>{hit.page.title.trim() || "Untitled page"}</span>
-                        <span className={styles.kbSearchHitSnippet}>{hit.snippet || "No content."}</span>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
 
           <div className={styles.kbTreeToolbar}>
             <Button

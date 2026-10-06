@@ -25,6 +25,7 @@ import type {
   ChatMessage,
   ChatSelectionContext,
   ChatToneStatus,
+  ChatResponseMode,
 } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { OPEN_AI_CHAT_EVENT, parseOpenChatDetail } from "@/lib/chat/open-chat";
@@ -213,6 +214,16 @@ export default function AiChatFab() {
   // always mounted, so fetching this on mount/every render would cost a
   // request on every page load for no reason.
   const [toneStatus, setToneStatus] = useState<ChatToneStatus | null>(null);
+  // ASK-AI-VOICE-TOGGLE W2: persisted voice/informational choice (default
+  // "voice" keeps today's auto-voice for sample-having users). A voice that
+  // cannot be produced (no sample / embedded) is never requested: the sent
+  // mode is coerced to "informational". null (status not yet fetched) is not
+  // treated as disabled, to avoid a flicker; the route is base-safe anyway.
+  const [responseMode, setResponseMode] = useState<ChatResponseMode>(() =>
+    readLS<ChatResponseMode>("ask-ai-voice-mode", "voice") === "informational" ? "informational" : "voice"
+  );
+  const voiceDisabled = toneStatus !== null && toneStatus !== "active";
+  const effectiveResponseMode: ChatResponseMode = voiceDisabled ? "informational" : responseMode;
 
   // Fetch the tone status only when the chat window opens. The embedded
   // provider never calls a model (see the route), so no tone is ever
@@ -317,6 +328,7 @@ export default function AiChatFab() {
 
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
+  useEffect(() => { writeLS("ask-ai-voice-mode", responseMode); }, [responseMode]);
   useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
   useEffect(() => { writeLS("checklist-overview-open", checklistOverviewOpen); }, [checklistOverviewOpen]);
   useEffect(() => { writeLS("legibility-probe-open", legibilityProbeOpen); }, [legibilityProbeOpen]);
@@ -508,6 +520,7 @@ export default function AiChatFab() {
           sessionId: sessionIdRef.current,
           provider,
           activeInstitution,
+          responseMode: effectiveResponseMode,
           ...(knowledgeContext ? { contextPageIds: knowledgeContext.knowledgePageIds } : {}),
           // selectionContextText (C2): re-sent with EVERY message for the
           // lifetime of this open chat window, same session-scoped
@@ -548,7 +561,7 @@ export default function AiChatFab() {
     } finally {
       setLoading(false);
     }
-  }, [messages, recordPrompt, knowledgeContext, selectionContext]);
+  }, [messages, recordPrompt, knowledgeContext, selectionContext, effectiveResponseMode]);
 
   // Resolves an institution picked from the typeahead popup (AC2) into a
   // knowledgeContext covering every page under it, up to the shared cap
@@ -853,6 +866,12 @@ export default function AiChatFab() {
           placeholder="Type your message, or @ to load an institution…"
           knowledgeContextSummary={knowledgeContextSummary}
           toneStatus={toneStatus}
+          responseMode={{
+            value: responseMode,
+            onChange: setResponseMode,
+            voiceDisabled,
+            showSampleLink: toneStatus === "no-sample",
+          }}
           suggestions={suggestions}
           attachDisabled={attachDisabled}
           attachDisabledReason="The Embedded Deterministic Engine cannot read files, so attachments are turned off. Switch providers to attach files."

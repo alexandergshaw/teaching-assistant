@@ -334,6 +334,8 @@ const SAFE_FILES: readonly string[] = [
   "src/app/actions/current-events-assignments.test.ts",
   "src/app/actions/guard-overtightening.test.ts",
   "src/app/components/chat/institutionTriggerWiring.test.ts",
+  // ASK-AI-VOICE-TOGGLE W1: CRLF-safe idiom (block-comment replace, then split on \r?\n and strip // per line - never sees a CR).
+  "src/app/components/chat/responseMode.wiring.test.ts",
   // N15 W3: classic safe idiom (block-comment replace, then /\/\/.*$/gm); the m-flag $ stops before a CR, so CRLF-safe and trailing-comment-safe.
   "src/app/components/grading/gradingPictureWiring.wiring.test.ts",
   // A8 Wave C: same classic safe idiom as gradingPictureWiring above (block-comment replace, then /\/\/.*$/gm, m-flag $ stops before CR).

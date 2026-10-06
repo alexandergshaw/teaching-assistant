@@ -23,6 +23,7 @@ import {
 import InstitutionTypeahead from "./chat/InstitutionTypeahead";
 import { useInstitutionTrigger } from "./chat/useInstitutionTrigger";
 import { visuallyHidden } from "./ui/visuallyHidden";
+import ResponseModeStrip, { type ResponseModeStripProps } from "./chat/ResponseModeStrip";
 
 /** Reads a File into a base64 string (no data-URL prefix), like the voice-style upload flow. */
 function readFileAsBase64(file: File): Promise<string> {
@@ -121,6 +122,8 @@ interface AiChatWindowProps {
   /** Text for the always-mounted assertive live region - a load FAILURE
    * (item 29). Only rendered while `institutionTypeahead` is set. */
   liveAlert?: string;
+  /** Voice vs informational control (FAB chat only); omitted = no control. */
+  responseMode?: ResponseModeStripProps;
   position: { x: number; y: number };
   onHeaderMouseDown: (e: React.MouseEvent) => void;
   onSend: (text: string, attachments: ChatAttachment[]) => void;
@@ -152,6 +155,7 @@ export default function AiChatWindow({
   onClearKnowledgeContext,
   liveMessage,
   liveAlert,
+  responseMode,
   position,
   onHeaderMouseDown,
   onSend,
@@ -718,6 +722,7 @@ export default function AiChatWindow({
           contextText strip above) so the two never overlap when both are
           present. Reuses the same context-chip class/spacing; only the
           text color is overridden per state via a modifier class. */}
+      {responseMode && <ResponseModeStrip {...responseMode} />}
       {toneStatus === "active" && (
         <div
           className={`${styles.selectionChatContext} ${styles.toneStatusChip} ${styles.toneStatusChipActive}`}

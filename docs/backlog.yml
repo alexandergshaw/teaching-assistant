@@ -1445,3 +1445,27 @@
   from: 'GR-NONCANVAS-PERSIST owner decision A (folded into the next grading-chat wave) + W5 verify a8c5f576 F1 nit, 2026-10-04'
   note: 'Low-risk, non-gated, disjoint: GradingChatPanel.tsx is grading-chat (SMOOTH-GRADER + M1 both complete, slot free) and repoGradesCellEdits.ts is NOT in the Wave B write set, so this does not collide with the in-flight RG-SEARCH-STICKY Wave B build or anything else. Keep it tiny - do NOT re-open the GR-NONCANVAS persistence policy (A is decided: accept non-persistence; this only removes the stale-value DISPLAY, it does not add persistence). Loop: build -> verify (small). Sequence disjoint in time from any grading-chat / repo-grades build. SHIPPED in 8f63c116 (COMPLETE): cleanup 1 deleted loadPersisted + the two legacy-key constants (INSTRUCTIONS/RUBRIC_STORAGE_KEY), both fields start useState("") so a non-Canvas reload starts blank, no persistence added, Canvas scoped-memory path (loadChatSetupMemory/saveChatSetupMemory + CHAT_RUBRIC_MEMORY_KEY) untouched, canary stays 4 (comment names the two keys as no-longer-read); cleanup 2 rewrote the stale submittedFiles comment. 96 tests green, tsc 0 (orchestrator re-confirmed exit 0 at HEAD). Pin: no loadPersisted/no localStorage.getItem on the panel + scoped memory still present. No verify needed (dead-code deletion + comment).'
   question: null
+- id: 'KNOWLEDGE-ASK-AI-UNGATE'
+  state: 'verification'
+  kind: 'bug'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06: the Ask AI textbox on the knowledge pages should not be gated behind the summary. Observed: Ask AI was hidden until the AI summary was generated. Cause: in KnowledgeOverviewPanel the Ask AI section sat inside the overview initial loading/loadError ternary (the whole body was replaced by "Loading AI overview..." until the fetch settled, and the summary auto-generates on first view), so it read as hidden-until-summary.'
+  owns: ['src/app/components/knowledge/KnowledgeOverviewPanel.tsx']
+  verify: null
+  blocked_by: []
+  instrument: 'Nothing renders under vitest, so machine-checkable = tsc (JSX balance) + the knowledge-overview structure/storage tests staying green; the felt behavior (Ask AI visible immediately, summary loads separately) is an owner/browser walk. hasContent derives from the pages prop (useKnowledgeOverview.ts:149), not the async load, so the control is correctly enabled immediately.'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'SHIPPED a441617f: pulled the Ask AI section out of the loading/loadError ternary so it renders whenever the overview is open (gated only on hasContent, never on summary); only the SUMMARY + the Q&A history still wait on the load. No summary precondition anywhere (confirmed: the render had no summary && wrapper, the hook ask() and askKnowledgeOverviewAction have none). tsc clean, 58 knowledge/structure tests green, eslint/no-emojis/source-bytes clean. NOTE: the ungating "Ask above summary" had already shipped earlier (7da4a368); this closes the remaining loading-gate that still hid it on first view. Owner-walk residual: confirm on the live page that Ask AI shows before/without a summary.'
+  question: null
+- id: 'ASK-AI-VOICE-TOGGLE'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06 verbatim: "i need a toggle in the ask ai chat bot modal that opens up, that designates whether I need a response in my voice or whether I''m asking the chatbot a question for my own good." A two-mode toggle in the Ask AI chat modal: (1) "in my voice" - the response is drafted AS the instructor in their writing voice (something they could send); (2) "for my own good" - a plain informational answer (the current default).'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'The voice mechanism already exists and must be reused: writing-style-prompts.ts (WRITING_STYLE_PROMPTS/PROMPT_PREFIX/RESPONSE_PREFIX) + the saved writing sample via getUserStyleAction (voice-style account page), injected conditionally into the chat system prompt (src/lib/chat/system-instruction.ts). Machine-checkable = the system-instruction composition is pure (pin voice-mode injects the writing-style directive + sample, informational mode byte-identical to today, frozen oracle) + the persisted ta- key + the toggle->system-instruction wiring (source-text); the rendered toggle + felt voice quality + the live LLM response are owner-walk. attended UI reaches the LLM only via a server action.'
+  from: 'Owner request 2026-10-06 (direct chat), taken mid-turn after KNOWLEDGE-ASK-AI-UNGATE.'
+  note: 'Loop: UX+architect recon -> check -> (notes -> check) -> build -> owner walk. Recon dispatched (docs/ask-ai-voice-toggle-scope.md). FORKS riding to owner: F1 target modal (recommend the app-wide chat FAB AiChatFab.tsx - the "chat bot that opens up"; vs courses/AskAiModal.tsx vs the inline knowledge Ask AI); F2 no-writing-sample case (recommend disable the voice toggle + link to the voice-style page); F3 default mode (recommend informational, so nothing changes for existing users until they opt into voice). Persist the toggle (ta- key). AiChatFab is 924 lines - check ceiling headroom / extraction. Reuses the writing-style profile (do not invent a new voice system; in-house AI only).'
+  question: null

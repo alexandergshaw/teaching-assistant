@@ -101,7 +101,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 119 -> 120: RES-A39-3B filed 2026-10-05 from the A39 interaction-cost recon - the
 // cartridge path grades against a two-label string, not a real assignment description
 // (carved out of A39, previously unfiled per a39-census section 8 / A40 note).
-const EXPECTED_ROW_COUNT = 120;
+// 120 -> 122: two owner direct requests filed 2026-10-06 - KNOWLEDGE-ASK-AI-UNGATE
+// (Ask AI no longer hidden until the summary, shipped a441617f) + ASK-AI-VOICE-TOGGLE
+// (in-my-voice vs informational toggle in the Ask AI chat modal).
+const EXPECTED_ROW_COUNT = 122;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

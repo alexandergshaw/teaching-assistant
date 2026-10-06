@@ -1530,7 +1530,7 @@
   note: 'SHIPPED c9211e11 (inline): AttachmentsPanel body is a drop target - onDragOver (preventDefault + dashed-accent highlight) / onDragLeave (cleared only when the pointer leaves the body, not on child boundaries) / onDrop routes e.dataTransfer.files into the existing handleFiles (same auth + size/count caps as the picker); no-op while uploading or at cap. Token-only inline highlight (var(--accent)/var(--radius-sm)) - no CSS-module class, orphan ratchet untouched. tsc + eslint + attachment-embed + no-emojis + source-bytes + strip-comments green. Owner walk: dropping files actually attaches them + the highlight reads right.'
   question: null
 - id: 'KNOWLEDGE-CREATE-LAG'
-  state: 'actionable'
+  state: 'verification'
   kind: 'bug'
   area: 'ask-ai-modal'
   title: 'Owner 2026-10-06: considerable lag when creating a new knowledge page. Cause: createTopLevel/createChild (useKbTreeActions.ts:100-127) call createInstitutionPageAction then await refresh(result.page.id), and refresh (useKbPageTree.ts:196-207) does a FULL listInstitutionPagesAction reload of every page WITH BODIES - the over-fetch KNOWLEDGE-SWITCH-SPEED removed from initial load, still paid on create.'
@@ -1539,7 +1539,7 @@
   blocked_by: []
   instrument: 'createInstitutionPageAction returns the new page (result.page). Fix = optimistic insert into pages + select + expand parent instead of a full refetch, with the refreshedRef/background-bodies guard (W2 e8c745b1) so a late fetch cannot drop the just-created page, and the new empty body treated as REAL not a placeholder. Machine-checkable = the insert is a pure/state update + create no longer calls listInstitutionPagesAction (wiring); felt speed is an owner walk.'
   from: 'Owner request 2026-10-06 (direct chat); follows KNOWLEDGE-SWITCH-SPEED (same hooks).'
-  note: 'Loop: recon -> check -> build -> owner walk. Recon dispatched (docs/knowledge-create-lag-scope.md). Must reproduce refresh(selectId) selection/expansion + the post-create edit/rename UX on the optimistic path, confirm the create action returns a full page, and guard the refreshedRef/background-merge interaction. Recon also notes whether rename/reorder/reparent/delete (which also full-refetch via refresh()) deserve the same optimistic treatment or a follow-up.'
+  note: 'Loop: recon -> check -> build -> owner walk. Recon dispatched (docs/knowledge-create-lag-scope.md). Must reproduce refresh(selectId) selection/expansion + the post-create edit/rename UX on the optimistic path, confirm the create action returns a full page, and guard the refreshedRef/background-merge interaction. Recon notes rename/reorder/reparent/delete also full-refetch - DEFERRED as KNOWLEDGE-MUTATION-LAG. SCOPE CHECKED SHIP (ad9eee6f; 1 blocker = the optimistic branch must not add a 3rd setBodiesReady(true)/setLoadState - frozen count + invariant; folded into the build). SHIPPED 94f6d56d: insertCreatedPage (bodiesReady -> refreshedRef + append + applySelection, no refetch/extra setters; !bodiesReady -> refresh fallback); create actions call it instead of refresh; beginEdit + expand preserved; frozen setBodiesReady(true) stays 2; 5 sabotages red-then-green incl. the 3rd-setter one; 231 tests green; KnowledgeTab 966. COMPLETE - verification. Owner walk = creating a page feels fast + the new page opens for rename.'
   question: null
 - id: 'KNOWLEDGE-ASK-AI-INDEPENDENT'
   state: 'actionable'

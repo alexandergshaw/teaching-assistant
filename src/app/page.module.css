@@ -4068,8 +4068,8 @@ a.instFieldValue:hover {
   min-height: 300px;
   display: flex;
   flex-direction: column;
-  background: var(--field-background);
-  border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+  background: var(--card-background);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -4110,7 +4110,7 @@ a.instFieldValue:hover {
   justify-content: space-between;
   padding: var(--space-3) var(--space-3);
   background: var(--surface-subtle);
-  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
   cursor: grab;
   user-select: none;
@@ -4146,12 +4146,24 @@ a.instFieldValue:hover {
   color: var(--text-primary);
 }
 
+/* AiChatWindow-only close-icon geometry. A modifier on top of the shared
+   .selectionChatClose so LiveClassWindow's raw x and the Weekly Checklist
+   modal's Refresh/close buttons keep their current treatment. */
+.selectionChatCloseIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
 .selectionChatContext {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  background: var(--surface-subtle);
-  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 6%, transparent);
+  background: transparent;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4186,6 +4198,12 @@ a.instFieldValue:hover {
 
 .toneStatusChipLink:hover {
   color: var(--accent);
+}
+
+/* One grouped meta zone: the strips above share the card surface, and a
+   single hairline separates the whole zone from the stream. */
+.selectionChatContext + .selectionChatMessages {
+  border-top: 1px solid var(--border-soft);
 }
 
 .selectionChatMessages {
@@ -4247,6 +4265,29 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/* Per-message action rows are revealed on hover or keyboard focus (opacity,
+   so the row keeps its height and nothing shifts). Touch devices have no
+   hover, so they always show them. */
+.selectionChatMsgActionsAi,
+.selectionChatMsgActionsUser {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.selectionChatMsgGroup:hover .selectionChatMsgActionsAi,
+.selectionChatMsgGroup:hover .selectionChatMsgActionsUser,
+.selectionChatMsgGroup:focus-within .selectionChatMsgActionsAi,
+.selectionChatMsgGroup:focus-within .selectionChatMsgActionsUser {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .selectionChatMsgActionsAi,
+  .selectionChatMsgActionsUser {
+    opacity: 1;
+  }
 }
 
 .selectionChatMsgActionsAi {

@@ -50,7 +50,6 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { searchPages } from "@/lib/knowledge-base";
 import { formatRelative } from "../utils/time";
 import TabShell from "./TabShell";
 import TabHeader from "./TabHeader";
@@ -75,6 +74,8 @@ import {
   selectAllVisibleVisualState,
   describeKnowledgeContextLabel,
   includedContextPages,
+  resolveSearchHits,
+  isBodyPending,
   SHOW_ALL_SELECTED_PAGES,
 } from "./knowledge/knowledge-helpers";
 import { openChat } from "@/lib/chat/open-chat";
@@ -163,6 +164,7 @@ export default function KnowledgeTab({
   });
   const {
     pages,
+    bodiesReady,
     loadState,
     loadError,
     selectedId,
@@ -484,9 +486,11 @@ export default function KnowledgeTab({
     });
   };
 
-  const searchHits = useMemo(
-    () => (pages && search.trim() ? searchPages(pages, search) : []),
-    [pages, search]
+  // Full-text once bodies are present; title-only (with a hint) while they
+  // are still loading in the background.
+  const { hits: searchHits, titleOnly: searchTitleOnly } = useMemo(
+    () => resolveSearchHits(pages, bodiesReady, search),
+    [pages, bodiesReady, search]
   );
 
   // Shared between the empty state below and the populated picker further
@@ -550,6 +554,7 @@ export default function KnowledgeTab({
   }
 
   const controlsDisabled = !selectedId || isEditing || pendingAction !== null;
+  const bodyPending = isBodyPending(selectedPage !== null, bodiesReady);
 
   return (
     <TabShell>
@@ -611,6 +616,7 @@ export default function KnowledgeTab({
             search={search}
             onSearchChange={setSearch}
             searchHits={searchHits}
+            titleOnly={searchTitleOnly}
             selectedIds={kbSelection.selected}
             onToggle={kbSelection.toggle}
             onOpenHit={openSearchHit}
@@ -769,6 +775,7 @@ export default function KnowledgeTab({
             onAskAi={askAiAboutSelection}
             onStartRecording={startRecordingWithSelection}
             onStartGrading={startGradingWithSelection}
+            bodiesReady={bodiesReady}
             bulkDelete={bulkDelete}
           />
 
@@ -802,7 +809,7 @@ export default function KnowledgeTab({
                   set's to edit) centers its own content and sets its own
                   min-height, which would shrink-wrap and center this panel
                   too if it were nested inside instead. */}
-              {loadState === "idle" && !isEditing && pages && pages.length > 0 && (
+              {loadState === "idle" && bodiesReady && !isEditing && pages && pages.length > 0 && (
                 <KnowledgeOverviewPanel
                   institution={active}
                   scopePageId={null}
@@ -853,14 +860,14 @@ export default function KnowledgeTab({
                       </Button>
                     </>
                   ) : (
-                    <Button size="small" variant="outlined" onClick={() => beginEdit(selectedPage)}>
+                    <Button size="small" variant="outlined" onClick={() => beginEdit(selectedPage)} disabled={bodyPending}>
                       Edit
                     </Button>
                   )}
                 </div>
               </div>
 
-              <p className={styles.kbMeta}>Last edited {formatRelative(selectedPage.updatedAt)}</p>
+              {!bodyPending && <p className={styles.kbMeta}>Last edited {formatRelative(selectedPage.updatedAt)}</p>}
 
               {/* Placed HIGH - directly under the page meta, above tags,
                   attachments and the body - not at the bottom of the pane.
@@ -878,7 +885,7 @@ export default function KnowledgeTab({
                   never ambiguous, and its open/closed state persists per
                   scope, so collapsing it once on a page keeps it collapsed
                   there. */}
-              {loadState === "idle" && !isEditing && pages && pages.length > 0 && (
+              {loadState === "idle" && bodiesReady && !isEditing && pages && pages.length > 0 && (
                 <KnowledgeOverviewPanel
                   institution={active}
                   scopePageId={scopeHasDescendants(pages, selectedPage.id) ? selectedPage.id : null}
@@ -940,6 +947,8 @@ export default function KnowledgeTab({
                     placeholder="Write this page's policy, rule, or deadline in Markdown…"
                   />
                 </div>
+              ) : bodyPending ? (
+                <p className={styles.fieldHint} role="status" aria-live="polite">Loading content…</p>
               ) : selectedPage.body.trim() ? (
                 <PageBody body={selectedPage.body} attachments={attachments} />
               ) : (

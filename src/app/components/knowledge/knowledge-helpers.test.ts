@@ -23,8 +23,12 @@ import {
   describeBulkDeleteOutcome,
   kbBulkBarStatusText,
   includedContextPages,
+  pagesFromSummaries,
+  titleOnlySearch,
+  resolveSearchHits,
+  isBodyPending,
 } from "./knowledge-helpers";
-import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
+import { buildPageTree, searchPages, type InstitutionPage, type InstitutionPageSummary } from "@/lib/knowledge-base";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 
 function page(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
@@ -721,5 +725,61 @@ describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptan
       { id: "a", title: "A", body: "body a" },
       { id: "c", title: "C", body: "body c" },
     ]);
+  });
+});
+
+describe("KNOWLEDGE-SWITCH-SPEED W2: summaries-first helpers", () => {
+  const summaries: InstitutionPageSummary[] = [
+    { id: "a", parentId: null, title: "Late Policy", position: 0 },
+    { id: "b", parentId: null, title: "Grading", position: 1 },
+    { id: "c", parentId: "b", title: "Rubric", position: 3 },
+  ];
+  const full: InstitutionPage[] = [
+    page({ id: "a", title: "Late Policy", position: 0, body: "five percent per day", tags: ["deadlines"] }),
+    page({ id: "b", title: "Grading", position: 1, body: "see rubric" }),
+    page({ id: "c", parentId: "b", title: "Rubric", position: 3, body: "criteria" }),
+  ];
+
+  function shape(nodes: ReturnType<typeof buildPageTree>): unknown {
+    return nodes.map((n) => ({ id: n.id, children: shape(n.children) }));
+  }
+
+  it("the tree built from placeholders matches the tree built from full pages", () => {
+    const placeholders = pagesFromSummaries("MCC", summaries);
+    expect(shape(buildPageTree(placeholders))).toEqual(shape(buildPageTree(full)));
+    expect(buildPageTree(placeholders).map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("pagesFromSummaries carries id/parent/title/position and an empty body", () => {
+    const p = pagesFromSummaries("MCC", summaries)[2];
+    expect(p).toMatchObject({ id: "c", parentId: "b", title: "Rubric", position: 3, institution: "MCC", body: "", tags: [] });
+  });
+
+  it("titleOnlySearch matches titles case-insensitively, ignores bodies, blank returns []", () => {
+    const placeholders = pagesFromSummaries("MCC", summaries);
+    expect(titleOnlySearch(placeholders, "  RUB ").map((h) => h.page.id)).toEqual(["c"]);
+    expect(titleOnlySearch(full, "percent")).toEqual([]);
+    expect(titleOnlySearch(full, "deadl").map((h) => h.page.id)).toEqual(["a"]);
+    expect(titleOnlySearch(placeholders, "   ")).toEqual([]);
+    expect(titleOnlySearch(placeholders, "zzz")).toEqual([]);
+  });
+
+  it("resolveSearchHits: title-only while bodies pending, full-text once ready", () => {
+    const placeholders = pagesFromSummaries("MCC", summaries);
+    const pending = resolveSearchHits(placeholders, false, "late");
+    expect(pending.titleOnly).toBe(true);
+    expect(pending.hits.map((h) => h.page.id)).toEqual(["a"]);
+    const ready = resolveSearchHits(full, true, "percent");
+    expect(ready.titleOnly).toBe(false);
+    expect(ready.hits).toEqual(searchPages(full, "percent"));
+    expect(ready.hits).toHaveLength(1);
+    expect(resolveSearchHits(null, false, "x").hits).toEqual([]);
+    expect(resolveSearchHits(full, true, " ").hits).toEqual([]);
+  });
+
+  it("isBodyPending is true only for a selected page whose bodies have not arrived", () => {
+    expect(isBodyPending(true, false)).toBe(true);
+    expect(isBodyPending(true, true)).toBe(false);
+    expect(isBodyPending(false, false)).toBe(false);
   });
 });

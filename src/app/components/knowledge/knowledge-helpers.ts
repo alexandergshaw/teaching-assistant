@@ -8,7 +8,14 @@
 // (pure helpers pulled out of a big tab component).
 
 import { useCallback, useEffect, useState } from "react";
-import { wouldCreateCycle, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
+import {
+  wouldCreateCycle,
+  searchPages,
+  type InstitutionPage,
+  type InstitutionPageNode,
+  type InstitutionPageSummary,
+  type PageSearchHit,
+} from "@/lib/knowledge-base";
 import { useInstitutions, readActiveInstitution } from "@/lib/institutions";
 
 // ---------------------------------------------------------------------------
@@ -758,4 +765,59 @@ export function kbBulkBarStatusText(
     } (including sub-pages of anything selected). This cannot be undone.`;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// KNOWLEDGE-SWITCH-SPEED W2: summaries-first loading. The tree renders from
+// body-less summaries the moment they arrive; full bodies follow in the
+// background. These pure helpers cover the window in between.
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifts body-less summaries into InstitutionPage-shaped placeholders so every
+ * STRUCTURE consumer (tree, breadcrumb, selection, reparent, rename, delete)
+ * keeps one list type. The placeholders carry NO real body, tags or
+ * timestamps - every body-dependent consumer must be gated on `bodiesReady`
+ * (useKbPageTree) so an empty placeholder body is never read as content.
+ */
+export function pagesFromSummaries(institution: string, summaries: InstitutionPageSummary[]): InstitutionPage[] {
+  return summaries.map((s) => ({
+    id: s.id,
+    institution,
+    parentId: s.parentId,
+    title: s.title,
+    body: "",
+    tags: [],
+    position: s.position,
+    createdAt: "",
+    updatedAt: "",
+  }));
+}
+
+/** Title (and tag) only search, used while bodies are still loading. Mirrors
+ *  searchPages' contract: blank query returns [], hits carry no snippet. */
+export function titleOnlySearch(pages: InstitutionPage[], query: string): PageSearchHit[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return pages
+    .filter((p) => p.title.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q)))
+    .map((page) => ({ page, snippet: "" }));
+}
+
+/** Picks the search implementation: full-text once bodies are present, else
+ *  title-only. `titleOnly` drives the "contents still loading" hint. */
+export function resolveSearchHits(
+  pages: InstitutionPage[] | null,
+  bodiesReady: boolean,
+  query: string
+): { hits: PageSearchHit[]; titleOnly: boolean } {
+  if (!pages || !query.trim()) return { hits: [], titleOnly: !bodiesReady };
+  return bodiesReady
+    ? { hits: searchPages(pages, query), titleOnly: false }
+    : { hits: titleOnlySearch(pages, query), titleOnly: true };
+}
+
+/** True when a page is selected but its body has not arrived yet. */
+export function isBodyPending(hasSelectedPage: boolean, bodiesReady: boolean): boolean {
+  return hasSelectedPage && !bodiesReady;
 }

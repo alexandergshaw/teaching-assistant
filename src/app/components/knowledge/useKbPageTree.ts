@@ -12,7 +12,7 @@
 // prop rather than resolving purely from localStorage).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listInstitutionPagesAction } from "../../actions";
+import { listInstitutionPagesAction, listInstitutionPageSummariesAction } from "../../actions";
 import { buildPageTree, pageBreadcrumb, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
 import {
   readSelectedPageId,
@@ -20,6 +20,7 @@ import {
   readExpandedIds,
   writeExpandedIds,
   pickValidPageId,
+  pagesFromSummaries,
 } from "./knowledge-helpers";
 
 type LoadState = "idle" | "loading" | "error";
@@ -45,7 +46,14 @@ export interface UseKbPageTreeArgs {
 }
 
 export interface UseKbPageTreeReturn {
+  /** The page list. While `bodiesReady` is false this holds body-less
+   *  placeholders built from the title summaries (real id/parent/title/
+   *  position, EMPTY body/tags/timestamps) - every body-dependent consumer
+   *  must gate on `bodiesReady`. */
   pages: InstitutionPage[] | null;
+  /** True once the full page bodies have arrived (background fetch after the
+   *  tree has already painted from summaries). */
+  bodiesReady: boolean;
   loadState: LoadState;
   loadError: string | null;
   selectedId: string | null;
@@ -71,6 +79,11 @@ export function useKbPageTree({
   const [pages, setPages] = useState<InstitutionPage[] | null>(null);
   const [loadState, setLoadState] = useState<LoadState>(() => (active ? "loading" : "idle"));
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [bodiesReady, setBodiesReady] = useState(false);
+  // Set by refresh(): a post-mutation full read is fresher than anything the
+  // initial background load may still deliver, so that load must not
+  // overwrite it.
+  const refreshedRef = useRef(false);
 
   // ── Selection + tree expansion, persisted per institution ───────────────
   const [selectedId, setSelectedIdState] = useState<string | null>(null);
@@ -86,38 +99,66 @@ export function useKbPageTree({
   if (active !== prevActive) {
     setPrevActive(active);
     setPages(null);
+    setBodiesReady(false);
     setLoadState(active ? "loading" : "idle");
     setLoadError(null);
     setSelectedIdState(null);
     setExpandedState(new Set());
   }
 
-  // Load pages for the active institution. Await-first so the effect never
-  // performs a synchronous setState (see set-state-in-effect idiom). Does
-  // NOT resolve the selection itself - the reconciliation effect below owns
-  // that (both for this initial load and for every later change), so there
-  // is exactly one place implementing the "URL wins over localStorage,
-  // invalid/foreign id falls back to none" contract rather than a second
-  // copy of it here.
+  // Load pages for the active institution, summaries first (KNOWLEDGE-SWITCH-
+  // SPEED W2): the sidebar tree needs only titles, so it paints as soon as the
+  // small body-less read returns, while the full-body read (started right
+  // behind it, never awaited before the tree renders) fills in bodies later.
+  // Await-first so the effect never performs a synchronous setState (see
+  // set-state-in-effect idiom). Does NOT resolve the selection itself - the
+  // reconciliation effect below owns that, and because the summary
+  // placeholders already carry every id it resolves the restored/URL
+  // selection immediately, not after bodies land.
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
+    let bodiesLanded = false;
+    let treeShown = false;
+    let bodiesError: string | null = null;
+    refreshedRef.current = false;
+    const summariesRequest = listInstitutionPageSummariesAction(active);
+    const bodiesRequest = listInstitutionPagesAction(active);
     (async () => {
-      const result = await listInstitutionPagesAction(active);
-      if (cancelled) return;
+      const result = await summariesRequest;
+      if (cancelled || bodiesLanded || refreshedRef.current) return;
       if ("error" in result) {
         setLoadState("error");
         setLoadError(result.error);
         return;
       }
-      setPages(result.pages);
+      treeShown = true;
+      setPages(pagesFromSummaries(active, result.pages));
       setLoadState("idle");
       setExpandedState(readExpandedIds(active));
+      if (bodiesError) setActionError(bodiesError);
+    })();
+    (async () => {
+      const result = await bodiesRequest;
+      if (cancelled) return;
+      if ("error" in result) {
+        bodiesError = `Page contents failed to load: ${result.error}`;
+        if (treeShown) setActionError(bodiesError);
+        return;
+      }
+      bodiesLanded = true;
+      if (refreshedRef.current) return;
+      setPages(result.pages);
+      setBodiesReady(true);
+      if (!treeShown) {
+        setLoadState("idle");
+        setExpandedState(readExpandedIds(active));
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, setActionError]);
 
   const tree = useMemo(() => (pages ? buildPageTree(pages) : []), [pages]);
   const selectedPage = useMemo(() => pages?.find((p) => p.id === selectedId) ?? null, [pages, selectedId]);
@@ -160,7 +201,10 @@ export function useKbPageTree({
         setActionError(result.error);
         return;
       }
+      refreshedRef.current = true;
       setPages(result.pages);
+      setBodiesReady(true);
+      setLoadState("idle");
       const validIds = new Set(result.pages.map((p) => p.id));
       const desired = selectId !== undefined ? selectId : selectedId;
       applySelection(pickValidPageId(desired ?? null, validIds));
@@ -212,6 +256,7 @@ export function useKbPageTree({
 
   return {
     pages,
+    bodiesReady,
     loadState,
     loadError,
     selectedId,

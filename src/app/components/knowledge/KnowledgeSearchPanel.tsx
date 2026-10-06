@@ -17,6 +17,8 @@ interface KnowledgeSearchPanelProps {
   search: string;
   onSearchChange: (value: string) => void;
   searchHits: PageSearchHit[];
+  /** True while page bodies are still loading: hits are title-only. */
+  titleOnly: boolean;
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onOpenHit: (id: string) => void;
@@ -27,6 +29,7 @@ export default function KnowledgeSearchPanel({
   search,
   onSearchChange,
   searchHits,
+  titleOnly,
   selectedIds,
   onToggle,
   onOpenHit,
@@ -48,6 +51,11 @@ export default function KnowledgeSearchPanel({
       <div className={kbStyles.kbOverlayAnchor}>
         {search.trim() && (
           <div className={`${styles.kbSearchPanel} ${kbStyles.kbOverlayCard}`}>
+            {titleOnly && (
+              <p className={styles.fieldHint} role="status" aria-live="polite">
+                Page contents are still loading - searching titles only.
+              </p>
+            )}
             {searchHits.length === 0 ? (
               <p className={styles.kbTreeEmpty}>No pages match &ldquo;{search.trim()}&rdquo;.</p>
             ) : (
@@ -72,7 +80,9 @@ export default function KnowledgeSearchPanel({
                     onClick={() => onOpenHit(hit.page.id)}
                   >
                     <span className={styles.kbSearchHitTitle}>{hit.page.title.trim() || "Untitled page"}</span>
-                    <span className={styles.kbSearchHitSnippet}>{hit.snippet || "No content."}</span>
+                    {!titleOnly && (
+                      <span className={styles.kbSearchHitSnippet}>{hit.snippet || "No content."}</span>
+                    )}
                   </button>
                 </div>
               ))

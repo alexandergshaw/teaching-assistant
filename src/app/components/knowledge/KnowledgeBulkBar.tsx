@@ -67,9 +67,14 @@ export interface KnowledgeBulkBarProps {
   onStartRecording: () => void;
   onStartGrading: () => void;
   bulkDelete: UseKbBulkActionsReturn;
+  /** False while page bodies are still loading: Start recording and Grade
+   *  via recording read checked bodies, so they stay disabled until then.
+   *  Ask AI sends ids only and is never gated. */
+  bodiesReady: boolean;
 }
 
 const CONTROL_HEIGHT = "var(--control-height-md)";
+const BODIES_LOADING_HINT = "Available once page contents finish loading";
 
 export default function KnowledgeBulkBar({
   selectedCount,
@@ -81,6 +86,7 @@ export default function KnowledgeBulkBar({
   onStartRecording,
   onStartGrading,
   bulkDelete,
+  bodiesReady,
 }: KnowledgeBulkBarProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const menuOpen = menuAnchor !== null;
@@ -197,6 +203,7 @@ export default function KnowledgeBulkBar({
         </div>
 
         <MenuItem
+          disabled={!bodiesReady}
           onClick={() => {
             closeMenu();
             onStartRecording();
@@ -204,11 +211,12 @@ export default function KnowledgeBulkBar({
         >
           <ListItemText
             primary="Start recording"
-            secondary={kbBulkActionConsequenceTag("fan-out")}
+            secondary={bodiesReady ? kbBulkActionConsequenceTag("fan-out") : BODIES_LOADING_HINT}
             slotProps={{ secondary: { className: `${kbStyles.kbConsequenceTag} ${kbStyles.kbConsequenceTagFanOut}` } }}
           />
         </MenuItem>
         <MenuItem
+          disabled={!bodiesReady}
           onClick={() => {
             closeMenu();
             onStartGrading();
@@ -216,7 +224,7 @@ export default function KnowledgeBulkBar({
         >
           <ListItemText
             primary="Grade via recording"
-            secondary={kbBulkActionConsequenceTag("fan-out")}
+            secondary={bodiesReady ? kbBulkActionConsequenceTag("fan-out") : BODIES_LOADING_HINT}
             slotProps={{ secondary: { className: `${kbStyles.kbConsequenceTag} ${kbStyles.kbConsequenceTagFanOut}` } }}
           />
         </MenuItem>

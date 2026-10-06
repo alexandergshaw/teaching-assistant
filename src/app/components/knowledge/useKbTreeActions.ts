@@ -29,6 +29,7 @@ export interface UseKbTreeActionsArgs {
   expanded: Set<string>;
   setExpanded: (next: Set<string>) => void;
   refresh: (selectId?: string | null) => Promise<void>;
+  insertCreatedPage: (page: InstitutionPage) => Promise<void>;
   confirmDiscard: () => boolean;
   beginEdit: (page: InstitutionPage) => void;
   /** Delete's own reset touches only these two - see confirmDeleteRequest
@@ -73,6 +74,7 @@ export function useKbTreeActions({
   expanded,
   setExpanded,
   refresh,
+  insertCreatedPage,
   confirmDiscard,
   beginEdit,
   setIsEditing,
@@ -106,7 +108,7 @@ export function useKbTreeActions({
       setActionError(result.error);
       return;
     }
-    await refresh(result.page.id);
+    await insertCreatedPage(result.page);
     beginEdit(result.page);
   };
 
@@ -124,7 +126,7 @@ export function useKbTreeActions({
     next.add(parentId);
     setExpanded(next);
     writeExpandedIds(active, next);
-    await refresh(result.page.id);
+    await insertCreatedPage(result.page);
     beginEdit(result.page);
   };
 

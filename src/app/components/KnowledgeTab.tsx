@@ -175,6 +175,7 @@ export default function KnowledgeTab({
     breadcrumb,
     applySelection,
     refresh,
+    insertCreatedPage,
     toggleExpand,
     expandAncestorsOf,
   } = pageTree;
@@ -256,6 +257,7 @@ export default function KnowledgeTab({
     expanded,
     setExpanded,
     refresh,
+    insertCreatedPage,
     confirmDiscard,
     beginEdit,
     setIsEditing: editSession.setIsEditing,

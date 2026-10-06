@@ -64,6 +64,10 @@ export interface UseKbPageTreeReturn {
   breadcrumb: InstitutionPage[];
   applySelection: (id: string | null) => void;
   refresh: (selectId?: string | null) => Promise<void>;
+  /** Adds a page the create action just returned to the list and selects it,
+   *  without re-reading every page body (falls back to refresh while the
+   *  background body read is still in flight). */
+  insertCreatedPage: (page: InstitutionPage) => Promise<void>;
   toggleExpand: (id: string) => void;
   expandAncestorsOf: (id: string) => void;
 }
@@ -212,6 +216,27 @@ export function useKbPageTree({
     [active, selectedId, applySelection, setActionError]
   );
 
+  // Optimistic alternative to refresh() for create: the create action already
+  // returns the complete new page (empty body, server position), so once the
+  // bodies are loaded it is appended locally instead of re-reading every page
+  // body. While the background body read is still in flight (!bodiesReady) the
+  // list holds placeholders, so an append could strand them or be overwritten
+  // by the late result - fall back to the full read, which also repairs them.
+  // Deliberately never flips bodiesReady/loadState: those flip only from a
+  // full read.
+  const insertCreatedPage = useCallback(
+    async (page: InstitutionPage) => {
+      if (!bodiesReady) {
+        await refresh(page.id);
+        return;
+      }
+      refreshedRef.current = true;
+      setPages((prev) => (prev ? [...prev, page] : [page]));
+      applySelection(page.id);
+    },
+    [bodiesReady, refresh, applySelection]
+  );
+
   // Resolves the actual selection whenever the pages loaded for `active`, or
   // the requested page id (page.tsx's URL-tracked value - AC1/AC2), change.
   // Owns every selection resolution, including the very first one after an
@@ -267,6 +292,7 @@ export function useKbPageTree({
     breadcrumb,
     applySelection,
     refresh,
+    insertCreatedPage,
     toggleExpand,
     expandAncestorsOf,
   };

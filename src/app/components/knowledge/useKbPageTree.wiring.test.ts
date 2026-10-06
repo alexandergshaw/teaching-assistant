@@ -30,4 +30,28 @@ describe("useKbPageTree load ordering", () => {
     expect(source).toContain("bodiesReady,");
     expect(source.match(/setBodiesReady\(true\)/g)?.length).toBe(2);
   });
+
+  // KNOWLEDGE-CREATE-LAG: create inserts the returned page optimistically.
+  // Source-text pins only - no renderer here, so runtime call counts are not proven.
+  it("exposes insertCreatedPage with an optimistic branch and a full-read fallback", () => {
+    const start = source.indexOf("const insertCreatedPage = useCallback(");
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf("\n  );", start);
+    const body = source.slice(start, end);
+    expect(source).toContain("insertCreatedPage,\n    toggleExpand");
+    const fallback = body.indexOf("if (!bodiesReady)");
+    const refreshCall = body.indexOf("await refresh(page.id)");
+    const refreshedFlag = body.indexOf("refreshedRef.current = true");
+    const select = body.indexOf("applySelection(page.id)");
+    expect(fallback).toBeGreaterThan(-1);
+    expect(refreshCall).toBeGreaterThan(fallback);
+    expect(refreshedFlag).toBeGreaterThan(refreshCall);
+    expect(select).toBeGreaterThan(refreshedFlag);
+    expect(body).not.toContain("listInstitutionPagesAction");
+    const optimistic = body.slice(body.indexOf("refreshedRef.current = true"));
+    expect(optimistic).toContain("setPages(");
+    expect(optimistic).not.toContain("refresh(");
+    expect(body).not.toContain("setBodiesReady");
+    expect(body).not.toContain("setLoadState");
+  });
 });

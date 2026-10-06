@@ -111,7 +111,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // COURSES-COLUMN-SEARCH (per-column search), COURSES-TABLE-SPEED (slow load).
 // 126 -> 127: KNOWLEDGE-ATTACHMENTS-DND filed 2026-10-06 (shipped c9211e11) - the
 // knowledge attachments section accepts drag-and-dropped files.
-const EXPECTED_ROW_COUNT = 127;
+// 127 -> 128: KNOWLEDGE-CREATE-LAG filed 2026-10-06 - creating a page full-refetches
+// every page body via refresh(); fix = optimistic insert.
+const EXPECTED_ROW_COUNT = 128;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

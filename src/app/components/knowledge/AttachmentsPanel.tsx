@@ -74,6 +74,7 @@ export default function AttachmentsPanel({
   const { supabase, user } = useSupabase();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -259,7 +260,31 @@ export default function AttachmentsPanel({
       </button>
 
       {open && (
-        <div className={kbStyles.attachmentsBody}>
+        <div
+          className={kbStyles.attachmentsBody}
+          onDragOver={(e) => {
+            if (uploading || atCap) return;
+            e.preventDefault();
+            if (!isDragging) setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            // Only clear when the pointer leaves the body, not when it crosses
+            // onto a child element (dragleave fires on every child boundary).
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setIsDragging(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            if (uploading || atCap) return;
+            void handleFiles(e.dataTransfer.files);
+          }}
+          style={
+            isDragging
+              ? { outline: "2px dashed var(--accent)", outlineOffset: "2px", borderRadius: "var(--radius-sm)" }
+              : undefined
+          }
+        >
           <div className={kbStyles.attachmentsUploadRow}>
             <Button
               size="small"
@@ -278,8 +303,8 @@ export default function AttachmentsPanel({
               style={{ display: "none" }}
             />
             <span className={styles.fieldHint} style={{ margin: 0 }}>
-              Any file type, up to {formatByteSize(MAX_ATTACHMENT_SIZE_BYTES)} each, {MAX_ATTACHMENTS_PER_PAGE} per
-              page.
+              Drag files here or use Attach files. Any file type, up to{" "}
+              {formatByteSize(MAX_ATTACHMENT_SIZE_BYTES)} each, {MAX_ATTACHMENTS_PER_PAGE} per page.
             </span>
           </div>
 

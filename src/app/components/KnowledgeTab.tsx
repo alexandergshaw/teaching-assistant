@@ -60,6 +60,7 @@ import PageBody from "./knowledge/PageBody";
 import KnowledgeBulkBar from "./knowledge/KnowledgeBulkBar";
 import KnowledgeSearchPanel from "./knowledge/KnowledgeSearchPanel";
 import KnowledgeOverviewPanel from "./knowledge/KnowledgeOverviewPanel";
+import KnowledgeAskAiPanel from "./knowledge/KnowledgeAskAiPanel";
 import { scopeHasDescendants } from "@/lib/knowledge-overview-scope";
 import { useKbPageTree } from "./knowledge/useKbPageTree";
 import { useKbEditSession } from "./knowledge/useKbEditSession";
@@ -806,6 +807,12 @@ export default function KnowledgeTab({
 
         {/* Right pane: selected page */}
         <div className={styles.kbDetailPane}>
+          {/* Ask AI: mounted ONCE, outside both selection branches, so a page
+              switch never resets it. Always scoped to the whole active
+              institution. */}
+          {active && (
+            <KnowledgeAskAiPanel institution={active} pages={pages ?? []} onSelectPage={openSearchHit} />
+          )}
           {!selectedPage ? (
             <>
               {/* X5: a SIBLING above the dashed empty-state box, never its

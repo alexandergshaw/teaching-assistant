@@ -33,10 +33,12 @@
 // AskKnowledgeOverviewResult) rather than on the persisted row, because they
 // describe THIS request's resolution rather than a property of the saved
 // summary. They are therefore held in state here and cleared on a scope
-// change, exactly like citationsUnavailableFor.
+// change. (The Ask AI half moved to useKnowledgeAskAi.ts, keyed on institution
+// only; hardCappedPages/skippedAttachments stay here because only the summary
+// block renders them.)
 //
 // AC8 PERSISTENCE - THE BUG TO AVOID (see knowledge-overview-storage.ts's own
-// header comment for the full "why"): `open`/`historyOpen`/`question` seed
+// header comment for the full "why"): `open` seeds
 // from PLAIN DEFAULTS (never a localStorage read) in their useState calls
 // below. Exactly ONE mount effect, keyed on `scopeKey`, reads all three
 // persisted values and records `hydratedScopeKey`; every write-back effect is
@@ -49,16 +51,13 @@ import type { InstitutionPage } from "@/lib/knowledge-base";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { collectScopePages, describeScope, scopeStorageKey } from "@/lib/knowledge-overview-scope";
 import { summaryStaleness, fingerprintScopePages, type SummaryStaleness } from "@/lib/knowledge-overview-stale";
-import { MAX_SCOPE_QA_ENTRIES, type ScopeSummary, type ScopeQuestion } from "@/lib/knowledge-overview";
+import { type ScopeSummary } from "@/lib/knowledge-overview";
 import {
   getKnowledgeOverviewAction,
   generateKnowledgeOverviewSummaryAction,
-  askKnowledgeOverviewAction,
-  deleteKnowledgeOverviewQaAction,
-  clearKnowledgeOverviewQaAction,
   type KnowledgeOverviewPageRef,
 } from "../../actions/knowledge-overview";
-import { readOverviewUiState, writeOverviewOpen, writeOverviewHistoryOpen, writeOverviewQuestion } from "./knowledge-overview-storage";
+import { readOverviewUiState, writeOverviewOpen } from "./knowledge-overview-storage";
 
 export interface UseKnowledgeOverviewArgs {
   institution: string;
@@ -92,19 +91,6 @@ export interface UseKnowledgeOverviewReturn {
   generateError: string | null;
   generateSummary: () => void;
 
-  question: string;
-  setQuestion: (value: string) => void;
-  asking: boolean;
-  askError: string | null;
-  /** The id of the question whose citations are unavailable (the JSON-parse-
-   *  failure fallback on askKnowledgeOverviewAction's own
-   *  AskKnowledgeOverviewResult field), or null. Compared against
-   *  `lastAnswer.id` by the caller rather than a bare boolean, so deleting
-   *  the entry this described (or a later scope switch) can never leave a
-   *  stale "unavailable" caption pinned to a DIFFERENT answer that happens
-   *  to become questions[0] next - ephemeral either way, never persisted on
-   *  ScopeQuestion, so a reload always reads null. */
-  citationsUnavailableFor: string | null;
   /** X8: in-scope pages the most recent request could not look at AT ALL,
    *  because the scope holds more pages than one request can check. Distinct
    *  from a budget-omitted page (which WAS considered and is recorded in
@@ -112,26 +98,8 @@ export interface UseKnowledgeOverviewReturn {
   hardCappedPages: KnowledgeOverviewPageRef[];
   /** X14: how many attachment files the most recent request could not include. */
   skippedAttachments: number;
-  /** The most recently asked (or most recently loaded) question/answer for
-   *  this scope - always questions[0], since listScopeQuestions/appendScopeQuestion
-   *  keep the list newest-first (AC6). Rendered immediately under the Ask box
-   *  (AC4) as well as at the top of the history list below it - the same
-   *  persisted row, not a separate copy, so there is exactly one place this
-   *  can drift from what history shows. */
-  lastAnswer: ScopeQuestion | null;
-  ask: () => void;
-
-  questions: ScopeQuestion[];
-  historyError: string | null;
-  deletingId: string | null;
-  deleteQuestion: (id: string) => void;
-  clearing: boolean;
-  clearAll: () => void;
-
   open: boolean;
   toggleOpen: () => void;
-  historyOpen: boolean;
-  toggleHistoryOpen: () => void;
 }
 
 /** How long the page list must sit still before the summary refreshes
@@ -150,8 +118,6 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
 
   // ── Persisted UI control state (AC8) - see this file's header comment. ──
   const [open, setOpen] = useState(true);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [question, setQuestion] = useState("");
   const [hydratedScopeKey, setHydratedScopeKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -166,8 +132,6 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
       const state = readOverviewUiState(scopeKey);
       if (cancelled) return;
       setOpen(state.open);
-      setHistoryOpen(state.historyOpen);
-      setQuestion(state.question);
       setHydratedScopeKey(scopeKey);
     })();
     return () => {
@@ -180,27 +144,15 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
     writeOverviewOpen(scopeKey, open);
   }, [open, scopeKey, hydratedScopeKey]);
 
-  useEffect(() => {
-    if (hydratedScopeKey !== scopeKey) return;
-    writeOverviewHistoryOpen(scopeKey, historyOpen);
-  }, [historyOpen, scopeKey, hydratedScopeKey]);
-
-  useEffect(() => {
-    if (hydratedScopeKey !== scopeKey) return;
-    writeOverviewQuestion(scopeKey, question);
-  }, [question, scopeKey, hydratedScopeKey]);
-
   // ── Summary + history data (reset on scope change during render, not an
   //     effect - mirrors useKbAttachments.ts's identical reset-on-id-change
   //     block; the load effect below never performs a synchronous setState). ──
   const [summary, setSummary] = useState<ScopeSummary | null>(null);
-  const [questions, setQuestions] = useState<ScopeQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [citationsUnavailableFor, setCitationsUnavailableFor] = useState<string | null>(null);
   // See the X8/X14 block in this file's header. Both describe the most recent
   // generate-or-ask request, not the persisted row, so both reset on a scope
-  // change alongside the summary and question list below.
+  // change alongside the summary below.
   const [hardCappedPages, setHardCappedPages] = useState<KnowledgeOverviewPageRef[]>([]);
   const [skippedAttachments, setSkippedAttachments] = useState(0);
   /** The scope fingerprint the auto-refresh below has already acted on - see
@@ -211,10 +163,8 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
   if (scopeKey !== prevScopeKey) {
     setPrevScopeKey(scopeKey);
     setSummary(null);
-    setQuestions([]);
     setLoading(true);
     setLoadError(null);
-    setCitationsUnavailableFor(null);
     setHardCappedPages([]);
     setSkippedAttachments(0);
     setAutoRefreshedFor(null);
@@ -233,7 +183,6 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
         return;
       }
       setSummary(result.summary);
-      setQuestions(result.questions);
       setLoading(false);
     })();
     return () => {
@@ -327,73 +276,6 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, loadError, summary, staleness, generating, hasContent, autoRefreshedFor, scopeSignature]);
 
-  // ── Ask AI (AC4/AC5/AC6) ─────────────────────────────────────────────────
-  const [asking, setAsking] = useState(false);
-  const [askError, setAskError] = useState<string | null>(null);
-
-  const ask = () => {
-    const trimmed = question.trim();
-    if (!trimmed || asking) return;
-    setAskError(null);
-    setAsking(true);
-    void (async () => {
-      const result = await askKnowledgeOverviewAction(institution, scopePageId, trimmed, provider);
-      setAsking(false);
-      if ("error" in result) {
-        setAskError(result.error);
-        return;
-      }
-      setQuestions((prev) => [result.question, ...prev].slice(0, MAX_SCOPE_QA_ENTRIES));
-      setCitationsUnavailableFor(result.citationsUnavailable ? result.question.id : null);
-      setHardCappedPages(result.hardCappedPages);
-      setSkippedAttachments(result.skippedAttachments);
-      // Spec item: "Focus does NOT move when an answer arrives - it stays in
-      // the cleared, re-enabled field so a follow-up is zero-click." Clearing
-      // the draft here (rather than leaving the asked text in the box) is
-      // what makes that field ready for a follow-up with no extra click;
-      // this component never calls .focus()/.blur() itself, so the TextField
-      // keeps whatever focus state it already had.
-      setQuestion("");
-    })();
-  };
-
-  const lastAnswer = questions.length > 0 ? questions[0] : null;
-
-  // ── History delete / clear (AC6) ─────────────────────────────────────────
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [clearing, setClearing] = useState(false);
-
-  const deleteQuestion = (id: string) => {
-    if (deletingId) return;
-    setHistoryError(null);
-    setDeletingId(id);
-    void (async () => {
-      const result = await deleteKnowledgeOverviewQaAction(id);
-      setDeletingId(null);
-      if ("error" in result) {
-        setHistoryError(result.error);
-        return;
-      }
-      setQuestions((prev) => prev.filter((q) => q.id !== id));
-    })();
-  };
-
-  const clearAll = () => {
-    if (clearing || questions.length === 0) return;
-    setHistoryError(null);
-    setClearing(true);
-    void (async () => {
-      const result = await clearKnowledgeOverviewQaAction(institution, scopePageId);
-      setClearing(false);
-      if ("error" in result) {
-        setHistoryError(result.error);
-        return;
-      }
-      setQuestions([]);
-    })();
-  };
-
   return {
     scopeKey,
     scopeLabel,
@@ -409,26 +291,9 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
     generateError,
     generateSummary,
 
-    question,
-    setQuestion,
-    asking,
-    askError,
-    citationsUnavailableFor,
     hardCappedPages,
     skippedAttachments,
-    lastAnswer,
-    ask,
-
-    questions,
-    historyError,
-    deletingId,
-    deleteQuestion,
-    clearing,
-    clearAll,
-
     open,
     toggleOpen: () => setOpen((prev) => !prev),
-    historyOpen,
-    toggleHistoryOpen: () => setHistoryOpen((prev) => !prev),
   };
 }

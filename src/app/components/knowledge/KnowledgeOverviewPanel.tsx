@@ -1,6 +1,6 @@
 "use client";
 
-// The Knowledge overview panel (AI summary + Ask AI) - AC.md AC1-AC11.
+// The Knowledge overview panel (AI summary only; the Ask AI moved to KnowledgeAskAiPanel.tsx) - AC.md AC1-AC11.
 // Rendered by KnowledgeTab.tsx at exactly two sites (X5/BUILD.md's UI
 // section): a SIBLING placed ABOVE the empty-detail-pane's dashed box when no
 // page is selected (scope = the whole institution), and the LAST child of
@@ -24,13 +24,10 @@
 
 import type { ReactNode } from "react";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import type { InstitutionPage } from "@/lib/knowledge-base";
 import { useKnowledgeOverview } from "./useKnowledgeOverview";
-import KnowledgeOverviewHistory from "./KnowledgeOverviewHistory";
 import {
   renderOverviewMarkdown,
-  citationPageExists,
   describeOmittedPages,
   describeHardCappedPages,
   describeSkippedAttachments,
@@ -90,33 +87,15 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
     generating,
     generateError,
     generateSummary,
-    question,
-    setQuestion,
-    asking,
-    askError,
-    citationsUnavailableFor,
     hardCappedPages,
     skippedAttachments,
-    lastAnswer,
-    ask,
-    questions,
-    historyError,
-    deletingId,
-    deleteQuestion,
-    clearing,
-    clearAll,
     open,
     toggleOpen,
-    historyOpen,
-    toggleHistoryOpen,
   } = useKnowledgeOverview({ institution, scopePageId, allPages: pages });
 
   const summaryIncluded = summary ? summary.sourcePages.filter((p) => p.included) : [];
   const summaryOmitted = summary ? summary.sourcePages.filter((p) => !p.included).map((p) => p.title) : [];
   const staleNote = staleness ? describeStaleness(staleness) : null;
-
-  const lastAnswerOmitted = lastAnswer ? lastAnswer.sourcePages.filter((p) => !p.included).map((p) => p.title) : [];
-  const lastAnswerIncludedCount = lastAnswer ? lastAnswer.sourcePages.filter((p) => p.included).length : 0;
 
   return (
     <section className={kbStyles.kbOverview}>
@@ -138,120 +117,9 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
 
           {!hasContent && (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
-              Add some page content in this scope before generating a summary or asking a question.
+              Add some page content in this scope before generating a summary.
             </p>
           )}
-
-              {/* ── Ask AI (AC4/AC5/AC6)
-                  ALWAYS rendered when the overview is open - never hidden behind
-                  the initial overview load OR behind the summary, at the owner's
-                  request: Ask AI must not wait for a summary to be generated.
-                  hasContent comes from the pages prop (not the async load), so
-                  the control is enabled/disabled immediately; only the SUMMARY
-                  and the Q&A history below wait on the load. */}
-              <div className={kbStyles.kbOverviewSection}>
-                <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
-                  Ask AI
-                </SectionHeading>
-
-                <div className={kbStyles.kbOverviewAskRow}>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    placeholder="Ask about PTO, late work, attendance…"
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        ask();
-                      }
-                    }}
-                    helperText="Press Enter to ask, Shift+Enter for a new line."
-                    disabled={asking || !hasContent}
-                  />
-                  <Button
-                    size="small"
-                    variant="contained"
-                    onClick={ask}
-                    disabled={asking || !hasContent || !question.trim()}
-                    loading={asking}
-                    loadingPosition="start"
-                  >
-                    Ask
-                  </Button>
-                </div>
-
-                <p className={`${styles.error} ${kbStyles.kbOverviewAlert}`} role="alert">
-                  {askError}
-                </p>
-
-                {/* AC5/spec item on live regions: wraps status + answer +
-                    citations in ONE polite, non-atomic region, always
-                    mounted (zero height at rest) - MUI's `loading` prop
-                    disables the button but sets no aria-busy, so this text
-                    is the only thing announcing the in-flight state. */}
-                <div role="status" aria-live="polite" aria-atomic="false" className={kbStyles.kbOverviewStatus}>
-                  {asking && <span className={styles.fieldHint}>Answering…</span>}
-                  {!asking && lastAnswer && (
-                    <div className={kbStyles.kbOverviewAnswerBlock}>
-                      <div
-                        className={kbStyles.kbOverviewAnswer}
-                        dangerouslySetInnerHTML={{ __html: renderOverviewMarkdown(lastAnswer.answer) }}
-                      />
-                      {!lastAnswer.grounded && (
-                        <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Not from your knowledge base</span>
-                      )}
-                      {lastAnswer.citations.length > 0 ? (
-                        <div className={kbStyles.kbOverviewSources}>
-                          {lastAnswer.citations.map((citation) =>
-                            citationPageExists(citation.id, pages) ? (
-                              <Button
-                                key={citation.id}
-                                size="small"
-                                variant="text"
-                                className={kbStyles.kbOverviewChip}
-                                onClick={() => onSelectPage(citation.id)}
-                              >
-                                {citation.title.trim() || "Untitled page"}
-                              </Button>
-                            ) : (
-                              <span key={citation.id} className={kbStyles.kbOverviewChipDeleted}>
-                                {citation.title.trim() || "Untitled page"} (deleted)
-                              </span>
-                            )
-                          )}
-                        </div>
-                      ) : (
-                        // Addendum A4's mandatory fallback: the model's JSON
-                        // envelope failed to parse, so citations were never
-                        // resolved for this answer - captioned honestly
-                        // rather than silently presenting an uncited answer
-                        // as if it were cited. Compared by id (never a bare
-                        // "was the last ask" flag) so deleting this entry, or
-                        // switching scope, can never leave the caption
-                        // pinned to a different answer - see
-                        // useKnowledgeOverview.ts's own doc comment.
-                        citationsUnavailableFor === lastAnswer.id && (
-                          <p className={styles.fieldHint} style={{ margin: 0, fontStyle: "italic" }}>
-                            Citations unavailable for this answer.
-                          </p>
-                        )
-                      )}
-                      <span className={styles.ghMeta}>
-                        Searched {lastAnswerIncludedCount} page{lastAnswerIncludedCount === 1 ? "" : "s"}.
-                      </span>
-                      {describeOmittedPages(lastAnswerOmitted) && (
-                        <p className={styles.fieldHint} style={{ margin: 0 }}>
-                          {describeOmittedPages(lastAnswerOmitted)}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
 
               {/* ── AI summary (AC2/AC3) ────────────────────────────────── */}
               {loading ? (
@@ -362,19 +230,6 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
                 )}
               </div>
 
-              <KnowledgeOverviewHistory
-                questions={questions}
-                allPages={pages}
-                open={historyOpen}
-                onToggleOpen={toggleHistoryOpen}
-                headingLevel={headingLevel + 1}
-                onSelectPage={onSelectPage}
-                deletingId={deletingId}
-                onDelete={deleteQuestion}
-                clearing={clearing}
-                onClearAll={clearAll}
-                error={historyError}
-              />
             </>
           )}
         </div>

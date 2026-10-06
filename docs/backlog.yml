@@ -1541,4 +1541,16 @@
   from: 'Owner request 2026-10-06 (direct chat); follows KNOWLEDGE-SWITCH-SPEED (same hooks).'
   note: 'Loop: recon -> check -> build -> owner walk. Recon dispatched (docs/knowledge-create-lag-scope.md). Must reproduce refresh(selectId) selection/expansion + the post-create edit/rename UX on the optimistic path, confirm the create action returns a full page, and guard the refreshedRef/background-merge interaction. Recon also notes whether rename/reorder/reparent/delete (which also full-refetch via refresh()) deserve the same optimistic treatment or a follow-up.'
   question: null
+- id: 'KNOWLEDGE-ASK-AI-INDEPENDENT'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06, two intertwined asks: (1) the Ask AI on knowledge pages should provide links back out to the cited pages; (2) the Ask AI section should be INDEPENDENT of pages - stay up regardless of what page or institution is selected (do not reset on nav). Today Ask AI lives in KnowledgeOverviewPanel, keyed on scopeKey=(institution,scopePageId) and RESETS on every page/institution switch; citations link via onSelectPage only when the cited page is in the CURRENT scope.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Machine-checkable: Ask AI state decoupled from scopeKey (nav-independent persisted key; no reset on institution/page change) + the citation carries (institution,pageId) and the navigate-out handler drives institution-switch + page-select (source-text/wiring). The cross-institution query (if F1=global) is a pure/action-shape pin. Felt persistence + rendered navigation + live LLM results are owner/browser walk (no API key/DB here). Shares KnowledgeTab.tsx with KNOWLEDGE-CREATE-LAG - serialize builds.'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'Loop: recon -> check -> build -> owner walk. Recon dispatched (docs/knowledge-ask-ai-independent-scope.md). FORK F1 (query scope, the crux): a page/institution-independent Ask AI must search (a) ALL institutions [recommended, the literal reading of "regardless of institution"; needs askKnowledgeOverviewAction to go cross-institution + citations to carry their institution] vs (b) a sticky user-chosen scope decoupled from nav. PART A = pull Ask AI out of the scope-keyed useKnowledgeOverview reset so it persists across nav + mounts as a standalone always-visible section (summary likely stays per-scope). PART B = citations navigate OUT to the cited page even in another institution (switch active institution + select page). Reuses + supersedes the earlier KNOWLEDGE-ASK-AI-UNGATE direction.'
+  question: null
 

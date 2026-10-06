@@ -1577,4 +1577,16 @@
   from: 'Owner request 2026-10-06 (direct chat).'
   note: 'Loop: UX+architect scope/recon -> check -> build -> owner walk. Token-efficient pipeline: UX primary + architect for layout; data/admin/security/SRE N/A for a CSS overhaul. DISJOINT from KNOWLEDGE-ASK-AI-INDEPENDENT (that is the knowledge-tab Ask AI panel; this is the app-wide FAB AiChatWindow) and from KNOWLEDGE-MUTATION-LAG. Watch the css-module class guard + any orphan ratchet over the chat CSS; preserve the VH-style structure pins if any exist on the chat window.'
   question: null
+- id: 'CHATBOT-FORMALITY-SCALE'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06: include a formality scale on the AI chatbot dictating how formal the responses should be. A control in the app-wide chat FAB (AiChatWindow/AiChatFab) that sets response formality, injected into the chat system instruction.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Reuse the ASK-AI-VOICE-TOGGLE seam (shipped 0f2de815/68982439): a pure formality directive composed into buildChatSystemInstruction (src/lib/chat/system-instruction.ts) via an optional RequestBody field the route reads; a persisted control (ta- key) in AiChatWindow; the FAB sends it in the /api/ai-chat POST. Machine-checkable = the directive is a pure function (each level -> its directive text, default = byte-identical to today, frozen oracle) + the persisted key + the route-reads + FAB-sends wiring (mirror responseMode.wiring.test.ts, BOTH halves of the seam). Rendered control + felt formality + live LLM = owner walk.'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'Loop: recon -> check -> build. FORKS: scale granularity (discrete levels e.g. casual/neutral/formal via SegmentedToggle, vs a numeric slider 1-5) - recommend in recon; default (recommend neutral = byte-identical to today, no directive); interaction with the VOICE mode (in-my-voice vs just-answer-me) - does formality compose with voice or is it independent? (recommend independent: formality always applies; voice controls whose style, formality controls how formal). SERIALIZES with CHATBOT-MODAL-VISUAL + touches the same AiChatWindow/AiChatFab/system-instruction as the voice toggle - recommend this functional control lands, then the visual overhaul styles the full control set (or coordinate order in the recon). Byte-identical default seam (W1-style) so nothing changes until a non-default level is picked.'
+  question: null
 

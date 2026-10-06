@@ -27,6 +27,7 @@ import {
   titleOnlySearch,
   resolveSearchHits,
   isBodyPending,
+  replacePages,
 } from "./knowledge-helpers";
 import { buildPageTree, searchPages, type InstitutionPage, type InstitutionPageSummary } from "@/lib/knowledge-base";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
@@ -781,5 +782,43 @@ describe("KNOWLEDGE-SWITCH-SPEED W2: summaries-first helpers", () => {
     expect(isBodyPending(true, false)).toBe(true);
     expect(isBodyPending(true, true)).toBe(false);
     expect(isBodyPending(false, false)).toBe(false);
+  });
+});
+
+describe("replacePages", () => {
+  const list = [
+    page({ id: "a", title: "A", position: 0 }),
+    page({ id: "b", title: "B", position: 1 }),
+    page({ id: "c", title: "C", position: 2, parentId: "a" }),
+  ];
+
+  it("rename: replaces one page title, keeps the others", () => {
+    const out = replacePages(list, [page({ id: "b", title: "B2", position: 1 })]);
+    expect(out.map((p) => p.title)).toEqual(["A", "B2", "C"]);
+  });
+
+  it("reorder: replaces both swapped rows' positions", () => {
+    const out = replacePages(list, [page({ id: "a", title: "A", position: 1 }), page({ id: "b", title: "B", position: 0 })]);
+    expect(out.map((p) => [p.id, p.position])).toEqual([["a", 1], ["b", 0], ["c", 2]]);
+  });
+
+  it("reparent: replaces parentId", () => {
+    const out = replacePages(list, [page({ id: "b", title: "B", position: 1, parentId: "a" })]);
+    expect(out[1].parentId).toBe("a");
+    expect(out[0].parentId).toBeNull();
+  });
+
+  it("preserves list order and ignores ids that are absent", () => {
+    const out = replacePages(list, [page({ id: "zzz", title: "Z" }), page({ id: "c", title: "C2", parentId: "a", position: 2 })]);
+    expect(out.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    expect(out).toHaveLength(3);
+    expect(out[2].title).toBe("C2");
+  });
+
+  it("does not mutate its input", () => {
+    const snapshot = JSON.stringify(list);
+    const out = replacePages(list, [page({ id: "a", title: "changed" })]);
+    expect(JSON.stringify(list)).toBe(snapshot);
+    expect(out).not.toBe(list);
   });
 });

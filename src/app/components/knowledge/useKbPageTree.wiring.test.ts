@@ -38,7 +38,7 @@ describe("useKbPageTree load ordering", () => {
     expect(start).toBeGreaterThan(-1);
     const end = source.indexOf("\n  );", start);
     const body = source.slice(start, end);
-    expect(source).toContain("insertCreatedPage,\n    toggleExpand");
+    expect(source).toContain("insertCreatedPage,\n    applyLocalPageUpdate");
     const fallback = body.indexOf("if (!bodiesReady)");
     const refreshCall = body.indexOf("await refresh(page.id)");
     const refreshedFlag = body.indexOf("refreshedRef.current = true");
@@ -51,6 +51,28 @@ describe("useKbPageTree load ordering", () => {
     const optimistic = body.slice(body.indexOf("refreshedRef.current = true"));
     expect(optimistic).toContain("setPages(");
     expect(optimistic).not.toContain("refresh(");
+    expect(body).not.toContain("setBodiesReady");
+    expect(body).not.toContain("setLoadState");
+  });
+
+  // KNOWLEDGE-MUTATION-LAG: rename / reorder / reparent replace the returned rows locally.
+  it("exposes applyLocalPageUpdate with an optimistic replace branch and a full-read fallback", () => {
+    const start = source.indexOf("const applyLocalPageUpdate = useCallback(");
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf("\n  );", start);
+    const body = source.slice(start, end);
+    expect(source).toContain("applyLocalPageUpdate,\n    toggleExpand");
+    const fallback = body.indexOf("if (!bodiesReady)");
+    const refreshCall = body.indexOf("await refresh()");
+    const refreshedFlag = body.indexOf("refreshedRef.current = true");
+    expect(fallback).toBeGreaterThan(-1);
+    expect(refreshCall).toBeGreaterThan(fallback);
+    expect(refreshedFlag).toBeGreaterThan(refreshCall);
+    const optimistic = body.slice(refreshedFlag);
+    expect(optimistic).toContain("replacePages(");
+    expect(optimistic).not.toContain("refresh(");
+    expect(body).not.toContain("listInstitutionPagesAction");
+    expect(body).not.toContain("applySelection");
     expect(body).not.toContain("setBodiesReady");
     expect(body).not.toContain("setLoadState");
   });

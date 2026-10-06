@@ -176,6 +176,7 @@ export default function KnowledgeTab({
     applySelection,
     refresh,
     insertCreatedPage,
+    applyLocalPageUpdate,
     toggleExpand,
     expandAncestorsOf,
   } = pageTree;
@@ -258,6 +259,7 @@ export default function KnowledgeTab({
     setExpanded,
     refresh,
     insertCreatedPage,
+    applyLocalPageUpdate,
     confirmDiscard,
     beginEdit,
     setIsEditing: editSession.setIsEditing,

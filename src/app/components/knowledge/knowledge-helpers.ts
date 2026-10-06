@@ -794,6 +794,14 @@ export function pagesFromSummaries(institution: string, summaries: InstitutionPa
   }));
 }
 
+/** Replaces each page whose id appears in `updated` with the authoritative row
+ *  the server returned (rename / reorder / reparent), preserving list order and
+ *  keeping every other page. Ids not present in `pages` are ignored. Pure. */
+export function replacePages(pages: InstitutionPage[], updated: InstitutionPage[]): InstitutionPage[] {
+  const byId = new Map(updated.map((p) => [p.id, p]));
+  return pages.map((p) => byId.get(p.id) ?? p);
+}
+
 /** Title (and tag) only search, used while bodies are still loading. Mirrors
  *  searchPages' contract: blank query returns [], hits carry no snippet. */
 export function titleOnlySearch(pages: InstitutionPage[], query: string): PageSearchHit[] {

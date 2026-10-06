@@ -30,6 +30,7 @@ export interface UseKbTreeActionsArgs {
   setExpanded: (next: Set<string>) => void;
   refresh: (selectId?: string | null) => Promise<void>;
   insertCreatedPage: (page: InstitutionPage) => Promise<void>;
+  applyLocalPageUpdate: (updated: InstitutionPage[]) => Promise<void>;
   confirmDiscard: () => boolean;
   beginEdit: (page: InstitutionPage) => void;
   /** Delete's own reset touches only these two - see confirmDeleteRequest
@@ -75,6 +76,7 @@ export function useKbTreeActions({
   setExpanded,
   refresh,
   insertCreatedPage,
+  applyLocalPageUpdate,
   confirmDiscard,
   beginEdit,
   setIsEditing,
@@ -157,7 +159,7 @@ export function useKbTreeActions({
       setActionError(result.error);
       return;
     }
-    await refresh();
+    await applyLocalPageUpdate([result.page]);
   };
 
   // ── Delete (AC5: the confirmation states the real descendant count) ────
@@ -207,7 +209,7 @@ export function useKbTreeActions({
       setActionError(resB.error);
       return;
     }
-    await refresh();
+    await applyLocalPageUpdate([resA.page, resB.page]);
   };
 
   const reparent = async (parentId: string | null) => {
@@ -225,7 +227,7 @@ export function useKbTreeActions({
       setExpanded(next);
       writeExpandedIds(active, next);
     }
-    await refresh();
+    await applyLocalPageUpdate([result.page]);
   };
 
   const canMoveUp = selectedId ? computeReorder(siblingPositions, selectedId, "up") !== null : false;

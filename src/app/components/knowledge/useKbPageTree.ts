@@ -21,6 +21,7 @@ import {
   writeExpandedIds,
   pickValidPageId,
   pagesFromSummaries,
+  replacePages,
 } from "./knowledge-helpers";
 
 type LoadState = "idle" | "loading" | "error";
@@ -68,6 +69,10 @@ export interface UseKbPageTreeReturn {
    *  without re-reading every page body (falls back to refresh while the
    *  background body read is still in flight). */
   insertCreatedPage: (page: InstitutionPage) => Promise<void>;
+  /** Replaces the rows a rename / reorder / reparent action just returned,
+   *  without re-reading every page body (falls back to refresh while the
+   *  background body read is still in flight). Selection is unchanged. */
+  applyLocalPageUpdate: (updated: InstitutionPage[]) => Promise<void>;
   toggleExpand: (id: string) => void;
   expandAncestorsOf: (id: string) => void;
 }
@@ -237,6 +242,22 @@ export function useKbPageTree({
     [bodiesReady, refresh, applySelection]
   );
 
+  // Optimistic alternative to refresh() for rename / reorder / reparent: each
+  // action returns the complete authoritative row, so it is replaced by id
+  // locally. Same !bodiesReady fallback and same no-flip rule as
+  // insertCreatedPage. Selection is untouched (those mutations keep it).
+  const applyLocalPageUpdate = useCallback(
+    async (updated: InstitutionPage[]) => {
+      if (!bodiesReady) {
+        await refresh();
+        return;
+      }
+      refreshedRef.current = true;
+      setPages((prev) => (prev ? replacePages(prev, updated) : prev));
+    },
+    [bodiesReady, refresh]
+  );
+
   // Resolves the actual selection whenever the pages loaded for `active`, or
   // the requested page id (page.tsx's URL-tracked value - AC1/AC2), change.
   // Owns every selection resolution, including the very first one after an
@@ -293,6 +314,7 @@ export function useKbPageTree({
     applySelection,
     refresh,
     insertCreatedPage,
+    applyLocalPageUpdate,
     toggleExpand,
     expandAncestorsOf,
   };

@@ -26,9 +26,9 @@ import {
 // url-state.test.ts and topLevelTabs.wiring.test.ts respectively. What this
 // file pins is the shape the other two assume.
 
-describe("the five top-level tabs (D25a)", () => {
-  it("lists exactly five, in strip order", () => {
-    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel", "one-off-tasks"]);
+describe("the four top-level tabs", () => {
+  it("lists exactly four, in strip order", () => {
+    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel"]);
   });
 
   it("has a non-empty label for every tab, and no duplicates", () => {
@@ -44,8 +44,8 @@ describe("the five top-level tabs (D25a)", () => {
 });
 
 describe("each merged tab's sections", () => {
-  it("holds the two former tabs it absorbed, in switch order", () => {
-    expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks"]);
+  it("holds the Courses sections in order, plus the two former tabs the others absorbed", () => {
+    expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks", "oneoff"]);
     expect([...TOOLS_SECTION_ORDER]).toEqual(["manual", "workflows"]);
     expect([...LIBRARY_SECTION_ORDER]).toEqual(["files", "knowledge"]);
   });
@@ -109,11 +109,12 @@ describe("the view families the flattened rails are built from", () => {
 });
 
 describe("the retired tab values (D25b)", () => {
-  it("names exactly the three that stopped being tabs", () => {
-    expect(Object.keys(RETIRED_TAB_DESTINATIONS).sort()).toEqual(["knowledge", "tasks", "workflows"]);
+  it("names exactly the four that stopped being tabs", () => {
+    expect(Object.keys(RETIRED_TAB_DESTINATIONS).sort()).toEqual(["knowledge", "one-off-tasks", "tasks", "workflows"]);
     expect(isRetiredTabValue("tasks")).toBe(true);
     expect(isRetiredTabValue("workflows")).toBe(true);
     expect(isRetiredTabValue("knowledge")).toBe(true);
+    expect(isRetiredTabValue("one-off-tasks")).toBe(true);
     expect(isRetiredTabValue("manual")).toBe(false);
     expect(isRetiredTabValue("")).toBe(false);
     expect(isRetiredTabValue(null)).toBe(false);
@@ -135,6 +136,8 @@ describe("the retired tab values (D25b)", () => {
     expect(RETIRED_TAB_DESTINATIONS.workflows.toolsSection).toBe("workflows");
     expect(RETIRED_TAB_DESTINATIONS.knowledge.tab).toBe("files");
     expect(RETIRED_TAB_DESTINATIONS.knowledge.librarySection).toBe("knowledge");
+    expect(RETIRED_TAB_DESTINATIONS["one-off-tasks"].tab).toBe("courses");
+    expect(RETIRED_TAB_DESTINATIONS["one-off-tasks"].coursesSection).toBe("oneoff");
 
     for (const destination of Object.values(RETIRED_TAB_DESTINATIONS)) {
       expect(TAB_ORDER).toContain(destination.tab);

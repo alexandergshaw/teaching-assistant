@@ -531,6 +531,11 @@ export default function Home() {
                 same tasksView param they always did, so this pane no longer
                 needs a way to change it. */}
             {coursesSection === "tasks" && <TasksTab view={tasksView} />}
+            {coursesSection === "oneoff" && (
+              <TabShell>
+                <OneOffTasksTab />
+              </TabShell>
+            )}
           </>
         )}
 
@@ -841,14 +846,6 @@ export default function Home() {
         {activeTab === "course-intel" && (
           <TabShell>
             <CourseIntelTab />
-          </TabShell>
-        )}
-
-        {/* One-Off Tasks: a stateless, rail-less top-level tab like Course
-            Intel. Wave 1 renders an empty shell only. */}
-        {activeTab === "one-off-tasks" && (
-          <TabShell>
-            <OneOffTasksTab />
           </TabShell>
         )}
 

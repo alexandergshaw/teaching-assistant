@@ -129,7 +129,7 @@ function branchSlice(source: string, tab: ActiveTab): string {
   return source.slice(start, end);
 }
 
-describe("the five top-level tabs are registered, in the strip, and rendered", () => {
+describe("the four top-level tabs are registered, in the strip, and rendered", () => {
   it("finds the page at all, so a moved file cannot make this vacuously pass", () => {
     // Every assertion below reads one file. If that read ever returns an empty
     // string - a moved page, a renamed directory - `indexOf` returns -1 and
@@ -141,9 +141,8 @@ describe("the five top-level tabs are registered, in the strip, and rendered", (
     expect(source).toContain("activeTab");
   });
 
-  it("registers exactly the five tabs D25a names, with a label each", () => {
-    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel", "one-off-tasks"]);
-    expect(TAB_LABELS["one-off-tasks"]).toBe("One-Off Tasks");
+  it("registers exactly the four tabs, with a label each", () => {
+    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel"]);
     expect(TAB_LABELS.courses).toBe("Courses");
     expect(TAB_LABELS.manual).toBe("Tools");
     expect(TAB_LABELS.files).toBe("Library");
@@ -179,6 +178,8 @@ describe("the five top-level tabs are registered, in the strip, and rendered", (
 
   it("renders a branch for every tab, guarded by that tab's own id", () => {
     const source = read(PAGE);
+    // One-Off Tasks moved into the Courses rail; a stray top-level branch must not survive.
+    expect(source).not.toContain('{activeTab === "one-off-tasks"');
     for (const tab of TAB_ORDER) {
       // The JSX branch form specifically - `activeTab === "files"` on its own
       // also appears inside effects (the files-inbox mark-seen one, the
@@ -251,6 +252,15 @@ describe("the five top-level tabs are registered, in the strip, and rendered", (
       expect(slice, `the "${tab}" branch never checks ${first}`).toContain(first);
       expect(slice, `the "${tab}" branch never checks ${second}`).toContain(second);
     }
+  });
+
+  it("renders OneOffTasksTab inside the Courses branch behind coursesSection === \"oneoff\"", () => {
+    // Reachability canary for the moved pane: without this the rail chip can
+    // highlight while the pane stays blank and every other gate stays green.
+    const slice = branchSlice(read(PAGE), "courses");
+    const guardIndex = slice.indexOf('coursesSection === "oneoff"');
+    expect(guardIndex, "the courses branch never checks coursesSection === \"oneoff\"").toBeGreaterThan(-1);
+    expect(slice.indexOf("<OneOffTasksTab", guardIndex)).toBeGreaterThan(guardIndex);
   });
 });
 
@@ -397,6 +407,12 @@ describe("every retired tab value still resolves to its new home", () => {
   // enough, because the tab now opens on a specific rail item. A legacy link
   // that lands on Tools with the Manual chip selected has lost exactly as much
   // as one that landed on the wrong tab before - the user asked for Workflows.
+  it("lands the retired one-off-tasks link on the One-Off Tasks chip", () => {
+    const oneOff = parseUrlState("?tab=one-off-tasks");
+    expect(oneOff.tab).toBe("courses");
+    expect(coursesRailItemFor(oneOff.coursesSection, oneOff.tasksView)).toBe("oneoff");
+  });
+
   it("lands each retired link on the right CHIP, not merely the right tab", () => {
     const tasks = parseUrlState("?tab=tasks");
     expect(tasks.tab).toBe("courses");

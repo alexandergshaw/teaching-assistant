@@ -187,9 +187,9 @@ describe("the highlighted Tools chip is derived from the params, never stored", 
   });
 });
 
-describe("the Courses rail is one flat list: Courses plus the two Tasks views (D26)", () => {
-  it("holds exactly three chips, in that order", () => {
-    expect(COURSES_RAIL_ITEMS.map((item) => item.id)).toEqual(["courses", "tasks:term", "tasks:recurring"]);
+describe("the Courses rail is one flat list: Courses, the two Tasks views, and One-Off Tasks (D26)", () => {
+  it("holds exactly four chips, in that order", () => {
+    expect(COURSES_RAIL_ITEMS.map((item) => item.id)).toEqual(["courses", "tasks:term", "tasks:recurring", "oneoff"]);
   });
 
   it("carries every registered Tasks view, derived from TASKS_VIEW_ORDER rather than restated", () => {
@@ -199,7 +199,7 @@ describe("the Courses rail is one flat list: Courses plus the two Tasks views (D
         tasksRailItemId(view)
       );
     }
-    expect(COURSES_RAIL_ITEMS).toHaveLength(1 + TASKS_VIEW_ORDER.length);
+    expect(COURSES_RAIL_ITEMS).toHaveLength(2 + TASKS_VIEW_ORDER.length);
   });
 
   it("keeps the wording the deleted TasksTab subnav used", () => {
@@ -207,9 +207,10 @@ describe("the Courses rail is one flat list: Courses plus the two Tasks views (D
     expect(byId.get("courses")).toBe("Courses");
     expect(byId.get("tasks:term")).toBe(TASKS_VIEW_LABELS.term);
     expect(byId.get("tasks:recurring")).toBe(TASKS_VIEW_LABELS.recurring);
+    expect(byId.get("oneoff")).toBe("One-Off Tasks");
   });
 
-  it("splits every chip into exactly one of the two Courses sections", () => {
+  it("splits every chip into exactly one of the Courses sections", () => {
     const sections = new Set(COURSES_RAIL_ITEMS.map((item) => item.section));
     expect([...sections].sort()).toEqual([...COURSES_SECTION_ORDER].sort());
   });

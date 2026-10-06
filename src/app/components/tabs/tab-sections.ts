@@ -28,19 +28,18 @@
 // meant five broken URL shapes instead of three redirects, for a cosmetic
 // gain nobody can see in the address bar anyway.
 
-export type ActiveTab = "courses" | "manual" | "files" | "course-intel" | "one-off-tasks";
+export type ActiveTab = "courses" | "manual" | "files" | "course-intel";
 
 // Display order of the top-level strip. page.tsx maps this array directly
 // rather than hand-writing one <Tab> per member, so "registered but missing
 // from the strip" is not a state this app can be in.
-export const TAB_ORDER: readonly ActiveTab[] = ["courses", "manual", "files", "course-intel", "one-off-tasks"];
+export const TAB_ORDER: readonly ActiveTab[] = ["courses", "manual", "files", "course-intel"];
 
 export const TAB_LABELS: Record<ActiveTab, string> = {
   courses: "Courses",
   manual: "Tools",
   files: "Library",
   "course-intel": "Course Intel",
-  "one-off-tasks": "One-Off Tasks",
 };
 
 // The tab the app lands on when nothing valid is stored or requested.
@@ -63,11 +62,11 @@ export const DEFAULT_TAB: ActiveTab = "manual";
 // families have a remembered view - drop it and "?tab=manual" with both a
 // stored manualView and a stored workflowsView becomes ambiguous.
 
-export type CoursesSection = "courses" | "tasks";
+export type CoursesSection = "courses" | "tasks" | "oneoff";
 export type ToolsSection = "manual" | "workflows";
 export type LibrarySection = "files" | "knowledge";
 
-export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks"];
+export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks", "oneoff"];
 export const TOOLS_SECTION_ORDER: readonly ToolsSection[] = ["manual", "workflows"];
 export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowledge"];
 
@@ -86,6 +85,7 @@ export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowl
 export const COURSES_SECTION_LABELS: Record<CoursesSection, string> = {
   courses: "Courses",
   tasks: "Tasks",
+  oneoff: "One-Off Tasks",
 };
 export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
   files: "Files",
@@ -159,7 +159,7 @@ export const DEFAULT_DESTINATION: TabDestination = {
 // canonical value is written back (useAppNavigation.ts's first URL sync) so
 // an old link converges on the new shape the first time it is opened instead
 // of staying legacy forever.
-export type RetiredTabValue = "tasks" | "workflows" | "knowledge";
+export type RetiredTabValue = "tasks" | "workflows" | "knowledge" | "one-off-tasks";
 
 export const RETIRED_TAB_DESTINATIONS: Record<RetiredTabValue, TabDestination> = {
   // "?tab=tasks" -> Courses, showing its Tasks section.
@@ -182,6 +182,13 @@ export const RETIRED_TAB_DESTINATIONS: Record<RetiredTabValue, TabDestination> =
     coursesSection: DEFAULT_COURSES_SECTION,
     toolsSection: DEFAULT_TOOLS_SECTION,
     librarySection: "knowledge",
+  },
+  // "?tab=one-off-tasks" (a former top-level tab) -> Courses, One-Off Tasks chip.
+  "one-off-tasks": {
+    tab: "courses",
+    coursesSection: "oneoff",
+    toolsSection: DEFAULT_TOOLS_SECTION,
+    librarySection: DEFAULT_LIBRARY_SECTION,
   },
 };
 

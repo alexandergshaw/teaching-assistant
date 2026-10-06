@@ -185,6 +185,7 @@ describe("url-state", () => {
       expect(buildUrlSearch(parseUrlState("?tab=tasks"))).toBe("?tab=courses&coursesSection=tasks");
       expect(buildUrlSearch(parseUrlState("?tab=workflows"))).toBe("?tab=manual&toolsSection=workflows");
       expect(buildUrlSearch(parseUrlState("?tab=knowledge"))).toBe("?tab=files&librarySection=knowledge");
+      expect(buildUrlSearch(parseUrlState("?tab=one-off-tasks"))).toBe("?tab=courses&coursesSection=oneoff");
 
       expect(buildUrlSearch(parseUrlState("?tab=tasks&tasksView=recurring"))).toBe(
         "?tab=courses&coursesSection=tasks&tasksView=recurring"

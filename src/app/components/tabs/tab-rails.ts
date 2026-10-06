@@ -55,7 +55,7 @@ import {
 
 // --- Courses -------------------------------------------------------------
 
-export type CoursesRailItemId = "courses" | `tasks:${TasksView}`;
+export type CoursesRailItemId = "courses" | "oneoff" | `tasks:${TasksView}`;
 
 /** The id of the Courses rail item for one Tasks sub-view. Exported so no
  *  caller has to hand-write the prefixed string. */
@@ -68,6 +68,7 @@ export function tasksRailItemId(view: TasksView): `tasks:${TasksView}` {
  *  cannot be routed to the wrong family because the family travels with it. */
 export type CoursesRailItem =
   | { id: "courses"; label: string; section: "courses" }
+  | { id: "oneoff"; label: string; section: "oneoff" }
   | { id: `tasks:${TasksView}`; label: string; section: "tasks"; tasksView: TasksView };
 
 // Derived from TASKS_VIEW_ORDER rather than restated, so a Tasks sub-view
@@ -83,6 +84,7 @@ export const COURSES_RAIL_ITEMS: readonly CoursesRailItem[] = [
       tasksView: view,
     })
   ),
+  { id: "oneoff", label: COURSES_SECTION_LABELS.oneoff, section: "oneoff" },
 ];
 
 const COURSES_RAIL_BY_ID: ReadonlyMap<string, CoursesRailItem> = new Map(
@@ -93,6 +95,7 @@ const COURSES_RAIL_BY_ID: ReadonlyMap<string, CoursesRailItem> = new Map(
  *  localStorage already resolved. This is the "section is derived" direction:
  *  nothing stores a rail item, it is read back out of the params every time. */
 export function coursesRailItemFor(section: CoursesSection, tasksView: TasksView): CoursesRailItemId {
+  if (section === "oneoff") return "oneoff";
   return section === "tasks" ? tasksRailItemId(tasksView) : "courses";
 }
 
@@ -108,6 +111,7 @@ export function coursesStateFromRailItem(
   const item = COURSES_RAIL_BY_ID.get(id);
   if (!item) return { coursesSection: currentSection, tasksView: currentTasksView };
   if (item.section === "courses") return { coursesSection: "courses", tasksView: currentTasksView };
+  if (item.section === "oneoff") return { coursesSection: "oneoff", tasksView: currentTasksView };
   return { coursesSection: "tasks", tasksView: item.tasksView };
 }
 

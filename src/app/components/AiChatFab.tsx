@@ -26,6 +26,7 @@ import type {
   ChatSelectionContext,
   ChatToneStatus,
   ChatResponseMode,
+  ChatFormality,
 } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { OPEN_AI_CHAT_EVENT, parseOpenChatDetail } from "@/lib/chat/open-chat";
@@ -222,6 +223,10 @@ export default function AiChatFab() {
   const [responseMode, setResponseMode] = useState<ChatResponseMode>(() =>
     readLS<ChatResponseMode>("ask-ai-voice-mode", "voice") === "informational" ? "informational" : "voice"
   );
+  const [formality, setFormality] = useState<ChatFormality>(() => {
+    const stored = readLS<ChatFormality>("ask-ai-formality", "neutral");
+    return stored === "casual" || stored === "formal" ? stored : "neutral";
+  });
   const voiceDisabled = toneStatus !== null && toneStatus !== "active";
   const effectiveResponseMode: ChatResponseMode = voiceDisabled ? "informational" : responseMode;
 
@@ -329,6 +334,7 @@ export default function AiChatFab() {
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("ask-ai-voice-mode", responseMode); }, [responseMode]);
+  useEffect(() => { writeLS("ask-ai-formality", formality); }, [formality]);
   useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
   useEffect(() => { writeLS("checklist-overview-open", checklistOverviewOpen); }, [checklistOverviewOpen]);
   useEffect(() => { writeLS("legibility-probe-open", legibilityProbeOpen); }, [legibilityProbeOpen]);
@@ -521,6 +527,7 @@ export default function AiChatFab() {
           provider,
           activeInstitution,
           responseMode: effectiveResponseMode,
+          formality,
           ...(knowledgeContext ? { contextPageIds: knowledgeContext.knowledgePageIds } : {}),
           // selectionContextText (C2): re-sent with EVERY message for the
           // lifetime of this open chat window, same session-scoped
@@ -561,7 +568,7 @@ export default function AiChatFab() {
     } finally {
       setLoading(false);
     }
-  }, [messages, recordPrompt, knowledgeContext, selectionContext, effectiveResponseMode]);
+  }, [messages, recordPrompt, knowledgeContext, selectionContext, effectiveResponseMode, formality]);
 
   // Resolves an institution picked from the typeahead popup (AC2) into a
   // knowledgeContext covering every page under it, up to the shared cap
@@ -872,6 +879,7 @@ export default function AiChatFab() {
             voiceDisabled,
             showSampleLink: toneStatus === "no-sample",
           }}
+          formality={{ value: formality, onChange: setFormality }}
           suggestions={suggestions}
           attachDisabled={attachDisabled}
           attachDisabledReason="The Embedded Deterministic Engine cannot read files, so attachments are turned off. Switch providers to attach files."

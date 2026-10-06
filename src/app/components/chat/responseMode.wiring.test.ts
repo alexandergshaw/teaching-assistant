@@ -73,3 +73,17 @@ describe("responseMode survives the client half of the wire", () => {
     expect(fabSource).toMatch(/writeLS\(\s*"ask-ai-voice-mode"/);
   });
 });
+
+describe("formality survives the client half of the wire", () => {
+  it("the FAB sends formality in the /api/ai-chat POST body", () => {
+    const start = fabSource.indexOf('fetch("/api/ai-chat"');
+    expect(start).toBeGreaterThan(-1);
+    const end = fabSource.indexOf("});", start);
+    expect(fabSource.slice(start, end)).toMatch(/\bformality\b\s*[,:]/);
+  });
+
+  it("the FAB reads and writes the ta:-prefixed ask-ai-formality key", () => {
+    expect(fabSource).toMatch(/readLS<[^>]*>\(\s*"ask-ai-formality"/);
+    expect(fabSource).toMatch(/writeLS\(\s*"ask-ai-formality"/);
+  });
+});

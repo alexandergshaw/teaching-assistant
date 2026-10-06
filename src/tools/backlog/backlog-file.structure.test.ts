@@ -109,7 +109,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 123 -> 126: three owner direct requests filed 2026-10-06 - ONE-OFF-TASKS-MOVE
 // (move the tab to a Courses rail item, resolving ONE-OFF-TASKS FORK 1),
 // COURSES-COLUMN-SEARCH (per-column search), COURSES-TABLE-SPEED (slow load).
-const EXPECTED_ROW_COUNT = 126;
+// 126 -> 127: KNOWLEDGE-ATTACHMENTS-DND filed 2026-10-06 (shipped c9211e11) - the
+// knowledge attachments section accepts drag-and-dropped files.
+const EXPECTED_ROW_COUNT = 127;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

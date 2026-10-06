@@ -1517,3 +1517,15 @@
   from: 'Owner request 2026-10-06 (direct chat); scoped with COURSES-COLUMN-SEARCH in docs/courses-table-search-and-speed-scope.md.'
   note: 'Loop: recon (shared doc) -> check -> build -> owner speed walk. Recon dispatched. Highest-leverage lowest-risk fix TBD from the diagnosis (render rows immediately + lazy heavy cells / parallelize / cache). Owner pain = the table not appearing fast. SCOPE CHECKED SHIP (a8232abc); fork = Shape B (two-phase, recommended) over Shape C - proceeded on B. SHIPPED df7c2a3e (verified a27c3dd5, data-integrity weighted - no heavy-field writer fires outside the inert guard): new listCoursesLight (38 light cols, SEPARATE fn; listCourses byte-untouched) paints the table, then the 17 heavy cols merge in the background (heavyReady); heavy cells show aria-busy placeholders; inert <tbody> blocks row writers until heavyReady so a save cannot wipe real heavy data; courses.light.test pins light+heavy===COLUMNS. 2 sabotages red-then-green. COMPLETE - verification. Owner walk = the table paints noticeably sooner. ASK1 column-search builds next; it must handle heavy-column search vs heavyReady (notes/heavy cols can''t match until bodies load).'
   question: null
+- id: 'KNOWLEDGE-ATTACHMENTS-DND'
+  state: 'verification'
+  kind: 'feature'
+  area: 'ask-ai-modal'
+  title: 'Owner 2026-10-06: make the attachments section on the knowledge pages accept drag-and-dropped files. Today AttachmentsPanel only takes files via the Attach-files picker.'
+  owns: ['src/app/components/knowledge/AttachmentsPanel.tsx']
+  verify: null
+  blocked_by: []
+  instrument: 'Nothing renders under vitest, so machine-checkable = tsc + the existing attachment tests staying green; the drag interaction itself is an owner/browser walk. handleFiles already does all validation (auth, size cap, count cap), so drop reuses it.'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'SHIPPED c9211e11 (inline): AttachmentsPanel body is a drop target - onDragOver (preventDefault + dashed-accent highlight) / onDragLeave (cleared only when the pointer leaves the body, not on child boundaries) / onDrop routes e.dataTransfer.files into the existing handleFiles (same auth + size/count caps as the picker); no-op while uploading or at cap. Token-only inline highlight (var(--accent)/var(--radius-sm)) - no CSS-module class, orphan ratchet untouched. tsc + eslint + attachment-embed + no-emojis + source-bytes + strip-comments green. Owner walk: dropping files actually attaches them + the highlight reads right.'
+  question: null

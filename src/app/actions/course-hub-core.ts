@@ -1,6 +1,7 @@
 "use server";
 
 import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, updateCourseRepoPairing, updateCourseExportModuleAdditions, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
+import { listCoursesLight } from "@/lib/supabase/courses.light";
 import { requireOwner } from "@/lib/supabase/auth";
 import { coerceRepoModulePairing, type RepoModulePairing } from "@/lib/repo-module-pairing";
 import { coerceExportModuleAdditions, type ExportModuleAdditions } from "@/lib/export-module-additions";
@@ -26,6 +27,18 @@ export async function listCourseHubAction(): Promise<{ courses: CourseHub[] } | 
   try {
     const user = await requireOwner();
     return { courses: await listCourseHubRows(user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list your courses." };
+  }
+}
+
+/** List the owner's saved courses WITHOUT the heavy content columns, so the
+ * Courses table can paint before the full rows (listCourseHubAction) arrive.
+ * Heavy fields on the returned courses are empty placeholders. */
+export async function listCourseHubLightAction(): Promise<{ courses: CourseHub[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    return { courses: await listCoursesLight(user.id) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list your courses." };
   }

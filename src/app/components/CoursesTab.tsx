@@ -61,6 +61,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
     orgs,
     state,
     refreshing,
+    heavyReady,
     error,
     setError,
     load,
@@ -342,6 +343,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         courses={filteredCourses}
         highlightCourseId={highlightCourseId}
         loading={state === "loading"}
+        heavyReady={heavyReady}
         refreshing={refreshing}
         onRefresh={() => void load({ silent: true })}
         onNewCourse={() => setFormState({ mode: "new" })}

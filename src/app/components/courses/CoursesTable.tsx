@@ -42,6 +42,7 @@ import { cellCopyPlan, columnTextForCopy, type CellColumnId } from "@/lib/cell-c
 import { CELL_COLUMN_LABELS } from "@/lib/courses-table-labels";
 import { syncCourseCalendarAction } from "@/app/actions";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
+import { heavyReadReady } from "@/lib/courses-hydration";
 import CourseRow from "./CourseRow";
 import CellMenu, { type CellMenuItem } from "./CellMenu";
 import styles from "../../page.module.css";
@@ -126,6 +127,11 @@ export interface CoursesTableProps {
    */
   highlightCourseId?: string | null;
   loading: boolean;
+  /** False until the heavy content columns have merged in after the light
+   * first paint. While false, heavy cells show a loading marker and the row
+   * body is inert: every row edit round-trips the whole Course, so a save in
+   * this window would write the empty placeholders over real content. */
+  heavyReady: boolean;
   refreshing: boolean;
   onRefresh: () => void;
   onNewCourse: () => void;
@@ -178,6 +184,7 @@ export default function CoursesTable({
   courses,
   highlightCourseId = null,
   loading,
+  heavyReady,
   refreshing,
   onRefresh,
   onNewCourse,
@@ -449,6 +456,8 @@ export default function CoursesTable({
       key: "copy-all",
       label: "Copy all",
       helperText: "Copies every course currently in view to the clipboard.",
+      disabled: !heavyReadReady(heavyReady, id),
+      disabledReason: "Course details are still loading.",
       onSelect: () => void runCopyAll(id),
     },
   ];
@@ -706,7 +715,7 @@ export default function CoursesTable({
                 <th style={{ minWidth: COLUMN_MIN_WIDTHS.actions }}>Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody inert={!heavyReady}>
               {sorted.map((c) => (
                 <CourseRow
                   key={c.id}
@@ -746,6 +755,7 @@ export default function CoursesTable({
                   onCopyCellToVisible={(course, column) => setCopyRequest({ course, column })}
                   onRecommendTextbooks={onRecommendTextbooks}
                   onExtractTextbookPhoto={onExtractTextbookPhoto}
+                  heavyReady={heavyReady}
                 />
               ))}
             </tbody>

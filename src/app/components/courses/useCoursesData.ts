@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   listCourseHubAction,
+  listCourseHubLightAction,
   listFinalizedSyllabiAction,
   listMyOrgsAction,
   listSyllabusTemplatesAction,
@@ -14,6 +15,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { splitCourseNotifResults } from "@/lib/courses-table-helpers";
+import { mergeHydratedCourses } from "@/lib/courses-hydration";
 import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 export interface UseCoursesDataReturn {
@@ -27,6 +29,9 @@ export interface UseCoursesDataReturn {
   setOrgs: (orgs: string[] | ((prev: string[]) => string[])) => void;
   state: "loading" | "idle" | "error";
   refreshing: boolean;
+  /** False between the light first paint and the background merge of the
+   * heavy content columns; true once every Course field is real. */
+  heavyReady: boolean;
   error: string | null;
   setError: (error: string | null) => void;
   load: (opts?: { silent?: boolean }) => Promise<void>;
@@ -73,6 +78,7 @@ export function useCoursesData(): UseCoursesDataReturn {
   const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
+  const [heavyReady, setHeavyReady] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notifByCourse, setNotifByCourse] = useState<Record<string, { needsGrading: number; unread: number }>>({});
   const [lmsErrorByCourse, setLmsErrorByCourse] = useState<Record<string, string>>({});
@@ -114,12 +120,18 @@ export function useCoursesData(): UseCoursesDataReturn {
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (opts?.silent) setRefreshing(true);
     else setState("loading");
+    // A silent reload already has rows on screen, so it fetches full rows in
+    // one step (a light replace would blank the heavy cells). Only the
+    // initial, non-silent load paints from the light rows first.
+    const twoPhase = !opts?.silent;
     const [c, s, o, t] = await Promise.all([
-      listCourseHubAction(),
+      twoPhase ? listCourseHubLightAction() : listCourseHubAction(),
       listFinalizedSyllabiAction(),
       listMyOrgsAction(),
       listSyllabusTemplatesAction(),
     ]);
+    // Queued after the four above, so it never delays the first paint.
+    const fullPromise = twoPhase ? listCourseHubAction() : null;
     if ("error" in c) {
       setRefreshing(false);
       if (!opts?.silent) {
@@ -134,13 +146,37 @@ export function useCoursesData(): UseCoursesDataReturn {
       orgs: "error" in o ? [] : o.orgs,
       templates: "error" in t ? [] : t.templates,
     };
-    hubCache = next;
+    if (!twoPhase) {
+      hubCache = next;
+      setCoursesWithCache(next.courses);
+      setSyllabisWithCache(next.syllabi);
+      setOrgsWithCache(next.orgs);
+      setTemplatesWithCache(next.templates);
+      setHeavyReady(true);
+      setState("idle");
+      setRefreshing(false);
+      return;
+    }
+    // Phase 1: paint from the light rows. hubCache is NOT written yet - a
+    // remount mid-window must not treat placeholder rows as complete.
+    setHeavyReady(false);
     setCoursesWithCache(next.courses);
     setSyllabisWithCache(next.syllabi);
     setOrgsWithCache(next.orgs);
     setTemplatesWithCache(next.templates);
     setState("idle");
     setRefreshing(false);
+    // Phase 2: fetch the full rows in the background and merge by id.
+    const full = await fullPromise;
+    if (full === null) return;
+    if ("error" in full) {
+      setError(`Could not load the full course details: ${full.error} Use Refresh to retry.`);
+      return;
+    }
+    const merged = mergeHydratedCourses(next.courses, full.courses);
+    hubCache = { ...next, courses: merged };
+    setCoursesWithCache(merged);
+    setHeavyReady(true);
   }, [setCoursesWithCache, setSyllabisWithCache, setOrgsWithCache, setTemplatesWithCache]);
 
   const reloadSyllabi = useCallback(async () => {
@@ -221,6 +257,7 @@ export function useCoursesData(): UseCoursesDataReturn {
     setOrgs: setOrgsWithCache,
     state,
     refreshing,
+    heavyReady,
     error,
     setError,
     load,

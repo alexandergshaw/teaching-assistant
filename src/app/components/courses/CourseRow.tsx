@@ -16,6 +16,7 @@ import { courseCalendarBlockers, type CourseCalendarBlocker } from "@/lib/course
 import { integrationsToText } from "@/lib/courses-tab-helpers";
 import { COURSE_KINDS } from "@/lib/course-kind";
 import { cellCopyPlan, type CellColumnId } from "@/lib/cell-copy";
+import { heavyReadReady } from "@/lib/courses-hydration";
 import {
   CELL_COLUMN_LABELS,
   MODALITY_OPTIONS,
@@ -102,6 +103,9 @@ export interface CourseRowProps {
   onRecommendTextbooks: (course: Course) => void;
   /** F2: opens the "Extract from photo" modal for this course. */
   onExtractTextbookPhoto: (course: Course) => void;
+  /** False while this course's heavy content columns are still placeholders
+   * (the two-phase load's window): those cells render a loading marker. */
+  heavyReady: boolean;
 }
 
 export default function CourseRow({
@@ -138,6 +142,7 @@ export default function CourseRow({
   onCopyCellToVisible,
   onRecommendTextbooks,
   onExtractTextbookPhoto,
+  heavyReady,
 }: CourseRowProps) {
   const save = (field: TableEditableField) => (rawValue: string) => saveField(course, field, rawValue).then((result) => result !== null);
 
@@ -659,7 +664,15 @@ export default function CourseRow({
       </td>
 
       {visibleColumns.map((id) => (
-        <Fragment key={id}>{cells[id]}</Fragment>
+        <Fragment key={id}>
+          {heavyReadReady(heavyReady, id) ? (
+            cells[id]
+          ) : (
+            <td aria-busy="true" style={{ minWidth: COLUMN_MIN_WIDTHS[id], color: "var(--text-muted)" }}>
+              <span aria-label="Loading">...</span>
+            </td>
+          )}
+        </Fragment>
       ))}
 
       <td>

@@ -17,7 +17,7 @@
 // composer field after clearing it, so the next paste does not cost an extra
 // click back into the field (clicking Send moves focus to the button;
 // pressing Enter does not move focus at all).
-import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import SegmentedToggle from "../ui/SegmentedToggle";
@@ -63,6 +63,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
   const [url, setUrl] = useState("");
   const textFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const selectMode = (next: InputMode) => {
     setMode(next);
@@ -96,8 +97,35 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     setUrl("");
   };
 
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    if (disabled) return;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) onSubmitFiles(files);
+  };
+
   return (
-    <div className={chatStyles.composer}>
+    <div
+      className={chatStyles.composer}
+      onDragOver={(event) => {
+        if (disabled) return;
+        event.preventDefault();
+        if (!isDragging) setIsDragging(true);
+      }}
+      onDragLeave={(event) => {
+        // Only clear when the pointer leaves the composer, not when it crosses
+        // onto a child element (dragleave fires on every child boundary).
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setIsDragging(false);
+      }}
+      onDrop={handleDrop}
+      style={
+        isDragging
+          ? { outline: "2px dashed var(--accent)", outlineOffset: "2px", borderRadius: "var(--radius-sm)" }
+          : undefined
+      }
+    >
       <div className={styles.ghActions}>
         <SegmentedToggle
           label="Submission type"

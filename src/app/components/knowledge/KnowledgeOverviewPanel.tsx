@@ -136,30 +136,19 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
             Scoped to {scopeLabel}.
           </p>
 
-          {loading ? (
-            <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>
-              Loading AI overview…
+          {!hasContent && (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Add some page content in this scope before generating a summary or asking a question.
             </p>
-          ) : loadError ? (
-            <p className={styles.error} role="alert">
-              {loadError}
-            </p>
-          ) : (
-            <>
-              {!hasContent && (
-                <p className={styles.fieldHint} style={{ margin: 0 }}>
-                  Add some page content in this scope before generating a summary or asking a question.
-                </p>
-              )}
+          )}
 
               {/* ── Ask AI (AC4/AC5/AC6)
-                  FIRST, above the summary, at the owner's request: asking a
-                  question is the frequent action and reading the summary is
-                  the occasional one, so the control used every visit sits
-                  where it needs no scrolling. The summary below also
-                  refreshes itself now, which makes it something you READ
-                  rather than something you operate - a second reason it does
-                  not need the top slot. */}
+                  ALWAYS rendered when the overview is open - never hidden behind
+                  the initial overview load OR behind the summary, at the owner's
+                  request: Ask AI must not wait for a summary to be generated.
+                  hasContent comes from the pages prop (not the async load), so
+                  the control is enabled/disabled immediately; only the SUMMARY
+                  and the Q&A history below wait on the load. */}
               <div className={kbStyles.kbOverviewSection}>
                 <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
                   Ask AI
@@ -265,6 +254,16 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
               </div>
 
               {/* ── AI summary (AC2/AC3) ────────────────────────────────── */}
+              {loading ? (
+                <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>
+                  Loading AI overview…
+                </p>
+              ) : loadError ? (
+                <p className={styles.error} role="alert">
+                  {loadError}
+                </p>
+              ) : (
+                <>
               <div className={kbStyles.kbOverviewSection}>
                 <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
                   AI summary

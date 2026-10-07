@@ -131,7 +131,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // view (TakeAnnouncementPanel) restyled to mimic the grading-chat view; serializes after the composer chain.
 // 139 -> 140: RECORD-SCREEN-SUBMISSION filed 2026-10-06 (shipped) - a Record mode on the chat grading
 // composer captures screen frames as image parts graded as one row via the composite path.
-const EXPECTED_ROW_COUNT = 140;
+// 140 -> 141: ZIP-LINK-SUBMISSION filed 2026-10-07 (shipped) - zip grading resolves Canvas *_link.html
+// URL submissions (github / vscode.dev->github) and grades the linked content, not the redirect page.
+const EXPECTED_ROW_COUNT = 141;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

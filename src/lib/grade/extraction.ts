@@ -24,6 +24,8 @@ import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel } fro
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { looksLikeGithubUrl } from "../submission-repo";
 import { fetchGradableRepoContent } from "./repo-content";
+import { parseGoogleDriveUrl } from "../google-drive-url";
+import { extractCanvasSubmittedUrl, normalizeSubmittedRepoUrl } from "./canvas-link-submission";
 
 async function extractTextFromFile(
   name: string,
@@ -189,6 +191,9 @@ export async function ingestZipEntries(
   if (collisionMessage) {
     throw new Error(collisionMessage);
   }
+  // Zip link submissions: resolve each Canvas link.html redirect to the code
+  // it points at, before inference and grouping (runs unconditionally).
+  await resolveLinkSubmissions(submissions, rawData);
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
@@ -382,6 +387,107 @@ function buildDiscussionEntry(discussion: DiscussionActivity): {
 }
 
 /**
+ * The shared GitHub fetch-and-fold step: fetch a GitHub link's gradable code
+ * and turn it into one content part plus the per-file list. Used by BOTH
+ * canvasWorkToEntry (Canvas link submissions) and resolveSubmittedLink (zip
+ * link.html submissions) so the two never grow two dialects of the fold.
+ *
+ * fetchGradableRepoContent is documented to never throw (every GitHub failure
+ * mode maps to { error }), but one student's link must never be able to abort
+ * the batch this is called in a loop for - so an unexpected rejection is
+ * caught the same way a reported { error } is: noted and degraded to
+ * text-only grading, never re-thrown.
+ */
+async function foldGithubRepoContent(url: string): Promise<{
+  contentPart: string;
+  gradedRepo: string | null;
+  gradedRef: string | null;
+  repoReadNote: string | null;
+  files: SubmittedFileInfo[];
+}> {
+  try {
+    const repoResult = await fetchGradableRepoContent(url);
+    if ("error" in repoResult) {
+      const repoReadNote = `Could not read the linked GitHub repository: ${repoResult.error}.`;
+      return { contentPart: `Note: ${repoReadNote}`, gradedRepo: null, gradedRef: null, repoReadNote, files: [] };
+    }
+    // F5 (docs/grading-results-file-viewer-acceptance-criteria.md): surface
+    // the real per-file list alongside the "Submission link" pseudo-file, so
+    // the Files column and browsing panel show the actual graded source, not
+    // just a link to it.
+    const files: SubmittedFileInfo[] = repoResult.files.map((file) => ({
+      name: file.path,
+      extension: getFileExtension(file.path),
+      previewContent: file.text,
+      previewTruncated: file.truncated ?? false,
+      mimeType: "text/plain",
+    }));
+    return {
+      contentPart: `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`,
+      gradedRepo: repoResult.repo,
+      gradedRef: repoResult.ref,
+      repoReadNote: null,
+      files,
+    };
+  } catch (err) {
+    const repoReadNote = `Could not read the linked GitHub repository: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
+    return { contentPart: `Note: ${repoReadNote}`, gradedRepo: null, gradedRef: null, repoReadNote, files: [] };
+  }
+}
+
+/**
+ * Resolve the URL a student submitted as a Canvas "Website URL" (extracted
+ * from a zip's link.html) into gradable text. Never throws: every branch
+ * returns content (repo code or a note) so one student's bad link cannot fail
+ * the zip. SSRF posture: only known hosts resolve. GitHub (and vscode.dev,
+ * mapped to GitHub) goes through fetchGradableRepoContent, which fetches
+ * owner/repo/path against the GitHub API and never the pasted URL. Google
+ * Drive is detected but NOT fetched in this wave; any other host is a note
+ * with no fetch.
+ */
+async function resolveSubmittedLink(url: string): Promise<string> {
+  const parts = [`Submitted link: ${url}`];
+  const normalized = normalizeSubmittedRepoUrl(url);
+  if (looksLikeGithubUrl(normalized)) {
+    parts.push((await foldGithubRepoContent(normalized)).contentPart);
+  } else if (parseGoogleDriveUrl(url)) {
+    parts.push(
+      `Note: This submission was a link to Google Drive (${url}); automatic fetch of Drive links from a zip is not supported yet.`
+    );
+  } else {
+    parts.push(`Note: This submission was a link to ${url}; automatic fetch is not supported for this host.`);
+  }
+  return parts.join("\n\n---\n\n");
+}
+
+/**
+ * Rewrite every Canvas link.html redirect page in `submissions` to the
+ * content its URL resolves to. SEQUENTIAL on purpose (mirrors
+ * extractCanvasEntries): a zip can hold many link files and each GitHub fetch
+ * makes many API calls, so parallel fan-out would hit GitHub concurrency
+ * limits and the serverless time cap. Ordinary html is left untouched.
+ */
+async function resolveLinkSubmissions(
+  submissions: Record<string, string>,
+  rawData: Record<string, string>
+): Promise<void> {
+  for (const path of Object.keys(submissions)) {
+    const extension = getFileExtension(path);
+    if (extension !== "html" && extension !== "htm") continue;
+    const url = extractCanvasSubmittedUrl(submissions[path]);
+    if (!url) continue;
+    let resolved: string;
+    try {
+      resolved = await resolveSubmittedLink(url);
+    } catch (err) {
+      resolved = `Submitted link: ${url}\n\n---\n\nNote: Could not resolve the submitted link: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
+    }
+    submissions[path] = resolved;
+    delete rawData[path];
+  }
+}
+
+/**
  * Turn one student's Canvas work (discussion text and/or uploaded files) into a
  * gradable entry: text and extracted file text go into `content`; image files
  * are attached with rawBase64 so the vision grader sees them (the same image
@@ -446,41 +552,12 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     });
 
     if (looksLikeGithubUrl(work.submissionUrl)) {
-      // fetchGradableRepoContent is documented to never throw (every GitHub
-      // failure mode maps to { error }), but one student's link must never be
-      // able to abort the whole batch canvasWorkToEntry is called in a loop
-      // for (gradeCanvasUrl/extractCanvasEntries) - so an unexpected
-      // rejection here is caught the same way a reported { error } is: noted
-      // and degraded to text-only grading, never re-thrown.
-      try {
-        const repoResult = await fetchGradableRepoContent(work.submissionUrl);
-        if ("error" in repoResult) {
-          repoReadNote = `Could not read the linked GitHub repository: ${repoResult.error}.`;
-          contentParts.push(`Note: ${repoReadNote}`);
-        } else {
-          gradedRepo = repoResult.repo;
-          gradedRef = repoResult.ref;
-          contentParts.push(
-            `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`
-          );
-          // F5 (docs/grading-results-file-viewer-acceptance-criteria.md):
-          // surface the real per-file list alongside the "Submission link"
-          // pseudo-file above, so the Files column and browsing panel show
-          // the actual graded source, not just a link to it.
-          for (const file of repoResult.files) {
-            submittedFiles.push({
-              name: file.path,
-              extension: getFileExtension(file.path),
-              previewContent: file.text,
-              previewTruncated: file.truncated ?? false,
-              mimeType: "text/plain",
-            });
-          }
-        }
-      } catch (err) {
-        repoReadNote = `Could not read the linked GitHub repository: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
-        contentParts.push(`Note: ${repoReadNote}`);
-      }
+      const folded = await foldGithubRepoContent(work.submissionUrl);
+      contentParts.push(folded.contentPart);
+      gradedRepo = folded.gradedRepo;
+      gradedRef = folded.gradedRef;
+      repoReadNote = folded.repoReadNote;
+      submittedFiles.push(...folded.files);
     }
   }
 

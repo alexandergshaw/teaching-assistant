@@ -40,7 +40,7 @@ import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extract
 import { fetchGradableRepoContent } from "@/lib/grade/repo-content";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { generateRubric } from "@/lib/grade/rubric";
-import { prepareChatSubmissionAction, resolveChatRunHeaderAction } from "./grading-chat-intake";
+import { prepareChatSubmissionAction, prepareCompositeSubmissionAction, resolveChatRunHeaderAction } from "./grading-chat-intake";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 
 const mockRequireAppOwner = vi.mocked(requireAppOwner);
@@ -233,5 +233,94 @@ describe("prepareChatSubmissionAction - url", () => {
       expect(outcome.reason).toContain("GitHub");
     }
     expect(mockFetchGradableRepoContent).not.toHaveBeenCalled();
+  });
+});
+
+function compositeFormData(student: string, parts: Array<Record<string, string | File>>): FormData {
+  const fd = new FormData();
+  fd.set("kind", "composite");
+  fd.set("student", student);
+  fd.set("partCount", String(parts.length));
+  parts.forEach((part, i) => {
+    for (const [key, value] of Object.entries(part)) fd.set(`part.${i}.${key}`, value);
+  });
+  return fd;
+}
+
+describe("prepareCompositeSubmissionAction", () => {
+  it("calls requireAppOwner", async () => {
+    await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "x" }]));
+    expect(mockRequireAppOwner).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves text + file + repo URL parts into ONE merged entry on the session scale", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({
+      repo: "owner/repo",
+      ref: "abc123",
+      content: "repo code",
+      fileCount: 2,
+      truncated: false,
+      files: [
+        { path: "a.ts", text: "const x = 1;", truncated: false },
+        { path: "b.ts", text: "const y = 2;", truncated: false },
+      ],
+    });
+    const outcome = await prepareCompositeSubmissionAction(
+      compositeFormData("Ada Lovelace", [
+        { kind: "text", content: "my essay" },
+        { kind: "file", file: new File(["hello world"], "essay.txt", { type: "text/plain" }) },
+        { kind: "url", url: "https://github.com/owner/repo" },
+      ])
+    );
+    expect(outcome.kind).toBe("entries");
+    if (outcome.kind === "entries") {
+      expect(outcome.entries).toHaveLength(1);
+      expect(outcome.pointsPossible).toBeNull();
+      const merged = outcome.entries[0];
+      expect(merged.student).toBe("Ada Lovelace");
+      expect(merged.content.startsWith("Part 1 - Text:\n\nmy essay\n\n---\n\nPart 2 - ")).toBe(true);
+      expect(merged.content).toContain("Part 3 - owner/repo:");
+      expect(merged.mergedFileCount).toBe(0 + 1 + 2);
+      expect(merged.gradedRepo).toBeUndefined();
+    }
+  });
+
+  it("refuses the whole composite when a part resolves to more than one entry (class zip)", async () => {
+    mockExtractStudentEntries.mockResolvedValue([canvasEntry, { ...canvasEntry, student: "Bob" }]);
+    const outcome = await prepareCompositeSubmissionAction(
+      compositeFormData("Ada", [
+        { kind: "text", content: "x" },
+        { kind: "file", file: new File(["zip bytes"], "class.zip", { type: "application/zip" }) },
+      ])
+    );
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("Part 2");
+  });
+
+  it("drops a single-entry Canvas part's pointsPossible", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue("assignment");
+    mockExtractCanvasEntries.mockResolvedValue({ entries: [canvasEntry], pointsPossible: 100 });
+    const outcome = await prepareCompositeSubmissionAction(
+      compositeFormData("Ada", [{ kind: "url", url: "https://canvas.example.edu/courses/1/assignments/2" }])
+    );
+    expect(outcome.kind).toBe("entries");
+    if (outcome.kind === "entries") expect(outcome.pointsPossible).toBeNull();
+  });
+
+  it("refuses a merged payload over the wire budget even when each part is under it", async () => {
+    const big = "x".repeat(2 * 1024 * 1024);
+    const outcome = await prepareCompositeSubmissionAction(
+      compositeFormData("Ada", [
+        { kind: "text", content: big },
+        { kind: "text", content: big },
+      ])
+    );
+    expect(outcome).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface." });
+  });
+
+  it("refuses a bad part count", async () => {
+    const fd = compositeFormData("Ada", []);
+    expect((await prepareCompositeSubmissionAction(fd)).kind).toBe("refused");
   });
 });

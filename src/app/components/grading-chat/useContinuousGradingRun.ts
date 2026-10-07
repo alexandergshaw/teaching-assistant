@@ -28,8 +28,12 @@
 // imported from "react", so this file can be driven by the same no-render
 // vi.mock("react", ...) lifecycle-test harness.
 import { useRef, useState } from "react";
-import { resolveChatRunHeaderAction, prepareChatSubmissionAction } from "@/app/actions/grading-chat-intake";
-import { buildTextEntry, type ChatSubmissionInput } from "./chatSubmissionIntake";
+import {
+  resolveChatRunHeaderAction,
+  prepareChatSubmissionAction,
+  prepareCompositeSubmissionAction,
+} from "@/app/actions/grading-chat-intake";
+import { buildTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
 import type { GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -258,7 +262,28 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         canvasUrlToPin = input.url;
       }
       const formData = new FormData();
-      if (input.kind === "file") {
+      if (input.kind === "composite") {
+        if (input.parts.length === 0) {
+          return { kind: "refused", reason: "Add at least one part to this submission." };
+        }
+        // One name owns the whole composite; a blank one defaults exactly as a
+        // text submission's label does, so the student is never empty.
+        const trimmedStudent = input.student.trim();
+        ordinalRef.current += 1;
+        const student = (trimmedStudent.length > 0 ? trimmedStudent : `Submission ${ordinalRef.current}`).slice(
+          0,
+          CHAT_LABEL_MAX_CHARS
+        );
+        formData.set("kind", "composite");
+        formData.set("student", student);
+        formData.set("partCount", String(input.parts.length));
+        input.parts.forEach((part, index) => {
+          formData.set(`part.${index}.kind`, part.kind);
+          if (part.kind === "text") formData.set(`part.${index}.content`, part.content);
+          else if (part.kind === "file") formData.set(`part.${index}.file`, part.file);
+          else formData.set(`part.${index}.url`, part.url);
+        });
+      } else if (input.kind === "file") {
         formData.set("kind", "file");
         formData.set("file", input.file);
       } else {
@@ -266,7 +291,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         formData.set("url", input.url);
       }
       formData.set("provider", provider);
-      const outcome = await prepareChatSubmissionAction(formData);
+      const outcome =
+        input.kind === "composite"
+          ? await prepareCompositeSubmissionAction(formData)
+          : await prepareChatSubmissionAction(formData);
       if (outcome.kind === "refused") {
         return { kind: "refused", reason: outcome.reason };
       }

@@ -15,7 +15,8 @@
  * SERVER-side only, inside N2's prepareChatSubmissionAction; the composer's
  * file-mode `accept` filter uses a plain extension list, not this module.
  */
-import type { StudentSubmissionEntry } from "@/lib/grade/types";
+import type { StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
+import { assignUnclaimedLabel } from "@/lib/grade/utils";
 
 /** The owner's "text submissions, zip submissions, url submissions, other
  * file submissions" taxonomy. `file` covers a single supported file OR a
@@ -24,6 +25,16 @@ import type { StudentSubmissionEntry } from "@/lib/grade/types";
  * two. */
 export type ChatSubmissionInput =
   | { readonly kind: "text"; readonly label?: string; readonly content: string }
+  | { readonly kind: "file"; readonly file: File }
+  | { readonly kind: "url"; readonly url: string }
+  | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] };
+
+/** One part of a composite submission. Each part resolves to EXACTLY ONE
+ * entry (see extractSingleEntry); a part that would resolve to zero or many
+ * (a class zip, a multi-submission Canvas URL) is refused by name, never
+ * merged. `file` is a SINGLE File: "several files" is several file parts. */
+export type CompositePartInput =
+  | { readonly kind: "text"; readonly content: string }
   | { readonly kind: "file"; readonly file: File }
   | { readonly kind: "url"; readonly url: string };
 
@@ -67,4 +78,60 @@ export function buildTextEntry(input: { readonly label?: string; readonly conten
     mergedFileCount: 0,
     submittedFiles: [],
   };
+}
+
+const COMPOSITE_PART_SEPARATOR = "\n\n---\n\n";
+
+/**
+ * Pure merge of already-resolved single-entry parts into ONE entry
+ * (docs/grading-chat-composite-scope.md section 4). The content format extends
+ * the separator both existing merge sites use (utils.ts zip path,
+ * extraction.ts Canvas path) with a per-part header carrying the 1-based
+ * ordinal and the part's own label, so provenance survives truncation.
+ *
+ * mergedFileCount is the SUM of each part's own count over the allowed part
+ * kinds (text 0, single file 1, repo fileCount): it counts constituent FILES,
+ * not parts. The zip and Canvas precedents differ on this field, so neither
+ * is mirrored. `student` is the argument verbatim; single-source provenance
+ * fields (userId, gradedRepo, submissionUrl, codeRun, ...) are left unset.
+ */
+export function mergeCompositeEntries(resolvedParts: readonly StudentSubmissionEntry[], student: string): StudentSubmissionEntry {
+  const content = resolvedParts
+    .map((part, index) => `Part ${index + 1} - ${part.student}:\n\n${part.content}`)
+    .join(COMPOSITE_PART_SEPARATOR);
+
+  const takenNames = new Set<string>();
+  const submittedFiles: SubmittedFileInfo[] = [];
+  let mergedFileCount = 0;
+  for (const part of resolvedParts) {
+    mergedFileCount += part.mergedFileCount;
+    for (const file of part.submittedFiles) {
+      const name = assignUnclaimedLabel(file.name, takenNames);
+      takenNames.add(name);
+      submittedFiles.push(name === file.name ? file : { ...file, name });
+    }
+  }
+
+  return { student, content, mergedFileCount, submittedFiles };
+}
+
+/**
+ * Enforces exactly ONE entry per composite part, on cardinality rather than
+ * source kind. A single-entry Canvas/zip IS admitted; its outcome-level
+ * pointsPossible is intentionally dropped here (it lives on IntakeOutcome, not
+ * on the entry) - a composite is graded on the session rubric.
+ */
+export function extractSingleEntry(
+  outcome: IntakeOutcome,
+  partLabel: string
+): { readonly ok: true; readonly entry: StudentSubmissionEntry } | { readonly ok: false; readonly reason: string } {
+  if (outcome.kind === "refused") return { ok: false, reason: outcome.reason };
+  if (outcome.entries.length === 0) return { ok: false, reason: `${partLabel} had nothing to grade.` };
+  if (outcome.entries.length > 1) {
+    return {
+      ok: false,
+      reason: `${partLabel} resolved to more than one student's submission, so it can't be one student's composite part - grade it as its own submission instead.`,
+    };
+  }
+  return { ok: true, entry: outcome.entries[0] };
 }

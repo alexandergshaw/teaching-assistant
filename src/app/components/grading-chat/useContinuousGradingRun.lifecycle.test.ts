@@ -43,7 +43,9 @@ vi.mock("react", () => ({
 
 const resolveChatRunHeaderActionMock = vi.fn();
 const prepareChatSubmissionActionMock = vi.fn();
+const prepareCompositeSubmissionActionMock = vi.fn();
 vi.mock("@/app/actions/grading-chat-intake", () => ({
+  prepareCompositeSubmissionAction: (...args: unknown[]) => prepareCompositeSubmissionActionMock(...args),
   resolveChatRunHeaderAction: (...args: unknown[]) => resolveChatRunHeaderActionMock(...args),
   prepareChatSubmissionAction: (...args: unknown[]) => prepareChatSubmissionActionMock(...args),
 }));
@@ -90,6 +92,7 @@ beforeEach(() => {
   h0.reset();
   resolveChatRunHeaderActionMock.mockReset();
   prepareChatSubmissionActionMock.mockReset();
+  prepareCompositeSubmissionActionMock.mockReset();
   dispatchItemMock.mockReset();
   resolveChatRunHeaderActionMock.mockResolvedValue(readyHeader);
 });
@@ -561,5 +564,61 @@ describe("useContinuousGradingRun - W2 O3-A: commentSplit reaches the dispatched
     dispatchItemMock.mockReturnValue(new Promise(() => {}));
     await driver.submit({ kind: "text", content: "x" });
     expect(dispatchItemMock.mock.calls[0][0].commentSplit).toBeUndefined();
+  });
+});
+
+describe("useContinuousGradingRun - composite submit appends exactly one row", () => {
+  it("posts the parts to the composite action and dispatches ONE item for the merged entry", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+
+    const merged = { student: "Ada", content: "Part 1 - Text:\n\nx", mergedFileCount: 1, submittedFiles: [] };
+    prepareCompositeSubmissionActionMock.mockResolvedValue({ kind: "entries", entries: [merged], pointsPossible: null });
+    dispatchItemMock.mockResolvedValue(gradedRow("Ada"));
+
+    const file = new File(["body"], "a.txt");
+    const outcome = await driver.submit({
+      kind: "composite",
+      student: "Ada",
+      parts: [
+        { kind: "text", content: "x" },
+        { kind: "file", file },
+        { kind: "url", url: "https://github.com/o/r" },
+      ],
+    });
+    await flushMicrotasks();
+
+    expect(outcome).toEqual({ kind: "accepted", entryCount: 1 });
+    expect(prepareChatSubmissionActionMock).not.toHaveBeenCalled();
+    const fd = prepareCompositeSubmissionActionMock.mock.calls[0][0] as FormData;
+    expect(fd.get("kind")).toBe("composite");
+    expect(fd.get("student")).toBe("Ada");
+    expect(fd.get("partCount")).toBe("3");
+    expect(fd.get("part.0.kind")).toBe("text");
+    expect(fd.get("part.0.content")).toBe("x");
+    expect(fd.get("part.1.kind")).toBe("file");
+    expect((fd.get("part.1.file") as File).name).toBe("a.txt");
+    expect(fd.get("part.2.url")).toBe("https://github.com/o/r");
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+  });
+
+  it("defaults a blank student to Submission <ordinal> and refuses an empty parts list", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+
+    const empty = await driver.submit({ kind: "composite", student: "Ada", parts: [] });
+    expect(empty.kind).toBe("refused");
+    expect(prepareCompositeSubmissionActionMock).not.toHaveBeenCalled();
+
+    prepareCompositeSubmissionActionMock.mockResolvedValue({ kind: "refused", reason: "nope" });
+    const refused = await driver.submit({ kind: "composite", student: "   ", parts: [{ kind: "text", content: "x" }] });
+    expect(refused).toEqual({ kind: "refused", reason: "nope" });
+    const fd = prepareCompositeSubmissionActionMock.mock.calls[0][0] as FormData;
+    expect(fd.get("student")).toBe("Submission 1");
+    expect(dispatchItemMock).not.toHaveBeenCalled();
   });
 });

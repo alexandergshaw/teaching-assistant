@@ -27,7 +27,11 @@ import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import type { GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import { estimateEntryWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
-import { buildTextEntry } from "@/app/components/grading-chat/chatSubmissionIntake";
+import {
+  buildTextEntry,
+  extractSingleEntry,
+  mergeCompositeEntries,
+} from "@/app/components/grading-chat/chatSubmissionIntake";
 import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmissionIntake";
 
 // SEC-GC-3 (docs/grading-chat-security.md F4 Gap 1): bound before a
@@ -38,6 +42,9 @@ import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmission
 // with a header-resolution path that had none.
 const MAX_INSTRUCTIONS_CHARS = 20_000;
 const MAX_RUBRIC_CHARS = 20_000;
+// Bound on parts per composite, so one request cannot fan out unbounded
+// extraction work (each part may fetch a repo or a Drive file).
+const MAX_COMPOSITE_PARTS = 12;
 
 // Google Drive link refusals (docs/grading-chat-gdrive-url-scope.md section 4).
 const DRIVE_FOLDER_MESSAGE =
@@ -125,20 +132,43 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
   await requireAppOwner();
 
   const kind = (formData.get("kind") as string | null) ?? "";
-  const provider = normalizeProvider(formData.get("provider") as string | null);
+  return resolveOnePart(kind, {
+    provider: normalizeProvider(formData.get("provider") as string | null),
+    content: (formData.get("content") as string | null) ?? "",
+    label: (formData.get("label") as string | null) ?? undefined,
+    ordinal: Number(formData.get("ordinal") ?? "1"),
+    file: formData.get("file") as File | null,
+    url: ((formData.get("url") as string | null) ?? "").trim(),
+  });
+}
+
+/** The decoded payload one submission part resolves from - the union of the
+ * fields the three kinds read, so the single-submission action and the
+ * composite action share ONE resolver. */
+interface PartData {
+  readonly provider: LlmProvider;
+  readonly content: string;
+  readonly label: string | undefined;
+  readonly ordinal: number;
+  readonly file: File | null;
+  readonly url: string;
+}
+
+/** Module-private per-kind resolution shared by prepareChatSubmissionAction
+ * and prepareCompositeSubmissionAction. Callers own the requireAppOwner()
+ * guard; this never runs unauthenticated. */
+async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutcome> {
+  const { provider } = data;
 
   if (kind === "text") {
-    const content = (formData.get("content") as string | null) ?? "";
-    const label = (formData.get("label") as string | null) ?? undefined;
-    const ordinal = Number(formData.get("ordinal") ?? "1");
-    const entry = buildTextEntry({ label, content }, Number.isFinite(ordinal) ? ordinal : 1);
+    const entry = buildTextEntry({ label: data.label, content: data.content }, Number.isFinite(data.ordinal) ? data.ordinal : 1);
     const oversized = firstOversizedEntryReason([entry]);
     if (oversized) return { kind: "refused", reason: oversized };
     return { kind: "entries", entries: [entry], pointsPossible: null };
   }
 
   if (kind === "file") {
-    const file = formData.get("file") as File | null;
+    const file = data.file;
     if (!file || file.size === 0) {
       return { kind: "refused", reason: "No file was attached." };
     }
@@ -178,7 +208,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
   }
 
   if (kind === "url") {
-    const url = ((formData.get("url") as string | null) ?? "").trim();
+    const url = data.url;
     if (!url) {
       return { kind: "refused", reason: "No URL was provided." };
     }
@@ -254,4 +284,45 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
   }
 
   return { kind: "refused", reason: "This submission could not be read." };
+}
+
+/**
+ * Composite submission: several parts (text / one file / one URL each) that
+ * belong to ONE student, graded as ONE effort. FormData wire shape (scope
+ * section 6): kind, student, provider, partCount, then per part
+ * `part.<i>.kind` plus exactly one of `part.<i>.content` / `.file` / `.url`.
+ * Every part must resolve to exactly one entry; the merged entry is oversize-
+ * checked as a whole and returned with pointsPossible null (the session
+ * rubric scale, never a part's).
+ */
+export async function prepareCompositeSubmissionAction(formData: FormData): Promise<IntakeOutcome> {
+  await requireAppOwner();
+
+  const student = ((formData.get("student") as string | null) ?? "").trim();
+  const provider = normalizeProvider(formData.get("provider") as string | null);
+  const partCount = Number(formData.get("partCount") ?? "0");
+  if (!Number.isInteger(partCount) || partCount < 1 || partCount > MAX_COMPOSITE_PARTS) {
+    return { kind: "refused", reason: `A composite submission needs between 1 and ${MAX_COMPOSITE_PARTS} parts.` };
+  }
+
+  const entries: StudentSubmissionEntry[] = [];
+  for (let i = 0; i < partCount; i += 1) {
+    const partLabel = `Part ${i + 1}`;
+    const outcome = await resolveOnePart(((formData.get(`part.${i}.kind`) as string | null) ?? ""), {
+      provider,
+      content: (formData.get(`part.${i}.content`) as string | null) ?? "",
+      label: "Text",
+      ordinal: i + 1,
+      file: formData.get(`part.${i}.file`) as File | null,
+      url: ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
+    });
+    const got = extractSingleEntry(outcome, partLabel);
+    if (!got.ok) return { kind: "refused", reason: got.reason };
+    entries.push(got.entry);
+  }
+
+  const merged = mergeCompositeEntries(entries, student);
+  const oversized = firstOversizedEntryReason([merged]);
+  if (oversized) return { kind: "refused", reason: oversized };
+  return { kind: "entries", entries: [merged], pointsPossible: null };
 }

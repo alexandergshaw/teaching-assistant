@@ -125,7 +125,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // copy feedback, harshness control, loading indicators; harshness prompt seam landed, rest pending.
 // 136 -> 137: RECORDING-DETECTION-RELIABILITY filed 2026-10-06 - the recording grader silently
 // misses discussion posts (the keep gate has no scroll term; the "too fast" notice is backpressure-bound).
-const EXPECTED_ROW_COUNT = 137;
+// 137 -> 138: COMPOSITE-SUBMISSION filed 2026-10-06 (W1 seam shipped) - one student's submission
+// can be multiple parts (file + url + text) graded as one row; W1 union+merge+action+driver.
+const EXPECTED_ROW_COUNT = 138;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

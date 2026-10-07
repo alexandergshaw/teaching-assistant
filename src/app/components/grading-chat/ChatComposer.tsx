@@ -179,6 +179,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    // A drop on the composer is handled here (tray-aware) and must NOT also
+    // bubble to the panel-level drop target, or it would be submitted twice.
+    event.stopPropagation();
     setIsDragging(false);
     if (disabled) return;
     const files = Array.from(event.dataTransfer.files);

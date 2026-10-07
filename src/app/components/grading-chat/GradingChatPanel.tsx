@@ -14,7 +14,7 @@
 // RecordingTab in page.tsx (P2) - this component itself does not know or care
 // about visibility; the wrapper's display:none/undefined toggle is what
 // preserves the in-flight run across navigation (architecture section 7).
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
@@ -84,6 +84,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [preparing, setPreparing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
@@ -234,8 +235,37 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const busy = driver.headerState === "resolving";
   const hasRows = driver.run !== null && driver.run.results.length > 0;
 
+  // Whole-view drop target: dropping files anywhere on the grading chat
+  // panel (not just the narrow composer strip) submits them for grading.
+  // The composer's own drop handler stops propagation, so a drop there stays
+  // tray-aware and does not also reach this handler.
+  const handlePanelDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    if (busy || preparing) return;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) handleSubmitFiles(files);
+  };
+
   return (
-    <div className={`${styles.card} ${styles.form}`}>
+    <div
+      className={`${styles.card} ${styles.form}`}
+      onDragOver={(event) => {
+        if (busy || preparing) return;
+        event.preventDefault();
+        if (!isDragging) setIsDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setIsDragging(false);
+      }}
+      onDrop={handlePanelDrop}
+      style={
+        isDragging
+          ? { outline: "2px dashed var(--accent)", outlineOffset: "-2px", borderRadius: "var(--radius-sm)" }
+          : undefined
+      }
+    >
       {!sessionReady ? (
         <>
           <div className={chatStyles.compactField}>

@@ -127,7 +127,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // misses discussion posts (the keep gate has no scroll term; the "too fast" notice is backpressure-bound).
 // 137 -> 138: COMPOSITE-SUBMISSION filed 2026-10-06 (W1 seam shipped) - one student's submission
 // can be multiple parts (file + url + text) graded as one row; W1 union+merge+action+driver.
-const EXPECTED_ROW_COUNT = 138;
+// 138 -> 139: ANNOUNCEMENT-VIEW-CHAT-MIMIC filed 2026-10-06 - the announcements-from-a-recording
+// view (TakeAnnouncementPanel) restyled to mimic the grading-chat view; serializes after the composer chain.
+const EXPECTED_ROW_COUNT = 139;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

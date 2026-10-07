@@ -133,7 +133,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // composer captures screen frames as image parts graded as one row via the composite path.
 // 140 -> 141: ZIP-LINK-SUBMISSION filed 2026-10-07 (shipped) - zip grading resolves Canvas *_link.html
 // URL submissions (github / vscode.dev->github) and grades the linked content, not the redirect page.
-const EXPECTED_ROW_COUNT = 141;
+// 141 -> 142: CHAT-GRADING-TABLE-SEARCH filed 2026-10-07 (shipped) - a default-off searchable prop on
+// GradingResults filters the chat grading table; the 3 non-chat mounts stay byte-identical.
+const EXPECTED_ROW_COUNT = 142;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

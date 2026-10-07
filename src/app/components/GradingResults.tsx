@@ -19,6 +19,8 @@ import { FeedbackExpandModal } from "./grading-results/FeedbackExpandModal";
 import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";
 import { hasTrendableResults, toClassTrendsEntry } from "./grading-results/classTrendsEntry";
 import styles from "../page.module.css";
+import controls from "./recording/RecordingControls.module.css";
+import { filterGradeRowsForTable } from "./grading-results/gradeRowFilter";
 import {
   applyFeedbackFieldEdit,
   blankRowEdit,
@@ -170,6 +172,12 @@ export type GradingResultsProps = {
    * simply has no candidate here and falls through to page.tsx's own
    * whole-app fallback - confirmed, not assumed. */
   sectionRef?: Ref<HTMLDivElement>;
+  /** Opt-in, default off: renders a search bar above the table that filters
+   * only the DISPLAYED rows (posting, CSV and trends still read run.results).
+   * Only the chat grading mount passes it. */
+  searchable?: boolean;
+  /** Placeholder for the search bar; only read when `searchable`. */
+  filterPlaceholder?: string;
 };
 
 /** Imperative handle so a parent (the Live Feed pane) can drive "Post & Next". */
@@ -201,6 +209,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   onPosted,
   banner,
   sectionRef,
+  searchable,
+  filterPlaceholder = "Search by student name or feedback",
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -224,6 +234,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [codeOutputStudent, setCodeOutputStudent] = useState<string | null>(null);
   // Task 2: the row whose "Browse all files" panel is open, or null.
   const [browseFilesFor, setBrowseFilesFor] = useState<GradeRow | null>(null);
+  // Transient search text; read only when `searchable` (default off).
+  const [filterQuery, setFilterQuery] = useState("");
 
   // Re-load editable rows when a new run arrives (adjust-state-on-prop-change).
   // Loads from storage (not a bare re-seed) so edits already persisted for
@@ -515,6 +527,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // them - see ./grading-results/useResultsSort.ts's own header comment for
   // why this is a pure relocation, not a behaviour change.
   const { sortedResults, sortState, handleSort, sortLabel } = useResultsSort(run);
+  const visibleResults = searchable ? filterGradeRowsForTable(sortedResults, filterQuery) : sortedResults;
 
   const handleDownloadFile = (
     name: string,
@@ -622,6 +635,30 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         );
       })()}
 
+      {searchable && (
+        <>
+          <div className={styles.adaptRow}>
+            <TextField
+              type="search"
+              size="small"
+              label="Search graded rows"
+              placeholder={filterPlaceholder}
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              className={controls.fieldMd}
+            />
+          </div>
+          {filterQuery.trim() !== "" && (
+            <p className={styles.fieldHint}>
+              {`Showing ${visibleResults.length} of ${sortedResults.length} row${sortedResults.length === 1 ? "" : "s"}.`}{" "}
+              <button type="button" className={styles.linkButton} onClick={() => setFilterQuery("")}>
+                Clear
+              </button>
+            </p>
+          )}
+        </>
+      )}
+
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
@@ -633,7 +670,17 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
             />
           </thead>
           <tbody>
-            {sortedResults.map((result) => {
+            {searchable && filterQuery.trim() !== "" && visibleResults.length === 0 && (
+              <tr>
+                <td colSpan={2 + run.rubricAreaNames.length + 2}>
+                  {`No rows match "${filterQuery.trim()}". `}
+                  <button type="button" className={styles.linkButton} onClick={() => setFilterQuery("")}>
+                    Clear
+                  </button>
+                </td>
+              </tr>
+            )}
+            {visibleResults.map((result) => {
               const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
               const edit = edits[result.student] ?? defaultRowEdit(result);
               const status = postStatus[result.student];

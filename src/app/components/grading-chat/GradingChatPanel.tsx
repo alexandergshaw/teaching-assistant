@@ -326,6 +326,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           copiedKey={copiedKey}
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}
+          searchable
         />
         </div>
       ) : (

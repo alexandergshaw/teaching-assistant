@@ -112,6 +112,7 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./icons.tsx",
     "./useResultsSort.ts",
     "./ResultsTableHeaderRow.tsx",
+    "./gradeRowFilter.ts", // chat grading-table search: the pure display-row filter leaf (type-only import, zero runtime edges).
     "./FeedbackExpandModal.tsx",
     "./FilesCell.tsx", // A16-1: the Files-column cell moved out to its own file.
     "./GeneratedRubricCard.tsx", // A39 incremental-fill W5 (RES-P-4-adjacent): GradingTab.tsx's own line-budget extraction, landing here per the design's named target path.

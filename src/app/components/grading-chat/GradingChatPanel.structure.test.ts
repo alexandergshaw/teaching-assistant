@@ -598,3 +598,24 @@ describe("GradingChatPanel - controls #3: harshness control and wire", () => {
     expect(driver).not.toMatch(/^\s*harshness(:|,)/m);
   });
 });
+
+describe("ChatComposer - record-a-submission: frames become composite parts", () => {
+  it("has a Record segment and loadInputMode admits it", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toContain('{ value: "record", label: "Record" }');
+    expect(source).toMatch(/stored === "record"/);
+  });
+
+  it("wires useChatScreenFrameCapture and adds each stopped frame as a composite file part", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toContain("useChatScreenFrameCapture(");
+    const start = source.indexOf("useChatScreenFrameCapture(");
+    const call = source.slice(start, source.indexOf(");", start));
+    expect(call).toContain("addParts(");
+    expect(call).toContain('kind: "file"');
+  });
+
+  it("does not persist under a second key (record reuses the input-mode key)", () => {
+    expect(withoutLineComments(read("src/app/components/grading-chat/chatFrameCapture.ts"))).not.toContain("ta-");
+  });
+});

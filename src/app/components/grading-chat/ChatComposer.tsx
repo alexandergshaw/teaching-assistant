@@ -25,16 +25,17 @@ import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import type { CompositePartInput } from "./chatSubmissionIntake";
+import { MAX_RECORDING_FRAMES, useChatScreenFrameCapture } from "./chatFrameCapture";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
-type InputMode = "text" | "file" | "url";
+type InputMode = "text" | "file" | "url" | "record";
 
 function loadInputMode(): InputMode {
   if (typeof window === "undefined") return "text";
   try {
     const stored = localStorage.getItem(INPUT_MODE_STORAGE_KEY);
-    if (stored === "text" || stored === "file" || stored === "url") return stored;
+    if (stored === "text" || stored === "file" || stored === "url" || stored === "record") return stored;
   } catch {
     // Private window / blocked storage: degrade to the default.
   }
@@ -83,6 +84,13 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
   const trayActive = parts.length > 0;
 
   const addParts = (added: CompositePartInput[]) => setParts((prev) => [...prev, ...added]);
+  // A stopped recording hands back its frames as image Files; they join the
+  // composite tray as file parts, so "Grade submission (N)" merges them into
+  // ONE row through the existing composite path.
+  const capture = useChatScreenFrameCapture((files) =>
+    addParts(files.map((file): CompositePartInput => ({ kind: "file", file })))
+  );
+  const trayRoom = MAX_RECORDING_FRAMES - parts.length;
   const removePart = (index: number) => setParts((prev) => prev.filter((_, i) => i !== index));
 
   const selectMode = (next: InputMode) => {
@@ -159,7 +167,8 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
       fileInputRef.current?.click();
     }
   };
-  const addPartDisabled = disabled || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
+  const addPartDisabled =
+    disabled || mode === "record" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
 
   const handleGrade = () => {
     if (disabled || !trayActive) return;
@@ -206,6 +215,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             { value: "text", label: "Text" },
             { value: "file", label: "File" },
             { value: "url", label: "URL" },
+            { value: "record", label: "Record" },
           ]}
           value={mode}
           onChange={selectMode}
@@ -285,6 +295,36 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             <Button variant="text" size="small" aria-label="Clear submission text" onClick={handleClearText}>
               Clear
             </Button>
+          )}
+        </div>
+      )}
+
+      {mode === "record" && (
+        <div className={styles.adaptRow}>
+          {capture.recording ? (
+            <Button variant="contained" size="small" aria-label="Stop recording" onClick={capture.stop}>
+              {`Stop recording (${capture.frameCount} captured)`}
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              size="small"
+              aria-label="Start recording the screen"
+              disabled={disabled || trayRoom < 1}
+              onClick={() => void capture.start(trayRoom)}
+            >
+              Start recording
+            </Button>
+          )}
+          <span className={styles.ghMeta}>
+            {trayRoom < 1
+              ? `The tray is full (${MAX_RECORDING_FRAMES} parts). Remove one to record.`
+              : "Frames are captured every few seconds and added as parts when you stop."}
+          </span>
+          {capture.error && (
+            <span role="alert" className={styles.ghMeta}>
+              {capture.error}
+            </span>
           )}
         </div>
       )}

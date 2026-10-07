@@ -145,6 +145,8 @@ export function describeRubricOrigin(loaded: LoadedRubricMemory, requestedScope:
 export function describeRubricScope(scope: string): string {
   const uploadMatch = /^upload:(.*)$/.exec(scope);
   if (uploadMatch) return `your upload of "${uploadMatch[1]}"`;
+  const courseDefaultMatch = /^course-default:(.*)$/.exec(scope);
+  if (courseDefaultMatch) return `the default rubric for ${courseDefaultMatch[1]}`;
   const cartridgeMatch = /^cartridge:(.*)\|(.*)$/.exec(scope);
   if (cartridgeMatch) return `${cartridgeMatch[1]} / ${cartridgeMatch[2]}`;
   return scope;

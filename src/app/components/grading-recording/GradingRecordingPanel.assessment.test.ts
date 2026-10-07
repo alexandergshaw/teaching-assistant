@@ -66,7 +66,7 @@ describe("GradingRecordingPanel.tsx D22b/D23e assessment selector wiring", () =>
   });
 
   it("assessmentId (the trimmed value) - not assessmentLabel, not courseId alone - is passed as useGradingRows's second argument", () => {
-    expect(source).toMatch(/const gradingRows = useGradingRows\(courseId, assessmentId\);/);
+    expect(source).toMatch(/const gradingRows = useGradingRows\(courseId, assessmentId, selectedRosterText\);/);
   });
 
   it("assessmentOptions is derived from gradingRows.rawRows (already course-scoped), collecting only truthy row.assessment values - never a fixed/invented catalogue", () => {

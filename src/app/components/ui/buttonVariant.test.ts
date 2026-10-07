@@ -164,9 +164,11 @@ function countPrimaries(source: string): number {
 const FROZEN_PRIMARY_SITES: Record<string, number> = {
   "src/app/components/caption-studio/CaptionStudio.tsx": 1,
   "src/app/components/caption-studio/CaptionsList.tsx": 1,
-  // 3: Start/Stop, Add rubric and Grade submissions each carry a
-  // state predicate; exactly one is contained per state (fix wave, CC1).
-  "src/app/components/grading-recording/GradingRecordingPanel.tsx": 3,
+  // 2: Start/Stop and Grade submissions each carry a state predicate; exactly
+  // one is contained per state (fix wave, CC1). Was 3 until UX overhaul wave 2
+  // replaced the "Add rubric" button with an inline textarea (the rubric moved
+  // to GradingRubricField.tsx, whose only button, "Upload a file", is outlined).
+  "src/app/components/grading-recording/GradingRecordingPanel.tsx": 2,
   "src/app/components/grading-recording/LegibilityProbeModal.tsx": 2,
   "src/app/components/grading-recording/RubricInputModal.tsx": 1,
   "src/app/components/module-deck-capture/ModuleDeckCapturePanel.tsx": 2,

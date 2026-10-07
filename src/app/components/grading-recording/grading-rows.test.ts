@@ -670,7 +670,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment, dismissed, rubric)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment, dismissed, rubric, rubric-course, setup-open)", () => {
     // A9 wave 2 (docs/REGRESSION.md entry 428/RES-A9-8): six keys became
     // seven when a per-course dismissed-submission tombstone set (the fix
     // that makes a deletion survive a reload) had to persist somewhere.
@@ -687,6 +687,9 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     // rubric-memory.ts's actual localStorage calls live outside this
     // directory entirely and are covered by the separate A4d-shaped block
     // beneath this describe block, not by isWired() below.
+    //
+    // UX overhaul wave 2: "ta-rec-grade-rubric-course" (the per-course rubric
+    // default, grading-rubric-memory.ts) joins the set, same A4d treatment.
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
     expect(keys).toEqual([
       "ta-rec-grade-assessment",
@@ -695,6 +698,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
       "ta-rec-grade-dismissed",
       "ta-rec-grade-filter",
       "ta-rec-grade-rubric",
+      "ta-rec-grade-rubric-course",
       "ta-rec-grade-setup-open",
       "ta-rec-grade-sort",
       "ta-rec-grade-table",
@@ -765,20 +769,35 @@ function stripComments(source: string): string {
 }
 
 describe('A4d: GradingRecordingPanel is actually wired to rubric-memory.ts for STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric"', () => {
-  const panelPath = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx");
+  // UX overhaul wave 2: the rubric constants and calls moved out of the panel
+  // (1000-line ceiling) into grading-rubric-memory.ts; the panel reaches them
+  // through useGradingRubric. "panelSource" is now that leaf's text, and the
+  // first test below also pins the panel to the hook.
+  const panelPath = path.resolve(process.cwd(), "src/app/components/grading-recording/grading-rubric-memory.ts");
   const panelSource = fs.readFileSync(panelPath, "utf-8");
   const leafPath = path.resolve(process.cwd(), "src/lib/grade/rubric-memory.ts");
   const leafSource = fs.readFileSync(leafPath, "utf-8");
 
-  it('GradingRecordingPanel.tsx declares const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric"', () => {
+  it('grading-rubric-memory.ts declares const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric" and the course default key', () => {
     expect(panelSource).toMatch(/const STORAGE_KEY_RUBRIC = "ta-rec-grade-rubric";/);
+    expect(panelSource).toMatch(/const STORAGE_KEY_RUBRIC_COURSE = "ta-rec-grade-rubric-course";/);
   });
 
-  it("GradingRecordingPanel.tsx actually calls rubric-memory's load/save with STORAGE_KEY_RUBRIC - declaring the key literal alone proves nothing", () => {
+  it("GradingRecordingPanel.tsx calls useGradingRubric and mounts GradingRubricField - the rubric leaf is reachable", () => {
+    const panel = stripComments(
+      fs.readFileSync(path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx"), "utf-8")
+    );
+    expect(panel).toMatch(/useGradingRubric\(/);
+    expect(panel).toMatch(/<GradingRubricField\b/);
+  });
+
+  it("grading-rubric-memory.ts actually calls rubric-memory's load/save with STORAGE_KEY_RUBRIC - declaring the key literal alone proves nothing", () => {
     const stripped = stripComments(panelSource);
     const called =
       /loadRubricMemory\(\s*STORAGE_KEY_RUBRIC\s*,/.test(stripped) &&
-      /saveRubricMemory\(\s*STORAGE_KEY_RUBRIC\s*,/.test(stripped);
+      /saveRubricMemory\(\s*STORAGE_KEY_RUBRIC\s*,/.test(stripped) &&
+      /loadRubricMemory\(\s*STORAGE_KEY_RUBRIC_COURSE\s*,/.test(stripped) &&
+      /saveRubricMemory\(\s*STORAGE_KEY_RUBRIC_COURSE\s*,/.test(stripped);
     expect(called).toBe(true);
   });
 

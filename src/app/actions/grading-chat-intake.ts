@@ -22,6 +22,8 @@ import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extract
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
+import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
+import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import type { GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import { estimateEntryWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
@@ -36,6 +38,14 @@ import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmission
 // with a header-resolution path that had none.
 const MAX_INSTRUCTIONS_CHARS = 20_000;
 const MAX_RUBRIC_CHARS = 20_000;
+
+// Google Drive link refusals (docs/grading-chat-gdrive-url-scope.md section 4).
+const DRIVE_FOLDER_MESSAGE =
+  "This is a Google Drive folder, which is not supported yet. Open the folder and share a single file's link, or download the files and drop them in.";
+const DRIVE_SHEETS_SLIDES_MESSAGE =
+  "Google Sheets and Slides links are not supported yet. Share a Google Doc, or export the file and drop it in.";
+const DRIVE_UNSUPPORTED_TYPE_MESSAGE =
+  "This file type is not supported for grading. Download it and drop in a text file, document, image, or zip archive.";
 
 /**
  * Resolves the per-RUN header ONCE: the blank-instructions refusal, the
@@ -200,9 +210,46 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
       return { kind: "entries", entries: [entry], pointsPossible: null };
     }
 
+    const driveTarget = parseGoogleDriveUrl(url);
+    if (driveTarget) {
+      if (driveTarget.kind === "folder") {
+        return { kind: "refused", reason: DRIVE_FOLDER_MESSAGE };
+      }
+      if (driveTarget.kind === "native-doc" && driveTarget.docType !== "document") {
+        return { kind: "refused", reason: DRIVE_SHEETS_SLIDES_MESSAGE };
+      }
+      try {
+        const fetched = await fetchGoogleDriveFile(driveTarget);
+        if ("error" in fetched) return { kind: "refused", reason: fetched.error };
+
+        // From here a Drive file behaves exactly like a dropped file.
+        const uploadKind = classifyGradingUpload(fetched.name);
+        if (uploadKind === "unsupported") {
+          return { kind: "refused", reason: DRIVE_UNSUPPORTED_TYPE_MESSAGE };
+        }
+        let entries: StudentSubmissionEntry[];
+        if (uploadKind === "single") {
+          const entry = await buildSingleFileEntry(fetched.name, fetched.buffer);
+          if (!entry) return { kind: "refused", reason: "This file could not be read." };
+          entries = [entry];
+        } else {
+          // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
+          // throws from here and is surfaced verbatim by the catch below.
+          const bytes = new Uint8Array(fetched.buffer).slice().buffer;
+          entries = await extractStudentEntries(bytes, { inferFileNamesWith: provider });
+        }
+        const oversized = firstOversizedEntryReason(entries);
+        if (oversized) return { kind: "refused", reason: oversized };
+        return { kind: "entries", entries, pointsPossible: null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not read this Google Drive link.";
+        return { kind: "refused", reason: message };
+      }
+    }
+
     return {
       kind: "refused",
-      reason: "This surface accepts Canvas assignment/discussion URLs and GitHub repo URLs. Arbitrary web URLs are not supported yet.",
+      reason: "This surface accepts Canvas assignment/discussion URLs, GitHub repo URLs, and Google Drive share links. Other web URLs are not supported yet.",
     };
   }
 

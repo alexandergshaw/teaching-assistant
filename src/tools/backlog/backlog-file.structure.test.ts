@@ -117,7 +117,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // page/institution nav + citations link out to the cited page.
 // 132 -> 133: CHAT-GRADING-DND filed 2026-10-06 (shipped) - drag-and-drop files into the
 // grading-chat composer, reusing the KNOWLEDGE-ATTACHMENTS-DND pattern + the onSubmitFiles path.
-const EXPECTED_ROW_COUNT = 133;
+// 133 -> 134: GDRIVE-URL filed 2026-10-06 (W1 shipped) - the grading-chat URL mode accepts
+// Google Drive sharing links (parse id -> direct-download fetch -> existing file-grading path).
+const EXPECTED_ROW_COUNT = 134;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

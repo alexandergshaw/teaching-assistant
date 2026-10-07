@@ -1602,3 +1602,15 @@
   from: 'Owner request 2026-10-06 (direct chat).'
   note: 'Loop: direct build (tiny, pattern already proven by KNOWLEDGE-ATTACHMENTS-DND). SHIPPED f30846d7: ChatComposer.tsx gains whole-composer drop target (broad reading of "into the chat grading view"), reuses onSubmitFiles(File[]) so dropped files grade exactly like picked files; disabled guard on drop; no new CSS class (inline token outline, orphan-neutral). tsc clean, eslint clean, 71 grading-chat + emoji tests green. COMPLETE - verification. Owner walk = dropping a file onto the composer starts grading + the dashed highlight reads right.'
   question: null
+- id: 'GDRIVE-URL'
+  state: 'verification'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Owner 2026-10-06: the grading chat tool needs to accept Google Drive sharing URLs. The URL submission mode (Canvas + GitHub today) gains a Google Drive branch: a public share link is parsed to its file id, fetched via a direct-download URL, and graded through the same path file uploads use.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Pure parser oracle (src/lib/google-drive-url.test.ts, 36 rows incl. exact-host traps) is machine-checkable; the live fetch is network-blocked under vitest (owner/browser walk). Scope docs/grading-chat-gdrive-url-scope.md (checked SHIP a4d0ececb, 0 blockers). Security posture verified in google-drive-content.ts: id-into-host-fixed-literal, redirect:manual + per-hop exact-host allowlist + https-only, credentials:omit/no auth (repo Google OAuth is calendar-scope only), dual size cap, text/html refused.'
+  from: 'Owner request 2026-10-06 (direct chat).'
+  note: 'Loop: recon -> check (SHIP) -> build W1 -> owner walk. W1 SHIPPED: new pure src/lib/google-drive-url.ts (parseGoogleDriveUrl: file/native-doc/folder shapes, DRIVE_ID charset guard, host-fixed URL builders); new src/lib/grade/google-drive-content.ts (fetchGoogleDriveFile, never throws, full egress posture); new google-drive-url.test.ts oracle (36 tests, sabotage watched red-then-green on the exact-host check); grading-chat-intake.ts url branch gains the Drive case between GitHub and the final refuse (folders + Sheets/Slides refused pre-fetch; Google Docs -> txt export; file -> classifyGradingUpload -> buildSingleFileEntry/extractStudentEntries -> firstOversizedEntryReason). tsc clean, eslint clean, 64 tests green. COMPLETE - verification. W2 = the ChatComposer URL-mode label widening ("Canvas, GitHub, or Google Drive URL") serializes behind the last ChatComposer writer (composite/controls/visual all touch it). RESIDUALS (RES-GDRIVE-*): the live fetch/redirect/egress behavior is owner-walk only; FOLDER support + AUTHENTICATED Drive (would need a Drive OAuth scope the repo lacks) are product residuals, owner-gated; the ~25MB virus-scan interstitial threshold is an external fact (our on-disk cap ~2.75MB is well below it so any interstitial file already exceeds budget); Sheets/Slides refused by name (Docs-to-txt only). Owner walk = pasting a shared Drive file/Doc link grades it.'
+  question: null

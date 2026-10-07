@@ -37,6 +37,7 @@ import { raceWithTimeout } from "@/lib/bounded-race";
 import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
+import annChat from "../recording/announcement-chat.module.css";
 import runBar from "./WalkthroughRunBar.module.css";
 import { variantFor } from "../ui/buttonVariant";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
@@ -567,15 +568,13 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   }, [selectedCourse, moduleLabel, notesText, provider]);
 
   return (
-    <div className={styles.adaptPanel}>
-      <div className={styles.adaptPanelHeader}>
-        <h2 className={styles.adaptPanelTitle}>Announcement from a walkthrough</h2>
-        <p className={styles.adaptPanelSubtitle}>
-          Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an
-          announcement matching a previous one&apos;s format, and/or a video script, covering the pages in the order
-          you walked them.
-        </p>
-      </div>
+    <div className={`${styles.card} ${styles.form}`}>
+      <h2 className={annChat.title}>Announcement from a walkthrough</h2>
+      <p className={styles.fieldHint}>
+        Share your screen and click through a series of LMS pages - the app reads what is visible and drafts an
+        announcement matching a previous one&apos;s format, and/or a video script, covering the pages in the order
+        you walked them.
+      </p>
 
       {(startError || droppedFrames > 0 || frameEncodeNotice || notices.length > 0) && (
         <div role="status" aria-live="polite" className={styles.field}>
@@ -795,8 +794,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       {/* AC5: the video script - never posted, just read aloud while
           re-recording. */}
       {(scriptError || scriptText) && (
-        <fieldset className={controls.section}>
-          <legend className={controls.sectionLegend}>Video script draft</legend>
+        <fieldset className={annChat.latestCard}>
+          <legend className={annChat.latestCardLabel}>Video script draft</legend>
           {scriptError && (
             <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
               {scriptError}

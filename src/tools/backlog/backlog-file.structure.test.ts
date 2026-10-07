@@ -135,7 +135,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // URL submissions (github / vscode.dev->github) and grades the linked content, not the redirect page.
 // 141 -> 142: CHAT-GRADING-TABLE-SEARCH filed 2026-10-07 (shipped) - a default-off searchable prop on
 // GradingResults filters the chat grading table; the 3 non-chat mounts stay byte-identical.
-const EXPECTED_ROW_COUNT = 142;
+// 142 -> 143: WALKTHROUGH-ANNOUNCEMENT-CHAT-MIMIC filed 2026-10-07 (shipped) - WalkthroughAnnouncementPanel
+// restyled to the grading-chat look (bare-sibling root + cross-imported annChat skin, orphan-neutral).
+const EXPECTED_ROW_COUNT = 143;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

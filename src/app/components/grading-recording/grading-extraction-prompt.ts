@@ -89,6 +89,11 @@ export function buildSubmissionExtractionPrompt(frameCount: number): string {
     "- If a submission runs off the edge of the last image, return the visible part.",
     "- Never continue, complete, summarize, paraphrase, correct or tidy a submission. Transcribe the words that are on the screen. If you cannot read a word, leave it out rather than inventing one.",
 
+    "CONTENT CUT OFF AT THE EDGE OF AN IMAGE",
+    "- The images are separate capture windows, so a submission can run past the top or bottom edge of one image and carry on in the next. A submission whose first or last lines are sliced by an image edge is a CROPPED part of one longer submission, not a complete one and not a separate one.",
+    "- Return the cropped part's visible words as they are. Do not complete the sliced line, and do not invent the missing beginning or end. If the same submission is visible elsewhere in the images with its name, return the parts together as one submission under that name.",
+    "- A cropped part with no visible name still follows THE NAME RULE: skip it.",
+
     "IF THERE ARE NO SUBMISSIONS",
     '- If these images show only navigation, a gradebook or submission list with nothing open, a loading state, or an empty page, do NOT return an empty array. Return an array with exactly one element instead: {"noSubmissionsVisible": true, "reason": "..."}, where "reason" briefly names what the images actually show (for example "a gradebook list, no submission open" or "a loading spinner"). Always include this element rather than returning nothing at all - a page that genuinely holds no submissions must be told apart from a page you could not make sense of.',
 

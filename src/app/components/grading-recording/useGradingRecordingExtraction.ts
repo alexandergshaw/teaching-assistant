@@ -28,6 +28,7 @@ import type { UseGradingRowsReturn } from "./useGradingRows";
 import type { UseGradingCaptureTrackingReturn } from "./useGradingCaptureTracking";
 import { describeExtractionOutcome, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { makeGradingRecordingLogBatch, type GradingRecordingLogBatch } from "./grading-recording-log";
+import { EMPTY_GRADING_EXTRACTION_LEDGER, foldBatchOutcome, type GradingExtractionLedger } from "./grading-extraction-ledger";
 
 interface UseGradingRecordingExtractionParams {
   takeFrameBatch: (max: number, maxWireBytes: number) => { base64: string }[];
@@ -43,6 +44,8 @@ interface UseGradingRecordingExtractionParams {
 
 export interface UseGradingRecordingExtractionReturn {
   extracting: boolean;
+  /** DET-Wave 1: durable per-run record of batch outcomes (windows attempted vs unread). Not yet displayed. */
+  ledger: GradingExtractionLedger;
 }
 
 export function useGradingRecordingExtraction({
@@ -57,6 +60,7 @@ export function useGradingRecordingExtraction({
   setTotalReadingsCount,
 }: UseGradingRecordingExtractionParams): UseGradingRecordingExtractionReturn {
   const [extracting, setExtracting] = useState(false);
+  const [ledger, setLedger] = useState<GradingExtractionLedger>(EMPTY_GRADING_EXTRACTION_LEDGER);
 
   const runExtraction = useCallback(async () => {
     const frames = takeFrameBatch(GRADING_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET);
@@ -76,6 +80,7 @@ export function useGradingRecordingExtraction({
         provider
       );
       if ("error" in result) {
+        setLedger((prev) => foldBatchOutcome(prev, { ok: false, frames: frames.length, reason: result.error }));
         setLogBatches((prev) => [
           ...prev,
           makeGradingRecordingLogBatch({ at: new Date().toISOString(), framesInBatch: frames.length, error: result.error }),
@@ -83,6 +88,7 @@ export function useGradingRecordingExtraction({
         pushNotices(describeExtractionOutcome(result, 0));
         return;
       }
+      setLedger((prev) => foldBatchOutcome(prev, { ok: true, frames: frames.length }));
       // A9/RES-A9-9: the RENDER value (gradingRows.rawRows), never
       // rawRowsRef.current - the ref is one commit stale (see the panel's
       // own effect that writes it), and on the render where
@@ -160,5 +166,5 @@ export function useGradingRecordingExtraction({
     };
   }, [pendingFrames, extracting, runExtraction]);
 
-  return { extracting };
+  return { extracting, ledger };
 }

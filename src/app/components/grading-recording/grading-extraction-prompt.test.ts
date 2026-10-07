@@ -101,6 +101,20 @@ describe("buildSubmissionExtractionPrompt", () => {
     });
   });
 
+  describe("DET-Wave 1: capture-boundary clause (FM-3)", () => {
+    it("tells the model a submission can be cropped at an image edge and must not be completed or split", () => {
+      const prompt = buildSubmissionExtractionPrompt(5);
+      expect(prompt).toContain("CONTENT CUT OFF AT THE EDGE OF AN IMAGE");
+      expect(prompt).toContain("CROPPED part");
+      expect(prompt).toContain("do not invent the missing beginning or end");
+    });
+
+    it("keeps the name rule in force for a cropped part with no visible name", () => {
+      const prompt = buildSubmissionExtractionPrompt(5);
+      expect(prompt).toContain("A cropped part with no visible name still follows THE NAME RULE");
+    });
+  });
+
   it("uses singular phrasing for a 1-frame batch and plural for more than one (sabotage target: a hardcoded plural)", () => {
     const one = buildSubmissionExtractionPrompt(1);
     const many = buildSubmissionExtractionPrompt(2);

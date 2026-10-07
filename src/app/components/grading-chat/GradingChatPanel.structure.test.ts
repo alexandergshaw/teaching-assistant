@@ -422,3 +422,66 @@ describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas 
     expect(source).toContain("saveChatSetupMemory(scope");
   });
 });
+
+// COMPOSITE W2 (docs/grading-chat-composite-scope.md section 7). Source-text
+// pins on the parts tray; the interaction itself is an OWNER walk.
+describe("GradingChatPanel - composite W2: tray wiring", () => {
+  it("the panel hands ChatComposer onSubmitComposite and keeps the three single-part props", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("<ChatComposer");
+    expect(start).toBeGreaterThan(-1);
+    const mount = source.slice(start, source.indexOf("/>", start));
+    expect(mount).toMatch(/onSubmitComposite=\{handleSubmitComposite\}/);
+    expect(mount).toMatch(/onSubmitText=\{handleSubmitText\}/);
+    expect(mount).toMatch(/onSubmitFiles=\{handleSubmitFiles\}/);
+    expect(mount).toMatch(/onSubmitUrl=\{handleSubmitUrl\}/);
+  });
+
+  it("handleSubmitComposite ensures a session, then submits a composite through the driver", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("const handleSubmitComposite");
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf("const busy", start));
+    expect(body).toContain("await ensureSession()");
+    expect(body).toMatch(/driver\.submit\(\{\s*kind:\s*"composite",\s*student,\s*parts\s*\}\)/);
+    expect(body.indexOf("ensureSession()")).toBeLessThan(body.indexOf("driver.submit("));
+  });
+});
+
+describe("ChatComposer - composite W2: tray controls and the preserved single-part path", () => {
+  it("declares onSubmitComposite and the three single-part callbacks", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toMatch(/onSubmitComposite:\s*\(student: string, parts: CompositePartInput\[\]\) => void/);
+    expect(source).toMatch(/onSubmitText:/);
+    expect(source).toMatch(/onSubmitFiles:/);
+    expect(source).toMatch(/onSubmitUrl:/);
+  });
+
+  it("has the add-part, remove, student-name and grade controls", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toContain("+ Add part");
+    expect(source).toMatch(/Remove part/);
+    expect(source).toContain('label="Student name"');
+    expect(source).toMatch(/Grade submission \(\$\{parts\.length\}\)/);
+    expect(source).toMatch(/onSubmitComposite\(student\.trim\(\), parts\)/);
+  });
+
+  it("each mode's primary handler still reaches its immediate-submit callback when the tray is empty, and reroutes to add-part when it is not", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    const slice = (from: string, to: string) => {
+      const a = source.indexOf(from);
+      expect(a, from).toBeGreaterThan(-1);
+      return source.slice(a, source.indexOf(to, a));
+    };
+    const text = slice("const handleSendText", "const handleAddTextPart");
+    expect(text).toContain("onSubmitText(");
+    expect(text.indexOf("trayActive")).toBeGreaterThan(-1);
+    expect(text.indexOf("handleAddTextPart()")).toBeLessThan(text.indexOf("onSubmitText("));
+    const url = slice("const handleSendUrl", "const handleAddUrlPart");
+    expect(url).toContain("onSubmitUrl(");
+    expect(url.indexOf("handleAddUrlPart()")).toBeLessThan(url.indexOf("onSubmitUrl("));
+    const pick = slice("const handlePickFile", "const handleSendUrl");
+    expect(pick).toContain("onSubmitFiles(files)");
+    expect(pick).toContain("trayActive");
+  });
+});

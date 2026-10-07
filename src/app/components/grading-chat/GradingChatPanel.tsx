@@ -27,6 +27,7 @@ import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { submitFilesSequentially } from "./chatFileBatch";
+import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
 import styles from "../../page.module.css";
@@ -157,6 +158,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   };
 
+  const handleSubmitComposite = async (student: string, parts: CompositePartInput[]) => {
+    if (!(await ensureSession())) return;
+    const outcome = await driver.submit({ kind: "composite", student, parts });
+    setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+  };
+
   const busy = driver.headerState === "resolving";
   const hasRows = driver.run !== null && driver.run.results.length > 0;
 
@@ -235,7 +242,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             {submitError}
           </p>
         )}
-        <ChatComposer disabled={busy} onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl} />
+        <ChatComposer
+          disabled={busy}
+          onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
+          onSubmitComposite={handleSubmitComposite}
+        />
       </div>
     </div>
   );

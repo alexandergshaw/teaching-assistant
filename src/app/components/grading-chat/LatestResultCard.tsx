@@ -1,5 +1,6 @@
+import Button from "@mui/material/Button";
 import type { GradeResult } from "../../../lib/grade/types";
-import { FEEDBACK_FIELDS, type FeedbackField } from "../grading-results/gradingResultsHelpers";
+import { copyAllFeedbackText, FEEDBACK_FIELDS, type FeedbackField } from "../grading-results/gradingResultsHelpers";
 import chatStyles from "./grading-chat.module.css";
 
 // GRADER-WORKFLOW-OVERHAUL M1: a READ-ONLY view of the newest arrived result,
@@ -12,15 +13,35 @@ const FIELD_LABELS: Record<FeedbackField, string> = {
 
 export interface LatestResultCardProps {
   readonly result: GradeResult | null;
+  readonly copiedKey: string | null;
+  readonly onCopy: (key: string, value: string) => Promise<void>;
 }
 
-export function LatestResultCard({ result }: LatestResultCardProps) {
+export function LatestResultCard({ result, copiedKey, onCopy }: LatestResultCardProps) {
   if (!result) return null;
+  // Distinct from the matrix row's own all-feedback key so the two "Copied"
+  // states never light up together.
+  const copyKey = `latest-${result.student}-all-feedback`;
+  const copyText = () =>
+    copyAllFeedbackText({
+      overall: result.overallComment,
+      strengths: result.strengths,
+      improvements: result.improvements,
+      resubmitNotice: result.resubmitNotice,
+    });
   return (
     <section className={chatStyles.latestCard} aria-label={`Latest result for ${result.student}`}>
       <div className={chatStyles.latestCardHeader}>
         <span className={chatStyles.latestCardStudent}>{result.student}</span>
         <span className={chatStyles.latestCardScore}>{result.totalScore}</span>
+        <Button
+          variant="text"
+          size="small"
+          aria-label={`Copy feedback for ${result.student}`}
+          onClick={() => void onCopy(copyKey, copyText())}
+        >
+          {copiedKey === copyKey ? "Copied" : "Copy feedback"}
+        </Button>
       </div>
       {FEEDBACK_FIELDS.map((field) => (
         <div key={field} className={chatStyles.latestCardField}>

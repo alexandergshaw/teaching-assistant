@@ -34,7 +34,7 @@ import {
   prepareCompositeSubmissionAction,
 } from "@/app/actions/grading-chat-intake";
 import { buildTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
-import type { GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeHarshness, GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
@@ -87,6 +87,8 @@ export interface UseContinuousGradingRunResult {
   readonly beginSession: (params: {
     readonly assignmentInstructions: string;
     readonly rubric: string;
+    /** Captured once at session start and frozen for the session; absent = balanced. */
+    readonly harshness?: GradeHarshness;
   }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
   readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
   readonly reset: () => void;
@@ -136,6 +138,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
   const assignmentInstructionsRef = useRef("");
+  const harshnessRef = useRef<GradeHarshness>("balanced");
   const arrivedRef = useRef<ArrivedItemResult[]>([]);
   const queueRef = useRef<GradeRunItemRequestBody[]>([]);
   const inFlightRef = useRef(0);
@@ -213,7 +216,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     }
   };
 
-  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string }) => {
+  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; harshness?: GradeHarshness }) => {
     // Idempotent: a header already resolved for this session is a no-op, so
     // a second call (e.g. from every submit()) never re-spends a
     // generateRubric model call.
@@ -229,6 +232,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
     headerRef.current = header;
     assignmentInstructionsRef.current = sessionParams.assignmentInstructions;
+    harshnessRef.current = sessionParams.harshness ?? "balanced";
     setHeaderState("ready");
     setSessionError(null);
     return { kind: "ready" as const };
@@ -331,6 +335,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         provider,
         pointsPossible,
         ...(commentSplit ? { commentSplit: true } : {}),
+        ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
       pendingRef.current.add(sourceIndex);
@@ -370,6 +375,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pendingRef.current = new Set();
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
+    harshnessRef.current = "balanced";
     arrivedRef.current = [];
     queueRef.current = [];
     inFlightRef.current = 0;

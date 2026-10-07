@@ -102,6 +102,12 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     textFieldRef.current?.focus();
   };
 
+  const handleClearText = () => {
+    setText("");
+    setLabel("");
+    textFieldRef.current?.focus();
+  };
+
   const handleAddTextPart = () => {
     if (disabled || !text.trim()) return;
     addParts([{ kind: "text", content: text }]);
@@ -275,6 +281,11 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           <Button variant="outlined" aria-label="Send submission" disabled={disabled || !text.trim()} onClick={handleSendText}>
             Send
           </Button>
+          {(text !== "" || label !== "") && (
+            <Button variant="text" size="small" aria-label="Clear submission text" onClick={handleClearText}>
+              Clear
+            </Button>
+          )}
         </div>
       )}
 

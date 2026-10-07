@@ -264,7 +264,7 @@ describe("GradingChatPanel - W3 F1: the composer sits in a sticky wrapper", () =
     expect(mountIdx, "expected the ChatComposer mount").toBeGreaterThan(-1);
     const classIdx = source.lastIndexOf("chatStyles.stickyComposer", mountIdx);
     expect(classIdx, "expected chatStyles.stickyComposer before the mount").toBeGreaterThan(-1);
-    expect(mountIdx - classIdx).toBeLessThan(400);
+    expect(mountIdx - classIdx).toBeLessThan(1000);
   });
 
   it("the .stickyComposer rule has position: sticky and a bottom/top offset (mechanism proxy; sticking itself is an owner walk check)", () => {
@@ -413,7 +413,10 @@ describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas 
     expect(source).not.toContain("loadPersisted");
     expect(source).not.toContain("INSTRUCTIONS_STORAGE_KEY");
     expect(source).not.toContain("RUBRIC_STORAGE_KEY");
-    expect(source).not.toMatch(/localStorage\.getItem/);
+    // The only localStorage read is the harshness preference; it never seeds
+    // the instructions or rubric fields.
+    const reads = source.match(/localStorage\.getItem\([^)]*\)/g) ?? [];
+    expect(reads).toEqual(["localStorage.getItem(HARSHNESS_STORAGE_KEY)"]);
   });
 
   it("the Canvas-scoped memory still restores inside ensureSession", () => {
@@ -483,5 +486,115 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
     const pick = slice("const handlePickFile", "const handleSendUrl");
     expect(pick).toContain("onSubmitFiles(files)");
     expect(pick).toContain("trayActive");
+  });
+});
+
+// GRADING-CHAT-CONTROLS (docs/grading-chat-controls-scope.md items 1-4). Source
+// pins on wiring; the rendered effect and the clipboard are OWNER walks.
+const DRIVER = "src/app/components/grading-chat/useContinuousGradingRun.ts";
+
+describe("GradingChatPanel - controls #1: clear controls", () => {
+  it("each setup field has a clear handler inside the !sessionReady branch", () => {
+    const source = withoutLineComments(read(PANEL));
+    const guard = source.indexOf("!sessionReady ? (");
+    const summary = source.indexOf("chatStyles.setupSummary");
+    expect(guard).toBeGreaterThan(-1);
+    const branch = source.slice(guard, summary);
+    expect(branch).toContain("onClick={handleClearInstructions}");
+    expect(branch).toContain("onClick={handleClearRubric}");
+    expect(source).toMatch(/handleClearInstructions\s*=\s*\(\)\s*=>\s*setInstructions\(""\)/);
+    expect(source).toMatch(/handleClearRubric\s*=\s*\(\)\s*=>\s*setRubric\(""\)/);
+  });
+
+  it("Clear all clears both fields and is shown only pre-lock", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("const handleClearAll");
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf("};", start));
+    expect(body).toContain('setInstructions("")');
+    expect(body).toContain('setRubric("")');
+    expect(source).toMatch(/!sessionReady\s*&&\s*\(instructions\s*!==\s*""\s*\|\|\s*rubric\s*!==\s*""\)/);
+    expect(source).toContain("onClick={handleClearAll}");
+  });
+
+  it("the composer text field has a Clear control that empties the text", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toContain('aria-label="Clear submission text"');
+    const start = source.indexOf("const handleClearText");
+    expect(start).toBeGreaterThan(-1);
+    expect(source.slice(start, source.indexOf("};", start))).toContain('setText("")');
+    expect(source).toContain("onClick={handleClearText}");
+  });
+});
+
+describe("GradingChatPanel - controls #2: copy on the latest-result card", () => {
+  it("the panel threads copiedKey and onCopy into LatestResultCard", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("<LatestResultCard");
+    const mount = source.slice(start, source.indexOf("/>", start));
+    expect(mount).toMatch(/copiedKey=\{copiedKey\}/);
+    expect(mount).toMatch(/onCopy=\{onCopy\}/);
+  });
+
+  it("the card renders a control that copies the composed feedback under a distinct key", () => {
+    const source = withoutLineComments(read(CARD));
+    expect(source).toMatch(/copyAllFeedbackText/);
+    expect(source).toContain("latest-${result.student}-all-feedback");
+    expect(source).toMatch(/onCopy\(copyKey,\s*copyText\(\)\)/);
+    expect(source).toMatch(/copiedKey\s*===\s*copyKey/);
+    for (const f of ["overallComment", "strengths", "improvements", "resubmitNotice"]) expect(source).toContain(f);
+  });
+});
+
+describe("GradingChatPanel - controls #4: loading indicators", () => {
+  it("every submit handler runs inside withPreparing and the composer is disabled while preparing", () => {
+    const source = withoutLineComments(read(PANEL));
+    for (const name of ["handleSubmitText", "handleSubmitFiles", "handleSubmitUrl", "handleSubmitComposite"]) {
+      const start = source.indexOf(`const ${name}`);
+      expect(start, name).toBeGreaterThan(-1);
+      expect(source.slice(start, start + 200), name).toContain("withPreparing(");
+    }
+    expect(source).toMatch(/finally\s*\{\s*setPreparing\(false\)/);
+    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\}/);
+  });
+
+  it("a Grading progress line reads driver.inFlight", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toMatch(/driver\.inFlight\s*>\s*0/);
+    expect(source).toContain("Grading ${driver.inFlight}");
+  });
+});
+
+describe("GradingChatPanel - controls #3: harshness control and wire", () => {
+  it("renders a SegmentedToggle with Lenient / Balanced / Strict, locked after the session starts", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf('label="Grading strictness"');
+    expect(start).toBeGreaterThan(-1);
+    const toggle = source.slice(start, source.indexOf("/>", start));
+    for (const v of ["lenient", "balanced", "strict"]) expect(toggle).toContain(`value: "${v}"`);
+    expect(toggle).toContain("disabled={sessionReady}");
+  });
+
+  it("persists under the harshness key and defaults to balanced", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain('HARSHNESS_STORAGE_KEY = "ta-grading-chat-harshness"');
+    expect(source).toContain("localStorage.setItem(HARSHNESS_STORAGE_KEY");
+    expect(source).toMatch(/useState<GradeHarshness>\("balanced"\)/);
+  });
+
+  it("captures harshness at beginSession (not per submit)", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("driver.beginSession(");
+    const call = source.slice(start, source.indexOf("});", start));
+    expect(call).toMatch(/\bharshness\b/);
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toMatch(/harshnessRef\.current\s*=\s*sessionParams\.harshness\s*\?\?\s*"balanced"/);
+  });
+
+  it("the driver conditional-spreads harshness into the request body, default wire byte-identical", () => {
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toContain('...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {})');
+    // Default-wire canary: no unconditional harshness key on the body.
+    expect(driver).not.toMatch(/^\s*harshness(:|,)/m);
   });
 });

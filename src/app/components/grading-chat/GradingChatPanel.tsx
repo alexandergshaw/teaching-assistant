@@ -14,7 +14,7 @@
 // RecordingTab in page.tsx (P2) - this component itself does not know or care
 // about visibility; the wrapper's display:none/undefined toggle is what
 // preserves the in-flight run across navigation (architecture section 7).
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
@@ -25,6 +25,8 @@ import { ChatComposer } from "./ChatComposer";
 import { LatestResultCard } from "./LatestResultCard";
 import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
+import SegmentedToggle from "../ui/SegmentedToggle";
+import type { GradeHarshness } from "@/lib/grade/types";
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { submitFilesSequentially } from "./chatFileBatch";
 import type { CompositePartInput } from "./chatSubmissionIntake";
@@ -47,6 +49,28 @@ import controls from "../recording/RecordingControls.module.css";
 export const CHAT_SESSION_NOT_SAVED_DISCLOSURE =
   "This session is not saved. Reloading or closing this tab loses every graded row and anything still grading.";
 
+// Grading harshness (docs/grading-chat-controls-scope.md item 3): persisted as
+// a UI preference, captured once at beginSession and frozen for the session.
+const HARSHNESS_STORAGE_KEY = "ta-grading-chat-harshness";
+
+function loadHarshness(): GradeHarshness {
+  try {
+    const stored = localStorage.getItem(HARSHNESS_STORAGE_KEY);
+    if (stored === "lenient" || stored === "strict" || stored === "balanced") return stored;
+  } catch {
+    // Private window / blocked storage: degrade to the default.
+  }
+  return "balanced";
+}
+
+function persistHarshness(level: GradeHarshness) {
+  try {
+    localStorage.setItem(HARSHNESS_STORAGE_KEY, level);
+  } catch {
+    // ignore
+  }
+}
+
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -58,9 +82,29 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [rubric, setRubric] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
+  const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
+  const [preparing, setPreparing] = useState(false);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
+
+  // Restore the stored harshness after mount (a state initializer would
+  // mismatch the server render); setState only after an await.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadHarshness());
+      if (!cancelled) setHarshness(stored);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectHarshness = (next: GradeHarshness) => {
+    setHarshness(next);
+    persistHarshness(next);
+  };
 
   const handleInstructionsChange = (value: string) => setInstructions(value);
   const handleRubricChange = (value: string) => setRubric(value);
@@ -84,6 +128,17 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     driver.reset();
     setSubmitError(null);
     setSetupNote(null);
+  };
+
+  // Marks the submit intake (extraction, session start) as in progress so the
+  // composer shows busy until the awaits settle, success or failure.
+  const withPreparing = async (work: () => Promise<void>) => {
+    setPreparing(true);
+    try {
+      await work();
+    } finally {
+      setPreparing(false);
+    }
   };
 
   // Resolve the setup fields (typed text always wins; Canvas then stored memory
@@ -110,7 +165,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     if (fill.instructions !== instructions) setInstructions(fill.instructions);
     if (fill.rubric !== rubric) setRubric(fill.rubric);
 
-    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric });
+    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric, harshness });
     if (result.kind === "refused") {
       sessionRefusalRef.current = result.reason;
       setSubmitError(result.reason);
@@ -129,12 +184,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     return true;
   };
 
-  const handleSubmitText = async (content: string, label: string | undefined) => {
-    if (!(await ensureSession())) return;
-    const outcome = await driver.submit({ kind: "text", content, label });
-    setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
-  };
-  const handleSubmitFiles = async (files: File[]) => {
+  const handleSubmitText = (content: string, label: string | undefined) =>
+    withPreparing(async () => {
+      if (!(await ensureSession())) return;
+      const outcome = await driver.submit({ kind: "text", content, label });
+      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+    });
+  const handleSubmitFiles = (files: File[]) => withPreparing(async () => {
     // The session is begun once for the whole batch, not once per file.
     let began = false;
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
@@ -151,17 +207,28 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       if (outcome.kind !== "accepted") reasons.push(`${files[index].name}: ${outcome.reason}`);
     });
     setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
-  };
-  const handleSubmitUrl = async (url: string) => {
-    if (!(await ensureSession(url))) return;
-    const outcome = await driver.submit({ kind: "url", url });
-    setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
-  };
+  });
+  const handleSubmitUrl = (url: string) =>
+    withPreparing(async () => {
+      if (!(await ensureSession(url))) return;
+      const outcome = await driver.submit({ kind: "url", url });
+      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+    });
 
-  const handleSubmitComposite = async (student: string, parts: CompositePartInput[]) => {
-    if (!(await ensureSession())) return;
-    const outcome = await driver.submit({ kind: "composite", student, parts });
-    setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+  const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
+    withPreparing(async () => {
+      if (!(await ensureSession())) return;
+      const outcome = await driver.submit({ kind: "composite", student, parts });
+      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+    });
+
+  // Clear controls: uncommitted draft text only, so no confirm. Pre-lock only;
+  // the setup fields do not exist once the session is ready.
+  const handleClearInstructions = () => setInstructions("");
+  const handleClearRubric = () => setRubric("");
+  const handleClearAll = () => {
+    setInstructions("");
+    setRubric("");
   };
 
   const busy = driver.headerState === "resolving";
@@ -183,6 +250,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
               onChange={(event) => handleInstructionsChange(event.target.value)}
               disabled={sessionReady}
             />
+            {instructions !== "" && (
+              <Button variant="text" size="small" aria-label="Clear assignment instructions" onClick={handleClearInstructions}>
+                Clear
+              </Button>
+            )}
           </div>
 
           <div className={chatStyles.compactField}>
@@ -197,11 +269,36 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
               onChange={(event) => handleRubricChange(event.target.value)}
               disabled={sessionReady}
             />
+            {rubric !== "" && (
+              <Button variant="text" size="small" aria-label="Clear rubric" onClick={handleClearRubric}>
+                Clear
+              </Button>
+            )}
           </div>
         </>
       ) : (
         <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
       )}
+
+      <div className={styles.ghActions}>
+        <SegmentedToggle
+          label="Grading strictness"
+          showLabel
+          options={[
+            { value: "lenient", label: "Lenient" },
+            { value: "balanced", label: "Balanced" },
+            { value: "strict", label: "Strict" },
+          ]}
+          value={harshness}
+          onChange={selectHarshness}
+          disabled={sessionReady}
+        />
+        {!sessionReady && (instructions !== "" || rubric !== "") && (
+          <Button variant="text" size="small" aria-label="Clear all setup fields" onClick={handleClearAll}>
+            Clear all
+          </Button>
+        )}
+      </div>
 
       <div className={chatStyles.sessionBar}>
         <div className={chatStyles.sessionMeta}>
@@ -236,14 +333,22 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       <div className={chatStyles.stickyComposer}>
-        {hasRows && driver.run && <LatestResultCard result={selectLatestResult(driver.run)} />}
+        {hasRows && driver.run && (
+          <LatestResultCard result={selectLatestResult(driver.run)} copiedKey={copiedKey} onCopy={onCopy} />
+        )}
         {submitError && (
           <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
             {submitError}
           </p>
         )}
+        {preparing && <p className={styles.ghMeta} aria-live="polite">Reading your submission...</p>}
+        {driver.inFlight > 0 && (
+          <p className={styles.ghMeta} aria-live="polite">
+            {`Grading ${driver.inFlight} submission${driver.inFlight === 1 ? "" : "s"}... (${driver.completedCount} of ${driver.dispatchedCount} done)`}
+          </p>
+        )}
         <ChatComposer
-          disabled={busy}
+          disabled={busy || preparing}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
           onSubmitComposite={handleSubmitComposite}
         />

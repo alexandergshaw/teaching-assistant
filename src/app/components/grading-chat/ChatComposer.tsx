@@ -295,7 +295,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             type="url"
             className={chatStyles.composerGrow}
             size="small"
-            label="Canvas or GitHub repo URL"
+            label="Canvas, GitHub, or Google Drive URL"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
             onKeyDown={submitOnEnter(handleSendUrl)}

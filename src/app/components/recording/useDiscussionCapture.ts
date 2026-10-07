@@ -320,7 +320,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       setDroppedFrames(droppedFramesRef.current);
       return;
     }
-    pendingQueueRef.current.push({ base64, sourceWidth, sourceHeight, encodedWidth: targetWidth, encodedHeight: targetHeight, encodedQuality });
+    pendingQueueRef.current.push({ base64, sourceWidth, sourceHeight, encodedWidth: targetWidth, encodedHeight: targetHeight, encodedQuality, signature });
     setPendingFrames(pendingQueueRef.current.length);
   }, []);
 

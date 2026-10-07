@@ -16,8 +16,8 @@
 // proven by the whole suite staying green with no test edited, plus reading,
 // plus tsc/lint/build - not by any assertion here (RES-A38WP-4).
 
-import { useCallback, useEffect, useState } from "react";
-import { EXTRACT_BATCH_WIRE_BUDGET } from "../recording/discussion-capture";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { EXTRACT_BATCH_WIRE_BUDGET, type FrameSignature } from "../recording/discussion-capture";
 import type { LlmProvider } from "@/lib/llm";
 import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 import { GRADING_EXTRACT_BATCH_SIZE } from "./grading-extraction-prompt";
@@ -29,9 +29,10 @@ import type { UseGradingCaptureTrackingReturn } from "./useGradingCaptureTrackin
 import { describeExtractionOutcome, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { makeGradingRecordingLogBatch, type GradingRecordingLogBatch } from "./grading-recording-log";
 import { EMPTY_GRADING_EXTRACTION_LEDGER, foldBatchOutcome, type GradingExtractionLedger } from "./grading-extraction-ledger";
+import { detectCoverageGap, mergeCoverageGap } from "./grading-coverage";
 
 interface UseGradingRecordingExtractionParams {
-  takeFrameBatch: (max: number, maxWireBytes: number) => { base64: string }[];
+  takeFrameBatch: (max: number, maxWireBytes: number) => { base64: string; signature?: FrameSignature }[];
   pendingFrames: number;
   provider: LlmProvider;
   pushNotices: (outcomes: GradingExtractionOutcome[]) => void;
@@ -46,6 +47,8 @@ export interface UseGradingRecordingExtractionReturn {
   extracting: boolean;
   /** DET-Wave 1: durable per-run record of batch outcomes (windows attempted vs unread). Not yet displayed. */
   ledger: GradingExtractionLedger;
+  /** DET-Wave 2: run-total of consecutive kept-frame pairs compared and how many looked like full turnover (content scrolled past un-sampled). Not yet displayed. */
+  coverage: { pairsCompared: number; gapCount: number };
 }
 
 export function useGradingRecordingExtraction({
@@ -61,6 +64,10 @@ export function useGradingRecordingExtraction({
 }: UseGradingRecordingExtractionParams): UseGradingRecordingExtractionReturn {
   const [extracting, setExtracting] = useState(false);
   const [ledger, setLedger] = useState<GradingExtractionLedger>(EMPTY_GRADING_EXTRACTION_LEDGER);
+  const [coverage, setCoverage] = useState({ pairsCompared: 0, gapCount: 0 });
+  // Last kept-frame signature of the previous batch, so the pair that
+  // straddles a batch boundary is still compared.
+  const lastSignatureRef = useRef<FrameSignature | null>(null);
 
   const runExtraction = useCallback(async () => {
     const frames = takeFrameBatch(GRADING_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET);
@@ -73,6 +80,12 @@ export function useGradingRecordingExtraction({
     // every setState from here on happen strictly AFTER the effect body has
     // returned, exactly like AiChatFab.tsx's own tone-status effect.
     await Promise.resolve();
+    const sigs: FrameSignature[] = [];
+    if (lastSignatureRef.current) sigs.push(lastSignatureRef.current);
+    for (const f of frames) if (f.signature) sigs.push(f.signature);
+    if (sigs.length > 0) lastSignatureRef.current = sigs[sigs.length - 1];
+    const gap = detectCoverageGap(sigs);
+    setCoverage((prev) => mergeCoverageGap(prev, gap));
     setExtracting(true);
     try {
       const result = await extractGradingSubmissionsAction(
@@ -166,5 +179,5 @@ export function useGradingRecordingExtraction({
     };
   }, [pendingFrames, extracting, runExtraction]);
 
-  return { extracting, ledger };
+  return { extracting, ledger, coverage };
 }

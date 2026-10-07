@@ -163,6 +163,10 @@ export interface CapturedFrame {
    *  EXTRACT_BATCH_WIRE_BUDGET (AC10b/S5). Never a nominal constant restated
    *  without regard to whether a re-encode actually happened for THIS frame. */
   encodedQuality: number;
+  /** DET-Wave 2: the 32x32 luma signature this frame was kept with (the one
+   *  already computed for the change-threshold gate). Optional so existing
+   *  constructors and fixtures stay valid. */
+  signature?: FrameSignature;
 }
 
 // ---------------------------------------------------------------------------

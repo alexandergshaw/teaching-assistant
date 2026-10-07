@@ -123,7 +123,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // overhaul; W1 setup-collapse + notices extraction (panel 1000 -> 996); FORK 1 = keep OCR.
 // 135 -> 136: GRADING-CHAT-CONTROLS filed 2026-10-06 (harshness seam W1 shipped) - clear fields,
 // copy feedback, harshness control, loading indicators; harshness prompt seam landed, rest pending.
-const EXPECTED_ROW_COUNT = 136;
+// 136 -> 137: RECORDING-DETECTION-RELIABILITY filed 2026-10-06 - the recording grader silently
+// misses discussion posts (the keep gate has no scroll term; the "too fast" notice is backpressure-bound).
+const EXPECTED_ROW_COUNT = 137;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

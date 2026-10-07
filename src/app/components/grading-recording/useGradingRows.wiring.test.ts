@@ -22,7 +22,7 @@ const SOURCE = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/g
 
 describe("useGradingRows.ts D21d course-scoping wiring", () => {
   it('takes courseId AND assessmentId, each collapsed "" -> the undefined scope', () => {
-    expect(SOURCE).toMatch(/export function useGradingRows\(courseId: string, assessmentId: string\): UseGradingRowsReturn \{/);
+    expect(SOURCE).toMatch(/export function useGradingRows\(courseId: string, assessmentId: string, rosterText\?: string \| null\): UseGradingRowsReturn \{/);
     expect(SOURCE).toMatch(/const courseScope = courseId\.length > 0 \? courseId : undefined;/);
     expect(SOURCE).toMatch(/const assessmentScope = assessmentId\.length > 0 \? assessmentId : undefined;/);
   });

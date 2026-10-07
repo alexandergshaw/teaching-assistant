@@ -365,7 +365,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // VISIBLE table (only course does that); the assessment tag exists to make
   // a row's assessment attributable for a future per-assessment denominator,
   // not to change what this panel itself shows.
-  const gradingRows = useGradingRows(courseId, assessmentId);
+  const gradingRows = useGradingRows(courseId, assessmentId, selectedRosterText);
 
   // D22b/D23e: previously-typed assessment labels for the CURRENTLY selected
   // course (drawn from `gradingRows.rawRows`, already course-scoped) - pure
@@ -520,7 +520,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
   }, []);
 
-  const { extracting } = useGradingRecordingExtraction({
+  const { extracting, ledger, coverage } = useGradingRecordingExtraction({
     takeFrameBatch,
     pendingFrames,
     provider,
@@ -809,6 +809,8 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
 
       <GradingRecordingNotices
         droppedFramesTotal={droppedFramesTotal}
+        coverageGapCount={coverage.gapCount}
+        ledger={ledger}
         frameEncodeNotice={frameEncodeNotice}
         gradeError={gradeError}
         rowError={rowGrade.rowError}
@@ -965,6 +967,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onRemoveRow={capture.onRemoveRow}
         onMarkLate={gradingRows.markSubmissionLate}
         onClearTable={capture.onClearTable}
+        onAddManual={gradingRows.addManualRow}
         onCopyError={handleCopyFeedbackError}
         onConfirmSubmissionKind={gradingRows.confirmSubmissionKind}
         onAcceptSuggestedKinds={gradingRows.acceptSuggestedKinds}

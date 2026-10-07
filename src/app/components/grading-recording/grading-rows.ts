@@ -499,3 +499,33 @@ export function isEligibleForBatchAccept(row: GradingRow): boolean {
 export function acceptSuggestedKinds(rows: ReadonlyArray<GradingRow>): GradingRow[] {
   return rows.map((row) => (isEligibleForBatchAccept(row) ? confirmSubmissionKind(row, row.suggestedSubmissionKind) : row));
 }
+
+/**
+ * DET-Wave 3 (Change 4): mints a row the instructor typed by hand for a post
+ * the capture missed. The caller supplies `id` (production passes
+ * crypto.randomUUID(), so no accumulator entry can ever own it).
+ * grading-capture-sync.ts's advanceGradingCapture PRESERVES every row no
+ * tracked entry consumed, so this row survives later capture merges untouched -
+ * grading-capture-sync.test.ts pins that. Otherwise identical to a freshly
+ * captured row: pending, never graded, kind unconfirmed.
+ */
+export function mintManualGradingRow(id: string, studentName: string, submissionText: string): GradingRow {
+  return {
+    id,
+    studentName: studentName.trim(),
+    nameMatch: "no-roster",
+    rosterCandidates: [],
+    submissionText: submissionText.trim(),
+    state: "pending",
+    totalScore: "",
+    strengths: "",
+    improvements: "",
+    overallComment: "",
+    error: "",
+    userEdited: false,
+    rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
+  };
+}

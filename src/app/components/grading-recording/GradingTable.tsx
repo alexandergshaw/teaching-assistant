@@ -28,6 +28,7 @@ import controls from "../recording/RecordingControls.module.css";
 import tableStyles from "../workflows/AutomationsTable.module.css";
 import rowStyles from "./GradingTable.module.css";
 import GradingTableRow from "./GradingTableRow";
+import GradingManualAdd from "./GradingManualAdd";
 import {
   GRADING_TABLE_COLUMN_COUNT,
   gradingClearTableSignature,
@@ -101,6 +102,10 @@ export interface GradingTableProps {
    *  why this records lateness without a timestamp. */
   onMarkLate: (id: string) => void;
   onClearTable: () => void;
+  /** DET-Wave 3 (Change 4): adds a hand-typed row for a post the capture
+   *  missed - rendered by GradingManualAdd, in the empty state too (a capture
+   *  that read nothing is exactly when it is needed). */
+  onAddManual: (studentName: string, submissionText: string) => boolean;
   /** CC14: threaded straight through to every row's Copy feedback button -
    *  see GradingTableRow.tsx's own prop doc for why this feeds the panel's
    *  existing notice path rather than a new row-local affordance. */
@@ -146,6 +151,7 @@ export default function GradingTable({
   onRemoveRow,
   onMarkLate,
   onClearTable,
+  onAddManual,
   onCopyError,
   onConfirmSubmissionKind,
   onAcceptSuggestedKinds,
@@ -184,6 +190,7 @@ export default function GradingTable({
     return (
       <div ref={containerRef} tabIndex={-1} className={rowStyles.tableContainer}>
         <p className={styles.fieldHint}>No graded submissions yet.</p>
+        <GradingManualAdd onAdd={onAddManual} />
       </div>
     );
   }
@@ -212,6 +219,7 @@ export default function GradingTable({
           }}
         />
       </div>
+      <GradingManualAdd onAdd={onAddManual} />
       <div className={styles.ghActions}>
         {filterText.trim() !== "" && (
           <span className={styles.fieldHint}>

@@ -150,6 +150,7 @@ import {
   editGradingRowField,
   applyGradingResultToRow,
   applyRosterMatchToRow,
+  mintManualGradingRow,
   removeGradingRow,
   confirmSubmissionKind,
   acceptSuggestedKinds,
@@ -170,6 +171,8 @@ import {
 } from "./grading-row";
 import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
 import { gradingRowCodec } from "./grading-row-serialization";
+import { matchNameAgainstRoster } from "./grading-roster-match";
+import { parseRosterNames } from "./grading-course-roster";
 import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 
 const STORAGE_KEY_FILTER = "ta-rec-grade-filter";
@@ -247,6 +250,12 @@ export interface UseGradingRowsReturn {
   removeRow: (id: string) => void;
   clearTable: () => void;
 
+  /** DET-Wave 3 (Change 4): adds a row by hand for a post the capture missed.
+   *  The id is a fresh uuid no accumulator entry owns, so
+   *  advanceGradingCapture preserves it across every later capture merge. A
+   *  blank name AND blank text is refused (returns false); otherwise true. */
+  addManualRow: (studentName: string, submissionText: string) => boolean;
+
   /** A38 wave 1 (docs/a38-scope.md section 6.2, "B4's fix"): the single-row
    *  grade path's state-only write - `useGradingRowGrade.ts` calls this for
    *  the pre-await "grading" dispatch write and for restoring a row's PRIOR
@@ -310,7 +319,7 @@ export interface UseGradingRowsReturn {
  * is forgetting to say, for the identical reason `courseId` above stopped
  * being optional.
  */
-export function useGradingRows(courseId: string, assessmentId: string): UseGradingRowsReturn {
+export function useGradingRows(courseId: string, assessmentId: string, rosterText?: string | null): UseGradingRowsReturn {
   // D21d: "" collapses to the same `undefined` scope a row with no course
   // tag carries - see the file header and useReplyRows.ts's own identical
   // comment on its courseScope.
@@ -498,6 +507,27 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     );
   }, [commitRows, rowsRef, courseScope]);
 
+  // DET-Wave 3 (Change 4): mints through the pure mintManualGradingRow, stamps
+  // course/assessment exactly like a captured row (stampGradingRows* against an
+  // empty previous slice, so the new id is "introduced"), roster-matches it
+  // against the selected course's roster, and appends. Never routes through
+  // setAllRows, so no capture accumulator is touched.
+  const addManualRow = useCallback(
+    (studentName: string, submissionText: string): boolean => {
+      if (studentName.trim() === "" && submissionText.trim() === "") return false;
+      const minted = mintManualGradingRow(crypto.randomUUID(), studentName, submissionText);
+      const matched = applyRosterMatchToRow(minted, matchNameAgainstRoster(minted.studentName, parseRosterNames(rosterText)));
+      const stamped = stampGradingRowsWithAssessment(
+        stampGradingRowsWithCourse([matched], [], courseScope),
+        [],
+        assessmentScope
+      );
+      commitRows([...rowsRef.current, ...stamped]);
+      return true;
+    },
+    [commitRows, rowsRef, courseScope, assessmentScope, rosterText]
+  );
+
   const clearTable = useCallback(() => {
     // D21d: clears only THIS course's own rows - mirrors useReplyRows.ts's
     // own clearTable exactly. An instructor clearing one class's table must
@@ -537,6 +567,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     applyRosterMatch,
     removeRow,
     clearTable,
+    addManualRow,
     markRowState,
     markSubmissionLate,
     confirmSubmissionKind: confirmSubmissionKindCb,

@@ -19,6 +19,8 @@
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
+import type { GradingExtractionLedger } from "./grading-extraction-ledger";
+import { coverageGapNotice, ledgerUnreadNotice } from "./grading-coverage-notices";
 
 export interface GradingRecordingNotice extends GradingExtractionOutcome {
   id: string;
@@ -26,6 +28,8 @@ export interface GradingRecordingNotice extends GradingExtractionOutcome {
 
 export default function GradingRecordingNotices({
   droppedFramesTotal,
+  coverageGapCount,
+  ledger,
   frameEncodeNotice,
   gradeError,
   rowError,
@@ -33,20 +37,26 @@ export default function GradingRecordingNotices({
   onDismiss,
 }: {
   droppedFramesTotal: number;
+  coverageGapCount: number;
+  ledger: GradingExtractionLedger;
   frameEncodeNotice: string | null;
   gradeError: string | null;
   rowError: string | null | undefined;
   notices: GradingRecordingNotice[];
   onDismiss: (id: string) => void;
 }) {
-  if (!(droppedFramesTotal > 0 || frameEncodeNotice || gradeError || rowError || notices.length > 0)) return null;
+  const gapText = coverageGapNotice(coverageGapCount);
+  const unreadText = ledgerUnreadNotice(ledger);
+  if (!(droppedFramesTotal > 0 || gapText || unreadText || frameEncodeNotice || gradeError || rowError || notices.length > 0)) return null;
   return (
     <div role="status" aria-live="polite" className={styles.field}>
       {droppedFramesTotal > 0 && (
         <p className={`${controls.notice} ${controls.noticeDanger}`}>
-          Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch it.
+          Reading fell behind the capture, so some frames were skipped. Scroll back over that section to catch it.
         </p>
       )}
+      {gapText && <p className={`${controls.notice} ${controls.noticeDanger}`}>{gapText}</p>}
+      {unreadText && <p className={`${controls.notice} ${controls.noticeDanger}`}>{unreadText}</p>}
       {frameEncodeNotice && <p className={`${controls.notice} ${controls.noticeDanger}`}>{frameEncodeNotice}</p>}
       {gradeError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{gradeError}</p>}
       {/* The single-row grade path's own refusal/error - kept separate from

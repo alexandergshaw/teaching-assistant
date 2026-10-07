@@ -89,8 +89,8 @@ describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
     expect(STRIPPED_SOURCE).toMatch(/from "\.\/GradingRecordingNotices"/);
   });
 
-  it("canary: the notices leaf still carries the disclosure copy under that gate (a gate with the notice deleted must not pass)", () => {
-    expect(STRIPPED_NOTICES).toMatch(/\{droppedFramesTotal\s*>\s*0\s*&&\s*\(\s*<p[\s\S]*?scrolled past faster than it could be read/);
+  it("canary: the notices leaf still carries the (DET-W3 retexted: backpressure, not scroll-speed) disclosure copy under that gate (a gate with the notice deleted must not pass)", () => {
+    expect(STRIPPED_NOTICES).toMatch(/\{droppedFramesTotal\s*>\s*0\s*&&\s*\(\s*<p[\s\S]*?Reading fell behind the capture/);
   });
 
   it("a Start/Stop/Start session's live readings survive through the panel's own accumulator contract", () => {
@@ -770,5 +770,48 @@ describe("GradingRecordingPanel.tsx imports hasTrendableResults directly, never 
     expect(/import\s*\{[^}]*\bhasTrendableResults\b[^}]*\}\s*from\s*["']\.\/classTrendsRunCohort["']/.test(STRIPPED_SOURCE)).toBe(
       false
     );
+  });
+});
+
+// ── DET-Wave 3: three DISTINCT signals, and the manual-add wiring ─────────
+// Backpressure (droppedFramesTotal), coverage gap (coverage.gapCount) and the
+// failed-batch ledger (ledger.windowsUnread) are separate props with separate
+// gates; the coverage notice must never read droppedFramesTotal.
+describe("DET-W3: coverage gap and ledger surface as signals separate from backpressure", () => {
+  it("the panel takes ledger and coverage from the extraction hook and passes the gap COUNT and the ledger to the notices leaf", () => {
+    expect(STRIPPED_SOURCE).toMatch(/const \{ extracting, ledger, coverage \} = useGradingRecordingExtraction\(/);
+    const match = STRIPPED_SOURCE.match(/<GradingRecordingNotices[\s\S]*?\/>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toMatch(/coverageGapCount=\{coverage\.gapCount\}/);
+    expect(match![0]).toMatch(/ledger=\{ledger\}/);
+  });
+
+  it("the coverage notice is driven by coverageGapCount, not droppedFramesTotal", () => {
+    expect(STRIPPED_NOTICES).toMatch(/coverageGapNotice\(coverageGapCount\)/);
+    expect(STRIPPED_NOTICES).toMatch(/ledgerUnreadNotice\(ledger\)/);
+    expect(STRIPPED_NOTICES).toMatch(/\{gapText && /);
+    expect(STRIPPED_NOTICES).toMatch(/\{unreadText && /);
+    // The one droppedFramesTotal gate must not wrap or feed either new notice.
+    const coverageLeaf = stripComments(
+      fs.readFileSync(path.resolve(process.cwd(), "src/app/components/grading-recording/grading-coverage-notices.ts"), "utf-8")
+    );
+    expect(coverageLeaf).not.toMatch(/droppedFrames/);
+  });
+
+  it("the panel hands the table the hook's addManualRow, and the table mounts GradingManualAdd with it", () => {
+    expect(STRIPPED_SOURCE).toMatch(/onAddManual=\{gradingRows\.addManualRow\}/);
+    const table = stripComments(
+      fs.readFileSync(path.resolve(process.cwd(), "src/app/components/grading-recording/GradingTable.tsx"), "utf-8")
+    );
+    expect(table).toMatch(/<GradingManualAdd onAdd=\{onAddManual\} \/>/);
+  });
+
+  it("addManualRow mints through mintManualGradingRow with a uuid id and never routes through setAllRows or the capture accumulator", () => {
+    const hook = stripComments(
+      fs.readFileSync(path.resolve(process.cwd(), "src/app/components/grading-recording/useGradingRows.ts"), "utf-8")
+    );
+    const body = hook.slice(hook.indexOf("const addManualRow"), hook.indexOf("const clearTable"));
+    expect(body).toMatch(/mintManualGradingRow\(crypto\.randomUUID\(\)/);
+    expect(body).not.toMatch(/setAllRows|advanceGradingCapture/);
   });
 });

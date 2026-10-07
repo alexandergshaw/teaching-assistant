@@ -334,6 +334,33 @@ export function joinFeedback(row: AssessmentFeedback): string {
     .join("\n\n");
 }
 
+/** Separator between two students' blocks in the batch copy payload. */
+export const BATCH_FEEDBACK_SEPARATOR = "\n\n---\n\n";
+
+/** Heading used in the batch copy payload when a row has no read name. */
+export const BATCH_FEEDBACK_UNNAMED = "Unnamed student";
+
+/**
+ * Wave 3 (docs/grading-recording-ux-overhaul-scope.md Move C): composes every
+ * row's feedback into ONE clipboard payload so grading P posts is one copy,
+ * not P. Each block is the student's name on its own line, a blank line, then
+ * exactly what the per-row Copy feedback button would copy (joinFeedback).
+ * A row whose joinFeedback is empty is skipped entirely - a heading with
+ * nothing under it would paste as noise. Blocks are joined by
+ * BATCH_FEEDBACK_SEPARATOR. Returns "" when no row has feedback, so a caller
+ * can refuse to write an empty clipboard, as the per-row control does.
+ */
+export function joinAllFeedback(rows: ReadonlyArray<AssessmentFeedback & { studentName: string }>): string {
+  const blocks: string[] = [];
+  for (const row of rows) {
+    const text = joinFeedback(row);
+    if (text === "") continue;
+    const name = row.studentName.trim() === "" ? BATCH_FEEDBACK_UNNAMED : row.studentName.trim();
+    blocks.push(`${name}\n\n${text}`);
+  }
+  return blocks.join(BATCH_FEEDBACK_SEPARATOR);
+}
+
 // ---------------------------------------------------------------------------
 // docs/course-student-intelligence-acceptance-criteria.md D21d: course
 // scoping. Mirrors discussion-serialization.ts's own D21d section - the

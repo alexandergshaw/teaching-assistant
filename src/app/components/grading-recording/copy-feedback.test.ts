@@ -21,7 +21,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { joinFeedback, type GradingRow } from "./grading-row";
+import { joinFeedback, joinAllFeedback, type GradingRow } from "./grading-row";
 import { composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types";
 import { editAssessmentField } from "../assessment-shared/assessment-row";
 import { composeGradingRowResult } from "./grading-feedback-prompt";
@@ -330,5 +330,29 @@ describe("G-R2b: GradingTableRow.tsx no longer hard-codes the two pre-A8-R 'Subm
     const falsePositiveBait = "GradingRowSubmissionTimeStatus gradingRowSubmissionTimeStatus submissionBlock submissionCell";
     expect(falsePositiveBait).not.toContain(">Submission</span>");
     expect(falsePositiveBait).not.toContain("`Submission from ${");
+  });
+});
+
+// Wave 3: batch "Copy all feedback" composer - frozen literal oracle.
+describe("joinAllFeedback (Wave 3 batch copy)", () => {
+  it("composes named blocks, skips empty rows, frozen literal", () => {
+    const rows: GradingRow[] = [
+      makeRow({ id: "a", studentName: "Maria Alvarez", strengths: "Clear.", improvements: "Cite more." }),
+      makeRow({ id: "b", studentName: "Skipped Person" }),
+      makeRow({ id: "c", studentName: "  ", strengths: "Solid." }),
+    ];
+    expect(joinAllFeedback(rows)).toBe(
+      "Maria Alvarez" + "\n\n" + "Clear." + "\n\n" + "Cite more." + "\n\n" + "---" + "\n\n" + "Unnamed student" + "\n\n" + "Solid.",
+    );
+  });
+
+  it("each block's body equals the per-row copy text", () => {
+    const row = makeRow({ studentName: "Lee", strengths: "S", improvements: "I" });
+    expect(joinAllFeedback([row])).toBe("Lee" + "\n\n" + joinFeedback(row));
+  });
+
+  it("returns empty string when no row has feedback", () => {
+    expect(joinAllFeedback([makeRow()])).toBe("");
+    expect(joinAllFeedback([])).toBe("");
   });
 });

@@ -36,7 +36,8 @@ import {
   type GradingFeedbackField,
   type GradingSort,
 } from "./grading-rows";
-import type { GradingRow } from "./grading-row";
+import { joinAllFeedback, type GradingRow } from "./grading-row";
+import { writeClipboardText } from "../ui/clipboard";
 // WAVE 3 of the assessment-grading extraction: the keyed-ref-map
 // focus-after-remove machinery moved verbatim to assessment-shared - see
 // that hook's own header for why the container fallback is load-bearing.
@@ -184,7 +185,19 @@ export default function GradingTable({
   // GradingTableRow.tsx's own "Mark late" doc comment names. Computed over
   // the currently visible (filtered) rows, matching the "Showing N of M"
   // hint immediately below.
-  const hasEligibleForBatchAccept = rows.some(isEligibleForBatchAccept);
+  const eligibleForBatchAcceptCount = rows.filter(isEligibleForBatchAccept).length;
+  // Wave 3: one clipboard payload for every visible row that has feedback.
+  const allFeedbackText = joinAllFeedback(rows);
+  const [allCopied, setAllCopied] = useState(false);
+  const handleCopyAll = async () => {
+    try {
+      await writeClipboardText(allFeedbackText);
+      setAllCopied(true);
+      setTimeout(() => setAllCopied(false), 1500);
+    } catch {
+      onCopyError("Could not copy all feedback automatically. Copy each row's feedback instead.");
+    }
+  };
 
   if (totalCount === 0) {
     return (
@@ -197,6 +210,27 @@ export default function GradingTable({
 
   return (
     <div ref={containerRef} tabIndex={-1} className={rowStyles.tableContainer}>
+      {/* CUE-2 / Wave 3 (docs/grading-recording-ux-overhaul-scope.md FORK 3,
+          explicit reading): the batch kind accept sits at the TOP of the
+          table, above search, with the count it will change - one obvious
+          click instead of per-row. Still an explicit press, never applied
+          silently; non-destructive so no ConfirmArmButtons. Outlined, not
+          contained, so buttonVariant.test.ts's frozen primary count for this
+          file is unchanged. Rendered only when it would change something. */}
+      {(eligibleForBatchAcceptCount > 0 || allFeedbackText !== "") && (
+        <div className={styles.ghActions}>
+          {eligibleForBatchAcceptCount > 0 && (
+            <Button size="small" variant="outlined" onClick={onAcceptSuggestedKinds}>
+              {`Accept suggested kinds (${eligibleForBatchAcceptCount})`}
+            </Button>
+          )}
+          {allFeedbackText !== "" && (
+            <Button size="small" variant="outlined" onClick={handleCopyAll}>
+              {allCopied ? "Copied all feedback" : "Copy all feedback"}
+            </Button>
+          )}
+        </div>
+      )}
       <div className={styles.adaptRow}>
         <TextField
           type="search"
@@ -228,18 +262,6 @@ export default function GradingTable({
               Clear
             </button>
           </span>
-        )}
-        {/* CUE-2 (docs/a8r-scope.md section 6): a non-destructive batch
-            action, so it needs no ConfirmArmButtons - it only ever confirms
-            rows the model itself gave a real basis for, and never touches a
-            row the instructor already confirmed. buttonVariant.test.ts's
-            FROZEN_PRIMARY_SITES pins GradingTable.tsx at its current
-            primary-button count - outlined, same as "Clear table", not
-            contained. */}
-        {hasEligibleForBatchAccept && (
-          <Button size="small" variant="outlined" onClick={onAcceptSuggestedKinds}>
-            Accept suggested kinds
-          </Button>
         )}
         {/* CC5 - "no row can be removed" fix - the whole-table wipe, now the
             shared ConfirmArmButtons component: one Button element whose

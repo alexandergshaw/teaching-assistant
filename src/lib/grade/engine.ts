@@ -11,6 +11,7 @@ import {
   GRADING_FAILURE_PREFIX,
   UNGRADED_NOT_ATTEMPTED_MESSAGES,
   composeOverallComment,
+  type GradeHarshness,
   type GradeResult,
   type GradedResult,
   type UngradedResult,
@@ -285,6 +286,9 @@ export interface GradingRunOptions {
   /** G8/F1=B: separate praise (What Went Well) from deductions + advice
    *  (What Could Be Better). Unset/false keeps today's byte-identical mapping. */
   readonly commentSplit?: boolean;
+  /** Grading-chat harshness. Unset/"balanced" appends no directive, keeping
+   *  today's prompt byte-identical. */
+  readonly harshness?: GradeHarshness;
 }
 
 /**
@@ -339,7 +343,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit } = options;
+  const { deadlineMs, commentSplit, harshness } = options;
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
@@ -353,17 +357,17 @@ async function gradeStudentEntries(
   // once; WHICH one an entry uses is chosen PER ENTRY (3.3/3.6). singleAxisPrompt
   // is today's call, byte for byte (ALL criteria, axisScope "all").
   const singleAxisPrompt = commentSplit
-    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths")
-    : buildSystemPrompt(assignmentInstructions, rubric, criteria);
+    ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "separate-strengths", "all", harshness)
+    : buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", "in-overall-comment", "all", harshness);
   const [axisMode, axisRouting] = commentSplit
     ? (["some", "separate-strengths"] as const)
     : (["some", "in-overall-comment"] as const);
   const initialCriteria = criteria.filter((c) => c.axis !== "reply");
   const replyCriteria = criteria.filter((c) => c.axis === "reply");
   const hasReplySection = replyCriteria.length > 0;
-  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only");
+  const initialAxisPrompt = buildSystemPrompt(assignmentInstructions, rubric, initialCriteria, axisMode, axisRouting, "initial-post-only", harshness);
   const replyAxisPrompt = hasReplySection
-    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only")
+    ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only", harshness)
     : null;
   const results: GradeResult[] = [];
 

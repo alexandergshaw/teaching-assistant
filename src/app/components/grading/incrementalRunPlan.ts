@@ -13,7 +13,7 @@
  * row never moves, it only appears" (a39-architecture.md, RULING 30).
  */
 import type { LlmProvider } from "@/lib/llm";
-import type { GradeResult, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeHarshness, GradeResult, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
 import { GRADING_FAILURE_PREFIX } from "@/lib/grade/types";
 import { UPLOAD_WIRE_BUDGET_BYTES, wireBytesForFile } from "@/lib/upload-budget";
 // A39 incremental-fill W5 (design 6.4): reconcile.ts is a genuinely pure leaf
@@ -64,6 +64,8 @@ export interface GradeRunItemRequestBody {
   readonly pointsPossible: number | null;
   /** Opt-in did-right/did-wrong comment split; only a literal true opts in. */
   readonly commentSplit?: boolean;
+  /** Grading harshness; type-only here, buildRunItemRequests leaves it unset like commentSplit. */
+  readonly harshness?: GradeHarshness;
 }
 
 export interface ArrivedItemResult {

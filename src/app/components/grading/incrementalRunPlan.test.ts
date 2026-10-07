@@ -119,6 +119,21 @@ describe("buildRunItemRequests (W4-3)", () => {
     });
     expect(requests[1].sourceIndex).toBe(1);
   });
+
+  // toEqual ignores undefined-valued keys, so the full-object assertion above
+  // cannot see an accidental `harshness: undefined`; the `in` check can.
+  it("leaves the optional commentSplit and harshness keys unset, so the default wire is unchanged", () => {
+    const plan: IncrementalRunPlan = {
+      tickets: [{ sourceIndex: 0, entry: entry({ student: "Alice" }) }],
+      assignmentInstructions: "Write an essay.",
+      rubric: "1. Correctness",
+      provider: "gemini",
+      pointsPossible: null,
+    };
+    const requests = buildRunItemRequests(plan);
+    expect("harshness" in requests[0]).toBe(false);
+    expect("commentSplit" in requests[0]).toBe(false);
+  });
 });
 
 describe("mergeArrivedResults (W4-5, RULING 30: a row never moves, it only appears)", () => {

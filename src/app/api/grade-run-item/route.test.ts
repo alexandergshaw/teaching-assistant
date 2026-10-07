@@ -247,6 +247,35 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     expect(body).toEqual({ sourceIndex: 0, result: fakeResult });
   });
 
+  describe("harshness parse is default-safe (harshness wave 1)", () => {
+    async function harshnessReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, ...extra }) as any);
+      const options = mockGradeEntries.mock.calls[0][5];
+      return options?.harshness;
+    }
+
+    it("passes lenient and strict through", async () => {
+      expect(await harshnessReachedEngine({ harshness: "strict" })).toBe("strict");
+      vi.clearAllMocks();
+      expect(await harshnessReachedEngine({ harshness: "lenient" })).toBe("lenient");
+    });
+
+    it("resolves an absent harshness to balanced", async () => {
+      expect(await harshnessReachedEngine({})).toBe("balanced");
+    });
+
+    it("resolves an invalid harshness (string, number, null) to balanced", async () => {
+      expect(await harshnessReachedEngine({ harshness: "savage" })).toBe("balanced");
+      vi.clearAllMocks();
+      expect(await harshnessReachedEngine({ harshness: 7 })).toBe("balanced");
+      vi.clearAllMocks();
+      expect(await harshnessReachedEngine({ harshness: null })).toBe("balanced");
+    });
+  });
+
   it("504s on a timed-out outcome, never throwing an unhandled error", async () => {
     mockRaceWithTimeout.mockResolvedValueOnce({ kind: "timedout" } as never);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

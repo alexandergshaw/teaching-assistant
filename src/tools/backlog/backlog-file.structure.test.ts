@@ -121,7 +121,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // Google Drive sharing links (parse id -> direct-download fetch -> existing file-grading path).
 // 134 -> 135: RECORDING-GRADER-UX filed 2026-10-06 (W1 shipped) - screen-recording-grader UX
 // overhaul; W1 setup-collapse + notices extraction (panel 1000 -> 996); FORK 1 = keep OCR.
-const EXPECTED_ROW_COUNT = 135;
+// 135 -> 136: GRADING-CHAT-CONTROLS filed 2026-10-06 (harshness seam W1 shipped) - clear fields,
+// copy feedback, harshness control, loading indicators; harshness prompt seam landed, rest pending.
+const EXPECTED_ROW_COUNT = 136;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

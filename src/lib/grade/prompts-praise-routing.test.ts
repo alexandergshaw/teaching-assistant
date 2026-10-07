@@ -210,3 +210,43 @@ describe("buildSystemPrompt separate-strengths branch (A11 wave 2)", () => {
     );
   });
 });
+
+/**
+ * Harshness wave 1 (docs/grading-chat-harshness-w1-test-notes.md section 3).
+ * Literals duplicated, not imported from prompts-harshness.test.ts.
+ */
+const STRICT_HARSHNESS = "Grade strictly. Hold the submission to the full requirements of each rubric area, and deduct for every shortfall you can point to in the submission. Do not round up or give the benefit of the doubt when a requirement is only partly met. Still cite the specific reason for each deduction, and never invent a problem the submission does not actually have.";
+const LENIENT_HARSHNESS = "Grade leniently. Give the benefit of the doubt wherever a rubric area is substantially met, treat minor or cosmetic issues as not worth a deduction, and award full points for an area unless there is a clear, evidenced shortfall. Do not award points for work that is genuinely missing.";
+const INITIAL_AXIS_SNIPPET = "SCOPE OF THIS EVALUATION (initial post only):";
+
+describe("buildSystemPrompt harshness parameter (7th, trailing)", () => {
+  it("AC3-2: every slot explicit with balanced equals the omitted-default capture", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced")
+    ).toBe(DEFAULT_NO_CRITERIA);
+  });
+
+  it("AC3-3: strict and lenient are appended last, after a blank line", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "strict")
+    ).toBe(DEFAULT_NO_CRITERIA + "\n\n" + STRICT_HARSHNESS);
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "lenient")
+    ).toBe(DEFAULT_NO_CRITERIA + "\n\n" + LENIENT_HARSHNESS);
+  });
+
+  it("AC3-3b: the harshness directive follows the axis directive", () => {
+    const out = buildSystemPrompt(
+      "Instructions.",
+      "Rubric.",
+      [],
+      "some",
+      "in-overall-comment",
+      "initial-post-only",
+      "strict"
+    );
+    expect(out.endsWith("\n\n" + STRICT_HARSHNESS)).toBe(true);
+    expect(out.indexOf(INITIAL_AXIS_SNIPPET)).toBeGreaterThan(-1);
+    expect(out.indexOf(INITIAL_AXIS_SNIPPET)).toBeLessThan(out.indexOf(STRICT_HARSHNESS));
+  });
+});

@@ -4,7 +4,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
-import type { StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
+import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
   ITEM_REQUEST_BYTE_BUDGET,
   estimateEntryWireBytes,
@@ -63,6 +63,7 @@ interface GradeRunItemRequestBody {
   provider?: unknown;
   pointsPossible?: unknown;
   commentSplit?: unknown;
+  harshness?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,6 +94,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   provider: ReturnType<typeof normalizeProvider>;
   pointsPossible: number | null;
   commentSplit: boolean;
+  harshness: GradeHarshness;
 } | null {
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
@@ -133,6 +135,9 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     pointsPossible: body.pointsPossible,
     // Only a literal true opts in; anything else is the default mapping.
     commentSplit: body.commentSplit === true,
+    // Default-safe: only a literal "lenient" or "strict" passes through; an
+    // absent or invalid value resolves to "balanced" (no directive).
+    harshness: body.harshness === "lenient" || body.harshness === "strict" ? body.harshness : "balanced",
   };
 }
 
@@ -173,7 +178,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness } = parsed;
 
   // THE SOFT BUDGET IS UNDER THE HARD CAP (S1 check 3): TOTAL_BUDGET_MS is
   // strictly below maxDuration * 1000, so this handler stops itself, on its
@@ -188,7 +193,7 @@ export async function POST(req: NextRequest) {
     // either per item would reproduce the grading.ts:634-636 defect this
     // seam exists to avoid (W4-4).
     const outcome = await raceWithTimeout(
-      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit }),
+      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness }),
       waitMs
     );
 

@@ -68,6 +68,11 @@ export interface RubricAreaResult {
  * later determination adds one more member here rather than a new
  * independent field on GradeResult.
  */
+/** Grading harshness register. "balanced" (or absent) appends no directive to
+ *  the grading prompt, keeping today's prompt byte-identical. TYPE-ONLY here; the
+ *  runtime consumers are grade/prompts.ts, grade/engine.ts and the route. */
+export type GradeHarshness = "lenient" | "balanced" | "strict";
+
 export type GradeDetermination = "no-submission" | "no-submission-unmerged-branch";
 
 // Single source of truth for validating a persisted/untrusted value against

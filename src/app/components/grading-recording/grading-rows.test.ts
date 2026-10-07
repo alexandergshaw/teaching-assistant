@@ -695,6 +695,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
       "ta-rec-grade-dismissed",
       "ta-rec-grade-filter",
       "ta-rec-grade-rubric",
+      "ta-rec-grade-setup-open",
       "ta-rec-grade-sort",
       "ta-rec-grade-table",
     ]);
@@ -736,6 +737,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     "ta-rec-grade-declarations",
     "ta-rec-grade-assessment",
     "ta-rec-grade-dismissed",
+    "ta-rec-grade-setup-open",
   ])(
     '"%s" has both a localStorage read and a localStorage write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
     (key) => {

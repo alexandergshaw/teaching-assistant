@@ -141,7 +141,9 @@ import { useGradingRowGrade } from "./useGradingRowGrade";
 // this hook - a pin-free, behaviour-preserving relocation. See that file's
 // own header for the full reasoning.
 import { useGradingRecordingExtraction } from "./useGradingRecordingExtraction";
-import { isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
+import { type GradingExtractionOutcome } from "./grading-extraction-outcome";
+import GradingRecordingNotices from "./GradingRecordingNotices";
+import { loadSetupOpen, resolveSetupOpen, saveSetupOpen } from "./grading-recording-setup-collapse";
 import { classifyGradingResult, gradedRubricDigestOf, setGradingRowState } from "./grading-rows";
 // A16-3 (docs/a16-plan.md 5.5/9.3, rulings 10/19): the SAME ClassTrendsPanel
 // GradingResults.tsx already mounts for the LMS grading surfaces, reached
@@ -749,6 +751,24 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // CC1: the visible reason a disabled Grade submissions primary carries.
   const canGrade = rubricText.trim() !== "";
 
+  // Wave 1 (docs/grading-recording-ux-overhaul-scope.md Move A): the one-time
+  // setup collapses once a capture starts or rows exist. The instructor's own
+  // toggle is saved and wins. It is applied in a MOUNT EFFECT, not a useState
+  // initializer: a localStorage-seeded initializer never reflects on reload
+  // (the server render and first client render must match).
+  const [setupUserOpen, setSetupUserOpen] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await Promise.resolve();
+      if (!cancelled) setSetupUserOpen(loadSetupOpen());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const setupOpen = resolveSetupOpen({ capturing, totalCount: gradingRows.totalCount, rubricPresent: canGrade }, setupUserOpen);
+
   // CC12: composeCaptureLiveSentence/useThrottledLiveSentence, adopted
   // whole - Grading's own noun is "submission"/"submissions".
   const captureLiveSentence = composeCaptureLiveSentence({
@@ -787,107 +807,83 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onDownload={handleDownloadLog}
       />
 
-      {/* Fixer pass finding 7: this used to render at the bottom of the
-          panel, below the table, where a notice about a failed extraction
-          could scroll out of view before the instructor ever saw it - moved
-          here, directly under the header/run-log row, so it is the first
-          thing on screen regardless of how far down the table has grown.
-          CC11: ONE wrapper carries role="status"/aria-live - no role on the
-          individual notices. This replaces the per-notice role="alert" this
-          file used to give every danger-kind notice: the 9b finding is that
-          several extraction outcomes can arrive close together, and N
-          simultaneous role="alert" elements each queue their own
-          interruption instead of being read as one update - which is worse,
-          not better, for an instructor already mid-task. One status region
-          announcing the latest change is the same shape
-          DiscussionRepliesPanel.tsx's own notice list uses.
-          CC11 fixer pass: the dropped-frames notice, the frame-encode notice
-          and a failed-grade error used to render as three separate standalone
-          `role="alert"` paragraphs further down the panel - folded in here so
-          every notice on this surface lives in the one place an instructor
-          already knows to look, matching module deck's own consolidated
-          wrapper. `{droppedFramesTotal > 0 &&` stays the exact gate
-          GradingRecordingPanel.wiring.test.ts:55 pins; only its render
-          location moved. A non-danger extraction outcome ("confirmed-empty",
-          "added") now renders as a neutral `controls.notice` box rather than
-          a bare `.fieldHint` line, matching module deck's own notice
-          treatment. */}
-      {(droppedFramesTotal > 0 || frameEncodeNotice || gradeError || rowGrade.rowError || notices.length > 0) && (
-        <div role="status" aria-live="polite" className={styles.field}>
-          {droppedFramesTotal > 0 && (
-            <p className={`${controls.notice} ${controls.noticeDanger}`}>
-              Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch
-              it.
-            </p>
-          )}
-          {frameEncodeNotice && <p className={`${controls.notice} ${controls.noticeDanger}`}>{frameEncodeNotice}</p>}
-          {gradeError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{gradeError}</p>}
-          {/* A38 wave 1: the single-row grade path's own refusal/error -
-              kept separate from `gradeError` (the bulk path's) so neither
-              clobbers the other, and surfaced through the SAME notice
-              region rather than a second live region (docs/a38-scope.md
-              section 4.5's "no new live region" rule). */}
-          {rowGrade.rowError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{rowGrade.rowError}</p>}
-          {notices.map((n) => (
-            <p key={n.id} className={isDangerNotice(n.kind) ? `${controls.notice} ${controls.noticeDanger}` : controls.notice}>
-              {n.text}{" "}
-              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
-                Dismiss
-              </button>
-            </p>
-          ))}
-        </div>
-      )}
-
-      {/* CC2: settings grouped under named sections, run row last. */}
-      <GradingCaptureSettings
-        courseId={courseId}
-        setCourseId={setCourseId}
-        courses={courses}
-        coursesLoading={coursesLoading}
-        coursesError={coursesError}
-        selectedRosterText={selectedRosterText}
-        assessmentOptions={assessmentOptions}
-        assessmentLabel={assessmentLabel}
-        setAssessmentLabel={setAssessmentLabel}
-        assessmentId={assessmentId}
+      <GradingRecordingNotices
+        droppedFramesTotal={droppedFramesTotal}
+        frameEncodeNotice={frameEncodeNotice}
+        gradeError={gradeError}
+        rowError={rowGrade.rowError}
+        notices={notices}
+        onDismiss={dismissNotice}
       />
 
-      <GradingAssessmentDeclarationControls
-        courseId={courseId}
-        assessmentId={assessmentId}
-        assessmentLabel={assessmentLabel}
-        hasRows={gradingRows.totalCount > 0}
-        declarations={declarations}
-      />
+      {/* CC2: settings grouped under named sections, run row last. Wave 1:
+          all of it is the collapsible Setup region. onToggle only records a
+          change that differs from the rendered state, so React's own open
+          updates are not saved as a user choice. */}
+      <details
+        className={styles.adaptDisclosure}
+        open={setupOpen}
+        onToggle={(e) => {
+          const next = e.currentTarget.open;
+          if (next === setupOpen) return;
+          setSetupUserOpen(next);
+          saveSetupOpen(next);
+        }}
+      >
+        <summary>
+          Setup{rubricText ? " - rubric set" : " - no rubric yet"}
+        </summary>
+        <div className={styles.adaptDisclosureBody}>
+          <GradingCaptureSettings
+            courseId={courseId}
+            setCourseId={setCourseId}
+            courses={courses}
+            coursesLoading={coursesLoading}
+            coursesError={coursesError}
+            selectedRosterText={selectedRosterText}
+            assessmentOptions={assessmentOptions}
+            assessmentLabel={assessmentLabel}
+            setAssessmentLabel={setAssessmentLabel}
+            assessmentId={assessmentId}
+          />
 
-      <fieldset className={controls.section}>
-        <legend className={controls.sectionLegend}>Grading</legend>
-        <div className={styles.ghActions}>
-          {/* Fixer pass finding 1: with rows captured and no rubric yet,
-              "Add rubric" is the real next step - it now takes the fill
-              instead of leaving a disabled "Grade submissions" as the only
-              contained button on screen. Guarded on !capturing so "Stop
-              capture" stays the sole primary while a capture is live (CC1's
-              "a live capture beats everything"). */}
-          <Button
-            variant={variantFor(!capturing && gradingRows.totalCount > 0 && !canGrade)}
-            size="small"
-            ref={rubricButtonRef}
-            onClick={() => setRubricModalOpen(true)}
-          >
-            {rubricText ? "Edit rubric" : "Add rubric"}
-          </Button>
+          <GradingAssessmentDeclarationControls
+            courseId={courseId}
+            assessmentId={assessmentId}
+            assessmentLabel={assessmentLabel}
+            hasRows={gradingRows.totalCount > 0}
+            declarations={declarations}
+          />
+
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Grading</legend>
+            <div className={styles.ghActions}>
+              {/* Fixer pass finding 1: with rows captured and no rubric yet,
+                  "Add rubric" is the real next step - it now takes the fill
+                  instead of leaving a disabled "Grade submissions" as the only
+                  contained button on screen. Guarded on !capturing so "Stop
+                  capture" stays the sole primary while a capture is live (CC1's
+                  "a live capture beats everything"). */}
+              <Button
+                variant={variantFor(!capturing && gradingRows.totalCount > 0 && !canGrade)}
+                size="small"
+                ref={rubricButtonRef}
+                onClick={() => setRubricModalOpen(true)}
+              >
+                {rubricText ? "Edit rubric" : "Add rubric"}
+              </Button>
+            </div>
+            <p className={styles.fieldHint}>
+              {rubricText
+                ? `Rubric set (${rubricText.trim().length} characters).`
+                : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
+            </p>
+            {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
+          </fieldset>
+
+          <GradingRecordingContextPanel knowledgeContext={knowledgeContext} setKnowledgeContext={setKnowledgeContext} />
         </div>
-        <p className={styles.fieldHint}>
-          {rubricText
-            ? `Rubric set (${rubricText.trim().length} characters).`
-            : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
-        </p>
-        {rubricOrigin && <p className={styles.fieldHint}>{rubricOrigin}</p>}
-      </fieldset>
-
-      <GradingRecordingContextPanel knowledgeContext={knowledgeContext} setKnowledgeContext={setKnowledgeContext} />
+      </details>
 
       {/* CC1: the run row - the primary is the next step, and a live capture
           beats everything (Stop capture is primary while capturing). Grading

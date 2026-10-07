@@ -53,6 +53,13 @@ function stripComments(source: string): string {
 
 const STRIPPED_SOURCE = stripComments(source);
 
+// Wave 1 of the recording-grader UX overhaul moved the notices region (the
+// dropped-frames disclosure included) into its own leaf; the pins that guarded
+// its gate are re-pointed there, not dropped.
+const NOTICES_PATH = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingNotices.tsx");
+const noticesSource = fs.readFileSync(NOTICES_PATH, "utf-8");
+const STRIPPED_NOTICES = stripComments(noticesSource);
+
 describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
   it("calls accumulateDroppedFrames with the live value and a ref-tracked previous value, never the live value alone", () => {
     expect(source).toMatch(/accumulateDroppedFrames\(\s*prevLiveDroppedRef\.current\s*,\s*droppedFrames\s*,/);
@@ -68,9 +75,22 @@ describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
     expect(source).toMatch(/droppedFrames:\s*droppedFramesTotal[,\s]/);
   });
 
-  it("never gates the persistent drop notice on the hook's live droppedFrames directly - only on droppedFramesTotal", () => {
+  it("never gates the persistent drop notice on the hook's live droppedFrames directly - only on droppedFramesTotal (re-pointed to GradingRecordingNotices.tsx)", () => {
     expect(source).not.toMatch(/\{droppedFrames\s*>\s*0\s*&&/);
-    expect(source).toMatch(/\{droppedFramesTotal\s*>\s*0\s*&&/);
+    expect(noticesSource).not.toMatch(/\{droppedFrames\s*>\s*0\s*&&/);
+    expect(noticesSource).toMatch(/\{droppedFramesTotal\s*>\s*0\s*&&/);
+  });
+
+  it("the panel renders <GradingRecordingNotices> and feeds it the session total droppedFramesTotal, never the live droppedFrames", () => {
+    const match = STRIPPED_SOURCE.match(/<GradingRecordingNotices[\s\S]*?\/>/);
+    expect(match, "expected the panel to render <GradingRecordingNotices .../>").not.toBeNull();
+    expect(match![0]).toMatch(/droppedFramesTotal=\{droppedFramesTotal\}/);
+    expect(match![0]).not.toMatch(/droppedFramesTotal=\{droppedFrames\}/);
+    expect(STRIPPED_SOURCE).toMatch(/from "\.\/GradingRecordingNotices"/);
+  });
+
+  it("canary: the notices leaf still carries the disclosure copy under that gate (a gate with the notice deleted must not pass)", () => {
+    expect(STRIPPED_NOTICES).toMatch(/\{droppedFramesTotal\s*>\s*0\s*&&\s*\(\s*<p[\s\S]*?scrolled past faster than it could be read/);
   });
 
   it("a Start/Stop/Start session's live readings survive through the panel's own accumulator contract", () => {

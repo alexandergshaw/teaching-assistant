@@ -1,0 +1,103 @@
+/* ANNOUNCEMENT-VIEW chat-mimic. Applied from TakeAnnouncementPanel.tsx through
+   the local binding `annChat`. Each rule replicates the declarations of its
+   grading-chat counterpart (grading-chat/grading-chat.module.css) from the same
+   design tokens; the grading-chat module stays private to that feature. The
+   panel is mounted inside TabShell's card, so there is deliberately no card
+   frame here (it would double-frame). */
+
+/* Panel root: replaces the bordered .adaptPanel box so content sits directly in
+   the surrounding card, as the grading-chat view does. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Heading that carries the focus anchor (headingRef, tabIndex -1). Lighter than
+   the old panel title and set in the chat view's tracked label voice. */
+.title {
+  margin: 0;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.title:focus {
+  outline: none;
+}
+
+.title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Setup block around the course picker (grading-chat .compactField idiom). */
+.setupField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* One-line status strip (grading-chat .setupSummary idiom): the posted view's
+   "Posted to ..." line. */
+.setupSummary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  line-height: var(--line-normal);
+}
+
+/* Accent-rail card for the produced artifact (grading-chat .latestCard idiom):
+   the armed post preview. Scrolls inside itself when long. */
+.latestCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.latestCardLabel {
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.latestCardText {
+  display: block;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  line-height: var(--line-normal);
+}
+
+/* Docked primary-action bar (grading-chat .stickyComposer idiom): hairline edge
+   above the Post / Save row. Static, not sticky - the panel's scroll ancestor is
+   TabShell, not the chat's tab container (owner-walk check). */
+.dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-4);
+  background: var(--card-background);
+  border-top: 1px solid var(--border-soft);
+}

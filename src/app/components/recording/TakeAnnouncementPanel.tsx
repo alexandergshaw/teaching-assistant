@@ -23,6 +23,7 @@ import { Button, MenuItem, TextField } from "@mui/material";
 import LinearProgress from "@mui/material/LinearProgress";
 import styles from "../../page.module.css";
 import controls from "./RecordingControls.module.css";
+import annChat from "./announcement-chat.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import RunLogRow from "./RunLogRow";
 import {
@@ -252,8 +253,8 @@ export default function TakeAnnouncementPanel({
 
   if (posted) {
     return (
-      <div className={styles.adaptPanel}>
-        <h2 ref={headingRef} tabIndex={-1} className={styles.adaptPanelTitle}>
+      <div className={annChat.panel}>
+        <h2 ref={headingRef} tabIndex={-1} className={annChat.title}>
           Announcement from {take.name}
         </h2>
         {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a
@@ -262,7 +263,7 @@ export default function TakeAnnouncementPanel({
             able to download (what path did the transcription take, did the
             image upload fail while the text posted). */}
         {downloadLogRow}
-        <p role="status" aria-live="polite">
+        <p role="status" aria-live="polite" className={annChat.setupSummary}>
           Posted to {posted.course}. Students can see it now.
         </p>
         <p className={styles.previewMeta}>Subject: {posted.subject}</p>
@@ -280,8 +281,8 @@ export default function TakeAnnouncementPanel({
   const canCancelPipeline = stage.phase === "preparing" || stage.phase === "transcribing";
 
   return (
-    <div className={styles.adaptPanel}>
-      <h2 ref={headingRef} tabIndex={-1} className={styles.adaptPanelTitle}>
+    <div className={annChat.panel}>
+      <h2 ref={headingRef} tabIndex={-1} className={annChat.title}>
         Announcement from {take.name}
       </h2>
 
@@ -409,6 +410,7 @@ export default function TakeAnnouncementPanel({
               surface). */}
           <fieldset className={controls.section}>
             <legend className={controls.sectionLegend}>Post to</legend>
+            <div className={annChat.setupField}>
             <div className={styles.adaptRow}>
               <TextField
                 select
@@ -427,6 +429,7 @@ export default function TakeAnnouncementPanel({
               </TextField>
             </div>
             <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
+            </div>
             {coursesError && (
               <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
                 {coursesError}
@@ -595,29 +598,21 @@ export default function TakeAnnouncementPanel({
           )}
 
           {armed && (
-            <div className={`${controls.notice} ${controls.noticeWarning}`}>
-              <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite">
-                Posting publishes this announcement to every student in {courses?.find((c) => c.id === courseId)?.name ?? "the course"} immediately - Canvas has no unpublished state for an announcement - and this app cannot recall or delete it afterward.
-              </p>
-              <p className={styles.previewMeta}>Subject that will be sent:</p>
-              <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>{subject}</code>
-              <p className={styles.previewMeta}>Body that will be sent:</p>
-              <code
-                tabIndex={0}
-                role="group"
-                aria-label="Announcement preview"
-                style={{
-                  display: "block",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  fontSize: "var(--font-size-md)",
-                  maxHeight: "180px",
-                  overflow: "auto",
-                }}
-              >
-                {body}
-              </code>
-            </div>
+            <>
+              <div className={`${controls.notice} ${controls.noticeWarning}`}>
+                <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite">
+                  Posting publishes this announcement to every student in {courses?.find((c) => c.id === courseId)?.name ?? "the course"} immediately - Canvas has no unpublished state for an announcement - and this app cannot recall or delete it afterward.
+                </p>
+              </div>
+              <div className={annChat.latestCard}>
+                <span className={annChat.latestCardLabel}>Subject that will be sent</span>
+                <code className={annChat.latestCardText}>{subject}</code>
+                <span className={annChat.latestCardLabel}>Body that will be sent</span>
+                <code tabIndex={0} role="group" aria-label="Announcement preview" className={annChat.latestCardText}>
+                  {body}
+                </code>
+              </div>
+            </>
           )}
 
           {postError && (
@@ -626,6 +621,7 @@ export default function TakeAnnouncementPanel({
             </div>
           )}
 
+          <div className={annChat.dock}>
           <div className={`${styles.ghActions} ${controls.runRow}`}>
             <ConfirmArmButtons
               armed={armed}
@@ -656,6 +652,7 @@ export default function TakeAnnouncementPanel({
             )}
           </div>
           {postUnavailableReason && <p className={styles.fieldHint}>{postUnavailableReason}</p>}
+          </div>
         </>
       )}
     </div>

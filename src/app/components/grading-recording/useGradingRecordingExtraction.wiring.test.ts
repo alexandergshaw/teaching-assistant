@@ -41,6 +41,6 @@ describe("useGradingRecordingExtraction.ts - per-batch failure ledger wiring", (
   });
 
   it("returns the ledger from the hook", () => {
-    expect(code).toMatch(/return \{ extracting, ledger \}/);
+    expect(code).toMatch(/return \{ extracting, ledger, coverage \}/);
   });
 });

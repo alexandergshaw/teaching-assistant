@@ -565,3 +565,35 @@ describe("PPT-DESIGN-INTO-PRESENTATIONS (I-NAV-INIT): the initial-load path migr
     expect(storedCheck).toBeGreaterThan(urlNormalize);
   });
 });
+
+// WORKFLOWS-COLLAPSE W1 (M-D2): the stored/URL Tools > Workflows > Drafts
+// location now lands on Library > Drafts. Source-text pins on the hook (the
+// hook cannot run outside a React render); the pure resolver is exercised in
+// src/app/url-state.automate-collapse.test.ts.
+describe("WORKFLOWS-COLLAPSE W1: the activeTab and librarySection initializers migrate the retired Drafts home", () => {
+  const helperStart = source.indexOf("function readsAsLegacyWorkflowsDrafts()");
+  const helper = source.slice(helperStart, source.indexOf("export function useAppNavigation", helperStart));
+
+  it("the shared helper reads the raw ta-workflows-view key and the raw ta-drafts-view literal, via the grades-first resolvers", () => {
+    expect(helperStart, "readsAsLegacyWorkflowsDrafts helper missing").toBeGreaterThan(-1);
+    expect(helper).toContain("resolveDraftsLibraryPointer(");
+    expect(helper).toContain("localStorage.getItem(WORKFLOWS_VIEW_KEY)");
+    expect(helper).toContain('localStorage.getItem("ta-drafts-view")');
+    expect(helper).toContain("isLegacyWorkflowsDrafts(");
+  });
+
+  it("activeTab returns 'files' and librarySection returns 'drafts' from that helper", () => {
+    expect(source).toMatch(/if \(readsAsLegacyWorkflowsDrafts\(\)\) return "files";/);
+    expect(source).toMatch(/if \(readsAsLegacyWorkflowsDrafts\(\)\) return "drafts";/);
+  });
+
+  it("the workflowsView initializer no longer maps a stored grade-drafts/drafts tab to a Workflows 'drafts' view", () => {
+    const start = source.indexOf("const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(");
+    const end = source.indexOf("const [tasksView", start);
+    expect(source.slice(start, end)).not.toMatch(/return "drafts"/);
+  });
+
+  it("the WORKFLOWS_VIEW_KEY constant stays 'ta-workflows-view' (raw migration input for both grades and drafts)", () => {
+    expect(source).toContain('const WORKFLOWS_VIEW_KEY = "ta-workflows-view";');
+  });
+});

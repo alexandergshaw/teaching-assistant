@@ -47,6 +47,7 @@ import {
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
 import { legacyPptDesignView } from "@/lib/ppt-view-migration";
+import { isLegacyWorkflowsDrafts } from "@/lib/workflows-drafts-library-migration";
 import {
   COURSES_SECTION_ORDER,
   DEFAULT_COURSES_SECTION,
@@ -115,9 +116,12 @@ export function isActiveTab(value: unknown): value is ActiveTab {
 // Courses section and lose exactly the screen the link asked for. That is the
 // silent bounce D25b is about, one level deeper.
 export function resolveTabDestination(value: string | null): TabDestination {
-  // Legacy "grade-drafts"/"drafts" named the pre-merge Workflows tab, so they
-  // land where "workflows" now lands: Tools, Workflows section.
-  if (value === "grade-drafts" || value === "drafts") return { ...RETIRED_TAB_DESTINATIONS.workflows };
+  // Legacy "grade-drafts"/"drafts" named the pre-merge Workflows tab's Drafts
+  // view. WORKFLOWS-COLLAPSE W1 moved Drafts to Library, so they land there
+  // (M-D4): Library, Drafts section.
+  if (value === "grade-drafts" || value === "drafts") {
+    return { ...DEFAULT_DESTINATION, tab: "files", librarySection: "drafts" };
+  }
   // Legacy "ppt-design" named a Manual subtab that briefly lived at top
   // level; it has always resolved to the Manual tab and still does.
   if (value === "ppt-design") return { ...DEFAULT_DESTINATION };
@@ -389,6 +393,26 @@ export function resolveGradingPointer(
   );
 }
 
+// WORKFLOWS-COLLAPSE W1 (M-D1/M-D3): do these raw URL params name the retired
+// Tools > Workflows > Drafts location? Drafts now lives at Library > Drafts.
+// ORDER IS LOAD-BEARING: the grades pointer (resolveGradingPointer, which
+// matches workflowsView="drafts" + draftsView="grades" first) is consulted
+// BEFORE the drafts->Library test, so a grades-draft user is never bounced to
+// Library. impliedToolsSection is the section a retired tab value carries
+// ("?tab=workflows" implies "workflows"); an explicit valid toolsSection wins.
+export function resolveDraftsLibraryPointer(
+  rawManualView: string | null,
+  rawContentView: string | null,
+  rawToolsSection: string | null,
+  impliedToolsSection: ToolsSection,
+  rawWorkflowsView: string | null,
+  rawDraftsView: string | null
+): boolean {
+  if (resolveGradingPointer(rawManualView, rawContentView, rawWorkflowsView, rawDraftsView)) return false;
+  const effectiveTools = isToolsSection(rawToolsSection) ? rawToolsSection : impliedToolsSection;
+  return isLegacyWorkflowsDrafts(effectiveTools, rawWorkflowsView, rawDraftsView);
+}
+
 export function parseUrlState(search: string): UrlNavState {
   const params = new URLSearchParams(search);
   // The tab value resolves to a whole destination first, because a RETIRED
@@ -411,8 +435,21 @@ export function parseUrlState(search: string): UrlNavState {
   // PPT-DESIGN-INTO-PRESENTATIONS: the retired "?manualView=ppt-design" means
   // Presentations > PowerPoint Design; written back canonically on first sync.
   const pptRedirect = legacyPptDesignView(rawManualView);
+  // WORKFLOWS-COLLAPSE W1: a legacy Drafts URL on the Tools tab lands on
+  // Library > Drafts. Only when the URL resolved to the Tools tab (a Courses or
+  // Library URL carrying a stray workflowsView is not a Drafts link).
+  const draftsToLibrary =
+    destination.tab === "manual" &&
+    resolveDraftsLibraryPointer(
+      rawManualView,
+      rawContentView,
+      rawToolsSection,
+      destination.toolsSection,
+      rawWorkflowsView,
+      rawDraftsView
+    );
   return {
-    tab: destination.tab,
+    tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
     // A resolved grading pointer FORCES toolsSection to "manual", even when an
     // explicit (and otherwise valid) toolsSection param says "workflows" - the
@@ -424,7 +461,11 @@ export function parseUrlState(search: string): UrlNavState {
       : isToolsSection(rawToolsSection)
         ? rawToolsSection
         : destination.toolsSection,
-    librarySection: isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection,
+    librarySection: draftsToLibrary
+      ? "drafts"
+      : isLibrarySection(rawLibrarySection)
+        ? rawLibrarySection
+        : destination.librarySection,
     manualView: gradingPointer
       ? gradingPointer.manualView
       : pptRedirect

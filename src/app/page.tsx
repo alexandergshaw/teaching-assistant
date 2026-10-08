@@ -34,6 +34,7 @@ import LessonPlanningForm from "./components/LessonPlanningForm";
 import TabShell from "./components/TabShell";
 import TopBar from "./components/TopBar";
 import WorkflowsPanel from "./components/home/WorkflowsPanel";
+import MessageDraftsTab from "./components/MessageDraftsTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import { useAppNavigation } from "./components/home/useAppNavigation";
 import { useLessonPlanner } from "./components/home/useLessonPlanner";
@@ -47,7 +48,6 @@ import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 import { TabRail } from "./components/tabs/TabRail";
 import {
   COURSES_RAIL_ITEMS,
-  TOOLS_RAIL_DRAFTS_ID,
   TOOLS_RAIL_ITEMS,
   coursesRailItemFor,
   coursesStateFromRailItem,
@@ -258,14 +258,14 @@ export default function Home() {
   // wave 3 (DECISION 19, E-full) dropped the fourth setter, setDraftsView -
   // Drafts renders MessageDraftsTab directly now, with no inner selector.
   useEffect(() => {
+    // WORKFLOWS-COLLAPSE W1: Drafts lives at Library > Drafts now.
     const handler = () => {
-      setWorkflowsView("drafts");
-      setToolsSection("workflows");
-      setActiveTab("manual");
+      setLibrarySection("drafts");
+      setActiveTab("files");
     };
     window.addEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
     return () => window.removeEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
-  }, [setActiveTab, setToolsSection, setWorkflowsView]);
+  }, [setActiveTab, setLibrarySection]);
 
   useEffect(() => {
     // GRAD-SUBTAB wave 3: Drafted Grades now also refreshes from its new home
@@ -276,13 +276,13 @@ export default function Home() {
     // grading check immediately followed by "&&" - topLevelTabs.wiring.test.ts's
     // R-1 guard locates the run/repos render branch by searching for exactly
     // that text, and an earlier, unrelated match here would misdirect it.
-    const workflowsDraftsShowing = activeTab === "manual" && toolsSection === "workflows" && workflowsView === "drafts";
+    const workflowsDraftsShowing = activeTab === "files" && librarySection === "drafts";
     const gradingDraftsShowing =
       activeTab === "manual" && toolsSection === "manual" && gradingView === "drafts" && manualView === "grading";
     if (workflowsDraftsShowing || gradingDraftsShowing) {
       refreshDrafts();
     }
-  }, [activeTab, toolsSection, workflowsView, manualView, gradingView, refreshDrafts]);
+  }, [activeTab, toolsSection, librarySection, manualView, gradingView, refreshDrafts]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -398,15 +398,12 @@ export default function Home() {
   // carries draftsGradesCount, and the Drafts chip's count narrows to
   // draftsMessagesCount only (it used to be draftsInbox, grades+messages
   // combined, when Drafts still hosted both).
+  // WORKFLOWS-COLLAPSE W1: the message-drafts count moved to Library (the tab
+  // and its Drafts chip below); Tools keeps only the Grading chip's count.
   const toolsRailOptions = TOOLS_RAIL_ITEMS.map((item) => ({
     id: item.id,
     label: item.label,
-    count:
-      item.id === TOOLS_RAIL_DRAFTS_ID
-        ? draftsMessagesCount
-        : item.id === manualRailItemId("grading")
-          ? draftsGradesCount
-          : 0,
+    count: item.id === manualRailItemId("grading") ? draftsGradesCount : 0,
   }));
   // Library was already flat before D26 - its two halves have no sub-views to
   // pull up, so its rail is still exactly its two sections, unchanged in
@@ -414,7 +411,7 @@ export default function Home() {
   const libraryRailOptions = LIBRARY_SECTION_ORDER.map((id) => ({
     id,
     label: LIBRARY_SECTION_LABELS[id],
-    count: id === "files" ? filesInbox : 0,
+    count: id === "files" ? filesInbox : id === "drafts" ? draftsMessagesCount : 0,
   }));
 
   // Picking a rail item writes the param that ALREADY owned that view, plus
@@ -507,7 +504,7 @@ export default function Home() {
               value: a tab registered in tab-sections.ts but missing from the
               strip is not a state this file can be in. Each merged tab
               carries the attention count of the half that had one before the
-              merge (drafts under Tools, the files inbox under Library), so
+              merge (grade drafts under Tools, the files inbox plus message drafts under Library), so
               neither badge disappears just because its tab did. NavTabLabel
               renders the text alone at count 0. */}
           {TAB_ORDER.map((tab) => (
@@ -517,7 +514,7 @@ export default function Home() {
               label={
                 <NavTabLabel
                   text={TAB_LABELS[tab]}
-                  count={tab === "manual" ? draftsInbox : tab === "files" ? filesInbox : 0}
+                  count={tab === "manual" ? draftsGradesCount : tab === "files" ? filesInbox + draftsMessagesCount : 0}
                 />
               }
               disableRipple
@@ -730,13 +727,9 @@ export default function Home() {
               </>
             )}
 
-            {/* WorkflowsPanel's own Workflows/Automations/Drafts subnav is
-                gone with D26 - those three are chips in the rail above now,
-                writing the same workflowsView param, and the Drafts badge
-                moved up with them. The Grades/Messages subnav that used to
-                sit INSIDE Drafts is gone too (GRAD-SUBTAB wave 3, DECISION 19
-                E-full) - Drafted Grades moved out, and Drafts now renders
-                MessageDraftsTab directly. */}
+            {/* WorkflowsPanel's own subnav is gone with D26 - its chips are in
+                the rail above, writing the workflowsView param. Drafts left
+                this family for Library > Drafts (WORKFLOWS-COLLAPSE W1). */}
             {toolsSection === "workflows" && (
               <WorkflowsPanel workflowsView={workflowsView} onOpenWorkflow={openWorkflow} />
             )}
@@ -869,6 +862,8 @@ export default function Home() {
             />
 
             {librarySection === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
+
+            {librarySection === "drafts" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
 
             {librarySection === "knowledge" && (
               <KnowledgeTab

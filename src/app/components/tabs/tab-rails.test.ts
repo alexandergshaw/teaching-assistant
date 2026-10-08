@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   COURSES_RAIL_ITEMS,
-  TOOLS_RAIL_DRAFTS_ID,
   TOOLS_RAIL_ITEMS,
   coursesRailItemFor,
   coursesStateFromRailItem,
@@ -40,7 +39,7 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  *    of the family it belongs to, and picking one family's chip never disturbs
  *    the other family's remembered view.
  *
- * 4. ONE LEVEL. Eleven Tools chips in one list, three Courses chips in one list,
+ * 4. ONE LEVEL. Ten Tools chips in one list, three Courses chips in one list,
  *    with nothing between the tab strip and them.
  *
  * What it cannot prove: that any of it RENDERS. vitest here is node-env and
@@ -50,7 +49,7 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  */
 
 describe("the Tools rail is one flat list of both families' views (D26)", () => {
-  it("holds exactly the eight Manual views then the three Workflows views, in that order", () => {
+  it("holds exactly the eight Manual views then the two Workflows views, in that order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
@@ -62,9 +61,9 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "manual:grading",
       "workflows:workflows",
       "workflows:automations",
-      "workflows:drafts",
     ]);
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
+    // WORKFLOWS-COLLAPSE W1: Drafts left for Library, so 11 -> 10.
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {
@@ -102,7 +101,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     }
   });
 
-  it("has no two chips sharing a label, so eleven items in one row stay distinguishable", () => {
+  it("has no two chips sharing a label, so ten items in one row stay distinguishable", () => {
     // The collision question the flattening had to answer before merging two
     // families into one row. They are disjoint today; this says so out loud.
     const labels = TOOLS_RAIL_ITEMS.map((item) => item.label);
@@ -124,20 +123,19 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     expect([...sections].sort()).toEqual([...TOOLS_SECTION_ORDER].sort());
   });
 
-  it("names the Drafts chip through the rail's own builder, so the badge cannot be hung on a stale id", () => {
-    expect(TOOLS_RAIL_DRAFTS_ID).toBe(workflowsRailItemId("drafts"));
-    expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toContain(TOOLS_RAIL_DRAFTS_ID);
+  it("no longer carries a Drafts chip - it moved to Library > Drafts (WORKFLOWS-COLLAPSE W1)", () => {
+    expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).not.toContain("workflows:drafts");
   });
 });
 
 describe("picking a Tools chip writes the param that already owned that view", () => {
   it("routes every Manual chip to manualView + the Manual section, leaving workflowsView alone", () => {
     for (const view of MANUAL_VIEW_ORDER) {
-      const next = toolsStateFromRailItem(manualRailItemId(view), "workflows", "recording", "drafts");
+      const next = toolsStateFromRailItem(manualRailItemId(view), "workflows", "recording", "automations");
       expect(next.manualView, `chip for "${view}" did not write manualView`).toBe(view);
       expect(next.toolsSection).toBe("manual");
       // The other family keeps whatever the user last had there.
-      expect(next.workflowsView).toBe("drafts");
+      expect(next.workflowsView).toBe("automations");
     }
   });
 
@@ -151,8 +149,8 @@ describe("picking a Tools chip writes the param that already owned that view", (
   });
 
   it("leaves everything untouched for an id the rail does not contain", () => {
-    const next = toolsStateFromRailItem("manual:not-a-view", "workflows", "recording", "drafts");
-    expect(next).toEqual({ toolsSection: "workflows", manualView: "recording", workflowsView: "drafts" });
+    const next = toolsStateFromRailItem("manual:not-a-view", "workflows", "recording", "automations");
+    expect(next).toEqual({ toolsSection: "workflows", manualView: "recording", workflowsView: "automations" });
   });
 
   it("round-trips: the chip a state resolves to writes that same state back", () => {
@@ -167,7 +165,7 @@ describe("picking a Tools chip writes the param that already owned that view", (
 describe("the highlighted Tools chip is derived from the params, never stored", () => {
   it("reads the Manual family's chip when the Manual section is showing", () => {
     for (const view of MANUAL_VIEW_ORDER) {
-      expect(toolsRailItemFor("manual", view, "drafts")).toBe(manualRailItemId(view));
+      expect(toolsRailItemFor("manual", view, "automations")).toBe(manualRailItemId(view));
     }
   });
 
@@ -325,7 +323,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       },
       { ...DEFAULT_STATE, tab: "files" },
       {
@@ -358,7 +356,6 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     );
     expect(parseUrlState("?tab=courses&coursesSection=tasks&tasksView=recurring").tasksView).toBe("recurring");
     expect(parseUrlState("?tab=manual&manualView=content&contentView=quizzes").contentView).toBe("quizzes");
-    expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts").workflowsView).toBe("drafts");
     expect(parseUrlState("?tab=files&librarySection=knowledge&kbInstitution=acme&kbPage=p1").kbInstitution).toBe(
       "ACME"
     );
@@ -374,11 +371,11 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       ...DEFAULT_STATE,
       tab: "manual",
       toolsSection: "workflows",
-      workflowsView: "drafts",
+      workflowsView: "automations",
     });
     expect(everything).not.toContain("manual:");
-    expect(everything).not.toContain("workflows:drafts");
+    expect(everything).not.toContain("workflows:automations");
     expect(everything).not.toContain("railItem");
-    expect(everything).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
+    expect(everything).toBe("?tab=manual&toolsSection=workflows&workflowsView=automations");
   });
 });

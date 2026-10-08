@@ -1,6 +1,7 @@
 // "Jump to the Message Drafts tab" - the Saved-to-drafts link in
 // MessageThreadRow.tsx (docs/message-replies-acceptance-criteria.md M16)
-// needs to land the instructor on Manual > Workflows > Drafts > Messages
+// needs to land the instructor on Library > Drafts (WORKFLOWS-COLLAPSE W1
+// moved it there from Tools > Workflows > Drafts)
 // without a plain <a href="?tab=workflows&workflowsView=drafts&draftsView=
 // messages">: `tab`/`workflowsView`/`draftsView` are held in page.tsx's own
 // component state (src/app/url-state.ts, src/app/components/home/
@@ -30,7 +31,8 @@
 export const MESSAGE_DRAFTS_NAV_EVENT = "ta-message-drafts-nav";
 
 /**
- * Request a jump to Manual > Workflows > Drafts > Messages. Dispatches
+ * Request a jump to Library > Drafts (WORKFLOWS-COLLAPSE W1; formerly
+ * Tools > Workflows > Drafts). Dispatches
  * MESSAGE_DRAFTS_NAV_EVENT so page.tsx's live listener (registered once, on
  * mount, next to its KNOWLEDGE_RETURN_EVENT listener - see that file's own
  * header on why it is the sole owner of these setters) can apply

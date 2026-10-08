@@ -64,11 +64,11 @@ export const DEFAULT_TAB: ActiveTab = "manual";
 
 export type CoursesSection = "courses" | "tasks" | "oneoff";
 export type ToolsSection = "manual" | "workflows";
-export type LibrarySection = "files" | "knowledge";
+export type LibrarySection = "files" | "knowledge" | "drafts";
 
 export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks", "oneoff"];
 export const TOOLS_SECTION_ORDER: readonly ToolsSection[] = ["manual", "workflows"];
-export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowledge"];
+export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowledge", "drafts"];
 
 // Only the sections that are still their own rail ITEM carry a label.
 //
@@ -90,6 +90,7 @@ export const COURSES_SECTION_LABELS: Record<CoursesSection, string> = {
 export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
   files: "Files",
   knowledge: "Knowledge",
+  drafts: "Drafts",
 };
 
 // --- The view families that the flattened rails are built from ------------
@@ -102,16 +103,18 @@ export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
 // re-exports both types, so every existing import site is unchanged - and so
 // are the "workflowsView" and "tasksView" URL params they validate.
 
-export type WorkflowsView = "workflows" | "automations" | "drafts";
+// WORKFLOWS-COLLAPSE W1: "drafts" left this family for Library > Drafts
+// (LibrarySection). A stored/URL workflowsView of "drafts" is a MIGRATION input
+// (src/lib/workflows-drafts-library-migration.ts), never a live member.
+export type WorkflowsView = "workflows" | "automations";
 export type TasksView = "term" | "recurring";
 
 // Rail order for the Workflows family, unchanged from the order the deleted
 // Workflows subnav rendered them in.
-export const WORKFLOWS_VIEW_ORDER: readonly WorkflowsView[] = ["workflows", "automations", "drafts"];
+export const WORKFLOWS_VIEW_ORDER: readonly WorkflowsView[] = ["workflows", "automations"];
 export const WORKFLOWS_VIEW_LABELS: Record<WorkflowsView, string> = {
   workflows: "Workflows",
   automations: "Automations",
-  drafts: "Drafts",
 };
 
 // Rail order and labels for the Tasks family, unchanged from the order and

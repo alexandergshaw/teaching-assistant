@@ -47,7 +47,9 @@ describe("each merged tab's sections", () => {
   it("holds the Courses sections in order, plus the two former tabs the others absorbed", () => {
     expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks", "oneoff"]);
     expect([...TOOLS_SECTION_ORDER]).toEqual(["manual", "workflows"]);
-    expect([...LIBRARY_SECTION_ORDER]).toEqual(["files", "knowledge"]);
+    expect([...LIBRARY_SECTION_ORDER]).toEqual(["files", "knowledge", "drafts"]);
+    // WORKFLOWS-COLLAPSE W1: Drafts joined Library as its third section.
+    expect(LIBRARY_SECTION_LABELS.drafts).toBe("Drafts");
   });
 
   it("labels every section that is still its own rail item", () => {
@@ -96,9 +98,10 @@ describe("each merged tab's sections", () => {
 // here is wrong in two places at once - which is exactly why they are pinned.
 describe("the view families the flattened rails are built from", () => {
   it("lists the Workflows views in rail order, with a label each", () => {
-    expect([...WORKFLOWS_VIEW_ORDER]).toEqual(["workflows", "automations", "drafts"]);
+    expect([...WORKFLOWS_VIEW_ORDER]).toEqual(["workflows", "automations"]);
     for (const view of WORKFLOWS_VIEW_ORDER) expect(WORKFLOWS_VIEW_LABELS[view]).toBeTruthy();
-    expect(WORKFLOWS_VIEW_LABELS.drafts).toBe("Drafts");
+    // WORKFLOWS-COLLAPSE W1: drafts left this family for Library.
+    expect(Object.keys(WORKFLOWS_VIEW_LABELS)).not.toContain("drafts");
   });
 
   it("lists the Tasks views in rail order, keeping the wording the deleted subnav used", () => {

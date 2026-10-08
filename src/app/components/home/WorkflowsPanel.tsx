@@ -2,7 +2,6 @@
 
 import WorkflowsTab from "../WorkflowsTab";
 import AutomationsTabView from "../AutomationsTabView";
-import MessageDraftsTab from "../MessageDraftsTab";
 import type { WorkflowsView } from "../../url-state";
 
 export interface WorkflowsPanelProps {
@@ -29,13 +28,16 @@ export interface WorkflowsPanelProps {
  * repo avoids ("a registration describing a screen that no longer exists" -
  * tab-sections.ts). Drafts now renders MessageDraftsTab directly, with no
  * subnav of its own left to render.
+ *
+ * WORKFLOWS-COLLAPSE W1: Drafts left this panel entirely - MessageDraftsTab now
+ * mounts under Library > Drafts (page.tsx), so this panel renders only
+ * Workflows and Automations.
  */
 export default function WorkflowsPanel({ workflowsView, onOpenWorkflow }: WorkflowsPanelProps) {
   return (
     <>
       {workflowsView === "workflows" && <WorkflowsTab />}
       {workflowsView === "automations" && <AutomationsTabView onOpenWorkflow={onOpenWorkflow} />}
-      {workflowsView === "drafts" && <MessageDraftsTab onOpenWorkflow={onOpenWorkflow} />}
     </>
   );
 }

@@ -156,12 +156,6 @@ const TOOLS_RAIL_BY_ID: ReadonlyMap<string, ToolsRailItem> = new Map(
   TOOLS_RAIL_ITEMS.map((item) => [item.id, item])
 );
 
-/** The Drafts chip, which is the one Tools rail item that carries an attention
- *  badge (the unread drafts count the deleted section switch used to badge on
- *  its "Workflows" half). Exported so page.tsx names it through the same
- *  builder the rail itself uses instead of a literal. */
-export const TOOLS_RAIL_DRAFTS_ID: ToolsRailItemId = workflowsRailItemId("drafts");
-
 /** The Tools rail chip for the currently resolved state - the derived section
  *  read backwards. */
 export function toolsRailItemFor(

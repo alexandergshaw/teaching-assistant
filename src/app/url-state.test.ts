@@ -65,9 +65,9 @@ describe("url-state", () => {
       expect(normalizeActiveTab(null)).toBe("manual");
     });
 
-    it("migrates legacy grade-drafts/drafts values to the Tools tab", () => {
-      expect(normalizeActiveTab("grade-drafts")).toBe("manual");
-      expect(normalizeActiveTab("drafts")).toBe("manual");
+    it("migrates legacy grade-drafts/drafts values to the Library tab (WORKFLOWS-COLLAPSE W1)", () => {
+      expect(normalizeActiveTab("grade-drafts")).toBe("files");
+      expect(normalizeActiveTab("drafts")).toBe("files");
     });
 
     it("migrates the legacy ppt-design value to manual", () => {
@@ -162,11 +162,11 @@ describe("url-state", () => {
       // draftsView is a retired param now (GRAD-SUBTAB wave 3, DECISION 19
       // E-full) - it is read only to detect the "grades" retired pointer
       // below; any other value (like "messages" here) is simply ignored.
-      expect(parseUrlState("?tab=workflows&workflowsView=drafts&draftsView=messages")).toEqual({
+      expect(parseUrlState("?tab=workflows&workflowsView=automations&draftsView=messages")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       });
       expect(parseUrlState("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123")).toEqual({
         ...DEFAULT_STATE,
@@ -190,8 +190,8 @@ describe("url-state", () => {
       expect(buildUrlSearch(parseUrlState("?tab=tasks&tasksView=recurring"))).toBe(
         "?tab=courses&coursesSection=tasks&tasksView=recurring"
       );
-      expect(buildUrlSearch(parseUrlState("?tab=workflows&workflowsView=drafts&draftsView=messages"))).toBe(
-        "?tab=manual&toolsSection=workflows&workflowsView=drafts"
+      expect(buildUrlSearch(parseUrlState("?tab=workflows&workflowsView=automations&draftsView=messages"))).toBe(
+        "?tab=manual&toolsSection=workflows&workflowsView=automations"
       );
       expect(buildUrlSearch(parseUrlState("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123"))).toBe(
         "?tab=files&librarySection=knowledge&kbInstitution=MCC&kbPage=abc-123"
@@ -259,7 +259,6 @@ describe("url-state", () => {
     it("accepts valid sub-views", () => {
       expect(normalizeWorkflowsView("workflows")).toBe("workflows");
       expect(normalizeWorkflowsView("automations")).toBe("automations");
-      expect(normalizeWorkflowsView("drafts")).toBe("drafts");
       expect(isWorkflowsView("automations")).toBe(true);
     });
 
@@ -417,11 +416,11 @@ describe("url-state", () => {
     });
 
     it("parses the workflows sub-view alongside the Tools tab's Workflows section", () => {
-      expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts")).toEqual({
+      expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       });
     });
 
@@ -465,11 +464,11 @@ describe("url-state", () => {
     // retired "grades" pointer (see "the retired 'drafts-view:grades'
     // pointer" describe block below) is simply ignored.
     it("ignores a draftsView param nested under workflows + drafts (retired)", () => {
-      expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=drafts&draftsView=messages")).toEqual({
+      expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations&draftsView=messages")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       });
     });
 
@@ -515,10 +514,10 @@ describe("url-state", () => {
         tab: "courses",
         manualView: "content",
       });
-      expect(parseUrlState("?tab=manual&workflowsView=drafts")).toEqual({
+      expect(parseUrlState("?tab=manual&workflowsView=automations")).toEqual({
         ...DEFAULT_STATE,
         tab: "manual",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       });
       // buildView present but manualView is "content", not "course-planning".
       expect(parseUrlState("?tab=manual&manualView=content&buildView=new")).toEqual({
@@ -583,7 +582,7 @@ describe("url-state", () => {
         "?tab=manual&manualView=content"
       );
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "artifact-design", workflowsView: "drafts" })
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "artifact-design", workflowsView: "automations" })
       ).toBe("?tab=manual&manualView=artifact-design");
       // The Workflows section is showing, so the Manual half's params are not
       // in effect and must not be written.
@@ -626,9 +625,9 @@ describe("url-state", () => {
       // a Courses/Library URL, and a workflowsView value must not leak into a
       // Tools > Manual URL.
       expect(
-        buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", manualView: "content", workflowsView: "drafts" })
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", manualView: "content", workflowsView: "automations" })
       ).toBe("?tab=courses");
-      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", workflowsView: "drafts" })).toBe(
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", manualView: "content", workflowsView: "automations" })).toBe(
         "?tab=manual&manualView=content"
       );
     });
@@ -675,9 +674,9 @@ describe("url-state", () => {
           ...DEFAULT_STATE,
           tab: "manual",
           toolsSection: "workflows",
-          workflowsView: "drafts",
+          workflowsView: "automations",
         })
-      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
+      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=automations");
     });
 
     it("omits kbInstitution/kbPage when the Knowledge section has no selection (AC3's common case)", () => {
@@ -734,9 +733,9 @@ describe("url-state", () => {
           ...DEFAULT_STATE,
           tab: "manual",
           toolsSection: "workflows",
-          workflowsView: "drafts",
+          workflowsView: "automations",
         })
-      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=drafts");
+      ).toBe("?tab=manual&toolsSection=workflows&workflowsView=automations");
 
       expect(
         buildUrlSearch({
@@ -781,7 +780,7 @@ describe("url-state", () => {
         ...DEFAULT_STATE,
         tab: "manual",
         toolsSection: "workflows",
-        workflowsView: "drafts",
+        workflowsView: "automations",
       });
       expect(drafts).toContain("workflowsView=");
 

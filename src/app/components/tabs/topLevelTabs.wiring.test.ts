@@ -381,10 +381,11 @@ describe("the merged tabs are one navigation level deep", () => {
     const source = read(PAGE);
     expect(source).toContain("COURSES_RAIL_ITEMS.map(");
     expect(source).toContain("TOOLS_RAIL_ITEMS.map(");
-    // Eleven chips is a lot; a hand-written list is how one of them goes
-    // missing. Eight Manual + three Workflows (PPT-DESIGN-INTO-PRESENTATIONS
-    // re-parented "ppt-design" under Presentations, so it left MANUAL_VIEW_ORDER).
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
+    // Ten chips is a lot; a hand-written list is how one of them goes
+    // missing. Eight Manual + two Workflows (PPT-DESIGN-INTO-PRESENTATIONS
+    // re-parented "ppt-design" under Presentations, so it left MANUAL_VIEW_ORDER;
+    // WORKFLOWS-COLLAPSE W1 moved Drafts to Library, 11 -> 10).
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
   });
 });
 
@@ -438,9 +439,14 @@ describe("every retired tab value still resolves to its new home", () => {
     const recurring = parseUrlState("?tab=tasks&tasksView=recurring");
     expect(coursesRailItemFor(recurring.coursesSection, recurring.tasksView)).toBe("tasks:recurring");
 
+    // WORKFLOWS-COLLAPSE W1: the Drafts deep link now lands on Library > Drafts.
     const drafts = parseUrlState("?tab=workflows&workflowsView=drafts");
-    expect(toolsRailItemFor(drafts.toolsSection, drafts.manualView, drafts.workflowsView)).toBe(
-      "workflows:drafts"
+    expect(drafts.tab).toBe("files");
+    expect(drafts.librarySection).toBe("drafts");
+
+    const automations = parseUrlState("?tab=workflows&workflowsView=automations");
+    expect(toolsRailItemFor(automations.toolsSection, automations.manualView, automations.workflowsView)).toBe(
+      "workflows:automations"
     );
 
     // And the Manual family through the param this whole design exists to
@@ -734,5 +740,40 @@ describe("Drafted Grades is reachable at its new home and dead at its old one (I
         "the new home, they are not mirrored from it"
     ).not.toContain("DraftedGradesTab");
     expect(source).not.toContain('draftsView === "grades"');
+  });
+});
+
+// WORKFLOWS-COLLAPSE W1 (docs/workflows-collapse-ia-scope.md): the message
+// drafts surface moved from Tools > Workflows > Drafts to Library > Drafts.
+// Source-text pins only - no component renders under vitest, so the badge
+// APPEARING and the pane painting are owner-walk (OW-1).
+describe("Drafts lives in Library, and is gone from Tools (AC-W1-1, AC-W1-3, AC-W1-4, AC-W1-7)", () => {
+  it("AC-W1-1: the Library branch renders MessageDraftsTab behind librarySection === drafts, exactly once in page.tsx", () => {
+    const source = read(PAGE);
+    expect(branchSlice(source, "files")).toMatch(/librarySection === "drafts" && <MessageDraftsTab/);
+    expect(source.split("<MessageDraftsTab").length - 1).toBe(1);
+  });
+
+  it("AC-W1-3: WorkflowsPanel no longer imports or renders MessageDraftsTab, and the Tools branch has no workflowsView === drafts render", () => {
+    expect(readWithoutComments(WORKFLOWS_PANEL)).not.toContain("MessageDraftsTab");
+    expect(branchSlice(read(PAGE), "manual")).not.toContain('workflowsView === "drafts"');
+  });
+
+  it("AC-W1-4: the message-drafts count rides the Library tab and its Drafts chip, and the Tools tab carries only the grades count", () => {
+    const source = read(PAGE);
+    expect(source).toContain('tab === "manual" ? draftsGradesCount : tab === "files" ? filesInbox + draftsMessagesCount : 0');
+    expect(source).toContain('id === "drafts" ? draftsMessagesCount');
+    const toolsOptions = source.slice(source.indexOf("const toolsRailOptions"), source.indexOf("const libraryRailOptions"));
+    expect(toolsOptions).not.toContain("draftsMessagesCount");
+    expect(toolsOptions).toContain("draftsGradesCount");
+  });
+
+  it("AC-W1-7: the Saved-to-drafts event lands on Library > Drafts, never Tools > Workflows", () => {
+    const source = read(PAGE);
+    const start = source.indexOf("window.addEventListener(MESSAGE_DRAFTS_NAV_EVENT");
+    const handler = source.slice(Math.max(0, start - 300), start);
+    expect(handler).toContain('setLibrarySection("drafts")');
+    expect(handler).toContain('setActiveTab("files")');
+    expect(handler).not.toContain('setToolsSection("workflows")');
   });
 });

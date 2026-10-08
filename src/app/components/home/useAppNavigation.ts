@@ -28,9 +28,11 @@ import {
   buildUrlSearch,
   resolveTabDestination,
   resolveGradingPointer,
+  resolveDraftsLibraryPointer,
 } from "../../url-state";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
+import { isLegacyWorkflowsDrafts } from "../../../lib/workflows-drafts-library-migration";
 
 // ActiveTab and WorkflowsView live in ../../url-state since that module is
 // also the single source of truth for validating/normalizing them against the
@@ -99,6 +101,39 @@ function readNavSource(): { params: URLSearchParams; urlHasTab: boolean; destina
 }
 
 /**
+ * WORKFLOWS-COLLAPSE W1 (M-D1..M-D3): does the starting location name the
+ * retired Tools > Workflows > Drafts home? Drafts now lives at Library >
+ * Drafts, so the activeTab and librarySection initializers both consult this
+ * ONE answer. The Drafts > Grades pointer is matched FIRST (inside
+ * resolveDraftsLibraryPointer / isLegacyWorkflowsDrafts), so a grades-draft
+ * user is never bounced to Library. The raw "ta-workflows-view" and
+ * "ta-drafts-view" localStorage strings stay literal inputs for this.
+ */
+function readsAsLegacyWorkflowsDrafts(): boolean {
+  const { params, urlHasTab, destination } = readNavSource();
+  if (destination.tab !== "manual") return false;
+  if (urlHasTab) {
+    return resolveDraftsLibraryPointer(
+      params.get("manualView"),
+      params.get("contentView"),
+      params.get("toolsSection"),
+      destination.toolsSection,
+      params.get("workflowsView"),
+      params.get("draftsView")
+    );
+  }
+  const storedTools =
+    destination.toolsSection !== DEFAULT_DESTINATION.toolsSection
+      ? destination.toolsSection
+      : localStorage.getItem(TOOLS_SECTION_KEY);
+  return isLegacyWorkflowsDrafts(
+    storedTools,
+    localStorage.getItem(WORKFLOWS_VIEW_KEY),
+    localStorage.getItem("ta-drafts-view")
+  );
+}
+
+/**
  * Owns every piece of "where in the app am I" state for the Home route: the
  * active top-level tab, each tab's sub-view, the Knowledge tab's
  * (institution, page) selection, and the two-way binding between all of that
@@ -120,6 +155,8 @@ export function useAppNavigation() {
     // and a RETIRED value ("tasks"/"workflows"/"knowledge", still sitting in
     // the localStorage of every user who was here before the merge) resolves
     // to its new home instead of silently bouncing to that default.
+    // WORKFLOWS-COLLAPSE W1: the retired Drafts home resolves to Library.
+    if (readsAsLegacyWorkflowsDrafts()) return "files";
     return readNavSource().destination.tab;
   });
   // Which half of each merged tab is showing. Resolution order, and it is the
@@ -184,6 +221,8 @@ export function useAppNavigation() {
   });
   const [librarySection, setLibrarySection] = useState<LibrarySection>(() => {
     if (typeof window === "undefined") return "files";
+    // WORKFLOWS-COLLAPSE W1: the retired Drafts home lands on Library > Drafts.
+    if (readsAsLegacyWorkflowsDrafts()) return "drafts";
     const { params, urlHasTab, destination } = readNavSource();
     if (urlHasTab) {
       const raw = params.get("librarySection");
@@ -358,9 +397,10 @@ export function useAppNavigation() {
     if (urlHasTab && destination.tab === "manual" && toolsSection === "workflows") {
       return normalizeWorkflowsView(urlParams.get("workflowsView"));
     }
-    // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
-    const saved = localStorage.getItem("ta-active-tab");
-    if (saved === "grade-drafts" || saved === "drafts") return "drafts";
+    // WORKFLOWS-COLLAPSE W1: a stored "grade-drafts"/"drafts" active tab no
+    // longer maps to a Workflows view - it resolves to Library > Drafts via
+    // resolveTabDestination. A stored workflowsView of "drafts" normalizes to
+    // the default (it is migration input only).
     return normalizeWorkflowsView(localStorage.getItem(WORKFLOWS_VIEW_KEY));
   });
   const [tasksView, setTasksView] = useState<TasksView>(() => {

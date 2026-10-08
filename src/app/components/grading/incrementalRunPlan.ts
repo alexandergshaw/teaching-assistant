@@ -66,6 +66,8 @@ export interface GradeRunItemRequestBody {
   readonly commentSplit?: boolean;
   /** Grading harshness; type-only here, buildRunItemRequests leaves it unset like commentSplit. */
   readonly harshness?: GradeHarshness;
+  /** Feedback word-count target; type-only here, buildRunItemRequests leaves it unset like harshness. */
+  readonly feedbackWordTarget?: number;
 }
 
 export interface ArrivedItemResult {

@@ -250,3 +250,52 @@ describe("buildSystemPrompt harshness parameter (7th, trailing)", () => {
     expect(out.indexOf(INITIAL_AXIS_SNIPPET)).toBeLessThan(out.indexOf(STRICT_HARSHNESS));
   });
 });
+
+/**
+ * Feedback length wave 1 (docs/feedback-length-control-scope.md section 5).
+ * The directive literal is duplicated, not imported from prompts-feedback-length.test.ts.
+ */
+const FEEDBACK_150 = "Aim to keep the written feedback for this submission to approximately 150 words in total across the feedback fields. Prioritize the most important points and keep the wording concise. Do not pad to reach the count, and do not drop a required deduction, rubric citation, or any other rule above just to stay under it.";
+
+describe("buildSystemPrompt feedbackWordTarget parameter (8th, trailing)", () => {
+  it("AC-L-2: an explicit-undefined 8th slot equals the omitted-default capture", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced", undefined)
+    ).toBe(DEFAULT_NO_CRITERIA);
+  });
+
+  it("AC-L-3: a target is appended last, after a blank line", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced", 150)
+    ).toBe(DEFAULT_NO_CRITERIA + "\n\n" + FEEDBACK_150);
+  });
+
+  it("AC-L-3b: harshness comes before length when both are set", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "strict", 150)
+    ).toBe(DEFAULT_NO_CRITERIA + "\n\n" + STRICT_HARSHNESS + "\n\n" + FEEDBACK_150);
+  });
+
+  it("AC-L-3c: axis, harshness and length stack in that order", () => {
+    const out = buildSystemPrompt(
+      "Instructions.",
+      "Rubric.",
+      [],
+      "some",
+      "in-overall-comment",
+      "initial-post-only",
+      "strict",
+      150
+    );
+    expect(out.endsWith("\n\n" + FEEDBACK_150)).toBe(true);
+    expect(out.indexOf(INITIAL_AXIS_SNIPPET)).toBeGreaterThan(-1);
+    expect(out.indexOf(INITIAL_AXIS_SNIPPET)).toBeLessThan(out.indexOf(STRICT_HARSHNESS));
+    expect(out.indexOf(STRICT_HARSHNESS)).toBeLessThan(out.indexOf(FEEDBACK_150));
+  });
+
+  it("an out-of-range target appends nothing", () => {
+    expect(
+      buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced", 5)
+    ).toBe(DEFAULT_NO_CRITERIA);
+  });
+});

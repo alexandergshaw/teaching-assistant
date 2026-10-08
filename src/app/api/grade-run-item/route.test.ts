@@ -276,6 +276,33 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     });
   });
 
+  describe("feedbackWordTarget parse is default-safe (feedback length wave 1)", () => {
+    async function targetReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
+      vi.clearAllMocks();
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, ...extra }) as any);
+      const options = mockGradeEntries.mock.calls[0][5];
+      return options?.feedbackWordTarget;
+    }
+
+    it("passes a valid target through, including a numeric string", async () => {
+      expect(await targetReachedEngine({ feedbackWordTarget: 150 })).toBe(150);
+      expect(await targetReachedEngine({ feedbackWordTarget: "150" })).toBe(150);
+    });
+
+    it("resolves an absent target to undefined", async () => {
+      expect(await targetReachedEngine({})).toBeUndefined();
+    });
+
+    it("resolves an out-of-range or invalid target to undefined", async () => {
+      for (const bad of [5, 600, "big", 150.5, null, 0, -20]) {
+        expect(await targetReachedEngine({ feedbackWordTarget: bad })).toBeUndefined();
+      }
+    });
+  });
+
   it("504s on a timed-out outcome, never throwing an unhandled error", async () => {
     mockRaceWithTimeout.mockResolvedValueOnce({ kind: "timedout" } as never);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

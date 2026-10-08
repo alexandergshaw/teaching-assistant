@@ -139,7 +139,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // restyled to the grading-chat look (bare-sibling root + cross-imported annChat skin, orphan-neutral).
 // 143 -> 144: REGRADE-AFTER-BATCH filed 2026-10-08 (shipped) - a per-row Regrade control on the chat
 // grading table re-runs a graded row in place (driver.regrade + the edits-shadow clear).
-const EXPECTED_ROW_COUNT = 144;
+// 144 -> 145: FEEDBACK-LENGTH-CONTROL filed 2026-10-08 (W1 seam shipped) - a word-count control for the
+// grading feedback length; W1 is the byte-identical prompt seam (8th param), W2 the numeric panel control.
+const EXPECTED_ROW_COUNT = 145;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

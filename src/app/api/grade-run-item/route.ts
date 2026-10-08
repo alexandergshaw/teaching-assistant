@@ -4,6 +4,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
+import { coerceFeedbackWordTarget } from "@/lib/grade/types";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
   ITEM_REQUEST_BYTE_BUDGET,
@@ -64,6 +65,7 @@ interface GradeRunItemRequestBody {
   pointsPossible?: unknown;
   commentSplit?: unknown;
   harshness?: unknown;
+  feedbackWordTarget?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +97,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   pointsPossible: number | null;
   commentSplit: boolean;
   harshness: GradeHarshness;
+  feedbackWordTarget: number | undefined;
 } | null {
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
@@ -138,6 +141,9 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     // Default-safe: only a literal "lenient" or "strict" passes through; an
     // absent or invalid value resolves to "balanced" (no directive).
     harshness: body.harshness === "lenient" || body.harshness === "strict" ? body.harshness : "balanced",
+    // Untrusted wire value: coerced to an in-range integer or undefined (unset,
+    // no directive). Never trusted as sent.
+    feedbackWordTarget: coerceFeedbackWordTarget(body.feedbackWordTarget),
   };
 }
 
@@ -178,7 +184,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget } = parsed;
 
   // THE SOFT BUDGET IS UNDER THE HARD CAP (S1 check 3): TOTAL_BUDGET_MS is
   // strictly below maxDuration * 1000, so this handler stops itself, on its
@@ -193,7 +199,7 @@ export async function POST(req: NextRequest) {
     // either per item would reproduce the grading.ts:634-636 defect this
     // seam exists to avoid (W4-4).
     const outcome = await raceWithTimeout(
-      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness }),
+      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget }),
       waitMs
     );
 

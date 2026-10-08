@@ -121,6 +121,24 @@ export function coerceGradeDetermination(value: unknown): GradeDetermination | u
     : undefined;
 }
 
+/** Bounds for the grading-chat feedback word-count target. Outside this range
+ *  the target coerces to unset (no directive), never clamps. */
+export const FEEDBACK_WORD_TARGET_MIN = 20;
+export const FEEDBACK_WORD_TARGET_MAX = 500;
+
+/**
+ * Coerces an untrusted or persisted value to a valid feedback word target, or
+ * undefined (unset) for anything absent, non-integer, NaN, infinite or out of
+ * range. Unset is the byte-identical default, so every failure lands there.
+ * A numeric string (as typed in a text field) is tolerated.
+ */
+export function coerceFeedbackWordTarget(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  if (!Number.isInteger(n)) return undefined;
+  if (n < FEEDBACK_WORD_TARGET_MIN || n > FEEDBACK_WORD_TARGET_MAX) return undefined;
+  return n;
+}
+
 export interface SubmittedFileInfo {
   name: string;
   extension: string;

@@ -1,3 +1,4 @@
+import { FEEDBACK_WORD_TARGET_MAX, FEEDBACK_WORD_TARGET_MIN } from "./types";
 import type { GradeHarshness, RubricCriterion, SubmittedFileInfo } from "./types";
 import { getBaseFileName } from "./utils";
 
@@ -93,7 +94,12 @@ export function buildSystemPrompt(
    *  section 4). Trailing and appended LAST, after the axis-scoped directive.
    *  "balanced" (the default) and undefined append nothing, so every existing
    *  call is byte-identical to before this parameter existed. */
-  harshness: GradeHarshness = "balanced"
+  harshness: GradeHarshness = "balanced",
+  /** Grading-chat feedback length control (docs/feedback-length-control-scope.md
+   *  section 4). Trailing and appended LAST, after the harshness directive.
+   *  Undefined (or any value outside the valid range) appends nothing, so every
+   *  existing call is byte-identical to before this parameter existed. */
+  feedbackWordTarget?: number
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -220,8 +226,28 @@ ${toneRule}
 ${resubmissionRule}
 - Do not include markdown fences or any text outside the JSON object.`;
   const withAxis = axisScope === "all" ? basePrompt : `${basePrompt}\n\n${axisScopeDirective(axisScope)}`;
+  const parts: string[] = [withAxis];
   const harshnessDirective = harshnessDirectiveForLevel(harshness);
-  return harshnessDirective ? `${withAxis}\n\n${harshnessDirective}` : withAxis;
+  if (harshnessDirective) parts.push(harshnessDirective);
+  const lengthDirective = feedbackLengthDirective(feedbackWordTarget);
+  if (lengthDirective) parts.push(lengthDirective);
+  return parts.join("\n\n");
+}
+
+/** Pure word-count budget appended to the grading prompt. Returns "" for an
+ *  unset, non-integer or out-of-range target so the default prompt is
+ *  unchanged. The trailing clause keeps the budget subordinate to the
+ *  structural rules. Authored without long or short dashes. */
+export function feedbackLengthDirective(target: number | undefined): string {
+  if (
+    typeof target !== "number" ||
+    !Number.isInteger(target) ||
+    target < FEEDBACK_WORD_TARGET_MIN ||
+    target > FEEDBACK_WORD_TARGET_MAX
+  ) {
+    return "";
+  }
+  return `Aim to keep the written feedback for this submission to approximately ${target} words in total across the feedback fields. Prioritize the most important points and keep the wording concise. Do not pad to reach the count, and do not drop a required deduction, rubric citation, or any other rule above just to stay under it.`;
 }
 
 /** Register-only strictness nudges. Authored without long or short dashes, as

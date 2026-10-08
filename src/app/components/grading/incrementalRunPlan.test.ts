@@ -133,6 +133,7 @@ describe("buildRunItemRequests (W4-3)", () => {
     const requests = buildRunItemRequests(plan);
     expect("harshness" in requests[0]).toBe(false);
     expect("commentSplit" in requests[0]).toBe(false);
+    expect("feedbackWordTarget" in requests[0]).toBe(false);
   });
 });
 

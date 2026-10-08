@@ -118,3 +118,53 @@ describe("gradeEntries default path composes today's exact system prompt (harshn
     }
   });
 });
+
+// Feedback length wave 1 (docs/feedback-length-control-scope.md AC-L-4): the
+// engine must thread the 8th buildSystemPrompt arg at its real call sites. The
+// unset default is already pinned byte-identical by E1/E2/E3 above (options
+// never carry feedbackWordTarget); these cases pin that a SET target reaches
+// the composed prompt on every engine branch.
+const FEEDBACK_150 = "Aim to keep the written feedback for this submission to approximately 150 words in total across the feedback fields. Prioritize the most important points and keep the wording concise. Do not pad to reach the count, and do not drop a required deduction, rubric citation, or any other rule above just to stay under it.";
+
+describe("gradeEntries threads feedbackWordTarget to the composed prompt (AC-L-4)", () => {
+  it("E-LEN-1: default branch with a target is the frozen default plus the directive", async () => {
+    const options: GradingRunOptions = { feedbackWordTarget: 150 };
+    await gradeEntries([entry()], "Instructions.", "Rubric.", "gemini", null, options);
+    expect(capturedPrompt(0).startsWith(FROZEN_DEFAULT + "\n\n" + FEEDBACK_150 + SEP)).toBe(true);
+  });
+
+  it("E-LEN-2: commentSplit branch with a target is the frozen capture plus the directive", async () => {
+    const options: GradingRunOptions = { commentSplit: true, feedbackWordTarget: 150 };
+    await gradeEntries([entry()], "Instructions.", "Rubric.", "gemini", null, options);
+    expect(capturedPrompt(0).startsWith(FROZEN_SEPARATE_STRENGTHS + "\n\n" + FEEDBACK_150 + SEP)).toBe(true);
+  });
+
+  it("E-LEN-3: both two-axis prompts carry the directive after the axis directive", async () => {
+    const rubric = ["Thesis (20 pts): clear", "Reply section:", "Engagement (10 pts): responds to peers"].join("\n");
+    const options: GradingRunOptions = { feedbackWordTarget: 150 };
+    await gradeEntries(
+      [entry({ discussionAxes: { initialPostContent: "my post", replyContent: "my reply", replyCount: 1 } })],
+      "Instructions.",
+      rubric,
+      "gemini",
+      null,
+      options
+    );
+    expect(mockCallLlm).toHaveBeenCalledTimes(2);
+    for (const [i, snippet] of [
+      [0, INITIAL_AXIS_SNIPPET],
+      [1, REPLY_AXIS_SNIPPET],
+    ] as const) {
+      const p = capturedPrompt(i);
+      expect(p.includes(FEEDBACK_150 + SEP)).toBe(true);
+      expect(p.indexOf(snippet)).toBeGreaterThan(-1);
+      expect(p.indexOf(snippet)).toBeLessThan(p.indexOf(FEEDBACK_150));
+    }
+  });
+
+  it("E-LEN-4: an out-of-range target leaves the default prompt byte-identical", async () => {
+    const options: GradingRunOptions = { feedbackWordTarget: 5 };
+    await gradeEntries([entry()], "Instructions.", "Rubric.", "gemini", null, options);
+    expect(capturedPrompt(0).startsWith(FROZEN_DEFAULT + SEP)).toBe(true);
+  });
+});

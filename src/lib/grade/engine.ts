@@ -22,7 +22,7 @@ import {
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
 } from "./types";
-import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
+import { collectInlineVisualParts } from "./inline-visuals";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
@@ -61,7 +61,7 @@ async function scoreAxis(
   studentName: string,
   content: string,
   provider: LlmProvider,
-  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  inlineFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
   codeRun: CodeRunResult | null = null,
   // The real submitted file names, given to the model as an explicit list
   // (see buildSubmittedFileNamesBlock) so it can check a stated filename
@@ -76,8 +76,8 @@ async function scoreAxis(
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
   const imageNote =
-    imageFiles.length > 0
-      ? `\n\nThe student also submitted ${imageFiles.length} image file(s) (e.g. required screenshots), attached below: ${imageFiles
+    inlineFiles.length > 0
+      ? `\n\nThe student also submitted ${inlineFiles.length} file(s) (e.g. required screenshots or documents), attached below: ${inlineFiles
           .map((f) => f.name)
           .join(", ")}. Treat them as part of the submission and evaluate them against the rubric.`
       : "";
@@ -96,7 +96,7 @@ async function scoreAxis(
     {
       text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}`,
     },
-    ...imageFiles.map((f) => ({
+    ...inlineFiles.map((f) => ({
       inlineData: { mimeType: f.mimeType, data: f.base64 },
     })),
   ];
@@ -190,7 +190,7 @@ async function gradeSubmission(
   studentName: string,
   content: string,
   provider: LlmProvider,
-  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  inlineFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
   // When set (the Canvas path), re-base the total onto the assignment's real
   // points so the tool grades out of the same total Canvas shows.
   pointsPossible: number | null = null,
@@ -198,7 +198,7 @@ async function gradeSubmission(
   submittedFiles: SubmittedFileInfo[] = [],
   commentSplit = false
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, imageFiles, codeRun, submittedFiles, commentSplit);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -236,13 +236,13 @@ async function gradeDiscussionAxes(a: {
   replyText: string | null;
   replyCount: number;
   provider: LlmProvider;
-  imageFiles: Array<{ name: string; base64: string; mimeType: string }>;
+  inlineFiles: Array<{ name: string; base64: string; mimeType: string }>;
   codeRun: CodeRunResult | null;
   submittedFiles: SubmittedFileInfo[];
   commentSplit: boolean;
   pointsPossible: number | null;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.imageFiles, a.codeRun, a.submittedFiles, a.commentSplit);
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit);
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -402,11 +402,7 @@ async function gradeStudentEntries(
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
       : contentTruncated;
 
-    const imageFiles = submittedFiles
-      .filter(
-        (f) => f.rawBase64 && f.mimeType && GEMINI_IMAGE_MIME_TYPES.has(f.mimeType)
-      )
-      .map((f) => ({ name: f.name, base64: f.rawBase64!, mimeType: f.mimeType! }));
+    const inlineFiles = collectInlineVisualParts(submittedFiles);
 
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). Never throws.
@@ -423,7 +419,7 @@ async function gradeStudentEntries(
             replyText: replyTrunc?.text ?? null,
             replyCount: axes?.replyCount ?? 0,
             provider,
-            imageFiles,
+            inlineFiles,
             codeRun,
             submittedFiles,
             commentSplit: commentSplit === true,
@@ -434,7 +430,7 @@ async function gradeStudentEntries(
             student,
             truncatedContent,
             provider,
-            imageFiles,
+            inlineFiles,
             pointsPossible,
             codeRun,
             submittedFiles,

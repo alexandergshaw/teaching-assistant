@@ -59,6 +59,19 @@ export const GEMINI_IMAGE_MIME_TYPES = new Set([
   "image/heif",
 ]);
 
+// Every MIME type the grader sends to Gemini as inline data: the readable
+// image types plus PDF, so a PDF's embedded screenshots reach the model
+// instead of only its extracted text.
+export const GEMINI_INLINE_MIME_TYPES = new Set([
+  ...GEMINI_IMAGE_MIME_TYPES,
+  "application/pdf",
+]);
+
+/** True when the grader sends this MIME type's raw bytes to the model. */
+export function graderNeedsFileBytes(mimeType: string | undefined): boolean {
+  return mimeType !== undefined && GEMINI_INLINE_MIME_TYPES.has(mimeType);
+}
+
 export function getMimeType(extension: string): string {
   return MIME_TYPES[extension.toLowerCase()] ?? "application/octet-stream";
 }

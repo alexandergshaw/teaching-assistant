@@ -547,6 +547,57 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     expect(parseSessionDiagnosticLogEntries(parsed.entries)).toEqual([...state.entries]);
   });
 
+  it("round-trips durationMs when present and carries no durationMs key when absent", () => {
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:01.000Z",
+      surface: "lms-content",
+      operation: "slow_op",
+      label: "Slow op",
+      outcome: "success",
+      durationMs: 2360,
+    });
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:02.000Z",
+      surface: "lms-content",
+      operation: "fast_op",
+      label: "Fast op",
+      outcome: "success",
+    });
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries[0].durationMs).toBe(2360);
+    expect("durationMs" in state.entries[1]).toBe(false);
+    const log = buildSessionDiagnosticLog(state, CONTEXT, "2026-09-07T12:00:00.000Z");
+    const parsed = JSON.parse(formatSessionDiagnosticLogJson(log));
+    const reparsed = parseSessionDiagnosticLogEntries(parsed.entries);
+    expect(reparsed).toEqual([...state.entries]);
+    expect(reparsed[0].durationMs).toBe(2360);
+    expect("durationMs" in reparsed[1]).toBe(false);
+  });
+
+  it("writes a Duration (ms) CSV column: filled when present, empty when absent", () => {
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:01.000Z",
+      surface: "lms-content",
+      operation: "slow_op",
+      label: "Slow op",
+      outcome: "success",
+      durationMs: 2360,
+    });
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:02.000Z",
+      surface: "lms-content",
+      operation: "fast_op",
+      label: "Fast op",
+      outcome: "success",
+    });
+    const log = buildSessionDiagnosticLog(readSessionDiagnosticLogState(), CONTEXT, "2026-09-07T12:00:00.000Z");
+    const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
+    const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
+    expect(lines[headerIndex]).toContain("Duration (ms)");
+    expect(lines[headerIndex + 1].endsWith(",2360")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",")).toBe(true);
+  });
+
   it("drops a malformed entry rather than throwing", () => {
     const parsed = parseSessionDiagnosticLogEntries([
       {

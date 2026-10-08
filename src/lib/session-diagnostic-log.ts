@@ -140,6 +140,9 @@ export interface SessionDiagnosticEntry {
   /** "" on success. On failure, the caller's own error text, already scrubbed
    * and length-capped - see sanitizeSessionDiagnosticError. */
   error: string;
+  /** Elapsed milliseconds for a slow operation. OPTIONAL and OMITTED (never an
+   * explicit undefined) when the caller supplied none. */
+  durationMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +209,8 @@ export interface RecordSessionDiagnosticArgs {
   /** The caller's own RAW error message - never pre-scrubbed or
    * pre-truncated. This function owns both steps, in the required order. */
   error?: string;
+  /** Optional elapsed milliseconds; stored only when supplied. */
+  durationMs?: number;
 }
 
 /** Append one entry to the session store. Side-effecting on purpose: this is
@@ -223,6 +228,7 @@ export function recordSessionDiagnosticEntry(args: RecordSessionDiagnosticArgs):
     course: args.course ?? "",
     outcome: args.outcome,
     error: args.outcome === "failure" ? sanitizeSessionDiagnosticError(args.error ?? "") : "",
+    ...(args.durationMs !== undefined ? { durationMs: args.durationMs } : {}),
   };
   storedEntries.push(entry);
   while (storedEntries.length > MAX_SESSION_DIAGNOSTIC_LOG_ENTRIES) {
@@ -370,7 +376,7 @@ export function buildSessionDiagnosticLog(
 
 const RUN_CSV_HEADER = ["Field", "Value"];
 const COVERAGE_CSV_HEADER = ["Area", "Instrumented", "What is recorded"];
-const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error"];
+const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)"];
 
 /** CSV export: a "Session" header block, then the COVERAGE block (what this
  * file does and does not claim), then one row per entry, oldest first - the
@@ -422,6 +428,7 @@ export function formatSessionDiagnosticLogCsv(log: SessionDiagnosticLog): string
         entry.course,
         entry.outcome,
         entry.error,
+        entry.durationMs === undefined ? "" : String(entry.durationMs),
       ])
     );
   }
@@ -507,6 +514,9 @@ function parseOneEntry(raw: unknown): SessionDiagnosticEntry | null {
     course,
     outcome: record.outcome,
     error,
+    ...(typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+      ? { durationMs: record.durationMs }
+      : {}),
   };
 }
 

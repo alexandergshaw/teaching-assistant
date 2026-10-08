@@ -33,6 +33,7 @@ import { selectDisplayRun, selectRunKey, isTerminal } from "./grading/incrementa
 import { describeRunProgress, shouldShowEmptyState } from "./grading/runProgressCopy";
 import { runResetKey } from "./grading-results/gradingResultsHelpers";
 import GradingPictureField from "./grading/GradingPictureField";
+import { useWholeRunDiagnostic } from "./grading/useWholeRunDiagnostic";
 import ReplySectionInsertField from "./grading/ReplySectionInsertField";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -165,14 +166,14 @@ export default function GradingTab({
 
   const run = state.run;
 
+  // Session Diagnostic Log: times the whole-run grade (dispatch -> pending clears).
+  const markWholeRunStart = useWholeRunDiagnostic(pending, state);
   // A39 wave 4c, step S5 (RULING 40); A39 incremental-fill W5 (architecture
   // 5.4): every whole-run dispatch now goes through beginWholeRun (the hook's
   // ONE door) before reaching here, so this is the file's only remaining
   // direct formAction( call site - A5's count is now exactly one.
   const submitWholeRun = (fd: FormData) => {
-    startTransition(() => {
-      formAction(fd);
-    });
+    startTransition(() => { markWholeRunStart(); formAction(fd); });
   };
   const {
     startReview,

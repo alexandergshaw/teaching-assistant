@@ -70,13 +70,14 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   "lms-content": "Course Content",
   diagnostics: "Diagnostics (Settings)",
+  grading: "Grading",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -93,6 +94,8 @@ const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = 
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",
   diagnostics:
     "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, and cancelling a migration job.",
+  grading:
+    "The main grading tab's whole-run grade (zip and Canvas), timed from dispatch to result - its operation's outcome and elapsed time as seen by the browser.",
 };
 
 export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[] = SURFACES.map((surface) => ({
@@ -106,7 +109,7 @@ export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[
  * gap into a false claim of coverage. */
 export const SESSION_DIAGNOSTIC_NOT_COVERED: readonly string[] = [
   "Recording, captions, teleprompter and avatar tools.",
-  "Grading, rubrics, drafted grades and repo grading.",
+  "Chat grading, posting grades back to Canvas, rubrics, drafted grades and repo grading.",
   "Workflows and the Automate panel - these keep their own per-run logs, downloadable from their own views.",
   "Chat, the knowledge base, discussion replies and message replies.",
   "Files, course planning, and every other tab not listed as covered above.",

@@ -415,7 +415,9 @@ describe("sessionDiagnosticLog: coverage is declared, so silence is readable", (
     // appears is vacuous the moment that list is emptied, which is exactly
     // the change that would turn this file into a false claim of total
     // coverage. Both counts are floors, so the lists may grow.
-    expect(SESSION_DIAGNOSTIC_COVERAGE.length).toBeGreaterThanOrEqual(2);
+    expect(SESSION_DIAGNOSTIC_COVERAGE.length).toBeGreaterThanOrEqual(3);
+    // The grading surface is instrumented (whole-run grade), so its row must exist.
+    expect(SESSION_DIAGNOSTIC_COVERAGE.map((row) => row.surface)).toContain("grading");
     expect(SESSION_DIAGNOSTIC_NOT_COVERED.length).toBeGreaterThanOrEqual(4);
     // A count floor alone still passes while the list quietly loses the
     // areas that matter, so the FACT is pinned instead of the spelling:
@@ -647,6 +649,10 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
 // ---------------------------------------------------------------------------
 
 const MODULE_SPECIFIER = "session-diagnostic-log";
+// The grading wrapper records through the same browser-only store, so a server
+// file importing it would be the same cross-request-state bug while passing a
+// scan for the core's own specifier.
+const GRADING_WRAPPER_SPECIFIER = "gradingDiagnosticLog";
 
 // The DIRECTIVE, on its own line - not a mention of the words. A substring
 // scan for `"use server"` also matches this file and the module itself, both
@@ -691,7 +697,8 @@ describe("sessionDiagnosticLog: nothing server-side may import this module", () 
   it("is not imported by any route handler, server action, or file carrying the use-server directive", () => {
     const offenders: string[] = [];
     for (const file of new Set(candidates)) {
-      if (fs.readFileSync(file, "utf-8").includes(MODULE_SPECIFIER)) offenders.push(rel(file));
+      const text = fs.readFileSync(file, "utf-8");
+      if (text.includes(MODULE_SPECIFIER) || text.includes(GRADING_WRAPPER_SPECIFIER)) offenders.push(rel(file));
     }
     expect(
       offenders,

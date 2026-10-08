@@ -31,6 +31,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { LMS_VIEWS, MANUAL_VIEW_ORDER, getInnerDestinations } from "../manual/manual-rail";
 import { normalizeContentView, isContentView, resolveGradingPointer } from "../../url-state";
+import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 
 const SOURCE_PATH = join(process.cwd(), "src/app/components/home/useAppNavigation.ts");
 const source = readFileSync(SOURCE_PATH, "utf8");
@@ -503,5 +504,64 @@ describe("GRAD-SUBTAB wave 3 (RES-GRAD-PINS): the manualView/gradingView localSt
         "sees gradingView migrated to \"drafts\", so normalizeGradingView(GRADING_VIEW_KEY) lands them on the " +
         "wrong inner Grading surface instead of Drafted Grades"
     ).toMatch(/localStorage\.getItem\("ta-drafts-view"\)\s*===\s*"grades"[\s\S]{0,80}return\s+"drafts"/);
+  });
+});
+
+// PPT-DESIGN-INTO-PRESENTATIONS: PowerPoint Design is now Presentations'
+// third tab, so the retired top-level "ppt-design" value must be migrated at
+// every initial-load channel. Source-text over the two initializers (nothing
+// renders here). The PLACEMENT of the channel-4 URL sub-case is the point: a
+// plain presence grep passes on the stored arm alone and cannot catch a URL
+// check sitting after the normalize return, which lands a cold-load
+// "?manualView=ppt-design" bookmark on Slide Deck Creation.
+describe("PPT-DESIGN-INTO-PRESENTATIONS (I-NAV-INIT): the initial-load path migrates the retired ppt-design value", () => {
+  it("legacyPptDesignView resolves the retired value and nothing else (the behavioral half)", () => {
+    expect(legacyPptDesignView("ppt-design")).toEqual({ manualView: "presentations", presentationsView: "ppt-design" });
+    expect(legacyPptDesignView("presentations")).toBeNull();
+  });
+
+  it("channel 3: the manualView initializer redirects the URL and stored ppt-design to presentations, and no arm returns it as a manualView", () => {
+    const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf("const [buildView", start);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end);
+
+    const urlBranchStart = block.indexOf('if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {');
+    const urlBranchEnd = block.indexOf("const savedManual", urlBranchStart);
+    expect(urlBranchStart).toBeGreaterThan(-1);
+    expect(urlBranchEnd).toBeGreaterThan(urlBranchStart);
+    const urlBranch = block.slice(urlBranchStart, urlBranchEnd);
+    const urlPpt = urlBranch.indexOf('legacyPptDesignView(urlParams.get("manualView"))');
+    expect(urlPpt, "URL branch must consult legacyPptDesignView").toBeGreaterThan(-1);
+    expect(urlPpt).toBeLessThan(urlBranch.indexOf('normalizeManualView(urlParams.get("manualView"))'));
+
+    const storedPpt = block.indexOf("legacyPptDesignView(savedManual)");
+    expect(storedPpt, "stored ta-manual-view must be migrated").toBeGreaterThan(-1);
+    expect(storedPpt).toBeLessThan(block.indexOf("isManualViewType(savedManual)"));
+
+    expect(block).toMatch(/legacyPptDesignView\(saved\)/);
+    expect(block).not.toMatch(/return\s+"ppt-design"/);
+  });
+
+  it("channel 4: the presentationsView initializer checks the URL sub-case BEFORE the normalize return, and the stored sub-case before the stored return", () => {
+    const start = source.indexOf("const [presentationsView, setPresentationsView] = useState<PresentationsView>(");
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf("const [focusCourseId", start);
+    expect(end).toBeGreaterThan(start);
+    const slice = source.slice(start, end);
+
+    const urlCheck = slice.indexOf('legacyPptDesignView(urlParams.get("manualView"))');
+    const urlNormalize = slice.indexOf('normalizePresentationsView(urlParams.get("presentationsView"))');
+    expect(urlCheck, "URL sub-case missing").toBeGreaterThan(-1);
+    expect(urlNormalize).toBeGreaterThan(-1);
+    expect(urlCheck, "URL sub-case sits after the normalize return").toBeLessThan(urlNormalize);
+
+    const storedCheck = slice.indexOf("legacyPptDesignView(localStorage.getItem(MANUAL_VIEW_KEY))");
+    const storedNormalize = slice.indexOf("normalizePresentationsView(localStorage.getItem(PRESENTATIONS_VIEW_KEY))");
+    expect(storedCheck, "stored sub-case missing").toBeGreaterThan(-1);
+    expect(storedNormalize).toBeGreaterThan(-1);
+    expect(storedCheck, "stored sub-case sits after the stored return").toBeLessThan(storedNormalize);
+    expect(storedCheck).toBeGreaterThan(urlNormalize);
   });
 });

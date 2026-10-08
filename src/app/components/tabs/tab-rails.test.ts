@@ -50,13 +50,12 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  */
 
 describe("the Tools rail is one flat list of both families' views (D26)", () => {
-  it("holds exactly the nine Manual views then the three Workflows views, in that order", () => {
+  it("holds exactly the eight Manual views then the three Workflows views, in that order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
       "manual:version-control",
       "manual:recording",
-      "manual:ppt-design",
       "manual:artifact-design",
       "manual:presentations",
       "manual:announcements",
@@ -65,7 +64,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "workflows:automations",
       "workflows:drafts",
     ]);
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(12);
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(11);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {
@@ -103,7 +102,7 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     }
   });
 
-  it("has no two chips sharing a label, so twelve items in one row stay distinguishable", () => {
+  it("has no two chips sharing a label, so eleven items in one row stay distinguishable", () => {
     // The collision question the flattening had to answer before merging two
     // families into one row. They are disjoint today; this says so out loud.
     const labels = TOOLS_RAIL_ITEMS.map((item) => item.label);

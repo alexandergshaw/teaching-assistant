@@ -14,6 +14,8 @@ import {
   getInnerDestinations,
   getInnerNavAriaLabel,
   isManualViewType,
+  isPresentationsView,
+  PRESENTATIONS_VIEWS,
 } from "./manual-rail";
 
 describe("manual-rail", () => {
@@ -67,11 +69,6 @@ describe("manual-rail", () => {
     it("should return recording when manualView is recording", () => {
       const id = getActiveDestinationId("recording", "new", "modules", "run");
       expect(id).toBe("recording");
-    });
-
-    it("should return ppt-design when manualView is ppt-design", () => {
-      const id = getActiveDestinationId("ppt-design", "new", "modules", "run");
-      expect(id).toBe("ppt-design");
     });
   });
 
@@ -175,7 +172,7 @@ describe("manual-rail", () => {
       expect(allDests).toContain("build-prebuilt");
       expect(allDests).toContain("version-control");
       expect(allDests).toContain("recording");
-      expect(allDests).toContain("ppt-design");
+      expect(allDests).toContain("presentations-ppt-design");
     });
 
     it("should have descriptions for all destinations", () => {
@@ -189,7 +186,7 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (the Manual half of the Tools rail)", () => {
-    it("should list the nine subtabs in display order", () => {
+    it("should list the eight subtabs in display order", () => {
       // Nine: "announcements" (ANNOUNCEMENTS-TAB A-W1) sits at index 7
       // (TOOLS-IA-REORG W1 moved it down from index 2, to just before Grading). Before that, "presentations" (PRES-1 wave 3) is the newest
       // addition - an inner-nav subtab (a "Presentations" destination group
@@ -205,7 +202,6 @@ describe("manual-rail", () => {
         "content",
         "version-control",
         "recording",
-        "ppt-design",
         "artifact-design",
         "presentations",
         "announcements",
@@ -269,7 +265,6 @@ describe("manual-rail", () => {
     it("should return null for single-view subtabs", () => {
       expect(getInnerDestinations("version-control")).toBeNull();
       expect(getInnerDestinations("recording")).toBeNull();
-      expect(getInnerDestinations("ppt-design")).toBeNull();
     });
   });
 
@@ -386,7 +381,7 @@ describe("artifact-design subtab", () => {
 
 // The Presentations sub-tab (PRES-1 wave 3, AC-2 /
 // docs/pres-1-architecture.md section "the extensible-child decision"): unlike
-// version-control/recording/ppt-design/artifact-design (each a single
+// version-control/recording/artifact-design (each a single
 // destination with getInnerDestinations returning null), presentations is
 // wired as an INNER-NAV view with a "Presentations" destinations group so a
 // child-tab strip renders under the "Presentations" chip and a second child
@@ -413,8 +408,8 @@ describe("presentations subtab", () => {
   it("has a non-null inner-nav destinations list containing Slide Deck Creation and, since PRES-2 S6.7, Slide Deck Pipeline (AC-2 / RES-S6-A)", () => {
     const inner = getInnerDestinations("presentations");
     expect(inner).not.toBeNull();
-    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck", "presentations-pipeline"]);
-    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation", "Slide Deck Pipeline"]);
+    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck", "presentations-pipeline", "presentations-ppt-design"]);
+    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation", "Slide Deck Pipeline", "PowerPoint Design"]);
   });
 
   it("PRES-2 S6.7: the pipeline child is reachable from its destination id and reports itself as active via presentationsView", () => {
@@ -675,5 +670,38 @@ describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard
     expect(resolveStateFromDestinationId("grading-run", "grading", "new", "modules", "run", "slide-deck", "walkthrough").announcementsView).toBe(
       "walkthrough"
     );
+  });
+});
+
+// PPT-DESIGN-INTO-PRESENTATIONS: PowerPoint Design MOVED (it was not deleted) -
+// from a top-level Tools chip to the third Presentations tab. Modelled on the
+// course-intel removal block, with the re-parent twist: the legacy id resolves
+// to the new place instead of falling back to the current view.
+describe("ppt-design re-parented under Presentations", () => {
+  it("is a presentationsView member derived from the presence record (I-UNION)", () => {
+    expect(PRESENTATIONS_VIEWS).toContain("ppt-design");
+    expect(isPresentationsView("ppt-design")).toBe(true);
+    expect(isPresentationsView("bogus")).toBe(false);
+  });
+
+  it("is gone as a top-level chip (I-RAILGONE)", () => {
+    expect(MANUAL_VIEW_ORDER).not.toContain("ppt-design");
+    expect(Object.keys(MANUAL_VIEW_LABELS)).not.toContain("ppt-design");
+    expect(isManualViewType("ppt-design")).toBe(false);
+    expect(getDestinationById("ppt-design")).toBeUndefined();
+  });
+
+  it("the new destination is reachable and reports itself as active (I-DESTID)", () => {
+    const resolved = resolveStateFromDestinationId("presentations-ppt-design", "content", "new", "modules", "run");
+    expect(resolved.manualView).toBe("presentations");
+    expect(resolved.presentationsView).toBe("ppt-design");
+    expect(getActiveDestinationId("presentations", "new", "modules", "run", "ppt-design")).toBe("presentations-ppt-design");
+    expect(getDestinationById("presentations-ppt-design")?.label).toBe("PowerPoint Design");
+  });
+
+  it("the legacy 'ppt-design' id resolves to Presentations > PowerPoint Design, not the current view (I-DESTID)", () => {
+    const resolved = resolveStateFromDestinationId("ppt-design", "recording", "new", "modules", "run");
+    expect(resolved.manualView).toBe("presentations");
+    expect(resolved.presentationsView).toBe("ppt-design");
   });
 });

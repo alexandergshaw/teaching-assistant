@@ -660,12 +660,6 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "ppt-design" && (
-                  <TabShell>
-                    <PowerPointDesignTab />
-                  </TabShell>
-                )}
-
                 {manualView === "artifact-design" && (
                   <TabShell>
                     <ArtifactDesignTab />
@@ -683,7 +677,13 @@ export default function Home() {
 
                 {manualView === "presentations" && (
                   <TabShell>
-                    {presentationsView === "pipeline" ? <PipelineTab /> : <PresentationsTab />}
+                    {presentationsView === "ppt-design" ? (
+                      <PowerPointDesignTab />
+                    ) : presentationsView === "pipeline" ? (
+                      <PipelineTab />
+                    ) : (
+                      <PresentationsTab />
+                    )}
                   </TabShell>
                 )}
 

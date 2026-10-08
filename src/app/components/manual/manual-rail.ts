@@ -1,4 +1,5 @@
 import type { ContentView } from "../content-tab/constants";
+import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 
 export interface Destination {
   id: string;
@@ -16,7 +17,6 @@ export type ManualViewType =
   | "content"
   | "version-control"
   | "recording"
-  | "ppt-design"
   | "artifact-design"
   | "grading"
   | "presentations"
@@ -52,11 +52,14 @@ export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts"
 // one-shot flow - "slide-deck" is that shipped thin flow
 // (`presentations-slide-deck`, unchanged), "pipeline" is the new stage-gated
 // surface (`presentations-pipeline`). Same shape as GradingView above.
-export type PresentationsView = "slide-deck" | "pipeline";
+// "ppt-design" (PPT-DESIGN-INTO-PRESENTATIONS): PowerPoint Design, re-parented
+// from a top-level Tools chip into a third Presentations tab.
+export type PresentationsView = "slide-deck" | "pipeline" | "ppt-design";
 
 const PRESENTATIONS_VIEW_PRESENCE: Record<PresentationsView, true> = {
   "slide-deck": true,
   pipeline: true,
+  "ppt-design": true,
 };
 export const PRESENTATIONS_VIEWS: readonly PresentationsView[] = Object.keys(
   PRESENTATIONS_VIEW_PRESENCE
@@ -153,12 +156,6 @@ export const destinations: DestinationGroup[] = [
   {
     name: null,
     destinations: [
-      { id: "ppt-design", label: "PowerPoint Design", description: "Create presentation slides" },
-    ],
-  },
-  {
-    name: null,
-    destinations: [
       { id: "artifact-design", label: "Artifact Templates", description: "Build reusable assignment and test templates" },
     ],
   },
@@ -175,6 +172,7 @@ export const destinations: DestinationGroup[] = [
     destinations: [
       { id: "presentations-slide-deck", label: "Slide Deck Creation", description: "Generate a lecture outline, activity ideas, and a slide deck from pasted context" },
       { id: "presentations-pipeline", label: "Slide Deck Pipeline", description: "Build a deck through the full 13-stage pipeline, stage by stage, with editable intermediates and a run-to-end option" },
+      { id: "presentations-ppt-design", label: "PowerPoint Design", description: "Create presentation slides" },
     ],
   },
   {
@@ -217,7 +215,6 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "content",
   "version-control",
   "recording",
-  "ppt-design",
   "artifact-design",
   "presentations",
   "announcements",
@@ -230,7 +227,6 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   announcements: "Announcements",
   "version-control": "Version Control",
   recording: "Recording",
-  "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
   presentations: "Presentations",
   grading: "Grading",
@@ -307,12 +303,10 @@ export function getActiveDestinationId(
     return "version-control";
   } else if (manualView === "recording") {
     return "recording";
-  } else if (manualView === "ppt-design") {
-    return "ppt-design";
   } else if (manualView === "artifact-design") {
     return "artifact-design";
   } else if (manualView === "presentations") {
-    return presentationsView === "pipeline" ? "presentations-pipeline" : "presentations-slide-deck";
+    return `presentations-${presentationsView}`;
   } else if (manualView === "grading") {
     return `grading-${gradingView}`;
   } else if (manualView === "announcements") {
@@ -388,7 +382,7 @@ export function resolveStateFromDestinationId(
     if (id.startsWith("lms-")) return "content";
     if (id === "version-control") return "version-control";
     if (id === "recording") return "recording";
-    if (id === "ppt-design") return "ppt-design";
+    if (legacyPptDesignView(id)) return "presentations";
     if (id === "artifact-design") return "artifact-design";
     if (id.startsWith("presentations-")) return "presentations";
     if (id.startsWith("grading-")) return "grading";
@@ -425,6 +419,9 @@ export function resolveStateFromDestinationId(
   const presentationsView: PresentationsView = (() => {
     if (id === "presentations-pipeline") return "pipeline";
     if (id === "presentations-slide-deck") return "slide-deck";
+    if (id === "presentations-ppt-design") return "ppt-design";
+    // Retired top-level id: the surface moved, so it resolves to its new tab.
+    if (legacyPptDesignView(id)) return "ppt-design";
     return currentPresentationsView;
   })();
 

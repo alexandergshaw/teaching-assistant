@@ -46,6 +46,7 @@ import {
 } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
+import { legacyPptDesignView } from "@/lib/ppt-view-migration";
 import {
   COURSES_SECTION_ORDER,
   DEFAULT_COURSES_SECTION,
@@ -407,6 +408,9 @@ export function parseUrlState(search: string): UrlNavState {
   const rawWorkflowsView = params.get(WORKFLOWS_VIEW_PARAM);
   const rawDraftsView = params.get(DRAFTS_VIEW_PARAM);
   const gradingPointer = resolveGradingPointer(rawManualView, rawContentView, rawWorkflowsView, rawDraftsView);
+  // PPT-DESIGN-INTO-PRESENTATIONS: the retired "?manualView=ppt-design" means
+  // Presentations > PowerPoint Design; written back canonically on first sync.
+  const pptRedirect = legacyPptDesignView(rawManualView);
   return {
     tab: destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
@@ -421,12 +425,18 @@ export function parseUrlState(search: string): UrlNavState {
         ? rawToolsSection
         : destination.toolsSection,
     librarySection: isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection,
-    manualView: gradingPointer ? gradingPointer.manualView : normalizeManualView(rawManualView),
+    manualView: gradingPointer
+      ? gradingPointer.manualView
+      : pptRedirect
+        ? pptRedirect.manualView
+        : normalizeManualView(rawManualView),
     workflowsView: normalizeWorkflowsView(rawWorkflowsView),
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(rawContentView),
     gradingView: gradingPointer ? gradingPointer.gradingView : normalizeGradingView(params.get(GRADING_VIEW_PARAM)),
-    presentationsView: normalizePresentationsView(params.get(PRESENTATIONS_VIEW_PARAM)),
+    presentationsView: pptRedirect
+      ? pptRedirect.presentationsView
+      : normalizePresentationsView(params.get(PRESENTATIONS_VIEW_PARAM)),
     announcementsView: normalizeAnnouncementsView(params.get(ANNOUNCEMENTS_VIEW_PARAM)),
     tasksView: normalizeTasksView(params.get(TASKS_VIEW_PARAM)),
     kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),

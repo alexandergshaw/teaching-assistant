@@ -30,6 +30,7 @@ import {
   resolveGradingPointer,
 } from "../../url-state";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
+import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 
 // ActiveTab and WorkflowsView live in ../../url-state since that module is
 // also the single source of truth for validating/normalizing them against the
@@ -44,7 +45,6 @@ export type ManualView =
   | "content"
   | "version-control"
   | "recording"
-  | "ppt-design"
   | "artifact-design"
   | "presentations"
   | "grading"
@@ -236,6 +236,10 @@ export function useAppNavigation() {
         urlParams.get("draftsView")
       );
       if (gradingPointer) return gradingPointer.manualView;
+      // PPT-DESIGN-INTO-PRESENTATIONS (channel 3, URL): the retired top-level
+      // "?manualView=ppt-design" now means Presentations > PowerPoint Design.
+      const pptRedirect = legacyPptDesignView(urlParams.get("manualView"));
+      if (pptRedirect) return pptRedirect.manualView;
       return normalizeManualView(urlParams.get("manualView"));
     }
     // GRAD-SUBTAB wave 3 (P3(iii)): a returning user who last sat on
@@ -260,6 +264,10 @@ export function useAppNavigation() {
     if (savedManual === "repo-grades") {
       return "grading";
     }
+    // PPT-DESIGN-INTO-PRESENTATIONS (channel 3, stored): ta-manual-view =
+    // "ppt-design" is no longer a ManualViewType; same ordering reason as above.
+    const pptStored = legacyPptDesignView(savedManual);
+    if (pptStored) return pptStored.manualView;
     // Validated against manual-rail.ts's authoritative MANUAL_VIEW_ORDER
     // (via isManualViewType) rather than a hand-restated list of literals,
     // so a subtab added to that order is accepted here automatically. A
@@ -271,7 +279,8 @@ export function useAppNavigation() {
     const saved = localStorage.getItem("ta-active-tab");
     if (saved === "recording") return "recording";
     if (saved === "version-control") return "version-control";
-    if (saved === "ppt-design") return "ppt-design";
+    const pptActiveTab = legacyPptDesignView(saved);
+    if (pptActiveTab) return pptActiveTab.manualView;
     // GRAD-SUBTAB wave 1 (the "active-tab:grading" retired pointer): this used
     // to land on "content" (the LMS Grading destination); it now lands on the
     // Grading sub-tab directly.
@@ -437,8 +446,16 @@ export function useAppNavigation() {
     // matching comment on buildView above.
     const { params: urlParams, urlHasTab, destination } = readNavSource();
     if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "presentations") {
+      // PPT-DESIGN-INTO-PRESENTATIONS (channel 4, URL sub-case): a cold-load
+      // "?manualView=ppt-design" resolved manualView to "presentations" above,
+      // so this branch is taken and the bare presentationsView param is absent;
+      // this check must precede the normalize return or it yields "slide-deck".
+      if (legacyPptDesignView(urlParams.get("manualView"))) return "ppt-design";
       return normalizePresentationsView(urlParams.get("presentationsView"));
     }
+    // Channel 4, stored sub-case: a user last on the old top-level PowerPoint
+    // Design has no ta-presentations-view value.
+    if (legacyPptDesignView(localStorage.getItem(MANUAL_VIEW_KEY))) return "ppt-design";
     return normalizePresentationsView(localStorage.getItem(PRESENTATIONS_VIEW_KEY));
   });
   // Which course the Courses tab should scroll to and highlight on arrival,

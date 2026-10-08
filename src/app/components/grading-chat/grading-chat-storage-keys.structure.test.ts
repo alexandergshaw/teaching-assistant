@@ -11,6 +11,7 @@ import { join } from "path";
 const DIR = join(process.cwd(), "src/app/components/grading-chat");
 
 const EXPECTED: readonly string[] = [
+  "ta-grading-chat-feedback-length",
   "ta-grading-chat-harshness",
   "ta-grading-chat-input-mode",
   "ta-grading-chat-instructions",

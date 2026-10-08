@@ -629,6 +629,33 @@ describe("useContinuousGradingRun - W2 O3-A: commentSplit reaches the dispatched
   });
 });
 
+describe("useContinuousGradingRun - AC-L-7: feedbackWordTarget is captured once and locked for the session", () => {
+  it("both bodies of a two-submit session carry the same target", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "", feedbackWordTarget: 150 });
+    driver = useTestDriver();
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "text", content: "first" });
+    await driver.submit({ kind: "text", content: "second" });
+    expect(dispatchItemMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(dispatchItemMock.mock.calls[0][0].feedbackWordTarget).toBe(150);
+    expect(dispatchItemMock.mock.calls[1][0].feedbackWordTarget).toBe(150);
+  });
+
+  it("a session with no target never puts the key on the wire", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    await driver.submit({ kind: "text", content: "first" });
+    await driver.submit({ kind: "text", content: "second" });
+    expect(dispatchItemMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of dispatchItemMock.mock.calls) {
+      expect("feedbackWordTarget" in call[0]).toBe(false);
+    }
+  });
+});
+
 describe("useContinuousGradingRun - composite submit appends exactly one row", () => {
   it("posts the parts to the composite action and dispatches ONE item for the merged entry", async () => {
     let driver = useTestDriver();

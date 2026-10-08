@@ -26,7 +26,12 @@ import { LatestResultCard } from "./LatestResultCard";
 import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import SegmentedToggle from "../ui/SegmentedToggle";
-import type { GradeHarshness } from "@/lib/grade/types";
+import {
+  coerceFeedbackWordTarget,
+  FEEDBACK_WORD_TARGET_MAX,
+  FEEDBACK_WORD_TARGET_MIN,
+  type GradeHarshness,
+} from "@/lib/grade/types";
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
 import { submitFilesSequentially } from "./chatFileBatch";
 import type { CompositePartInput } from "./chatSubmissionIntake";
@@ -71,6 +76,26 @@ function persistHarshness(level: GradeHarshness) {
   }
 }
 
+// Feedback word-count target (docs/feedback-length-control-scope.md): the raw
+// field text is persisted, and coerced to a number only at the beginSession seam.
+const FEEDBACK_LENGTH_STORAGE_KEY = "ta-grading-chat-feedback-length";
+
+function loadFeedbackLength(): string {
+  try {
+    return localStorage.getItem(FEEDBACK_LENGTH_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function persistFeedbackLength(text: string) {
+  try {
+    localStorage.setItem(FEEDBACK_LENGTH_STORAGE_KEY, text);
+  } catch {
+    // ignore
+  }
+}
+
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -83,6 +108,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
+  const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
@@ -101,6 +127,23 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       cancelled = true;
     };
   }, []);
+
+  // Same mount-effect restore as harshness (no state initializer: hydration).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadFeedbackLength());
+      if (!cancelled) setFeedbackLengthText(stored);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const changeFeedbackLength = (next: string) => {
+    setFeedbackLengthText(next);
+    persistFeedbackLength(next);
+  };
 
   const selectHarshness = (next: GradeHarshness) => {
     setHarshness(next);
@@ -166,7 +209,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     if (fill.instructions !== instructions) setInstructions(fill.instructions);
     if (fill.rubric !== rubric) setRubric(fill.rubric);
 
-    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric, harshness });
+    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric,
+      harshness,
+      feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText),
+    });
     if (result.kind === "refused") {
       sessionRefusalRef.current = result.reason;
       setSubmitError(result.reason);
@@ -322,6 +368,17 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           value={harshness}
           onChange={selectHarshness}
           disabled={sessionReady}
+        />
+        <TextField
+          type="number"
+          size="small"
+          label="Feedback word count (optional)"
+          value={feedbackLengthText}
+          onChange={(event) => changeFeedbackLength(event.target.value)}
+          disabled={sessionReady}
+          slotProps={{
+            htmlInput: { min: FEEDBACK_WORD_TARGET_MIN, max: FEEDBACK_WORD_TARGET_MAX, step: 10 },
+          }}
         />
         {!sessionReady && (instructions !== "" || rubric !== "") && (
           <Button variant="text" size="small" aria-label="Clear all setup fields" onClick={handleClearAll}>

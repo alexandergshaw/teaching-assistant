@@ -459,10 +459,13 @@ describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas 
     expect(source).not.toContain("loadPersisted");
     expect(source).not.toContain("INSTRUCTIONS_STORAGE_KEY");
     expect(source).not.toContain("RUBRIC_STORAGE_KEY");
-    // The only localStorage read is the harshness preference; it never seeds
-    // the instructions or rubric fields.
+    // The only localStorage reads are the harshness and feedback-length
+    // preferences; neither seeds the instructions or rubric fields.
     const reads = source.match(/localStorage\.getItem\([^)]*\)/g) ?? [];
-    expect(reads).toEqual(["localStorage.getItem(HARSHNESS_STORAGE_KEY)"]);
+    expect(reads).toEqual([
+      "localStorage.getItem(HARSHNESS_STORAGE_KEY)",
+      "localStorage.getItem(FEEDBACK_LENGTH_STORAGE_KEY)",
+    ]);
   });
 
   it("the Canvas-scoped memory still restores inside ensureSession", () => {
@@ -642,6 +645,46 @@ describe("GradingChatPanel - controls #3: harshness control and wire", () => {
     expect(driver).toContain('...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {})');
     // Default-wire canary: no unconditional harshness key on the body.
     expect(driver).not.toMatch(/^\s*harshness(:|,)/m);
+  });
+});
+
+describe("GradingChatPanel - feedback length control W2: word-count field and wire", () => {
+  it("renders a numeric word-count field locked after the session starts", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf('label="Feedback word count (optional)"');
+    expect(start).toBeGreaterThan(-1);
+    const open = source.lastIndexOf("<TextField", start);
+    const field = source.slice(open, source.indexOf("/>", start));
+    expect(field).toContain('type="number"');
+    expect(field).toContain("disabled={sessionReady}");
+    expect(field).toContain("FEEDBACK_WORD_TARGET_MIN");
+    expect(field).toContain("FEEDBACK_WORD_TARGET_MAX");
+  });
+
+  it("persists the raw text under its own key and restores it in a mount effect", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain('FEEDBACK_LENGTH_STORAGE_KEY = "ta-grading-chat-feedback-length"');
+    expect(source).toContain("localStorage.setItem(FEEDBACK_LENGTH_STORAGE_KEY");
+    expect(source).toContain('const [feedbackLengthText, setFeedbackLengthText] = useState("")');
+    expect(source).toContain("await Promise.resolve(loadFeedbackLength())");
+  });
+
+  it("beginSession receives the coerced target (captured once, not per submit)", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("driver.beginSession(");
+    const call = source.slice(start, source.indexOf("});", start));
+    expect(call).toContain("feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText)");
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toMatch(/feedbackWordTargetRef\.current\s*=\s*sessionParams\.feedbackWordTarget/);
+    expect(driver).toMatch(/feedbackWordTargetRef\.current\s*=\s*undefined/);
+  });
+
+  it("the driver conditional-spreads feedbackWordTarget, default wire byte-identical", () => {
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toContain(
+      "...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {})",
+    );
+    expect(driver).not.toMatch(/^\s*feedbackWordTarget(:|,)/m);
   });
 });
 

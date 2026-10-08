@@ -607,10 +607,16 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
     expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\}/);
   });
 
-  it("a Grading progress line reads driver.inFlight", () => {
+  it("the grading indicator is driven by OUTSTANDING work (dispatched - completed), not driver.inFlight", () => {
+    // Regression: keying the indicator on driver.inFlight (active concurrency
+    // slots only) made it vanish while grading was still going - inFlight hits
+    // 0 in the gap between intake and dispatch and whenever work is queued
+    // behind the concurrency limit. The indicator must key on work outstanding.
     const source = withoutLineComments(read(PANEL));
-    expect(source).toMatch(/driver\.inFlight\s*>\s*0/);
-    expect(source).toContain("Grading ${driver.inFlight}");
+    expect(source).toContain("driver.dispatchedCount - driver.completedCount");
+    expect(source).toMatch(/outstanding\s*>\s*0/);
+    // and it must NOT regress to gating the block on inFlight
+    expect(source).not.toMatch(/driver\.inFlight\s*>\s*0/);
   });
 });
 

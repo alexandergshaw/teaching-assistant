@@ -430,21 +430,33 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             {submitError}
           </p>
         )}
-        {(preparing || driver.inFlight > 0) && (
-          <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
-            <span className={styles.spinner} aria-hidden="true" />
-            <div>
-              <p className={styles.loadingTitle}>
-                {preparing ? "Reading your submission..." : "Grading in progress"}
-              </p>
-              {driver.inFlight > 0 && (
-                <p className={styles.loadingText}>
-                  {`Grading ${driver.inFlight} submission${driver.inFlight === 1 ? "" : "s"} (${driver.completedCount} of ${driver.dispatchedCount} done)`}
+        {(() => {
+          // "Still grading" is driven by WORK OUTSTANDING (dispatched but not
+          // yet arrived), NOT driver.inFlight (only the active concurrency
+          // slots). inFlight drops to 0 in the gap between intake finishing and
+          // the first dispatch, and whenever submissions are queued behind the
+          // concurrency limit - so keying on it made the indicator vanish while
+          // grading was still going. outstanding stays > 0 from the moment an
+          // entry is queued (set synchronously, before `preparing` clears)
+          // until its result arrives.
+          const outstanding = driver.dispatchedCount - driver.completedCount;
+          if (!preparing && outstanding <= 0) return null;
+          return (
+            <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <p className={styles.loadingTitle}>
+                  {preparing && outstanding <= 0 ? "Reading your submission..." : "Grading in progress"}
                 </p>
-              )}
+                {outstanding > 0 && (
+                  <p className={styles.loadingText}>
+                    {`${outstanding} submission${outstanding === 1 ? "" : "s"} still grading (${driver.completedCount} of ${driver.dispatchedCount} done)`}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         <ChatComposer
           disabled={busy || preparing}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

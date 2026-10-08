@@ -24,6 +24,76 @@ import { getFileExtension, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, extractTextFrom
 import { IMAGE_EXTENSIONS, getMimeType } from "./constants";
 import { toPreviewContent } from "./utils";
 import type { StudentSubmissionEntry } from "./types";
+import { callLlm, type LlmProvider } from "../llm";
+import { CHAT_LABEL_MAX_CHARS } from "@/app/components/grading-chat/chatSubmissionIntake";
+
+/**
+ * Deliberately SMALL: a false positive on a real name is worse than a miss.
+ * Matched against the WHOLE token set of a stem, never a substring, so
+ * "Jordan Lee - reflection" stays usable while "reflection" alone does not.
+ */
+const GENERIC_NAME_TOKENS: ReadonlySet<string> = new Set([
+  "submission", "uploaded", "document", "doc", "assignment", "untitled", "final", "draft",
+  "paper", "essay", "homework", "hw", "response", "reflection", "file", "download",
+  "upload", "scan", "image", "img", "photo", "attachment", "export", "new", "copy",
+  "output", "report",
+]);
+
+/** Characters of extracted content shown to the name-inference model. */
+const INFERENCE_CONTENT_CHARS = 2000;
+
+/**
+ * Pure: true when a file stem carries no usable student name (empty, no
+ * letters, a uuid/hash, or made only of generic placeholder words).
+ */
+export function isUnusableStudentName(stem: string): boolean {
+  const lowered = stem.trim().toLowerCase();
+  if (lowered.length === 0) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(lowered)) return true;
+  if (/^[0-9a-f]{32,64}$/.test(lowered)) return true;
+  const withoutCounter = lowered.replace(/\s*\(\d+\)$/, "").replace(/[-_]\d+$/, "");
+  const tokens = withoutCounter.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0);
+  if (tokens.length === 0) return true;
+  if (!/\p{L}/u.test(withoutCounter)) return true;
+  return tokens.every((t) => GENERIC_NAME_TOKENS.has(t));
+}
+
+/**
+ * Asks the model for the submitting student's name from the head of the
+ * document. ONE call, temperature 0. Abstains (null) on NONE, on a failed or
+ * thrown call, or on a value that is itself unusable or over-long: a guessed
+ * name is a misattribution, which is worse than a flag.
+ */
+export async function inferStudentNameFromContent(
+  text: string,
+  provider: LlmProvider
+): Promise<string | null> {
+  const head = text.slice(0, INFERENCE_CONTENT_CHARS);
+  const prompt =
+    "Below is the start of a student's submitted work. If the submitting student's name " +
+    "is clearly present as an author, byline or header, reply with only that name. " +
+    "If it is not clearly present, reply with only the single word NONE. Do not guess.\n\n" +
+    "---\n" +
+    head;
+  try {
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 60 },
+      },
+      provider
+    );
+    if (!result.ok) return null;
+    const firstLine = result.text.trim().split(/\r?\n/)[0] ?? "";
+    const name = firstLine.replace(/^name\s*:\s*/i, "").replace(/^["'`]+|["'`]+$/g, "").trim();
+    if (name.length === 0 || name.toUpperCase() === "NONE") return null;
+    if (name.length > CHAT_LABEL_MAX_CHARS) return null;
+    if (isUnusableStudentName(name)) return null;
+    return name;
+  } catch {
+    return null;
+  }
+}
 
 export type GradingUploadKind = "zip" | "single" | "unsupported";
 
@@ -71,16 +141,21 @@ function studentLabelFromFileName(name: string): string {
  */
 export async function buildSingleFileEntry(
   name: string,
-  buffer: Buffer
+  buffer: Buffer,
+  provider?: LlmProvider,
+  /** True when the user typed a label: the label wins, so no inference runs. */
+  labelled: boolean = false
 ): Promise<StudentSubmissionEntry | null> {
   const extension = getFileExtension(name);
-  const student = studentLabelFromFileName(name);
+  const stem = studentLabelFromFileName(name);
+  const needsName = !labelled && isUnusableStudentName(stem);
 
   if (IMAGE_EXTENSIONS.has(extension)) {
     const mimeType = getMimeType(extension);
     const placeholder = `[Image file: ${name}]`;
     return {
-      student,
+      student: stem,
+      studentNameSource: needsName ? "unresolved" : "filename",
       content: placeholder,
       mergedFileCount: 1,
       submittedFiles: [
@@ -112,8 +187,20 @@ export async function buildSingleFileEntry(
       return null;
     }
     const preview = toPreviewContent(extracted);
+    let student = stem;
+    let studentNameSource: "filename" | "inferred" | "unresolved" = "filename";
+    if (needsName) {
+      const inferred = provider ? await inferStudentNameFromContent(extracted, provider) : null;
+      if (inferred) {
+        student = inferred;
+        studentNameSource = "inferred";
+      } else {
+        studentNameSource = "unresolved";
+      }
+    }
     return {
       student,
+      studentNameSource,
       content: extracted,
       mergedFileCount: 1,
       submittedFiles: [

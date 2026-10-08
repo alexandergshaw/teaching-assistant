@@ -73,6 +73,13 @@ describe("buildSingleFileEntry (W1-2)", () => {
 
     expect(entry).not.toBeNull();
     expect(entry!.student).toBe("Jordan Lee - reflection");
+    expect(entry!.studentNameSource).toBe("filename");
+  });
+
+  it("marks an unnamed generic stem unresolved when no provider can infer a name", async () => {
+    const generic = await buildSingleFileEntry("essay.txt", Buffer.from("body", "utf-8"));
+    expect(generic!.student).toBe("essay");
+    expect(generic!.studentNameSource).toBe("unresolved");
   });
 
   it("carries the extracted text as content, and a preview in submittedFiles", async () => {

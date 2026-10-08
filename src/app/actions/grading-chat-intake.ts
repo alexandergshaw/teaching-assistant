@@ -139,6 +139,7 @@ export async function prepareChatSubmissionAction(formData: FormData): Promise<I
     ordinal: Number(formData.get("ordinal") ?? "1"),
     file: formData.get("file") as File | null,
     url: ((formData.get("url") as string | null) ?? "").trim(),
+    labelled: (((formData.get("label") as string | null) ?? "").trim().length > 0),
   });
 }
 
@@ -152,6 +153,9 @@ interface PartData {
   readonly ordinal: number;
   readonly file: File | null;
   readonly url: string;
+  /** True when the caller already knows this submission's name (a typed
+   * label, or a composite's single owning student): inference is suppressed. */
+  readonly labelled: boolean;
 }
 
 /** Module-private per-kind resolution shared by prepareChatSubmissionAction
@@ -188,7 +192,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
     try {
       let entries: StudentSubmissionEntry[];
       if (uploadKind === "single") {
-        const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()));
+        const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider, data.labelled);
         if (!entry) {
           return { kind: "refused", reason: "This file could not be read." };
         }
@@ -259,7 +263,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         }
         let entries: StudentSubmissionEntry[];
         if (uploadKind === "single") {
-          const entry = await buildSingleFileEntry(fetched.name, fetched.buffer);
+          const entry = await buildSingleFileEntry(fetched.name, fetched.buffer, provider, data.labelled);
           if (!entry) return { kind: "refused", reason: "This file could not be read." };
           entries = [entry];
         } else {
@@ -315,6 +319,7 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
       ordinal: i + 1,
       file: formData.get(`part.${i}.file`) as File | null,
       url: ((formData.get(`part.${i}.url`) as string | null) ?? "").trim(),
+      labelled: true,
     });
     const got = extractSingleEntry(outcome, partLabel);
     if (!got.ok) return { kind: "refused", reason: got.reason };

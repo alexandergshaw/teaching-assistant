@@ -145,7 +145,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // submission modes; driver override guarded to single-entry submissions so multi-student sources keep their names.
 // 146 -> 147: ZIP-UPLOAD-LAG filed 2026-10-08 (FIX-1 shipped) - a big zip was rejected by the upload size caps
 // before extraction with no client pre-flight (the "clocking"); FIX-1 adds a client size pre-flight + worded error.
-const EXPECTED_ROW_COUNT = 148;
+const EXPECTED_ROW_COUNT = 149;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

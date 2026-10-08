@@ -6,7 +6,7 @@
 // both the Route Handler and the client driver import it and vitest can
 // exercise every decision (no component is rendered there).
 
-import { ITEM_REQUEST_BYTE_BUDGET, estimateEntryWireBytes } from "@/app/components/grading/incrementalRunPlan";
+import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
 
 export interface IngestSkip {
@@ -44,7 +44,7 @@ export function buildIngestLines(
   const skipped: IngestSkip[] = [];
   let emitted = 0;
   for (const entry of entries) {
-    if (estimateEntryWireBytes(entry) > budget) {
+    if (estimateNeededWireBytes(entry) > budget) {
       const skip: IngestSkip = { student: entry.student, reason: OVERSIZED_SKIP_REASON };
       skipped.push(skip);
       lines.push({ type: "skip", ...skip });

@@ -165,3 +165,22 @@ describe("ingestStoragedZip (never throws)", () => {
     expect(outcome.kind).toBe("refused");
   });
 });
+
+describe("buildIngestLines (W2: budget counts only bytes the grader reads)", () => {
+  const withFile = (mimeType: string, size: number): StudentSubmissionEntry => ({
+    student: "S",
+    content: "x",
+    mergedFileCount: 1,
+    submittedFiles: [
+      { name: "f", extension: "f", previewContent: "", previewTruncated: false, mimeType, rawBase64: "z".repeat(size) },
+    ],
+  });
+  it("emits a student over budget ONLY from non-visual base64", () => {
+    const lines = buildIngestLines([withFile("application/zip", 500)], [], 100);
+    expect(lines[0].type).toBe("entry");
+  });
+  it("still skips a student whose VISUAL base64 alone is over budget (RES-VIS-1)", () => {
+    const lines = buildIngestLines([withFile("application/pdf", 500)], [], 100);
+    expect(lines[0].type).toBe("skip");
+  });
+});

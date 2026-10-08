@@ -9,7 +9,7 @@ import { coerceFeedbackWordTarget } from "@/lib/grade/types";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
   ITEM_REQUEST_BYTE_BUDGET,
-  estimateEntryWireBytes,
+  estimateNeededWireBytes,
 } from "@/app/components/grading/incrementalRunPlan";
 
 // A39 wave 4c (docs/a39-waves.md 8.4.3): one student's grading call, moved
@@ -138,7 +138,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
         : undefined,
   };
 
-  if (estimateEntryWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
+  if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
 
   if (typeof body.assignmentInstructions !== "string" || body.assignmentInstructions.length > MAX_INSTRUCTIONS_CHARS) {
     return null;

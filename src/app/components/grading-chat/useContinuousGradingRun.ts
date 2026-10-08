@@ -45,6 +45,7 @@ import {
   mergeArrivedResults,
   buildIncrementalRun,
   classifyItemFailure,
+  stripUnneededRawBase64,
   INCREMENTAL_CONCURRENCY,
   type ArrivedItemResult,
   type GradeRunItemRequestBody,
@@ -147,7 +148,7 @@ async function postGradeRunItem(request: GradeRunItemRequestBody): Promise<Grade
   const res = await fetch("/api/grade-run-item", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify({ ...request, entry: stripUnneededRawBase64(request.entry) }),
   });
   const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string };
   if (!res.ok || !body.result) {
@@ -226,7 +227,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const itemStartedAtMs = chatSeamNowMs();
       dispatchItem(request)
         .then((result) => {
-          recordArrival({ sourceIndex: request.sourceIndex, result });
+          // Restore the FULL submittedFiles (the POST carried the stripped copy)
+          // so the Files-UI download of non-visual files survives.
+          const full = retainedBodiesRef.current.get(request.sourceIndex) ?? request;
+          recordArrival({
+            sourceIndex: request.sourceIndex,
+            result: { ...result, submittedFiles: full.entry.submittedFiles },
+          });
           recordChatSeamSettled({
             operation: "grade_item",
             startedAtMs: itemStartedAtMs,

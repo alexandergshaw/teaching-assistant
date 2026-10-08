@@ -42,6 +42,7 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { generateRubric } from "@/lib/grade/rubric";
 import { prepareChatSubmissionAction, prepareCompositeSubmissionAction, resolveChatRunHeaderAction } from "./grading-chat-intake";
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
+import { ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 
 const mockRequireAppOwner = vi.mocked(requireAppOwner);
 const mockExtractStudentEntries = vi.mocked(extractStudentEntries);
@@ -175,6 +176,21 @@ describe("prepareChatSubmissionAction - file", () => {
     if (outcome.kind === "entries") {
       expect(outcome.entries).toEqual([canvasEntry]);
     }
+  });
+
+  it("budget gate counts only bytes the grader reads: non-visual-heavy passes, visual-heavy is refused", async () => {
+    const heavy = (mimeType: string): StudentSubmissionEntry => ({
+      ...canvasEntry,
+      submittedFiles: [
+        { name: "f", extension: "f", previewContent: "", previewTruncated: false, mimeType, rawBase64: "z".repeat(ITEM_REQUEST_BYTE_BUDGET + 10) },
+      ],
+    });
+    const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
+    mockExtractStudentEntries.mockResolvedValue([heavy("application/zip")]);
+    expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("entries");
+    mockExtractStudentEntries.mockResolvedValue([heavy("application/pdf")]);
+    const refused = await prepareChatSubmissionAction(fileFormData(file));
+    expect(refused).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface." });
   });
 });
 

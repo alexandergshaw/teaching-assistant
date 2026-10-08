@@ -26,7 +26,7 @@ import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import type { GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
-import { estimateEntryWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
+import { estimateNeededWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 import {
   buildTextEntry,
   extractSingleEntry,
@@ -112,7 +112,7 @@ function buildRepoUrlEntry(repo: GradableRepoContent): StudentSubmissionEntry {
  * (do-not-reuse, architecture section 6), so it is a plain refusal. */
 function firstOversizedEntryReason(entries: readonly StudentSubmissionEntry[]): string | null {
   for (const entry of entries) {
-    if (estimateEntryWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) {
+    if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) {
       return "One submission is too large to grade on this surface.";
     }
   }

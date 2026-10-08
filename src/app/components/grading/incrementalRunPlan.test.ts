@@ -8,6 +8,8 @@ import {
   mergeArrivedResults,
   classifyItemFailure,
   estimateEntryWireBytes,
+  estimateNeededWireBytes,
+  stripUnneededRawBase64,
   isTerminal,
   canonicalColumns,
   buildIncrementalRun,
@@ -270,6 +272,60 @@ describe("estimateEntryWireBytes", () => {
       })
     );
     expect(bytes).toBe(5 + 4);
+  });
+});
+
+describe("estimateNeededWireBytes / stripUnneededRawBase64 (W2+W3, one predicate)", () => {
+  const file = (name: string, mimeType: string, rawBase64: string) => ({
+    name, extension: name.split(".").pop() ?? "", previewContent: "", previewTruncated: false, mimeType, rawBase64,
+  });
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const mixed = () =>
+    entry({
+      content: "12345",
+      submittedFiles: [
+        file("a.zip", "application/zip", "z".repeat(1000)),
+        file("b.py", "text/x-python", "p".repeat(500)),
+        file("c.pdf", "application/pdf", "abcd"),
+        file("d.docx", DOCX, "ef"),
+        file("e.png", "image/png", "g"),
+      ],
+    });
+
+  it("does not count non-visual base64 but counts pdf/docx/image base64", () => {
+    expect(estimateNeededWireBytes(mixed())).toBe(5 + 4 + 2 + 1);
+  });
+
+  it("strip keeps visual bytes + content, drops non-visual bytes, never mutates the input", () => {
+    const original = mixed();
+    const stripped = stripUnneededRawBase64(original);
+    expect(stripped.content).toBe("12345");
+    expect(stripped.submittedFiles.map((f) => f.rawBase64)).toEqual([undefined, undefined, "abcd", "ef", "g"]);
+    expect(original.submittedFiles[0].rawBase64).toHaveLength(1000);
+    expect(stripped.submittedFiles).toHaveLength(5);
+  });
+
+  it("keeps and counts a previewTruncated non-visual file (code execution needs its bytes); strips a non-truncated one", () => {
+    const big = { ...file("big.py", "text/x-python", "B".repeat(300)), previewTruncated: true };
+    const small = file("small.py", "text/x-python", "s".repeat(200));
+    const e = entry({ content: "", submittedFiles: [big, small] });
+    expect(estimateNeededWireBytes(e)).toBe(300);
+    expect(stripUnneededRawBase64(e).submittedFiles.map((f) => f.rawBase64)).toEqual(["B".repeat(300), undefined]);
+  });
+
+  it("AC-5: estimateNeededWireBytes(original) equals the stripped POST's estimate", () => {
+    const original = mixed();
+    expect(estimateNeededWireBytes(original)).toBe(estimateEntryWireBytes(stripUnneededRawBase64(original)));
+  });
+
+  it("coupling: an entry that passes the needed-bytes gate has a stripped POST within the budget", () => {
+    const big = entry({
+      content: "x",
+      submittedFiles: [file("s.zip", "application/zip", "z".repeat(ITEM_REQUEST_BYTE_BUDGET + 10))],
+    });
+    expect(estimateEntryWireBytes(big)).toBeGreaterThan(ITEM_REQUEST_BYTE_BUDGET);
+    expect(estimateNeededWireBytes(big)).toBeLessThanOrEqual(ITEM_REQUEST_BYTE_BUDGET);
+    expect(estimateEntryWireBytes(stripUnneededRawBase64(big))).toBeLessThanOrEqual(ITEM_REQUEST_BYTE_BUDGET);
   });
 });
 

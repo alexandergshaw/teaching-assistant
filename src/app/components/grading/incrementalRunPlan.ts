@@ -13,8 +13,9 @@
  * row never moves, it only appears" (a39-architecture.md, RULING 30).
  */
 import type { LlmProvider } from "@/lib/llm";
-import type { GradeHarshness, GradeResult, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeHarshness, GradeResult, SubmittedFileInfo, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
 import { GRADING_FAILURE_PREFIX } from "@/lib/grade/types";
+import { OFFICE_IMAGE_SOURCE_MIME_TYPES, graderNeedsFileBytes } from "@/lib/grade/constants";
 import { UPLOAD_WIRE_BUDGET_BYTES, wireBytesForFile } from "@/lib/upload-budget";
 // A39 incremental-fill W5 (design 6.4): reconcile.ts is a genuinely pure leaf
 // as of W1's import move (./prompts, not ./rubric), so importing it here does
@@ -89,6 +90,52 @@ export function estimateEntryWireBytes(entry: StudentSubmissionEntry): number {
     if (file.rawBase64) total += file.rawBase64.length;
   }
   return total;
+}
+
+/** True when the grader reads this file's bytes (visual types). One predicate drives estimate and strip. */
+export function graderReadsFileBytes(mimeType: string | undefined): boolean {
+  return graderNeedsFileBytes(mimeType) || (mimeType !== undefined && Object.hasOwn(OFFICE_IMAGE_SOURCE_MIME_TYPES, mimeType));
+}
+
+/**
+ * The WIRE bytes the grader actually NEEDS for one entry: text content plus
+ * rawBase64 ONLY for files whose bytes the model reads (graderReadsFileBytes:
+ * graderNeedsFileBytes images/pdf PLUS the docx/pptx office types whose
+ * embedded images inline-visuals extracts - graderNeedsFileBytes alone is
+ * false for docx/pptx). Non-visual base64 is kept only for the Files-UI
+ * download and is stripped from the POST by stripUnneededRawBase64, so this
+ * estimate equals the stripped POST size (one predicate drives both).
+ */
+/**
+ * File-level predicate shared by the estimate AND the strip. A file the
+ * preview truncated (previewTruncated) keeps its bytes even when non-visual:
+ * code execution (engine runSubmittedCode / code-run-selection) decodes
+ * rawBase64 and skips a truncated candidate that has none.
+ */
+function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
+  return graderReadsFileBytes(file.mimeType) || file.previewTruncated;
+}
+
+export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
+  let total = entry.content.length;
+  for (const file of entry.submittedFiles) {
+    if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;
+  }
+  return total;
+}
+
+/** A copy of `entry` with rawBase64 removed from every file the grader does
+ * not need bytes for; visual files keep their bytes. Never mutates `entry`. */
+export function stripUnneededRawBase64(entry: StudentSubmissionEntry): StudentSubmissionEntry {
+  return {
+    ...entry,
+    submittedFiles: entry.submittedFiles.map((file) => {
+      if (!file.rawBase64 || fileNeedsRawBytes(file)) return file;
+      const { rawBase64: _dropped, ...rest } = file;
+      void _dropped;
+      return rest;
+    }),
+  };
 }
 
 /**

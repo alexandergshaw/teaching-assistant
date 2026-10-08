@@ -188,10 +188,9 @@ describe("GradingChatPanel - regrade-after-batch: the chat mount opts in, the ot
     expect(slice).toMatch(/\bonRegrade=\{\s*driver\.regrade\s*\}/);
   });
 
-  it("passes unresolvedStudents={driver.unresolvedStudents} to the results mount and the latest card", () => {
+  it("passes unresolvedStudents={driver.unresolvedStudents} to the results mount", () => {
     const source = withoutLineComments(read(PANEL));
     expect(resultsMountSlice(source)).toMatch(/unresolvedStudents=\{\s*driver\.unresolvedStudents\s*\}/);
-    expect(source).toMatch(/<LatestResultCard[\s\S]{0,300}unresolvedStudents=\{\s*driver\.unresolvedStudents\s*\}/);
   });
 
   it("the non-chat mounts pass no unresolvedStudents", () => {
@@ -415,67 +414,6 @@ describe("ChatComposer - W3 F5: Send stays grouped with the Submission text fiel
   });
 });
 
-// GRADER-WORKFLOW-OVERHAUL M1 (docs/grader-m1-latest-result-card-test-notes.md
-// AC-M2/AC-M3). Source pins: presence, call on the live run, position. The
-// leaf-to-card value flow is closed by the type gate, not by text.
-const CARD = "src/app/components/grading-chat/LatestResultCard.tsx";
-
-describe("GradingChatPanel - M1 AC-M2: the latest-result card is wired through the leaf", () => {
-  it("imports the card and the selector from their own modules", () => {
-    const source = withoutLineComments(read(PANEL));
-    expect(source).toMatch(/import\s*\{[^}]*\bLatestResultCard\b[^}]*\}\s*from\s*"\.\/LatestResultCard"/);
-    expect(source).toMatch(/import\s*\{[^}]*\bselectLatestResult\b[^}]*\}\s*from\s*"\.\/latestGradedResult"/);
-  });
-
-  it("calls selectLatestResult( on driver.run", () => {
-    const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("selectLatestResult(");
-    expect(start, "expected a selectLatestResult( call").toBeGreaterThan(-1);
-    const end = source.indexOf(")", start);
-    expect(source.slice(start, end)).toContain("driver.run");
-  });
-
-  it("mounts the card inside the sticky wrapper, above the composer", () => {
-    const source = withoutLineComments(read(PANEL));
-    const wrapper = source.indexOf("chatStyles.stickyComposer");
-    const card = source.indexOf("<LatestResultCard");
-    const composer = source.indexOf("<ChatComposer");
-    expect(card).toBeGreaterThan(-1);
-    expect(wrapper).toBeGreaterThan(-1);
-    expect(wrapper).toBeLessThan(card);
-    expect(card).toBeLessThan(composer);
-  });
-
-  it("the card mount is fed a JS value, not a literal stub", () => {
-    const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("<LatestResultCard");
-    const end = source.indexOf("/>", start);
-    const slice = source.slice(start, end);
-    expect(slice).toContain("{");
-    expect(slice).not.toMatch(/result=\{\s*(null|undefined|\[\]|\{\})\s*\}/);
-  });
-
-  it("the card is gated on hasRows and a non-null driver.run", () => {
-    const source = withoutLineComments(read(PANEL));
-    const card = source.indexOf("<LatestResultCard");
-    const gate = source.lastIndexOf("hasRows", card);
-    expect(gate).toBeGreaterThan(-1);
-    expect(source.slice(gate, card)).toContain("driver.run");
-  });
-});
-
-describe("LatestResultCard - M1 AC-M3: shows the grade and all three feedback fields", () => {
-  it("references totalScore and maps the three feedback fields", () => {
-    const source = withoutLineComments(read(CARD));
-    expect(source).toContain("totalScore");
-    const mapsConstant =
-      /import\s*\{[^}]*\bFEEDBACK_FIELDS\b[^}]*\}\s*from\s*"\.\.\/grading-results\/gradingResultsHelpers"/.test(source) &&
-      source.includes("FEEDBACK_FIELDS.map(");
-    const namesAll = ["strengths", "improvements", "resubmitNotice"].every((f) => source.includes(f));
-    expect(mapsConstant || namesAll).toBe(true);
-  });
-});
-
 describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas path", () => {
   it("does not read localStorage to seed the setup fields", () => {
     const source = read(PANEL);
@@ -623,25 +561,6 @@ describe("GradingChatPanel - controls #1: clear controls", () => {
     expect(start).toBeGreaterThan(-1);
     expect(source.slice(start, source.indexOf("};", start))).toContain('setText("")');
     expect(source).toContain("onClick={handleClearText}");
-  });
-});
-
-describe("GradingChatPanel - controls #2: copy on the latest-result card", () => {
-  it("the panel threads copiedKey and onCopy into LatestResultCard", () => {
-    const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("<LatestResultCard");
-    const mount = source.slice(start, source.indexOf("/>", start));
-    expect(mount).toMatch(/copiedKey=\{copiedKey\}/);
-    expect(mount).toMatch(/onCopy=\{onCopy\}/);
-  });
-
-  it("the card renders a control that copies the composed feedback under a distinct key", () => {
-    const source = withoutLineComments(read(CARD));
-    expect(source).toMatch(/copyAllFeedbackText/);
-    expect(source).toContain("latest-${result.student}-all-feedback");
-    expect(source).toMatch(/onCopy\(copyKey,\s*copyText\(\)\)/);
-    expect(source).toMatch(/copiedKey\s*===\s*copyKey/);
-    for (const f of ["overallComment", "strengths", "improvements", "resubmitNotice"]) expect(source).toContain(f);
   });
 });
 

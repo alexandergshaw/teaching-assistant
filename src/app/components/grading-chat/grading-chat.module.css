@@ -1,5 +1,5 @@
-/* GRADING-CHAT surface (SMOOTH-GRADER). Applied from GradingChatPanel.tsx,
-   ChatComposer.tsx and LatestResultCard.tsx through the local binding
+/* GRADING-CHAT surface (SMOOTH-GRADER). Applied from GradingChatPanel.tsx
+   and ChatComposer.tsx through the local binding
    `chatStyles`. */
 
 /* Composer pinned to the bottom of the viewport so it stays reachable while the
@@ -103,63 +103,5 @@
   background: var(--surface-subtle);
   font-size: var(--font-size-md);
   color: var(--text-secondary);
-  line-height: var(--line-normal);
-}
-
-/* Read-only latest-result card, rendered inside .stickyComposer above the
-   composer. Capped in height so a long result never pushes the composer off
-   screen; it scrolls inside itself instead. */
-.latestCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  max-height: 30vh;
-  overflow-y: auto;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-soft);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md);
-  background: var(--surface-subtle);
-}
-
-.latestCardHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-4);
-}
-
-.latestCardStudent {
-  font-weight: 700;
-  font-size: var(--font-size-md);
-  color: var(--text-primary);
-}
-
-.latestCardScore {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent-ink);
-  flex-shrink: 0;
-}
-
-.latestCardField {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.latestCardLabel {
-  font-size: var(--font-size-2xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.latestCardText {
-  margin: 0;
-  white-space: pre-wrap;
-  font-size: var(--font-size-md);
-  color: var(--text-primary);
   line-height: var(--line-normal);
 }

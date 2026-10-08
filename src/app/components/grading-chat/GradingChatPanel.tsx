@@ -22,8 +22,6 @@ import GradingResults from "../GradingResults";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import { ChatComposer } from "./ChatComposer";
-import { LatestResultCard } from "./LatestResultCard";
-import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView, describeBulkProgress, type LedgerView } from "./ingestLedger";
 import SegmentedToggle from "../ui/SegmentedToggle";
@@ -537,14 +535,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       <div className={chatStyles.stickyComposer}>
-        {hasRows && driver.run && (
-          <LatestResultCard
-            result={selectLatestResult(driver.run)}
-            copiedKey={copiedKey}
-            onCopy={onCopy}
-            unresolvedStudents={driver.unresolvedStudents}
-          />
-        )}
         {submitError && (
           <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
             {submitError}

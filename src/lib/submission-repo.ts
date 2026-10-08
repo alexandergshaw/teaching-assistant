@@ -37,6 +37,8 @@ export interface ParsedSubmissionRepoUrl {
 }
 
 const GITHUB_HOST = /^(www\.)?github\.com$/i;
+const SAFE_NAME = /^[A-Za-z0-9_.-]+$/;
+const DOT_SEGMENT = /^\.{1,2}$/;
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /**
@@ -78,6 +80,12 @@ export function parseSubmissionGithubUrl(raw: string): ParsedSubmissionRepoUrl |
   const repo = segments[1].replace(/\.git$/i, "");
   if (!owner || !repo) {
     return { error: "The GitHub URL is missing a repository (expected github.com/<owner>/<repo>)." };
+  }
+
+  // Owner and repo are later interpolated unencoded into api.github.com paths,
+  // so a decoded "../x" (from "..%2Fx") must never get through.
+  if (!SAFE_NAME.test(owner) || !SAFE_NAME.test(repo) || DOT_SEGMENT.test(owner) || DOT_SEGMENT.test(repo)) {
+    return { error: "The GitHub URL has an invalid owner or repository name." };
   }
 
   let ref: string | undefined;

@@ -60,6 +60,34 @@ describe("parseSubmissionGithubUrl", () => {
   });
 });
 
+describe("parseSubmissionGithubUrl path-traversal guard", () => {
+  it.each([
+    "https://github.com/..%2Fuser/repos",
+    "https://github.com/%2e%2e/repo",
+    "https://github.com/./repo",
+    "https://github.com/owner/..",
+    "https://github.com/owner/..git",
+    "https://github.com/owner%2Fx/repo",
+  ])("rejects %s", (u) => {
+    expect(parseSubmissionGithubUrl(u)).toHaveProperty("error");
+  });
+
+  it("a literal ../ is normalised away by URL and yields a harmless owner", () => {
+    expect(parseSubmissionGithubUrl("https://github.com/../user/repos")).toMatchObject({ owner: "user", repo: "repos" });
+  });
+
+  it("still accepts owners and repos with dots, dashes and underscores", () => {
+    expect(parseSubmissionGithubUrl("https://github.com/my-org_1/repo.name-2_x")).toMatchObject({
+      owner: "my-org_1",
+      repo: "repo.name-2_x",
+    });
+    expect(parseSubmissionGithubUrl("https://github.com/octocat/Hello-World")).toMatchObject({
+      owner: "octocat",
+      repo: "Hello-World",
+    });
+  });
+});
+
 describe("looksLikeGithubUrl", () => {
   it("is true for a parseable GitHub repo URL", () => {
     expect(looksLikeGithubUrl("https://github.com/octocat/Hello-World")).toBe(true);

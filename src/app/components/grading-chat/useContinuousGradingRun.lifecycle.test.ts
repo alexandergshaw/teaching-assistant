@@ -959,4 +959,40 @@ describe("useContinuousGradingRun - BULK-ZIP BW2: the storaged-zip submit path",
     }
     expect(dispatchItemMock).toHaveBeenCalledTimes(2);
   });
+
+  it("I-ledger-retained: skipped AND failedSupportedFiles are retained after the submit, survive a later submit, and clear on reset", async () => {
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    let call = 0;
+    const ingest: Ingest = async (_path, _provider, onEntry) => {
+      call += 1;
+      onEntry(entryOf(`S${call}`));
+      return {
+        kind: "complete",
+        entryCount: 1,
+        ledger:
+          call === 1
+            ? { studentsFound: 2, studentsEmitted: 1, skipped: [{ student: "Big", reason: "too large" }], failedSupportedFiles: ["x/bad.docx"] }
+            : { studentsFound: 1, studentsEmitted: 1, skipped: [], failedSupportedFiles: [] },
+      };
+    };
+    const driver = await readyZipDriver(ingest);
+    expect(driver.ingestLedger).toBeNull();
+    await driver.submit(zipInput);
+
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- no-render harness: one call is one render
+    let after = useZipDriver(ingest);
+    expect(after.ingestLedger?.skipped).toEqual([{ student: "Big", reason: "too large" }]);
+    expect(after.ingestLedger?.failedSupportedFiles).toEqual(["x/bad.docx"]);
+
+    await after.submit(zipInput);
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- no-render harness: one call is one render
+    after = useZipDriver(ingest);
+    expect(after.ingestLedger?.skipped).toHaveLength(1);
+    expect(after.ingestLedger?.failedSupportedFiles).toEqual(["x/bad.docx"]);
+    expect(after.ingestLedger?.studentsFound).toBe(3);
+
+    after.reset();
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- no-render harness: one call is one render
+    expect(useZipDriver(ingest).ingestLedger).toBeNull();
+  });
 });

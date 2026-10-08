@@ -25,6 +25,7 @@ import { ChatComposer } from "./ChatComposer";
 import { LatestResultCard } from "./LatestResultCard";
 import { selectLatestResult } from "./latestGradedResult";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
+import { buildLedgerView, describeBulkProgress, type LedgerView } from "./ingestLedger";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import {
   coerceFeedbackWordTarget,
@@ -106,6 +107,70 @@ export interface GradingChatPanelProps {
   readonly onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
 }
 
+// BULK-ZIP BW4: the persistent ingest ledger. Session state, not a transient
+// alert: it renders from the retained driver ledger and the graded rows.
+function LedgerNotice({ view }: { view: LedgerView }) {
+  if (!view.hasAny) return null;
+  return (
+    <div className={controls.notice} aria-label="Zip ingest ledger">
+      {view.skipped.length > 0 && (
+        <p className={styles.ghMeta}>
+          {`Skipped (too large): ${view.skipped.map((s) => `${s.student} (${s.reason})`).join("; ")}`}
+        </p>
+      )}
+      {view.linkNotFetched.length > 0 && (
+        <p className={styles.ghMeta}>
+          {`Link could not be fetched (graded on the link note): ${view.linkNotFetched.map((s) => s.student).join(", ")}`}
+        </p>
+      )}
+      {view.failedFiles.length > 0 && (
+        <p className={styles.ghMeta}>{`Files that could not be read: ${view.failedFiles.join(", ")}`}</p>
+      )}
+      {!view.accountedFor && (
+        <p className={styles.ghMeta}>Some students in the zip are not accounted for. Re-upload the zip to check.</p>
+      )}
+    </div>
+  );
+}
+
+// "Still grading" is driven by WORK OUTSTANDING (dispatched but not yet
+// arrived), NOT driver.inFlight (only the active concurrency slots). inFlight
+// drops to 0 in the gap between intake finishing and the first dispatch, and
+// whenever submissions are queued behind the concurrency limit - so keying on it
+// made the indicator vanish while grading was still going. outstanding stays > 0
+// from the moment an entry is queued until its result arrives.
+function GradingProgress(props: {
+  preparing: boolean;
+  zipPhase: "uploading" | "preparing" | null;
+  bulk: boolean;
+  outstanding: number;
+  dispatchedCount: number;
+  completedCount: number;
+}) {
+  const { preparing, zipPhase, bulk, outstanding, dispatchedCount, completedCount } = props;
+  if (!preparing && outstanding <= 0) return null;
+  const counts = { dispatchedCount, completedCount };
+  const bulkUpload = zipPhase !== null ? describeBulkProgress({ phase: zipPhase, ...counts }) : "";
+  const bulkGrading = bulk && outstanding > 0 ? describeBulkProgress({ phase: "grading", ...counts }) : "";
+  return (
+    <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
+      <span className={styles.spinner} aria-hidden="true" />
+      <div>
+        <p className={styles.loadingTitle}>
+          {bulkUpload !== "" ? bulkUpload : preparing && outstanding <= 0 ? "Reading your submission..." : "Grading in progress"}
+        </p>
+        {outstanding > 0 && (
+          <p className={styles.loadingText}>
+            {bulkGrading !== ""
+              ? bulkGrading
+              : `${outstanding} submission${outstanding === 1 ? "" : "s"} still grading (${completedCount} of ${dispatchedCount} done)`}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
@@ -115,6 +180,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
@@ -254,15 +320,21 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // real guarantees.
   const submitStoragedZip = async (file: File): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
-    const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
-    if (!uploaded.ok) return { kind: "refused", reason: uploaded.message };
+    setZipPhase("uploading");
     try {
-      const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
-      if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
-      return outcome;
-    } catch (err) {
-      await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
-      throw err;
+      const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
+      if (!uploaded.ok) return { kind: "refused", reason: uploaded.message };
+      setZipPhase("preparing");
+      try {
+        const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
+        if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+        return outcome;
+      } catch (err) {
+        await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+        throw err;
+      }
+    } finally {
+      setZipPhase(null);
     }
   };
   const handleSubmitFiles = (files: File[], label?: string) => withPreparing(async () => {
@@ -321,6 +393,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const busy = driver.headerState === "resolving";
   const hasRows = driver.run !== null && driver.run.results.length > 0;
+  const ledgerView = buildLedgerView(driver.run?.results ?? [], driver.ingestLedger);
 
   // Whole-view drop target: dropping files anywhere on the grading chat
   // panel (not just the narrow composer strip) submits them for grading.
@@ -477,33 +550,16 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             {submitError}
           </p>
         )}
-        {(() => {
-          // "Still grading" is driven by WORK OUTSTANDING (dispatched but not
-          // yet arrived), NOT driver.inFlight (only the active concurrency
-          // slots). inFlight drops to 0 in the gap between intake finishing and
-          // the first dispatch, and whenever submissions are queued behind the
-          // concurrency limit - so keying on it made the indicator vanish while
-          // grading was still going. outstanding stays > 0 from the moment an
-          // entry is queued (set synchronously, before `preparing` clears)
-          // until its result arrives.
-          const outstanding = driver.dispatchedCount - driver.completedCount;
-          if (!preparing && outstanding <= 0) return null;
-          return (
-            <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
-              <span className={styles.spinner} aria-hidden="true" />
-              <div>
-                <p className={styles.loadingTitle}>
-                  {preparing && outstanding <= 0 ? "Reading your submission..." : "Grading in progress"}
-                </p>
-                {outstanding > 0 && (
-                  <p className={styles.loadingText}>
-                    {`${outstanding} submission${outstanding === 1 ? "" : "s"} still grading (${driver.completedCount} of ${driver.dispatchedCount} done)`}
-                  </p>
-                )}
-              </div>
-            </div>
-          );
-        })()}
+        <LedgerNotice view={ledgerView} />
+        <GradingProgress
+          preparing={preparing}
+          zipPhase={zipPhase}
+          bulk={driver.ingestLedger !== null}
+          outstanding={driver.dispatchedCount - driver.completedCount}
+          dispatchedCount={driver.dispatchedCount}
+          completedCount={driver.completedCount}
+        />
+
         <ChatComposer
           disabled={busy || preparing}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

@@ -39,7 +39,8 @@ import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
-import { ingestStoragedZip, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
+import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
+import { mergeIngestLedgers } from "./ingestLedger";
 import {
   mergeArrivedResults,
   buildIncrementalRun,
@@ -131,6 +132,10 @@ export interface UseContinuousGradingRunResult {
    * inferable from content and who carry no typed label. A labelled row is never
    * in it. Consumed only by the chat grading mount. */
   readonly unresolvedStudents: ReadonlySet<string>;
+  /** BULK-ZIP BW4: the retained ingest ledger (skipped students, unreadable
+   * files, student counts) accumulated across every storaged-zip submit in this
+   * session; null until one completes, cleared by reset(). */
+  readonly ingestLedger: IngestLedger | null;
 }
 
 interface GradeRunItemResponse {
@@ -179,6 +184,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [inFlight, setInFlight] = useState(0);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [unresolvedStudents, setUnresolvedStudents] = useState<ReadonlySet<string>>(new Set());
+  const [ingestLedger, setIngestLedger] = useState<IngestLedger | null>(null);
 
   const rebuildRun = () => {
     const header = headerRef.current;
@@ -308,6 +314,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: "The session was reset while the zip was being prepared. Nothing was graded." };
       }
       ingestSkipped = ingest.ledger.skipped;
+      // Retained structurally (skipped AND unreadable files) so it outlives this
+      // submit's transient outcome string.
+      const completedLedger = ingest.ledger;
+      setIngestLedger((prev) => mergeIngestLedgers(prev, completedLedger));
       if (collected.length === 0 && ingestSkipped.length === 0) {
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
@@ -513,6 +523,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setInFlight(0);
     setSessionError(null);
     setUnresolvedStudents(new Set());
+    setIngestLedger(null);
   };
 
   return {
@@ -535,5 +546,6 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     inFlight,
     sessionError,
     unresolvedStudents,
+    ingestLedger,
   };
 }

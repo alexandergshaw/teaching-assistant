@@ -36,6 +36,7 @@ import {
 import { buildTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
 import type { GradeHarshness, GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
+import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import {
@@ -207,11 +208,22 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       inFlightRef.current += 1;
       setInFlight(inFlightRef.current);
 
+      const itemStartedAtMs = chatSeamNowMs();
       dispatchItem(request)
         .then((result) => {
           recordArrival({ sourceIndex: request.sourceIndex, result });
+          recordChatSeamSettled({
+            operation: "grade_item",
+            startedAtMs: itemStartedAtMs,
+            failureClass: result.ungraded ? "grade failed" : null,
+          });
         })
         .catch((err) => {
+          recordChatSeamSettled({
+            operation: "grade_item",
+            startedAtMs: itemStartedAtMs,
+            failureClass: classifyChatSeamFailure(err) === "timed out" ? "timed out" : "grade failed",
+          });
           recordArrival({
             sourceIndex: request.sourceIndex,
             result: classifyItemFailure(request.sourceIndex, request.entry, err),
@@ -235,7 +247,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (headerRef.current) return { kind: "ready" as const };
 
     setHeaderState("resolving");
+    const headerStartedAtMs = chatSeamNowMs();
     const header = await resolveChatRunHeaderAction(sessionParams.assignmentInstructions, sessionParams.rubric, provider);
+    recordChatSeamSettled({
+      operation: "resolve_header",
+      startedAtMs: headerStartedAtMs,
+      failureClass: header.kind === "refused" ? classifyChatSeamFailure(header.error) : null,
+    });
     if (header.kind === "refused") {
       setHeaderState("refused");
       setSessionError(header.error);
@@ -312,10 +330,22 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
       }
       formData.set("provider", provider);
-      const outcome =
-        input.kind === "composite"
-          ? await prepareCompositeSubmissionAction(formData)
-          : await prepareChatSubmissionAction(formData);
+      const prepareStartedAtMs = chatSeamNowMs();
+      let outcome: Awaited<ReturnType<typeof prepareChatSubmissionAction>>;
+      try {
+        outcome =
+          input.kind === "composite"
+            ? await prepareCompositeSubmissionAction(formData)
+            : await prepareChatSubmissionAction(formData);
+      } catch (err) {
+        recordChatSeamSettled({ operation: "prepare_submission", startedAtMs: prepareStartedAtMs, failureClass: "interrupted" });
+        throw err;
+      }
+      recordChatSeamSettled({
+        operation: "prepare_submission",
+        startedAtMs: prepareStartedAtMs,
+        failureClass: outcome.kind === "refused" ? classifyChatSeamFailure(outcome.reason) : null,
+      });
       if (outcome.kind === "refused") {
         return { kind: "refused", reason: outcome.reason };
       }

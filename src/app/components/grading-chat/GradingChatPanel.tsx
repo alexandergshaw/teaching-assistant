@@ -37,6 +37,7 @@ import { submitFilesSequentially } from "./chatFileBatch";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
+import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
@@ -198,7 +199,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
     let canvasMeta: { instructions: string; rubric: string } | null = null;
     if (canvasUrl && scope && needsFill) {
+      const metaStartedAtMs = chatSeamNowMs();
       const meta = await fetchCanvasMetaAction(canvasUrl.trim());
+      recordChatSeamSettled({
+        operation: "fetch_canvas_meta",
+        startedAtMs: metaStartedAtMs,
+        failureClass: "error" in meta ? classifyChatSeamFailure(meta.error) : null,
+      });
       if (!("error" in meta)) canvasMeta = { instructions: meta.description, rubric: meta.rubricText };
     }
     const loaded = scope && needsFill ? loadChatSetupMemory(scope) : null;

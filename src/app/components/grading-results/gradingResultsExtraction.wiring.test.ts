@@ -99,14 +99,24 @@ describe("GradingResults.tsx renders FilesCell, which renders EyeIcon/DownloadIc
 /** True when `source` imports useResultsSort, calls it, and the RESULT
  * (`sortedResults`) is what actually drives the results-table row map - not
  * `run.results.map(` directly, which would silently ignore the hook's sort
- * order while still compiling and still passing every OTHER check here. */
+ * order while still compiling and still passing every OTHER check here.
+ *
+ * The chat grading table's search (CHAT-GRADING-TABLE-SEARCH) added a
+ * `visibleResults` intermediary the <tbody> maps instead of sortedResults
+ * directly: `visibleResults = searchable ? filterGradeRowsForTable(sortedResults, …) : sortedResults`.
+ * That is still driven by the hook's sortedResults (never run.results), so the
+ * canary accepts a `visibleResults.map(` ONLY when `visibleResults` is assigned
+ * from `sortedResults`; mapping `run.results` directly still fails. */
 function tableRowsAreDrivenBySortedResults(source: string): boolean {
   const importsHook = /import\s*\{[^}]*\buseResultsSort\b[^}]*\}\s*from\s*["']\.\/grading-results\/useResultsSort["']/.test(
     source
   );
   const callsHook = /=\s*useResultsSort\(run\)/.test(source);
-  const mapsSortedResults = /\bsortedResults\.map\(/.test(source);
-  return importsHook && callsHook && mapsSortedResults;
+  const mapsSortedDirectly = /\bsortedResults\.map\(/.test(source);
+  const mapsVisibleFromSorted =
+    /\bvisibleResults\.map\(/.test(source) && /\bvisibleResults\s*=\s*[^;]*\bsortedResults\b/.test(source);
+  const mapsRunResultsDirectly = /\brun\.results\.map\(/.test(source);
+  return importsHook && callsHook && (mapsSortedDirectly || mapsVisibleFromSorted) && !mapsRunResultsDirectly;
 }
 
 describe("tableRowsAreDrivenBySortedResults (canary)", () => {

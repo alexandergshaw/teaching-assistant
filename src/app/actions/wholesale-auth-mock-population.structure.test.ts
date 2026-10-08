@@ -230,6 +230,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "snapshot-parse-rubric.test.ts",
   "submission-repo.test.ts",
   "syllabus-templates.test.ts",
+  "syllabus-upload.grading-bind.test.ts",
   "syllabus-upload.preserves-columns.test.ts",
   "syllabus-upload.rubric-reuse.test.ts",
   "textbook-research.upload-budget.test.ts",

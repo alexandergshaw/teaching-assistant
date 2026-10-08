@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { assertContainerWithinCaps, createZipBudget, readOfficeMember, type ZipBudget } from "@/lib/zip-caps";
 
 /**
  * In-place paragraph-level editing of Office Open XML files (.docx / .pptx).
@@ -338,6 +339,23 @@ function rebuildPptxParagraph(paraXml: string, spans: RunSpan[]): string {
   return `${open}${pPr}${runs}${endPr}</a:p>`;
 }
 
+/**
+ * Load an Office container and run the declared-size pre-flight over EVERY
+ * member BEFORE anything is decompressed (the BW0 openContainer pattern in
+ * office-extract.ts). A breach throws a "Refused: "-prefixed ZipCapError, so an
+ * uploaded decompression bomb is refused instead of exhausting memory.
+ */
+async function openOfficeZip(buffer: Buffer): Promise<JSZip> {
+  const zip = await JSZip.loadAsync(buffer);
+  assertContainerWithinCaps(zip, "office-file");
+  return zip;
+}
+
+/** Read one XML member as text through the bounded reader (fail-closed). */
+async function readXmlMember(entry: JSZip.JSZipObject, budget: ZipBudget): Promise<string> {
+  return (await readOfficeMember(entry, entry.name, budget)).toString("utf-8");
+}
+
 function sortedSlides(zip: JSZip) {
   return Object.values(zip.files)
     .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
@@ -346,12 +364,13 @@ function sortedSlides(zip: JSZip) {
 
 /** Parse a file's editable paragraphs (those that contain text). */
 export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): Promise<OfficeParagraph[]> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
 
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
     if (!file) return [];
-    const xml = await file.async("string");
+    const xml = await readXmlMember(file, budget);
     const out: OfficeParagraph[] = [];
     let i = 0;
     for (const match of xml.matchAll(DOCX_PARA)) {
@@ -369,7 +388,7 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
   const slides = sortedSlides(zip);
   const out: OfficeParagraph[] = [];
   for (let s = 0; s < slides.length; s += 1) {
-    const xml = await slides[s].async("string");
+    const xml = await readXmlMember(slides[s], budget);
     let p = 0;
     for (const match of xml.matchAll(PPTX_PARA)) {
       const text = paragraphText(match[0], PPTX_RUN);
@@ -425,11 +444,12 @@ export async function applyOfficeSections(
       .join("");
   };
 
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
     if (!file) return buffer;
-    let xml = await file.async("string");
+    let xml = await readXmlMember(file, budget);
     let i = -1;
     xml = xml.replace(DOCX_PARA, (para) => {
       i += 1;
@@ -440,7 +460,7 @@ export async function applyOfficeSections(
     const slides = sortedSlides(zip);
     for (let s = 0; s < slides.length; s += 1) {
       const file = slides[s];
-      let xml = await file.async("string");
+      let xml = await readXmlMember(file, budget);
       let p = -1;
       let touched = false;
       xml = xml.replace(PPTX_PARA, (para) => {
@@ -462,7 +482,7 @@ export async function applyOfficeSections(
  * one file into another.
  */
 export async function appendDocxParagraph(buffer: Buffer, spans: RunSpan[], style: string): Promise<Buffer> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
   const file = zip.file("word/document.xml");
   if (!file) return buffer;
   let xml = await file.async("string");
@@ -507,7 +527,7 @@ const withDescr = (attrs: string, alt: string): string => {
 
 /** List the images (with alt text) in a docx/pptx file. */
 export async function extractOfficeImages(kind: OfficeKind, buffer: Buffer): Promise<OfficeImage[]> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
   const images: OfficeImage[] = [];
 
   if (kind === "docx") {
@@ -566,7 +586,7 @@ export async function extractOfficeImageData(
   buffer: Buffer,
   id: string
 ): Promise<{ mimeType: string; base64: string } | null> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
 
   const readImage = async (path: string) => {
     const file = zip.file(path);
@@ -624,7 +644,7 @@ export async function setOfficeImageAlt(
   buffer: Buffer,
   edits: Record<string, string>
 ): Promise<Buffer> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
 
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
@@ -660,7 +680,7 @@ export async function setOfficeImageAlt(
 
 /** Read a docx's document title from its core properties (docProps/core.xml). */
 export async function extractDocxTitle(buffer: Buffer): Promise<string> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
   const core = await zip.file("docProps/core.xml")?.async("string");
   if (!core) return "";
   return decodeXmlEntities(core.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1]?.trim() ?? "");
@@ -677,7 +697,7 @@ const CORE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relation
  * entirely it is created and registered in [Content_Types].xml and _rels/.rels.
  */
 export async function setDocxTitle(buffer: Buffer, title: string): Promise<Buffer> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await openOfficeZip(buffer);
   const esc = escapeXml(title);
   const core = await zip.file(CORE_PROPS)?.async("string");
 

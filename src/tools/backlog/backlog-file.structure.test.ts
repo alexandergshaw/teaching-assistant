@@ -143,7 +143,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // grading feedback length; W1 is the byte-identical prompt seam (8th param), W2 the numeric panel control.
 // 145 -> 146: SUBMISSION-LABELS filed 2026-10-08 (shipped) - the optional label field extended to file + url
 // submission modes; driver override guarded to single-entry submissions so multi-student sources keep their names.
-const EXPECTED_ROW_COUNT = 146;
+// 146 -> 147: ZIP-UPLOAD-LAG filed 2026-10-08 (FIX-1 shipped) - a big zip was rejected by the upload size caps
+// before extraction with no client pre-flight (the "clocking"); FIX-1 adds a client size pre-flight + worded error.
+const EXPECTED_ROW_COUNT = 147;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

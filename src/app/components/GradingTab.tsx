@@ -13,7 +13,9 @@ import GeneratedRubricCard from "./grading-results/GeneratedRubricCard";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
+import { STUDENT_SUBMISSIONS_ACCEPT } from "./grading/studentSubmissionsAccept";
 import { submitOnEnter } from "./ui/submitOnEnter";
+import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
 import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
 import GithubGradingPanel from "./GithubGradingPanel";
@@ -38,25 +40,6 @@ import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
 
 type GradingMode = "zip" | "canvas" | "livefeed" | "github";
-
-// A39 wave 1 ("one submission needs no zip"): every extension
-// classifyGradingUpload (src/lib/grade/single-file-entry.ts) treats as
-// "single" - i.e. every non-zip type the server can grade directly without
-// an archive. Kept in sync with TEXT_EXTENSIONS/DOCUMENT_EXTENSIONS/
-// IMAGE_EXTENSIONS (src/lib/office-extract.ts, src/lib/grade/constants.ts)
-// by hand: this is a client component and cannot import those server-only
-// modules (JSZip, officeparser) directly.
-const SINGLE_SUBMISSION_EXTENSIONS = [
-  ".txt", ".md", ".markdown", ".py", ".js", ".ts", ".tsx", ".jsx", ".java",
-  ".c", ".cpp", ".cs", ".html", ".htm", ".css", ".json", ".xml", ".rb",
-  ".go", ".rs", ".csv", ".tsv", ".dat", ".in", ".ipynb", ".yml", ".yaml",
-  ".sql", ".sh", ".bash", ".zsh", ".php", ".swift", ".kt", ".kts", ".scala",
-  ".r", ".m", ".tex",
-  ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".odt", ".odp", ".ods",
-  ".pdf", ".rtf",
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif",
-];
-const STUDENT_SUBMISSIONS_ACCEPT = [".zip", "application/zip", ...SINGLE_SUBMISSION_EXTENSIONS].join(",");
 
 // A39 wave 2: path A's own ta- key for rubric-memory.ts, scoped per
 // uploaded file name ("upload:<name>") - never a single global slot. DECISION
@@ -127,6 +110,7 @@ export default function GradingTab({
   // The chosen upload's name - the save side of the "upload:<name>" scope
   // key the restore handler below uses.
   const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadRejection, setUploadRejection] = useState<string | null>(null);
 
   const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
 
@@ -255,6 +239,20 @@ export default function GradingTab({
   // restored until a file is chosen, scoped to that file's own name; an
   // edited field is left alone rather than overwritten.
   const handleUploadFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    // FIX-1 size pre-flight (CURRENT-transport guard: the file rides the Server
+    // Action body). The bulk-zip Storage path will make this input
+    // transport-aware: relax or branch on this one call, nothing depends on it.
+    const chosen = e.target.files?.[0];
+    if (chosen) {
+      const preflight = preflightUploadFile(chosen, "The student submissions file");
+      if (!preflight.ok) {
+        e.target.value = "";
+        setUploadFileName("");
+        setUploadRejection(preflight.message);
+        return;
+      }
+    }
+    setUploadRejection(null);
     const name = e.target.files?.[0]?.name ?? "";
     setUploadFileName(name);
     if (!name) return;
@@ -308,9 +306,9 @@ export default function GradingTab({
         </div>
       )}
 
-      {(state.error || incrementalError) && (
+      {(uploadRejection || state.error || incrementalError) && (
         <p role="alert" className={styles.error}>
-          {state.error || incrementalError}
+          {uploadRejection || state.error || incrementalError}
         </p>
       )}
 

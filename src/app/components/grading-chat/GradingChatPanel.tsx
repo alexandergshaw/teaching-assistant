@@ -37,6 +37,7 @@ import { submitFilesSequentially } from "./chatFileBatch";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
 import type { PreviewFile } from "../FilePreviewModal";
+import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -244,6 +245,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     // The session is begun once for the whole batch, not once per file.
     let began = false;
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
+      // FIX-1 size pre-flight: an oversized file is refused here, with a
+      // worded reason, before the session starts or any bytes are uploaded.
+      const preflight = preflightUploadFile(file, "This file");
+      if (!preflight.ok) return { kind: "refused", reason: preflight.message };
       if (!began) {
         if (!(await ensureSession())) {
           return { kind: "refused", reason: sessionRefusalRef.current };

@@ -23,8 +23,9 @@ Where any criterion below and this sentence diverge, the sentence wins.
 
 ## The owner decisions this document codifies (do not reopen)
 
-Both from `docs/owner-decisions-2026-09-23.md` and the A29 row note
-(`docs/backlog.yml:581`); DECISIONS, not rulings, so applying them is
+From `docs/owner-decisions-2026-09-23.md`, the A29 row note
+(`docs/backlog.yml:581`), and the round-2 rulings (`docs/a29-rulings-round2.md`)
+that DECISION 1 carries; DECISIONS, not rulings, so applying them is
 transcription, not a new round (`docs/loop/iteration-caps.md` cap 2).
 
 1. **The channel is the Canvas conversation, and that IS Canvas's emailer**
@@ -35,15 +36,36 @@ transcription, not a new round (`docs/loop/iteration-caps.md` cap 2).
    by the app** - which removes the address-source question entirely.
 2. **OC9 (owner, 2026-09-23, verbatim): "no courses should exceed 100."** A
    single POST to `/api/v1/conversations` with `recipients[]=course_<id>` and
-   `group_conversation` at its default of `false` creates INDIVIDUAL PRIVATE
-   conversations with each recipient - one request, no roster exposed, no
-   reply-all. Under 100 that is the whole send. So there is NO per-student pump,
-   NO durable attempt ledger, NO CAS, NO stale sweep, NO resume machinery, and NO
-   per-student receipt.
-3. **The named-refusal decision (owner, 2026-09-23).** Rather than measure
-   single-recipient Canvas behaviour first, above 100 recipients the feature
-   REFUSES with a counted, named reason - it does not fan out per student and
-   does not flip to `bulk_message` / `group_conversation`.
+   `group_conversation` at its default of `false` is the EMITTED SHAPE the code
+   holds - one `course_<id>` recipient token, no `group_conversation`, no
+   `force_new` - so the app exposes no roster and opens no reply-all thread. That
+   one POST is INTENDED to become individual private conversations, one per
+   recipient, but the N-conversations expansion is Canvas's behaviour, is
+   UNCONFIRMED here (network-blocked, no key: R-7 / OC11), and is FALSE at N=1
+   (DECISION 1, item 4). So the design holds the emitted shape; it does NOT assert
+   the per-recipient-conversation OUTCOME as code-held or unconditional. Under 100
+   that one POST is the whole send. So there is NO per-student pump, NO durable
+   attempt ledger, NO CAS, NO stale sweep, NO resume machinery, and NO per-student
+   receipt.
+3. **The over-100 named refusal (OC9, owner, 2026-09-23).** Above 100 recipients
+   the feature REFUSES with a counted, named reason - it does not fan out per
+   student and does not flip to `bulk_message` / `group_conversation`. This is the
+   HIGH-bound refusal; it is DISTINCT from the N=1 LOW-bound refusal in item 4,
+   and both are kept.
+4. **DECISION 1 - the one-student (N=1) named refusal (owner, 2026-09-23;
+   `docs/owner-decisions-2026-09-23.md:12-39`, carrying RULING 17,
+   `docs/a29-rulings-round2.md:24-50`).** The owner was asked whether to measure
+   single-recipient Canvas behaviour first (one authenticated `curl`) or to design
+   a refusal and ship without knowing, and chose: design the refusal, ship without
+   the measurement. At N=1, with `group_conversation` ABSENT and `force_new`
+   ABSENT, Canvas's `batch_private_messages` is false and control reaches
+   `initiate_conversation`, which REUSES an existing thread and IGNORES THE SUBJECT
+   - a defect no instrument here can see, because every instrument asserts on what
+   was EMITTED and this lives in what Canvas DID. So an N=1 course REFUSES with a
+   named, counted reason and sends nothing; it does not attempt a send whose
+   outcome it cannot predict. Per DECISION 1's visible-assumption rule, the
+   unconfirmed N-conversations expansion (OC11) is NOT read as confirmed anywhere
+   the design depends on it.
 
 ## Environment ceilings that bind every criterion
 
@@ -83,24 +105,31 @@ Measured facts, not assumptions (`docs/loop/this-repo.md`; commands in
 **Trigger fired: feature work**, so a claim is owed. A29 earns the GUARANTEED
 class (`docs/loop/leverage.md:44`). The delivery channel itself is INHERITED, not
 earned - `createConversation` already exists and any action can reach Canvas. What
-A29 EARNS is a code-held safety shape the shipped builder actively lacks: the send
-is constructed so that ONE request notifies the whole class as INDIVIDUAL PRIVATE
-conversations (`recipients[]=course_<id>`, `group_conversation` not `true`, and -
-critically - **no `force_new`**, which the shipped builder appends
-unconditionally, `inbox.ts:406`), and ABOVE 100 recipients it REFUSES by a
-counted, named reason rather than silently creating a reply-all group thread.
-Those are properties the code holds regardless of what any model returns or what
-the instructor types. In a plain LLM chat the human is the transport: the chat can
-draft the text, but it cannot send to a Canvas course at all, cannot guarantee
-each student gets a private thread, and has no structural cap that turns an
-oversized class into a named refusal instead of a roster-exposing accident. The
-class call (accept the earned safety shape as the leverage, redesign for more, or
-reject) is the human's to confirm, not this seat's to finalize.
+A29 EARNS is a code-held safety SHAPE the shipped builder actively lacks: the send
+is constructed so that ONE request carries the whole class as a single
+`course_<id>` recipient with `group_conversation` not `true` and - critically -
+**no `force_new`** (which the shipped builder appends unconditionally,
+`inbox.ts:406`); and it REFUSES by a counted, named reason at BOTH bounds - above
+100 recipients (OC9) and at N=1 (DECISION 1) - rather than silently creating a
+reply-all group thread or appending to an unrelated thread under a subject nobody
+chose. That emitted shape is INTENDED to become individual private conversations,
+one per recipient, but that N-conversations expansion is Canvas's behaviour, is
+UNCONFIRMED here (network-blocked, no key: R-7 / OC11) and is FALSE at N=1 - so the
+earned property is the EMITTED SHAPE and the two-bound refusal, which the code
+holds regardless of what any model returns or what the instructor types, NOT a
+guaranteed per-recipient-conversation outcome. In a plain LLM chat the human is the
+transport: the chat can draft the text, but it cannot send to a Canvas course at
+all, cannot emit a send shaped to keep each student's thread private, and has no
+structural cap that turns an oversized OR a one-student class into a named refusal
+instead of a roster-exposing or thread-reusing accident. The class call (accept the
+earned safety shape as the leverage, redesign for more, or reject) is the human's to
+confirm, not this seat's to finalize.
 
 - **LEV-1 (removal test, owned by the test seat).**
   - Object under comparison: the request the A29 send builder emits for a course,
-    versus that request with its individual-private-conversation construction
-    removed.
+    versus that request with its individual-private-conversation EMITTED-SHAPE
+    construction removed (the emitted shape, NOT Canvas's unconfirmed delivery
+    outcome - R-7 / OC11, FALSE at N=1).
   - Instrument: a pure unit test with `canvasFetch` mocked to capture the emitted
     URL + body; assert the emitted `recipients[]` is EXACTLY ONE value matching
     the course form (`^course_\d+$`), that no `group_conversation=true` (or `=1`)
@@ -126,7 +155,8 @@ against a Canvas sandbox.
 - Owner's words: "sends out a bulk email to the students"; OC9: one POST to
   `recipients[]=course_<id>`.
 - Object: the single request the A29 send builder emits for a course whose
-  recipient count is at or under the cap.
+  recipient count is in the PERMITTED band ([2..100]) - the refusal bounds (N=1,
+  AC-3; N>100, AC-2) emit no request.
 - Instrument: [MACHINE] a request-builder unit test with `canvasFetch` mocked to
   capture the emitted request; assert exactly ONE POST to `/api/v1/conversations`
   carrying exactly ONE `recipients[]` value, that value matching the course form
@@ -145,33 +175,77 @@ against a Canvas sandbox.
   emitted payload, not the function count.
 
 ### AC-2 - above 100 recipients, a NAMED, COUNTED refusal - no fan-out [MACHINE + OWNER]
-- Owner's words / OC9 + the named-refusal decision: "no courses should exceed
-  100"; above 100, refuse with a counted, named reason.
+- Owner's words / OC9 (the over-100 cap): "no courses should exceed 100"; above
+  100, refuse with a counted, named reason. This is the HIGH-bound refusal; the
+  LOW-bound N=1 refusal is AC-3, and both are produced by the one boundary
+  predicate.
 - Object: a pure predicate over the recipient COUNT that decides send-vs-refuse,
   and the refusal value it produces.
 - Instrument: [MACHINE] a boundary test on the predicate with the count source
   mocked: at count 100 it PERMITS the send; at count 101 it REFUSES; the refusal
   carries the actual count and a named reason (not a bare boolean, not a silent
-  no-op). Because the count source in this tree is the LENGTH of the live roster
-  read (there is no Canvas course-count endpoint - see Measurements), the test
-  supplies that length via a mocked `canvasGet` roster page (or the count
-  directly, architect's seam). [OWNER] a sandbox course over 100 shows the named
-  refusal and sends nothing.
+  no-op). The PERMIT band is [2..100] - the N=1 end is refused by AC-3, so this
+  predicate does not permit a one-student course. Because the count source in this
+  tree is the LENGTH of the live roster read (there is no Canvas course-count
+  endpoint - see Measurements), the test supplies that length via a mocked
+  `canvasGet` roster page (or the count directly, architect's seam). [OWNER] a
+  sandbox course over 100 shows the named refusal and sends nothing.
 - Direction of failure: FAILS if a count > 100 produces any outbound send; FAILS
   if the over-100 path flips to `bulk_message` or `group_conversation=true`
   instead of refusing; FAILS if the refusal omits the count or the reason; FAILS
   if 100 exactly is refused (off-by-one the wrong way). The direction that must
-  not be rewarded: a refusal that silently drops to a partial send.
+  not be rewarded: a refusal that silently drops to a partial send. (The N=1 end
+  of the predicate is AC-3's direction, not restated here.)
 - Reconciliation of the count source: 100 is far under the ~2000 pagination cap,
   so one roster page settles it; but the count is only as trustworthy as the
-  roster read. Whether an incomplete/failed roster read blocks the send is AC-4's
+  roster read. Whether an incomplete/failed roster read blocks the send is AC-5's
   territory, not this predicate's. The count SOURCE (roster-read length, no
   endpoint) is a measured tree fact routed to the architect - see residual R-1;
   it is NOT an owner fork (the tree forces it).
 
-### AC-3 - NO roster exposure, NO reply-all: individual private conversations by construction [MACHINE]
-- Owner intent + OC9: `group_conversation` default `false` is what makes the send
-  individual private conversations.
+### AC-3 - a one-student (N=1) course REFUSES with a named, counted reason [MACHINE + OWNER]
+- Owner's words / DECISION 1 (`docs/owner-decisions-2026-09-23.md:12-39`, carrying
+  RULING 17, `docs/a29-rulings-round2.md:24-50`): design a named refusal for
+  one-student courses and ship without the measurement. At N=1, omitting
+  `group_conversation` and `force_new` makes Canvas's `batch_private_messages`
+  false, so control reaches `initiate_conversation`, which REUSES an existing
+  thread and IGNORES THE SUBJECT - the individual-private-conversation outcome is
+  FALSE at N=1, and no emitted-request instrument can see it (the defect lives in
+  what Canvas DID, not what the app EMITTED).
+- Object: the same send-vs-refuse boundary predicate as AC-2, at its LOW bound -
+  the decision it makes at a recipient count of 1, and the refusal value it
+  produces there.
+- Instrument: [MACHINE] a boundary test on the predicate with the count source
+  mocked: at count 1 it REFUSES; at count 2 it PERMITS; at a count in [2..100] it
+  PERMITS; at a count > 100 it REFUSES (the AC-2 end). The N=1 refusal is a REAL
+  refusal - it carries the actual count (1) and a named reason DISTINCT from the
+  over-100 reason, makes NO outbound POST, and leaves nothing persisted (OC9
+  removed the durable ledger, so there is no half-done state to leave; the refusal
+  precedes any side effect). The count source is the roster-read length (R-1),
+  supplied via a mocked `canvasGet` roster page or the count directly (architect's
+  seam). [OWNER] a real one-student sandbox course shows the named refusal and
+  sends nothing (OV-2).
+- Direction of failure: FAILS if an N=1 course produces ANY outbound send; FAILS
+  if N=1 is PERMITTED (treated like a count in [2..100]); FAILS if the N=1 refusal
+  omits the count or is indistinguishable from the over-100 reason (a reader must
+  be able to tell WHICH bound was hit); FAILS if any side effect precedes the
+  refusal. The direction that must not be rewarded: an N=1 course that silently
+  sends and appends to an unrelated thread under a subject nobody chose.
+- Note: this is NET-NEW from DECISION 1 - the prior version (`docs/a29-ac.md`) had
+  no N=1 concept, so it carries no prior-id row in the disposition table. A
+  one-student course is not exotic (RULING 17, `docs/a29-rulings-round2.md:47-50`):
+  an independent study or a late-add / near-empty section reaches N=1. Under the
+  OC9 `course_<id>` form the app does not enumerate or exclude recipients (K3 /
+  E2), so the count the predicate reads is simply the course's active-student
+  count.
+
+### AC-4 - NO roster exposure, NO reply-all: the individual-private-conversation EMITTED SHAPE by construction [MACHINE]
+- Owner intent + OC9: emitting `recipients[]=course_<id>` with `group_conversation`
+  at its default of `false` and no `force_new` is the EMITTED SHAPE that keeps the
+  send from exposing a roster or opening a reply-all thread. The
+  per-recipient-private-conversation OUTCOME this shape is intended to produce is
+  Canvas's behaviour, is UNCONFIRMED here (R-7 / OC11), and is FALSE at N=1 (AC-3)
+  - so this criterion binds the emitted PARAMETERS, NOT the delivered outcome.
 - Object: the parameters the send builder emits, specifically the two that would
   turn a course send into a group/reply-all thread.
 - Instrument: [MACHINE] a builder unit test (same mocked-`canvasFetch` capture as
@@ -184,11 +258,11 @@ against a Canvas sandbox.
   own to make a multi-recipient batch a GROUP batch, Ruling 30 - so reusing the
   shipped builder AS-IS for a course audience is the exact defect this criterion
   catches).
-- Note: AC-3 and LEV-1 overlap deliberately. AC-3 is the standing pin on the two
+- Note: AC-4 and LEV-1 overlap deliberately. AC-4 is the standing pin on the two
   dangerous parameters; LEV-1 is the removal test the test seat owns. Both must
   hold; neither replaces the other.
 
-### AC-4 - not offered without a LIVE LMS connection; a failed read sends nothing [MACHINE + READING]
+### AC-5 - not offered without a LIVE LMS connection; a failed read sends nothing [MACHINE + READING]
 - Owner's words: "for courses that have a live lms connection".
 - Object: the course's `Course` row at the send entry point, and the send path
   when the live roster read fails.
@@ -208,7 +282,7 @@ against a Canvas sandbox.
   is proven at send time by the roster read - needed anyway for AC-2's count -
   succeeding. The architect owns where the gate sits.
 
-### AC-5 - the send goes through the app's Canvas path only; no external egress, no model call [MACHINE]
+### AC-6 - the send goes through the app's Canvas path only; no external egress, no model call [MACHINE]
 - Owner: "canvas built in emailer" + standing rule `in-house-ai-only.md`.
 - Object: the outbound requests the send path actually makes.
 - Instrument: [MACHINE] measure the REQUESTS the send makes, not import edges
@@ -227,7 +301,7 @@ against a Canvas sandbox.
   (Measurements), so this is a pin against a future regression, not a
   description.
 
-### AC-6 - one request, one outcome: report "Canvas accepted", never "delivered" [MACHINE + READING]
+### AC-7 - one request, one outcome: report "Canvas accepted", never "delivered" [MACHINE + READING]
 - OC9 honest limit: one request means one outcome for the whole class, no
   per-student receipt; whether an email actually goes out depends on each
   student's Canvas notification preferences, which the app cannot see.
@@ -243,7 +317,7 @@ against a Canvas sandbox.
   field; FAILS if any state name or copy asserts a student received or was
   emailed the message; FAILS if an ambiguous failure is recorded as `refused`.
 
-### AC-7 - a confirm shows course, count and message before the irreversible send [READING + OWNER]
+### AC-8 - a confirm shows course, count and message before the irreversible send [READING + OWNER]
 - OC9 survivor: "the confirm step showing course, count and the message"; a
   mistaken whole-class send cannot be recalled.
 - Object: what the instructor sees before the send fires.
@@ -260,7 +334,7 @@ against a Canvas sandbox.
   residual (R-2), owned by the architect and an owner browser check - not a
   durable ledger.
 
-### AC-8 - a drafted body leaves as plain text, not literal Markdown [MACHINE]
+### AC-9 - a drafted body leaves as plain text, not literal Markdown [MACHINE]
 - Row fact (`backlog.yml:581`): the A21 drafter emits MARKDOWN while Canvas Inbox
   bodies are plain text, so reusing it as-is puts literal `**` / `#` into
   students' messages.
@@ -273,7 +347,7 @@ against a Canvas sandbox.
   emitted body. Only fires when a drafter feeds the body; a free-typed body is
   plain text already.
 
-### AC-9 - no unattended path sends [MACHINE or READING]
+### AC-10 - no unattended path sends [MACHINE or READING]
 - A whole-class send is irreversible; it must be human-initiated.
 - Object: whether any unattended caller can reach the send.
 - Instrument: [MACHINE if buildable] a CALL-graph check that no module under
@@ -285,14 +359,14 @@ against a Canvas sandbox.
   residual if reading-only.
 - Direction of failure: FAILS if a workflow step or a route handler invokes the
   send without a human confirm. A workflow may DRAFT text; a person confirms and
-  sends (AC-7).
+  sends (AC-8).
 
 ## Owner verification (READING/OWNER claims - nothing renders under vitest)
 
 | Id | Claim | Owner | Instrument | Step |
 |---|---|---|---|---|
 | OV-1 | A real send to a sandbox course (<=100) reaches each test student's Canvas Inbox as its OWN private conversation (no student sees another), and a reply lands in the instructor's Inbox | Repo owner | Real browser + Canvas sandbox + a test student account | Verify, before push |
-| OV-2 | The control is absent/visibly-unavailable (with the reason) on a course without a live link; the confirm shows course, count and message; an over-100 course shows the named refusal and sends nothing | Repo owner | Real browser | Verify |
+| OV-2 | The control is absent/visibly-unavailable (with the reason) on a course without a live link; the confirm shows course, count and message; an over-100 course AND a one-student (N=1) course each show their own named refusal (distinguishable by which bound was hit) and send nothing | Repo owner | Real browser | Verify |
 | OV-3 | No delivery claim in the copy; whether the notification email actually arrives is outside the app's observation | Repo owner | A test student's own email inbox | Verify |
 
 ## Disposition of the prior version (`docs/a29-ac.md`; ids re-derived LAST)
@@ -300,30 +374,32 @@ against a Canvas sandbox.
 The prior version was written under the working default of real Outlook email to
 each student's address, with a per-student fan-out, a durable attempt ledger, a
 pump, a CAS claim, a stale sweep and resume. OC9 and the channel decision remove
-all of that.
+all of that. The final two rows are not `docs/a29-ac.md` criteria; they trace the
+two round-1 rulings about recipient shape (Ruling 29 / Ruling 30) through to their
+OC9 disposition, so the retirement of the enumerated-id form is confirmable (I2).
 
 | Prior id | Disposition | Now |
 |---|---|---|
-| K1 (no LMS link -> not offered) | KEPT, re-derived on `canLms` + a server-side no-request assertion (Ruling 11) | AC-4 |
-| K2 (live proven at send; `unknown` != connected) | KEPT; folded into "failed roster read sends nothing; not-connected vs unreachable" | AC-4 |
+| K1 (no LMS link -> not offered) | KEPT, re-derived on `canLms` + a server-side no-request assertion (Ruling 11) | AC-5 |
+| K2 (live proven at send; `unknown` != connected) | KEPT; folded into "failed roster read sends nothing; not-connected vs unreachable" | AC-5 |
 | K3 (recipients are active students, each once) | WITHDRAWN: the app no longer enumerates recipients; Canvas expands `course_<id>`. Protected correctness now handed to Canvas by the course form. The roster read's enrollment-state filter survives only for COUNT accuracy | handed to architect (R-1); enforcer was to-be-built, none lost |
 | K4 (incomplete roster never presented as the class) | REDUCED: relevant only to the count now; folded into the count-source residual | R-1 |
-| K5 (server-issued confirm token, consumed once) | WITHDRAWN: durable ledger/CAS removed by OC9. A light confirm survives (course/count/message) and a light double-submit guard is a residual | AC-7 + R-2 |
-| K6 (what is sent is what was confirmed) | WITHDRAWN with the token machinery | AC-7 (light) |
+| K5 (server-issued confirm token, consumed once) | WITHDRAWN: durable ledger/CAS removed by OC9. A light confirm survives (course/count/message) and a light double-submit guard is a residual | AC-8 + R-2 |
+| K6 (what is sent is what was confirmed) | WITHDRAWN with the token machinery | AC-8 (light) |
 | K7 (one confirmation spent once) | WITHDRAWN with the token machinery | R-2 |
-| K8 (outcome type with no counts, one summariser) | WITHDRAWN: one request, one outcome, no per-student counts (OC9) | AC-6 |
+| K8 (outcome type with no counts, one summariser) | WITHDRAWN: one request, one outcome, no per-student counts (OC9) | AC-7 |
 | K9 (lost/partial outcome not a silent re-send) | WITHDRAWN: the durable-ledger hazard is removed; the residual double-submit hazard remains | R-2 |
-| K10 (body leaves in the channel's format) | KEPT (light): plain-text body | AC-8 |
-| K11 (send path makes no model call) | KEPT; import instrument -> request recorder (Ruling 4/19) | AC-5 |
+| K10 (body leaves in the channel's format) | KEPT (light): plain-text body | AC-9 |
+| K11 (send path makes no model call) | KEPT; import instrument -> request recorder (Ruling 4/19) | AC-6 |
 | K12 (message-vs-announcement clarity) | HANDED to the UX seat (READING) | R-3 |
 | K13 (drafts persist per course; nothing authorising a send persists) | HANDED to the UX seat, standing rule `persist-ui-control-state.md` | R-4 |
-| K14 (no unattended path sends) | KEPT; call-graph instrument, import edge withdrawn (Ruling 19) | AC-9 |
+| K14 (no unattended path sends) | KEPT; call-graph instrument, import edge withdrawn (Ruling 19) | AC-10 |
 | P1 (which address is used) | WITHDRAWN: no student address is read or handled under the Canvas channel (OC9) | none - requirement dissolved |
-| P2 (per-recipient receipt) | WITHDRAWN: one request, one outcome (OC9) | AC-6 |
-| P3 (partial is partial; refusal not a throttle) | REDUCED into the one-outcome accepted/refused/unknown distinction | AC-6 |
-| P4 (no student sees another) | KEPT, re-derived as the by-construction pin | AC-3 |
-| P5 (no delivery claim) | KEPT | AC-6 |
-| P6 (channel precondition) | WITHDRAWN: Outlook-specific; the Canvas precondition is AC-4 | AC-4 |
+| P2 (per-recipient receipt) | WITHDRAWN: one request, one outcome (OC9) | AC-7 |
+| P3 (partial is partial; refusal not a throttle) | REDUCED into the one-outcome accepted/refused/unknown distinction | AC-7 |
+| P4 (no student sees another) | KEPT, re-derived as the by-construction pin | AC-4 |
+| P5 (no delivery claim) | KEPT | AC-7 |
+| P6 (channel precondition) | WITHDRAWN: Outlook-specific; the Canvas precondition is AC-5 | AC-5 |
 | P7 (addresses do not outlive the send) | WITHDRAWN: no address is ever held (OC9) | none - requirement dissolved |
 | L1 (removal test) | KEPT, re-derived for the course-form construction | LEV-1 |
 | OV1-OV3 | KEPT, re-derived for the Canvas channel | OV-1..OV-3 |
@@ -331,6 +407,8 @@ all of that.
 | E2 (invited/inactive students) | MOOT: Canvas expands `course_<id>`; the app does not choose recipients | - |
 | E3 (A21 voice for a private message) | survives as an owner/UX judgement | R-5 |
 | E5, E6 (address field, address retention) | MOOT: no address handled | - |
+| Ruling 29 (round 1): TAKE THE N-ID FORM - enumerate N explicit numeric student ids in one request (`docs/a29-rulings.md:480-497`) | RETIRED by OC9: the app emits a SINGLE `course_<id>` recipient token, NOT an enumerated id list; this withdraws the app-side recipient enumeration, the app-chosen exclusions, and the per-recipient receipt the N-id form carried. Trace row for I2; the substance is already codified above (OC9) | AC-1 / AC-4 (the `course_<id>` emitted form); the N=1 outcome gap the course form leaves is closed by AC-3 |
+| Ruling 30 (round 1): `force_new` is the privacy defect - the course request MUST NOT carry it (`docs/a29-rulings.md:499-515`) | CARRIED: enforced as "no `force_new`" | AC-4 pin + LEV-1 removal test |
 
 ## Residual register
 
@@ -359,10 +437,11 @@ under concurrency); until then they exist only here, which
   ANY surface offered as A29; this only fixes where the button lives, which the UX
   seat then designs against.
 
-  Nothing else is open. The <=100 refusal, the `group_conversation=false` /
-  no-`force_new` construction, the Canvas-Inbox channel, and "no address is ever
-  read" are DECIDED (OC9, the channel decision) and are not re-asked. The count
-  source is forced by the tree (R-1), not an owner choice.
+  Nothing else is open. The over-100 refusal (OC9), the N=1 refusal (DECISION 1),
+  the `group_conversation=false` / no-`force_new` construction, the Canvas-Inbox
+  channel, and "no address is ever read" are DECIDED (OC9, DECISION 1, the channel
+  decision) and are not re-asked. The count source is forced by the tree (R-1),
+  not an owner choice.
 
 ## Out of scope for this document (routed, per `docs/loop/seats.md:77-84`)
 

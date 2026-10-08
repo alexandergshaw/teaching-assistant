@@ -372,11 +372,20 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             {submitError}
           </p>
         )}
-        {preparing && <p className={styles.ghMeta} aria-live="polite">Reading your submission...</p>}
-        {driver.inFlight > 0 && (
-          <p className={styles.ghMeta} aria-live="polite">
-            {`Grading ${driver.inFlight} submission${driver.inFlight === 1 ? "" : "s"}... (${driver.completedCount} of ${driver.dispatchedCount} done)`}
-          </p>
+        {(preparing || driver.inFlight > 0) && (
+          <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <p className={styles.loadingTitle}>
+                {preparing ? "Reading your submission..." : "Grading in progress"}
+              </p>
+              {driver.inFlight > 0 && (
+                <p className={styles.loadingText}>
+                  {`Grading ${driver.inFlight} submission${driver.inFlight === 1 ? "" : "s"} (${driver.completedCount} of ${driver.dispatchedCount} done)`}
+                </p>
+              )}
+            </div>
+          </div>
         )}
         <ChatComposer
           disabled={busy || preparing}

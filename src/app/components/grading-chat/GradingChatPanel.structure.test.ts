@@ -264,7 +264,11 @@ describe("GradingChatPanel - W3 F1: the composer sits in a sticky wrapper", () =
     expect(mountIdx, "expected the ChatComposer mount").toBeGreaterThan(-1);
     const classIdx = source.lastIndexOf("chatStyles.stickyComposer", mountIdx);
     expect(classIdx, "expected chatStyles.stickyComposer before the mount").toBeGreaterThan(-1);
-    expect(mountIdx - classIdx).toBeLessThan(1000);
+    // Window widened 1000 -> 1500: the latest-result card, the submitError
+    // notice, and the prominent spinner loading block (styles.loadingState,
+    // made apparent on owner request 2026-10-08) all sit between the sticky
+    // wrapper and the composer mount. Still bounds the composer to the wrapper.
+    expect(mountIdx - classIdx).toBeLessThan(1500);
   });
 
   it("the .stickyComposer rule has position: sticky and a bottom/top offset (mechanism proxy; sticking itself is an owner walk check)", () => {

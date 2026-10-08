@@ -402,7 +402,7 @@ async function gradeStudentEntries(
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
       : contentTruncated;
 
-    const inlineFiles = collectInlineVisualParts(submittedFiles);
+    const inlineFiles = await collectInlineVisualParts(submittedFiles);
 
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). Never throws.

@@ -67,6 +67,13 @@ export const GEMINI_INLINE_MIME_TYPES = new Set([
   "application/pdf",
 ]);
 
+// Office containers whose embedded raster images are extracted and sent to the
+// model (wave 1b). Maps the MIME type to the office-edit kind.
+export const OFFICE_IMAGE_SOURCE_MIME_TYPES: Record<string, "docx" | "pptx"> = {
+  [MIME_TYPES.docx]: "docx",
+  [MIME_TYPES.pptx]: "pptx",
+};
+
 /** True when the grader sends this MIME type's raw bytes to the model. */
 export function graderNeedsFileBytes(mimeType: string | undefined): boolean {
   return mimeType !== undefined && GEMINI_INLINE_MIME_TYPES.has(mimeType);

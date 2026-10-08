@@ -515,10 +515,10 @@ describe("GradingResults.tsx source-text wiring", () => {
 
   function tbodyMapRegion(source: string): string {
     const stripped = stripComments(source);
-    const mapStart = stripped.indexOf("sortedResults.map(");
-    if (mapStart === -1) throw new Error("sortedResults.map( not found in GradingResults.tsx");
+    const mapStart = stripped.indexOf("visibleResults.map(");
+    if (mapStart === -1) throw new Error("visibleResults.map( not found in GradingResults.tsx");
     const trClose = stripped.indexOf("</tr>", mapStart);
-    if (trClose === -1) throw new Error("</tr> not found after sortedResults.map( in GradingResults.tsx");
+    if (trClose === -1) throw new Error("</tr> not found after visibleResults.map( in GradingResults.tsx");
     return stripped.slice(mapStart, trClose + "</tr>".length);
   }
 
@@ -527,8 +527,8 @@ describe("GradingResults.tsx source-text wiring", () => {
 
     it("canary: the detection discriminates a known-good fixture from known-bad ones", () => {
       const good =
-        "sortedResults.map((result) => { return (<tr data-ungraded-state={classifyRow(result, edit).state}><td /></tr>); })";
-      const badNoAttribute = "sortedResults.map((result) => { return (<tr><td /></tr>); })";
+        "visibleResults.map((result) => { return (<tr data-ungraded-state={classifyRow(result, edit).state}><td /></tr>); })";
+      const badNoAttribute = "visibleResults.map((result) => { return (<tr><td /></tr>); })";
       expect(tbodyMapRegion(good)).toMatch(new RegExp(`${ATTRIBUTE_NAME}=`));
       expect(tbodyMapRegion(good)).toMatch(/classifyRow\(/);
       expect(tbodyMapRegion(badNoAttribute)).not.toMatch(new RegExp(`${ATTRIBUTE_NAME}=`));
@@ -545,7 +545,7 @@ describe("GradingResults.tsx source-text wiring", () => {
     // commented out on its own line).
     it("S9's control: a trailing-comment copy of the attribute is not mistaken for a live one", () => {
       const trailingCommentSabotage =
-        "sortedResults.map((result) => { return (<tr // data-ungraded-state={classifyRow(result, edit).state}\n><td /></tr>); })";
+        "visibleResults.map((result) => { return (<tr // data-ungraded-state={classifyRow(result, edit).state}\n><td /></tr>); })";
       expect(tbodyMapRegion(trailingCommentSabotage)).not.toMatch(new RegExp(`${ATTRIBUTE_NAME}=`));
     });
 

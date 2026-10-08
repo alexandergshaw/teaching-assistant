@@ -108,17 +108,17 @@ describe("GradingResults.tsx source-text wiring - the visible label is rendered"
 
   function tbodyMapRegion(source: string): string {
     const stripped = stripComments(source);
-    const mapStart = stripped.indexOf("sortedResults.map(");
-    if (mapStart === -1) throw new Error("sortedResults.map( not found in GradingResults.tsx");
+    const mapStart = stripped.indexOf("visibleResults.map(");
+    if (mapStart === -1) throw new Error("visibleResults.map( not found in GradingResults.tsx");
     const trClose = stripped.indexOf("</tr>", mapStart);
-    if (trClose === -1) throw new Error("</tr> not found after sortedResults.map( in GradingResults.tsx");
+    if (trClose === -1) throw new Error("</tr> not found after visibleResults.map( in GradingResults.tsx");
     return stripped.slice(mapStart, trClose + "</tr>".length);
   }
 
   it("canary: the detection discriminates a known-good fixture from known-bad ones", () => {
     const good =
-      "sortedResults.map((result) => { const l = describeUngradedRowLabel(state); return (<tr><td>{l}</td></tr>); })";
-    const badNoCall = "sortedResults.map((result) => { return (<tr><td /></tr>); })";
+      "visibleResults.map((result) => { const l = describeUngradedRowLabel(state); return (<tr><td>{l}</td></tr>); })";
+    const badNoCall = "visibleResults.map((result) => { return (<tr><td /></tr>); })";
     expect(tbodyMapRegion(good)).toMatch(/describeUngradedRowLabel\(/);
     expect(tbodyMapRegion(badNoCall)).not.toMatch(/describeUngradedRowLabel\(/);
   });
@@ -139,7 +139,7 @@ describe("GradingResults.tsx source-text wiring - the visible label is rendered"
   // for a live one.
   it("a trailing-comment copy of the call is not mistaken for a live one", () => {
     const trailingCommentSabotage =
-      "sortedResults.map((result) => { return (<tr // describeUngradedRowLabel(state)\n><td /></tr>); })";
+      "visibleResults.map((result) => { return (<tr // describeUngradedRowLabel(state)\n><td /></tr>); })";
     expect(tbodyMapRegion(trailingCommentSabotage)).not.toMatch(/describeUngradedRowLabel\(/);
   });
 });

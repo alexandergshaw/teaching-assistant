@@ -177,8 +177,8 @@ export const destinations: DestinationGroup[] = [
     destinations: [
       { id: "grading-run", label: "Submissions", description: "Grade student submissions and post results to Canvas" },
       { id: "grading-repos", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
-      { id: "grading-recording", label: "Grading (from a recording)", description: "Grade submissions by narrating over a screen recording" },
-      { id: "grading-snapshots", label: "Grading (from screenshots)", description: "Grade submissions from screenshots of student work" },
+      { id: "grading-recording", label: "From a recording", description: "Grade submissions by narrating over a screen recording" },
+      { id: "grading-snapshots", label: "From screenshots", description: "Grade submissions from screenshots of student work" },
       { id: "grading-drafts", label: "Drafted Grades", description: "Review and post grades saved as drafts" },
       { id: "grading-chat", label: "Chat", description: "Grade a continuous stream of submissions in a chat-style surface" },
     ],
@@ -210,12 +210,12 @@ export function getDestinationById(id: string): Destination | undefined {
 export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "course-planning",
   "content",
-  "announcements",
   "version-control",
   "recording",
   "ppt-design",
   "artifact-design",
   "presentations",
+  "announcements",
   "grading",
 ];
 

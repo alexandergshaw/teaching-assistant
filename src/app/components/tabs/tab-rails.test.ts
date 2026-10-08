@@ -54,12 +54,12 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
-      "manual:announcements",
       "manual:version-control",
       "manual:recording",
       "manual:ppt-design",
       "manual:artifact-design",
       "manual:presentations",
+      "manual:announcements",
       "manual:grading",
       "workflows:workflows",
       "workflows:automations",

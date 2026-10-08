@@ -190,8 +190,8 @@ describe("manual-rail", () => {
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (the Manual half of the Tools rail)", () => {
     it("should list the nine subtabs in display order", () => {
-      // Nine: "announcements" (ANNOUNCEMENTS-TAB A-W1) sits at index 2, right
-      // after "content" (LMS). Before that, "presentations" (PRES-1 wave 3) is the newest
+      // Nine: "announcements" (ANNOUNCEMENTS-TAB A-W1) sits at index 7
+      // (TOOLS-IA-REORG W1 moved it down from index 2, to just before Grading). Before that, "presentations" (PRES-1 wave 3) is the newest
       // addition - an inner-nav subtab (a "Presentations" destination group
       // holding "Slide Deck Creation", extensible to more children later),
       // slotted between Artifact Templates and Grading. "course-intel" left
@@ -203,12 +203,12 @@ describe("manual-rail", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
-        "announcements",
         "version-control",
         "recording",
         "ppt-design",
         "artifact-design",
         "presentations",
+        "announcements",
         "grading",
       ]);
     });
@@ -457,7 +457,7 @@ describe("grading subtab", () => {
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has six inner destinations: Submissions, Repo Grades, Grading (from a recording), Grading (from screenshots), Drafted Grades, and Chat (GRAD-SUBTAB waves 2-3, GRADING-CHAT wave 1)", () => {
+  it("has six inner destinations: Submissions, Repo Grades, From a recording, From screenshots, Drafted Grades, and Chat (GRAD-SUBTAB waves 2-3, GRADING-CHAT wave 1)", () => {
     expect(getInnerDestinations("grading")?.map((d) => d.id)).toEqual([
       "grading-run",
       "grading-repos",
@@ -469,8 +469,8 @@ describe("grading subtab", () => {
     expect(getInnerDestinations("grading")?.map((d) => d.label)).toEqual([
       "Submissions",
       "Repo Grades",
-      "Grading (from a recording)",
-      "Grading (from screenshots)",
+      "From a recording",
+      "From screenshots",
       "Drafted Grades",
       "Chat",
     ]);

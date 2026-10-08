@@ -95,6 +95,10 @@ export interface UseContinuousGradingRunResult {
   /** Re-dispatches the ORIGINAL request body of a failed row in place (same
    * sourceIndex, no new row). A no-op on a graded or still-pending row. */
   readonly retry: (sourceIndex: number) => void;
+  /** Re-dispatches the retained body of an already-arrived row (graded or
+   * failed) so it is re-graded and REPLACED in place. Keyed by the row's
+   * student label. A no-op for an unknown student or a row already in flight. */
+  readonly regrade: (student: string) => void;
   /** The one Canvas URL pinned for this session (F3=A); "" until a Canvas URL
    * submission is accepted. */
   readonly canvasUrl: string;
@@ -367,6 +371,25 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pump();
   };
 
+  // Unlike retry, works on an already-GRADED row. Resolves student -> sourceIndex
+  // through the retained bodies (entry.student is the unique session label), then
+  // re-dispatches that body; recordArrival overwrites the arrival in place.
+  const regrade = (student: string) => {
+    let sourceIndex = -1;
+    for (const [idx, body] of retainedBodiesRef.current) {
+      if (body.entry.student === student) {
+        sourceIndex = idx;
+        break;
+      }
+    }
+    if (sourceIndex < 0 || pendingRef.current.has(sourceIndex)) return;
+    const body = retainedBodiesRef.current.get(sourceIndex);
+    if (!body) return;
+    pendingRef.current.add(sourceIndex);
+    queueRef.current.push(body);
+    pump();
+  };
+
   const reset = () => {
     sessionIdRef.current += 1;
     canvasUrlRef.current = "";
@@ -395,6 +418,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     submit,
     reset,
     retry,
+    regrade,
     canvasUrl: canvasUrlRef.current,
     runKey: "grading-chat-" + sessionIdRef.current,
     sessionId: sessionIdRef.current,

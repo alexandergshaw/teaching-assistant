@@ -472,6 +472,68 @@ describe("W1 oracle 5 - G6/FF-7: a failed row is retried in place", () => {
   });
 });
 
+describe("regrade-after-batch: a GRADED row is re-graded in place", () => {
+  it("regrade re-dispatches the retained body at the same sourceIndex and replaces the row (no duplicate, count unchanged)", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockResolvedValueOnce({ ...gradedRow("Ada"), totalScore: "70" });
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    expect(driver.results).toHaveLength(1);
+    expect(driver.results[0].ungraded).toBeUndefined();
+    expect(driver.results[0].totalScore).toBe("70");
+
+    dispatchItemMock.mockResolvedValueOnce({ ...gradedRow("Ada"), totalScore: "90" });
+    driver.regrade("Ada");
+    await flushMicrotasks();
+    driver = useTestDriver();
+
+    expect(dispatchItemMock).toHaveBeenCalledTimes(2);
+    const body = dispatchItemMock.mock.calls[1][0];
+    expect(body.sourceIndex).toBe(0);
+    expect(body.rubric).toBe("1. Correctness");
+    expect(body.pointsPossible).toBe(100);
+    expect(body.entry.student).toBe("Ada");
+    expect(driver.results).toHaveLength(1);
+    expect(driver.results[0].totalScore).toBe("90");
+    expect(driver.dispatchedCount).toBe(1);
+    expect(driver.completedCount).toBe(1);
+  });
+
+  it("regrade is a no-op for an unknown student", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockResolvedValueOnce(gradedRow("Ada"));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    await flushMicrotasks();
+    driver = useTestDriver();
+    driver.regrade("Nobody");
+    await flushMicrotasks();
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("regrade is a no-op while that row is already in flight", async () => {
+    resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    prepareChatSubmissionActionMock.mockResolvedValue(oneEntry("Ada"));
+    dispatchItemMock.mockReturnValueOnce(new Promise(() => {}));
+    await driver.submit({ kind: "url", url: CANVAS_URL });
+    driver = useTestDriver();
+    driver.regrade("Ada");
+    await flushMicrotasks();
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("W1 oracle 6 - G7/FF-9: the driver exposes the effective rubric and provenance", () => {
   it("exposes effectiveRubric and rubricFingerprint at the top level, consistent with the stamped run", async () => {
     resolveChatRunHeaderActionMock.mockResolvedValue(okHeader);

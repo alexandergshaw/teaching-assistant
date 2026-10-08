@@ -178,6 +178,10 @@ export type GradingResultsProps = {
   searchable?: boolean;
   /** Placeholder for the search bar; only read when `searchable`. */
   filterPlaceholder?: string;
+  /** Opt-in, default off: when provided, each row renders a Regrade button that
+   * re-runs that row's grading in place. Only the chat grading mount passes it.
+   * Receives the row's student (the driver's bijective key). */
+  onRegrade?: (student: string) => void;
 };
 
 /** Imperative handle so a parent (the Live Feed pane) can drive "Post & Next". */
@@ -211,6 +215,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   sectionRef,
   searchable,
   filterPlaceholder = "Search by student name or feedback",
+  onRegrade,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -273,6 +278,21 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       delete next[student];
       return next;
     });
+
+  // Regrade: drop the shadowing edits entry so the row falls through to
+  // defaultRowEdit(result) and tracks the live run.results row the driver is
+  // about to replace in place. Discards that row's manual edits (fresh-grade
+  // semantics); the posted status is stale too.
+  const handleRegradeRow = (student: string) => {
+    setEdits((prev) => {
+      if (!(student in prev)) return prev;
+      const next = { ...prev };
+      delete next[student];
+      return next;
+    });
+    clearPostStatus(student);
+    onRegrade?.(student);
+  };
 
   // docs/rubric-criteria-breakdown-acceptance-criteria.md B5 item 1: a
   // hand-edited total does NOT touch `areas` here - left this way
@@ -717,6 +737,17 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                           disabled={rowPosting}
                         >
                           {status?.status === "posted" ? "Re-post" : "Post to Canvas"}
+                        </Button>
+                      </div>
+                    )}
+                    {onRegrade && (
+                      <div style={{ marginTop: "var(--space-1)" }}>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => handleRegradeRow(result.student)}
+                        >
+                          Regrade
                         </Button>
                       </div>
                     )}

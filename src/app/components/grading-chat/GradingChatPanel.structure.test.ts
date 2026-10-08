@@ -180,6 +180,48 @@ describe("GradingChatPanel - W2 O4 half 2: the edits key is session-scoped", () 
   });
 });
 
+describe("GradingChatPanel - regrade-after-batch: the chat mount opts in, the other mounts do not", () => {
+  const RESULTS = "src/app/components/GradingResults.tsx";
+
+  it("passes onRegrade={driver.regrade} on the GradingResults mount", () => {
+    const slice = resultsMountSlice(withoutLineComments(read(PANEL)));
+    expect(slice).toMatch(/\bonRegrade=\{\s*driver\.regrade\s*\}/);
+  });
+
+  it("the non-chat mounts pass no onRegrade", () => {
+    for (const file of [
+      "src/app/components/GithubGradingPanel.tsx",
+      "src/app/components/GradingTab.tsx",
+      "src/app/components/LiveFeedPanel.tsx",
+    ]) {
+      expect(resultsMountSlice(withoutLineComments(read(file)))).not.toContain("onRegrade");
+    }
+  });
+
+  it("GradingResults renders the Regrade button only under an onRegrade guard", () => {
+    const source = withoutLineComments(read(RESULTS));
+    expect(source).toMatch(/\{onRegrade\s*&&\s*\([\s\S]{0,400}handleRegradeRow\(result\.student\)[\s\S]{0,200}Regrade/);
+  });
+
+  it("the Regrade handler clears edits[student] and the post status, then calls onRegrade", () => {
+    const source = withoutLineComments(read(RESULTS));
+    const start = source.indexOf("const handleRegradeRow");
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf("onRegrade?.(student)", start) + 25);
+    expect(body).toMatch(/setEdits\(/);
+    expect(body).toMatch(/delete next\[student\]/);
+    expect(body).toMatch(/clearPostStatus\(student\)/);
+    expect(body).toContain("onRegrade?.(student)");
+  });
+
+  it("the guard pattern discriminates: an unguarded button and a non-clearing handler do not match", () => {
+    const guarded = /\{onRegrade\s*&&\s*\([\s\S]{0,400}handleRegradeRow\(result\.student\)/;
+    expect("<Button onClick={() => handleRegradeRow(result.student)}>Regrade</Button>").not.toMatch(guarded);
+    expect("{onRegrade && (<Button onClick={() => handleRegradeRow(result.student)}>").toMatch(guarded);
+    expect("const handleRegradeRow = (s) => { onRegrade?.(s); };").not.toMatch(/delete next\[student\]/);
+  });
+});
+
 describe("GradingChatPanel - W2 O3 panel-feed: the driver is constructed with commentSplit: true", () => {
   it("the useContinuousGradingRun( construction call carries commentSplit: true", () => {
     const source = withoutLineComments(read(PANEL));

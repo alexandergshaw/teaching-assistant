@@ -357,6 +357,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}
           searchable
+          onRegrade={driver.regrade}
         />
         </div>
       ) : (

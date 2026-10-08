@@ -419,14 +419,25 @@ describe("sessionDiagnosticLog: coverage is declared, so silence is readable", (
     // The grading surface is instrumented (whole-run grade), so its row must exist.
     expect(SESSION_DIAGNOSTIC_COVERAGE.map((row) => row.surface)).toContain("grading");
     expect(SESSION_DIAGNOSTIC_NOT_COVERED.length).toBeGreaterThanOrEqual(4);
+    // Frozen exact count: every grading surface is now covered, so the grading
+    // line is gone (6 -> 5). Dropping another line, or re-adding one, must be
+    // a deliberate edit here.
+    expect(SESSION_DIAGNOSTIC_NOT_COVERED).toHaveLength(5);
     // A count floor alone still passes while the list quietly loses the
     // areas that matter, so the FACT is pinned instead of the spelling:
     // these are real app areas this log does not watch, and each one has to
     // be named as uncovered. Only the keyword is asserted, never the
     // sentence around it.
     const declared = SESSION_DIAGNOSTIC_NOT_COVERED.join(" ").toLowerCase();
-    for (const area of ["recording", "grading", "workflow", "chat", "files"]) {
+    for (const area of ["recording", "workflow", "chat", "files"]) {
       expect(declared, `"${area}" is not instrumented but is not declared as uncovered`).toContain(area);
+    }
+    // Grading is fully covered now: it must NOT still be declared uncovered,
+    // and its coverage row must name each grading area it claims.
+    expect(declared).not.toContain("grading");
+    const gradingCovers = (SESSION_DIAGNOSTIC_COVERAGE.find((row) => row.surface === "grading")?.covers ?? "").toLowerCase();
+    for (const claimed of ["whole-run", "chat grading", "repo grading", "rubric generation", "checklist", "posting grades", "drafted"]) {
+      expect(gradingCovers, `grading coverage row does not name "${claimed}"`).toContain(claimed);
     }
   });
 
@@ -653,6 +664,11 @@ const MODULE_SPECIFIER = "session-diagnostic-log";
 // file importing it would be the same cross-request-state bug while passing a
 // scan for the core's own specifier.
 const GRADING_WRAPPER_SPECIFIER = "gradingDiagnosticLog";
+// The chat-seam and action-seam leaves import that wrapper (and so the store);
+// a server file importing either would be the same bug past the scans above.
+const CHAT_SEAM_SPECIFIER = "chatSeamDiagnostic";
+const ACTION_SEAM_SPECIFIER = "gradingActionSeam";
+const BROWSER_ONLY_SPECIFIERS = [MODULE_SPECIFIER, GRADING_WRAPPER_SPECIFIER, CHAT_SEAM_SPECIFIER, ACTION_SEAM_SPECIFIER];
 
 // The DIRECTIVE, on its own line - not a mention of the words. A substring
 // scan for `"use server"` also matches this file and the module itself, both
@@ -698,7 +714,7 @@ describe("sessionDiagnosticLog: nothing server-side may import this module", () 
     const offenders: string[] = [];
     for (const file of new Set(candidates)) {
       const text = fs.readFileSync(file, "utf-8");
-      if (text.includes(MODULE_SPECIFIER) || text.includes(GRADING_WRAPPER_SPECIFIER)) offenders.push(rel(file));
+      if (BROWSER_ONLY_SPECIFIERS.some((specifier) => text.includes(specifier))) offenders.push(rel(file));
     }
     expect(
       offenders,

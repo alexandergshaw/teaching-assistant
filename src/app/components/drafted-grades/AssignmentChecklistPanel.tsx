@@ -10,6 +10,7 @@ import {
   resolveFallbackChecklistInput,
   type AssignmentChecklistSection,
 } from "@/lib/grading-draft-checklist";
+import { timeGradingAction } from "../grading/gradingActionSeam";
 
 type DeriveState = { status: "idle" } | { status: "loading" } | { status: "error"; error: string };
 
@@ -70,7 +71,7 @@ export default function AssignmentChecklistPanel({
         rubric = fallback.rubric;
       }
 
-      const res = await deriveAssignmentChecklistAction(instructions, rubric);
+      const res = await timeGradingAction("derive_checklist", () => deriveAssignmentChecklistAction(instructions, rubric));
       if ("error" in res) {
         setState({ status: "error", error: res.error });
         return;

@@ -58,6 +58,7 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // header comment for why the signature is an ordered JSON.stringify tuple,
 // not confirmArming.ts's sorting selectionSignature.
 import { draftPostArmSignature, isConfirmArmed } from "./drafted-grades/draftPostArming";
+import { timeGradingAction } from "./grading/gradingActionSeam";
 
 type CommentEditState = {
   draftId: string;
@@ -307,7 +308,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     setConfirmPost(null);
     setBusy(draft.id);
     try {
-      const res = await postGradingDraftAction(draft.id);
+      const res = await timeGradingAction("post_draft", () => postGradingDraftAction(draft.id));
       if ("error" in res) throw new Error(res.error);
       // B1: a draft is only genuinely fully posted when NOTHING was failed
       // AND nothing was silently skipped (a blank grade/comment that never

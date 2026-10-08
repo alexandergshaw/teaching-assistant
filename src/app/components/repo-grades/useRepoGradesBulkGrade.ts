@@ -77,6 +77,7 @@ import {
 // it directly; item 16's guarantee (both grading paths share the one
 // resolver) is unchanged, only WHO calls it and WHEN moved.
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
+import { timeGradingAction } from "../grading/gradingActionSeam";
 
 /** AC item 64/76 - the sibling of useRepoGradesGradingActions.ts's own
  * describeResolvedRubricForLog (duplicated rather than shared: this wave's
@@ -279,7 +280,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // `await` unsettled forever, which used to be what left the whole
       // run's flag, progress, log and summary stuck (docs/REGRESSION.md,
       // this entry's own baseline).
-      const result = await gradeRepoAction(
+      const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
         target.repo,
         instructions,
         rubricArg,
@@ -288,7 +289,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         target.folder,
         useReadmeInstructions,
         runCodeScoring
-      ).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
+      )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
 
       if ("error" in result) {
         onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });

@@ -35,6 +35,7 @@ import {
   loadStoredGithubGradingRun,
   persistGithubGradingRun,
 } from "@/lib/github-grading-run-store";
+import { timeGradingAction } from "./grading/gradingActionSeam";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
 
@@ -350,7 +351,7 @@ export default function GithubGradingPanel() {
     // AC A1: the common grading folder scopes the reference repo read too,
     // so a generated rubric reflects the same subset of code the grading run
     // itself will actually see. Blank reproduces today's whole-repo read.
-    const r = await generateRubricFromRepoAction(rubricRepo.trim(), instructions, provider, rubricBranch || undefined, gradingFolder);
+    const r = await timeGradingAction("generate_rubric", () => generateRubricFromRepoAction(rubricRepo.trim(), instructions, provider, rubricBranch || undefined, gradingFolder));
     setBusy("");
     if ("error" in r) setError(r.error);
     else setRubric(r.rubric);
@@ -369,13 +370,13 @@ export default function GithubGradingPanel() {
     setUndeterminedRepos([]);
     // AC A1/A2: one common folder scopes every repo in the queue for this
     // run. Blank reproduces today's whole-repo read exactly.
-    const r = await gradeReposAction(
+    const r = await timeGradingAction("grade_repos", () => gradeReposAction(
       queue.map((q) => ({ repoRef: q.repoRef, branch: q.branch || undefined, label: q.label || undefined })),
       instructions,
       rubric,
       provider,
       gradingFolder
-    );
+    ));
     setBusy("");
     if ("error" in r) {
       setError(r.error);

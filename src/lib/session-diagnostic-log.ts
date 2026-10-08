@@ -95,7 +95,7 @@ const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = 
   diagnostics:
     "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, and cancelling a migration job.",
   grading:
-    "The main grading tab's whole-run grade (zip and Canvas), timed from dispatch to result - its operation's outcome and elapsed time as seen by the browser.",
+    "Grading: the main grading tab's whole-run grade (zip and Canvas), chat grading (run header, submission preparation, each submission graded, Canvas assignment details), repo grading (one repository or a cohort, and rubric generation from a repo), deriving an assignment checklist, posting grades back to Canvas and posting drafted grades - each operation's outcome and elapsed time as seen by the browser.",
 };
 
 export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[] = SURFACES.map((surface) => ({
@@ -109,7 +109,6 @@ export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[
  * gap into a false claim of coverage. */
 export const SESSION_DIAGNOSTIC_NOT_COVERED: readonly string[] = [
   "Recording, captions, teleprompter and avatar tools.",
-  "Chat grading, posting grades back to Canvas, rubrics, drafted grades and repo grading.",
   "Workflows and the Automate panel - these keep their own per-run logs, downloadable from their own views.",
   "Chat, the knowledge base, discussion replies and message replies.",
   "Files, course planning, and every other tab not listed as covered above.",

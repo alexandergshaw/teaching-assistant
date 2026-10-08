@@ -169,4 +169,21 @@ describe("useContinuousGradingRun - diagnostic seams", () => {
     expect(items.every((e) => typeof e.durationMs === "number")).toBe(true);
     expect(JSON.stringify(grading())).not.toContain("Alice");
   });
+
+  it("grade_item records a resolved result that carries ungraded as the fixed class \"grade failed\"", async () => {
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    dispatchItemMock.mockResolvedValueOnce({
+      ...gradedRow("Alice"),
+      ungraded: { kind: "grading-failed", sourceIndex: 0, student: "Alice", message: "Alice's file could not be graded" },
+    });
+    await driver.submit({ kind: "text", content: "one" });
+    await flushMicrotasks();
+    const items = grading().filter((e) => e.operation === "grade_item");
+    expect(items).toHaveLength(1);
+    expect([items[0].outcome, items[0].error]).toEqual(["failure", "grade failed"]);
+    expect(typeof items[0].durationMs).toBe("number");
+    expect(JSON.stringify(grading())).not.toContain("Alice");
+  });
 });

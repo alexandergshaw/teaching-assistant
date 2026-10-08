@@ -73,6 +73,7 @@ import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grad
 // can see it without relying on styling alone.
 import { describeUngradedRowLabel } from "./grading-results/ungradedRowLabel";
 import { StudentNameCell } from "./grading-results/StudentNameCell";
+import { timePostGrades } from "./grading/gradingActionSeam";
 
 // CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
 // file's line-budget extraction). ExpandIcon moved to
@@ -415,7 +416,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return next;
     });
 
-    const result = await postCanvasGradesAction(canvasUrl, payload);
+    const result = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload));
     setPosting(false);
 
     if ("error" in result) {
@@ -493,7 +494,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     ];
 
     setPostStatus((prev) => ({ ...prev, [row.student]: { status: "posting" } }));
-    const res = await postCanvasGradesAction(canvasUrl, payload);
+    const res = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload));
     if ("error" in res) {
       setPostStatus((prev) => ({ ...prev, [row.student]: { status: "error", message: res.error } }));
       return;

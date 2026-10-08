@@ -71,6 +71,7 @@ import type { GradingRunEntry } from "@/lib/grade/types";
 // the sole guarantee (item 16) that a per-cell grade and a bulk column grade
 // can never disagree about which rubric a column uses.
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
+import { timeGradingAction } from "../grading/gradingActionSeam";
 
 /** AC item 64/76: both grading paths' log `detail` used to gate a
  * `Rubric used: <text>` line on the page-level rubric field being blank
@@ -298,7 +299,7 @@ export function useRepoGradesGradingActions(
     // gradeOneTarget - a rejected call (transport, never gradeRepoAction's
     // own body) becomes an ordinary `{ error }` outcome instead of leaving
     // this cell's `grading: true` set forever with no log entry.
-    const result = await gradeRepoAction(
+    const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
       row.repo,
       instructions,
       resolved.text,
@@ -307,7 +308,7 @@ export function useRepoGradesGradingActions(
       column.folder,
       useReadmeInstructions,
       runCodeScoring
-    ).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
+    )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
       // L1 item 2. A grading failure otherwise leaves only a per-cell error
@@ -552,7 +553,7 @@ export function useRepoGradesGradingActions(
       return next;
     });
 
-    const result = await postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade));
+    const result = await timeGradingAction("post_grades", () => postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade)));
 
     const fanout = fanOutRepoGradePostResult(
       plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
@@ -672,7 +673,7 @@ export function useRepoGradesGradingActions(
 
     setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { postStatus: "posting", postMessage: null }));
 
-    const result = await postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade));
+    const result = await timeGradingAction("post_grades", () => postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade)));
 
     const fanout = fanOutRepoGradePostResult(
       plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),

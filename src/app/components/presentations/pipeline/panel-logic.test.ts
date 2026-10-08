@@ -3,9 +3,12 @@
 // storage; every fixture is a plain PipelineState built via
 // createInitialPipelineState() + explicit per-stage overrides.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildPipelineRequest,
+  mergeRegeneratedSlide,
   reducePipelineResponse,
   runToEnd,
 } from "./panel-logic";
@@ -203,24 +206,43 @@ describe("reducePipelineResponse", () => {
     expect(next.sources).toEqual(state.sources);
   });
 
-  it("ok: regen-slide folds the returned slides into the existing deck and stales reviews/polish", () => {
-    const originalDeck = makeDeck("My Deck", [makeSlide("S0"), makeSlide("S1")]);
+  it("ok: regen-slide splices the ONE returned slide at slideIndex, preserving length and the other slides, and stales reviews", () => {
+    const originalSlides: PptxSlide[] = [makeSlide("S0"), makeSlide("S1"), makeSlide("S2"), makeSlide("S3")];
+    const originalDeck = makeDeck("My Deck", originalSlides);
     const state = withStages({
       deck: stage("done", originalDeck),
       reviewVisual: stage("done", makeChecklistResult()),
     });
-    const newSlides: PptxSlide[] = [makeSlide("S0"), { title: "S1 revised", bullets: ["punchier"] }];
+    // The route emits a ONE-element array (parseRegenSlideResponse -> [slides[0]]).
+    const revised: PptxSlide = { title: "S2 revised", bullets: ["punchier"] };
 
     const next = reducePipelineResponse(
       "regen-slide",
       200,
-      { op: "regen-slide", status: "ok", slides: newSlides },
-      state
+      { op: "regen-slide", status: "ok", slides: [revised] },
+      state,
+      2
     );
 
     expect(next.deck.status).toBe("done");
-    expect(next.deck.artifact).toEqual({ presentationTitle: "My Deck", slides: newSlides });
+    expect(next.deck.artifact?.slides).toHaveLength(4);
+    expect(next.deck.artifact).toEqual({
+      presentationTitle: "My Deck",
+      slides: [originalSlides[0], originalSlides[1], revised, originalSlides[3]],
+    });
     expect(next.reviewVisual.status).toBe("stale");
+  });
+
+  it("regen-slide without a slideIndex leaves the deck's slides intact (never collapses it)", () => {
+    const originalDeck = makeDeck("My Deck", [makeSlide("S0"), makeSlide("S1")]);
+    const state = withStages({ deck: stage("done", originalDeck) });
+    const next = reducePipelineResponse(
+      "regen-slide",
+      200,
+      { op: "regen-slide", status: "ok", slides: [makeSlide("X")] },
+      state
+    );
+    expect(next.deck.artifact?.slides).toEqual(originalDeck.slides);
   });
 
   it("error: a 502 PipelineErrorResponse marks only that stage error, no other stage mutates", () => {
@@ -269,6 +291,44 @@ describe("reducePipelineResponse", () => {
     const malformed = { op: "outline", status: "ok" }; // no `outline` field
     const next = reducePipelineResponse("outline", 200, malformed, state);
     expect(next.outline.status).toBe("error");
+  });
+});
+
+describe("mergeRegeneratedSlide", () => {
+  const deck = makeDeck("D", [makeSlide("A"), makeSlide("B"), makeSlide("C")]);
+  const revised: PptxSlide = { title: "B2", bullets: ["new"] };
+
+  it("replaces only the slide at the index; length and other slides preserved", () => {
+    const out = mergeRegeneratedSlide(deck, 1, revised);
+    expect(out.slides).toEqual([deck.slides[0], revised, deck.slides[2]]);
+    expect(out.slides).toHaveLength(deck.slides.length);
+    expect(out.presentationTitle).toBe("D");
+    // input not mutated
+    expect(deck.slides[1].title).toBe("B");
+  });
+
+  it("is a safe no-op for out-of-range or non-integer indexes", () => {
+    for (const idx of [-1, 3, 99, 1.5, Number.NaN]) {
+      expect(mergeRegeneratedSlide(deck, idx, revised)).toBe(deck);
+    }
+  });
+});
+
+describe("PipelineTab wiring (source-text pin)", () => {
+  const src = readFileSync(join(__dirname, "PipelineTab.tsx"), "utf8");
+
+  it("threads regenSlideIndex into reducePipelineResponse at the regen call site", () => {
+    expect(src).toMatch(
+      /reducePipelineResponse\(\s*"regen-slide"\s*,\s*res\.status\s*,\s*body\s*,\s*pipelineState\s*,\s*regenSlideIndex\s*\)/
+    );
+  });
+
+  it("mounts the Regenerate a slide card outside the deck stage block", () => {
+    const cardAt = src.indexOf("Regenerate a slide");
+    const deckBlockAt = src.indexOf('activeStage === "deck"');
+    const standardBlockAt = src.indexOf('activeStage === "standard"');
+    expect(cardAt).toBeGreaterThan(standardBlockAt);
+    expect(deckBlockAt).toBeGreaterThan(-1);
   });
 });
 

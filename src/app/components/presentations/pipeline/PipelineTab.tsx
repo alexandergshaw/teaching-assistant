@@ -228,7 +228,7 @@ export default function PipelineTab() {
         body: JSON.stringify(request),
       });
       const body = await res.json().catch(() => undefined);
-      const next = reducePipelineResponse("regen-slide", res.status, body, pipelineState);
+      const next = reducePipelineResponse("regen-slide", res.status, body, pipelineState, regenSlideIndex);
       setPipelineState(next);
       setRegenInstruction("");
     } finally {
@@ -516,40 +516,6 @@ export default function PipelineTab() {
               {pipelineState.deck.status === "done" && (
                 <>
                   <Divider />
-                  <Typography variant="subtitle2">Regenerate one slide</Typography>
-                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                    <TextField
-                      select
-                      label="Slide"
-                      size="small"
-                      value={regenSlideIndex}
-                      onChange={(e) => setRegenSlideIndex(Number(e.target.value))}
-                      style={{ minWidth: 160 }}
-                    >
-                      {(pipelineState.deck.artifact?.slides ?? []).map((slide, idx) => (
-                        <MenuItem key={idx} value={idx}>
-                          {idx + 1}. {slide.title}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    <TextField
-                      label="What should change?"
-                      size="small"
-                      fullWidth
-                      value={regenInstruction}
-                      onChange={(e) => setRegenInstruction(e.target.value)}
-                    />
-                    <Button
-                      variant="outlined"
-                      onClick={handleRegenSlide}
-                      disabled={busy || regenInstruction.trim() === ""}
-                      sx={{ textTransform: "none" }}
-                    >
-                      Regenerate this slide
-                    </Button>
-                  </div>
-
-                  <Divider />
                   <Typography variant="subtitle2">Apply a change to the whole deck</Typography>
                   <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
                     <TextField
@@ -646,6 +612,48 @@ export default function PipelineTab() {
           )}
         </CardContent>
       </Card>
+
+      {pipelineState.deck.status === "done" && (
+        <Card variant="outlined">
+          <CardContent style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+            <Typography variant="h6">Regenerate a slide</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Rewrite one slide of the deck from an instruction. Every other slide is left as it is.
+            </Typography>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+              <TextField
+                select
+                label="Slide"
+                size="small"
+                value={regenSlideIndex}
+                onChange={(e) => setRegenSlideIndex(Number(e.target.value))}
+                style={{ minWidth: 160 }}
+              >
+                {(pipelineState.deck.artifact?.slides ?? []).map((slide, idx) => (
+                  <MenuItem key={idx} value={idx}>
+                    {idx + 1}. {slide.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="What should change?"
+                size="small"
+                fullWidth
+                value={regenInstruction}
+                onChange={(e) => setRegenInstruction(e.target.value)}
+              />
+              <Button
+                variant="outlined"
+                onClick={handleRegenSlide}
+                disabled={busy || regenInstruction.trim() === ""}
+                sx={{ textTransform: "none" }}
+              >
+                Regenerate this slide
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

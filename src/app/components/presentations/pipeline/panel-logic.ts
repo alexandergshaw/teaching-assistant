@@ -197,16 +197,35 @@ function markStageError<K extends StageId>(state: PipelineState, stage: K): Pipe
 }
 
 /**
- * Fold a `regen-slide` success (`{ slides: PptxSlide[] }`) into the existing
- * `deck` artifact: the response replaces the deck's whole slide array (the
- * shipped `/api/decks/ask` convention `deck-operations.ts` follows) while
- * keeping the deck's `presentationTitle`. Then routes through
+ * Returns a deck identical to `deck` except slide `slideIndex` is replaced by
+ * `newSlide`. The deck length and every other slide are preserved by
+ * construction. An out-of-range (or non-integer) index is a SAFE NO-OP: the
+ * deck is returned unchanged.
+ */
+export function mergeRegeneratedSlide(deck: DeckContent, slideIndex: number, newSlide: PptxSlide): DeckContent {
+  if (!Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= deck.slides.length) return deck;
+  return {
+    ...deck,
+    slides: deck.slides.map((slide, i) => (i === slideIndex ? newSlide : slide)),
+  };
+}
+
+/**
+ * Fold a `regen-slide` success (`{ slides: [oneSlide] }`, the route emits a
+ * ONE-element array) into the existing `deck` artifact by splicing that slide
+ * in at `slideIndex` via `mergeRegeneratedSlide`. Then routes through
  * `applyStageEdit("deck", ...)` exactly like any other deck-producing op, so
  * `reviews`/`polish` go stale the same way a full `deck` op's success would.
+ * No existing deck, or an empty response, is an error for the deck stage.
  */
-function applyRegenSlideSuccess(state: PipelineState, slides: PptxSlide[]): PipelineState {
-  const presentationTitle = state.deck.artifact?.presentationTitle ?? "";
-  const nextDeck: DeckContent = { presentationTitle, slides };
+function applyRegenSlideSuccess(
+  state: PipelineState,
+  slides: PptxSlide[],
+  slideIndex: number | undefined
+): PipelineState {
+  const currentDeck = state.deck.artifact;
+  if (!currentDeck || slides.length === 0) return markStageError(state, "deck");
+  const nextDeck = mergeRegeneratedSlide(currentDeck, slideIndex ?? -1, slides[0]);
   return applyStageEdit(state, "deck", nextDeck);
 }
 
@@ -214,13 +233,14 @@ export function reducePipelineResponse(
   op: PipelineOp,
   httpStatus: number,
   body: unknown,
-  state: PipelineState
+  state: PipelineState,
+  regenSlideIndex?: number
 ): PipelineState {
   const stage = stageForOp(op);
 
   if (httpStatus === 200 && isMatchingOkBody(op, body)) {
     if (body.op === "regen-slide") {
-      return applyRegenSlideSuccess(state, body.slides as PptxSlide[]);
+      return applyRegenSlideSuccess(state, body.slides as PptxSlide[], regenSlideIndex);
     }
     switch (body.op) {
       case "outline":

@@ -39,6 +39,8 @@ import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChat
 import type { PreviewFile } from "../FilePreviewModal";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
+import { chooseZipTransport, deleteGradingZipBestEffort, uploadGradingZip } from "@/lib/grade/grading-zip-transport";
+import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -116,6 +118,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
+  const { supabase, user } = useSupabase();
 
   // Restore the stored harshness after mount (a state initializer would
   // mismatch the server render); setState only after an await.
@@ -245,6 +248,23 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       const outcome = await driver.submit({ kind: "text", content, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
     });
+  // Uploads a large zip straight to Storage, then hands the path to the
+  // driver. If the ingest call rejects or throws, the temp object is removed
+  // best-effort (R10); the server's own delete and the orphan sweep remain the
+  // real guarantees.
+  const submitStoragedZip = async (file: File): Promise<SubmitOutcome> => {
+    if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
+    const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
+    if (!uploaded.ok) return { kind: "refused", reason: uploaded.message };
+    try {
+      const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
+      if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+      return outcome;
+    } catch (err) {
+      await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
+      throw err;
+    }
+  };
   const handleSubmitFiles = (files: File[], label?: string) => withPreparing(async () => {
     // A label names ONE student's ONE submission: forwarded only for a
     // single-file pick; a multi-file batch falls back to the filenames.
@@ -254,7 +274,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
       // FIX-1 size pre-flight: an oversized file is refused here, with a
       // worded reason, before the session starts or any bytes are uploaded.
-      const preflight = preflightUploadFile(file, "This file");
+      // BULK-ZIP BW1: a zip over the body budget takes the Storage transport
+      // (when the ingest exists) instead of being refused here; every other
+      // file keeps the body pre-flight unchanged.
+      const transport = chooseZipTransport(file);
+      if (transport.kind === "refused") return { kind: "refused", reason: transport.message };
+      const preflight = transport.kind === "storage" ? { ok: true as const } : preflightUploadFile(file, "This file");
       if (!preflight.ok) return { kind: "refused", reason: preflight.message };
       if (!began) {
         if (!(await ensureSession())) {
@@ -262,6 +287,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         }
         began = true;
       }
+      if (transport.kind === "storage") return submitStoragedZip(file);
       return driver.submit({ kind: "file", file, label: fileLabel });
     });
     const reasons: string[] = [];
@@ -410,7 +436,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           )}
           {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
         </div>
-        <Button variant="outlined" size="small" disabled={driver.headerState === "unset"} onClick={handleNewSession}>
+        <Button variant="outlined" size="small" disabled={driver.headerState === "unset" || preparing} onClick={handleNewSession}>
           New session
         </Button>
       </div>

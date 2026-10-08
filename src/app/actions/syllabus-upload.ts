@@ -36,6 +36,22 @@ function syllabusStorage(): SyllabusUploadStorageClient<Blob> {
   };
 }
 
+/**
+ * The segment allow-list for the two actions in this file (BULK-ZIP BW1, S3).
+ * `isKnownUploadPath` checks only membership in the SHARED UPLOAD_PATH_SEGMENTS
+ * union, which now also contains "grading-uploads" (the grading-chat zip
+ * transport). Without this bind, these actions would download and DELETE a
+ * grading temp object inside the caller's own uid prefix. Refusal happens
+ * before any Storage call, with the same worded error as an unknown path.
+ */
+const SEGMENTS_SERVED_HERE: readonly string[] = ["syllabus-uploads", "rubric-uploads"];
+
+function isServedHere(storagePath: string): boolean {
+  return SEGMENTS_SERVED_HERE.includes(storagePath.split("/")[1] ?? "");
+}
+
+const UPLOAD_NOT_FOUND_ERROR = "That upload could not be found. Please try uploading the file again.";
+
 /** Extract plain text from an uploaded file's raw bytes. */
 async function extractTextFromFile(
   buffer: Buffer,
@@ -122,6 +138,7 @@ export async function uploadSyllabusAction(
 ): Promise<{ syllabusId: string; syllabusName: string } | { error: string }> {
   try {
     const user = await requireOwner();
+    if (!isServedHere(file.storagePath)) return { error: UPLOAD_NOT_FOUND_ERROR };
 
     const extraction = await withUploadedSyllabusFile(syllabusStorage(), user.id, file.storagePath, (blob) =>
       validateAndExtractSyllabusText(file, blob)
@@ -229,6 +246,7 @@ export async function extractSyllabusTextAction(
 ): Promise<{ text: string } | { error: string }> {
   try {
     const user = await requireOwner();
+    if (!isServedHere(file.storagePath)) return { error: UPLOAD_NOT_FOUND_ERROR };
 
     const extraction = await withUploadedSyllabusFile(syllabusStorage(), user.id, file.storagePath, (blob) =>
       validateAndExtractSyllabusText(file, blob)

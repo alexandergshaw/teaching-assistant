@@ -63,7 +63,7 @@ export type SyllabusUploadResult<V> = { ok: true; value: V } | { ok: false; erro
  * segment added only here, with `tsc` staying silent because
  * `readonly UploadPathSegment[]` accepts any subset of the union.
  */
-export const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads"] as const;
+export const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads", "grading-uploads"] as const;
 
 /** The closed set of path segments `withUploadedSyllabusFile` will ever
  * download and delete. See `UPLOAD_PATH_SEGMENTS` above for why this is a

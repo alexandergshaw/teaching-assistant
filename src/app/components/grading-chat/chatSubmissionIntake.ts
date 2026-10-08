@@ -27,7 +27,12 @@ export type ChatSubmissionInput =
   | { readonly kind: "text"; readonly label?: string; readonly content: string }
   | { readonly kind: "file"; readonly file: File; readonly label?: string }
   | { readonly kind: "url"; readonly url: string; readonly label?: string }
-  | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] };
+  | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] }
+  // BULK-ZIP BW1: a class zip too large for the request body, already uploaded
+  // to private Storage under `${userId}/grading-uploads/<uuid>.zip`. Carries
+  // only the path; BW2's streaming ingest reads, parses and deletes it. The
+  // driver does not consume this member until BW2.
+  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string };
 
 /** One part of a composite submission. Each part resolves to EXACTLY ONE
  * entry (see extractSingleEntry); a part that would resolve to zero or many

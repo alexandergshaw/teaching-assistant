@@ -326,15 +326,18 @@ describe("sweepOrphanUploads: skippedUnknownAge is its own counter, never folded
 });
 
 describe("sweepOrphanUploads: segment containment", () => {
-  it("only ever lists syllabus-uploads and rubric-uploads under a user prefix - never any other segment", async () => {
+  it("only ever lists syllabus-uploads, rubric-uploads and grading-uploads under a user prefix - never any other segment", async () => {
     const { lister, remover, listCalls } = makeSharedStateFakes({
       "": [{ name: "u1", updatedAt: null }],
       "u1/rubric-uploads": [],
       "u1/syllabus-uploads": [],
+      "u1/grading-uploads": [],
     });
     await sweepOrphanUploads(lister, remover, fixedPicker(0), NOW, baseOptions());
     const segmentPaths = listCalls.map((c) => c.path).filter((p) => p !== "");
-    expect(new Set(segmentPaths)).toEqual(new Set(["u1/rubric-uploads", "u1/syllabus-uploads"]));
+    expect(new Set(segmentPaths)).toEqual(
+      new Set(["u1/rubric-uploads", "u1/syllabus-uploads", "u1/grading-uploads"])
+    );
   });
 });
 

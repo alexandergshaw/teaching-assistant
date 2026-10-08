@@ -324,6 +324,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         // A typed label reaches the server's `labelled` flag, which suppresses
         // name inference (grading-chat-intake.ts reads formData.get("label")).
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
+      } else if (input.kind === "storaged-zip") {
+        // BULK-ZIP BW2 wires the real storaged-zip submit path and flips
+        // GRADING_ZIP_STORAGE_INGEST_ENABLED on; until then the transport flag is
+        // off so this branch is unreachable, but it keeps the ChatSubmissionInput
+        // union exhaustive and type-safe here.
+        return { kind: "refused", reason: "Large-zip grading is not available yet." };
       } else {
         formData.set("kind", "url");
         formData.set("url", input.url);

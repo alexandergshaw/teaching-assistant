@@ -4,6 +4,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
+import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { coerceFeedbackWordTarget } from "@/lib/grade/types";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
@@ -55,6 +56,9 @@ const MAX_RUBRIC_CHARS = 20_000;
 const MAX_INSTRUCTIONS_CHARS = 20_000;
 const MAX_STUDENT_CHARS = 500;
 const MAX_CONTENT_CHARS = 2_000_000;
+// BULK-ZIP BW3: bound on a submitted link URL; the SSRF allowlists live in the
+// resolvers (resolveEntryLinks), so this boundary checks type and length only.
+const MAX_URL_CHARS = 2048;
 
 interface GradeRunItemRequestBody {
   sourceIndex?: unknown;
@@ -109,6 +113,13 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   }
   if (typeof rawEntry.content !== "string" || rawEntry.content.length > MAX_CONTENT_CHARS) return null;
   if (typeof rawEntry.mergedFileCount !== "number") return null;
+  if (
+    rawEntry.submissionUrl !== undefined &&
+    rawEntry.submissionUrl !== null &&
+    (typeof rawEntry.submissionUrl !== "string" || rawEntry.submissionUrl.length > MAX_URL_CHARS)
+  ) {
+    return null;
+  }
   if (!Array.isArray(rawEntry.submittedFiles) || !rawEntry.submittedFiles.every(isSubmittedFileInfo)) return null;
 
   const entry: StudentSubmissionEntry = {
@@ -119,6 +130,12 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     userId: typeof rawEntry.userId === "number" ? rawEntry.userId : undefined,
     gradedRepo: typeof rawEntry.gradedRepo === "string" ? rawEntry.gradedRepo : undefined,
     gradedRef: typeof rawEntry.gradedRef === "string" ? rawEntry.gradedRef : undefined,
+    submissionUrl: typeof rawEntry.submissionUrl === "string" ? rawEntry.submissionUrl : undefined,
+    repoReadNote: typeof rawEntry.repoReadNote === "string" ? rawEntry.repoReadNote : undefined,
+    linkFetch:
+      rawEntry.linkFetch === "ok" || rawEntry.linkFetch === "failed" || rawEntry.linkFetch === "flagged"
+        ? rawEntry.linkFetch
+        : undefined,
   };
 
   if (estimateEntryWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
@@ -198,8 +215,15 @@ export async function POST(req: NextRequest) {
     // step (prepareGradingRunAction) resolved ONCE, up front. Repeating
     // either per item would reproduce the grading.ts:634-636 defect this
     // seam exists to avoid (W4-4).
+    // BULK-ZIP BW3: a link submission (entry.submissionUrl) is resolved HERE,
+    // per item, inside the same soft budget as the grade. resolveEntryLinks
+    // never throws and re-clamps the folded content.
     const outcome = await raceWithTimeout(
-      gradeEntries([entry], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget }),
+      (async () => {
+        const resolved = await resolveEntryLinks(entry);
+        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget });
+        return { graded, linkFetch: resolved.linkFetch };
+      })(),
       waitMs
     );
 
@@ -213,8 +237,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: describeError(outcome.error) }, { status: 502 });
     }
 
-    const result = outcome.value.results[0];
-    return NextResponse.json({ sourceIndex, result });
+    const result = outcome.value.graded.results[0];
+    return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch } });
   } catch (err) {
     return NextResponse.json({ error: describeError(err) }, { status: 502 });
   }

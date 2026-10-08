@@ -73,6 +73,9 @@ export interface RubricAreaResult {
  *  runtime consumers are grade/prompts.ts, grade/engine.ts and the route. */
 export type GradeHarshness = "lenient" | "balanced" | "strict";
 
+/** BULK-ZIP BW3: how a submitted link resolved at grade time. */
+export type LinkFetchOutcome = "ok" | "failed" | "flagged";
+
 export type GradeDetermination = "no-submission" | "no-submission-unmerged-branch";
 
 // Single source of truth for validating a persisted/untrusted value against
@@ -272,6 +275,13 @@ interface GradeResultBase {
   // can be defended to a student (which code, at which commit, was read).
   gradedRepo?: string | null;
   gradedRef?: string | null;
+  // BULK-ZIP BW3: the outcome of resolving a submitted LINK at grade time.
+  // "ok" = a fetch folded real content; "failed" = a fetch was attempted and
+  // failed (graded on the bare link note); "flagged" = the link was not
+  // fetched (unsupported type or host, or not a single submission). Undefined
+  // for every submission that carried no link. Stamped by the grade-run-item
+  // route from the resolved entry; BW4's ledger reads it.
+  linkFetch?: LinkFetchOutcome;
   // True when this submission's merged content exceeded the per-submission
   // character cap (GRADE_MAX_CHARS_PER_SUBMISSION / getGeminiMaxCharsPerSubmission
   // in ../gemini) and was cut down before being sent to the model - see
@@ -466,6 +476,8 @@ export interface StudentSubmissionEntry {
   gradedRepo?: string | null;
   gradedRef?: string | null;
   repoReadNote?: string | null;
+  // BULK-ZIP BW3: set by resolveEntryLinks (extraction.ts); see GradeResultBase.
+  linkFetch?: LinkFetchOutcome;
   // Per-axis slices of a discussion entry. TYPE-ONLY forward declaration
   // (A8 Wave A): no producer or consumer until Wave B.
   discussionAxes?: { initialPostContent: string; replyContent: string; replyCount: number };

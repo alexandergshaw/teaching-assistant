@@ -178,15 +178,20 @@ vi.mock("@/lib/grade/engine", () => ({
 vi.mock("@/lib/bounded-race", () => ({
   raceWithTimeout: vi.fn(),
 }));
+vi.mock("@/lib/grade/extraction", () => ({
+  resolveEntryLinks: vi.fn(async (entry: unknown) => entry),
+}));
 
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { gradeEntries } from "@/lib/grade/engine";
 import { raceWithTimeout } from "@/lib/bounded-race";
+import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { POST } from "./route";
 
 const mockRequireUser = vi.mocked(requireAppOwner);
 const mockGradeEntries = vi.mocked(gradeEntries);
 const mockRaceWithTimeout = vi.mocked(raceWithTimeout);
+const mockResolveEntryLinks = vi.mocked(resolveEntryLinks);
 
 // Same idiom as visualizer/create/route.test.ts and
 // lms-generation/deck/route.test.ts: a plain fake object, never a real
@@ -300,6 +305,73 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
       for (const bad of [5, 600, "big", 150.5, null, 0, -20]) {
         expect(await targetReachedEngine({ feedbackWordTarget: bad })).toBeUndefined();
       }
+    });
+  });
+
+  describe("BW3: submissionUrl is validated, resolved before grading, and linkFetch is stamped", () => {
+    const LINK_URL = "https://github.com/octocat/hello-world";
+
+    function settle() {
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+    }
+
+    it("I-submissionurl-validated: a non-string or over-length submissionUrl is a 400 and never reaches the model", async () => {
+      for (const bad of [42, {}, ["x"], "h".repeat(2049)]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, submissionUrl: bad } }) as any);
+        expect(res.status).toBe(400);
+      }
+      expect(mockGradeEntries).not.toHaveBeenCalled();
+      expect(mockResolveEntryLinks).not.toHaveBeenCalled();
+    });
+
+    it("I-submissionurl-validated: a valid string is carried onto the entry handed to resolveEntryLinks", async () => {
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, submissionUrl: LINK_URL } }) as any);
+      expect(mockResolveEntryLinks.mock.calls[0][0].submissionUrl).toBe(LINK_URL);
+    });
+
+    it("I-linkfetch-field: the resolved entry is what is graded, and its linkFetch is stamped onto the result", async () => {
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "RESOLVED", linkFetch: "failed" as const }));
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, submissionUrl: LINK_URL } }) as any);
+      const body = await res.json();
+      expect(body.result.linkFetch).toBe("failed");
+      expect(mockGradeEntries.mock.calls[0][0][0].content).toBe("RESOLVED");
+    });
+
+    it("I-linkfetch-field: a plain text submission leaves linkFetch undefined", async () => {
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await POST(jsonRequest(VALID_BODY) as any);
+      const body = await res.json();
+      expect(body.result.linkFetch).toBeUndefined();
+    });
+
+    it("carries repoReadNote and a valid linkFetch onto the entry, and ignores a non-enum linkFetch", async () => {
+      mockGradeEntries.mockResolvedValue({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, repoReadNote: "unmatched", linkFetch: "flagged" } }) as any);
+      expect(mockResolveEntryLinks.mock.calls[0][0].repoReadNote).toBe("unmatched");
+      expect(mockResolveEntryLinks.mock.calls[0][0].linkFetch).toBe("flagged");
+
+      settle();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, linkFetch: "bogus" } }) as any);
+      expect(mockResolveEntryLinks.mock.calls[1][0].linkFetch).toBeUndefined();
+    });
+
+    it("wiring: resolveEntryLinks( is called before gradeEntries( inside the race", () => {
+      const idxResolve = routeSource.indexOf("resolveEntryLinks(");
+      const idxGrade = routeSource.indexOf("gradeEntries(");
+      expect(idxResolve).toBeGreaterThan(0);
+      expect(idxResolve).toBeLessThan(idxGrade);
     });
   });
 

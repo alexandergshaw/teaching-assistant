@@ -73,6 +73,7 @@ const ALL_GRADE_RESULT_FIELDS = [
   "codeExecution",
   "gradedRepo",
   "gradedRef",
+  "linkFetch",
   "submissionTruncated",
   "determination",
   "ungraded",
@@ -120,6 +121,10 @@ const _exhaustiveOutcomeCheck: MissingOutcomeFields extends never
 // silently - kept here as the one place all three DROP lists are visible
 // side by side.
 const DROPS_FILE_BYTES_AND_CODE_EXECUTION = new Set<keyof GradeResult>(["codeExecution"]);
+// BULK-ZIP BW3: linkFetch is a TRANSIENT per-run link-resolution outcome, read
+// only by the live ledger off the in-memory run. It is INTENTIONALLY dropped by
+// all three allowlists (drafts and persisted runs never carry it).
+const DROPS_TRANSIENT_LINK_FETCH = new Set<keyof GradeResult>(["linkFetch"]);
 // submittedFiles is always rebuilt (emptied, or re-mapped through its own
 // coercer) rather than value-compared below - see each describe block.
 
@@ -155,6 +160,7 @@ function gradedSentinel(): GradedResult {
     },
     gradedRepo: "SENTINEL_gradedRepo",
     gradedRef: "SENTINEL_gradedRef",
+    linkFetch: "failed",
     submissionTruncated: true,
     determination: "no-submission",
   };
@@ -191,6 +197,7 @@ function ungradedSentinel(): UngradedResult {
     },
     gradedRepo: "SENTINEL_gradedRepo",
     gradedRef: "SENTINEL_gradedRef",
+    linkFetch: "failed",
     submissionTruncated: true,
     determination: "no-submission",
     ungraded: {
@@ -247,6 +254,10 @@ describe("stripGradeResultForDraft (grading-review-rows.ts) carries every field 
         expect(stripped.codeExecution, `codeExecution should be dropped`).toBeUndefined();
         continue;
       }
+      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
+        expect(stripped.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
+        continue;
+      }
       if (field === "submittedFiles") {
         expect(stripped.submittedFiles, `submittedFiles should be emptied`).toEqual([]);
         continue;
@@ -276,6 +287,10 @@ describe("coerceGradeResult, via coerceGradingDraftPayload (grading-drafts.ts), 
         expect(result.codeExecution, `codeExecution should be dropped`).toBeUndefined();
         continue;
       }
+      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
+        expect(result.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
+        continue;
+      }
       if (field === "submittedFiles") {
         expect(result.submittedFiles, `submittedFiles should round-trip (minus rawBase64)`).toEqual(
           sentinel.submittedFiles
@@ -303,6 +318,10 @@ describe("parseGradeResult, via serializeGithubGradingRun/parseStoredGithubGradi
     for (const field of fieldsFor(sentinel)) {
       if (DROPS_FILE_BYTES_AND_CODE_EXECUTION.has(field)) {
         expect(result.codeExecution, `codeExecution should be dropped`).toBeUndefined();
+        continue;
+      }
+      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
+        expect(result.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
         continue;
       }
       if (field === "submittedFiles") {

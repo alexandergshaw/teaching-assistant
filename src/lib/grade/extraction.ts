@@ -27,14 +27,22 @@ import {
   type ZipLimits,
 } from "../zip-caps";
 import type { LlmProvider } from "../llm";
-import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
+import {
+  MAX_NESTED_ZIP_DEPTH,
+  type InferredFileNameLookup,
+  type SubmittedFileInfo,
+  type StudentSubmissionEntry,
+} from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
-import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel } from "./utils";
+import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { looksLikeGithubUrl } from "../submission-repo";
 import { fetchGradableRepoContent } from "./repo-content";
 import { parseGoogleDriveUrl } from "../google-drive-url";
 import { extractCanvasSubmittedUrl, normalizeSubmittedRepoUrl } from "./canvas-link-submission";
+import { planLinkResolution } from "./link-resolution-plan";
+import { fetchGoogleDriveFile } from "./google-drive-content";
+import { classifyGradingUpload, buildSingleFileEntry } from "./single-file-entry";
 
 /** What one leaf member produced; merged into the result maps in ARCHIVE order. */
 interface LeafOutcome {
@@ -212,7 +220,17 @@ export async function extractStudentEntries(
  */
 export async function ingestZipEntries(
   zipBuffer: ArrayBuffer,
-  options?: { readonly inferFileNamesWith?: LlmProvider }
+  options?: {
+    readonly inferFileNamesWith?: LlmProvider;
+    /**
+     * BULK-ZIP BW3. Default false = today's inline resolution (the batch /
+     * engine path is untouched). True (only the bulk ingest route): link.html
+     * files are NOT fetched here; each link student's entry carries
+     * `submissionUrl` plus a bare "Submitted link" note, and the fetch happens
+     * per item at grade time (resolveEntryLinks).
+     */
+    readonly deferLinks?: boolean;
+  }
 ): Promise<{
   entries: StudentSubmissionEntry[];
   attemptedSupportedFiles: number;
@@ -234,11 +252,19 @@ export async function ingestZipEntries(
   }
   // Zip link submissions: resolve each Canvas link.html redirect to the code
   // it points at, before inference and grouping (runs unconditionally).
-  await resolveLinkSubmissions(submissions, rawData);
+  let deferredLinks: Map<string, string> | null = null;
+  if (options?.deferLinks) {
+    deferredLinks = deferLinkSubmissions(submissions);
+  } else {
+    await resolveLinkSubmissions(submissions, rawData);
+  }
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
-  const entries = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
+  const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
+  if (deferredLinks && deferredLinks.size > 0) {
+    attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
+  }
   return { entries, attemptedSupportedFiles, failedSupportedFiles };
 }
 
@@ -525,6 +551,189 @@ async function resolveLinkSubmissions(
     }
     submissions[path] = resolved;
     delete rawData[path];
+  }
+}
+
+/**
+ * BULK-ZIP BW3 (deferLinks): rewrite every Canvas link.html redirect page to a
+ * bare "Submitted link: <url>" note WITHOUT fetching, and return path -> url so
+ * the URL can be attached to its owning entry after grouping. rawData is left
+ * as-is.
+ */
+function deferLinkSubmissions(submissions: Record<string, string>): Map<string, string> {
+  const urlByPath = new Map<string, string>();
+  for (const path of Object.keys(submissions)) {
+    const extension = getFileExtension(path);
+    if (extension !== "html" && extension !== "htm") continue;
+    const url = extractCanvasSubmittedUrl(submissions[path]);
+    if (!url) continue;
+    urlByPath.set(path, url);
+    submissions[path] = `Submitted link: ${url}`;
+  }
+  return urlByPath;
+}
+
+const UNMATCHED_LINK_NOTE = "submitted link could not be matched to a single student";
+
+function linkKey(studentDisplay: string, citationName: string): string {
+  return JSON.stringify([studentDisplay.toLowerCase(), citationName]);
+}
+
+/**
+ * BULK-ZIP BW3 post-group pass (checker B2). groupSubmissionsByStudent keeps no
+ * raw path: an entry's `submittedFiles[].name` is the STRIPPED citation name.
+ * So the link map is keyed on the citation name, computed with the SAME
+ * parseSubmissionFileName call the grouping used (after inference, which it
+ * depends on) - never on the path.
+ *
+ * The key also carries the student display. On the Canvas `name_id_id_` zips
+ * the citation name alone is the bare "link.html" for EVERY student, so a
+ * citation-only key would collide across the whole zip and attach nothing.
+ * A URL attaches only when its (student, citation name) key maps to exactly
+ * ONE link path in the zip; any collision (one student with two link files that
+ * strip alike) attaches nothing and flags the entry, and an entry whose
+ * display was re-labelled by the A44 disambiguation simply finds no key. A URL
+ * is therefore never cross-attached to the wrong student.
+ */
+function attachDeferredLinkUrls(
+  entries: StudentSubmissionEntry[],
+  urlByPath: ReadonlyMap<string, string>,
+  inferredLookup: InferredFileNameLookup | undefined,
+  zipParents: Record<string, string[]>
+): void {
+  const byKey = new Map<string, { url: string; linkPaths: Set<string> }>();
+  for (const [linkPath, url] of urlByPath) {
+    const parsed = parseSubmissionFileName(linkPath, inferredLookup, zipParents[linkPath]);
+    const key = linkKey(parsed.studentDisplay, parsed.citationFileName);
+    const slot = byKey.get(key);
+    if (slot) slot.linkPaths.add(linkPath);
+    else byKey.set(key, { url, linkPaths: new Set([linkPath]) });
+  }
+  for (const entry of entries) {
+    const urls = new Set<string>();
+    let ambiguous = false;
+    for (const file of entry.submittedFiles) {
+      const slot = byKey.get(linkKey(entry.student, file.name));
+      if (!slot) continue;
+      if (slot.linkPaths.size === 1) urls.add(slot.url);
+      else ambiguous = true;
+    }
+    if (ambiguous || urls.size > 1) {
+      entry.repoReadNote = UNMATCHED_LINK_NOTE;
+      entry.linkFetch = "flagged";
+    } else if (urls.size === 1) {
+      entry.submissionUrl = [...urls][0];
+    }
+  }
+}
+
+/** Matches grade-run-item's incoming content cap; folded content is clamped to it. */
+export const MAX_ENTRY_CONTENT_CHARS = 2_000_000;
+
+function clampEntryContent(entry: StudentSubmissionEntry): StudentSubmissionEntry {
+  if (entry.content.length <= MAX_ENTRY_CONTENT_CHARS) return entry;
+  return { ...entry, content: entry.content.slice(0, MAX_ENTRY_CONTENT_CHARS) };
+}
+
+function withLinkNote(
+  entry: StudentSubmissionEntry,
+  linkFetch: "failed" | "flagged",
+  repoReadNote: string
+): StudentSubmissionEntry {
+  return clampEntryContent({
+    ...entry,
+    content: `${entry.content}\n\n---\n\nNote: ${repoReadNote}`,
+    repoReadNote,
+    linkFetch,
+  });
+}
+
+function withFoldedContent(
+  entry: StudentSubmissionEntry,
+  contentPart: string,
+  files: SubmittedFileInfo[],
+  extra: Partial<StudentSubmissionEntry>
+): StudentSubmissionEntry {
+  return clampEntryContent({
+    ...entry,
+    ...extra,
+    content: `${entry.content}\n\n---\n\n${contentPart}`,
+    submittedFiles: [...entry.submittedFiles, ...files],
+    repoReadNote: null,
+    linkFetch: "ok",
+  });
+}
+
+async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<StudentSubmissionEntry> {
+  const url = entry.submissionUrl;
+  if (typeof url !== "string" || url.trim().length === 0) return entry;
+  // A Canvas-path entry arrives already resolved (canvasWorkToEntry folded it).
+  if (entry.gradedRepo || entry.repoReadNote || entry.linkFetch) return entry;
+
+  const plan = planLinkResolution(url);
+  if (plan.action === "flag") {
+    return withLinkNote(entry, "flagged", `link not fetched: ${plan.reason ?? "unsupported link"}`);
+  }
+
+  if (plan.action === "github") {
+    const folded = await foldGithubRepoContent(normalizeSubmittedRepoUrl(url));
+    if (folded.gradedRepo === null) {
+      return withLinkNote(entry, "failed", folded.repoReadNote ?? "Could not read the linked GitHub repository.");
+    }
+    return withFoldedContent(entry, folded.contentPart, folded.files, {
+      gradedRepo: folded.gradedRepo,
+      gradedRef: folded.gradedRef,
+    });
+  }
+
+  const target = parseGoogleDriveUrl(url);
+  if (!target) return withLinkNote(entry, "flagged", "link not fetched: not a Google Drive link");
+  const fetched = await fetchGoogleDriveFile(target);
+  if ("error" in fetched) {
+    return withLinkNote(entry, "failed", `Could not read the linked Google Drive file: ${fetched.error}`);
+  }
+
+  const kind = classifyGradingUpload(fetched.name);
+  if (kind === "unsupported") {
+    return withLinkNote(entry, "flagged", "link not fetched: the linked Drive file type is not supported for grading");
+  }
+  let linked: StudentSubmissionEntry[];
+  if (kind === "single") {
+    const single = await buildSingleFileEntry(fetched.name, fetched.buffer, undefined, true);
+    linked = single ? [single] : [];
+  } else {
+    // Own ArrayBuffer, not Node's pooled one.
+    linked = await extractStudentEntries(new Uint8Array(fetched.buffer).slice().buffer);
+  }
+  // M1 single-entry guard: an archive (or an unreadable file) must never fan
+  // several students into this one row (the A44 blend).
+  if (linked.length !== 1) {
+    return withLinkNote(entry, "flagged", "the linked Drive file could not be used as a single submission");
+  }
+  return withFoldedContent(
+    entry,
+    `Linked Google Drive file (${fetched.name}):\n\n${linked[0].content}`,
+    linked[0].submittedFiles,
+    { mergedFileCount: entry.mergedFileCount + linked[0].mergedFileCount }
+  );
+}
+
+/**
+ * BULK-ZIP BW3: resolve an entry's `submissionUrl` at GRADE time. NEVER throws
+ * (a thrown error degrades to the bare note with linkFetch "failed"). An entry
+ * with no `submissionUrl`, or one already resolved, is returned unchanged.
+ * Sets `linkFetch` ("ok" | "failed" | "flagged") and re-clamps the folded
+ * content to MAX_ENTRY_CONTENT_CHARS. SSRF posture: GitHub goes through the
+ * hardened parser + fetchGradableRepoContent; Drive only through
+ * parseGoogleDriveUrl + fetchGoogleDriveFile's host allowlist; any other host
+ * is flagged, never fetched.
+ */
+export async function resolveEntryLinks(entry: StudentSubmissionEntry): Promise<StudentSubmissionEntry> {
+  try {
+    return await resolveEntryLinksUnsafe(entry);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "an unexpected error occurred";
+    return withLinkNote(entry, "failed", `Could not resolve the submitted link: ${reason}.`);
   }
 }
 

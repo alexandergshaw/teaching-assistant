@@ -1890,3 +1890,27 @@
   from: 'Owner request 2026-10-08 (direct chat).'
   note: 'Mechanism B (acted-on default, recommended by scope + check): extract the dropped .pptx theme COLORS and feed buildSlidesPptx existing-but-unfed theme? path so generated decks match the brand. A (place generated content INTO the actual file keeping masters/layouts/logos) is infeasible in this stack (jszip+pptxgenjs, no OOXML authoring lib) and render-unverifiable here - deferred as the FORK. Transport: SERVER-PARSE, NO-PERSIST - client posts base64 to a new action that parses via BW0 zip-caps capped primitives (readOfficeMember/assertContainerWithinCaps, fail-closed), returns only the PptxTheme, file discarded; a .pptx is a zip so it must NOT use a raw JSZip. Persist the theme globally for the owner (ta-pres-template-theme). W1 (server-parse extractor + theme leaf, new files, ships dead until W2) is GATED behind BULK/BW0 W2 landing (it imports zip-caps office primitives that BW0 W2 is editing); W2 is the SURFACE (TemplateDropzone.tsx + index.tsx/ArtifactCard/deck-file thread-through + the KEPT-rewritten deck-file.test.ts frozen invariant). Owner walk = drop a branded .pptx, generated decks pick up its colors.'
   question: 'Template use = recolor the generated decks to the dropped file brand (B, recommended, ships now) OR place your generated content into that actual .pptx keeping its masters/layouts/logos (A, a large build whose fidelity cannot be verified here)?'
+- id: 'BULK-ZIP'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Owner 2026-10-08: grade a large submissions zip (the owner 12MB submissions (4).zip is refused by the fast-fail preflight, limit 2.6MB). Upload to Supabase Storage off the body cap and grade through the existing chat per-item pump.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/bulk-zip-grading-scope.md (FINAL buildable plan; security S1-S9 + reliability R1-R12 folded in; loop-checker running). Machine-checkable (node-env vitest): the NDJSON stream-parser leaf (missing sentinel = interrupted), the never-throw client ingest wrapper, the per-student skip PARTITION (one oversized student = a skip line, not a whole-call refusal), the budget-under-maxDuration predicate shape, the guard-first route test (401 before body read), the path-segment bind (grading-uploads), the I-size-check, the FIX-4 removal pair, and I-sweep-lists-segment (replaces the old tautology). The real 12MB upload + Vercel memory/time are owner walks.'
+  from: 'Owner FORK=B decision (full bulk-zip support) after ZIP-UPLOAD-LAG FIX-1 shipped; re-surfaced 2026-10-08 when the owner 12MB zip was refused.'
+  note: 'Depends on ZIP-BOMB-CAPS (BW0) - now SHIPPED (W1 9d3933fb + W2 5150961f), so the capped parse primitives (zip-caps.ts readOfficeMember/assertContainerWithinCaps) exist and BW2/BW3 build ON them. Structural changes from the revision: a STREAMING Route Handler (src/app/api/grade-submission-zip/route.ts, maxDuration=60, ~35-40s extraction soft budget, requireAppOwner first) emitting one NDJSON entry line per student + skip lines + a done sentinel carrying the M-of-N ledger, feeding the EXISTING pump - NOT a Server Action (can not set maxDuration + head-of-line-blocks). The ~4.5MB cap is a REQUEST-BODY cap that hits Route Handlers too, so the STORAGE upload (body = storagePath only) beats it; NDJSON is justified on memory/incremental-dispatch/interruption grounds. Uses the withUploadedSyllabusFile lifecycle + isKnownUploadPath, adds grading-uploads to UPLOAD_PATH_SEGMENTS, binds segments[1]===grading-uploads on BOTH the new ingest AND extractSyllabusTextAction. Waves: BW1 client Storage transport + segment + stale-session UI + client delete-on-reject; BW2 streaming route + never-throw parser + driver wiring + guard-first + S4 size check + the skip partition; BW3 FIX-4 grade-time link defer via a shared resolveEntryLinks; BW4 skip-ledger + progress UI. Diagnostics mostly reuse (prepare_submission class exists; only upload_zip is new). Owner walk = the 12MB zip uploads and grades, oversized/failed students shown as named skips.'
+  question: null
+- id: 'GITHUB-URL-TRAVERSAL'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Pre-existing: parseSubmissionGithubUrl (submission-repo.ts:77-78) takes decoded owner=segments[0]/repo=segments[1] with no character validation; a student-supplied link can steer an authenticated GitHub API GET (e.g. ..%2Fuser/repos -> api.github.com/user/repos).'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Unit test: parseSubmissionGithubUrl rejects an owner or repo not matching ^[A-Za-z0-9_.-]+$ (and not . / ..). Reachable TODAY via the chat URL branch; BULK-ZIP FIX-4 (BW3) adds a route reach, so fix before or with BW3.'
+  from: 'RES-BZ-7 of docs/bulk-zip-grading-scope.md + the earlier security pass (S8); the claim it was already filed was measured FALSE 2026-10-08.'
+  note: 'getRepo interpolates owner/repo unencoded onto the api.github.com base with the owner bearer token (github.repos.ts), so a crafted link steers an authenticated GET to other api.github.com paths. Fix = reject non ^[A-Za-z0-9_.-]+$ owner/repo in parseSubmissionGithubUrl. Pre-existing, not caused by bulk-zip; small standalone fix.'
+  question: null

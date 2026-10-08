@@ -17,6 +17,15 @@ import {
 // and below and measured runtime-import-graph.test.ts:703's frozen trail go
 // RED above and GREEN below (F15 clause 3).
 import { inferFileNameConvention } from "./rubric";
+import {
+  ZipCapError,
+  chargeArchiveLevel,
+  createZipBudget,
+  readMemberBounded,
+  runBounded,
+  type PlannedZipMember,
+  type ZipLimits,
+} from "../zip-caps";
 import type { LlmProvider } from "../llm";
 import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
@@ -27,26 +36,27 @@ import { fetchGradableRepoContent } from "./repo-content";
 import { parseGoogleDriveUrl } from "../google-drive-url";
 import { extractCanvasSubmittedUrl, normalizeSubmittedRepoUrl } from "./canvas-link-submission";
 
-async function extractTextFromFile(
-  name: string,
-  file: JSZip.JSZipObject
-): Promise<string | null> {
-  const extension = getFileExtension(name);
-
-  if (TEXT_EXTENSIONS.has(extension)) {
-    return file.async("string");
-  }
-
-  if (DOCUMENT_EXTENSIONS.has(extension)) {
-    return extractTextFromBuffer(name, await file.async("nodebuffer"));
-  }
-
-  return null;
+/** What one leaf member produced; merged into the result maps in ARCHIVE order. */
+interface LeafOutcome {
+  readonly fullName: string;
+  readonly isImage: boolean;
+  readonly submission: string | null;
+  readonly raw: string | null;
 }
 
-/** Extract text-based files from a zip archive. */
+/**
+ * Extract text-based files from a zip archive.
+ *
+ * ZIP-BOMB-CAPS (docs/zip-bomb-caps-scope.md): one shared budget covers every
+ * nesting level; each level is checked from its declared sizes BEFORE any
+ * member is decompressed; each member is then read ONCE through a bounded
+ * reader and converted natively (toString "utf-8" / "base64"). A cap breach
+ * throws a ZipCapError ("Refused: ..." prefix) and refuses the whole archive.
+ * `options.limits` exists for tests; no production caller passes it.
+ */
 export async function extractSubmissions(
-  zipBuffer: ArrayBuffer
+  zipBuffer: ArrayBuffer,
+  options?: { readonly limits?: Partial<ZipLimits> }
 ): Promise<{
   submissions: Record<string, string>;
   rawData: Record<string, string>;
@@ -66,6 +76,7 @@ export async function extractSubmissions(
   const zipParents: Record<string, string[]> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
+  const budget = createZipBudget(options?.limits);
 
   async function collectFromZip(
     zip: JSZip,
@@ -73,60 +84,90 @@ export async function extractSubmissions(
     parentPath: string,
     zipChain: string[]
   ): Promise<void> {
-    await Promise.all(
-      Object.entries(zip.files).map(async ([name, file]) => {
-        if (file.dir) return;
-
-        const fullName = parentPath ? `${parentPath}/${name}` : name;
+    const planned = chargeArchiveLevel(zip, budget, {
+      parentPath,
+      chain: zipChain,
+      classify: (name) => {
         const extension = getFileExtension(name);
-        const isSupportedFile =
-          TEXT_EXTENSIONS.has(extension) || DOCUMENT_EXTENSIONS.has(extension);
+        if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) return "nested";
+        if (IMAGE_EXTENSIONS.has(extension)) return "leaf";
+        if (TEXT_EXTENSIONS.has(extension) || DOCUMENT_EXTENSIONS.has(extension)) return "leaf";
+        return "skip";
+      },
+    });
 
-        if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) {
-          try {
-            const nestedBuffer = await file.async("arraybuffer");
-            const nestedZip = await JSZip.loadAsync(nestedBuffer);
-            await collectFromZip(nestedZip, depth + 1, fullName, [...zipChain, fullName]);
-          } catch {
-            // Continue when a nested archive cannot be opened.
-          }
-          return;
-        }
+    const leaves: PlannedZipMember[] = planned.filter((member) => member.kind === "leaf");
+    const nested: PlannedZipMember[] = planned.filter((member) => member.kind === "nested");
+    const outcomes: Array<LeafOutcome | null> = leaves.map(() => null);
 
-        const isImage = IMAGE_EXTENSIONS.has(extension);
+    await runBounded(leaves, budget.limits.concurrency, async (member, index) => {
+      const { name, fullName, entry, declared } = member;
+      const extension = getFileExtension(name);
 
-        if (!isSupportedFile && !isImage) {
-          return;
-        }
+      if (IMAGE_EXTENSIONS.has(extension)) {
+        // Images carry no extractable text, but their presence matters (e.g.
+        // required screenshots). Record a placeholder so the file is grouped
+        // per student and surfaced in the file list, and keep the raw bytes so
+        // the vision-capable grader can actually see it.
+        const bytes = await readMemberBounded(entry, declared, fullName, zipChain, budget.limits);
+        const baseName = name.split("/").pop() ?? name;
+        outcomes[index] = {
+          fullName,
+          isImage: true,
+          submission: `[Image file: ${baseName}]`,
+          raw: bytes.toString("base64"),
+        };
+        return;
+      }
 
-        if (isImage) {
-          // Images carry no extractable text, but their presence matters (e.g.
-          // required screenshots). Record a placeholder so the file is grouped
-          // per student and surfaced in the file list, and keep the raw bytes so
-          // the vision-capable grader can actually see it.
-          const baseName = name.split("/").pop() ?? name;
-          submissions[fullName] = `[Image file: ${baseName}]`;
-          rawData[fullName] = await file.async("base64");
-          if (zipChain.length > 0) zipParents[fullName] = zipChain;
-          return;
-        }
+      try {
+        const bytes = await readMemberBounded(entry, declared, fullName, zipChain, budget.limits);
+        const extractedText = await extractTextFromBuffer(name, bytes);
+        outcomes[index] =
+          extractedText && extractedText.trim()
+            ? { fullName, isImage: false, submission: extractedText, raw: bytes.toString("base64") }
+            : { fullName, isImage: false, submission: null, raw: null };
+      } catch (err) {
+        // A cap breach refuses the whole archive; every other failure is this
+        // one file failing to extract, exactly as before.
+        if (err instanceof ZipCapError) throw err;
+        outcomes[index] = { fullName, isImage: false, submission: null, raw: null };
+      }
+    });
 
-        attemptedSupportedFiles += 1;
+    // Merge in ARCHIVE order (scope D7): the pool settles in completion order,
+    // the maps must not.
+    for (const outcome of outcomes) {
+      if (!outcome) continue;
+      if (!outcome.isImage) attemptedSupportedFiles += 1;
+      if (outcome.submission === null || outcome.raw === null) {
+        failedSupportedFiles.push(outcome.fullName);
+        continue;
+      }
+      submissions[outcome.fullName] = outcome.submission;
+      rawData[outcome.fullName] = outcome.raw;
+      if (zipChain.length > 0) zipParents[outcome.fullName] = zipChain;
+    }
 
-        try {
-          const extractedText = await extractTextFromFile(name, file);
-          if (extractedText && extractedText.trim()) {
-            submissions[fullName] = extractedText;
-            rawData[fullName] = await file.async("base64");
-            if (zipChain.length > 0) zipParents[fullName] = zipChain;
-          } else {
-            failedSupportedFiles.push(fullName);
-          }
-        } catch {
-          failedSupportedFiles.push(fullName);
-        }
-      })
-    );
+    // Nested archives one at a time, in archive order, so at most one nested
+    // buffer per depth is alive and the shared budget is charged
+    // deterministically.
+    for (const member of nested) {
+      try {
+        const nestedBuffer = await readMemberBounded(
+          member.entry,
+          member.declared,
+          member.fullName,
+          zipChain,
+          budget.limits
+        );
+        const nestedZip = await JSZip.loadAsync(nestedBuffer);
+        await collectFromZip(nestedZip, depth + 1, member.fullName, [...zipChain, member.fullName]);
+      } catch (err) {
+        if (err instanceof ZipCapError) throw err;
+        // Continue when a nested archive cannot be opened.
+      }
+    }
   }
 
   const zip = await JSZip.loadAsync(zipBuffer);

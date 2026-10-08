@@ -856,3 +856,107 @@ describe("useContinuousGradingRun - unresolved-name flag set and label forwardin
     expect((prepareChatSubmissionActionMock.mock.calls[0][0] as FormData).get("label")).toBe("Bob");
   });
 });
+
+describe("useContinuousGradingRun - BULK-ZIP BW2: the storaged-zip submit path", () => {
+  type Ingest = NonNullable<Parameters<typeof useContinuousGradingRun>[0]["ingestZip"]>;
+
+  function entryOf(student: string): StudentSubmissionEntry {
+    return { student, content: "x", mergedFileCount: 0, submittedFiles: [] };
+  }
+
+  function useZipDriver(ingestZip: Ingest, maxEntries = 40): ReturnType<typeof useContinuousGradingRun> {
+    h0.begin();
+    return useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatchItemMock, maxEntries, ingestZip });
+  }
+
+  async function readyZipDriver(ingestZip: Ingest, maxEntries = 40) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- no-render harness: one call is one render
+    let driver = useZipDriver(ingestZip, maxEntries);
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- no-render harness: one call is one render
+    driver = useZipDriver(ingestZip, maxEntries);
+    return driver;
+  }
+
+  const zipInput = { kind: "storaged-zip" as const, storagePath: "u/grading-uploads/a.zip", name: "class.zip" };
+
+  it("a refused ingest returns refused and dispatchedCount is unchanged", async () => {
+    const ingest: Ingest = async () => ({ kind: "refused", reason: "interrupted" });
+    const driver = await readyZipDriver(ingest);
+    const outcome = await driver.submit(zipInput);
+    expect(outcome).toEqual({ kind: "refused", reason: "interrupted" });
+    expect(useZipDriver(ingest).dispatchedCount).toBe(0);
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+
+  it("a REJECTING injected ingest resolves refused (never throws) with dispatchedCount unchanged", async () => {
+    const ingest: Ingest = async () => {
+      throw new Error("boom");
+    };
+    const driver = await readyZipDriver(ingest);
+    const outcome = await driver.submit(zipInput);
+    expect(outcome.kind).toBe("refused");
+    expect(useZipDriver(ingest).dispatchedCount).toBe(0);
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+
+  it("reset() fired inside the ingest refuses and queues nothing (R4 stale session)", async () => {
+    const holder: { driver?: ReturnType<typeof useContinuousGradingRun> } = {};
+    const ingest: Ingest = async (_path, _provider, onEntry) => {
+      onEntry(entryOf("A"));
+      onEntry(entryOf("B"));
+      holder.driver?.reset();
+      return { kind: "complete", entryCount: 2, ledger: { studentsFound: 2, studentsEmitted: 2, skipped: [], failedSupportedFiles: [] } };
+    };
+    const driver = await readyZipDriver(ingest);
+    holder.driver = driver;
+    const outcome = await driver.submit(zipInput);
+    expect(outcome.kind).toBe("refused");
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+
+  it("3 entries + 1 skip dispatches 3 and returns a partial naming the skipped student", async () => {
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    const ingest: Ingest = async (_path, _provider, onEntry) => {
+      onEntry(entryOf("A"));
+      onEntry(entryOf("B"));
+      onEntry(entryOf("C"));
+      return {
+        kind: "complete",
+        entryCount: 3,
+        ledger: { studentsFound: 4, studentsEmitted: 3, skipped: [{ student: "Big", reason: "too large" }], failedSupportedFiles: [] },
+      };
+    };
+    const driver = await readyZipDriver(ingest);
+    const outcome = await driver.submit(zipInput);
+    expect(outcome.kind).toBe("partial");
+    if (outcome.kind === "partial") {
+      expect(outcome.dispatchedCount).toBe(3);
+      expect(outcome.refusedCount).toBe(1);
+      expect(outcome.reason).toContain("Big");
+    }
+    expect(dispatchItemMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("the maxEntries clip still applies alongside skips: both the clip and the skip are named", async () => {
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    const ingest: Ingest = async (_path, _provider, onEntry) => {
+      for (const s of ["A", "B", "C", "D"]) onEntry(entryOf(s));
+      return {
+        kind: "complete",
+        entryCount: 4,
+        ledger: { studentsFound: 5, studentsEmitted: 4, skipped: [{ student: "Big", reason: "too large" }], failedSupportedFiles: [] },
+      };
+    };
+    const driver = await readyZipDriver(ingest, 2);
+    const outcome = await driver.submit(zipInput);
+    expect(outcome.kind).toBe("partial");
+    if (outcome.kind === "partial") {
+      expect(outcome.dispatchedCount).toBe(2);
+      expect(outcome.refusedCount).toBe(3);
+      expect(outcome.reason).toContain("limit");
+      expect(outcome.reason).toContain("Big");
+    }
+    expect(dispatchItemMock).toHaveBeenCalledTimes(2);
+  });
+});

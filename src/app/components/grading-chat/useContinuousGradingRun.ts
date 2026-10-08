@@ -39,6 +39,7 @@ import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
+import { ingestStoragedZip, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import {
   mergeArrivedResults,
   buildIncrementalRun,
@@ -77,6 +78,13 @@ export interface UseContinuousGradingRunParams {
   /** Injected so the hook is driven by the no-render lifecycle harness with a
    * MOCKED seam. Defaults to the real /api/grade-run-item POST. */
   readonly dispatchItem?: (request: GradeRunItemRequestBody) => Promise<GradeResult>;
+  /** Injected storaged-zip ingest (BULK-ZIP BW2). Defaults to the real
+   * never-throw NDJSON client for POST /api/grade-submission-zip. */
+  readonly ingestZip?: (
+    storagePath: string,
+    provider: string,
+    onEntry: (entry: StudentSubmissionEntry) => void
+  ) => Promise<IngestOutcome>;
   /** The per-session entry ceiling (R4). Defaults to DEFAULT_MAX_ENTRIES. */
   readonly maxEntries?: number;
   /** Opt in to the did-right/did-wrong comment split on every grade request.
@@ -146,6 +154,7 @@ async function postGradeRunItem(request: GradeRunItemRequestBody): Promise<Grade
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
+  const ingestZip = params.ingestZip ?? ingestStoragedZip;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
   const assignmentInstructionsRef = useRef("");
@@ -278,8 +287,32 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     let entries: StudentSubmissionEntry[];
     let pointsPossible: number | null = null;
     let canvasUrlToPin: string | null = null;
+    // BULK-ZIP BW2: students the ingest route skipped (named reason each),
+    // reported on the outcome so nothing is dropped silently.
+    let ingestSkipped: readonly { readonly student: string; readonly reason: string }[] = [];
 
-    if (input.kind === "text") {
+    if (input.kind === "storaged-zip") {
+      // R4: a reset while the zip is being prepared must not spend grading
+      // calls on a ghost run, so the session is captured before the await.
+      const sessionAtStart = sessionIdRef.current;
+      const collected: StudentSubmissionEntry[] = [];
+      let ingest: IngestOutcome;
+      try {
+        ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry));
+      } catch {
+        // ingestStoragedZip never throws; this guards an injected replacement.
+        ingest = { kind: "refused", reason: "The zip could not be prepared." };
+      }
+      if (ingest.kind === "refused") return { kind: "refused", reason: ingest.reason };
+      if (sessionIdRef.current !== sessionAtStart) {
+        return { kind: "refused", reason: "The session was reset while the zip was being prepared. Nothing was graded." };
+      }
+      ingestSkipped = ingest.ledger.skipped;
+      if (collected.length === 0 && ingestSkipped.length === 0) {
+        return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
+      }
+      entries = collected;
+    } else if (input.kind === "text") {
       if (!input.content.trim()) {
         return { kind: "refused", reason: "This submission is empty." };
       }
@@ -324,12 +357,6 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         // A typed label reaches the server's `labelled` flag, which suppresses
         // name inference (grading-chat-intake.ts reads formData.get("label")).
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
-      } else if (input.kind === "storaged-zip") {
-        // BULK-ZIP BW2 wires the real storaged-zip submit path and flips
-        // GRADING_ZIP_STORAGE_INGEST_ENABLED on; until then the transport flag is
-        // off so this branch is unreachable, but it keeps the ChatSubmissionInput
-        // union exhaustive and type-safe here.
-        return { kind: "refused", reason: "Large-zip grading is not available yet." };
       } else {
         formData.set("kind", "url");
         formData.set("url", input.url);
@@ -414,14 +441,21 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     }
     pump();
 
-    if (refusedCount > 0) {
+    if (refusedCount > 0 || ingestSkipped.length > 0) {
+      const skipNote =
+        ingestSkipped.length > 0
+          ? ` Skipped: ${ingestSkipped.map((s) => `${s.student} (${s.reason})`).join("; ")}.`
+          : "";
+      const clipNote =
+        refusedCount > 0
+          ? `Graded the first ${admitted.length} of ${entries.length} students in this submission; ` +
+            `the session's ${maxEntries}-submission limit was reached. Start a new session to grade the rest.`
+          : `Graded ${admitted.length} of ${admitted.length + ingestSkipped.length} students in this zip.`;
       return {
         kind: "partial",
         dispatchedCount: admitted.length,
-        refusedCount,
-        reason:
-          `Graded the first ${admitted.length} of ${entries.length} students in this submission; ` +
-          `the session's ${maxEntries}-submission limit was reached. Start a new session to grade the rest.`,
+        refusedCount: refusedCount + ingestSkipped.length,
+        reason: clipNote + skipNote,
       };
     }
     return { kind: "accepted", entryCount: admitted.length };

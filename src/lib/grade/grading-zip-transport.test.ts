@@ -46,8 +46,9 @@ describe("uploadGradingZip builds only a grading-uploads path", () => {
 });
 
 describe("chooseZipTransport", () => {
-  it("ships disabled until BW2 provides the server ingest", () => {
-    expect(GRADING_ZIP_STORAGE_INGEST_ENABLED).toBe(false);
+  it("is enabled now that BW2 provides the server ingest", () => {
+    expect(GRADING_ZIP_STORAGE_INGEST_ENABLED).toBe(true);
+    expect(chooseZipTransport({ name: "Class.zip", size: 12 * MB })).toEqual({ kind: "storage" });
   });
 
   it("keeps the body path for non-zip files and small zips, enabled or not", () => {

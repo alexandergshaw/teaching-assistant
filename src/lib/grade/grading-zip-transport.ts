@@ -13,12 +13,12 @@ import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabu
 import { checkFileWireBudget, formatMB } from "@/lib/upload-budget";
 
 /**
- * Whether the server-side streaming ingest (BW2) exists. While false a large
- * zip keeps today's worded refusal instead of uploading an object nothing can
- * grade. BW2 flips this in the same wave that adds the driver's "storaged-zip"
- * submit path.
+ * Whether the server-side streaming ingest (BW2, POST /api/grade-submission-zip)
+ * exists. True since BW2, which added it together with the driver's
+ * "storaged-zip" submit path. Setting it false restores today's worded refusal
+ * for a large zip (the rollback switch).
  */
-export const GRADING_ZIP_STORAGE_INGEST_ENABLED = false;
+export const GRADING_ZIP_STORAGE_INGEST_ENABLED = true;
 
 /** Pre-flight ceiling for the stored zip (scope section 2; the syllabus
  * precedent, syllabus-upload-validation.ts MAX_FILE_SIZE). BW2 re-checks the

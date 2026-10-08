@@ -401,6 +401,127 @@ export function readMemberBounded(
   });
 }
 
+/** Entries in one Office container (a deck legitimately has hundreds). */
+export const OFFICE_MAX_ENTRIES = 2000;
+/** Summed declared size of every member of one Office container. */
+export const OFFICE_MAX_ARCHIVE_DECLARED_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Container pre-flight for an Office file (ZIP-BOMB-CAPS W2, scope D8). A
+ * SYNCHRONOUS walk over EVERY member, from declared sizes only, before anything
+ * is decompressed: entry count, per-member declared size and ratio, and the
+ * container's total declared size. Applied to all members because the fallback
+ * parser decides for itself what it reads. Not charged to the shared budget.
+ * FAILS CLOSED on an unreadable size (declaredSizesOf throws).
+ */
+export function assertContainerWithinCaps(
+  zip: JSZip,
+  containerName: string,
+  chain: readonly string[] = [],
+  limits: ZipLimits = DEFAULT_ZIP_LIMITS,
+  container: { readonly maxEntries: number; readonly maxDeclaredBytes: number } = {
+    maxEntries: OFFICE_MAX_ENTRIES,
+    maxDeclaredBytes: OFFICE_MAX_ARCHIVE_DECLARED_BYTES,
+  }
+): void {
+  let count = 0;
+  let total = 0;
+  for (const [name, entry] of Object.entries(zip.files)) {
+    const fullName = `${containerName}/${name}`;
+    count += 1;
+    if (count > container.maxEntries) {
+      throw new ZipCapError({
+        code: "entry-count",
+        entryName: fullName,
+        chain,
+        limitName: "OFFICE_MAX_ENTRIES",
+        limitValue: container.maxEntries,
+        limitIsBytes: false,
+        observed: count,
+      });
+    }
+    if (entry.dir) continue;
+
+    const { declared, compressed } = declaredSizesOf(entry, fullName, chain, limits);
+    if (declared > limits.maxMemberDeclaredBytes) {
+      throw new ZipCapError({
+        code: "member-bytes",
+        entryName: fullName,
+        chain,
+        limitName: "ZIP_MAX_MEMBER_DECLARED_BYTES",
+        limitValue: limits.maxMemberDeclaredBytes,
+        limitIsBytes: true,
+        observed: declared,
+      });
+    }
+    if (declared >= limits.ratioFloorBytes) {
+      const ratio = Math.round(declared / Math.max(compressed, 1));
+      if (ratio > limits.maxMemberRatio) {
+        throw new ZipCapError({
+          code: "member-ratio",
+          entryName: fullName,
+          chain,
+          limitName: "ZIP_MAX_MEMBER_RATIO",
+          limitValue: limits.maxMemberRatio,
+          limitIsBytes: false,
+          observed: ratio,
+        });
+      }
+    }
+    total += declared;
+    if (total > container.maxDeclaredBytes) {
+      throw new ZipCapError({
+        code: "cumulative-bytes",
+        entryName: fullName,
+        chain,
+        limitName: "OFFICE_MAX_ARCHIVE_DECLARED_BYTES",
+        limitValue: container.maxDeclaredBytes,
+        limitIsBytes: true,
+        observed: total,
+      });
+    }
+  }
+}
+
+/**
+ * Read one Office member through the bounded reader, charging its declared
+ * bytes to `budget` (the shared archive budget when the caller supplied one) so
+ * many Office files in one archive cannot multiply the cap.
+ */
+export async function readOfficeMember(
+  entry: JSZip.JSZipObject,
+  entryName: string,
+  budget: ZipBudget,
+  chain: readonly string[] = []
+): Promise<Buffer> {
+  const { limits } = budget;
+  const { declared } = declaredSizesOf(entry, entryName, chain, limits);
+  if (declared > limits.maxMemberDeclaredBytes) {
+    throw new ZipCapError({
+      code: "member-bytes",
+      entryName,
+      chain,
+      limitName: "ZIP_MAX_MEMBER_DECLARED_BYTES",
+      limitValue: limits.maxMemberDeclaredBytes,
+      limitIsBytes: true,
+      observed: declared,
+    });
+  }
+  budget.declaredBytes += declared;
+  if (budget.declaredBytes > limits.cumulativeBytes) {
+    throw new ZipCapError({
+      code: "cumulative-bytes",
+      entryName,
+      chain,
+      limitName: "ZIP_MAX_CUMULATIVE_DECLARED_BYTES",
+      limitValue: limits.cumulativeBytes,
+      limitIsBytes: true,
+      observed: budget.declaredBytes,
+    });
+  }
+  return readMemberBounded(entry, declared, entryName, chain, limits);
+}
+
 /**
  * Run `fn` over `items` with at most `limit` in flight, FAIL-FAST: after the
  * first rejection no queued item starts, in-flight ones are awaited, and the

@@ -122,7 +122,7 @@ export async function extractSubmissions(
 
       try {
         const bytes = await readMemberBounded(entry, declared, fullName, zipChain, budget.limits);
-        const extractedText = await extractTextFromBuffer(name, bytes);
+        const extractedText = await extractTextFromBuffer(name, bytes, { budget });
         outcomes[index] =
           extractedText && extractedText.trim()
             ? { fullName, isImage: false, submission: extractedText, raw: bytes.toString("base64") }

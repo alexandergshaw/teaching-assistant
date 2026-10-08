@@ -1,5 +1,12 @@
 import JSZip from "jszip";
 import { OfficeParser, type SupportedFileType } from "officeparser";
+import {
+  assertContainerWithinCaps,
+  createZipBudget,
+  readOfficeMember,
+  type ZipBudget,
+  type ZipLimits,
+} from "./zip-caps";
 
 /**
  * Server-side text extraction for uploaded files. This is the single source of
@@ -103,15 +110,34 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
-async function extractDocxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
+/** Optional ZIP-BOMB-CAPS wiring: the shared archive budget and/or limit overrides. */
+export interface ExtractOptions {
+  budget?: ZipBudget;
+  limits?: Partial<ZipLimits>;
+}
+
+/** Every Office extractor reads through this: bounded, charged, fail-closed. */
+async function readText(
+  entry: JSZip.JSZipObject,
+  containerName: string,
+  budget: ZipBudget
+): Promise<string> {
+  const bytes = await readOfficeMember(entry, `${containerName}/${entry.name}`, budget);
+  return bytes.toString("utf-8");
+}
+
+async function extractDocxText(
+  zip: JSZip,
+  containerName: string,
+  budget: ZipBudget
+): Promise<string | null> {
   const documentXml = zip.file("word/document.xml");
 
   if (!documentXml) {
     return null;
   }
 
-  let xml = await documentXml.async("string");
+  let xml = await readText(documentXml, containerName, budget);
   xml = xml
     .replace(/<w:tab\s*\/?>/g, "\t")
     .replace(/<w:br\s*\/?>/g, "\n")
@@ -121,8 +147,11 @@ async function extractDocxText(buffer: Buffer): Promise<string | null> {
   return normalizeWhitespace(decodeXmlEntities(xml));
 }
 
-async function extractPptxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
+async function extractPptxText(
+  zip: JSZip,
+  containerName: string,
+  budget: ZipBudget
+): Promise<string | null> {
   const slideFiles = Object.values(zip.files)
     .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -134,7 +163,7 @@ async function extractPptxText(buffer: Buffer): Promise<string | null> {
   const slides: string[] = [];
 
   for (const slide of slideFiles) {
-    const xml = await slide.async("string");
+    const xml = await readText(slide, containerName, budget);
     const textMatches = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g));
     const text = textMatches
       .map((match) => decodeXmlEntities(match[1] ?? "").trim())
@@ -149,15 +178,18 @@ async function extractPptxText(buffer: Buffer): Promise<string | null> {
   return normalizeWhitespace(slides.join("\n\n"));
 }
 
-async function extractXlsxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
+async function extractXlsxText(
+  zip: JSZip,
+  containerName: string,
+  budget: ZipBudget
+): Promise<string | null> {
   const sharedStringsFile = zip.file("xl/sharedStrings.xml");
 
   if (!sharedStringsFile) {
     return null;
   }
 
-  const xml = await sharedStringsFile.async("string");
+  const xml = await readText(sharedStringsFile, containerName, budget);
   const matches = Array.from(xml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g));
   const values = matches
     .map((match) => decodeXmlEntities(match[1] ?? "").trim())
@@ -170,6 +202,31 @@ async function extractXlsxText(buffer: Buffer): Promise<string | null> {
   return normalizeWhitespace(values.join("\n"));
 }
 
+const OOXML_EXTENSIONS = new Set(["docx", "pptx", "xlsx"]);
+const ODF_EXTENSIONS = new Set(["odt", "odp", "ods"]);
+
+/**
+ * Load an Office container once and run the declared-size pre-flight over every
+ * member. A cap error always propagates. Any other load failure propagates for
+ * OOXML (as before) and is tolerated for ODF, which had no JSZip load before.
+ */
+async function openContainer(
+  name: string,
+  extension: string,
+  buffer: Buffer,
+  budget: ZipBudget
+): Promise<JSZip | null> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (error) {
+    if (ODF_EXTENSIONS.has(extension)) return null;
+    throw error;
+  }
+  assertContainerWithinCaps(zip, name, [], budget.limits);
+  return zip;
+}
+
 /**
  * Extract plain text from a file's bytes, dispatching on its extension. Text
  * files are decoded directly; Office/OpenDocument/PDF formats use the dedicated
@@ -178,7 +235,8 @@ async function extractXlsxText(buffer: Buffer): Promise<string | null> {
  */
 export async function extractTextFromBuffer(
   name: string,
-  buffer: Buffer
+  buffer: Buffer,
+  options?: ExtractOptions
 ): Promise<string | null> {
   const extension = getFileExtension(name);
 
@@ -187,23 +245,29 @@ export async function extractTextFromBuffer(
   }
 
   if (DOCUMENT_EXTENSIONS.has(extension)) {
+    const budget = options?.budget ?? createZipBudget(options?.limits);
+    const zip =
+      OOXML_EXTENSIONS.has(extension) || ODF_EXTENSIONS.has(extension)
+        ? await openContainer(name, extension, buffer, budget)
+        : null;
+
     // OOXML fallbacks are resilient for common LMS submissions.
-    if (extension === "docx") {
-      const docxText = await extractDocxText(buffer);
+    if (zip && extension === "docx") {
+      const docxText = await extractDocxText(zip, name, budget);
       if (docxText) {
         return docxText;
       }
     }
 
-    if (extension === "pptx") {
-      const pptxText = await extractPptxText(buffer);
+    if (zip && extension === "pptx") {
+      const pptxText = await extractPptxText(zip, name, budget);
       if (pptxText) {
         return pptxText;
       }
     }
 
-    if (extension === "xlsx") {
-      const xlsxText = await extractXlsxText(buffer);
+    if (zip && extension === "xlsx") {
+      const xlsxText = await extractXlsxText(zip, name, budget);
       if (xlsxText) {
         return xlsxText;
       }

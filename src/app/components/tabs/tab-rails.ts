@@ -45,12 +45,9 @@ import {
   COURSES_SECTION_LABELS,
   TASKS_VIEW_LABELS,
   TASKS_VIEW_ORDER,
-  WORKFLOWS_VIEW_LABELS,
-  WORKFLOWS_VIEW_ORDER,
   type CoursesSection,
   type TasksView,
   type ToolsSection,
-  type WorkflowsView,
 } from "./tab-sections";
 
 // --- Courses -------------------------------------------------------------
@@ -117,74 +114,50 @@ export function coursesStateFromRailItem(
 
 // --- Tools ---------------------------------------------------------------
 
-export type ToolsRailItemId = `manual:${ManualViewType}` | `workflows:${WorkflowsView}`;
+// WORKFLOWS-COLLAPSE W2: the rail is the Manual views only. The Workflows
+// family dissolved into the Automate container (manualView="artifact-design"),
+// so there is no "workflows:<view>" id any more.
+export type ToolsRailItemId = `manual:${ManualViewType}`;
 
 export function manualRailItemId(view: ManualViewType): `manual:${ManualViewType}` {
   return `manual:${view}`;
 }
 
-export function workflowsRailItemId(view: WorkflowsView): `workflows:${WorkflowsView}` {
-  return `workflows:${view}`;
-}
+export type ToolsRailItem = {
+  id: `manual:${ManualViewType}`;
+  label: string;
+  section: "manual";
+  manualView: ManualViewType;
+};
 
-export type ToolsRailItem =
-  | { id: `manual:${ManualViewType}`; label: string; section: "manual"; manualView: ManualViewType }
-  | { id: `workflows:${WorkflowsView}`; label: string; section: "workflows"; workflowsView: WorkflowsView };
-
-// Both halves derived from the families' own ordered lists, so a view added to
-// MANUAL_VIEW_ORDER or WORKFLOWS_VIEW_ORDER joins the rail with no edit here.
-export const TOOLS_RAIL_ITEMS: readonly ToolsRailItem[] = [
-  ...MANUAL_VIEW_ORDER.map(
-    (view): ToolsRailItem => ({
-      id: manualRailItemId(view),
-      label: MANUAL_VIEW_LABELS[view],
-      section: "manual",
-      manualView: view,
-    })
-  ),
-  ...WORKFLOWS_VIEW_ORDER.map(
-    (view): ToolsRailItem => ({
-      id: workflowsRailItemId(view),
-      label: WORKFLOWS_VIEW_LABELS[view],
-      section: "workflows",
-      workflowsView: view,
-    })
-  ),
-];
+// Derived from MANUAL_VIEW_ORDER, so a view added there joins the rail with no
+// edit here.
+export const TOOLS_RAIL_ITEMS: readonly ToolsRailItem[] = MANUAL_VIEW_ORDER.map(
+  (view): ToolsRailItem => ({
+    id: manualRailItemId(view),
+    label: MANUAL_VIEW_LABELS[view],
+    section: "manual",
+    manualView: view,
+  })
+);
 
 const TOOLS_RAIL_BY_ID: ReadonlyMap<string, ToolsRailItem> = new Map(
   TOOLS_RAIL_ITEMS.map((item) => [item.id, item])
 );
 
-/** The Tools rail chip for the currently resolved state - the derived section
- *  read backwards. */
-export function toolsRailItemFor(
-  section: ToolsSection,
-  manualView: ManualViewType,
-  workflowsView: WorkflowsView
-): ToolsRailItemId {
-  return section === "workflows" ? workflowsRailItemId(workflowsView) : manualRailItemId(manualView);
+/** The Tools rail chip for the currently resolved Manual view. */
+export function toolsRailItemFor(manualView: ManualViewType): ToolsRailItemId {
+  return manualRailItemId(manualView);
 }
 
 /** The full state one Tools rail chip selects: the section it implies plus the
- *  view param that already owned it, with the other family's view left exactly
- *  as the user last had it. */
+ *  view param that already owned it. An unrecognised id changes nothing. */
 export function toolsStateFromRailItem(
   id: string,
   currentSection: ToolsSection,
-  currentManualView: ManualViewType,
-  currentWorkflowsView: WorkflowsView
-): { toolsSection: ToolsSection; manualView: ManualViewType; workflowsView: WorkflowsView } {
+  currentManualView: ManualViewType
+): { toolsSection: ToolsSection; manualView: ManualViewType } {
   const item = TOOLS_RAIL_BY_ID.get(id);
-  if (!item) {
-    return {
-      toolsSection: currentSection,
-      manualView: currentManualView,
-      workflowsView: currentWorkflowsView,
-    };
-  }
-  if (item.section === "manual") {
-    return { toolsSection: "manual", manualView: item.manualView, workflowsView: currentWorkflowsView };
-  }
-  return { toolsSection: "workflows", manualView: currentManualView, workflowsView: item.workflowsView };
+  if (!item) return { toolsSection: currentSection, manualView: currentManualView };
+  return { toolsSection: "manual", manualView: item.manualView };
 }

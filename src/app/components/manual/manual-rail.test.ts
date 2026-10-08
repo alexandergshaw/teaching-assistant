@@ -16,6 +16,8 @@ import {
   isManualViewType,
   isPresentationsView,
   PRESENTATIONS_VIEWS,
+  AUTOMATE_VIEWS,
+  isAutomateView,
 } from "./manual-rail";
 
 describe("manual-rail", () => {
@@ -360,22 +362,69 @@ describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard
   });
 });
 
-describe("artifact-design subtab", () => {
-  it("is reachable from its destination id and reports itself as active", () => {
+// WORKFLOWS-COLLAPSE W2: artifact-design is now the "Automate" container. It
+// keeps the manualView value (so a returning ?manualView=artifact-design user
+// needs no migration) and grew an inner nav of Templates / Workflows /
+// Automations, exactly the way presentations grew one at PRES-2 S6.7. The chip
+// label is owner-settable copy (residual R-3).
+describe("artifact-design subtab (the Automate container)", () => {
+  it("is reachable from its destination id and reports itself as active (Templates is the default child)", () => {
     const resolved = resolveStateFromDestinationId("artifact-design", "content", "new", "modules", "run");
     expect(resolved.manualView).toBe("artifact-design");
+    expect(resolved.automateView).toBe("templates");
     expect(getActiveDestinationId("artifact-design", "new", "modules", "run")).toBe("artifact-design");
   });
 
-  it("has a rail destination with a label and description", () => {
+  it("has a Templates rail destination that keeps the recognisable Artifact Templates label", () => {
     const dest = getDestinationById("artifact-design");
     expect(dest).toBeDefined();
     expect(dest!.label).toBe("Artifact Templates");
     expect(dest!.description).toBeTruthy();
   });
 
-  it("has no inner destinations (it is a single-destination subtab)", () => {
-    expect(getInnerDestinations("artifact-design")).toBeNull();
+  it("relabels the rail chip to Automate (the value is unchanged)", () => {
+    expect(MANUAL_VIEW_LABELS["artifact-design"]).toBe("Automate");
+    expect(isManualViewType("artifact-design")).toBe(true);
+  });
+
+  it("has exactly three inner destinations - Templates, Workflows, Automations - in that order (AC-W2-1)", () => {
+    const inner = getInnerDestinations("artifact-design");
+    expect(inner).not.toBeNull();
+    expect(inner?.map((d) => d.id)).toEqual([
+      "artifact-design",
+      "artifact-design-workflows",
+      "artifact-design-automations",
+    ]);
+    expect(inner?.map((d) => d.label)).toEqual(["Artifact Templates", "Workflows", "Automations"]);
+  });
+
+  it("names its inner nav distinctly (AC-W2-7)", () => {
+    expect(getInnerNavAriaLabel("artifact-design")).toBe("Automate views");
+    expect(getInnerNavAriaLabel("artifact-design")).not.toBe(getInnerNavAriaLabel("presentations"));
+  });
+
+  it("resolves each inner destination id to the container plus its automateView, and reports it active", () => {
+    for (const [id, view] of [
+      ["artifact-design", "templates"],
+      ["artifact-design-workflows", "workflows"],
+      ["artifact-design-automations", "automations"],
+    ] as const) {
+      const resolved = resolveStateFromDestinationId(id, "content", "new", "modules", "run");
+      expect(resolved.manualView, id).toBe("artifact-design");
+      expect(resolved.automateView, id).toBe(view);
+      expect(getActiveDestinationId("artifact-design", "new", "modules", "run", "slide-deck", "post", view), id).toBe(id);
+    }
+  });
+
+  it("leaves automateView alone when a destination of another view is picked", () => {
+    const resolved = resolveStateFromDestinationId("grading-run", "content", "new", "modules", "run", "slide-deck", "post", "automations");
+    expect(resolved.automateView).toBe("automations");
+  });
+
+  it("registers exactly the three automateView members", () => {
+    expect([...AUTOMATE_VIEWS]).toEqual(["templates", "workflows", "automations"]);
+    expect(isAutomateView("workflows")).toBe(true);
+    expect(isAutomateView("drafts")).toBe(false);
   });
 });
 

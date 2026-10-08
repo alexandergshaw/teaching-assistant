@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   RETIRED_TAB_DESTINATIONS,
   TAB_LABELS,
   TAB_ORDER,
-  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
   type ActiveTab,
 } from "./tab-sections";
 import { TOOLS_RAIL_ITEMS, coursesRailItemFor, toolsRailItemFor } from "./tab-rails";
-import { MANUAL_VIEW_ORDER } from "../manual/manual-rail";
+import { AUTOMATE_VIEWS, MANUAL_VIEW_ORDER } from "../manual/manual-rail";
 import { isActiveTab, parseUrlState, resolveTabDestination } from "../../url-state";
 
 /**
@@ -74,8 +73,10 @@ import { isActiveTab, parseUrlState, resolveTabDestination } from "../../url-sta
 
 const PAGE = join(process.cwd(), "src", "app", "page.tsx");
 const NAV_HOOK = join(process.cwd(), "src", "app", "components", "home", "useAppNavigation.ts");
-// The three files that used to render the level D26 removed. Each is read to
-// prove the row is really gone rather than merely duplicated by the new rail.
+// The files that used to render the level D26 removed. Each is read to prove
+// the row is really gone rather than merely duplicated by the new rail.
+// WORKFLOWS_PANEL is DELETED (WORKFLOWS-COLLAPSE W2) and kept only so a test can
+// assert it stays deleted.
 const MANUAL_RAIL = join(process.cwd(), "src", "app", "components", "manual", "ManualRail.tsx");
 const WORKFLOWS_PANEL = join(process.cwd(), "src", "app", "components", "home", "WorkflowsPanel.tsx");
 const TASKS_TAB = join(process.cwd(), "src", "app", "components", "TasksTab.tsx");
@@ -244,7 +245,9 @@ describe("the four top-level tabs are registered, in the strip, and rendered", (
     const source = read(PAGE);
     const halves: [ActiveTab, string, string][] = [
       ["courses", 'coursesSection === "courses"', 'coursesSection === "tasks"'],
-      ["manual", 'toolsSection === "manual"', 'toolsSection === "workflows"'],
+      // WORKFLOWS-COLLAPSE W2: the Workflows section is gone; the Tools tab's
+      // second half is now the Automate container (manualView artifact-design).
+      ["manual", 'toolsSection === "manual"', 'manualView === "artifact-design"'],
       ["files", 'librarySection === "files"', 'librarySection === "knowledge"'],
     ];
     for (const [tab, first, second] of halves) {
@@ -316,19 +319,11 @@ describe("the merged tabs are one navigation level deep", () => {
     ).not.toContain("LMS views");
   });
 
-  it("has taken the Workflows/Automations/Drafts subnav out of WorkflowsPanel, and (GRAD-SUBTAB wave 3) the Grades/Messages subnav that used to sit inside Drafts too", () => {
-    const source = readWithoutComments(WORKFLOWS_PANEL);
-    expect(source.length, "WorkflowsPanel.tsx could not be read").toBeGreaterThan(200);
-    expect(
-      source,
-      "WorkflowsPanel.tsx still takes onWorkflowsViewChange, so its own three-chip subnav " +
-        "is still rendering below the flattened rail that already contains those three."
-    ).not.toContain("onWorkflowsViewChange");
-    // GRAD-SUBTAB wave 3 (DECISION 19, E-full): the Grades/Messages tablist
-    // that used to sit inside Drafts is gone too - Drafted Grades moved to
-    // Tools > Grading, and Drafts now renders MessageDraftsTab directly with
-    // no subnav left. Zero tablists, not one.
-    expect(source.split('role="tablist"').length - 1).toBe(0);
+  it("has deleted WorkflowsPanel entirely - its subnav, its Drafts and its Workflows branch are gone (WORKFLOWS-COLLAPSE W2)", () => {
+    expect(existsSync(WORKFLOWS_PANEL), "WorkflowsPanel.tsx came back").toBe(false);
+    const page = readWithoutComments(PAGE);
+    expect(page).not.toContain("WorkflowsPanel");
+    expect(page).not.toContain("onWorkflowsViewChange");
   });
 
   it("has taken the Term/Daily-Weekly tablist out of TasksTab entirely", () => {
@@ -355,15 +350,19 @@ describe("the merged tabs are one navigation level deep", () => {
     }
   });
 
-  it("gives every Workflows chip in the Tools rail its own render branch in WorkflowsPanel", () => {
-    const source = read(WORKFLOWS_PANEL);
-    for (const view of WORKFLOWS_VIEW_ORDER) {
-      expect(
-        source,
-        `WorkflowsPanel.tsx has no 'workflowsView === "${view}"' render branch, so that ` +
-          "rail chip leads to an empty pane."
-      ).toContain(`workflowsView === "${view}"`);
+  it("gives every Automate sub-view its own render branch in page.tsx (AC-W2-2, no orphan view)", () => {
+    const slice = readWithoutComments(PAGE);
+    const components = { templates: "<ArtifactDesignTab", workflows: "<WorkflowsTab", automations: "<AutomationsTabView" };
+    for (const view of AUTOMATE_VIEWS) {
+      const guard = `manualView === "artifact-design" && automateView === "${view}"`;
+      const at = slice.indexOf(guard);
+      expect(at, `page.tsx has no '${guard}' render branch, so that Automate sub-view is a blank pane`).toBeGreaterThan(-1);
+      expect(slice.indexOf(components[view], at), `the ${view} branch does not render ${components[view]}`).toBeGreaterThan(at);
+      // Exactly one mount site per surface: a mirror would paint it twice.
+      expect(slice.split(components[view]).length - 1).toBe(1);
     }
+    // The three sub-views are registered with the same members the branches cover.
+    expect(Object.keys(components).sort()).toEqual([...AUTOMATE_VIEWS].sort());
   });
 
   it("passes the rail the derived chip rather than a section the user picked", () => {
@@ -372,20 +371,18 @@ describe("the merged tabs are one navigation level deep", () => {
     // stored anywhere or drift from them.
     const source = read(PAGE);
     expect(branchSlice(source, "courses")).toContain("coursesRailItemFor(coursesSection, tasksView)");
-    expect(branchSlice(source, "manual")).toContain(
-      "toolsRailItemFor(toolsSection, manualView, workflowsView)"
-    );
+    expect(branchSlice(source, "manual")).toContain("toolsRailItemFor(manualView)");
   });
 
   it("builds each rail from the registries rather than a hand-written list of chips", () => {
     const source = read(PAGE);
     expect(source).toContain("COURSES_RAIL_ITEMS.map(");
     expect(source).toContain("TOOLS_RAIL_ITEMS.map(");
-    // Ten chips is a lot; a hand-written list is how one of them goes
-    // missing. Eight Manual + two Workflows (PPT-DESIGN-INTO-PRESENTATIONS
-    // re-parented "ppt-design" under Presentations, so it left MANUAL_VIEW_ORDER;
-    // WORKFLOWS-COLLAPSE W1 moved Drafts to Library, 11 -> 10).
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
+    // A hand-written list is how a chip goes missing. Eight Manual views, no
+    // Workflows family (PPT-DESIGN-INTO-PRESENTATIONS re-parented "ppt-design"
+    // under Presentations; WORKFLOWS-COLLAPSE W1 moved Drafts to Library, 11 ->
+    // 10; W2 folded Workflows + Automations into the Automate container, 10 -> 8).
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(8);
   });
 });
 
@@ -396,8 +393,10 @@ describe("every retired tab value still resolves to its new home", () => {
     expect(resolveTabDestination("tasks").tab).toBe("courses");
     expect(resolveTabDestination("tasks").coursesSection).toBe("tasks");
 
+    // "workflows" is aliased by the automate pointer (W2), not the registry; it
+    // still lands on the Tools tab (the sub-view is asserted in the next tests).
     expect(resolveTabDestination("workflows").tab).toBe("manual");
-    expect(resolveTabDestination("workflows").toolsSection).toBe("workflows");
+    expect(resolveTabDestination("workflows").toolsSection).toBe("manual");
 
     expect(resolveTabDestination("knowledge").tab).toBe("files");
     expect(resolveTabDestination("knowledge").librarySection).toBe("knowledge");
@@ -420,9 +419,8 @@ describe("every retired tab value still resolves to its new home", () => {
 
     const workflows = parseUrlState("?tab=workflows");
     expect(workflows.tab).toBe("manual");
-    expect(toolsRailItemFor(workflows.toolsSection, workflows.manualView, workflows.workflowsView)).toBe(
-      "workflows:workflows"
-    );
+    expect(toolsRailItemFor(workflows.manualView)).toBe("manual:artifact-design");
+    expect(workflows.automateView).toBe("workflows");
 
     const knowledge = parseUrlState("?tab=knowledge");
     expect(knowledge.tab).toBe("files");
@@ -445,16 +443,13 @@ describe("every retired tab value still resolves to its new home", () => {
     expect(drafts.librarySection).toBe("drafts");
 
     const automations = parseUrlState("?tab=workflows&workflowsView=automations");
-    expect(toolsRailItemFor(automations.toolsSection, automations.manualView, automations.workflowsView)).toBe(
-      "workflows:automations"
-    );
+    expect(toolsRailItemFor(automations.manualView)).toBe("manual:artifact-design");
+    expect(automations.automateView).toBe("automations");
 
     // And the Manual family through the param this whole design exists to
     // protect: an old "?manualView=" link still names its own chip.
     const recording = parseUrlState("?tab=manual&manualView=recording");
-    expect(toolsRailItemFor(recording.toolsSection, recording.manualView, recording.workflowsView)).toBe(
-      "manual:recording"
-    );
+    expect(toolsRailItemFor(recording.manualView)).toBe("manual:recording");
   });
 
   it("never lets a retired value fall through to the unrecognised-value default", () => {
@@ -731,16 +726,6 @@ describe("Drafted Grades is reachable at its new home and dead at its old one (I
         "no live capture resource, unlike GradingRecordingPanel/SnapshotGradingPanel"
     ).not.toMatch(/display:\s*[\s\S]{0,40}?"none"/);
   });
-
-  it("I-no-mirror: WorkflowsPanel no longer imports or renders DraftedGradesTab, and has no draftsView === 'grades' render", () => {
-    const source = read(WORKFLOWS_PANEL);
-    expect(
-      source,
-      "WorkflowsPanel.tsx still imports DraftedGradesTab - DECISION 18 says surfaces MOVE into " +
-        "the new home, they are not mirrored from it"
-    ).not.toContain("DraftedGradesTab");
-    expect(source).not.toContain('draftsView === "grades"');
-  });
 });
 
 // WORKFLOWS-COLLAPSE W1 (docs/workflows-collapse-ia-scope.md): the message
@@ -754,8 +739,8 @@ describe("Drafts lives in Library, and is gone from Tools (AC-W1-1, AC-W1-3, AC-
     expect(source.split("<MessageDraftsTab").length - 1).toBe(1);
   });
 
-  it("AC-W1-3: WorkflowsPanel no longer imports or renders MessageDraftsTab, and the Tools branch has no workflowsView === drafts render", () => {
-    expect(readWithoutComments(WORKFLOWS_PANEL)).not.toContain("MessageDraftsTab");
+  it("AC-W1-3: the Tools branch has no workflowsView === drafts render, and WorkflowsPanel (the old host) is deleted", () => {
+    expect(existsSync(WORKFLOWS_PANEL)).toBe(false);
     expect(branchSlice(read(PAGE), "manual")).not.toContain('workflowsView === "drafts"');
   });
 
@@ -775,5 +760,52 @@ describe("Drafts lives in Library, and is gone from Tools (AC-W1-1, AC-W1-3, AC-
     expect(handler).toContain('setLibrarySection("drafts")');
     expect(handler).toContain('setActiveTab("files")');
     expect(handler).not.toContain('setToolsSection("workflows")');
+  });
+});
+
+// WORKFLOWS-COLLAPSE W2 (docs/workflows-collapse-ia-scope.md): Artifact
+// Templates + Workflows + Automations collapsed into the Automate container
+// (manualView="artifact-design", inner nav automateView). Source-text pins
+// only - no component renders under vitest, so the inner nav painting and
+// being keyboard-reachable is owner-walk (OW-2).
+describe("the Workflows section is dissolved into the Automate container (AC-W2-2, AC-W2-5)", () => {
+  it("the Tools branch has no toolsSection === workflows render branch and no workflowsView state", () => {
+    const manual = readWithoutComments(PAGE);
+    const slice = manual.slice(manual.indexOf('{activeTab === "manual" &&'), manual.indexOf('{activeTab === "files" &&'));
+    expect(slice).not.toContain('toolsSection === "workflows"');
+    expect(slice).not.toContain("workflowsView");
+    expect(slice).not.toContain("setWorkflowsView");
+  });
+
+  it("passes the container its inner-nav state: ManualRail gets automateView, and picking a destination can set it", () => {
+    const source = readWithoutComments(PAGE);
+    expect(source).toContain("automateView={automateView}");
+    expect(source).toMatch(/resolved\.automateView !== automateView\) setAutomateView\(resolved\.automateView\)/);
+  });
+
+  it("every programmatic jump to Workflows (openWorkflow, scheduled, Courses handoff) lands on Automate > Workflows", () => {
+    const source = readWithoutComments(PAGE);
+    const start = source.indexOf("const jumpToAutomateWorkflows");
+    expect(start, "jumpToAutomateWorkflows missing").toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf("};", start));
+    expect(body).toContain('setManualView("artifact-design")');
+    expect(body).toContain('setAutomateView("workflows")');
+    expect(body).toContain('setToolsSection("manual")');
+    expect(body).toContain('setActiveTab("manual")');
+    // Nothing may still write the retired section.
+    expect(source).not.toContain('setToolsSection("workflows")');
+    expect(source.split("jumpToAutomateWorkflows()").length - 1).toBeGreaterThanOrEqual(3);
+  });
+
+  it("the nav hook owns the automateView state, persists it, and no longer owns workflowsView state", () => {
+    const hook = readWithoutComments(NAV_HOOK);
+    expect(hook).toContain("const [automateView, setAutomateView]");
+    expect(hook).toContain('const AUTOMATE_VIEW_KEY = "ta-automate-view";');
+    expect(hook).toContain("localStorage.setItem(AUTOMATE_VIEW_KEY, automateView)");
+    expect(hook).not.toContain("const [workflowsView");
+    expect(hook).not.toContain("setWorkflowsView");
+    // The raw key is still READ (grades + drafts + automate migration inputs), never written.
+    expect(hook).toContain('const WORKFLOWS_VIEW_KEY = "ta-workflows-view";');
+    expect(hook).not.toContain("localStorage.setItem(WORKFLOWS_VIEW_KEY");
   });
 });

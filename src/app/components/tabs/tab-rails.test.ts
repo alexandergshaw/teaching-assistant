@@ -8,15 +8,12 @@ import {
   tasksRailItemId,
   toolsRailItemFor,
   toolsStateFromRailItem,
-  workflowsRailItemId,
 } from "./tab-rails";
 import {
   COURSES_SECTION_ORDER,
   TASKS_VIEW_LABELS,
   TASKS_VIEW_ORDER,
   TOOLS_SECTION_ORDER,
-  WORKFLOWS_VIEW_LABELS,
-  WORKFLOWS_VIEW_ORDER,
 } from "./tab-sections";
 import { MANUAL_VIEW_LABELS, MANUAL_VIEW_ORDER } from "../manual/manual-rail";
 import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state";
@@ -25,15 +22,17 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  * D26: the flattened rails. What this file pins, and why each part earns it:
  *
  * 1. COMPLETENESS. Every view of every family the merged tab absorbed has a
- *    chip. A view registered in MANUAL_VIEW_ORDER/WORKFLOWS_VIEW_ORDER/
+ *    chip. A view registered in MANUAL_VIEW_ORDER/
  *    TASKS_VIEW_ORDER but missing from the rail is unreachable by click while
  *    the type checks, the URL restores it and every other gate stays green -
  *    the exact "ships dead" failure this project has paid for repeatedly.
  *
  * 2. THE PARAM CONTRACT. Each chip writes the param that ALREADY owned its
  *    view. This is the constraint the whole design turns on: the rail is a
- *    presentation over manualView/workflowsView/tasksView, not a new
- *    addressing scheme, so no existing "?manualView=" link breaks.
+ *    presentation over manualView/tasksView, not a new
+ *    addressing scheme, so no existing "?manualView=" link breaks. (W2: the
+ *    Workflows family retired into the Automate container; its raw
+ *    workflowsView param is aliased - see the oracle at the foot of the file.)
  *
  * 3. THE SECTION IS DERIVED. Picking a chip sets the section as a consequence
  *    of the family it belongs to, and picking one family's chip never disturbs
@@ -48,8 +47,8 @@ import { buildUrlSearch, parseUrlState, type UrlNavState } from "../../url-state
  * source-text canaries.
  */
 
-describe("the Tools rail is one flat list of both families' views (D26)", () => {
-  it("holds exactly the eight Manual views then the two Workflows views, in that order", () => {
+describe("the Tools rail is one flat list of the Manual views (D26; WORKFLOWS-COLLAPSE W2 dissolved the Workflows family)", () => {
+  it("holds exactly the eight Manual views, in order", () => {
     expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).toEqual([
       "manual:course-planning",
       "manual:content",
@@ -59,11 +58,10 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
       "manual:presentations",
       "manual:announcements",
       "manual:grading",
-      "workflows:workflows",
-      "workflows:automations",
     ]);
-    // WORKFLOWS-COLLAPSE W1: Drafts left for Library, so 11 -> 10.
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
+    // WORKFLOWS-COLLAPSE: 11 (post-fold) -> 10 (W1, Drafts to Library) -> 8 (W2,
+    // Workflows + Automations into the Automate container).
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(8);
   });
 
   it("carries every registered Manual view, derived from MANUAL_VIEW_ORDER rather than restated", () => {
@@ -78,109 +76,77 @@ describe("the Tools rail is one flat list of both families' views (D26)", () => 
     }
   });
 
-  it("carries every registered Workflows view, derived from WORKFLOWS_VIEW_ORDER rather than restated", () => {
-    const ids = TOOLS_RAIL_ITEMS.map((item) => item.id);
-    for (const view of WORKFLOWS_VIEW_ORDER) {
-      expect(ids, `"${view}" is a registered Workflows view with no chip in the Tools rail`).toContain(
-        workflowsRailItemId(view)
-      );
-    }
-  });
-
-  it("adds nothing the two families did not register", () => {
-    expect(TOOLS_RAIL_ITEMS).toHaveLength(MANUAL_VIEW_ORDER.length + WORKFLOWS_VIEW_ORDER.length);
+  it("adds nothing the Manual family did not register", () => {
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(MANUAL_VIEW_ORDER.length);
     expect(new Set(TOOLS_RAIL_ITEMS.map((item) => item.id)).size).toBe(TOOLS_RAIL_ITEMS.length);
   });
 
-  it("labels every chip with the label its own family already gave that view", () => {
+  it("labels every chip with the label the Manual family gave that view", () => {
     for (const item of TOOLS_RAIL_ITEMS) {
-      const expected =
-        item.section === "manual" ? MANUAL_VIEW_LABELS[item.manualView] : WORKFLOWS_VIEW_LABELS[item.workflowsView];
-      expect(item.label).toBe(expected);
+      expect(item.label).toBe(MANUAL_VIEW_LABELS[item.manualView]);
       expect(item.label.length).toBeGreaterThan(0);
     }
   });
 
-  it("has no two chips sharing a label, so ten items in one row stay distinguishable", () => {
-    // The collision question the flattening had to answer before merging two
-    // families into one row. They are disjoint today; this says so out loud.
+  it("relabels the artifact-design chip to Automate (the container; value unchanged)", () => {
+    const chip = TOOLS_RAIL_ITEMS.find((item) => item.id === "manual:artifact-design");
+    expect(chip?.label).toBe("Automate");
+  });
+
+  it("has no two chips sharing a label, so eight items in one row stay distinguishable", () => {
     const labels = TOOLS_RAIL_ITEMS.map((item) => item.label);
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("has disjoint raw view values across the two families - the fact the prefixed ids stop mattering", () => {
-    // Even though the ids are prefixed (so a future collision could not
-    // misroute a click), a collision here would still make two chips
-    // indistinguishable in any log or bug report that quotes the raw value.
-    const manual = new Set<string>(MANUAL_VIEW_ORDER);
-    for (const view of WORKFLOWS_VIEW_ORDER) {
-      expect(manual.has(view), `"${view}" is both a Manual view and a Workflows view`).toBe(false);
-    }
-  });
-
-  it("splits every chip into exactly one of the two Tools sections", () => {
+  it("is a single Tools section - the Workflows section is gone", () => {
     const sections = new Set(TOOLS_RAIL_ITEMS.map((item) => item.section));
     expect([...sections].sort()).toEqual([...TOOLS_SECTION_ORDER].sort());
+    expect([...sections]).toEqual(["manual"]);
   });
 
-  it("no longer carries a Drafts chip - it moved to Library > Drafts (WORKFLOWS-COLLAPSE W1)", () => {
-    expect(TOOLS_RAIL_ITEMS.map((item) => item.id)).not.toContain("workflows:drafts");
+  it("carries no Workflows-family chip: Drafts went to Library (W1), Workflows + Automations into Automate (W2)", () => {
+    const ids: string[] = TOOLS_RAIL_ITEMS.map((item) => item.id);
+    expect(ids).not.toContain("workflows:drafts");
+    expect(ids).not.toContain("workflows:workflows");
+    expect(ids).not.toContain("workflows:automations");
+    expect(ids.filter((id) => id.startsWith("workflows:"))).toEqual([]);
   });
 });
 
 describe("picking a Tools chip writes the param that already owned that view", () => {
-  it("routes every Manual chip to manualView + the Manual section, leaving workflowsView alone", () => {
+  it("routes every Manual chip to manualView + the Manual section", () => {
     for (const view of MANUAL_VIEW_ORDER) {
-      const next = toolsStateFromRailItem(manualRailItemId(view), "workflows", "recording", "automations");
+      const next = toolsStateFromRailItem(manualRailItemId(view), "manual", "recording");
       expect(next.manualView, `chip for "${view}" did not write manualView`).toBe(view);
       expect(next.toolsSection).toBe("manual");
-      // The other family keeps whatever the user last had there.
-      expect(next.workflowsView).toBe("automations");
     }
   });
 
-  it("routes every Workflows chip to workflowsView + the Workflows section, leaving manualView alone", () => {
-    for (const view of WORKFLOWS_VIEW_ORDER) {
-      const next = toolsStateFromRailItem(workflowsRailItemId(view), "manual", "recording", "workflows");
-      expect(next.workflowsView, `chip for "${view}" did not write workflowsView`).toBe(view);
-      expect(next.toolsSection).toBe("workflows");
-      expect(next.manualView).toBe("recording");
-    }
-  });
-
-  it("leaves everything untouched for an id the rail does not contain", () => {
-    const next = toolsStateFromRailItem("manual:not-a-view", "workflows", "recording", "automations");
-    expect(next).toEqual({ toolsSection: "workflows", manualView: "recording", workflowsView: "automations" });
+  it("leaves everything untouched for an id the rail does not contain (including a retired workflows id)", () => {
+    expect(toolsStateFromRailItem("manual:not-a-view", "manual", "recording")).toEqual({
+      toolsSection: "manual",
+      manualView: "recording",
+    });
+    expect(toolsStateFromRailItem("workflows:automations", "manual", "recording")).toEqual({
+      toolsSection: "manual",
+      manualView: "recording",
+    });
   });
 
   it("round-trips: the chip a state resolves to writes that same state back", () => {
     for (const item of TOOLS_RAIL_ITEMS) {
-      const written = toolsStateFromRailItem(item.id, "manual", "course-planning", "workflows");
-      const highlighted = toolsRailItemFor(written.toolsSection, written.manualView, written.workflowsView);
-      expect(highlighted).toBe(item.id);
+      const written = toolsStateFromRailItem(item.id, "manual", "course-planning");
+      expect(toolsRailItemFor(written.manualView)).toBe(item.id);
     }
   });
 });
 
 describe("the highlighted Tools chip is derived from the params, never stored", () => {
-  it("reads the Manual family's chip when the Manual section is showing", () => {
+  it("reads the Manual family's chip for every Manual view", () => {
     for (const view of MANUAL_VIEW_ORDER) {
-      expect(toolsRailItemFor("manual", view, "automations")).toBe(manualRailItemId(view));
+      expect(toolsRailItemFor(view)).toBe(manualRailItemId(view));
     }
-  });
-
-  it("reads the Workflows family's chip when the Workflows section is showing", () => {
-    for (const view of WORKFLOWS_VIEW_ORDER) {
-      expect(toolsRailItemFor("workflows", "recording", view)).toBe(workflowsRailItemId(view));
-    }
-  });
-
-  it("ignores the other family's view entirely - the section is what picks the family", () => {
-    // Both families always have a remembered view; only the section says which
-    // one is on screen. This is the reason the section value survived D26 even
-    // though the control that set it did not.
-    expect(toolsRailItemFor("manual", "grading", "automations")).toBe("manual:grading");
-    expect(toolsRailItemFor("workflows", "grading", "automations")).toBe("workflows:automations");
+    expect(toolsRailItemFor("grading")).toBe("manual:grading");
   });
 });
 
@@ -273,7 +239,7 @@ const DEFAULT_STATE: UrlNavState = {
   toolsSection: "manual",
   librarySection: "files",
   manualView: "course-planning",
-  workflowsView: "workflows",
+  automateView: "templates",
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",
@@ -293,13 +259,19 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
   // and Drafts (now message-only) has nothing left below workflowsView to
   // address - this is a genuine retirement, the B6.2 accounting shape this
   // frozen list exists to catch, not a drift.
+  //
+  // "workflowsView" and "toolsSection" LEFT this list in WORKFLOWS-COLLAPSE W2
+  // (retired by ALIAS, not deleted): the Workflows section dissolved into the
+  // Automate container, so buildUrlSearch never emits either again, while
+  // parseUrlState still READS both - a legacy workflowsView=workflows|automations
+  // link lands on Automate > Workflows|Automations (asserted below and in
+  // url-state.automate-collapse.test.ts). "automateView" is the new param.
   const EXPECTED_PARAM_NAMES = [
     "tab",
     "coursesSection",
-    "toolsSection",
     "librarySection",
     "manualView",
-    "workflowsView",
+    "automateView",
     "buildView",
     "contentView",
     "gradingView",
@@ -319,12 +291,7 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "announcements", announcementsView: "walkthrough" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", buildView: "new" },
-      {
-        ...DEFAULT_STATE,
-        tab: "manual",
-        toolsSection: "workflows",
-        workflowsView: "automations",
-      },
+      { ...DEFAULT_STATE, tab: "manual", manualView: "artifact-design", automateView: "automations" },
       { ...DEFAULT_STATE, tab: "files" },
       {
         ...DEFAULT_STATE,
@@ -351,8 +318,12 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     // old name. Each of these names a view whose chip moved into a flattened
     // rail, so each is one the flattening had the opportunity to rename.
     expect(parseUrlState("?tab=manual&manualView=recording").manualView).toBe("recording");
-    expect(parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations").workflowsView).toBe(
-      "automations"
+    // workflowsView is retired by ALIAS: an old link still resolves, to its new home.
+    const legacy = parseUrlState("?tab=manual&toolsSection=workflows&workflowsView=automations");
+    expect(legacy.manualView).toBe("artifact-design");
+    expect(legacy.automateView).toBe("automations");
+    expect(parseUrlState("?tab=manual&manualView=artifact-design&automateView=workflows").automateView).toBe(
+      "workflows"
     );
     expect(parseUrlState("?tab=courses&coursesSection=tasks&tasksView=recurring").tasksView).toBe("recurring");
     expect(parseUrlState("?tab=manual&manualView=content&contentView=quizzes").contentView).toBe("quizzes");
@@ -370,12 +341,12 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     const everything = buildUrlSearch({
       ...DEFAULT_STATE,
       tab: "manual",
-      toolsSection: "workflows",
-      workflowsView: "automations",
+      manualView: "artifact-design",
+      automateView: "automations",
     });
     expect(everything).not.toContain("manual:");
     expect(everything).not.toContain("workflows:automations");
     expect(everything).not.toContain("railItem");
-    expect(everything).toBe("?tab=manual&toolsSection=workflows&workflowsView=automations");
+    expect(everything).toBe("?tab=manual&manualView=artifact-design&automateView=automations");
   });
 });

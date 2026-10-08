@@ -2,20 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VIEW_KEY, type ContentView } from "../content-tab/constants";
-import { isManualViewType, type AnnouncementsView, type GradingView, type PresentationsView } from "../manual/manual-rail";
+import {
+  isManualViewType,
+  type AnnouncementsView,
+  type AutomateView,
+  type GradingView,
+  type PresentationsView,
+} from "../manual/manual-rail";
 import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "../knowledge/knowledge-helpers";
 import {
   type ActiveTab,
   type CoursesSection,
   type ToolsSection,
   type LibrarySection,
-  type WorkflowsView,
   type TasksView,
   isCoursesSection,
   isToolsSection,
   isLibrarySection,
   normalizeManualView,
-  normalizeWorkflowsView,
+  normalizeAutomateView,
   normalizeBuildView,
   normalizeContentView,
   normalizeGradingView,
@@ -29,14 +34,17 @@ import {
   resolveTabDestination,
   resolveGradingPointer,
   resolveDraftsLibraryPointer,
+  resolveAutomatePointer,
 } from "../../url-state";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 import { isLegacyWorkflowsDrafts } from "../../../lib/workflows-drafts-library-migration";
+import { legacyAutomateView } from "../../../lib/workflows-automate-migration";
 
-// ActiveTab and WorkflowsView live in ../../url-state since that module is
-// also the single source of truth for validating/normalizing them against the
-// URL - see the Back/Forward history feature. DraftsView was retired entirely
+// ActiveTab lives in ../../url-state since that module is also the single
+// source of truth for validating/normalizing it against the URL - see the
+// Back/Forward history feature. WorkflowsView was retired in WORKFLOWS-COLLAPSE
+// W2 (its views are the Automate container's inner views). DraftsView was retired entirely
 // in GRAD-SUBTAB wave 3 (DECISION 19, E-full): Drafts renders MessageDraftsTab
 // directly now, with no inner selector left to validate.
 // ManualViewType/BuildViewType have their own canonical home in manual-rail.ts;
@@ -62,8 +70,14 @@ const GRADING_VIEW_KEY = "ta-grading-view";
 // stage-gated pipeline - is showing.
 const PRESENTATIONS_VIEW_KEY = "ta-presentations-view";
 const ANNOUNCEMENTS_VIEW_KEY = "ta-announcements-view";
-// The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
+// RETIRED (WORKFLOWS-COLLAPSE W2): the Workflows view state is gone, but the raw
+// "ta-workflows-view" value a returning user carries is still READ (never
+// written) to detect the Drafts > Grades pointer, the Drafts -> Library pointer
+// and the Workflows/Automations -> Automate pointer.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
+// The Automate container (manualView="artifact-design") groups Templates,
+// Workflows and Automations as inner views.
+const AUTOMATE_VIEW_KEY = "ta-automate-view";
 // The Tasks tab groups Term and Recurring as subtabs.
 const TASKS_VIEW_KEY = "ta-tasks-view";
 // Which half of each merged top-level tab is showing (D25). New keys, and
@@ -117,17 +131,51 @@ function readsAsLegacyWorkflowsDrafts(): boolean {
       params.get("manualView"),
       params.get("contentView"),
       params.get("toolsSection"),
-      destination.toolsSection,
+      params.get("tab"),
       params.get("workflowsView"),
       params.get("draftsView")
     );
   }
+  // The retired "workflows" tab value implies the retired Workflows section
+  // (resolveTabDestination no longer carries that in toolsSection - W2).
   const storedTools =
-    destination.toolsSection !== DEFAULT_DESTINATION.toolsSection
-      ? destination.toolsSection
-      : localStorage.getItem(TOOLS_SECTION_KEY);
+    localStorage.getItem("ta-active-tab") === "workflows" ? "workflows" : localStorage.getItem(TOOLS_SECTION_KEY);
   return isLegacyWorkflowsDrafts(
     storedTools,
+    localStorage.getItem(WORKFLOWS_VIEW_KEY),
+    localStorage.getItem("ta-drafts-view")
+  );
+}
+
+/**
+ * WORKFLOWS-COLLAPSE W2 (M-W1..M-W4, M-T1): which Automate sub-view does the
+ * starting location name via the retired Tools > Workflows section? null when
+ * it names none. The manualView and automateView initializers both consult this
+ * ONE answer (manualView becomes "artifact-design"), so they cannot disagree.
+ * The Drafts > Grades pointer and the Drafts -> Library pointer are refused
+ * (resolveAutomatePointer / legacyAutomateView), so those users are never
+ * bounced here. A URL that names the Tools tab is authoritative; otherwise the
+ * raw stored "ta-tools-section" / "ta-workflows-view" / "ta-active-tab" strings
+ * are the inputs.
+ */
+function readLegacyAutomateView(): AutomateView | null {
+  const { params, urlHasTab, destination } = readNavSource();
+  if (urlHasTab && destination.tab === "manual") {
+    return (
+      resolveAutomatePointer(
+        params.get("manualView"),
+        params.get("contentView"),
+        params.get("toolsSection"),
+        params.get("tab"),
+        params.get("workflowsView"),
+        params.get("draftsView")
+      ) ?? null
+    );
+  }
+  const inLegacySection =
+    localStorage.getItem("ta-active-tab") === "workflows" || localStorage.getItem(TOOLS_SECTION_KEY) === "workflows";
+  return legacyAutomateView(
+    inLegacySection,
     localStorage.getItem(WORKFLOWS_VIEW_KEY),
     localStorage.getItem("ta-drafts-view")
   );
@@ -275,6 +323,9 @@ export function useAppNavigation() {
         urlParams.get("draftsView")
       );
       if (gradingPointer) return gradingPointer.manualView;
+      // WORKFLOWS-COLLAPSE W2: a retired Workflows/Automations URL means the
+      // Automate container (manualView="artifact-design").
+      if (readLegacyAutomateView()) return "artifact-design";
       // PPT-DESIGN-INTO-PRESENTATIONS (channel 3, URL): the retired top-level
       // "?manualView=ppt-design" now means Presentations > PowerPoint Design.
       const pptRedirect = legacyPptDesignView(urlParams.get("manualView"));
@@ -293,6 +344,9 @@ export function useAppNavigation() {
     ) {
       return "grading";
     }
+    // WORKFLOWS-COLLAPSE W2: a stored retired Workflows section (the drafts
+    // pointers above are refused by readLegacyAutomateView) means Automate.
+    if (readLegacyAutomateView()) return "artifact-design";
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
     // GRAD-SUBTAB wave 1 (the "repo-grades" retired pointer, M10): a stored
     // ta-manual-view of "repo-grades" - the standalone subtab this
@@ -387,21 +441,22 @@ export function useAppNavigation() {
     setContentViewState(v);
     if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, v);
   };
-  const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
-    if (typeof window === "undefined") return "workflows";
-    // The URL wins over localStorage, but only when it actually names the
-    // Tools tab's Workflows section - see the matching comment on manualView
-    // above. A legacy "?tab=workflows&workflowsView=drafts" link resolves to
-    // exactly that branch, which is what keeps the deep link working.
+  // WORKFLOWS-COLLAPSE W2: the Automate container's inner selection (replaces
+  // the retired workflowsView state at the same position, so the positional
+  // guards in this file's tests keep their marker).
+  const [automateView, setAutomateView] = useState<AutomateView>(() => {
+    if (typeof window === "undefined") return "templates";
+    // A retired Workflows/Automations location names its sub-view explicitly
+    // and wins over any remembered ta-automate-view (an alias is a redirect).
+    const legacy = readLegacyAutomateView();
+    if (legacy) return legacy;
+    // The URL wins over localStorage, but only when it actually named the
+    // Automate container as the branch being restored into.
     const { params: urlParams, urlHasTab, destination } = readNavSource();
-    if (urlHasTab && destination.tab === "manual" && toolsSection === "workflows") {
-      return normalizeWorkflowsView(urlParams.get("workflowsView"));
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "artifact-design") {
+      return normalizeAutomateView(urlParams.get("automateView"));
     }
-    // WORKFLOWS-COLLAPSE W1: a stored "grade-drafts"/"drafts" active tab no
-    // longer maps to a Workflows view - it resolves to Library > Drafts via
-    // resolveTabDestination. A stored workflowsView of "drafts" normalizes to
-    // the default (it is migration input only).
-    return normalizeWorkflowsView(localStorage.getItem(WORKFLOWS_VIEW_KEY));
+    return normalizeAutomateView(localStorage.getItem(AUTOMATE_VIEW_KEY));
   });
   const [tasksView, setTasksView] = useState<TasksView>(() => {
     if (typeof window === "undefined") return "term";
@@ -619,8 +674,8 @@ export function useAppNavigation() {
   }, [manualView]);
 
   useEffect(() => {
-    localStorage.setItem(WORKFLOWS_VIEW_KEY, workflowsView);
-  }, [workflowsView]);
+    localStorage.setItem(AUTOMATE_VIEW_KEY, automateView);
+  }, [automateView]);
 
   useEffect(() => {
     localStorage.setItem(TASKS_VIEW_KEY, tasksView);
@@ -707,7 +762,7 @@ export function useAppNavigation() {
       toolsSection,
       librarySection,
       manualView,
-      workflowsView,
+      automateView,
       buildView,
       contentView,
       gradingView,
@@ -745,7 +800,7 @@ export function useAppNavigation() {
     toolsSection,
     librarySection,
     manualView,
-    workflowsView,
+    automateView,
     buildView,
     contentView,
     gradingView,
@@ -795,7 +850,7 @@ export function useAppNavigation() {
       lastKnownSearchRef.current = buildUrlSearch(parsed);
       setActiveTab(parsed.tab);
       // Only apply a sub-view when its parent is the one actually being
-      // restored to - a manualView/workflowsView/buildView/contentView value
+      // restored to - a manualView/automateView/buildView/contentView value
       // parsed off an unrelated branch's history entry (see url-state.ts)
       // must not reset the sub-view the user had set up the
       // last time they were on that branch. Each level is gated on its own
@@ -822,9 +877,9 @@ export function useAppNavigation() {
           // ANNOUNCEMENTS-TAB A-W1: two inner destinations (post, walkthrough),
           // restored the same way presentationsView is above.
           if (parsed.manualView === "announcements") setAnnouncementsView(parsed.announcementsView);
-        }
-        if (parsed.toolsSection === "workflows") {
-          setWorkflowsView(parsed.workflowsView);
+          // WORKFLOWS-COLLAPSE W2: the Automate container's three inner views,
+          // restored the same way presentationsView is above.
+          if (parsed.manualView === "artifact-design") setAutomateView(parsed.automateView);
         }
       }
       if (parsed.tab === "files") {
@@ -866,8 +921,8 @@ export function useAppNavigation() {
     setPresentationsView,
     announcementsView,
     setAnnouncementsView,
-    workflowsView,
-    setWorkflowsView,
+    automateView,
+    setAutomateView,
     tasksView,
     setTasksView,
     focusCourseId,

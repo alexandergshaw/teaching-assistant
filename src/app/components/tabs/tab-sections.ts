@@ -63,11 +63,18 @@ export const DEFAULT_TAB: ActiveTab = "manual";
 // stored manualView and a stored workflowsView becomes ambiguous.
 
 export type CoursesSection = "courses" | "tasks" | "oneoff";
-export type ToolsSection = "manual" | "workflows";
+// WORKFLOWS-COLLAPSE W2: the Tools tab's "workflows" section retired - its
+// Workflows and Automations views live in the Automate container
+// (manualView="artifact-design", automateView). "manual" is the only LIVE
+// member; a stored/URL "workflows" is a MIGRATION input (see
+// src/lib/workflows-automate-migration.ts), never a resting render state. The
+// discriminant itself is now vacuous and is deliberately not ripped out of
+// url-state/useAppNavigation/page.tsx here (residual R-2).
+export type ToolsSection = "manual";
 export type LibrarySection = "files" | "knowledge" | "drafts";
 
 export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks", "oneoff"];
-export const TOOLS_SECTION_ORDER: readonly ToolsSection[] = ["manual", "workflows"];
+export const TOOLS_SECTION_ORDER: readonly ToolsSection[] = ["manual"];
 export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowledge", "drafts"];
 
 // Only the sections that are still their own rail ITEM carry a label.
@@ -78,8 +85,8 @@ export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowl
 // it alone (see tab-rails.ts).
 //
 // The Tools sections deliberately have NO labels: "Manual" and "Workflows"
-// were the names of the switch that D26 deleted, and both of that switch's
-// halves are now represented in the rail by their own views instead. Keeping
+// were the names of the switch that D26 deleted, and the surviving half is
+// represented in the rail by its own views instead. Keeping
 // a label map for a control nobody renders is how this repo ends up with a
 // registration describing a screen that no longer exists.
 export const COURSES_SECTION_LABELS: Record<CoursesSection, string> = {
@@ -103,19 +110,14 @@ export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
 // re-exports both types, so every existing import site is unchanged - and so
 // are the "workflowsView" and "tasksView" URL params they validate.
 
-// WORKFLOWS-COLLAPSE W1: "drafts" left this family for Library > Drafts
-// (LibrarySection). A stored/URL workflowsView of "drafts" is a MIGRATION input
-// (src/lib/workflows-drafts-library-migration.ts), never a live member.
-export type WorkflowsView = "workflows" | "automations";
+// WORKFLOWS-COLLAPSE W2: the Workflows view family (workflows | automations)
+// RETIRED. "drafts" left it in W1 (Library > Drafts); its last two members
+// became the Automate container's inner views (AutomateView, manual-rail.ts).
+// A stored/URL workflowsView is a MIGRATION input only
+// (src/lib/workflows-automate-migration.ts); the raw "workflowsView" URL param
+// and "ta-workflows-view" key are still READ to detect the migrations and the
+// Drafts > Grades pointer, never written.
 export type TasksView = "term" | "recurring";
-
-// Rail order for the Workflows family, unchanged from the order the deleted
-// Workflows subnav rendered them in.
-export const WORKFLOWS_VIEW_ORDER: readonly WorkflowsView[] = ["workflows", "automations"];
-export const WORKFLOWS_VIEW_LABELS: Record<WorkflowsView, string> = {
-  workflows: "Workflows",
-  automations: "Automations",
-};
 
 // Rail order and labels for the Tasks family, unchanged from the order and
 // wording the deleted TasksTab subnav rendered them in.
@@ -162,7 +164,15 @@ export const DEFAULT_DESTINATION: TabDestination = {
 // canonical value is written back (useAppNavigation.ts's first URL sync) so
 // an old link converges on the new shape the first time it is opened instead
 // of staying legacy forever.
-export type RetiredTabValue = "tasks" | "workflows" | "knowledge" | "one-off-tasks";
+//
+// WORKFLOWS-COLLAPSE W2: "workflows" is NOT in this registry any more. A retired
+// tab value resolves to a TabDestination (tab + sections), but "?tab=workflows"
+// names a Tools SUB-VIEW (Automate > Workflows), which a TabDestination cannot
+// carry - and its destination would equal the default, i.e. look like a dropped
+// alias. It is aliased by the automate pointer instead
+// (src/lib/workflows-automate-migration.ts, resolved from the raw tab string in
+// url-state.ts / useAppNavigation.ts) and resolves to the plain Tools tab here.
+export type RetiredTabValue = "tasks" | "knowledge" | "one-off-tasks";
 
 export const RETIRED_TAB_DESTINATIONS: Record<RetiredTabValue, TabDestination> = {
   // "?tab=tasks" -> Courses, showing its Tasks section.
@@ -170,13 +180,6 @@ export const RETIRED_TAB_DESTINATIONS: Record<RetiredTabValue, TabDestination> =
     tab: "courses",
     coursesSection: "tasks",
     toolsSection: DEFAULT_TOOLS_SECTION,
-    librarySection: DEFAULT_LIBRARY_SECTION,
-  },
-  // "?tab=workflows" -> Tools, showing its Workflows section.
-  workflows: {
-    tab: "manual",
-    coursesSection: DEFAULT_COURSES_SECTION,
-    toolsSection: "workflows",
     librarySection: DEFAULT_LIBRARY_SECTION,
   },
   // "?tab=knowledge" -> Library, showing its Knowledge section.

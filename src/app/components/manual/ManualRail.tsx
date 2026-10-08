@@ -9,6 +9,7 @@ import {
   type ManualViewType,
   type PresentationsView,
   type AnnouncementsView,
+  type AutomateView,
 } from "./manual-rail";
 import styles from "../../page.module.css";
 import type { ContentView } from "../content-tab/constants";
@@ -41,6 +42,7 @@ export function ManualRail({
   gradingView,
   presentationsView,
   announcementsView,
+  automateView,
   onDestinationClick,
 }: {
   manualView: ManualViewType;
@@ -56,9 +58,12 @@ export function ManualRail({
   // ANNOUNCEMENTS-TAB A-W1: which Announcements child is active (defaults to
   // "post" via getActiveDestinationId's own default).
   announcementsView?: AnnouncementsView;
+  // WORKFLOWS-COLLAPSE W2: which Automate child is active (defaults to
+  // "templates" via getActiveDestinationId's own default).
+  automateView?: AutomateView;
   onDestinationClick: (destId: string) => void;
 }) {
-  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView, announcementsView);
+  const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView, announcementsView, automateView);
   const innerDestinations = getInnerDestinations(manualView);
   const ariaLabel = getInnerNavAriaLabel(manualView);
 

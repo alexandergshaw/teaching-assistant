@@ -33,7 +33,8 @@ import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModa
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import TabShell from "./components/TabShell";
 import TopBar from "./components/TopBar";
-import WorkflowsPanel from "./components/home/WorkflowsPanel";
+import WorkflowsTab from "./components/WorkflowsTab";
+import AutomationsTabView from "./components/AutomationsTabView";
 import MessageDraftsTab from "./components/MessageDraftsTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import { useAppNavigation } from "./components/home/useAppNavigation";
@@ -82,7 +83,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, workflowsView, setWorkflowsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -365,21 +366,25 @@ export default function Home() {
     }, 1600);
   };
 
-  // Every programmatic jump to Workflows now names the Tools tab AND its
-  // Workflows section - "workflows" is no longer a tab value at all, and a
-  // jump that set only one of the two would land on Tools > Manual.
-  const openWorkflow = (id: string, panel?: "automate") => {
-    if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
-    if (panel === "automate" && typeof window !== "undefined") localStorage.setItem("ta-workflows-panel", "automate");
-    setWorkflowsView("workflows");
-    setToolsSection("workflows");
+  // Every programmatic jump to Workflows lands on Tools > Automate > Workflows
+  // (WORKFLOWS-COLLAPSE W2: the Workflows section retired into the Automate
+  // container, manualView="artifact-design"). A jump that set only some of the
+  // three would land on the wrong Tools view.
+  const jumpToAutomateWorkflows = () => {
+    setManualView("artifact-design");
+    setAutomateView("workflows");
+    setToolsSection("manual");
     setActiveTab("manual");
   };
 
+  const openWorkflow = (id: string, panel?: "automate") => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
+    if (panel === "automate" && typeof window !== "undefined") localStorage.setItem("ta-workflows-panel", "automate");
+    jumpToAutomateWorkflows();
+  };
+
   const handleWorkflowScheduled = () => {
-    setWorkflowsView("workflows");
-    setToolsSection("workflows");
-    setActiveTab("manual");
+    jumpToAutomateWorkflows();
   };
 
   // Each merged tab's ONE navigation rail (D26), derived from the ordered
@@ -424,10 +429,9 @@ export default function Home() {
     if (next.tasksView !== tasksView) setTasksView(next.tasksView);
   };
   const handleToolsRailChange = (id: string) => {
-    const next = toolsStateFromRailItem(id, toolsSection, manualView, workflowsView);
+    const next = toolsStateFromRailItem(id, toolsSection, manualView);
     if (next.toolsSection !== toolsSection) setToolsSection(next.toolsSection);
     if (next.manualView !== manualView) setManualView(next.manualView);
-    if (next.workflowsView !== workflowsView) setWorkflowsView(next.workflowsView);
   };
 
   return (
@@ -550,9 +554,8 @@ export default function Home() {
                     setToolsSection("manual");
                     setActiveTab("manual");
                   } else {
-                    // "workflows" - a section of the Tools tab now, not a tab.
-                    setToolsSection("workflows");
-                    setActiveTab("manual");
+                    // "workflows" - Tools > Automate > Workflows now.
+                    jumpToAutomateWorkflows();
                   }
                 }}
               />
@@ -573,14 +576,13 @@ export default function Home() {
 
         {activeTab === "manual" && (
           <>
-            {/* ONE nav level (D26): the nine Manual views and the three
-                Workflows views in a single rail of twelve, in place of the
-                Manual/Workflows switch that used to sit above a separate
-                Manual rail and a separate Workflows subnav. */}
+            {/* ONE nav level (D26): the Manual views in a single rail. The
+                Workflows views left it for the Automate container
+                (WORKFLOWS-COLLAPSE W2). */}
             <TabRail
               ariaLabel="Tools views"
               options={toolsRailOptions}
-              value={toolsRailItemFor(toolsSection, manualView, workflowsView)}
+              value={toolsRailItemFor(manualView)}
               onChange={handleToolsRailChange}
             />
 
@@ -598,6 +600,7 @@ export default function Home() {
                   gradingView={gradingView}
                   presentationsView={presentationsView}
                   announcementsView={announcementsView}
+                  automateView={automateView}
                   onDestinationClick={(destId) => {
                     const resolved = resolveStateFromDestinationId(
                       destId,
@@ -606,7 +609,8 @@ export default function Home() {
                       contentView,
                       gradingView,
                       presentationsView,
-                      announcementsView
+                      announcementsView,
+                      automateView
                     );
                     if (resolved.manualView !== manualView) setManualView(resolved.manualView);
                     if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
@@ -614,6 +618,7 @@ export default function Home() {
                     if (resolved.gradingView !== gradingView) setGradingView(resolved.gradingView);
                     if (resolved.presentationsView !== presentationsView) setPresentationsView(resolved.presentationsView);
                     if (resolved.announcementsView !== announcementsView) setAnnouncementsView(resolved.announcementsView);
+                    if (resolved.automateView !== automateView) setAutomateView(resolved.automateView);
                   }}
                 />
 
@@ -657,10 +662,19 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {manualView === "artifact-design" && (
+                {/* WORKFLOWS-COLLAPSE W2: the Automate container's three inner
+                    views, re-parented and unedited. WorkflowsTab and
+                    AutomationsTabView self-wrap their own TabShell (as they did
+                    under the retired WorkflowsPanel); Templates is wrapped here
+                    exactly as before. */}
+                {manualView === "artifact-design" && automateView === "templates" && (
                   <TabShell>
                     <ArtifactDesignTab />
                   </TabShell>
+                )}
+                {manualView === "artifact-design" && automateView === "workflows" && <WorkflowsTab />}
+                {manualView === "artifact-design" && automateView === "automations" && (
+                  <AutomationsTabView onOpenWorkflow={openWorkflow} />
                 )}
 
                 {/* ANNOUNCEMENTS-TAB wave A-W2: scoped to the "post" inner view so
@@ -725,13 +739,6 @@ export default function Home() {
                   <DraftedGradesTab onOpenWorkflow={openWorkflow} />
                 )}
               </>
-            )}
-
-            {/* WorkflowsPanel's own subnav is gone with D26 - its chips are in
-                the rail above, writing the workflowsView param. Drafts left
-                this family for Library > Drafts (WORKFLOWS-COLLAPSE W1). */}
-            {toolsSection === "workflows" && (
-              <WorkflowsPanel workflowsView={workflowsView} onOpenWorkflow={openWorkflow} />
             )}
           </>
         )}

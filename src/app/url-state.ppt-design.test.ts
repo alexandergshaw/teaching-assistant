@@ -11,7 +11,7 @@ const DEFAULT_STATE: UrlNavState = {
   toolsSection: "manual",
   librarySection: "files",
   manualView: "course-planning",
-  workflowsView: "workflows",
+  automateView: "templates",
   buildView: "prebuilt",
   contentView: "modules",
   gradingView: "run",

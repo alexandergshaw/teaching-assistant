@@ -70,6 +70,26 @@ export function isPresentationsView(value: unknown): value is PresentationsView 
   return typeof value === "string" && PRESENTATIONS_VIEW_SET.has(value);
 }
 
+// The Automate container's own inner selection (WORKFLOWS-COLLAPSE W2): the
+// container keeps the manualView="artifact-design" value, so a returning
+// ?manualView=artifact-design user lands on "templates" (the exact screen they
+// had). "workflows"/"automations" are the Workflows-section views that left the
+// Tools tab's retired Workflows section; a stored/URL workflowsView of either
+// value is a MIGRATION input (src/lib/workflows-automate-migration.ts).
+export type AutomateView = "templates" | "workflows" | "automations";
+
+const AUTOMATE_VIEW_PRESENCE: Record<AutomateView, true> = {
+  templates: true,
+  workflows: true,
+  automations: true,
+};
+export const AUTOMATE_VIEWS: readonly AutomateView[] = Object.keys(AUTOMATE_VIEW_PRESENCE) as AutomateView[];
+
+const AUTOMATE_VIEW_SET: ReadonlySet<string> = new Set(AUTOMATE_VIEWS);
+export function isAutomateView(value: unknown): value is AutomateView {
+  return typeof value === "string" && AUTOMATE_VIEW_SET.has(value);
+}
+
 // The Announcements sub-tab's own inner selection (ANNOUNCEMENTS-TAB wave
 // A-W1): "post" is Post-an-announcement, "walkthrough" is
 // From-a-walkthrough. Same shape as PresentationsView above; derived from a
@@ -154,9 +174,11 @@ export const destinations: DestinationGroup[] = [
     ],
   },
   {
-    name: null,
+    name: "Automate",
     destinations: [
       { id: "artifact-design", label: "Artifact Templates", description: "Build reusable assignment and test templates" },
+      { id: "artifact-design-workflows", label: "Workflows", description: "Build and run multi-step workflows" },
+      { id: "artifact-design-automations", label: "Automations", description: "Schedule and trigger workflows to run unattended" },
     ],
   },
   {
@@ -227,7 +249,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   announcements: "Announcements",
   "version-control": "Version Control",
   recording: "Recording",
-  "artifact-design": "Artifact Templates",
+  "artifact-design": "Automate",
   presentations: "Presentations",
   grading: "Grading",
 };
@@ -250,7 +272,10 @@ export function isManualViewType(value: unknown): value is ManualViewType {
 // destinations and a view with an accessible name are the same set BY
 // CONSTRUCTION - there is no second list either reader could fall out of sync
 // with (docs/tools-grading-subtab-architecture.md section 6.1).
-type InnerNavViewType = Extract<ManualViewType, "course-planning" | "content" | "grading" | "presentations" | "announcements">;
+type InnerNavViewType = Extract<
+  ManualViewType,
+  "course-planning" | "content" | "grading" | "presentations" | "announcements" | "artifact-design"
+>;
 
 const INNER_NAV: Record<InnerNavViewType, { groupName: string; ariaLabel: string }> = {
   "course-planning": { groupName: "Build", ariaLabel: "Course build modes" },
@@ -258,11 +283,12 @@ const INNER_NAV: Record<InnerNavViewType, { groupName: string; ariaLabel: string
   grading: { groupName: "Grading", ariaLabel: "Grading tools" },
   presentations: { groupName: "Presentations", ariaLabel: "Presentations views" },
   announcements: { groupName: "Announcements", ariaLabel: "Announcements views" },
+  "artifact-design": { groupName: "Automate", ariaLabel: "Automate views" },
 };
 
 // The active Manual view's inner destinations, or null when that view has no
-// inner views (Version Control, Recording, PowerPoint Design, and Artifact
-// Templates are each a single destination with nothing to switch between).
+// inner views (Version Control and Recording are each a single destination
+// with nothing to switch between).
 //
 // This is the level BELOW a rail chip and D26 deliberately kept it: it is
 // where a chip leads, not a second way to choose one. It is the only row
@@ -294,6 +320,7 @@ export function getActiveDestinationId(
   gradingView: GradingView,
   presentationsView: PresentationsView = "slide-deck",
   announcementsView: AnnouncementsView = "post",
+  automateView: AutomateView = "templates",
 ): string {
   if (manualView === "course-planning") {
     return buildView === "new" ? "build-new" : "build-prebuilt";
@@ -304,7 +331,7 @@ export function getActiveDestinationId(
   } else if (manualView === "recording") {
     return "recording";
   } else if (manualView === "artifact-design") {
-    return "artifact-design";
+    return automateView === "templates" ? "artifact-design" : `artifact-design-${automateView}`;
   } else if (manualView === "presentations") {
     return `presentations-${presentationsView}`;
   } else if (manualView === "grading") {
@@ -357,6 +384,7 @@ export function resolveStateFromDestinationId(
   currentGradingView: GradingView,
   currentPresentationsView: PresentationsView = "slide-deck",
   currentAnnouncementsView: AnnouncementsView = "post",
+  currentAutomateView: AutomateView = "templates",
 ): {
   manualView: ManualViewType;
   buildView: BuildViewType;
@@ -364,6 +392,7 @@ export function resolveStateFromDestinationId(
   gradingView: GradingView;
   presentationsView: PresentationsView;
   announcementsView: AnnouncementsView;
+  automateView: AutomateView;
 } {
   const alias = RETIRED_GRADING_POINTERS[id];
   if (alias) {
@@ -374,6 +403,7 @@ export function resolveStateFromDestinationId(
       gradingView: alias.gradingView,
       presentationsView: currentPresentationsView,
       announcementsView: currentAnnouncementsView,
+      automateView: currentAutomateView,
     };
   }
 
@@ -383,7 +413,7 @@ export function resolveStateFromDestinationId(
     if (id === "version-control") return "version-control";
     if (id === "recording") return "recording";
     if (legacyPptDesignView(id)) return "presentations";
-    if (id === "artifact-design") return "artifact-design";
+    if (id === "artifact-design" || id.startsWith("artifact-design-")) return "artifact-design";
     if (id.startsWith("presentations-")) return "presentations";
     if (id.startsWith("grading-")) return "grading";
     if (id.startsWith("announcements-")) return "announcements";
@@ -432,7 +462,14 @@ export function resolveStateFromDestinationId(
     return currentAnnouncementsView;
   })();
 
-  return { manualView, buildView, contentView, gradingView, presentationsView, announcementsView };
+  const automateView: AutomateView = (() => {
+    if (id === "artifact-design") return "templates";
+    if (id === "artifact-design-workflows") return "workflows";
+    if (id === "artifact-design-automations") return "automations";
+    return currentAutomateView;
+  })();
+
+  return { manualView, buildView, contentView, gradingView, presentationsView, announcementsView, automateView };
 }
 
 export function validateLmsViewsCompleteness(): string[] {

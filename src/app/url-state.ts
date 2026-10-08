@@ -43,11 +43,14 @@ import {
   type PresentationsView,
   isAnnouncementsView,
   type AnnouncementsView,
+  isAutomateView,
+  type AutomateView,
 } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
 import { legacyPptDesignView } from "@/lib/ppt-view-migration";
 import { isLegacyWorkflowsDrafts } from "@/lib/workflows-drafts-library-migration";
+import { isLegacyWorkflowsSection, legacyAutomateView } from "@/lib/workflows-automate-migration";
 import {
   COURSES_SECTION_ORDER,
   DEFAULT_COURSES_SECTION,
@@ -59,7 +62,6 @@ import {
   TAB_ORDER,
   TASKS_VIEW_ORDER,
   TOOLS_SECTION_ORDER,
-  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
   type ActiveTab,
   type CoursesSection,
@@ -67,22 +69,21 @@ import {
   type TabDestination,
   type TasksView,
   type ToolsSection,
-  type WorkflowsView,
 } from "./components/tabs/tab-sections";
 
 // Re-exported so every existing import site (page.tsx, useAppNavigation.ts,
-// WorkflowsPanel.tsx) keeps resolving these types from this module, which is
+// the tab components) keeps resolving these types from this module, which is
 // where the URL contract has always lived. The VALUES themselves - the
 // ordered member lists - are owned by components/tabs/tab-sections.ts; this
 // module owns validation and the query-string mapping, exactly as it already
 // does for ManualViewType/ContentView.
-// WorkflowsView and TasksView joined this list in D26: the flattened rails are
-// built from their ORDERED member lists, so those lists had to move to the
-// leaf module that owns every other ordered nav list (declaring them here and
-// importing them back would be a cycle). Re-exported so every existing import
-// site keeps resolving them from this module, and so the "workflowsView" and
-// "tasksView" params they validate are untouched.
-export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination, WorkflowsView, TasksView };
+// TasksView joined this list in D26: the flattened rails are built from its
+// ORDERED member list, so that list had to move to the leaf module that owns
+// every other ordered nav list (declaring it here and importing it back would
+// be a cycle). WorkflowsView retired in WORKFLOWS-COLLAPSE W2 (alias: the raw
+// "workflowsView" param is still READ, never written - see
+// resolveAutomatePointer).
+export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination, TasksView };
 // DraftsView (the Grades/Messages subnav that used to live inside Drafts)
 // was retired entirely in GRAD-SUBTAB wave 3 (DECISION 19, E-full): Drafted
 // Grades moved to Tools > Grading's own inner nav, and Drafts renders
@@ -171,23 +172,8 @@ export function normalizeLibrarySection(value: string | null): LibrarySection {
   return isLibrarySection(value) ? value : DEFAULT_LIBRARY_SECTION;
 }
 
-// Derived from the same ordered list the Tools rail renders (D26), not
-// restated: a Workflows sub-view added to that list is accepted by the URL
-// automatically. Restating it is precisely how a registered view ends up
-// rejected by its own restore guard - see manual-rail.ts's isManualViewType
-// comment for the time this project actually paid for that.
-const WORKFLOWS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(WORKFLOWS_VIEW_ORDER);
-
-export function isWorkflowsView(value: unknown): value is WorkflowsView {
-  return typeof value === "string" && WORKFLOWS_VIEW_VALUES.has(value);
-}
-
-export function normalizeWorkflowsView(value: string | null): WorkflowsView {
-  return isWorkflowsView(value) ? value : "workflows";
-}
-
-// Derived from the rail's own ordered list for the same reason as
-// WORKFLOWS_VIEW_VALUES above.
+// Derived from the rail's own ordered list rather than restated: a Tasks
+// sub-view added there is accepted by the URL automatically.
 const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(TASKS_VIEW_ORDER);
 
 export function isTasksView(value: unknown): value is TasksView {
@@ -231,6 +217,13 @@ export function normalizeContentView(value: string | null): ContentView {
 
 export function normalizeGradingView(value: string | null): GradingView {
   return isGradingView(value) ? value : "run";
+}
+
+// WORKFLOWS-COLLAPSE W2: the Automate container's own inner selection, same
+// shape as normalizeGradingView above - reuses isAutomateView (manual-rail.ts's
+// single source of truth for the three children).
+export function normalizeAutomateView(value: string | null): AutomateView {
+  return isAutomateView(value) ? value : "templates";
 }
 
 // PRES-2 S6.7: Presentations' own inner selection, same shape as
@@ -282,7 +275,7 @@ export function normalizeKbPageId(value: string | null): string | null {
 // "is this param at its default" check in buildUrlSearch can never drift
 // from the value normalizeX(null) actually produces.
 const DEFAULT_MANUAL_VIEW = normalizeManualView(null);
-const DEFAULT_WORKFLOWS_VIEW = normalizeWorkflowsView(null);
+const DEFAULT_AUTOMATE_VIEW = normalizeAutomateView(null);
 const DEFAULT_BUILD_VIEW = normalizeBuildView(null);
 const DEFAULT_CONTENT_VIEW = normalizeContentView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
@@ -306,7 +299,12 @@ const COURSES_SECTION_PARAM = "coursesSection";
 const TOOLS_SECTION_PARAM = "toolsSection";
 const LIBRARY_SECTION_PARAM = "librarySection";
 const MANUAL_VIEW_PARAM = "manualView";
+// RETIRED (WORKFLOWS-COLLAPSE W2): never emitted by buildUrlSearch and no
+// longer a field on UrlNavState - kept only so parseUrlState can still read the
+// raw legacy value, to detect the Drafts > Grades pointer, the Drafts -> Library
+// pointer and the Workflows/Automations -> Automate pointer.
 const WORKFLOWS_VIEW_PARAM = "workflowsView";
+const AUTOMATE_VIEW_PARAM = "automateView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
 const GRADING_VIEW_PARAM = "gradingView";
@@ -331,7 +329,7 @@ export interface UrlNavState {
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
   manualView: ManualViewType;
-  workflowsView: WorkflowsView;
+  automateView: AutomateView;
   buildView: BuildViewType;
   contentView: ContentView;
   gradingView: GradingView;
@@ -398,19 +396,39 @@ export function resolveGradingPointer(
 // ORDER IS LOAD-BEARING: the grades pointer (resolveGradingPointer, which
 // matches workflowsView="drafts" + draftsView="grades" first) is consulted
 // BEFORE the drafts->Library test, so a grades-draft user is never bounced to
-// Library. impliedToolsSection is the section a retired tab value carries
-// ("?tab=workflows" implies "workflows"); an explicit valid toolsSection wins.
+// Library. rawTab is the raw "tab" value: the retired "workflows" tab value
+// implies the retired Workflows section; an explicit toolsSection wins.
 export function resolveDraftsLibraryPointer(
   rawManualView: string | null,
   rawContentView: string | null,
   rawToolsSection: string | null,
-  impliedToolsSection: ToolsSection,
+  rawTab: string | null,
   rawWorkflowsView: string | null,
   rawDraftsView: string | null
 ): boolean {
   if (resolveGradingPointer(rawManualView, rawContentView, rawWorkflowsView, rawDraftsView)) return false;
-  const effectiveTools = isToolsSection(rawToolsSection) ? rawToolsSection : impliedToolsSection;
+  const effectiveTools = isLegacyWorkflowsSection(rawTab, rawToolsSection) ? "workflows" : "manual";
   return isLegacyWorkflowsDrafts(effectiveTools, rawWorkflowsView, rawDraftsView);
+}
+
+// WORKFLOWS-COLLAPSE W2 (M-W1/M-W2/M-T1): do these raw URL params name the
+// retired Tools > Workflows section? Workflows and Automations now live in the
+// Automate container (manualView="artifact-design"), so this answers WHICH
+// sub-view the old link meant, or undefined when it is not such a link. Both
+// the grading pointer and the Drafts location (workflowsView="drafts", owned by
+// the Library pointer) are refused here - the same grades-first precedence.
+export function resolveAutomatePointer(
+  rawManualView: string | null,
+  rawContentView: string | null,
+  rawToolsSection: string | null,
+  rawTab: string | null,
+  rawWorkflowsView: string | null,
+  rawDraftsView: string | null
+): AutomateView | undefined {
+  if (resolveGradingPointer(rawManualView, rawContentView, rawWorkflowsView, rawDraftsView)) return undefined;
+  return (
+    legacyAutomateView(isLegacyWorkflowsSection(rawTab, rawToolsSection), rawWorkflowsView, rawDraftsView) ?? undefined
+  );
 }
 
 export function parseUrlState(search: string): UrlNavState {
@@ -438,29 +456,25 @@ export function parseUrlState(search: string): UrlNavState {
   // WORKFLOWS-COLLAPSE W1: a legacy Drafts URL on the Tools tab lands on
   // Library > Drafts. Only when the URL resolved to the Tools tab (a Courses or
   // Library URL carrying a stray workflowsView is not a Drafts link).
+  const rawTab = params.get(TAB_PARAM);
   const draftsToLibrary =
     destination.tab === "manual" &&
-    resolveDraftsLibraryPointer(
-      rawManualView,
-      rawContentView,
-      rawToolsSection,
-      destination.toolsSection,
-      rawWorkflowsView,
-      rawDraftsView
-    );
+    resolveDraftsLibraryPointer(rawManualView, rawContentView, rawToolsSection, rawTab, rawWorkflowsView, rawDraftsView);
+  // WORKFLOWS-COLLAPSE W2: a legacy Workflows/Automations URL on the Tools tab
+  // lands on Automate > Workflows|Automations (manualView="artifact-design").
+  const automatePointer =
+    destination.tab === "manual" && !draftsToLibrary
+      ? resolveAutomatePointer(rawManualView, rawContentView, rawToolsSection, rawTab, rawWorkflowsView, rawDraftsView)
+      : undefined;
   return {
     tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
-    // A resolved grading pointer FORCES toolsSection to "manual", even when an
-    // explicit (and otherwise valid) toolsSection param says "workflows" - the
-    // legacy Drafts > Grades URL carries exactly that combination
-    // (?toolsSection=workflows&workflowsView=drafts&draftsView=grades), and
-    // its target is in the manual family (GRAD-SUBTAB wave 3 section 3.3).
-    toolsSection: gradingPointer
-      ? "manual"
-      : isToolsSection(rawToolsSection)
-        ? rawToolsSection
-        : destination.toolsSection,
+    // "manual" is the only live Tools section (W2): a legacy "workflows"
+    // section param is not valid, so every legacy shape - the Drafts > Grades
+    // URL (?toolsSection=workflows&workflowsView=drafts&draftsView=grades),
+    // the Automate pointers - resolves to it. Their TARGETS are all in the
+    // manual family (manualView grading / artifact-design).
+    toolsSection: isToolsSection(rawToolsSection) ? rawToolsSection : destination.toolsSection,
     librarySection: draftsToLibrary
       ? "drafts"
       : isLibrarySection(rawLibrarySection)
@@ -468,10 +482,12 @@ export function parseUrlState(search: string): UrlNavState {
         : destination.librarySection,
     manualView: gradingPointer
       ? gradingPointer.manualView
-      : pptRedirect
+      : automatePointer
+        ? "artifact-design"
+        : pptRedirect
         ? pptRedirect.manualView
         : normalizeManualView(rawManualView),
-    workflowsView: normalizeWorkflowsView(rawWorkflowsView),
+    automateView: automatePointer ?? normalizeAutomateView(params.get(AUTOMATE_VIEW_PARAM)),
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(rawContentView),
     gradingView: gradingPointer ? gradingPointer.gradingView : normalizeGradingView(params.get(GRADING_VIEW_PARAM)),
@@ -513,9 +529,7 @@ export function buildUrlSearch(state: UrlNavState): string {
   }
 
   if (state.tab === "manual") {
-    if (state.toolsSection !== DEFAULT_TOOLS_SECTION) {
-      params.set(TOOLS_SECTION_PARAM, state.toolsSection);
-    }
+    // toolsSection is never emitted: "manual" is its only live value (W2).
     if (state.toolsSection === "manual") {
       if (state.manualView !== DEFAULT_MANUAL_VIEW) params.set(MANUAL_VIEW_PARAM, state.manualView);
       if (state.manualView === "course-planning" && state.buildView !== DEFAULT_BUILD_VIEW) {
@@ -533,9 +547,9 @@ export function buildUrlSearch(state: UrlNavState): string {
       if (state.manualView === "announcements" && state.announcementsView !== DEFAULT_ANNOUNCEMENTS_VIEW) {
         params.set(ANNOUNCEMENTS_VIEW_PARAM, state.announcementsView);
       }
-    }
-    if (state.toolsSection === "workflows") {
-      if (state.workflowsView !== DEFAULT_WORKFLOWS_VIEW) params.set(WORKFLOWS_VIEW_PARAM, state.workflowsView);
+      if (state.manualView === "artifact-design" && state.automateView !== DEFAULT_AUTOMATE_VIEW) {
+        params.set(AUTOMATE_VIEW_PARAM, state.automateView);
+      }
     }
   }
 

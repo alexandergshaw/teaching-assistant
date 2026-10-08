@@ -39,12 +39,12 @@ const source = readFileSync(SOURCE_PATH, "utf8");
 describe("useAppNavigation's contentView restore guard delegates to normalizeContentView (D6r)", () => {
   it("the contentView useState initializer calls normalizeContentView(localStorage.getItem(VIEW_KEY)) - pinning the FACT that it delegates, not a restated literal list", () => {
     // Isolate the contentView initializer block specifically (between its own
-    // useState call and the next one, setWorkflowsView's), so this cannot be
+    // useState call and the next one, automateView's), so this cannot be
     // satisfied by some unrelated normalizeContentView call elsewhere in the
     // file (the URL branch two lines above it, for instance).
     const start = source.indexOf("const [contentView, setContentViewState] = useState<ContentView>(");
     expect(start, "expected to find the contentView useState initializer").toBeGreaterThan(-1);
-    const end = source.indexOf("const [workflowsView", start);
+    const end = source.indexOf("const [automateView", start);
     expect(end, "expected to find the next useState block after contentView's").toBeGreaterThan(start);
     const block = source.slice(start, end);
 
@@ -151,7 +151,7 @@ describe("the merged tabs' section switches persist under their own ta- keys", (
 describe("the view each rail chip writes persists under its own ta- key", () => {
   const KEYS = [
     { constant: "MANUAL_VIEW_KEY", value: "ta-manual-view" },
-    { constant: "WORKFLOWS_VIEW_KEY", value: "ta-workflows-view" },
+    { constant: "AUTOMATE_VIEW_KEY", value: "ta-automate-view" },
     { constant: "TASKS_VIEW_KEY", value: "ta-tasks-view" },
     { constant: "GRADING_VIEW_KEY", value: "ta-grading-view" },
     { constant: "ANNOUNCEMENTS_VIEW_KEY", value: "ta-announcements-view" },
@@ -176,9 +176,11 @@ describe("the view each rail chip writes persists under its own ta- key", () => 
   it("keeps the view params the rails write named exactly as they were", () => {
     // The constraint the whole flattening was built around. A rail chip writes
     // the param that ALREADY owned its view, so these three reads must still
-    // name manualView/workflowsView/tasksView - not a new rail-item param.
+    // name manualView/automateView/tasksView - not a new rail-item param.
+    // (workflowsView is retired by alias in WORKFLOWS-COLLAPSE W2: the raw
+    // param is still read for the migrations, pinned in the W2 block below.)
     expect(source).toContain('urlParams.get("manualView")');
-    expect(source).toContain('urlParams.get("workflowsView")');
+    expect(source).toContain('urlParams.get("automateView")');
     expect(source).toContain('urlParams.get("tasksView")');
   });
 });
@@ -587,13 +589,79 @@ describe("WORKFLOWS-COLLAPSE W1: the activeTab and librarySection initializers m
     expect(source).toMatch(/if \(readsAsLegacyWorkflowsDrafts\(\)\) return "drafts";/);
   });
 
-  it("the workflowsView initializer no longer maps a stored grade-drafts/drafts tab to a Workflows 'drafts' view", () => {
-    const start = source.indexOf("const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(");
-    const end = source.indexOf("const [tasksView", start);
-    expect(source.slice(start, end)).not.toMatch(/return "drafts"/);
+  it("readsAsLegacyWorkflowsDrafts treats the retired workflows ACTIVE TAB as the Workflows section (W2: resolveTabDestination no longer carries it)", () => {
+    expect(helper).toContain('localStorage.getItem("ta-active-tab") === "workflows"');
   });
 
   it("the WORKFLOWS_VIEW_KEY constant stays 'ta-workflows-view' (raw migration input for both grades and drafts)", () => {
+    expect(source).toContain('const WORKFLOWS_VIEW_KEY = "ta-workflows-view";');
+  });
+});
+
+// WORKFLOWS-COLLAPSE W2 (M-W3, M-W4): the stored/URL Tools > Workflows section
+// lands on Automate > Workflows|Automations. Source-text pins (the hook cannot
+// run outside a React render); the pure resolvers are exercised in
+// src/lib/workflows-automate-migration.test.ts and url-state.automate-collapse.test.ts.
+describe("WORKFLOWS-COLLAPSE W2: the manualView/automateView initializers migrate the retired Workflows section", () => {
+  const helperStart = source.indexOf("function readLegacyAutomateView()");
+  const helper = source.slice(helperStart, source.indexOf("/**", helperStart + 10));
+
+  it("the shared helper reads the raw stored strings and the URL, via the grades-first resolvers", () => {
+    expect(helperStart, "readLegacyAutomateView helper missing").toBeGreaterThan(-1);
+    expect(helper).toContain("resolveAutomatePointer(");
+    expect(helper).toContain("legacyAutomateView(");
+    expect(helper).toContain("localStorage.getItem(TOOLS_SECTION_KEY)");
+    expect(helper).toContain('localStorage.getItem("ta-active-tab") === "workflows"');
+    expect(helper).toContain("localStorage.getItem(WORKFLOWS_VIEW_KEY)");
+    expect(helper).toContain('localStorage.getItem("ta-drafts-view")');
+  });
+
+  it("the manualView initializer returns artifact-design for it in BOTH the URL and stored paths", () => {
+    const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
+    const end = source.indexOf("const [buildView", start);
+    const block = source.slice(start, end);
+    expect(block.split('if (readLegacyAutomateView()) return "artifact-design";').length - 1).toBe(2);
+    // URL path: after the grading pointer, before the generic normalize return.
+    const urlLegacy = block.indexOf('if (readLegacyAutomateView()) return "artifact-design";');
+    expect(urlLegacy).toBeGreaterThan(block.indexOf("if (gradingPointer) return gradingPointer.manualView"));
+    expect(urlLegacy).toBeLessThan(block.indexOf('normalizeManualView(urlParams.get("manualView"))'));
+    // Stored path: the Drafts > Grades combination is matched FIRST (grades precedence survives).
+    const storedLegacy = block.lastIndexOf('if (readLegacyAutomateView()) return "artifact-design";');
+    expect(storedLegacy).toBeGreaterThan(block.indexOf('localStorage.getItem("ta-drafts-view") === "grades"'));
+    expect(storedLegacy).toBeLessThan(block.indexOf("const savedManual"));
+  });
+
+  it("the automateView initializer takes the migration first, then the URL (gated on artifact-design), then the stored view", () => {
+    const start = source.indexOf("const [automateView, setAutomateView] = useState<AutomateView>(");
+    expect(start, "expected to find the automateView useState initializer").toBeGreaterThan(-1);
+    const end = source.indexOf("const [tasksView", start);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end);
+    const legacy = block.indexOf("readLegacyAutomateView()");
+    const url = block.indexOf('normalizeAutomateView(urlParams.get("automateView"))');
+    const stored = block.indexOf("normalizeAutomateView(localStorage.getItem(AUTOMATE_VIEW_KEY))");
+    expect(legacy).toBeGreaterThan(-1);
+    expect(url).toBeGreaterThan(legacy);
+    expect(stored).toBeGreaterThan(url);
+    expect(block).toMatch(/manualView === "artifact-design"/);
+  });
+
+  it("Back/Forward restores automateView under artifact-design, and the URL-sync effect lists it", () => {
+    const popStart = source.indexOf("const onPopState = () => {");
+    const pop = source.slice(popStart, source.indexOf('window.addEventListener("popstate"', popStart));
+    expect(pop).toMatch(/parsed\.manualView === "artifact-design"\) setAutomateView\(parsed\.automateView\)/);
+    expect(pop).not.toContain("setWorkflowsView");
+    const syncStart = source.indexOf("const target = buildUrlSearch({");
+    const syncSlice = source.slice(syncStart, source.indexOf("const onPopState", syncStart));
+    expect(syncSlice.split("automateView,").length - 1).toBeGreaterThanOrEqual(2);
+    expect(syncSlice).not.toContain("workflowsView");
+  });
+
+  it("no longer exposes workflowsView state, but the raw key is still read-only input (never written)", () => {
+    // Code lines only: comments here legitimately name the retired state.
+    expect(source).not.toMatch(/^ *const \[workflowsView/m);
+    expect(source).not.toMatch(/^[^/\r\n]*setWorkflowsView/m);
+    expect(source).not.toContain("localStorage.setItem(WORKFLOWS_VIEW_KEY");
     expect(source).toContain('const WORKFLOWS_VIEW_KEY = "ta-workflows-view";');
   });
 });

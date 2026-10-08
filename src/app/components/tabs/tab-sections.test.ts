@@ -16,8 +16,6 @@ import {
   TASKS_VIEW_LABELS,
   TASKS_VIEW_ORDER,
   TOOLS_SECTION_ORDER,
-  WORKFLOWS_VIEW_LABELS,
-  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
 } from "./tab-sections";
 
@@ -46,7 +44,9 @@ describe("the four top-level tabs", () => {
 describe("each merged tab's sections", () => {
   it("holds the Courses sections in order, plus the two former tabs the others absorbed", () => {
     expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks", "oneoff"]);
-    expect([...TOOLS_SECTION_ORDER]).toEqual(["manual", "workflows"]);
+    // WORKFLOWS-COLLAPSE W2: the Workflows section retired into the Automate
+    // container, so "manual" is the only live Tools section.
+    expect([...TOOLS_SECTION_ORDER]).toEqual(["manual"]);
     expect([...LIBRARY_SECTION_ORDER]).toEqual(["files", "knowledge", "drafts"]);
     // WORKFLOWS-COLLAPSE W1: Drafts joined Library as its third section.
     expect(LIBRARY_SECTION_LABELS.drafts).toBe("Drafts");
@@ -66,8 +66,10 @@ describe("each merged tab's sections", () => {
     // own header on the canary that had to move).
     const registry = tabSections as Record<string, unknown>;
     expect(Object.keys(registry)).not.toContain("TOOLS_SECTION_LABELS");
-    // The ORDER survives - it is what still validates the toolsSection param.
-    expect([...TOOLS_SECTION_ORDER]).toEqual(["manual", "workflows"]);
+    // The ORDER survives - it is what still validates the toolsSection param,
+    // and a stored/URL "workflows" is rejected by it (a migration input only).
+    expect([...TOOLS_SECTION_ORDER]).toEqual(["manual"]);
+    expect([...TOOLS_SECTION_ORDER] as string[]).not.toContain("workflows");
   });
 
   it("defaults each merged tab to the half whose tab value survived the merge", () => {
@@ -97,11 +99,13 @@ describe("each merged tab's sections", () => {
 // rail and url-state's own validator now derive from these, so anything wrong
 // here is wrong in two places at once - which is exactly why they are pinned.
 describe("the view families the flattened rails are built from", () => {
-  it("lists the Workflows views in rail order, with a label each", () => {
-    expect([...WORKFLOWS_VIEW_ORDER]).toEqual(["workflows", "automations"]);
-    for (const view of WORKFLOWS_VIEW_ORDER) expect(WORKFLOWS_VIEW_LABELS[view]).toBeTruthy();
-    // WORKFLOWS-COLLAPSE W1: drafts left this family for Library.
-    expect(Object.keys(WORKFLOWS_VIEW_LABELS)).not.toContain("drafts");
+  it("no longer has a Workflows view family (WORKFLOWS-COLLAPSE W2: retired, its views are the Automate container's inner views)", () => {
+    // Genuine retirement, recorded here the way draftsView's was: the family's
+    // ordered list and labels are gone from the registry, and the raw
+    // workflowsView param survives only as an alias (url-state.automate-collapse.test.ts).
+    const registry = tabSections as Record<string, unknown>;
+    expect(Object.keys(registry)).not.toContain("WORKFLOWS_VIEW_ORDER");
+    expect(Object.keys(registry)).not.toContain("WORKFLOWS_VIEW_LABELS");
   });
 
   it("lists the Tasks views in rail order, keeping the wording the deleted subnav used", () => {
@@ -112,10 +116,13 @@ describe("the view families the flattened rails are built from", () => {
 });
 
 describe("the retired tab values (D25b)", () => {
-  it("names exactly the four that stopped being tabs", () => {
-    expect(Object.keys(RETIRED_TAB_DESTINATIONS).sort()).toEqual(["knowledge", "one-off-tasks", "tasks", "workflows"]);
+  it("names exactly the three that stopped being tabs and resolve to a TabDestination", () => {
+    // "workflows" moved out of this registry in WORKFLOWS-COLLAPSE W2: it names
+    // a Tools sub-view, so it is aliased by the automate pointer instead
+    // (migration tests in url-state.automate-collapse.test.ts, M-T1).
+    expect(Object.keys(RETIRED_TAB_DESTINATIONS).sort()).toEqual(["knowledge", "one-off-tasks", "tasks"]);
     expect(isRetiredTabValue("tasks")).toBe(true);
-    expect(isRetiredTabValue("workflows")).toBe(true);
+    expect(isRetiredTabValue("workflows")).toBe(false);
     expect(isRetiredTabValue("knowledge")).toBe(true);
     expect(isRetiredTabValue("one-off-tasks")).toBe(true);
     expect(isRetiredTabValue("manual")).toBe(false);
@@ -135,8 +142,6 @@ describe("the retired tab values (D25b)", () => {
   it("sends each retired value to a live tab, with the section it named", () => {
     expect(RETIRED_TAB_DESTINATIONS.tasks.tab).toBe("courses");
     expect(RETIRED_TAB_DESTINATIONS.tasks.coursesSection).toBe("tasks");
-    expect(RETIRED_TAB_DESTINATIONS.workflows.tab).toBe("manual");
-    expect(RETIRED_TAB_DESTINATIONS.workflows.toolsSection).toBe("workflows");
     expect(RETIRED_TAB_DESTINATIONS.knowledge.tab).toBe("files");
     expect(RETIRED_TAB_DESTINATIONS.knowledge.librarySection).toBe("knowledge");
     expect(RETIRED_TAB_DESTINATIONS["one-off-tasks"].tab).toBe("courses");

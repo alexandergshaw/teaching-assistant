@@ -423,6 +423,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           onOpenPreview={onOpenPreview}
           searchable
           onRegrade={driver.regrade}
+          unresolvedStudents={driver.unresolvedStudents}
         />
         </div>
       ) : (
@@ -431,7 +432,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
       <div className={chatStyles.stickyComposer}>
         {hasRows && driver.run && (
-          <LatestResultCard result={selectLatestResult(driver.run)} copiedKey={copiedKey} onCopy={onCopy} />
+          <LatestResultCard
+            result={selectLatestResult(driver.run)}
+            copiedKey={copiedKey}
+            onCopy={onCopy}
+            unresolvedStudents={driver.unresolvedStudents}
+          />
         )}
         {submitError && (
           <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>

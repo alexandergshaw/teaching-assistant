@@ -51,7 +51,7 @@ vi.mock("@/app/actions/grading-chat-intake", () => ({
 }));
 
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
-import type { GradeResult } from "@/lib/grade/types";
+import type { GradeResult, StudentSubmissionEntry } from "@/lib/grade/types";
 
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -785,5 +785,74 @@ describe("useContinuousGradingRun - submit-time labels on file and url submissio
     expect(dispatchedStudents()).not.toContain("Y");
     // The pool runs 3 at a time, so the 4th entry is queued, not yet dispatched.
     expect(dispatchedStudents()[2]).toBe("Ann (2)");
+  });
+});
+
+// INFER-AND-FLAG-SUBMISSION-NAME wave 2: the driver computes the set of students
+// whose name was not found and who carry no label, and forwards a typed label.
+// Alias so the lint hook-name rule does not treat the harness driver as a hook
+// call inside a plain async helper (the harness is not React).
+const freshDriver = useTestDriver;
+
+describe("useContinuousGradingRun - unresolved-name flag set and label forwarding", () => {
+  const sourced = (student: string, source?: StudentSubmissionEntry["studentNameSource"]): StudentSubmissionEntry => ({
+    student,
+    content: "x",
+    mergedFileCount: 0,
+    submittedFiles: [],
+    ...(source ? { studentNameSource: source } : {}),
+  });
+
+  async function submitFile(entries: StudentSubmissionEntry[], label?: string) {
+    prepareChatSubmissionActionMock.mockResolvedValue({ kind: "entries", entries, pointsPossible: null });
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+    let driver = freshDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = freshDriver();
+    await driver.submit({ kind: "file", file: new File(["x"], "essay.txt"), ...(label !== undefined ? { label } : {}) });
+    return freshDriver();
+  }
+
+  it("an unresolved, unlabelled entry is in the set", async () => {
+    const driver = await submitFile([sourced("essay.txt", "unresolved")]);
+    expect([...driver.unresolvedStudents]).toEqual(["essay.txt"]);
+  });
+
+  it("a labelled unresolved entry is NOT in the set", async () => {
+    const driver = await submitFile([sourced("essay.txt", "unresolved")], "Ann");
+    expect(driver.unresolvedStudents.size).toBe(0);
+  });
+
+  it("a blank label does not unflag", async () => {
+    const driver = await submitFile([sourced("essay.txt", "unresolved")], "   ");
+    expect(driver.unresolvedStudents.has("essay.txt")).toBe(true);
+  });
+
+  it("filename, inferred and unsourced entries are NOT in the set", async () => {
+    for (const source of ["filename", "inferred", undefined] as const) {
+      h0.reset();
+      const driver = await submitFile([sourced("Ann", source)]);
+      expect(driver.unresolvedStudents.size).toBe(0);
+    }
+  });
+
+  it("the key is the de-duplicated row label and reset() clears the set", async () => {
+    let driver = await submitFile([sourced("essay.txt", "unresolved")]);
+    await driver.submit({ kind: "file", file: new File(["x"], "essay.txt") });
+    driver = useTestDriver();
+    expect([...driver.unresolvedStudents].sort()).toEqual(["essay.txt", "essay.txt (2)"]);
+    driver.reset();
+    expect(useTestDriver().unresolvedStudents.size).toBe(0);
+  });
+
+  it("file and url submits forward the trimmed label on the label form key", async () => {
+    await submitFile([sourced("essay.txt")], "  Ann  ");
+    expect((prepareChatSubmissionActionMock.mock.calls[0][0] as FormData).get("label")).toBe("Ann");
+
+    prepareChatSubmissionActionMock.mockClear();
+    let driver = useTestDriver();
+    await driver.submit({ kind: "url", url: "https://github.com/o/r", label: " Bob " });
+    driver = useTestDriver();
+    expect((prepareChatSubmissionActionMock.mock.calls[0][0] as FormData).get("label")).toBe("Bob");
   });
 });

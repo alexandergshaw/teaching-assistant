@@ -188,6 +188,29 @@ describe("GradingChatPanel - regrade-after-batch: the chat mount opts in, the ot
     expect(slice).toMatch(/\bonRegrade=\{\s*driver\.regrade\s*\}/);
   });
 
+  it("passes unresolvedStudents={driver.unresolvedStudents} to the results mount and the latest card", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(resultsMountSlice(source)).toMatch(/unresolvedStudents=\{\s*driver\.unresolvedStudents\s*\}/);
+    expect(source).toMatch(/<LatestResultCard[\s\S]{0,300}unresolvedStudents=\{\s*driver\.unresolvedStudents\s*\}/);
+  });
+
+  it("the non-chat mounts pass no unresolvedStudents", () => {
+    for (const file of [
+      "src/app/components/GithubGradingPanel.tsx",
+      "src/app/components/GradingTab.tsx",
+      "src/app/components/LiveFeedPanel.tsx",
+    ]) {
+      expect(resultsMountSlice(withoutLineComments(read(file)))).not.toContain("unresolvedStudents");
+    }
+  });
+
+  it("GradingResults threads unresolvedStudents into StudentNameCell, which renders the flag leaf", () => {
+    const results = withoutLineComments(read(RESULTS));
+    expect(results).toMatch(/unresolved=\{\s*unresolvedStudents\?\.has\(result\.student\)/);
+    const cell = withoutLineComments(read("src/app/components/grading-results/StudentNameCell.tsx"));
+    expect(cell).toContain("describeUnresolvedNameLabel()");
+  });
+
   it("the non-chat mounts pass no onRegrade", () => {
     for (const file of [
       "src/app/components/GithubGradingPanel.tsx",

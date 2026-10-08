@@ -118,6 +118,10 @@ export interface UseContinuousGradingRunResult {
   readonly completedCount: number;
   readonly inFlight: number;
   readonly sessionError: string | null;
+  /** Students (row keys) whose single-file name was neither in the file name nor
+   * inferable from content and who carry no typed label. A labelled row is never
+   * in it. Consumed only by the chat grading mount. */
+  readonly unresolvedStudents: ReadonlySet<string>;
 }
 
 interface GradeRunItemResponse {
@@ -164,6 +168,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [completedCount, setCompletedCount] = useState(0);
   const [inFlight, setInFlight] = useState(0);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [unresolvedStudents, setUnresolvedStudents] = useState<ReadonlySet<string>>(new Set());
 
   const rebuildRun = () => {
     const header = headerRef.current;
@@ -298,9 +303,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       } else if (input.kind === "file") {
         formData.set("kind", "file");
         formData.set("file", input.file);
+        // A typed label reaches the server's `labelled` flag, which suppresses
+        // name inference (grading-chat-intake.ts reads formData.get("label")).
+        formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
       } else {
         formData.set("kind", "url");
         formData.set("url", input.url);
+        formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
       }
       formData.set("provider", provider);
       const outcome =
@@ -336,6 +345,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
+    const flaggedNow: string[] = [];
     for (const rawEntry of admitted) {
       const sourceIndex = dispatchedCountRef.current;
       dispatchedCountRef.current += 1;
@@ -345,6 +355,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const label = assignUnclaimedLabel(baseStudent, takenLabelsRef.current);
       takenLabelsRef.current.add(label);
       const entry = label === rawEntry.student ? rawEntry : { ...rawEntry, student: label };
+      // A labelled row is NEVER flagged: the instructor already named it.
+      if (rawEntry.studentNameSource === "unresolved" && submitLabel === "") flaggedNow.push(label);
       const body: GradeRunItemRequestBody = {
         sourceIndex,
         entry,
@@ -361,6 +373,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       queueRef.current.push(body);
     }
     setDispatchedCount(dispatchedCountRef.current);
+    if (flaggedNow.length > 0) {
+      setUnresolvedStudents((prev) => new Set([...prev, ...flaggedNow]));
+    }
     pump();
 
     if (refusedCount > 0) {
@@ -427,6 +442,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setCompletedCount(0);
     setInFlight(0);
     setSessionError(null);
+    setUnresolvedStudents(new Set());
   };
 
   return {
@@ -448,5 +464,6 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     completedCount,
     inFlight,
     sessionError,
+    unresolvedStudents,
   };
 }

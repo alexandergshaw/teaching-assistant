@@ -118,6 +118,8 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./GeneratedRubricCard.tsx", // A39 incremental-fill W5 (RES-P-4-adjacent): GradingTab.tsx's own line-budget extraction, landing here per the design's named target path.
     "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
     "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
+    "./StudentNameCell.tsx", // INFER-FLAG W2: the student cell extracted from GradingResults.tsx to stay under the line ceiling; renders the unresolved-name flag.
+    "./unresolvedNameLabel.ts", // INFER-FLAG W2: the frozen flag-text leaf.
     "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.
     "./RubricProvenance.tsx", // A39 wave 2: the run's version-provenance leaf, mounted by GradingTab.tsx (not by this directory's own GradingResults.tsx).
     "../DraftedGradesTab.tsx", // fix(trends) 4e46fadb: the new non-local consumer of ./classTrendsEntry (hasTrendableResults), gating drafts' ClassTrendsPanel mount like the other five surfaces.

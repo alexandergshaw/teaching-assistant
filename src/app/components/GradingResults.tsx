@@ -72,6 +72,7 @@ import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grad
 // rendered, visible label, so a colour-blind reader (and every other reader)
 // can see it without relying on styling alone.
 import { describeUngradedRowLabel } from "./grading-results/ungradedRowLabel";
+import { StudentNameCell } from "./grading-results/StudentNameCell";
 
 // CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
 // file's line-budget extraction). ExpandIcon moved to
@@ -182,6 +183,9 @@ export type GradingResultsProps = {
    * re-runs that row's grading in place. Only the chat grading mount passes it.
    * Receives the row's student (the driver's bijective key). */
   onRegrade?: (student: string) => void;
+  /** Opt-in, default off: students whose name was not found and who carry no
+   * label; each such row shows the unresolved-name flag. Chat mount only. */
+  unresolvedStudents?: ReadonlySet<string>;
 };
 
 /** Imperative handle so a parent (the Live Feed pane) can drive "Post & Next". */
@@ -216,6 +220,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   searchable,
   filterPlaceholder = "Search by student name or feedback",
   onRegrade,
+  unresolvedStudents,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -713,21 +718,12 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               return (
                 <tr key={`${result.student}-matrix`} data-ungraded-state={ungradedState}>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{result.student}</div>
-                    {ungradedRowLabel && (
-                      <div className={styles.ungradedRowLabel}>{ungradedRowLabel}</div>
-                    )}
-                    {sgHref && (
-                      <a
-                        href={sgHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.fieldHint}
-                        style={{ display: "inline-block", marginTop: "var(--space-1)" }}
-                      >
-                        Open in SpeedGrader
-                      </a>
-                    )}
+                    <StudentNameCell
+                      student={result.student}
+                      ungradedRowLabel={ungradedRowLabel}
+                      speedGraderHref={sgHref}
+                      unresolved={unresolvedStudents?.has(result.student) ?? false}
+                    />
                     {canPostRow && (
                       <div style={{ marginTop: "var(--space-1)" }}>
                         <Button

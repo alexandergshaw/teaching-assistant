@@ -1,6 +1,7 @@
 import Button from "@mui/material/Button";
 import type { GradeResult } from "../../../lib/grade/types";
 import { copyAllFeedbackText, FEEDBACK_FIELDS, type FeedbackField } from "../grading-results/gradingResultsHelpers";
+import { describeUnresolvedNameLabel } from "../grading-results/unresolvedNameLabel";
 import chatStyles from "./grading-chat.module.css";
 
 // GRADER-WORKFLOW-OVERHAUL M1: a READ-ONLY view of the newest arrived result,
@@ -15,9 +16,11 @@ export interface LatestResultCardProps {
   readonly result: GradeResult | null;
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
+  /** Students whose name was not found and who carry no label (chat mount only). */
+  readonly unresolvedStudents?: ReadonlySet<string>;
 }
 
-export function LatestResultCard({ result, copiedKey, onCopy }: LatestResultCardProps) {
+export function LatestResultCard({ result, copiedKey, onCopy, unresolvedStudents }: LatestResultCardProps) {
   if (!result) return null;
   // Distinct from the matrix row's own all-feedback key so the two "Copied"
   // states never light up together.
@@ -33,6 +36,9 @@ export function LatestResultCard({ result, copiedKey, onCopy }: LatestResultCard
     <section className={chatStyles.latestCard} aria-label={`Latest result for ${result.student}`}>
       <div className={chatStyles.latestCardHeader}>
         <span className={chatStyles.latestCardStudent}>{result.student}</span>
+        {unresolvedStudents?.has(result.student) && (
+          <span className={chatStyles.latestCardLabel}>{describeUnresolvedNameLabel()}</span>
+        )}
         <span className={chatStyles.latestCardScore}>{result.totalScore}</span>
         <Button
           variant="text"

@@ -40,16 +40,24 @@ import type { Take } from "./recording/types";
 
 export type { Take } from "./recording/types";
 
-export default function RecordingTab({ active = true }: { active?: boolean }) {
+export default function RecordingTab({
+  active = true,
+  announcementsActive = false,
+}: {
+  active?: boolean;
+  /** TOOLS-IA-REORG W2: true while Tools > Announcements > From a recording is
+   * showing. That front door was RE-PARENTED out of this tab's strip, but it
+   * needs this tab's recorder, takes list and library, so the SAME always-mounted
+   * instance serves it: the strip is hidden and only the record stage shows. */
+  announcementsActive?: boolean;
+}) {
   const { supabase, user } = useSupabase();
 
-  // "announcement" (added alongside the pre-existing six): the owner's ask
-  // was that recording FOR an announcement be a distinct, directly-reachable
-  // feature rather than something found only via a per-take button buried
-  // inside the Record sub-view. This is a NEW front door onto the same
-  // underlying surface, not a replacement for the old one - see the shared
-  // gating below (the block that used to render only for recView==="record")
-  // for how both routes stay live at once.
+  // "announcement" LEFT this union in TOOLS-IA-REORG W2: recording FOR an
+  // announcement is now Tools > Announcements > From a recording, served by
+  // this same instance through the `announcementsActive` prop. A stored
+  // `ta-rec-view = "announcement"` is migrated by src/lib/rec-view-migration.ts
+  // (page.tsx redirects the user) and restores here as "record".
   //
   // "grading"/"snapgrade" (docs/grading-via-recording-acceptance-criteria.md,
   // docs/snapshot-grading-acceptance-criteria.md) MOVED OUT of this union
@@ -57,8 +65,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // GradingRecordingPanel and SnapshotGradingPanel are now always-mounted
   // siblings of this tab, reached through Tools > Grading's own inner nav
   // (gradingView), not through recView.
-  const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "moduledeck" | "messages"
+  const [storedRecView, setRecView] = useState<
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "moduledeck" | "messages"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -67,7 +75,6 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "captions" ||
       v === "slides" ||
       v === "avatar" ||
-      v === "announcement" ||
       v === "moduledeck" ||
       v === "messages"
       ? v
@@ -75,8 +82,13 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   });
 
   useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", recView);
-  }, [recView]);
+    if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", storedRecView);
+  }, [storedRecView]);
+
+  // The view every panel below is keyed on. Announcements > From a recording
+  // overrides the strip's selection WITHOUT touching or persisting it, so the
+  // user's real Recording sub-view survives a visit to Announcements.
+  const recView: typeof storedRecView | "announcement" = announcementsActive ? "announcement" : storedRecView;
 
   // Launch seam (Knowledge base "Start recording" on a page selection, and
   // the fab's Recording-tab entries): RecordingTab is kept mounted for the
@@ -104,7 +116,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       // widening recView back to include them) is what lets recView's union
       // actually shrink - tsc rejects setRecView(detail.view) otherwise,
       // since detail.view still carries both values.
-      if (detail.view === "grading" || detail.view === "snapgrade" || detail.view === "remembered" || detail.view === "walkannounce") return;
+      if (detail.view === "grading" || detail.view === "snapgrade" || detail.view === "remembered" || detail.view === "walkannounce" || detail.view === "announcement") return;
       setRecView(detail.view);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
@@ -292,8 +304,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // the `announcementTake === null` check, and pressing R while editing an
   // announcement's subject/body still cannot start a second recorder.
   const recordSurfaceActive =
-    active &&
-    (recView === "record" || recView === "announcement") &&
+    (active || announcementsActive) &&
+    (storedRecView === "record" || announcementsActive) &&
     walkthroughTake === null &&
     announcementTake === null;
 
@@ -567,9 +579,13 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
   return (
     <TabShell
-      eyebrow="Recording"
-      title="Recording, Capture & Playback Tools"
-      subtitle="Recording, capture, and playback tools for this course. Some record and preview live; others read a shared screen, or work from a recording you already have."
+      eyebrow={announcementsActive ? "Announcements" : "Recording"}
+      title={announcementsActive ? "Announce from a recording" : "Recording, Capture & Playback Tools"}
+      subtitle={
+        announcementsActive
+          ? "Record a take, or pick one from your recording library, then draft a Canvas announcement from it."
+          : "Recording, capture, and playback tools for this course. Some record and preview live; others read a shared screen, or work from a recording you already have."
+      }
     >
       {/* D6 (docs/aesthetics-pass-acceptance-criteria.md section 4b): this
           strip rendered eight role="tab" buttons with aria-selected but no
@@ -587,15 +603,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           pointer to the content div it exposes, and each content div further
           down carries a matching tabpanel role, id and a pointer back to the
           tab(s) that name it, via the "rec-tab-<key>" / "rec-panel-<key>"
-          pair. The record/announcement pair shares ONE content wrapper (the
-          block immediately below this strip), so the announcement tab
-          points at the record panel's id rather than a non-existent
-          announcement-only one. */}
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+          pair. W2: the announcement tab left the strip; its front door lives
+          under Tools > Announcements and reuses the record wrapper below
+          (the strip is hidden while that is showing). */}
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools" style={announcementsActive ? { display: "none" } : undefined}>
+        {([["record", "Record"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
-            aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
+            aria-controls={`rec-panel-${key}`}
             tabIndex={recView === key ? 0 : -1}
             onKeyDown={(e) => {
               const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
@@ -618,10 +633,12 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         ))}
       </div>
 
-      {/* Shared by "record" AND "announcement": the owner's ask was a
-          directly-reachable front door for recording FOR an announcement,
-          not a replacement for the existing per-take route reached from a
-          take's own row while on Record. TakeAnnouncementPanel is gated on
+      {/* Shared by Record AND Announcements > From a recording (W2: the latter
+          is no longer a strip tab, so this wrapper is a tabpanel only while
+          the strip is showing and a labelled region otherwise). The owner's
+          ask was a directly-reachable front door for recording FOR an
+          announcement, not a replacement for the existing per-take route
+          reached from a take's own row while on Record. TakeAnnouncementPanel is gated on
           `announcementTake`, never on which of these two views is active
           (AC16b's own reasoning: a take is an in-memory object URL, so
           nothing about it can be restored from `recView` after a reload) -
@@ -632,14 +649,15 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           Record; an instructor who opens the panel from a take's row while
           already on Record keeps that exact route too, unchanged. */}
       <div
-        role="tabpanel"
+        role={announcementsActive ? "region" : "tabpanel"}
         id="rec-panel-record"
-        aria-labelledby={recView === "announcement" ? "rec-tab-announcement" : "rec-tab-record"}
+        aria-labelledby={announcementsActive ? undefined : "rec-tab-record"}
+        aria-label={announcementsActive ? "Record an announcement" : undefined}
         style={{ display: recView === "record" || recView === "announcement" ? undefined : "none" }}
       >
         {error && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{error}</p>}
 
-        {recView === "announcement" && !walkthroughTake && !announcementTake && (
+        {announcementsActive && !walkthroughTake && !announcementTake && (
           <p className={styles.fieldHint}>
             Record a new take, or pick an existing one below (including from your recording library), to draft a Canvas announcement from it.{" "}
             <Button type="button" variant="text" size="small" onClick={openAnnouncementsTab}>

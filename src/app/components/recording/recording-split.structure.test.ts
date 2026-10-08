@@ -138,17 +138,19 @@ describe("recording-split structure", () => {
     // the dedicated Grading and Grading-from-screenshots front doors MOVED
     // OUT of this strip entirely - they are now Tools > Grading inner-nav
     // items, not Recording sub-tabs (twelve -> ten).
-    it("should render exactly nine inner-view tabs", () => {
+    // TOOLS-IA-REORG W2: the "announcement" tab was RE-PARENTED to Tools >
+    // Announcements > From a recording (nine -> eight).
+    it("should render exactly eight inner-view tabs", () => {
       const stripLine = recordingTabContent
         .split("\n")
         .find((line: string) => line.includes('["record", "Record"]'));
       expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
       const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
-      expect(entries).toHaveLength(9);
+      expect(entries).toHaveLength(8);
     });
 
-    it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {
-      expect(recordingTabContent).toMatch(/\["announcement",\s*"[^"]+"\]/);
+    it("should NOT include an announcement entry in the strip - it moved to Tools > Announcements (TOOLS-IA-REORG W2)", () => {
+      expect(recordingTabContent).not.toMatch(/\["announcement",\s*"[^"]+"\]/);
     });
 
     it("should NOT include a grading entry in the strip - grading-via-recording moved to Tools > Grading (GRAD-SUBTAB wave 2)", () => {
@@ -171,13 +173,21 @@ describe("recording-split structure", () => {
     // chain itself (bounded by its own `return`/ternary) rather than the
     // whole file, so this cannot be satisfied by the value appearing
     // anywhere else in the source (e.g. only in the strip above).
-    it("should accept every non-default recView value in the restored-view equality chain, including announcement and messages", () => {
+    it("should accept every non-default recView value in the restored-view equality chain, including messages", () => {
       const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
       expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
       const guard = guardMatch![0];
-      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement", "messages"]) {
+      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "messages"]) {
         expect(guard, `expected the restore guard to accept "${value}"`).toContain(`v === "${value}"`);
       }
+    });
+
+    // TOOLS-IA-REORG W2 (R-b1): "announcement" left recView; a chain that
+    // re-accepted it would strand/duplicate the re-parented front door.
+    it("should NOT accept announcement in the restore guard - it moved to Tools > Announcements", () => {
+      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
+      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
+      expect(guardMatch![0]).not.toContain('v === "announcement"');
     });
 
     // GRAD-SUBTAB wave 2: "grading"/"snapgrade" moved out of recView entirely
@@ -212,9 +222,13 @@ describe("recording-split structure", () => {
     // ten tabs are served by NINE panel divs, not ten. GRAD-SUBTAB wave 2
     // drops the grading/snapgrade tab AND their panel divs (twelve/eleven ->
     // ten/nine), moving both to Tools > Grading.
-    it("renders exactly eight tabpanel content divs (nine tabs, record/announcement sharing one)", () => {
+    // TOOLS-IA-REORG W2: eight tabs; seven literal tabpanel divs plus the
+    // record wrapper, whose role is dynamic (tabpanel on Recording, a labelled
+    // region while Announcements > From a recording reuses it).
+    it("renders seven literal tabpanel content divs plus the dynamic record wrapper (eight tabs)", () => {
       const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
-      expect(matches).toHaveLength(8);
+      expect(matches).toHaveLength(7);
+      expect(recordingTabContent).toContain('role={announcementsActive ? "region" : "tabpanel"}');
     });
 
     // The ten tab buttons render from ONE array literal via a single .map()
@@ -227,11 +241,10 @@ describe("recording-split structure", () => {
     // is one some tabpanel div actually declares.
     it("gives every tab button an aria-controls expression that resolves to a real tabpanel id for all nine keys", () => {
       expect(recordingTabContent).toContain(
-        'aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}'
+        "aria-controls={`rec-panel-${key}`}"
       );
       const keys = [
         "record",
-        "announcement",
         "discussions",
         "messages",
         "moduledeck",
@@ -241,7 +254,7 @@ describe("recording-split structure", () => {
         "avatar",
       ];
       const panelTargets = new Set(
-        keys.map((key) => (key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`))
+        keys.map((key) => `rec-panel-${key}`)
       );
       expect(panelTargets.size).toBe(8);
       for (const target of panelTargets) {
@@ -272,8 +285,8 @@ describe("recording-split structure", () => {
       );
       expect(
         sharedLabelledBy,
-        "expected the shared panel's aria-labelledby expression to name rec-tab-announcement"
-      ).toContain("rec-tab-announcement");
+        "the announcement tab left the strip (W2); the wrapper must not name it"
+      ).not.toContain("rec-tab-announcement");
       for (const key of ["discussions", "messages", "moduledeck", "speed", "captions", "slides", "avatar"]) {
         expect(recordingTabContent, `expected aria-labelledby="rec-tab-${key}" on its panel`).toContain(
           `aria-labelledby="rec-tab-${key}"`

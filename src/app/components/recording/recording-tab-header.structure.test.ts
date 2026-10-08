@@ -25,6 +25,14 @@ const FROZEN_SUBTITLE =
   "already have.";
 
 function resolveAttr(nearEyebrow: string, attr: "title" | "subtitle"): string {
+  // TOOLS-IA-REORG W2 re-parented "record an announcement" into Announcements,
+  // so the shared header now branches on announcementsActive. The Recording
+  // (false) branch still carries the frozen A18 literal; pull it from the
+  // ternary's else-string so this canary keeps its teeth on that branch.
+  const ternaryMatch = nearEyebrow.match(
+    new RegExp(`${attr}=\\{\\s*announcementsActive\\s*\\?\\s*"[^"]*"\\s*:\\s*"([^"]*)"\\s*\\}`)
+  );
+  if (ternaryMatch) return ternaryMatch[1];
   const inlineMatch = nearEyebrow.match(new RegExp(`${attr}="([^"]*)"`));
   if (inlineMatch) return inlineMatch[1];
   const refMatch = nearEyebrow.match(new RegExp(`${attr}=\\{([A-Za-z0-9_]+)\\}`));
@@ -39,23 +47,23 @@ function resolveAttr(nearEyebrow: string, attr: "title" | "subtitle"): string {
 }
 
 describe("A18 AC-5: RecordingTab.tsx's shared TabShell title and subtitle stop promising every inner view records", () => {
-  const eyebrowIdx = source.indexOf('eyebrow="Recording"');
+  const eyebrowIdx = source.indexOf('eyebrow={announcementsActive ? "Announcements" : "Recording"}');
 
-  it("finds eyebrow=\"Recording\" on the TabShell this tool is rendered under (anchor resolves)", () => {
+  it("finds the Recording/Announcements eyebrow on the TabShell this tool is rendered under (anchor resolves)", () => {
     expect(
       eyebrowIdx,
-      "expected to find eyebrow=\"Recording\" on the TabShell this tool is rendered under"
+      "expected to find eyebrow={announcementsActive ? \"Announcements\" : \"Recording\"} on the TabShell this tool is rendered under"
     ).toBeGreaterThan(-1);
   });
 
-  const nearEyebrow = source.slice(eyebrowIdx, eyebrowIdx + 400);
+  const nearEyebrow = source.slice(eyebrowIdx, eyebrowIdx + 700);
 
-  it("finds a title attribute or reference within 400 characters of the eyebrow (anchor resolves)", () => {
+  it("finds a title attribute or reference within 700 characters of the eyebrow (anchor resolves)", () => {
     const titleText = resolveAttr(nearEyebrow, "title");
     expect(titleText.length).toBeGreaterThan(0);
   });
 
-  it("finds a subtitle attribute or reference within 400 characters of the eyebrow (anchor resolves)", () => {
+  it("finds a subtitle attribute or reference within 700 characters of the eyebrow (anchor resolves)", () => {
     const subtitleText = resolveAttr(nearEyebrow, "subtitle");
     expect(subtitleText.length).toBeGreaterThan(0);
   });

@@ -62,7 +62,8 @@ import {
   TAB_ORDER,
   type ActiveTab,
 } from "./components/tabs/tab-sections";
-import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch, resolveRecordingLaunchRoute } from "@/lib/recording-launch";
+import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch, resolveRecordingLaunchRoute, navigateToRecordingTool } from "@/lib/recording-launch";
+import { legacyRecViewRedirect } from "@/lib/rec-view-migration";
 import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
 import { ANNOUNCEMENTS_NAV_EVENT } from "@/lib/announcements-nav";
@@ -160,6 +161,15 @@ export default function Home() {
       const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
       if (!detail) return;
       const route = resolveRecordingLaunchRoute(detail.view);
+      // TOOLS-IA-REORG W2: "announcement" launches (and the R-b1 migration)
+      // land on Announcements > From a recording, not on a Recording sub-tab.
+      if (detail.view === "announcement") {
+        setManualView("announcements");
+        setAnnouncementsView("recording");
+        setToolsSection(route.toolsSection);
+        setActiveTab(route.activeTab);
+        return;
+      }
       setManualView(route.manualView);
       if (route.gradingView) setGradingView(route.gradingView);
       if (route.announcementsView) setAnnouncementsView(route.announcementsView);
@@ -169,6 +179,31 @@ export default function Home() {
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
   }, [setManualView, setToolsSection, setActiveTab, setGradingView, setAnnouncementsView]);
+
+  // TOOLS-IA-REORG W2: Tools > Announcements > From a recording is showing.
+  const announcementsRecordingShown =
+    activeTab === "manual" && toolsSection === "manual" && manualView === "announcements" && announcementsView === "recording";
+
+  // TOOLS-IA-REORG W2 (R-b1): a returning user whose persisted
+  // ta-rec-view is the retired "announcement" sub-view and who lands on the
+  // Recording chip is sent to Announcements > From a recording. The stored value
+  // is read in a lazy initializer (pure read, idempotent under StrictMode)
+  // BEFORE RecordingTab's own persist effect rewrites the key to "record". The
+  // redirect rides the launch event so setState happens in the listener above,
+  // not synchronously in this effect.
+  const [legacyRecRedirect] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return legacyRecViewRedirect(localStorage.getItem("ta-rec-view"), manualView) !== null;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (legacyRecRedirect) navigateToRecordingTool("announcement");
+    // Once, at mount: the decision was captured by the initializer above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ANNOUNCEMENTS-TAB wave A-W2: the Recording tab's record-announcement
   // cross-link (openAnnouncementsTab, src/lib/announcements-nav.ts) lands on
@@ -725,13 +760,22 @@ export default function Home() {
             Recording view. Rewriting them in terms of the rail item id would
             have been the same predicate spelled a new way, with a live screen
             capture riding on getting the rewrite right. */}
+        {/* TOOLS-IA-REORG W2: the SAME always-mounted instance also serves
+            Tools > Announcements > From a recording (record-an-announcement was
+            re-parented out of Recording's strip). It needs this tab's recorder,
+            takes and library, so a second mount would fork live capture state. */}
         <div
           style={{
             display:
-              activeTab === "manual" && toolsSection === "manual" && manualView === "recording" ? undefined : "none",
+              activeTab === "manual" && toolsSection === "manual" && (manualView === "recording" || announcementsRecordingShown)
+                ? undefined
+                : "none",
           }}
         >
-          <RecordingTab active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"} />
+          <RecordingTab
+            active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"}
+            announcementsActive={announcementsRecordingShown}
+          />
         </div>
 
         {/* GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md

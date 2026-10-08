@@ -71,10 +71,14 @@ export function isPresentationsView(value: unknown): value is PresentationsView 
 // A-W1): "post" is Post-an-announcement, "walkthrough" is
 // From-a-walkthrough. Same shape as PresentationsView above; derived from a
 // presence record so the member list and the guard cannot drift apart.
-export type AnnouncementsView = "post" | "walkthrough";
+//
+// TOOLS-IA-REORG W2: "recording" (From a recording) is the third member - the
+// record-an-announcement front door RE-PARENTED out of Recording's inner strip.
+export type AnnouncementsView = "post" | "recording" | "walkthrough";
 
 const ANNOUNCEMENTS_VIEW_PRESENCE: Record<AnnouncementsView, true> = {
   post: true,
+  recording: true,
   walkthrough: true,
 };
 export const ANNOUNCEMENTS_VIEWS: readonly AnnouncementsView[] = Object.keys(
@@ -162,6 +166,7 @@ export const destinations: DestinationGroup[] = [
     name: "Announcements",
     destinations: [
       { id: "announcements-post", label: "Post an announcement", description: "Compose and post a course announcement" },
+      { id: "announcements-recording", label: "From a recording", description: "Record a take, or pick one from your library, and draft a course announcement from it" },
       { id: "announcements-walkthrough", label: "From a walkthrough", description: "Turn a recorded walkthrough into a course announcement" },
     ],
   },
@@ -425,6 +430,7 @@ export function resolveStateFromDestinationId(
 
   const announcementsView: AnnouncementsView = (() => {
     if (id === "announcements-post") return "post";
+    if (id === "announcements-recording") return "recording";
     if (id === "announcements-walkthrough") return "walkthrough";
     return currentAnnouncementsView;
   })();

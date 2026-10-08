@@ -262,8 +262,8 @@ describe("manual-rail", () => {
 
     it("should return the Announcements destinations for announcements", () => {
       const inner = getInnerDestinations("announcements");
-      expect(inner?.map((d) => d.id)).toEqual(["announcements-post", "announcements-walkthrough"]);
-      expect(inner?.map((d) => d.label)).toEqual(["Post an announcement", "From a walkthrough"]);
+      expect(inner?.map((d) => d.id)).toEqual(["announcements-post", "announcements-recording", "announcements-walkthrough"]);
+      expect(inner?.map((d) => d.label)).toEqual(["Post an announcement", "From a recording", "From a walkthrough"]);
     });
 
     it("should return null for single-view subtabs", () => {
@@ -302,6 +302,14 @@ describe("manual-rail", () => {
       expect(getInnerNavAriaLabel("grading")).toBe("Grading tools");
       expect(getInnerNavAriaLabel("content")).toBe("LMS views");
       expect(getInnerNavAriaLabel("grading")).not.toBe(getInnerNavAriaLabel("content"));
+    });
+
+    // TOOLS-IA-REORG W2: Announcements gained a third child (From a recording)
+    // re-parented from Recording; its ARIA name must stay table-fed and correct.
+    it("keeps the Announcements inner nav named after the re-parent", () => {
+      expect(getInnerNavAriaLabel("announcements")).toBe("Announcements views");
+      expect(getInnerNavAriaLabel("recording")).toBeNull();
+      expect(getInnerDestinations("recording")).toBeNull();
     });
   });
 });

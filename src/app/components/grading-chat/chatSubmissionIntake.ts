@@ -25,8 +25,8 @@ import { assignUnclaimedLabel } from "@/lib/grade/utils";
  * two. */
 export type ChatSubmissionInput =
   | { readonly kind: "text"; readonly label?: string; readonly content: string }
-  | { readonly kind: "file"; readonly file: File }
-  | { readonly kind: "url"; readonly url: string }
+  | { readonly kind: "file"; readonly file: File; readonly label?: string }
+  | { readonly kind: "url"; readonly url: string; readonly label?: string }
   | { readonly kind: "composite"; readonly student: string; readonly parts: readonly CompositePartInput[] };
 
 /** One part of a composite submission. Each part resolves to EXACTLY ONE

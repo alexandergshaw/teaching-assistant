@@ -237,7 +237,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       const outcome = await driver.submit({ kind: "text", content, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
     });
-  const handleSubmitFiles = (files: File[]) => withPreparing(async () => {
+  const handleSubmitFiles = (files: File[], label?: string) => withPreparing(async () => {
+    // A label names ONE student's ONE submission: forwarded only for a
+    // single-file pick; a multi-file batch falls back to the filenames.
+    const fileLabel = files.length === 1 ? label : undefined;
     // The session is begun once for the whole batch, not once per file.
     let began = false;
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
@@ -247,7 +250,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         }
         began = true;
       }
-      return driver.submit({ kind: "file", file });
+      return driver.submit({ kind: "file", file, label: fileLabel });
     });
     const reasons: string[] = [];
     outcomes.forEach((outcome, index) => {
@@ -255,10 +258,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     });
     setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
   });
-  const handleSubmitUrl = (url: string) =>
+  const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
       if (!(await ensureSession(url))) return;
-      const outcome = await driver.submit({ kind: "url", url });
+      const outcome = await driver.submit({ kind: "url", url, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
     });
 

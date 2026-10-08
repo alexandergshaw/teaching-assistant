@@ -711,3 +711,79 @@ describe("useContinuousGradingRun - composite submit appends exactly one row", (
     expect(dispatchItemMock).not.toHaveBeenCalled();
   });
 });
+
+// Submission labels: the optional label on file and url submissions overrides
+// entry.student in the driver, ONLY when the submission resolves to one entry.
+describe("useContinuousGradingRun - submit-time labels on file and url submissions", () => {
+  type LabelEntry = { student: string; content: string; mergedFileCount: number; submittedFiles: never[] };
+  const labelEntry = (student: string): LabelEntry => ({ student, content: "x", mergedFileCount: 0, submittedFiles: [] });
+
+  function primeMocks(entries: LabelEntry[]): void {
+    prepareChatSubmissionActionMock.mockResolvedValue({ kind: "entries", entries, pointsPossible: null });
+    dispatchItemMock.mockReturnValue(new Promise(() => {}));
+  }
+  const dispatchedStudents = (): string[] =>
+    dispatchItemMock.mock.calls.map((call) => (call[0] as { entry: { student: string } }).entry.student);
+  const aFile = () => new File(["x"], "essay.txt");
+
+  it("a file label becomes the dispatched student", async () => {
+    primeMocks([labelEntry("essay.txt")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "file", file: aFile(), label: "X" });
+    expect(dispatchedStudents()).toEqual(["X"]);
+  });
+
+  it("a url label becomes the dispatched student", async () => {
+    primeMocks([labelEntry("https://github.com/o/r")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "url", url: "https://github.com/o/r", label: "X" });
+    expect(dispatchedStudents()).toEqual(["X"]);
+  });
+
+  it("a blank or absent label leaves the derived student untouched", async () => {
+    primeMocks([labelEntry("essay.txt")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "file", file: aFile(), label: "   " });
+    await driver.submit({ kind: "file", file: aFile() });
+    expect(dispatchedStudents()).toEqual(["essay.txt", "essay.txt (2)"]);
+  });
+
+  it("a 600-char label is sliced to 500", async () => {
+    primeMocks([labelEntry("essay.txt")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "file", file: aFile(), label: "a".repeat(600) });
+    expect(dispatchedStudents()[0]).toHaveLength(500);
+  });
+
+  it("two submissions with the same label de-dup to X and X (2)", async () => {
+    primeMocks([labelEntry("essay.txt")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "file", file: aFile(), label: "X" });
+    await driver.submit({ kind: "file", file: aFile(), label: "X" });
+    expect(dispatchedStudents()).toEqual(["X", "X (2)"]);
+  });
+
+  it("a multi-entry file or url submission ignores the label (entries.length === 1 guard)", async () => {
+    primeMocks([labelEntry("Ann"), labelEntry("Bob")]);
+    let driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    driver = useTestDriver();
+    await driver.submit({ kind: "file", file: aFile(), label: "X" });
+    expect(dispatchedStudents()).toEqual(["Ann", "Bob"]);
+    await driver.submit({ kind: "url", url: "https://github.com/o/r", label: "Y" });
+    expect(dispatchedStudents()).not.toContain("X");
+    expect(dispatchedStudents()).not.toContain("Y");
+    // The pool runs 3 at a time, so the 4th entry is queued, not yet dispatched.
+    expect(dispatchedStudents()[2]).toBe("Ann (2)");
+  });
+});

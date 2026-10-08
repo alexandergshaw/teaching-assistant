@@ -54,8 +54,8 @@ function persistInputMode(mode: InputMode) {
 export interface ChatComposerProps {
   readonly disabled: boolean;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
-  readonly onSubmitFiles: (files: File[]) => void;
-  readonly onSubmitUrl: (url: string) => void;
+  readonly onSubmitFiles: (files: File[], label?: string) => void;
+  readonly onSubmitUrl: (url: string, label?: string) => void;
   readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => void;
 }
 
@@ -138,7 +138,10 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     addIntentRef.current = false;
     if (files.length === 0 || disabled) return;
     if (asParts) addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
-    else onSubmitFiles(files);
+    else {
+      onSubmitFiles(files, label.trim() ? label.trim() : undefined);
+      setLabel("");
+    }
   };
 
   const handleSendUrl = () => {
@@ -147,8 +150,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
       handleAddUrlPart();
       return;
     }
-    onSubmitUrl(url.trim());
+    onSubmitUrl(url.trim(), label.trim() ? label.trim() : undefined);
     setUrl("");
+    setLabel("");
   };
 
   const handleAddUrlPart = () => {
@@ -187,7 +191,10 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     const files = Array.from(event.dataTransfer.files);
     if (files.length === 0) return;
     if (trayActive) addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
-    else onSubmitFiles(files);
+    else {
+      onSubmitFiles(files, label.trim() ? label.trim() : undefined);
+      setLabel("");
+    }
   };
 
   return (
@@ -230,6 +237,14 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             <Button variant="outlined" size="small" aria-label="Attach a file" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
               Add files
             </Button>
+            <TextField
+              size="small"
+              className={chatStyles.composerLabel}
+              label="Label (optional)"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              disabled={disabled}
+            />
           </>
         )}
         <Button variant="text" size="small" aria-label="Add part to composite submission" disabled={addPartDisabled} onClick={handleAddPart}>
@@ -341,6 +356,15 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             label="Canvas, GitHub, or Google Drive URL"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={submitOnEnter(handleSendUrl)}
+            disabled={disabled}
+          />
+          <TextField
+            size="small"
+            className={chatStyles.composerLabel}
+            label="Label (optional)"
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
             onKeyDown={submitOnEnter(handleSendUrl)}
             disabled={disabled}
           />

@@ -533,8 +533,35 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
     expect(url).toContain("onSubmitUrl(");
     expect(url.indexOf("handleAddUrlPart()")).toBeLessThan(url.indexOf("onSubmitUrl("));
     const pick = slice("const handlePickFile", "const handleSendUrl");
-    expect(pick).toContain("onSubmitFiles(files)");
+    expect(pick).toContain("onSubmitFiles(files, ");
     expect(pick).toContain("trayActive");
+  });
+});
+
+describe("submission labels: file and url modes carry the optional label", () => {
+  it("the composer declares a label field in file mode and in url mode, and threads it into the callbacks", () => {
+    const source = withoutLineComments(read(COMPOSER));
+    expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => void/);
+    expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => void/);
+    const fileBlock = source.slice(source.indexOf('mode === "file" && ('), source.indexOf("+ Add part"));
+    expect(fileBlock).toContain("chatStyles.composerLabel");
+    expect(fileBlock).toContain("Label (optional)");
+    const urlBlock = source.slice(source.indexOf('mode === "url" && ('));
+    expect(urlBlock).toContain("chatStyles.composerLabel");
+    expect(urlBlock).toContain("Label (optional)");
+    expect(source).toContain("onSubmitUrl(url.trim(), ");
+  });
+
+  it("the panel forwards the label to the driver only for a single-file pick", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("const handleSubmitFiles");
+    const files = source.slice(start, source.indexOf("const handleSubmitUrl"));
+    expect(files).toMatch(/files\.length === 1 \? label : undefined/);
+    expect(files).toContain('kind: "file", file, label: fileLabel');
+    const url = source.slice(source.indexOf("const handleSubmitUrl"), source.indexOf("const handleSubmitComposite"));
+    expect(url).toContain('kind: "url", url, label');
+    // The whole-view drop supplies no label.
+    expect(source).toContain("handleSubmitFiles(files);");
   });
 });
 

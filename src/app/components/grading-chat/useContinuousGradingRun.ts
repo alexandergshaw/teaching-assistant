@@ -327,12 +327,22 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const admitted = entries.slice(0, available);
     const refusedCount = entries.length - admitted.length;
 
+    // Optional submit-time label for a file or url submission. Applied ONLY
+    // when the submission resolved to exactly one entry: a zip or a whole
+    // Canvas assignment resolves to many, and one label must never collapse
+    // distinct students. Blank/absent leaves the derived student untouched.
+    const submitLabel =
+      (input.kind === "file" || input.kind === "url") && entries.length === 1
+        ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
+        : "";
+
     for (const rawEntry of admitted) {
       const sourceIndex = dispatchedCountRef.current;
       dispatchedCountRef.current += 1;
       // Cross-event duplicate display names: the first claimant keeps its
       // name, later ones get " (2)", " (3)" so row identity stays unique.
-      const label = assignUnclaimedLabel(rawEntry.student, takenLabelsRef.current);
+      const baseStudent = submitLabel.length > 0 ? submitLabel : rawEntry.student;
+      const label = assignUnclaimedLabel(baseStudent, takenLabelsRef.current);
       takenLabelsRef.current.add(label);
       const entry = label === rawEntry.student ? rawEntry : { ...rawEntry, student: label };
       const body: GradeRunItemRequestBody = {

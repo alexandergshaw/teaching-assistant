@@ -8,9 +8,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildPipelineRequest,
+  deckFingerprint,
+  isPipelineComplete,
   mergeRegeneratedSlide,
   reducePipelineResponse,
   runToEnd,
+  shouldAutoDownloadDeck,
 } from "./panel-logic";
 import {
   createInitialPipelineState,
@@ -27,6 +30,8 @@ import type {
 import type { PinnedFrame } from "@/lib/deck-standard/frame";
 import type { SlidePlan } from "@/lib/deck-standard/slide-plan";
 import type { ChecklistResult } from "@/lib/deck-standard/checklists";
+import type { CheckResult } from "@/lib/deck-standard/types";
+import type { PolishResult } from "@/lib/deck-standard/polish";
 import type { PptxSlide } from "@/lib/pptx";
 
 // ---------------------------------------------------------------------------
@@ -391,5 +396,95 @@ describe("runToEnd", () => {
     expect(plan).toEqual(["outline", "activities", "frame"]);
     expect(plan).not.toContain("plan");
     expect(plan).not.toContain("deck");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-download at completion (W2)
+// ---------------------------------------------------------------------------
+
+function makeCompleteState(deck: DeckContent): PipelineState {
+  return withStages({
+    sources: stage("done", makeSources()),
+    outline: stage("done", makeOutline()),
+    activities: stage("done", makeActivities()),
+    frame: stage("done", makeFrame()),
+    plan: stage("done", makePlan()),
+    deck: stage("done", deck),
+    reviewInfoFlow: stage<ChecklistResult>("done", null),
+    reviewVisual: stage<ChecklistResult>("done", null),
+    standard: stage<CheckResult>("done", null),
+    polish: stage<PolishResult>("done", null),
+  });
+}
+
+describe("isPipelineComplete", () => {
+  const deck = makeDeck("Deck", [makeSlide("S0")]);
+
+  it("is false for a fresh pipeline", () => {
+    expect(isPipelineComplete(createInitialPipelineState())).toBe(false);
+  });
+
+  it("is false when the deck is done but later stages are still runnable", () => {
+    const state: PipelineState = { ...makeCompleteState(deck), reviewVisual: stage<ChecklistResult>("idle", null) };
+    expect(isPipelineComplete(state)).toBe(false);
+  });
+
+  it("is false when a later stage errored", () => {
+    const state: PipelineState = { ...makeCompleteState(deck), reviewInfoFlow: stage<ChecklistResult>("error", null) };
+    expect(isPipelineComplete(state)).toBe(false);
+  });
+
+  it("is false when the deck is stale", () => {
+    const state: PipelineState = { ...makeCompleteState(deck), deck: stage("stale", deck) };
+    expect(isPipelineComplete(state)).toBe(false);
+  });
+
+  it("is true when every stage is done", () => {
+    expect(isPipelineComplete(makeCompleteState(deck))).toBe(true);
+  });
+});
+
+describe("shouldAutoDownloadDeck", () => {
+  const deck = makeDeck("Deck", [makeSlide("S0")]);
+
+  it("deckFingerprint is equal for equal decks and differs for changed ones", () => {
+    expect(deckFingerprint(deck)).toBe(deckFingerprint(makeDeck("Deck", [makeSlide("S0")])));
+    expect(deckFingerprint(deck)).not.toBe(deckFingerprint(makeDeck("Deck", [makeSlide("S1")])));
+  });
+
+  it("downloads at completion when nothing was downloaded yet", () => {
+    const out = shouldAutoDownloadDeck(makeCompleteState(deck), "");
+    expect(out).toEqual({ download: true, fingerprint: deckFingerprint(deck) });
+  });
+
+  it("does not download again for the same completed deck (reload/revisit)", () => {
+    const out = shouldAutoDownloadDeck(makeCompleteState(deck), deckFingerprint(deck));
+    expect(out.download).toBe(false);
+  });
+
+  it("downloads again for a genuinely new deck", () => {
+    const next = makeDeck("Deck", [makeSlide("S0"), makeSlide("S1")]);
+    const out = shouldAutoDownloadDeck(makeCompleteState(next), deckFingerprint(deck));
+    expect(out.download).toBe(true);
+  });
+
+  it("does not download while the pipeline is incomplete", () => {
+    const state: PipelineState = { ...makeCompleteState(deck), polish: stage<PolishResult>("idle", null) };
+    expect(shouldAutoDownloadDeck(state, "").download).toBe(false);
+  });
+});
+
+describe("PipelineTab auto-download wiring (source-text pin)", () => {
+  const src = readFileSync(join(__dirname, "PipelineTab.tsx"), "utf8");
+
+  it("persists the fingerprint under the ta- key via usePersistedJSON", () => {
+    expect(src).toContain('"ta-pres-pipeline-autodl-fingerprint"');
+    expect(src).toMatch(/usePersistedJSON<string>\(PIPELINE_AUTODL_FINGERPRINT_KEY/);
+  });
+
+  it("manual button and auto path share one download function", () => {
+    expect(src.match(/downloadDeckPptx\(/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(src.match(/serializeDeckToPptx\(/g)?.length).toBe(1);
   });
 });

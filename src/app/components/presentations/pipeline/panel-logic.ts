@@ -298,3 +298,40 @@ export function runToEnd(state: PipelineState, target?: StageId): StageId[] {
     return needsRun && canRunStage(state, stage);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Auto-download at completion (PRESENTATIONS-PIPELINE W2). Pure decision
+// logic only; the Blob/anchor dance and the persisted fingerprint live in
+// PipelineTab.tsx.
+// ---------------------------------------------------------------------------
+
+/**
+ * True iff the deck exists and the full run-to-end frontier is exhausted: the
+ * deck stage is done and no stage other than `sources` is still runnable
+ * (idle/stale/error review or polish stages keep this false).
+ */
+export function isPipelineComplete(state: PipelineState): boolean {
+  if (state.deck.status !== "done" || !state.deck.artifact) return false;
+  return runToEnd(state).every((stage) => stage === "sources");
+}
+
+/** Stable identity of a deck's content: equal decks match, a changed deck differs. */
+export function deckFingerprint(deck: DeckContent): string {
+  return JSON.stringify({ presentationTitle: deck.presentationTitle, slides: deck.slides });
+}
+
+/**
+ * Decide whether to auto-download now. Downloads only at completion, only
+ * when a deck artifact exists, and only when its fingerprint differs from the
+ * last one already downloaded (so a reload of a downloaded run is a no-op).
+ */
+export function shouldAutoDownloadDeck(
+  state: PipelineState,
+  lastFingerprint: string
+): { download: boolean; fingerprint: string | null } {
+  const deck = state.deck.artifact;
+  if (!deck || !isPipelineComplete(state)) return { download: false, fingerprint: lastFingerprint };
+  const fingerprint = deckFingerprint(deck);
+  if (fingerprint === lastFingerprint) return { download: false, fingerprint: lastFingerprint };
+  return { download: true, fingerprint };
+}

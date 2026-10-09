@@ -36,14 +36,14 @@
 // and whether the model stays on-Frame / the review findings are genuinely
 // adversarial. See docs/pres-2-s6-plan.md section 8 / RES-S6-B/C/F.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Card, CardContent, Divider, MenuItem, TextField, Typography } from "@mui/material";
 import TabHeader from "../../TabHeader";
 import SourcesEditor from "../SourcesEditor";
 import SlideDeckPreview from "../SlideDeckPreview";
 import { usePersistedJSON } from "../hooks";
 import { deckDownloadFilename } from "../panel-logic";
-import type { PresentationSource } from "@/lib/presentations/types";
+import type { DeckContent, PresentationSource } from "@/lib/presentations/types";
 import {
   ALL_STAGE_IDS,
   createInitialPipelineState,
@@ -51,7 +51,13 @@ import {
   type PipelineState,
   type StageId,
 } from "@/lib/presentations/pipeline";
-import { applyStageEdit, buildPipelineRequest, reducePipelineResponse, runToEnd } from "./panel-logic";
+import {
+  applyStageEdit,
+  buildPipelineRequest,
+  reducePipelineResponse,
+  runToEnd,
+  shouldAutoDownloadDeck,
+} from "./panel-logic";
 import { buildMergedReview } from "./merged-review";
 import { reduceAskResponse } from "../../ppt-design/ask-response";
 import { checkDeckStandard, DECK_STANDARD_V1 } from "@/lib/deck-standard/standard";
@@ -66,6 +72,25 @@ const PIPELINE_URL = "/api/presentations/pipeline";
 const PIPELINE_STATE_KEY = "ta-pres-pipeline-state";
 const PIPELINE_CONTEXT_KEY = "ta-pres-pipeline-context-text";
 const PIPELINE_SOURCES_KEY = "ta-pres-pipeline-sources";
+const PIPELINE_AUTODL_FINGERPRINT_KEY = "ta-pres-pipeline-autodl-fingerprint";
+
+// The ONE serialize-and-save path: the manual button and the completion
+// auto-download both call this, so they produce the identical file.
+async function downloadDeckPptx(deck: DeckContent): Promise<void> {
+  const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
+  const buffer = await serializeDeckToPptx(deck);
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = deckDownloadFilename(deck.presentationTitle);
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 
 // The route-op each auto-runnable stage maps to (S6.6's inverse table,
 // panel-logic.ts's OP_TO_STAGE, restated here from the stage's side since
@@ -167,6 +192,18 @@ export default function PipelineTab() {
   const [askOutcome, setAskOutcome] = useState<{ severity: "warning" | "error"; text: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [autoDlFingerprint, setAutoDlFingerprint] = usePersistedJSON<string>(PIPELINE_AUTODL_FINGERPRINT_KEY, "");
+
+  // Auto-download once when the pipeline completes. The fingerprint is
+  // persisted BEFORE the download so a re-render or reload of the same
+  // completed deck never fires again; a new run (different deck) does.
+  useEffect(() => {
+    const decision = shouldAutoDownloadDeck(pipelineState, autoDlFingerprint);
+    const deck = pipelineState.deck.artifact;
+    if (!decision.download || decision.fingerprint === null || !deck) return;
+    setAutoDlFingerprint(decision.fingerprint);
+    downloadDeckPptx(deck).catch(() => setDownloadError("Could not build the .pptx"));
+  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint]);
 
   async function runOneStage(stage: StageId) {
     setRunningStage(stage);
@@ -271,19 +308,7 @@ export default function PipelineTab() {
     setDownloading(true);
     setDownloadError(null);
     try {
-      const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
-      const buffer = await serializeDeckToPptx(deck);
-      const blob = new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = deckDownloadFilename(deck.presentationTitle);
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
+      await downloadDeckPptx(deck);
     } catch {
       setDownloadError("Could not build the .pptx");
     } finally {

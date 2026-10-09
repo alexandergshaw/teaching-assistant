@@ -523,6 +523,30 @@ export async function readOfficeMember(
 }
 
 /**
+ * Pre-parse byte gate for a single in-memory file handed to OfficeParser
+ * (pdf/rtf and the other formats it parses itself). OfficeParser 7.0.3 has no
+ * size hook, so the only available hardening is to refuse an oversize buffer
+ * BEFORE the parse. Reuses ZIP_MAX_MEMBER_DECLARED_BYTES (DECOMPRESS-CAP-HARDENING W3).
+ */
+export function assertBytesWithinMemberCap(
+  byteLength: number,
+  name: string,
+  limits: ZipLimits = DEFAULT_ZIP_LIMITS
+): void {
+  if (byteLength > limits.maxMemberDeclaredBytes) {
+    throw new ZipCapError({
+      code: "member-bytes",
+      entryName: name,
+      chain: [],
+      limitName: "ZIP_MAX_MEMBER_DECLARED_BYTES",
+      limitValue: limits.maxMemberDeclaredBytes,
+      limitIsBytes: true,
+      observed: byteLength,
+    });
+  }
+}
+
+/**
  * Run `fn` over `items` with at most `limit` in flight, FAIL-FAST: after the
  * first rejection no queued item starts, in-flight ones are awaited, and the
  * first error is thrown. (A fifth copy of a worker pool on purpose: importing

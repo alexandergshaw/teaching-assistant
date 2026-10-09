@@ -6,6 +6,7 @@ import { createSyllabus } from "@/lib/supabase/course-syllabi";
 import { getCourse, updateCourse } from "@/lib/supabase/courses";
 import { courseToInputPayload } from "@/lib/workflows/registry-helpers";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
+import { assertBytesWithinMemberCap } from "@/lib/zip-caps";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { validateFileUpload } from "@/lib/syllabus-upload-validation";
 import { downloadFile, removeFiles } from "@/lib/supabase/storage";
@@ -70,6 +71,9 @@ async function extractTextFromFile(
   if (extension === ".pdf") {
     // Use officeparser to extract text from PDF
     try {
+      // Inside the swallow: an oversize buffer is never parsed and degrades to
+      // the placeholder below (DECOMPRESS-CAP-HARDENING W3, ruling B2).
+      assertBytesWithinMemberCap(buffer.byteLength, "syllabus.pdf");
       const ast = await OfficeParser.parseOffice(buffer, { fileType: "pdf" });
       const conversion = await ast.to("text");
       const value = typeof conversion.value === "string" ? conversion.value : "";

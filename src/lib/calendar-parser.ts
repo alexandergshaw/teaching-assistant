@@ -9,6 +9,7 @@ import {
   type ParsedCalendarResult,
 } from "./calendar-events";
 import { parseCalendarEmbedded } from "./embedded/calendar";
+import { assertBytesWithinMemberCap } from "./zip-caps";
 
 // Hard cap on the amount of extracted text we send to the model. PDFs of
 // syllabi / academic calendars are typically well under this, but a defensive
@@ -33,6 +34,7 @@ export interface ParseCalendarOptions {
  * callers can surface a friendly error.
  */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
+  assertBytesWithinMemberCap(buffer.byteLength, "calendar.pdf");
   const ast = await OfficeParser.parseOffice(buffer, { fileType: "pdf" });
   const conversion = await ast.to("text");
   const value = typeof conversion.value === "string" ? conversion.value : "";

@@ -13,6 +13,7 @@ import {
   ZIP_MAX_MEMBER_DECLARED_BYTES,
   ZIP_REFUSAL_PREFIX,
   ZipCapError,
+  assertBytesWithinMemberCap,
   chargeArchiveLevel,
   createZipBudget,
   declaredSizesOf,
@@ -380,5 +381,25 @@ describe("runBounded", () => {
 
   it("handles an empty list", async () => {
     await expect(runBounded([], 4, async () => undefined)).resolves.toBeUndefined();
+  });
+});
+
+describe("assertBytesWithinMemberCap (DECOMPRESS-CAP-HARDENING W3)", () => {
+  it("refuses a buffer one byte over the per-member cap, with the refusal prefix", () => {
+    const big = Buffer.alloc(ZIP_MAX_MEMBER_DECLARED_BYTES + 1);
+    expect(() => assertBytesWithinMemberCap(big.byteLength, "big.pdf")).toThrow(ZipCapError);
+    expect(() => assertBytesWithinMemberCap(big.byteLength, "big.pdf")).toThrow(ZIP_REFUSAL_PREFIX);
+  });
+
+  it("passes a buffer at or under the cap", () => {
+    const atCap = Buffer.alloc(ZIP_MAX_MEMBER_DECLARED_BYTES);
+    expect(() => assertBytesWithinMemberCap(atCap.byteLength, "ok.pdf")).not.toThrow();
+    expect(() => assertBytesWithinMemberCap(10, "tiny.pdf")).not.toThrow();
+  });
+
+  it("honours an injected limit", () => {
+    expect(() => assertBytesWithinMemberCap(11, "a.pdf", { ...DEFAULT_ZIP_LIMITS, maxMemberDeclaredBytes: 10 })).toThrow(
+      ZipCapError
+    );
   });
 });

@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import {
+  assertBytesWithinMemberCap,
   assertContainerWithinCaps,
   createZipBudget,
   readOfficeMember,
@@ -273,6 +274,8 @@ export async function extractTextFromBuffer(
       }
     }
 
+    // OfficeParser has no size hook: refuse an oversize buffer before parsing.
+    assertBytesWithinMemberCap(buffer.byteLength, name, budget.limits);
     const fileType = OFFICE_FILE_TYPE_HINTS[extension];
     const ast = fileType
       ? await OfficeParser.parseOffice(buffer, { fileType })

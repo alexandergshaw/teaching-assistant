@@ -1,7 +1,10 @@
 import JSZip from "jszip";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { extractTextFromBuffer } from "./office-extract";
-import { ZipCapError } from "./zip-caps";
+import { ZIP_MAX_MEMBER_DECLARED_BYTES, ZipCapError } from "./zip-caps";
 
 async function build(files: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -102,5 +105,46 @@ describe("extractTextFromBuffer Office caps (I6)", () => {
     );
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(ZipCapError);
+  });
+});
+
+describe("OfficeParser pre-parse byte cap (DECOMPRESS-CAP-HARDENING W3)", () => {
+  it("refuses an oversize pdf and rtf buffer before any parse", async () => {
+    const big = Buffer.alloc(ZIP_MAX_MEMBER_DECLARED_BYTES + 1);
+    await expect(extractTextFromBuffer("big.pdf", big)).rejects.toBeInstanceOf(ZipCapError);
+    await expect(extractTextFromBuffer("big.rtf", big)).rejects.toThrow(/^Refused: /);
+  });
+
+  it("census: every OfficeParser.parseOffice call in src is preceded by the byte cap in the same function", () => {
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) files.push(full);
+      }
+    };
+    walk(root);
+    const sites = files.filter((f) => readFileSync(f, "utf-8").includes("OfficeParser.parseOffice("));
+    expect(sites.map((f) => relative(root, f).split(sep).join("/")).sort()).toEqual([
+      "app/actions/syllabus-upload.ts",
+      "lib/calendar-parser.ts",
+      "lib/office-extract.ts",
+    ]);
+    for (const file of sites) {
+      const src = readFileSync(file, "utf-8");
+      let from = 0;
+      for (;;) {
+        const parse = src.indexOf("OfficeParser.parseOffice(", from);
+        if (parse < 0) break;
+        const before = src.slice(0, parse);
+        const guard = before.lastIndexOf("assertBytesWithinMemberCap(buffer.byteLength");
+        expect(guard, `${file}: no cap before parse at ${parse}`).toBeGreaterThan(-1);
+        // Same function: no function declaration between the guard and the parse.
+        expect(/\bfunction\b/.test(before.slice(guard)), `${file}: cap is in another function`).toBe(false);
+        from = parse + 1;
+      }
+    }
   });
 });

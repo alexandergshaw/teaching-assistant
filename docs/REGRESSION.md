@@ -47569,3 +47569,163 @@ WHAT THIS ENTRY CANNOT DETERMINE (owner-only; no component renders here):
 - R-3: that the live stream survives a tab switch, that each chip reveals the right panel, that the cross-link and the fab launch land, and that the institution switcher is usable. Owner = repo owner; instrument = a real-browser walk; step = the ANNOUNCEMENTS-TAB owner walk.
 - R-5: that the institution switcher's placement in the Announcements tab reads well. Owner = repo owner; instrument = the same walk (visual judgement); step = the same walk.
 - R-12: whether a stale `ta-content-view=announcements` should redirect to Tools > Announcements instead of LMS Modules. Owner = repo owner (decision); instrument = if "redirect", a `resolveGradingPointer`-style alias asserted by a url-state test on all three read paths (localStorage, popstate, initial URL - entry 437 BLOCKER 1 shows the third is the one that gets missed); step = the next wave to touch `url-state.ts` / `useAppNavigation.ts`.
+
+## 451. PowerPoint template-fill engine (applyOfficeSections / fillDeckTemplateFileAction) BEFORE the PRESENTATIONS-TEMPLATE W2 slide-clone wave - baseline
+
+The frozen before-state the W2 wave (OOXML slide-count clone for a deck LONGER
+than the template; scope `docs/presentations-template-ooxml-scope.md`, section 3.4
+and the W2 block of section 7) is regression-tested against. W2 edits the SHARED
+engine (`office-template-fill.ts`, `deck-template-files.ts`), so the PowerPoint
+Design tab (the template-fill's only UI, `ppt-design/index.tsx:528-535`) changes
+behavior with it. Like entries 446-448 this is an oracle read out of source and
+confirmed by running the code: a later change that moves a cited line or a
+measured value without being filed to move it is a regression. ONE row (C, the
+over-length refusal) is KNOWN to be changed on purpose by W2 and is baselined so
+the change is measured, not preserved.
+
+**Read at** `9c852ac5` (`git rev-parse --short HEAD` at write time).
+`git status --short -- src` printed nothing (no uncommitted source edit; only
+untracked `docs/*-scope.md` files). Last commits to the files read:
+`f66efb04` (`git log --oneline -1 -- src/lib/office-edit.ts`; routed all 14 raw
+`.async` reads through bounded readers) and the W0 cap `279e1ed0`. Line counts,
+`wc -l`: `office-edit.ts` 792 (PowerShell `@(Get-Content).Count` also 792),
+`office-template-fill.ts` 200, `deck-template-files.ts` 178, `fit-report.ts` 218.
+
+### How the values below were measured (and the limit of that instrument)
+
+Every row labelled MEASURED was produced by calling the REAL exported
+`fillDeckTemplateFileAction` / `uploadDeckTemplateFileAction`
+(`deck-template-files.ts:145,79`) end to end, with only two modules mocked:
+`@/lib/supabase/auth` (`requireUser` returns a fixed user) and
+`@/lib/supabase/server` (`createServiceClient` returns a chain whose
+`select().eq().eq().maybeSingle()` yields one in-memory row and whose
+`insert().select().single()` yields a stub row). Everything from
+`groupOfficeTemplateParagraphsBySlide` through `planSlideTemplateFill`,
+`fillOfficeTemplate`, `applyOfficeSections`, `openOfficeZip` (with its
+`assertContainerWithinCaps`) and `describeFitReport` is the shipped code. The
+fixture `.pptx` is built in memory with jszip (DEFLATE) and is a realistic OPC
+package: `[Content_Types].xml` with Default + Override entries,
+`_rels/.rels`, `ppt/presentation.xml` with `sldMasterIdLst`, `sldIdLst` (ids
+256+) and `sldSz`, `ppt/_rels/presentation.xml.rels` (rId1 master, rId2 theme,
+rId3.. slides), one master / layout / theme part each carrying a marker comment,
+`ppt/media/logo.png`, per-slide `_rels` (layout + image relationships) and
+`docProps/app.xml` with a `<Slides>` count. Output parts are compared by
+DECOMPRESSED content (not raw zip bytes). The probe lived OUTSIDE the repo (a
+`.mjs` vitest config with `root` = the session scratchpad, aliases for `@`,
+`jszip`, `vitest`; `npx vitest run --config <scratch>/tf.config.mjs template-fill`,
+1 test, passed, result written as JSON). It was not committed and is not in
+`src/`, so `npm test` does not collect it: this is a ONE-TIME measurement. The
+committed tests that DO pin part of this behavior are listed under "What
+executes over this behaviour today".
+
+### 1. Deck FITS the template (the happy path W2 must not regress)
+
+| Fact BEFORE W2 | Where | MEASURED |
+|---|---|---|
+| A deck with as many slides as the template has text-bearing slides is filled by position: a slide's first text paragraph <- the deck slide title, remaining paragraphs <- bullets in order | `office-template-fill.ts:179-200` (`:193-197` the mapping), `deck-template-files.ts:168,173` | fixture A (2 slides; paragraphs 3 + 2): slide1 text `[G1,g1a,g1b]`, slide2 `[G2,g2a]` |
+| The returned file name is the TRIMMED `presentationTitle`, else the template row's `name` | `deck-template-files.ts:174` | `"  Deck Title  "` -> `"Deck Title"`; `"   "` -> `"Row Name"` |
+| The success shape is `{ base64, name }` ONLY: no fit report, no clone count, no adjustment list reaches the caller on success | `deck-template-files.ts:148,174`; consumer `ppt-design/index.tsx:534-535` (`"error" in result` is the only branch) | n/a (read); `plan.fitReport` is empty on every ok plan, `office-template-fill.ts:199` |
+| Only the slide parts whose text changed are rewritten; EVERY other part is content-identical, including master, layout, theme, `ppt/media/logo.png`, `[Content_Types].xml`, `ppt/presentation.xml`, `ppt/_rels/presentation.xml.rels`, `docProps/app.xml` | `office-edit.ts:477-483` (`if (touched) zip.file(...)`), the module header `:9-13` | fixture A: `changedParts` = `ppt/slides/slide1.xml`, `ppt/slides/slide2.xml`; the 8 named parts all identical |
+| The output entry-name set equals the input's (the writer cannot add or remove a part) | `office-edit.ts:471-487` | `entryNamesEqual: true` in A, A2, A3, A4, B, D, E, F |
+| `<p:sldId>` count in `presentation.xml` is unchanged (equals the template's slide-part count, NOT the deck's) | no code touches `presentation.xml` | A 2, B 3, D 3, F 10 |
+| The output is re-emitted with NO compression: every input entry was DEFLATE, every output entry is STORE; total declared (uncompressed) bytes move by the text delta only | `office-edit.ts:487` `zip.generateAsync({ type: "nodebuffer" })` (no `compression` option) | A: file bytes 5626 -> 8804 (+56%), declared bytes 5538 -> 5626 (+88); B: 6271 -> 9905 / 6452 -> 6469; F: 10898 -> 19536 / 14120 -> 14290 |
+| Surplus deck bullets (more bullets than the template slide has body paragraphs) are DROPPED SILENTLY: no fit line, no error | `office-template-fill.ts:194-197` (loop bounded by the template's paragraph count); the `bullets-dropped` class `fit-report.ts:103-116` exists but nothing calls it | A2: deck bullets `[g1a,g1b,g1c-EXTRA,g1d-EXTRA]` and `[g2a,g2b-EXTRA]` -> output identical to A; the EXTRA strings are absent |
+| Fewer deck bullets than template body paragraphs: the template's own leftover text STAYS (H1, no deletion) | `office-template-fill.ts:15-26` (H1), `:195` | A3: slide1 `[G1,"A1 old","A2 old"]`, slide2 `[G2,"B1 old"]` |
+| A deck SHORTER than the template: the untouched slides keep their own text and stay in the deck | `office-template-fill.ts:174-177` comment, `:188-198` | B (3 slide parts, 1 deck slide): slide1 `[G1]`, slide2 `[T2 old]`, slide3 `[T3 old]`; `sldIdCount` 3; only slide1 changed |
+| Slide order is FILE order (numeric by `slideN.xml`), NOT `sldIdLst` presentation order | `office-edit.ts:370-374` `sortedSlides` (regex `^ppt/slides/slide` + digits + `.xml$`, numeric collate) | E (`sldIdLst` = slide2, slide1): deck slide 1 -> `slide1.xml`, deck slide 2 -> `slide2.xml` (so in PowerPoint's order the deck reads 2 then 1). F: deck slide 10 -> `slide10.xml`, not `slide2` |
+| The slide COUNT the planner uses is the number of slides that carry TEXT (`groups.length`), NOT the number of slide parts | `office-edit.ts:403-407` (a paragraph is emitted only if `text.trim()`), `office-template-fill.ts:132-147` (groups are built from emitted paragraphs) | D (3 slide parts, middle one text-less): deck of 2 -> ok, slide1 `[G1]`, slide2 `[]` untouched, slide3 `[G2]`; deck of 3 -> REFUSED naming "2 slides" |
+
+### 2. Deck LONGER than the template (the one row W2 changes on purpose)
+
+| Fact BEFORE W2 | Where | MEASURED (the returned `error` string, verbatim) |
+|---|---|---|
+| Refused, no file produced, no partial fill: `{ error }` with no `base64` | `office-template-fill.ts:183-186` -> `fit-report.ts:83-98` (`buildSlideCountAdjustment`, class `slide-count-refusal`), joined by `describeFitReport(...).join(" ")` at `deck-template-files.ts:169-171` | C: template 2, deck 5: `Your template has 2 slides and this deck needs 5. Pick a shorter shape or a longer template.` |
+| Singular wording at one slide | `fit-report.ts:88` (`templateSlideCount === 1 ? "slide" : "slides"`) | C: template 1, deck 2: `Your template has 1 slide and this deck needs 2. Pick a shorter shape or a longer template.` |
+| The boundary is exactly T+1 (`requiredSlideCount <= templateSlideCount` passes) | `fit-report.ts:87` | C: template 2, deck 3 -> refused; template 2, deck 2 -> ok (row A) |
+| The refusal is counted on text-bearing slides, so a template with a text-less slide refuses EARLIER than its slide-part count suggests | see the `groups.length` row above | D: 3 slide parts, deck 3 -> `Your template has 2 slides and this deck needs 3. ...` |
+| The refusal reaches the user as `generateError` beside Download / Save (not at Generate time) | `ppt-design/index.tsx:559-567,580`; the rendering block and its comment `GeneratePanel.tsx:497-514` | read only; not rendered |
+
+**What W2 is expected to change, for the diff (NOT a measurement; from the scope).**
+Row C only: the `{ error }` becomes a filled `.pptx` whose `<p:sldId>` count equals
+the deck's slide count, whose master / layout / theme / media parts are
+content-identical to the template's (the clone adds slide parts, their rels, a
+`[Content_Types].xml` Override, a `presentation.xml.rels` Relationship and a
+`sldIdLst` entry per clone, so those THREE shared parts legitimately change;
+`docProps/app.xml` `<Slides>` goes stale unless W2 updates it). Every row in
+section 1 must stay as measured, including the silent surplus-bullet drop (A2),
+the leftover-text rows (A3) and the file-order mapping (E): a W2 that "fixes" any
+of those is a separate, owner-visible behavior change and must be filed as one.
+
+### 3. The other entry points (unchanged by W2; baselined so a shared-file edit cannot move them)
+
+| Fact BEFORE W2 | Where | MEASURED |
+|---|---|---|
+| Blank template id | `deck-template-files.ts:151` | `Choose an uploaded template.` |
+| Template row not found | `deck-template-files.ts:159` | `That template no longer exists.` |
+| A template with no readable slide text refuses at fill time | `deck-template-files.ts:164-166` | G: `Could not read any slides from that template.` |
+| Upload: `.pptx` fixture accepted and the stub row's metadata returned | `deck-template-files.ts:79-116` | `{ template: {...} }`; exactly one `insert` call |
+| Upload: non-`.pptx` file name refused | `deck-template-files.ts:87` | `The template must be a PowerPoint .pptx file.` |
+| Upload: a pptx with no slide text refused | `deck-template-files.ts:94-98` | `Could not read any slide text from that file. Upload a PowerPoint .pptx with at least one slide of text.` |
+| Upload: bytes that are not a zip surface the RAW jszip message to the user | `deck-template-files.ts:113-114` (`err.message`), `office-edit.ts:349` | `Can't find end of central directory : is this a zip file ? If it is, see https://stuk.github.io/jszip/documentation/howto/read_zip.html` (pre-existing leak of a library message; W2 does not own it) |
+| The decompression bound is IN the engine: every open runs `assertContainerWithinCaps` (entries <= 2000, per-member declared <= 40 MiB, container declared <= 100 MiB) and every member read goes through `readOfficeMember` under one `createZipBudget()` per function | `office-edit.ts:348-368`, `zip-caps.ts:405-407,417-484,491-523` | `grep -c '\.async(' src/lib/office-edit.ts` printed 0 (the committed census asserts the same, `office-edit.zip-caps.test.ts:258`); that census (`:255-281`) passes |
+
+### What executes over this behaviour today
+
+`npm run test:paths -- src/lib/office-edit.zip-caps.test.ts src/lib/decks/office-template-fill.test.ts src/lib/decks/fit-report.test.ts src/lib/office-edit.test.ts`
+at write time: `Test Files 4 passed (4)`, `Tests 64 passed (64)`, four per-argument
+`COVERED` lines (zip-caps 27, template-fill 14, fit-report 18, office-edit 5),
+exit 0. What those pin, by file:
+
+- `office-template-fill.test.ts`: H1 (one section per paragraph), byte-identity of
+  an untouched paragraph, the bold-prefix rule, `groupOfficeTemplateParagraphsBySlide`,
+  and at the PLAN level (`planSlideTemplateFill`, not the action) the over-length
+  refusal object (`:260-301`), the fits case (`:303-323`), the spare-slides case
+  (`:325-338`) and the zero-paragraph slide (`:340-345`).
+- `fit-report.test.ts`: the report classes and `describeFitReport` wording.
+- `office-edit.zip-caps.test.ts`: the container pre-flight, lie-low members per
+  routed function, and the zero-raw-`.async` census.
+- NOTHING committed drives `fillDeckTemplateFileAction` or
+  `uploadDeckTemplateFileAction`: `ls src/app/actions | grep -i deck-template` lists
+  only `deck-template-files.ts` (no `.test.ts`); `guard-overtightening.test.ts:180-198`
+  only lists the four actions as requireUser capabilities. So rows A, A2, A3, A4, B,
+  C (action level), D, E, F, G and every section-3 row above rest on the one-time
+  probe, except the plan-level fits / refusal / spare-slides facts, which are also
+  pinned by `office-template-fill.test.ts`. No committed fixture in the existing
+  tests has a `ppt/presentation.xml`, `sldIdLst` or any rels part
+  (`buildPptxFixture`, `office-template-fill.test.ts:33-43` writes only
+  `[Content_Types].xml` and slides).
+
+### Disposition of prior coverage
+
+No prior REGRESSION entry covers this area: `grep -a -n -i -E 'office-edit|deck_template_files|slide-count-refusal|fillDeckTemplateFileAction|uploadDeckTemplateFileAction|planSlideTemplateFill|fillOfficeTemplate|zip-caps|ZipCapError' docs/REGRESSION.md`
+(run before writing this entry) printed nothing, and the broader
+`grep -a -n -i -E 'A43|deck.template|template-fill|PRESENTATIONS-TEMPLATE|ppt-design|PowerPoint Design'`
+returned only the deck_templates (structural preset) entries and the PowerPoint
+Design tab-migration entries, neither baselining the file-backed fill. Nothing was
+restructured and nothing withdrawn.
+
+### What this entry cannot determine
+
+- **Real PowerPoint behavior.** Whether a filled deck opens without "repair" and
+  looks right is an owner-walk; no renderer, no PowerPoint here
+  (`docs/loop/this-repo.md` section 6). "Content-identical parts" is a structural
+  fact, not a visual one.
+- **A real PowerPoint-authored template.** No `.pptx` is tracked
+  (`office-template-fill.test.ts:13-15`: `git ls-files | grep -icE ... -> 0`). The
+  fixture has no `notesSlide`, chart, embedded OLE, comments, custom XML, or
+  section list. Real templates carry some of these; their effect on the happy path
+  is unmeasured.
+- **The live `deck_template_files` table.** The Supabase chain is a stub; row
+  size limits, RLS and a real 3.5 MB template were not exercised.
+- **The UI.** The Download / Save-to-Files wiring (`ppt-design/index.tsx:528-536,559,580`)
+  and the error block (`GeneratePanel.tsx:497-514`) were read, not rendered.
+
+### Residual register for this entry
+
+| # | Not proven by this entry | Owner | Instrument | Step that measures it |
+|---|---|---|---|---|
+| BL451-1 | Rows A, A2, A3, A4, B, C (action level), D, E, F, G and section 3 rest on an uncommitted one-time probe | W2 test-author, then the W2 implementer | A committed characterization test driving the real `fillDeckTemplateFileAction` / `uploadDeckTemplateFileAction` with `requireUser` and `createServiceClient` mocked (the probe's shape), asserting each row's value; green on HEAD BEFORE any `office-template-fill.ts` / `deck-template-files.ts` edit | W2 test notes -> W2 first commit (red-before-green on row C only) |
+| BL451-2 | A filled and a cloned deck open in real PowerPoint without repair and look right | Repo owner | Open the output of a real template (drop it on Presentations > PowerPoint Design; a short and a longer-than-template deck) | The PRESENTATIONS-TEMPLATE W2 owner walk |
+| BL451-3 | Happy path on a real PowerPoint-authored template (notesSlides, charts, OLE, sections) | Repo owner supplies one `.pptx`; W2 verifier runs it | The probe fixture builder swapped for the real bytes; I-OPC over input and output | W2 verify |
+| BL451-4 | Live `deck_template_files` read / 3.5 MB template through the real Supabase path | Repo owner | One real upload + fill on production | Same owner walk as BL451-2 |
+| BL451-5 | Silent surplus-bullet drop (A2) and file-order mapping (E) are pre-existing defects surfaced here, not in any backlog row | Orchestrator files them | A backlog row each, or an explicit owner "won't fix"; instrument = rows A2 / E of this entry flipping | Orchestrator, at the W2 push reconciliation |

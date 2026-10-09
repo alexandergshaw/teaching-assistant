@@ -229,6 +229,39 @@ function applyRegenSlideSuccess(
   return applyStageEdit(state, "deck", nextDeck);
 }
 
+/**
+ * Per-slide regen sub-view seam 1: pull the candidate slide out of a
+ * `regen-slide` response WITHOUT merging it into any deck. Returns the first
+ * slide of an ok, matching, non-empty response; null for anything else
+ * (non-200, error body, empty slides, malformed first element).
+ */
+export function extractRegenCandidate(httpStatus: number, body: unknown): PptxSlide | null {
+  if (httpStatus !== 200 || !isMatchingOkBody("regen-slide", body)) return null;
+  const slides: unknown = body.op === "regen-slide" ? body.slides : null;
+  if (!Array.isArray(slides) || slides.length === 0) return null;
+  const first: unknown = slides[0];
+  if (!isRecord(first)) return null;
+  return first as unknown as PptxSlide;
+}
+
+/**
+ * Per-slide regen sub-view seam 2: the accept/discard decision over a held
+ * candidate. Discard returns the state untouched; accept splices the candidate
+ * in at `slideIndex` via `mergeRegeneratedSlide` and routes through
+ * `applyStageEdit("deck", ...)` so downstream stages go stale.
+ */
+export function applyRegenDecision(
+  state: PipelineState,
+  candidate: PptxSlide,
+  slideIndex: number,
+  action: "accept" | "discard"
+): PipelineState {
+  if (action === "discard") return state;
+  const deck = state.deck.artifact;
+  if (!deck) return state;
+  return applyStageEdit(state, "deck", mergeRegeneratedSlide(deck, slideIndex, candidate));
+}
+
 export function reducePipelineResponse(
   op: PipelineOp,
   httpStatus: number,

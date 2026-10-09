@@ -7,8 +7,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  applyRegenDecision,
   buildPipelineRequest,
   deckFingerprint,
+  extractRegenCandidate,
   isPipelineComplete,
   mergeRegeneratedSlide,
   reducePipelineResponse,
@@ -319,21 +321,89 @@ describe("mergeRegeneratedSlide", () => {
   });
 });
 
+describe("extractRegenCandidate", () => {
+  const s0 = makeSlide("S0");
+  const s1 = makeSlide("S1");
+
+  it("returns the first slide of an ok regen-slide response", () => {
+    expect(extractRegenCandidate(200, { op: "regen-slide", status: "ok", slides: [s0, s1] })).toEqual(s0);
+  });
+
+  it("returns null for empty slides, error bodies, non-200, wrong op and malformed bodies", () => {
+    expect(extractRegenCandidate(200, { op: "regen-slide", status: "ok", slides: [] })).toBeNull();
+    expect(extractRegenCandidate(502, { op: "regen-slide", status: "error", reason: "x" })).toBeNull();
+    expect(extractRegenCandidate(502, { op: "regen-slide", status: "ok", slides: [s0] })).toBeNull();
+    expect(extractRegenCandidate(200, { op: "deck", status: "ok", slides: [s0] })).toBeNull();
+    expect(extractRegenCandidate(200, { op: "regen-slide", status: "ok", slides: [null] })).toBeNull();
+    expect(extractRegenCandidate(200, undefined)).toBeNull();
+    expect(extractRegenCandidate(200, "nope")).toBeNull();
+  });
+});
+
+describe("applyRegenDecision", () => {
+  const original = makeDeck("D", [makeSlide("A"), makeSlide("B"), makeSlide("C")]);
+  const candidate: PptxSlide = { title: "B2", bullets: ["new"] };
+
+  function regenState(): PipelineState {
+    return makeCompleteState(original);
+  }
+
+  it("accept: replaces only the selected slide, keeps length, stales downstream", () => {
+    const next = applyRegenDecision(regenState(), candidate, 1, "accept");
+    expect(next.deck.artifact?.slides).toEqual([original.slides[0], candidate, original.slides[2]]);
+    expect(next.deck.artifact?.slides).toHaveLength(3);
+    expect(next.deck.artifact?.presentationTitle).toBe("D");
+    expect(next.deck.status).toBe("done");
+    for (const id of ["standard", "reviewInfoFlow", "reviewVisual", "polish"] as StageId[]) {
+      expect(next[id].status).toBe("stale");
+    }
+    // a regen leaves the pipeline incomplete, so no spurious auto-download
+    expect(isPipelineComplete(next)).toBe(false);
+    expect(shouldAutoDownloadDeck(next, deckFingerprint(original)).download).toBe(false);
+  });
+
+  it("accept: an out-of-range index leaves the deck contents unchanged", () => {
+    const next = applyRegenDecision(regenState(), candidate, 9, "accept");
+    expect(next.deck.artifact?.slides).toEqual(original.slides);
+  });
+
+  it("accept: no deck is a no-op", () => {
+    const empty = createInitialPipelineState();
+    expect(applyRegenDecision(empty, candidate, 0, "accept")).toBe(empty);
+  });
+
+  it("discard: returns the state unchanged (deck and every stage status)", () => {
+    const state = regenState();
+    const next = applyRegenDecision(state, candidate, 1, "discard");
+    expect(next).toBe(state);
+    expect(next.deck.artifact).toEqual(original);
+    expect(next.deck.artifact?.slides).toHaveLength(3);
+    expect(next.polish.status).toBe("done");
+  });
+});
+
 describe("PipelineTab wiring (source-text pin)", () => {
   const src = readFileSync(join(__dirname, "PipelineTab.tsx"), "utf8");
 
-  it("threads regenSlideIndex into reducePipelineResponse at the regen call site", () => {
-    expect(src).toMatch(
-      /reducePipelineResponse\(\s*"regen-slide"\s*,\s*res\.status\s*,\s*body\s*,\s*pipelineState\s*,\s*regenSlideIndex\s*\)/
-    );
-  });
-
-  it("mounts the Regenerate a slide card outside the deck stage block", () => {
-    const cardAt = src.indexOf("Regenerate a slide");
+  it("mounts the Regenerate a slide entry button in the deck stage block", () => {
     const deckBlockAt = src.indexOf('activeStage === "deck"');
     const standardBlockAt = src.indexOf('activeStage === "standard"');
-    expect(cardAt).toBeGreaterThan(standardBlockAt);
+    const entryAt = src.indexOf("Regenerate a slide");
     expect(deckBlockAt).toBeGreaterThan(-1);
+    expect(entryAt).toBeGreaterThan(deckBlockAt);
+    expect(entryAt).toBeLessThan(standardBlockAt);
+    expect(src).toMatch(/onClick=\{\(\) => setRegenOpen\(true\)\}/);
+  });
+
+  it("conditionally mounts SlideRegenView and no longer auto-merges a regen inline", () => {
+    expect(src).toMatch(/regenOpen[\s\S]{0,120}<SlideRegenView/);
+    expect(src).not.toContain("handleRegenSlide");
+    expect(src).not.toMatch(/reducePipelineResponse\(\s*"regen-slide"/);
+  });
+
+  it("persists the open flag via usePersistedJSON", () => {
+    expect(src).toContain('"ta-pres-pipeline-regen-open"');
+    expect(src).toMatch(/usePersistedJSON<boolean>\(PIPELINE_REGEN_OPEN_KEY/);
   });
 });
 

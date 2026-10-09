@@ -10,7 +10,13 @@
 import { Card, CardContent } from "@mui/material";
 import type { PptxSlide } from "@/lib/pptx";
 
-export default function SlideDeckPreview({ slides }: { slides: PptxSlide[] }) {
+export default function SlideDeckPreview({
+  slides,
+  startNumber,
+}: {
+  slides: PptxSlide[];
+  startNumber?: number;
+}) {
   if (slides.length === 0) {
     return <p style={{ color: "var(--text-secondary)" }}>This deck has no slides yet.</p>;
   }
@@ -29,7 +35,7 @@ export default function SlideDeckPreview({ slides }: { slides: PptxSlide[] }) {
               }}
             >
               <h5 style={{ margin: 0, fontSize: "var(--font-size-md)", fontWeight: 600 }}>
-                {idx + 1}. {slide.title}
+                {(startNumber ?? 1) + idx}. {slide.title}
               </h5>
             </div>
 

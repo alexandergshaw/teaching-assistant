@@ -36,7 +36,7 @@
 // and whether the model stays on-Frame / the review findings are genuinely
 // adversarial. See docs/pres-2-s6-plan.md section 8 / RES-S6-B/C/F.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Card, CardContent, Divider, MenuItem, TextField, Typography } from "@mui/material";
 import TabHeader from "../../TabHeader";
 import SourcesEditor from "../SourcesEditor";
@@ -67,12 +67,18 @@ import { INFO_FLOW_CHECKLIST, VISUAL_CHECKLIST, type Checklist } from "@/lib/dec
 import PipelineStepper, { STAGE_LABELS } from "./PipelineStepper";
 import FrameEditor from "./FrameEditor";
 import ReviewFindings from "./ReviewFindings";
+import SlideRegenView from "./SlideRegenView";
 
 const PIPELINE_URL = "/api/presentations/pipeline";
 const PIPELINE_STATE_KEY = "ta-pres-pipeline-state";
 const PIPELINE_CONTEXT_KEY = "ta-pres-pipeline-context-text";
 const PIPELINE_SOURCES_KEY = "ta-pres-pipeline-sources";
 const PIPELINE_AUTODL_FINGERPRINT_KEY = "ta-pres-pipeline-autodl-fingerprint";
+const PIPELINE_REGEN_OPEN_KEY = "ta-pres-pipeline-regen-open";
+
+function subscribeNoop(): () => void {
+  return () => {};
+}
 
 // The ONE serialize-and-save path: the manual button and the completion
 // auto-download both call this, so they produce the identical file.
@@ -185,14 +191,16 @@ export default function PipelineTab() {
   const [activeStage, setActiveStage] = useState<StageId>("sources");
   const [runningStage, setRunningStage] = useState<StageId | null>(null);
   const [runningToEnd, setRunningToEnd] = useState(false);
-  const [regenSlideIndex, setRegenSlideIndex] = useState(0);
-  const [regenInstruction, setRegenInstruction] = useState("");
   const [askInstruction, setAskInstruction] = useState("");
   const [askBusy, setAskBusy] = useState(false);
   const [askOutcome, setAskOutcome] = useState<{ severity: "warning" | "error"; text: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [autoDlFingerprint, setAutoDlFingerprint] = usePersistedJSON<string>(PIPELINE_AUTODL_FINGERPRINT_KEY, "");
+  const [regenOpen, setRegenOpen] = usePersistedJSON<boolean>(PIPELINE_REGEN_OPEN_KEY, false);
+  // Hydration guard: the persisted open flag must not choose the first paint.
+  // false on the server / first render, true once mounted on the client.
+  const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
 
   // Auto-download once when the pipeline completes. The fingerprint is
   // persisted BEFORE the download so a re-render or reload of the same
@@ -206,6 +214,7 @@ export default function PipelineTab() {
   }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint]);
 
   async function runOneStage(stage: StageId) {
+    setRegenOpen(false); // a stale open flag must not re-open the sub-view later
     setRunningStage(stage);
     try {
       const next = await runStage(stage, pipelineState, contextText);
@@ -216,6 +225,7 @@ export default function PipelineTab() {
   }
 
   async function handleRunToEnd() {
+    setRegenOpen(false);
     setRunningToEnd(true);
     try {
       let current = pipelineState;
@@ -246,31 +256,8 @@ export default function PipelineTab() {
   }
 
   function commitSources() {
+    setRegenOpen(false);
     setPipelineState((prev) => applyStageEdit(prev, "sources", sourcesDraft));
-  }
-
-  async function handleRegenSlide() {
-    // I3: gate on deck.status === "done", not merely canRunStage("deck") -
-    // buildPipelineRequest("regen-slide") throws on a null deck otherwise.
-    if (pipelineState.deck.status !== "done" || regenInstruction.trim() === "") return;
-    setRunningStage("deck");
-    try {
-      const request = buildPipelineRequest("regen-slide", pipelineState, contextText, {
-        slideIndex: regenSlideIndex,
-        instruction: regenInstruction,
-      });
-      const res = await fetch(PIPELINE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      });
-      const body = await res.json().catch(() => undefined);
-      const next = reducePipelineResponse("regen-slide", res.status, body, pipelineState, regenSlideIndex);
-      setPipelineState(next);
-      setRegenInstruction("");
-    } finally {
-      setRunningStage(null);
-    }
   }
 
   async function handleApplyToDeck() {
@@ -341,6 +328,17 @@ export default function PipelineTab() {
   }
 
   const busy = runningStage !== null || runningToEnd;
+
+  if (mounted && regenOpen && pipelineState.deck.status === "done") {
+    return (
+      <SlideRegenView
+        pipelineState={pipelineState}
+        setPipelineState={setPipelineState}
+        contextText={contextText}
+        onBack={() => setRegenOpen(false)}
+      />
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
@@ -541,6 +539,19 @@ export default function PipelineTab() {
               {pipelineState.deck.status === "done" && (
                 <>
                   <Divider />
+                  <Typography variant="subtitle2">Regenerate a slide</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rewrite one slide from an instruction and compare it with the current slide before keeping it.
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    onClick={() => setRegenOpen(true)}
+                    disabled={busy}
+                    sx={{ textTransform: "none", alignSelf: "start" }}
+                  >
+                    Regenerate a slide
+                  </Button>
+                  <Divider />
                   <Typography variant="subtitle2">Apply a change to the whole deck</Typography>
                   <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
                     <TextField
@@ -638,47 +649,6 @@ export default function PipelineTab() {
         </CardContent>
       </Card>
 
-      {pipelineState.deck.status === "done" && (
-        <Card variant="outlined">
-          <CardContent style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <Typography variant="h6">Regenerate a slide</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Rewrite one slide of the deck from an instruction. Every other slide is left as it is.
-            </Typography>
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-              <TextField
-                select
-                label="Slide"
-                size="small"
-                value={regenSlideIndex}
-                onChange={(e) => setRegenSlideIndex(Number(e.target.value))}
-                style={{ minWidth: 160 }}
-              >
-                {(pipelineState.deck.artifact?.slides ?? []).map((slide, idx) => (
-                  <MenuItem key={idx} value={idx}>
-                    {idx + 1}. {slide.title}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="What should change?"
-                size="small"
-                fullWidth
-                value={regenInstruction}
-                onChange={(e) => setRegenInstruction(e.target.value)}
-              />
-              <Button
-                variant="outlined"
-                onClick={handleRegenSlide}
-                disabled={busy || regenInstruction.trim() === ""}
-                sx={{ textTransform: "none" }}
-              >
-                Regenerate this slide
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

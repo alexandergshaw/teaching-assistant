@@ -356,6 +356,17 @@ async function readXmlMember(entry: JSZip.JSZipObject, budget: ZipBudget): Promi
   return (await readOfficeMember(entry, entry.name, budget)).toString("utf-8");
 }
 
+/** Read one binary member as base64 through the bounded reader (fail-closed). */
+async function readBase64Member(entry: JSZip.JSZipObject, budget: ZipBudget): Promise<string> {
+  return (await readOfficeMember(entry, entry.name, budget)).toString("base64");
+}
+
+/** Bounded XML read of the member at `path`; undefined when it is absent. */
+async function readXmlAt(zip: JSZip, path: string, budget: ZipBudget): Promise<string | undefined> {
+  const entry = zip.file(path);
+  return entry ? readXmlMember(entry, budget) : undefined;
+}
+
 function sortedSlides(zip: JSZip) {
   return Object.values(zip.files)
     .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
@@ -483,9 +494,10 @@ export async function applyOfficeSections(
  */
 export async function appendDocxParagraph(buffer: Buffer, spans: RunSpan[], style: string): Promise<Buffer> {
   const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
   const file = zip.file("word/document.xml");
   if (!file) return buffer;
-  let xml = await file.async("string");
+  let xml = await readXmlMember(file, budget);
 
   const pPr = style ? `<w:pPr><w:pStyle w:val="${escapeXml(style)}"/></w:pPr>` : "";
   const runs = (spans.length ? spans : [{ text: "" }])
@@ -528,12 +540,13 @@ const withDescr = (attrs: string, alt: string): string => {
 /** List the images (with alt text) in a docx/pptx file. */
 export async function extractOfficeImages(kind: OfficeKind, buffer: Buffer): Promise<OfficeImage[]> {
   const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
   const images: OfficeImage[] = [];
 
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
     if (!file) return [];
-    const xml = await file.async("string");
+    const xml = await readXmlMember(file, budget);
     for (const m of xml.matchAll(/<wp:docPr\b([^>]*?)\/?>/g)) {
       const id = attr(m[1], "id");
       if (!id) continue;
@@ -544,7 +557,7 @@ export async function extractOfficeImages(kind: OfficeKind, buffer: Buffer): Pro
 
   const slides = sortedSlides(zip);
   for (let s = 0; s < slides.length; s += 1) {
-    const xml = await slides[s].async("string");
+    const xml = await readXmlMember(slides[s], budget);
     // Only <p:cNvPr> inside a <p:pic> (a picture) — not every shape.
     for (const pic of xml.matchAll(/<p:pic\b[\s\S]*?<\/p:pic>/g)) {
       const cn = pic[0].match(/<p:cNvPr\b([^>]*?)\/?>/);
@@ -587,20 +600,21 @@ export async function extractOfficeImageData(
   id: string
 ): Promise<{ mimeType: string; base64: string } | null> {
   const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
 
   const readImage = async (path: string) => {
     const file = zip.file(path);
     if (!file) return null;
     const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""];
     if (!mime) return null;
-    return { mimeType: mime, base64: await file.async("base64") };
+    return { mimeType: mime, base64: await readBase64Member(file, budget) };
   };
   const embedTarget = (relsXml: string, embed: string): string | undefined =>
     relsXml.match(new RegExp(`Id="${embed}"[^>]*?Target="([^"]+)"`))?.[1] ??
     relsXml.match(new RegExp(`Target="([^"]+)"[^>]*?Id="${embed}"`))?.[1];
 
   if (kind === "docx") {
-    const docXml = await zip.file("word/document.xml")?.async("string");
+    const docXml = await readXmlAt(zip, "word/document.xml", budget);
     if (!docXml) return null;
     const numId = id.replace(/^d/, "");
     let embed: string | undefined;
@@ -611,7 +625,7 @@ export async function extractOfficeImageData(
       }
     }
     if (!embed) return null;
-    const relsXml = await zip.file("word/_rels/document.xml.rels")?.async("string");
+    const relsXml = await readXmlAt(zip, "word/_rels/document.xml.rels", budget);
     if (!relsXml) return null;
     const target = embedTarget(relsXml, embed);
     return target ? readImage(resolveZipPath("word", target)) : null;
@@ -622,7 +636,7 @@ export async function extractOfficeImageData(
   const slides = sortedSlides(zip);
   const slide = slides[Number(m[1])];
   if (!slide) return null;
-  const slideXml = await slide.async("string");
+  const slideXml = await readXmlMember(slide, budget);
   let embed: string | undefined;
   for (const pic of slideXml.matchAll(/<p:pic\b[\s\S]*?<\/p:pic>/g)) {
     if (new RegExp(`<p:cNvPr\\b[^>]*\\bid="${m[2]}"`).test(pic[0])) {
@@ -632,7 +646,7 @@ export async function extractOfficeImageData(
   }
   if (!embed) return null;
   const relsName = slide.name.replace(/slides\/(slide\d+)\.xml$/, "slides/_rels/$1.xml.rels");
-  const relsXml = await zip.file(relsName)?.async("string");
+  const relsXml = await readXmlAt(zip, relsName, budget);
   if (!relsXml) return null;
   const target = embedTarget(relsXml, embed);
   return target ? readImage(resolveZipPath("ppt/slides", target)) : null;
@@ -645,11 +659,12 @@ export async function setOfficeImageAlt(
   edits: Record<string, string>
 ): Promise<Buffer> {
   const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
 
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
     if (!file) return buffer;
-    let xml = await file.async("string");
+    let xml = await readXmlMember(file, budget);
     xml = xml.replace(/<wp:docPr\b([^>]*?)(\/?)>/g, (whole, attrs: string, slash: string) => {
       const id = attr(attrs, "id");
       const alt = id ? edits[`d${id}`] : undefined;
@@ -660,7 +675,7 @@ export async function setOfficeImageAlt(
     const slides = sortedSlides(zip);
     for (let s = 0; s < slides.length; s += 1) {
       const file = slides[s];
-      let xml = await file.async("string");
+      let xml = await readXmlMember(file, budget);
       let touched = false;
       xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, (pic) =>
         pic.replace(/<p:cNvPr\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
@@ -681,7 +696,8 @@ export async function setOfficeImageAlt(
 /** Read a docx's document title from its core properties (docProps/core.xml). */
 export async function extractDocxTitle(buffer: Buffer): Promise<string> {
   const zip = await openOfficeZip(buffer);
-  const core = await zip.file("docProps/core.xml")?.async("string");
+  const budget = createZipBudget();
+  const core = await readXmlAt(zip, "docProps/core.xml", budget);
   if (!core) return "";
   return decodeXmlEntities(core.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1]?.trim() ?? "");
 }
@@ -698,8 +714,9 @@ const CORE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relation
  */
 export async function setDocxTitle(buffer: Buffer, title: string): Promise<Buffer> {
   const zip = await openOfficeZip(buffer);
+  const budget = createZipBudget();
   const esc = escapeXml(title);
-  const core = await zip.file(CORE_PROPS)?.async("string");
+  const core = await readXmlAt(zip, CORE_PROPS, budget);
 
   if (core) {
     let xml = core;
@@ -721,14 +738,14 @@ export async function setDocxTitle(buffer: Buffer, title: string): Promise<Buffe
         ` xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
         `<dc:title>${esc}</dc:title></cp:coreProperties>`
     );
-    const ct = await zip.file("[Content_Types].xml")?.async("string");
+    const ct = await readXmlAt(zip, "[Content_Types].xml", budget);
     if (ct && !ct.includes('PartName="/docProps/core.xml"')) {
       zip.file(
         "[Content_Types].xml",
         ct.replace("</Types>", `<Override PartName="/docProps/core.xml" ContentType="${CORE_CT}"/></Types>`)
       );
     }
-    const rels = await zip.file("_rels/.rels")?.async("string");
+    const rels = await readXmlAt(zip, "_rels/.rels", budget);
     if (rels && !rels.includes(CORE_REL)) {
       zip.file(
         "_rels/.rels",

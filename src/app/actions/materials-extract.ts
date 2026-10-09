@@ -14,6 +14,7 @@
 
 import { requireOwner } from "@/lib/supabase/auth";
 import { extractTextFromBuffer } from "@/lib/office-extract";
+import { declaredSizesOf, readMemberBounded } from "@/lib/zip-caps";
 
 export interface MaterialsZipTextEntry {
   name: string;
@@ -48,11 +49,17 @@ export async function extractZipMaterialsTextAction(
 
     for (const member of members.slice(0, maxMembers)) {
       try {
-        const buffer = await member.async("nodebuffer");
-        if (buffer.byteLength > maxMemberBytes) {
-          entries.push({ name: member.name, size: buffer.byteLength, text: "" });
+        // Declared size first (fail-closed): an oversized member is listed
+        // WITHOUT being decompressed, and the bounded read refuses a member
+        // that declares small but inflates large (stream-overrun -> catch).
+        // Deliberately no assertContainerWithinCaps: this path is best-effort
+        // and must list, not refuse, the owner's archive.
+        const { declared } = declaredSizesOf(member, member.name);
+        if (declared > maxMemberBytes) {
+          entries.push({ name: member.name, size: declared, text: "" });
           continue;
         }
+        const buffer = await readMemberBounded(member, declared, member.name);
         const text = await extractTextFromBuffer(member.name, buffer);
         entries.push({ name: member.name, size: buffer.byteLength, text: text?.trim() ?? "" });
       } catch {

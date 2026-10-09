@@ -237,6 +237,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   );
   const identity = runResetKey(runKey, run);
   const [prevIdentity, setPrevIdentity] = useState<unknown>(identity);
+  const [editsKeyUrl, setEditsKeyUrl] = useState(canvasUrl);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   // GR-POST-ONE-CONFIRM: which single row is armed to post (first post only).
@@ -258,6 +259,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // the seeded map for a student the new run doesn't have.
   if (identity !== prevIdentity) {
     setPrevIdentity(identity);
+    setEditsKeyUrl(canvasUrl);
     setEdits(correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run, editsSurface)));
     setPostStatus({});
     setPostSummary("");
@@ -271,9 +273,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Persists on every edits change (grade, per-criterion score, or any of the
   // three feedback boxes) - best-effort, see persistGradingResultsEdits's own
   // doc comment for why a write failure is swallowed rather than thrown.
+  // Keyed on editsKeyUrl (re-synced on run change), not the live canvasUrl.
   useEffect(() => {
-    persistGradingResultsEdits(canvasUrl, edits, editsSurface);
-  }, [canvasUrl, edits, editsSurface]);
+    persistGradingResultsEdits(editsKeyUrl, edits, editsSurface);
+  }, [editsKeyUrl, edits, editsSurface]);
 
   // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a row must not
   // keep reading "Posted to Canvas" once the number that was posted has

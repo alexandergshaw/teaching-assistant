@@ -343,3 +343,41 @@ describe("GradingResults.tsx wires its Browse-all-files button to SubmittedFiles
     expect(readStrippedSource("./FilesCell.tsx")).toMatch(/onClick=\{\(\) => onBrowseAll\(result\)\}/);
   });
 });
+
+describe("GradingResults.tsx persists edits under editsKeyUrl, loads under canvasUrl (RES-FILL-11)", () => {
+  // The pure two-URL test in gradingResultsHelpersEditState.test.ts is the
+  // PRECONDITION control: it passes while the bug ships. This source-text
+  // guard is the load-bearing one - persisting under the live canvasUrl
+  // writes one assignment's edits under another's key while a stale run
+  // is still displayed.
+  function readStripped(): string {
+    return readFileSync(fileURLToPath(new URL("../GradingResults.tsx", import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+  }
+
+  it("canary: the detector discriminates the two persist spellings", () => {
+    expect(/persistGradingResultsEdits\(editsKeyUrl,/.test("persistGradingResultsEdits(canvasUrl, e, s)")).toBe(false);
+    expect(/persistGradingResultsEdits\(canvasUrl,/.test("persistGradingResultsEdits(canvasUrl, e, s)")).toBe(true);
+  });
+
+  it("persist is keyed on editsKeyUrl with the matching dep array", () => {
+    const source = readStripped();
+    expect(source).toContain("persistGradingResultsEdits(editsKeyUrl,");
+    expect(source).not.toContain("persistGradingResultsEdits(canvasUrl,");
+    expect(source).toContain("[editsKeyUrl, edits, editsSurface]");
+  });
+
+  it("setEditsKeyUrl is called exactly once, inside the identity-change block", () => {
+    const source = readStripped();
+    expect(source.match(/setEditsKeyUrl\(/g) ?? []).toHaveLength(1);
+    const block = source.slice(source.indexOf("if (identity !== prevIdentity) {"));
+    expect(block.slice(0, block.indexOf("\n  }\n"))).toContain("setEditsKeyUrl(canvasUrl);");
+  });
+
+  it("both load sites still read loadGradingResultsEdits(canvasUrl, ...)", () => {
+    const source = readStripped();
+    expect(source.match(/loadGradingResultsEdits\(canvasUrl, run, editsSurface\)/g) ?? []).toHaveLength(2);
+    expect(source).not.toContain("loadGradingResultsEdits(editsKeyUrl");
+  });
+});

@@ -1242,7 +1242,7 @@
   note: 'The durable backstop behind the client-side locks. Depends on a live Canvas environment + an owner policy call (fail-open vs fail-closed, and the title-reuse tolerance). WA-POST-LOCK + WA-POST-RETRY reduce the client-side blast radius; this is the server-side close. OWNER DECISION 2026-10-05 (go-with-recommended): LEAVE the client-side locks as the accepted mitigation; the server-side dedup guard is NOT built now. It needs a live Canvas read + a fail-open/closed policy that cannot be exercised or verified in this network-blocked checkout, and WA-POST-LOCK + WA-POST-RETRY + WA-POST-RETRY-TAKE already cover the common one-tab paths. CLOSED as accepted-mitigation; reopen with a live Canvas if cross-tab/reload dedup is later wanted.'
   question: 'Do you want a server-side duplicate-announcement guard before posting (read recent announcements, refuse/warn on a same-title duplicate)? If yes, should it fail-OPEN (post anyway if the check errors) or fail-CLOSED (block), and how should it treat a legitimately-reused title? If no, close this row and rely on the client-side locks.'
 - id: 'GR-POST-ONE-CONFIRM'
-  state: 'actionable'
+  state: 'verification'
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'Grader results: the per-row "Post to Canvas" button has NO confirm while the bulk "Post N grade(s) to Canvas" button does. Per-row handlePostOne (src/app/components/GradingResults.tsx:437-474) goes from click straight to the gradebook write after the A13 postability check; bulk Post confirms at :322-329 ("This writes to the live gradebook"). Pre-existing asymmetry in a SHARED component, found in passing by the grader smoothing scope (docs/grader-smooth-scope.md residual R-4); docs/repo-grader-smooth-scope.md notes the same shared GradingResults.tsx.'
@@ -1252,7 +1252,7 @@
   instrument: 'READ plus one grep, run 2026-10-04 from the repo root: grep -n "window.confirm" src/app/components/GradingResults.tsx returns exactly one hit, line 324, inside the bulk-post path; handlePostOne at :437 contains none (opened :437-446: guard on numeric userId, A13 checkRowPostability, then payload). Mount count is the scope''s claim (4 mounts, docs/grader-smooth-scope.md section 8), not re-counted here. Nothing renders, so how it feels is unobserved.'
   from: 'docs/grader-smooth-scope.md section 9 residual R-4 and section 4 note "NOT changed, deliberately" (orchestrator-routed, filed 2026-10-04)'
   note: 'OWNER-BLOCKED, not displaced: this is a safety and product call on a component four surfaces share, so nothing was started. My recommended reading, NOT an owner ruling and NOT acted on: give per-row Post a first-post arm-then-confirm, retry and re-post staying one click, mirroring the Repo Grades per-cell precedent (RepoGradeCellControl.tsx:587-592; retry rule at :247-256 per docs/repo-grader-smooth-scope.md). CORRECTION to the framing this row was filed under: that per-cell arm lives in the REPO grader component and does not cover GradingResults rows, so it is not evidence the asymmetry is already covered here. The grader smoothing build (SMOOTH-GRADER) deliberately does not touch GradingResults.tsx (82 lines of headroom against the 1000 ceiling per that scope, wc -l, not re-measured) and is not blocked by this row. Cost of answering (a) later: a one-wave change in one shared file plus a source-order test that the confirm precedes postCanvasGradesAction (no such test exists today per the scope, AC-R4).'
-  question: 'RESOLVED 2026-10-08 - OWNER chose a (add arm-then-confirm): the per-row Post in the shared GradingResults component gains a per-row arm-then-confirm mirroring RepoGradeCellControl, retry and re-post staying one click, one wave on GradingResults.tsx for all four mounts + an AC-R4 source-order pin that the arm gates postCanvasGradesAction. BUILDING (loop-implementer dispatched 2026-10-08).'
+  question: 'RESOLVED 2026-10-08 - OWNER chose a (add arm-then-confirm). SHIPPED 6c9d0798: per-row arm-then-confirm on the shared GradingResults Post (4 mounts) - first click arms+relabels "Confirm post", second click writes; A13 postability runs first, bulk Post window.confirm untouched, retry/re-post one click. Arm logic pure (postOneArming.ts) with an AC-R4 source-order pin that the arm gates postCanvasGradesAction; rowPostPayload.ts extracted verbatim for the ceiling. Opus verify FIX-then-SHIP: widened a stale slice window (gradingResultsPostOutcome.test.ts), added the two new leaves to the CLIENT_FILES directory canary (the gate-must-include-directory-canary case), and folded rubric AREA scores into the arm signature so a 5+5->6+4 edit (total unchanged) disarms before a confirm posts unconfirmed values (Safari/Firefox do not fire onBlur on button click). Residual NIT-3b: a fast double-click arms-then-posts (inherent to a two-click arm, matches RepoGradeCellControl). Owner-walk: armed button renders + blur disarm in the real browser.'
 - id: 'RG-GRADEALL-CONFIRM'
   state: 'owner'
   kind: 'bug'
@@ -1819,7 +1819,7 @@
   note: 'The only grading-adjacent action open to any active account. BW0 caps cover the resource-exhaustion vector; what remains is unmetered model spend by an authenticated non-owner. Owner decides whether testGeminiAction is meant to be reachable by non-owners at all.'
   question: 'Should testGeminiAction be owner-gated, or is it intentionally reachable by any signed-in account?'
 - id: 'MATERIALS-EXTRACT-DECOMPRESS-HOLE'
-  state: 'unscoped'
+  state: 'actionable'
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'materials-extract.ts:45-56 has the same decompress-before-check hole as extractSubmissions; plus a census of other loadAsync sites that decompress before any cap.'
@@ -1828,10 +1828,10 @@
   blocked_by: []
   instrument: 'Needs scoping. Apply the ZIP-BOMB-CAPS zip-caps.ts primitive (declared-size pre-flight + bounded read) to materials-extract and any other loadAsync caller a census finds.'
   from: 'R4 of docs/zip-bomb-caps-scope.md (2026-10-08).'
-  note: 'Deferred sibling of ZIP-BOMB-CAPS: same class of hole in a different ingest path. Scope once zip-caps.ts exists (BW0 W1) so it can be reused rather than re-derived.'
+  note: 'Deferred sibling of ZIP-BOMB-CAPS: same class of hole in a different ingest path. SCOPED+CHECKED as part of the decompress-cap-hardening cluster docs/decompress-cap-hardening-scope.md (loop-checker REVISE, rulings-only - 4 brief disproofs confirmed: office-edit already caps the container so the real residual is a per-member LIE-LOW hole, not a missing container cap). This is W1 of that scope: materials-extract.ts:51 .async-before-size-check + the 14 raw .async sites in office-edit.ts, routed through the EXISTING bounded readXmlMember/readMemberBounded (NOT a new leaf; openOfficeZip is private so not imported from zip-caps). Oracle = a small-declared/large-actual lie-low member REFUSED (the declared-large fixture is a tautology). BUILDING (loop-implementer dispatched 2026-10-08). ORCHESTRATOR RULING B1: W1 is NOT fully disjoint from W3 (both read zip-caps.ts + office-extract.ts which W3 edits) - W1+W2 sabotage-verify concurrently (shared seams unedited between them), W3 lands AFTER W1+W2 commit on a clean base.'
   question: null
 - id: 'NESTED-ZIP-SILENT-SKIP'
-  state: 'unscoped'
+  state: 'actionable'
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'A corrupt nested zip is swallowed by catch {} (extraction.ts ~:90-92): a student whose work is in an unreadable nested archive is silently dropped with no row and no reason.'
@@ -1840,10 +1840,10 @@
   blocked_by: []
   instrument: 'Needs scoping. Record a named per-student skip note instead of swallowing; surfacing needs the typed StudentSubmissionEntry skip field that BULK-ZIP BW2 designs, so coordinate with that.'
   from: 'R6 of docs/zip-bomb-caps-scope.md (2026-10-08); pre-existing, not caused by BW0.'
-  note: 'BW0 rethrows a CAP error (whole archive refused), but this pre-existing silent catch stays until a per-student skip surface exists. Coordinate with BULK-ZIP BW2 (owns the typed skip field + the M-of-N ledger UI).'
+  note: 'BW0 rethrows a CAP error (whole archive refused), but this pre-existing silent catch stays until a per-student skip surface exists - which BW2 shipped (IngestLedger.failedSupportedFiles/.skipped), so this fix is UNBLOCKED. W2 of docs/decompress-cap-hardening-scope.md (checked REVISE rulings-only): ~2 lines at extraction.ts:174-177 pushing the swallowed nested member to failedSupportedFiles + attemptedSupportedFiles+=1, partitioning per student (never a batch-abort throw), matching the leaf path at :152. Oracle = a corrupt TOP-LEVEL nested zip yields a failedSupportedFiles ROW with a valid student still present; the frozen toodeep.zip depth-3 skip oracle is UNCHANGED (different path). BUILDING (loop-implementer dispatched 2026-10-08). RESIDUAL RES-DCH-1 (PRE-EXISTING, confirmed not this wave): the ENGINE whole-run path (engine.ts:566-587) reads failedSupportedFiles only in the zero-entry branch and DROPS the whole list - leaf failures included - when students>0; W2 fully closes the BULK/grading-chat route (the live primary bulk surface) and improves the engine zero-entry case; the engine students>0 gap is a separate GradingRun-field residual.'
   question: null
 - id: 'UNCAPPED-PDF-RTF-PARSING'
-  state: 'unscoped'
+  state: 'actionable'
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'pdf/rtf parsing memory is uncapped (OfficeParser path); a large or hostile pdf can exhaust memory with no declared-size pre-flight.'
@@ -1852,7 +1852,7 @@
   blocked_by: []
   instrument: 'Needs scoping + measurement. No pdf path was measured in the BW0 investigation (owner-walk R7). Scope a bound for the OfficeParser/pdf path once BW0 W2 lands the office-extract caps.'
   from: 'R7 of docs/zip-bomb-caps-scope.md (2026-10-08).'
-  note: 'BW0 W2 caps docx/pptx/xlsx inner expansion via declared-size pre-flight, but pdf/rtf go through OfficeParser whose memory behavior was not measured here. Needs its own measurement before a cap value can be set.'
+  note: 'BW0 W2 caps docx/pptx/xlsx inner expansion via declared-size pre-flight, but pdf/rtf go through OfficeParser (7.0.3, NO size hook - only autoTerminateTimeout, a time not memory knob) so a pre-parse BYTE check is the only gate. W3 of docs/decompress-cap-hardening-scope.md (checked REVISE rulings-only): add assertBytesWithinMemberCap to zip-caps.ts (reusing ZIP_MAX_MEMBER_DECLARED_BYTES=40MB) and route all THREE sites - office-extract.ts:277-279, syllabus-upload.ts:73, calendar-parser.ts:36 (not one site). Oracle = Buffer.alloc(40MB+1) refused PRE-parse + sabotage-remove-cap. HELD until W1+W2 commit (ruling B1: W3 edits zip-caps.ts/office-extract.ts that W1 reads, so no concurrent sabotage-verify). ORCHESTRATOR RULING B2: the syllabus-upload.ts cap sits INSIDE the existing swallow-to-placeholder try/catch (extractTextFromFile is private + returns a graceful placeholder today) - the accepted observable is the oversize buffer never parsed, so that site is covered by the census/structure guard, NOT a behavioral rejects-oracle (siblings office-extract + calendar-parser have no local try so rejects works there). NIT: confirm api/parse-calendar/route.ts handles the new ZipCapError gracefully; the W3 census guard must pin the cap PRECEDES the parse (not merely imported). The cap VALUE is reuse+proportionality, not measured here (officeparser per-byte cost is unprofilable in this env; the GATE is testable - owner residual RES-DCH-4).'
   question: null
 - id: 'TOOLS-IA-REORG'
   state: 'actionable'

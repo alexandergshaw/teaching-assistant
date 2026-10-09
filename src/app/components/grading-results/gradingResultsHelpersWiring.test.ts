@@ -122,6 +122,8 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./unresolvedNameLabel.ts", // INFER-FLAG W2: the frozen flag-text leaf.
     "./classTrendsEntry.ts", // A22: the ClassTrendsPanel adapter, narrowed off the barrel onto @/lib/grade/types.
     "./RubricProvenance.tsx", // A39 wave 2: the run's version-provenance leaf, mounted by GradingTab.tsx (not by this directory's own GradingResults.tsx).
+    "./postOneArming.ts", // GR-POST-ONE-CONFIRM: the pure arm-then-confirm decision leaf for the per-row Post (imports only ../content-tab/modules/confirmArming).
+    "./rowPostPayload.ts", // GR-POST-ONE-CONFIRM: the pure per-row post-payload builder leaf.
     "../DraftedGradesTab.tsx", // fix(trends) 4e46fadb: the new non-local consumer of ./classTrendsEntry (hasTrendableResults), gating drafts' ClassTrendsPanel mount like the other five surfaces.
     "../GradingResults.tsx",
     "../GradingTab.tsx", // A39 wave 2: the new non-local consumer of ./RubricProvenance.tsx above.

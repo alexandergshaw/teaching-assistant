@@ -97,7 +97,9 @@ describe("GradingResults.tsx wires both post paths through fanOutGradingPostResu
     const source = readStrippedSource();
     const defIdx = source.indexOf("const handlePostOne = async");
     expect(defIdx).toBeGreaterThan(-1);
-    const body = source.slice(defIdx, defIdx + 1200);
+    const endIdx = source.indexOf("const handleRunCode", defIdx);
+    expect(endIdx).toBeGreaterThan(defIdx);
+    const body = source.slice(defIdx, endIdx);
     expect(body).toContain("fanOutGradingPostResult([row], res)");
   });
 });

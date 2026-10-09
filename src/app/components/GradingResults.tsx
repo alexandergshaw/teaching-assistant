@@ -59,6 +59,8 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // safe submodule) to keep this client bundle away from @/lib/grade's
 // server-only barrel.
 import { checkRowPostability } from "../../lib/grade/postable";
+import { decidePostOneClick, isPostOneArmed, postOneRowSignature, type PostOneArm } from "./grading-results/postOneArming";
+import { buildRowPostPayload } from "./grading-results/rowPostPayload";
 // A12/A13 (docs/a12-a13-scope.md): classifyRow gives a count-bound/deadline-
 // stopped or rescued row a distinct, correct disclosure. A31 (docs/a31-
 // scope.md) removed the engine's own retired "Re-run to grade the rest"
@@ -237,6 +239,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [prevIdentity, setPrevIdentity] = useState<unknown>(identity);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
+  // GR-POST-ONE-CONFIRM: which single row is armed to post (first post only).
+  const [armedPostOne, setArmedPostOne] = useState<PostOneArm | null>(null);
   const [posting, setPosting] = useState(false);
   // Which student + which of the three feedback boxes is expanded, or null.
   const [expandedBox, setExpandedBox] = useState<{ student: string; field: FeedbackField } | null>(null);
@@ -393,18 +397,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return { posted: 0, failed: 0, skipped: gradableResults.length };
     }
 
-    const payload = postableResults.map((r) => {
-      const edit = edits[r.student] ?? defaultRowEdit(r);
-      return {
-        userId: r.userId as number,
-        grade: parseEarnedPoints(edit.total),
-        comment: edit.overall,
-        rubricAreas: r.rubricAreas.map((a) => {
-          const ae = edit.areas[a.area] ?? { score: a.score };
-          return { area: a.area, score: ae.score, comment: "" };
-        }),
-      };
-    });
+    const payload = postableResults.map((r) =>
+      buildRowPostPayload(r, r.userId as number, edits[r.student] ?? defaultRowEdit(r)),
+    );
 
     setPosting(true);
     setPostSummary("");
@@ -481,17 +476,21 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       setPostStatus((prev) => ({ ...prev, [row.student]: { status: "skipped", message: check.reason } }));
       return;
     }
-    const payload = [
-      {
-        userId: row.userId,
-        grade: parseEarnedPoints(edit.total),
-        comment: edit.overall,
-        rubricAreas: row.rubricAreas.map((a) => {
-          const ae = edit.areas[a.area] ?? { score: a.score };
-          return { area: a.area, score: ae.score, comment: "" };
-        }),
-      },
-    ];
+    // GR-POST-ONE-CONFIRM: the first post of a row arms; only a second click
+    // on the armed row (or a retry/re-post) reaches the gradebook.
+    const signature = postOneRowSignature(row, edit);
+    const decision = decidePostOneClick({
+      status: postStatus[row.student]?.status,
+      armed: armedPostOne,
+      student: row.student,
+      signature,
+    });
+    if (decision === "arm") {
+      setArmedPostOne({ student: row.student, signature });
+      return;
+    }
+    setArmedPostOne(null);
+    const payload = [buildRowPostPayload(row, row.userId, edit)];
 
     setPostStatus((prev) => ({ ...prev, [row.student]: { status: "posting" } }));
     const res = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload));
@@ -713,6 +712,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               const sgHref = speedGraderHref(run.speedGraderUrl, result.userId);
               const canPostRow = canvasGradable && typeof result.userId === "number";
               const rowPosting = posting || status?.status === "posting";
+              const postOneArmed = isPostOneArmed(armedPostOne, result.student, status?.status, postOneRowSignature(result, edit));
               const ungradedState = classifyRow(result, edit).state;
               const ungradedRowLabel = describeUngradedRowLabel(ungradedState);
 
@@ -728,12 +728,15 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     {canPostRow && (
                       <div style={{ marginTop: "var(--space-1)" }}>
                         <Button
-                          variant="outlined"
+                          variant={postOneArmed ? "contained" : "outlined"}
+                          color={postOneArmed ? "warning" : "primary"}
                           size="small"
                           onClick={() => handlePostOne(result)}
+                          onBlur={() => setArmedPostOne((a) => (a && a.student === result.student ? null : a))}
                           disabled={rowPosting}
+                          title={postOneArmed ? "This writes to the live Canvas gradebook." : undefined}
                         >
-                          {status?.status === "posted" ? "Re-post" : "Post to Canvas"}
+                          {status?.status === "posted" ? "Re-post" : postOneArmed ? "Confirm post" : "Post to Canvas"}
                         </Button>
                       </div>
                     )}

@@ -173,7 +173,11 @@ export async function extractSubmissions(
         await collectFromZip(nestedZip, depth + 1, member.fullName, [...zipChain, member.fullName]);
       } catch (err) {
         if (err instanceof ZipCapError) throw err;
-        // Continue when a nested archive cannot be opened.
+        // A nested archive that cannot be opened is surfaced as a failed file
+        // (named by its archive path) instead of silently dropped; the batch
+        // continues so other students are unaffected.
+        attemptedSupportedFiles += 1;
+        failedSupportedFiles.push(member.fullName);
       }
     }
   }

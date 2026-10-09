@@ -246,13 +246,24 @@ describe("I8 - a cap error is not swallowed; a corrupt nested archive still is",
     expect(error.chain).toEqual(["mid.zip", "mid.zip/deep.zip"]);
   });
 
-  it("characterisation: a nested .zip of garbage bytes is still skipped silently", async () => {
+  it("a nested .zip of garbage bytes contributes no submissions and does not abort the batch", async () => {
     const outer = await makeZip([
       ["fine.txt", "fine"],
       ["junk.zip", "this is not a zip archive at all"],
     ]);
     const result = await extractSubmissions(toArrayBuffer(outer));
     expect(result.submissions).toEqual({ "fine.txt": "fine" });
+  });
+
+  it("DCH-W2: a corrupt nested .zip is surfaced as a failed file, and a valid student still grades", async () => {
+    const outer = await makeZip([
+      ["HW1/amy_1001_1001_hw.txt", "amy work"],
+      ["HW1/zed_9009_9009_corrupt.zip", seededBytes(256, 77)],
+    ]);
+    const result = await extractSubmissions(toArrayBuffer(outer));
+    expect(result.failedSupportedFiles).toEqual(["HW1/zed_9009_9009_corrupt.zip"]);
+    expect(result.attemptedSupportedFiles).toBe(2);
+    expect(result.submissions).toEqual({ "HW1/amy_1001_1001_hw.txt": "amy work" });
   });
 
   it("a non-cap per-file failure still lands in failedSupportedFiles (Z1)", async () => {

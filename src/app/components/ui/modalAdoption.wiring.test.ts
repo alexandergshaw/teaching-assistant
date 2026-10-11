@@ -350,7 +350,13 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // wave, whose own .tsx edits were ruled out first (neither changed a
     // dialog import or any dialog markup against HEAD). The count is the
     // canary working - a new adopter must be named here, deliberately.
-    expect(DIALOG_SITES.length).toBe(53);
+    //
+    // 54, not 53, as of the LIVE-LMS-STUDENT-MESSAGING W3 chunk:
+    // live-messaging/MessagingModal.tsx is one more new dialog site, on the
+    // same terms as SnapshotRubricCaptureReview.tsx before it - it adopts
+    // ModalShell from birth rather than needing a name on one of the three
+    // allowlists.
+    expect(DIALOG_SITES.length).toBe(54);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -418,7 +424,10 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // snapshot-grading/SnapshotRubricCaptureReview.tsx, which likewise adopts
     // ModalShell from birth. See DIALOG_SITES.length's comment above for why
     // this pin was bumped here rather than in the chunk that added the site.
-    expect(ADOPTING_PATHS.size).toBe(38);
+    // 39 as of the LIVE-LMS-STUDENT-MESSAGING W3 chunk - the thirty-eight
+    // described above plus live-messaging/MessagingModal.tsx, which likewise
+    // adopts ModalShell from birth.
+    expect(ADOPTING_PATHS.size).toBe(39);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

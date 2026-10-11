@@ -21,6 +21,7 @@ import PipelineTab from "./components/presentations/pipeline/PipelineTab";
 import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
+import SuccessTrackingTab from "./components/live-messaging/SuccessTrackingTab";
 import OneOffTasksTab from "./components/one-off-tasks/OneOffTasksTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
@@ -828,6 +829,16 @@ export default function Home() {
         {activeTab === "course-intel" && (
           <TabShell>
             <CourseIntelTab />
+          </TabShell>
+        )}
+
+        {/* Success Tracking: a stateless, rail-less top-level tab like Course
+            Intel (LIVE-LMS-STUDENT-MESSAGING W3). Placement is the orchestrator
+            default pending owner confirmation. Last in source order so the
+            branchSlice bound in topLevelTabs.wiring.test.ts stays valid. */}
+        {activeTab === "success-tracking" && (
+          <TabShell>
+            <SuccessTrackingTab />
           </TabShell>
         )}
 

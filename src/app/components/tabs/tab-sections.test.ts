@@ -24,9 +24,9 @@ import {
 // url-state.test.ts and topLevelTabs.wiring.test.ts respectively. What this
 // file pins is the shape the other two assume.
 
-describe("the four top-level tabs", () => {
-  it("lists exactly four, in strip order", () => {
-    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel"]);
+describe("the five top-level tabs", () => {
+  it("lists exactly five, in strip order", () => {
+    expect([...TAB_ORDER]).toEqual(["courses", "manual", "files", "course-intel", "success-tracking"]);
   });
 
   it("has a non-empty label for every tab, and no duplicates", () => {

@@ -28,18 +28,21 @@
 // meant five broken URL shapes instead of three redirects, for a cosmetic
 // gain nobody can see in the address bar anyway.
 
-export type ActiveTab = "courses" | "manual" | "files" | "course-intel";
+// LIVE-LMS-STUDENT-MESSAGING W3: "success-tracking" is the 5th tab. Placement is
+// the orchestrator default (scope FORK A'), pending owner confirmation.
+export type ActiveTab = "courses" | "manual" | "files" | "course-intel" | "success-tracking";
 
 // Display order of the top-level strip. page.tsx maps this array directly
 // rather than hand-writing one <Tab> per member, so "registered but missing
 // from the strip" is not a state this app can be in.
-export const TAB_ORDER: readonly ActiveTab[] = ["courses", "manual", "files", "course-intel"];
+export const TAB_ORDER: readonly ActiveTab[] = ["courses", "manual", "files", "course-intel", "success-tracking"];
 
 export const TAB_LABELS: Record<ActiveTab, string> = {
   courses: "Courses",
   manual: "Tools",
   files: "Library",
   "course-intel": "Course Intel",
+  "success-tracking": "Success Tracking",
 };
 
 // The tab the app lands on when nothing valid is stored or requested.

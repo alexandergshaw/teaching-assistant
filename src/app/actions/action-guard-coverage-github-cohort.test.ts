@@ -315,6 +315,10 @@ const GITHUB_FILES = new Set([
   "actions/grading.ts",
   "actions/institutions.ts",
   "actions/live-class.ts",
+  // LIVE-LMS-STUDENT-MESSAGING W3: both exports (listLiveCoursesAction,
+  // loadCourseEnrollmentsAction) call requireAppOwner() as their first
+  // statement - owner-only reads of live Canvas rosters, reviewed at birth.
+  "actions/live-messaging-enrollments.ts",
   "actions/llm-tools.ts",
   "actions/lms-generation-refine.ts",
   "actions/lms-generation.ts",

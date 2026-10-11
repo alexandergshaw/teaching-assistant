@@ -4,6 +4,30 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'REPO-GRADES-MODULE-PICKER-HEADER'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Owner 2026-10-11: on the repo grading page, move the module picker onto the table header.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/repo-grades-module-picker-header-scope.md (loop-architect dispatched 2026-10-11). Move the module picker control into the Repo Grades table header (reachable with the sticky header, minimize-clicks/scroll). Machine-checkable = source-text/structure pin the picker is inside the header element + wired to the same handler/state; sticky/column/sort intact + the real render are owner-walk. SEQUENCES after REPO-GRADING-REMOVE-ACTIVITY-LOG (shared index.tsx) - build waits for that commit then re-baselines.'
+  from: 'Owner request 2026-10-11 (direct chat).'
+  note: 'Presentational relocation of an existing control; keep the onChange wired to the same state + the persistence (do not ship it visible-but-dead - reachability). COLLIDES on index.tsx (and maybe RepoGradesGrid.tsx) with the in-flight activity-log removal + the status-prominence feature; BUILDS SERIALIZE (scope is read-only, safe now). No new diagnostic expected (presentational).'
+  question: null
+- id: 'REPO-GRADES-STATUS-PROMINENCE'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Owner 2026-10-11: make the status indicator more prominent when grading repos.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/repo-grades-status-prominence-scope.md (loop-architect dispatched 2026-10-11). Make the repo-grade-run status indicator (the A26/A27/A28 status-line, state in useRepoGradesGradingActions.ts) visibly more prominent during grading (banner/progress/placement), keeping the status transitions + the aria-live region. Machine-checkable = source-text/structure pin the prominent status element bound to the status state + aria-live; the real visual prominence is owner-walk. SEQUENCES after the activity-log removal + ordered vs the module-picker (shared index.tsx/useRepoGradesGradingActions.ts).'
+  from: 'Owner request 2026-10-11 (direct chat).'
+  note: 'Prominence = visual + placement, not new data; keep the live status transitions + aria-live (accessibility). COLLIDES on index.tsx/RepoGradesGrid.tsx/useRepoGradesGradingActions.ts (the activity-log removal edits useRepoGradesGradingActions.ts too) with the other two in-flight repo-grades items; BUILDS SERIALIZE. No new diagnostic expected (presentational), unless a progress-count adds a failure mode.'
+  question: null
 - id: 'REPO-GRADING-REMOVE-ACTIVITY-LOG'
   state: 'actionable'
   kind: 'feature'

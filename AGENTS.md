@@ -131,6 +131,44 @@ a queue that has quietly stopped while looking full. The single legitimate stop
 is when every remaining item is owner-blocked: say so, list what each one
 needs, and stop.
 
+**WHAT "OWNER-BLOCKED" ACTUALLY MEANS (tightened 2026-10-11 after the stop
+below).** An item is owner-blocked ONLY if it cannot proceed under ANY
+assumption: there is NO safe default and NO recommended reading, OR proceeding
+would be unsafe/irreversible (a real student-facing send, a destructive op), OR
+it needs owner-only infra/credentials AND there is no way to build it dark and
+leave it ready. **A RECOMMENDED READING OR A SAFE DEFAULT DISQUALIFIES AN ITEM
+FROM BEING OWNER-BLOCKED.** If you can write down a recommended choice for a
+fork, that recommendation is the instruction to ACT - build it now, recorded as
+YOUR reading, with the question riding alongside (SHAPE 5) - never to stop and
+wait. The more fully an item is designed and checked, the LESS excuse to park
+it: "fully designed and verified" is the strongest possible signal to build on
+the recommendation, not a milestone at which to hand the owner a decision.
+
+Two corollaries that each defeated me in the 2026-10-11 stop:
+
+- **Infra/credential dependencies gate the RUNTIME, not the BUILD.** "The owner
+  must raise a dashboard limit / supply a live key / flip a prod switch" is NOT
+  a build blocker. Build the feature DARK behind a default-off flag and ship it
+  ready; flipping the flag is then a one-line owner action, not a round-trip
+  through a design that was never built. Shipping it dark is "started."
+- **Bounded rework is not a reason to park.** "If the owner disagrees with my
+  placement I redo a tab move" is a one-message redirect for the owner and a
+  small rework for me. Parking instead costs a FULL round-trip and stops the
+  queue. Act on the recommendation; the owner redirects if wrong (SHAPE 5's
+  "the owner redirects, that costs one message; stalling costs a whole round
+  trip").
+
+**THE OVERRIDE IS NOT SELF-CERTIFYING.** `backlog:stop-guard --override` accepts
+your assertion that everything is owner-blocked without checking it - so the
+check is YOURS to make honestly. Before invoking it, go row by row through every
+`actionable` and `unscoped` item and, for EACH, write the reason it has NO safe
+default and NO recommended reading and cannot be built dark. "I have a
+recommendation for it" / "I have a default" / "it's designed, just needs a
+decision" are NOT such reasons - they are the trigger to BUILD it instead of
+overriding. If a single remaining item has a safe default you could act on, the
+override is a stall wearing the legitimate-stop's costume, and you have not
+earned the stop.
+
 **THE MECHANICAL TEST. Apply it before ending every turn.**
 
 > **Before ending a turn, ask: IS WORK ON A BACKLOG ITEM RUNNING OR LANDED

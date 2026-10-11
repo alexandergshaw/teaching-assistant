@@ -25,10 +25,13 @@ export interface RepoGradesStickyHeaderProps {
   // The assignment-folder picker (RepoGradesFolderPicker), moved here from the
   // stacked controls panel; index.tsx owns its state and handler.
   folderControl?: ReactNode;
+  // REPO-GRADES-STATUS-PROMINENCE: the visual-only grading progress banner
+  // (spinner + count); index.tsx gates it on the view-level bulkRunningFolder.
+  statusBanner?: ReactNode;
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = runBar !== null || typeof onSearchChange === "function";
@@ -56,6 +59,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
           {runBar && <RepoGradesRunBar {...runBar} />}
+          {statusBanner}
           {folderControl}
           {gradeSetControl}
           <label className={styles.headerField}>

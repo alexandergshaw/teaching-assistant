@@ -174,3 +174,36 @@ describe("REPO-HEADER-VISUAL VH-10 pins", () => {
     expect(removeBtn).toContain("from the grade set");
   });
 });
+
+// REPO-GRADES-STATUS-PROMINENCE: the grading banner is bound to VIEW-LEVEL
+// state (so it renders for both the run-bar start and the all-folders column
+// start) and is visual-only (no role, no aria-live).
+describe("REPO-GRADES-STATUS-PROMINENCE: sticky grading banner", () => {
+  const PIN_INDEX = withoutLineComments(read("index.tsx"));
+  const PIN_HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
+  const bannerProp = (): string => {
+    const start = PIN_INDEX.indexOf("statusBanner={");
+    expect(start, "statusBanner prop in index.tsx").toBeGreaterThan(-1);
+    const end = PIN_INDEX.indexOf("gradeSetControl={", start);
+    expect(end).toBeGreaterThan(start);
+    return PIN_INDEX.slice(start, end);
+  };
+
+  it("AC-2: bound to bulkRunningFolder/bulkProgress, independent of folder scope, rendered in the sticky header", () => {
+    const banner = bannerProp();
+    expect(banner).toContain("bulkRunningFolder ?");
+    expect(banner).toContain("bulkProgress");
+    expect(banner).not.toContain("ALL_FOLDERS");
+    expect(banner).not.toContain("currentSelectedFolder");
+    expect(PIN_HEADER).toMatch(/\{statusBanner\}/);
+    const hdr = sliceBetween(PIN_HEADER, "styles.stickyWorkingHeader", "{children}");
+    expect(hdr).toContain("{statusBanner}");
+  });
+
+  it("AC-3: exactly one aria-live attribute in index.tsx, and the banner carries no role or aria-live", () => {
+    expect((PIN_INDEX.match(/aria-live/g) ?? []).length).toBe(1);
+    const banner = bannerProp();
+    expect(banner).not.toContain("aria-live");
+    expect(banner).not.toMatch(/\brole=/);
+  });
+});

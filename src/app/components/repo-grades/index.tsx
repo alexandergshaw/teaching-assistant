@@ -759,6 +759,17 @@ export default function RepoGradesTab() {
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
         folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
+        statusBanner={bulkRunningFolder ? (
+          // Visual-only: no role and no aria-live (the postSummary region is the one live region).
+          <div className={pageStyles.loadingState}>
+            <span className={pageStyles.spinner} aria-hidden="true" />
+            <div>
+              <p className={pageStyles.loadingTitle}>
+                Grading {bulkProgress ? bulkProgress.done : 0} of {bulkProgress ? bulkProgress.total : 0} in {bulkRunningFolder}...
+              </p>
+            </div>
+          </div>
+        ) : null}
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
         runBar={

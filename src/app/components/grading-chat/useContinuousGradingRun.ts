@@ -49,6 +49,8 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
+import { gradeFailureFromBody, postPrepareVideo, videoFailureOf, type PrepareVideoFn } from "./videoClient";
+import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
 import {
   mergeArrivedResults,
   buildIncrementalRun,
@@ -95,6 +97,9 @@ export interface UseContinuousGradingRunParams {
     provider: string,
     onEntry: (entry: StudentSubmissionEntry) => void
   ) => Promise<IngestOutcome>;
+  /** Injected loose-video prepare (VIDEO-GRADING W4). Defaults to the real
+   * never-throw POST /api/grade-submission-video. */
+  readonly prepareVideo?: PrepareVideoFn;
   /** The per-session entry ceiling (R4). Defaults to DEFAULT_MAX_ENTRIES. */
   readonly maxEntries?: number;
   /** Opt in to the did-right/did-wrong comment split on every grade request.
@@ -123,6 +128,9 @@ export interface UseContinuousGradingRunResult {
   /** The one Canvas URL pinned for this session (F3=A); "" until a Canvas URL
    * submission is accepted. */
   readonly canvasUrl: string;
+  /** Loose videos submitted and not yet graded or failed (the pending-staged
+   * cap input, ops 5.3). */
+  readonly pendingVideoCount: () => number;
   /** Stable for a session, changes only across reset(): "grading-chat-" + sessionId. */
   readonly runKey: string;
   readonly sessionId: number;
@@ -158,9 +166,10 @@ async function postGradeRunItem(request: GradeRunItemRequestBody): Promise<Grade
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...request, entry: stripUnneededRawBase64(request.entry) }),
   });
-  const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string };
+  const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string; videoFailure?: unknown };
   if (!res.ok || !body.result) {
-    throw new Error(body.error ?? "The grading service did not respond.");
+    // A typed `videoFailure` rides the error so the driver records the class.
+    throw gradeFailureFromBody(body);
   }
   return body.result;
 }
@@ -169,6 +178,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const { provider, maxEntries = DEFAULT_MAX_ENTRIES, commentSplit } = params;
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
   const ingestZip = params.ingestZip ?? ingestStoragedZip;
+  const prepareVideo = params.prepareVideo ?? postPrepareVideo;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
   const assignmentInstructionsRef = useRef("");
@@ -258,6 +268,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
             startedAtMs: itemStartedAtMs,
             failureClass: classifyChatSeamFailure(err) === "timed out" ? "timed out" : "grade failed",
           });
+          // VIDEO-GRADING W4: the typed class (too large / unsupported format /
+          // timed out / model rejected ...), recorded as its own entry.
+          const videoFailure = videoFailureOf(err);
+          if (videoFailure !== null) {
+            recordVideoSettled({ startedAtMs: itemStartedAtMs, settledAtMs: chatSeamNowMs(), failure: videoFailure });
+          }
           recordArrival({
             sourceIndex: request.sourceIndex,
             result: classifyItemFailure(request.sourceIndex, request.entry, err),
@@ -332,7 +348,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         // ingestStoragedZip never throws; this guards an injected replacement.
         ingest = { kind: "refused", reason: "The zip could not be prepared." };
       }
-      if (ingest.kind === "refused") return { kind: "refused", reason: ingest.reason };
+      if (ingest.kind === "refused") {
+        if (ingest.videoFailure) {
+          recordVideoSettled({ startedAtMs: classifyStartedAtMs, settledAtMs: chatSeamNowMs(), failure: ingest.videoFailure });
+        }
+        return { kind: "refused", reason: ingest.reason };
+      }
       if (sessionIdRef.current !== sessionAtStart) {
         return { kind: "refused", reason: "The session was reset while the zip was being prepared. Nothing was graded." };
       }
@@ -342,6 +363,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const completedLedger = ingest.ledger;
       setIngestLedger((prev) => mergeIngestLedgers(prev, completedLedger));
       zipClassification = completedLedger.classification;
+      // VIDEO-GRADING W4: one prepare_video entry per counted in-zip video outcome.
+      recordZipVideoOutcomes({
+        outcomes: completedLedger.videoOutcomes,
+        startedAtMs: classifyStartedAtMs,
+        settledAtMs: chatSeamNowMs(),
+      });
       recordClassifySettled({
         startedAtMs: classifyStartedAtMs,
         settledAtMs: chatSeamNowMs(),
@@ -352,6 +379,27 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
       entries = collected;
+    } else if (input.kind === "storaged-video") {
+      // A reset while the video is being prepared must not spend a grading call
+      // on a ghost run.
+      const sessionAtStart = sessionIdRef.current;
+      const prepareStartedAtMs = chatSeamNowMs();
+      let prepared: Awaited<ReturnType<PrepareVideoFn>>;
+      try {
+        prepared = await prepareVideo(input.storagePath, input.name, input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS));
+      } catch {
+        // postPrepareVideo never throws; this guards an injected replacement.
+        prepared = { kind: "refused", reason: "The video could not be prepared.", videoFailure: "upload failed" };
+      }
+      if (prepared.kind === "refused") {
+        recordVideoSettled({ startedAtMs: prepareStartedAtMs, settledAtMs: chatSeamNowMs(), failure: prepared.videoFailure });
+        return { kind: "refused", reason: prepared.reason };
+      }
+      recordVideoSettled({ startedAtMs: prepareStartedAtMs, settledAtMs: chatSeamNowMs(), failure: null });
+      if (sessionIdRef.current !== sessionAtStart) {
+        return { kind: "refused", reason: "The session was reset while the video was being prepared. Nothing was graded." };
+      }
+      entries = [prepared.entry];
     } else if (input.kind === "text") {
       if (!input.content.trim()) {
         return { kind: "refused", reason: "This submission is empty." };
@@ -455,7 +503,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // Canvas assignment resolves to many, and one label must never collapse
     // distinct students. Blank/absent leaves the derived student untouched.
     const submitLabel =
-      (input.kind === "file" || input.kind === "url") && entries.length === 1
+      (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video") && entries.length === 1
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
@@ -541,6 +589,16 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pump();
   };
 
+  // Pending (queued or in flight) rows whose entry carries a video ref.
+  const pendingVideoCount = (): number => {
+    let count = 0;
+    for (const sourceIndex of pendingRef.current) {
+      const body = retainedBodiesRef.current.get(sourceIndex);
+      if (body && body.entry.submittedFiles.some((file) => file.videoRef !== undefined)) count += 1;
+    }
+    return count;
+  };
+
   const reset = () => {
     sessionIdRef.current += 1;
     canvasUrlRef.current = "";
@@ -575,6 +633,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     retry,
     regrade,
     canvasUrl: canvasUrlRef.current,
+    pendingVideoCount,
     runKey: "grading-chat-" + sessionIdRef.current,
     sessionId: sessionIdRef.current,
     effectiveRubric: headerRef.current?.effectiveRubric ?? "",

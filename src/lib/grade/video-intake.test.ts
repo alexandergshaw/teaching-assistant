@@ -1,8 +1,17 @@
 // VIDEO-GRADING W1: in-zip recognition, the F2 conservation law, the O-1
 // invariant (no rawBase64 on a video), the video-only named skip, and the
 // flag-off "nothing changed" proof. Real in-memory jszip fixtures, no network.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import JSZip from "jszip";
+
+// buildIngestLines' video-only skip is gated by the constant. The extraction
+// options below are explicit; this pins the CONSTANT off for the whole file so
+// the named-skip (flag-off) semantics stay covered. The flag-on side of the
+// parser is ndjson-ingest-parser.videoon.test.ts.
+vi.mock("./constants", async () => {
+  const actual = await vi.importActual<typeof import("./constants")>("./constants");
+  return { ...actual, VIDEO_GRADING_ENABLED: false };
+});
 import { extractSubmissions, ingestZipEntries } from "./extraction";
 import { ZipCapError } from "../zip-caps";
 import { buildIngestLines } from "./ndjson-ingest-parser";
@@ -67,7 +76,7 @@ describe("video recognition constants", () => {
   });
 });
 
-describe("in-zip video, flag OFF (the default): nothing changed", () => {
+describe("in-zip video, flag explicitly OFF: nothing changed", () => {
   it("a video member is still a silent skip - not counted, not failed, no entry", async () => {
     const result = await extractSubmissions(await buildVideoZip(), { videoEnabled: false });
     expect(Object.keys(result.submissions).some(isVideoName)).toBe(false);
@@ -77,13 +86,13 @@ describe("in-zip video, flag OFF (the default): nothing changed", () => {
     expect(ingested.entries.flatMap((entry) => entry.submittedFiles).some(isVideoFile)).toBe(false);
   });
 
-  it("the default (no option) is the OFF behaviour", async () => {
+  it("with no option the default follows the (mocked-off) constant", async () => {
     const result = await extractSubmissions(await buildVideoZip());
     expect(Object.keys(result.submissions).some(isVideoName)).toBe(false);
   });
 });
 
-describe("in-zip video, flag ON", () => {
+describe("in-zip video, flag ON (explicit option; parser constant mocked off)", () => {
   it("F2 conservation law: every video leaf is accounted for exactly once", async () => {
     const { entries, failedSupportedFiles } = await ingestZipEntries(await buildVideoZip(), { videoEnabled: true });
     const lines = buildIngestLines(entries, failedSupportedFiles);

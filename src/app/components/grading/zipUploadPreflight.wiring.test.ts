@@ -42,7 +42,11 @@ describe("FIX-1 upload pre-flight is wired into the file inputs", () => {
     const handler = body(panel, "const handleSubmitFiles", "const handleSubmitUrl");
     const call = handler.indexOf("preflightUploadFile(");
     expect(call).toBeGreaterThan(-1);
-    expect(call).toBeLessThan(handler.indexOf("ensureSession("));
+    // The file path begins its session in the `if (!began)` block. (VIDEO-GRADING
+    // W4: the loose-video path is decided before this and carries its own
+    // session closure; that ordering is pinned in video-w4.wiring.test.ts.)
+    expect(handler.indexOf("if (!began)")).toBeGreaterThan(-1);
+    expect(call).toBeLessThan(handler.indexOf("if (!began)"));
     expect(call).toBeLessThan(handler.indexOf('driver.submit({ kind: "file"'));
   });
 });

@@ -67,6 +67,13 @@ describe("source-text checks on the real route", () => {
   });
 });
 
+// The video flag is driven EXPLICITLY off for this baseline file (the shipped
+// constant is true since W4); the flag-on staging path is route.video.test.ts.
+vi.mock("@/lib/grade/constants", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/grade/constants")>("@/lib/grade/constants");
+  return { ...actual, VIDEO_GRADING_ENABLED: false };
+});
+
 const requireAppOwnerMock = vi.fn();
 vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: (...args: unknown[]) => requireAppOwnerMock(...args),
@@ -234,7 +241,7 @@ describe("POST /api/grade-submission-zip", () => {
     expect(ingestZipEntriesMock).not.toHaveBeenCalled();
   });
 
-  it("flag OFF: no stager is handed to extraction, so the pre-feature path is unchanged", async () => {
+  it("flag explicitly OFF: no stager is handed to extraction, so the pre-feature path is unchanged", async () => {
     await POST(jsonRequest({ storagePath: GOOD_PATH }));
     const options = ingestZipEntriesMock.mock.calls[0][1] as Record<string, unknown>;
     expect(options.stageVideo).toBeUndefined();

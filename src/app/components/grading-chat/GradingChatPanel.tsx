@@ -43,6 +43,8 @@ import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from ".
 import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
 import { chooseZipTransport, deleteGradingZipBestEffort, uploadGradingZip } from "@/lib/grade/grading-zip-transport";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
+import { submitLooseVideo } from "./videoClient";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -367,6 +369,26 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     // The session is begun once for the whole batch, not once per file.
     let began = false;
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
+      // VIDEO-GRADING W4: a video is decided FIRST (the zip preflight's "split
+      // the archive" wording is wrong for it) and goes straight to Storage; a
+      // non-video returns null and takes the unchanged path below.
+      const videoOutcome = await submitLooseVideo({
+        file,
+        label: fileLabel,
+        userId: user?.id ?? null,
+        storage: supabase.storage,
+        pendingStaged: driver.pendingVideoCount(),
+        enabled: VIDEO_GRADING_ENABLED,
+        ensureSession: async () => {
+          if (began) return true;
+          if (!(await ensureSession())) return false;
+          began = true;
+          return true;
+        },
+        sessionRefusal: () => sessionRefusalRef.current,
+        submit: driver.submit,
+      });
+      if (videoOutcome !== null) return videoOutcome;
       // FIX-1 size pre-flight: an oversized file is refused here, with a
       // worded reason, before the session starts or any bytes are uploaded.
       // BULK-ZIP BW1: a zip over the body budget takes the Storage transport

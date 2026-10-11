@@ -26,12 +26,13 @@ describe("frameToImageFile", () => {
   it("is classified as a single gradable upload by the server, keyed on the extension", () => {
     const file = frameToImageFile(JPEG_HEADER_BASE64, 2);
     expect(classifyGradingUpload(file.name)).toBe("single");
-    // Default (VIDEO_GRADING_ENABLED is false): a video is unsupported, as before.
-    expect(classifyGradingUpload("screen-recording-2.webm")).toBe("unsupported");
+    // Default (video grading is enabled, W4): a webm is a video.
+    expect(classifyGradingUpload("screen-recording-2.webm")).toBe("video");
   });
 
-  // VIDEO-GRADING W1: pin BOTH states of the dark flag so the test proves the
-  // gate and not just one branch. Off = today's behaviour, on = "video".
+  // VIDEO-GRADING W1/W4: pin BOTH states of the flag via the explicit argument
+  // so the test proves the gate and not just one branch. Off = the pre-feature
+  // behaviour (kept for a future toggle), on = "video".
   it("keeps .webm unsupported with the video flag off and classifies it video with the flag on", () => {
     expect(classifyGradingUpload("screen-recording-2.webm", false)).toBe("unsupported");
     expect(classifyGradingUpload("screen-recording-2.webm", true)).toBe("video");
@@ -42,7 +43,7 @@ describe("frameToImageFile", () => {
     expect(classifyGradingUpload("bundle.zip", true)).toBe("zip");
   });
 
-  it("ships with the video flag OFF (zero user impact until the owner enables it)", () => {
-    expect(VIDEO_GRADING_ENABLED).toBe(false);
+  it("the default argument tracks the shipped constant (no literal pinned)", () => {
+    expect(classifyGradingUpload("walkthrough.mp4")).toBe(classifyGradingUpload("walkthrough.mp4", VIDEO_GRADING_ENABLED));
   });
 });

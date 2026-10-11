@@ -47,7 +47,7 @@ const MIME_TYPES: Record<string, string> = {
  * for a loose upload, "skip" inside a zip. The owner flips it only after the
  * model seam exists and the Supabase upload limit is raised (owner D8).
  */
-export const VIDEO_GRADING_ENABLED = false;
+export const VIDEO_GRADING_ENABLED = true;
 
 // Video containers accepted for grading (ops section 4). One owner, no drift.
 export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "webm", "mov", "m4v"]);

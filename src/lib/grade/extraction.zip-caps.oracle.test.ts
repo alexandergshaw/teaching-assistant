@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
-import { extractSubmissions, extractStudentEntries, ingestZipEntries } from "./extraction";
+import { extractSubmissions, ingestZipEntries } from "./extraction";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -130,7 +130,9 @@ interface OracleSnapshot {
 }
 
 async function takeSnapshot(): Promise<OracleSnapshot> {
-  const result = await extractSubmissions(await buildOwnerShapeZip());
+  // The HEAD baseline is the flag-OFF behaviour; drive it EXPLICITLY (the shipped
+  // constant is true since W4).
+  const result = await extractSubmissions(await buildOwnerShapeZip(), { videoEnabled: false });
   const keys = Object.keys(result.submissions).sort();
   const submissionSha: Record<string, string> = {};
   const rawSha: Record<string, string> = {};
@@ -144,7 +146,7 @@ async function takeSnapshot(): Promise<OracleSnapshot> {
   for (const key of Object.keys(result.zipParents).sort()) {
     zipParents[key] = result.zipParents[key];
   }
-  const grouped = await extractStudentEntries(await buildOwnerShapeZip());
+  const { entries: grouped } = await ingestZipEntries(await buildOwnerShapeZip(), { videoEnabled: false });
   const entries = grouped
     .map((entry) => ({
       student: entry.student,
@@ -357,7 +359,7 @@ describe("extractSubmissions - frozen fold-equivalence oracle (I7)", () => {
   }, 60000);
 
   it("decodes the classic encoding hazards exactly as HEAD did (BOM kept, one U+FFFD per truncated sequence)", async () => {
-    const { submissions } = await extractSubmissions(await buildOwnerShapeZip());
+    const { submissions } = await extractSubmissions(await buildOwnerShapeZip(), { videoEnabled: false });
     const text = (label: string): string => submissions[`HW1/dana_1004_2004_enc-${label}.txt`];
     expect(text("bom")).toBe(BOM + "hello");
     expect(text("trunc-end")).toBe("ok " + FFFD);
@@ -428,7 +430,7 @@ const EXPECTED_VIDEO_ON: OracleSnapshot = {
 };
 
 describe("extractSubmissions - video re-freeze (flag ON) vs flag OFF", () => {
-  it("flag OFF (default): hal's clip is still dropped, snapshot identical to HEAD", async () => {
+  it("flag explicitly OFF: hal's clip is still dropped, snapshot identical to HEAD", async () => {
     expect(await takeSnapshot()).toEqual(EXPECTED);
     expect((await extractSubmissions(await buildOwnerShapeZip(), { videoEnabled: false })).attemptedSupportedFiles).toBe(22);
   }, 60000);

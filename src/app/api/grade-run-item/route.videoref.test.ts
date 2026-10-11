@@ -7,6 +7,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: vi.fn(async () => ({ id: "u1", email: "owner@example.com" })),
 }));
+// The entry guard is independent of the video flag; drive it EXPLICITLY off so
+// the positive control reaches the (mocked) model seam instead of the real
+// grade-time Storage download (the enabled path is route.videoseam.test.ts).
+vi.mock("@/lib/grade/constants", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/grade/constants")>("@/lib/grade/constants");
+  return { ...actual, VIDEO_GRADING_ENABLED: false };
+});
 vi.mock("@/lib/grade/engine", () => ({ gradeEntries: vi.fn() }));
 vi.mock("@/lib/bounded-race", () => ({ raceWithTimeout: vi.fn() }));
 vi.mock("@/lib/grade/extraction", () => ({ resolveEntryLinks: vi.fn(async (entry: unknown) => entry) }));

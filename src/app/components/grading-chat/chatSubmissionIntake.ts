@@ -33,7 +33,12 @@ export type ChatSubmissionInput =
   // to private Storage under `${userId}/grading-uploads/<uuid>.zip`. Carries
   // only the path; BW2's streaming ingest reads, parses and deletes it. The
   // driver does not consume this member until BW2.
-  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string };
+  | { readonly kind: "storaged-zip"; readonly storagePath: string; readonly name: string }
+  // VIDEO-GRADING W4: a loose video already uploaded to private Storage under
+  // `${userId}/grading-uploads/<uuid>.<ext>`. Carries only the path (a video can
+  // never ride the request body); the driver's prepareVideo turns it into an
+  // entry holding a `videoRef`, never rawBase64 (ops O-1).
+  | { readonly kind: "storaged-video"; readonly storagePath: string; readonly name: string; readonly label?: string };
 
 /** One part of a composite submission. Each part resolves to EXACTLY ONE
  * entry (see extractSingleEntry); a part that would resolve to zero or many

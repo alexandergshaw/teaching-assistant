@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { SubmissionZipClassification } from "@/lib/grade/types";
 import {
   readSessionDiagnosticLogState,
   readSessionDiagnosticSurfaceEntries,
@@ -7,7 +8,9 @@ import {
 } from "@/lib/session-diagnostic-log";
 import {
   GRADING_DIAGNOSTIC_OPERATION_LABELS,
+  decideClassifyDiagnostic,
   decideWholeRunDiagnostic,
+  recordClassifySettled,
   recordGradingDiagnosticEntry,
   recordWholeRunSettled,
   type WholeRunSettledState,
@@ -84,5 +87,64 @@ describe("recordGradingDiagnosticEntry / recordWholeRunSettled (call shape)", ()
     expect(entries[0].outcome).toBe("failure");
     expect(entries[0].error).toContain("denied");
     expect(entries[0].durationMs).toBe(2000);
+  });
+});
+
+function classOf(kind: SubmissionZipClassification["kind"], studentCount: number): SubmissionZipClassification {
+  return { kind, studentCount, markerStudentCount: studentCount, signal: "canvas-convention" };
+}
+
+describe("decideClassifyDiagnostic (pure)", () => {
+  it("maps each kind to its operation and carries the count and duration", () => {
+    expect(decideClassifyDiagnostic({ startedAtMs: 100, settledAtMs: 104.4, classification: classOf("class", 23) })).toEqual({
+      operation: "classify_submission_class",
+      studentCount: 23,
+      durationMs: 4,
+    });
+    expect(decideClassifyDiagnostic({ startedAtMs: 0, settledAtMs: 9, classification: classOf("single", 1) })?.operation).toBe(
+      "classify_submission_single"
+    );
+    expect(decideClassifyDiagnostic({ startedAtMs: 0, settledAtMs: 9, classification: classOf("unknown", 0) })?.operation).toBe(
+      "classify_submission_unknown"
+    );
+  });
+
+  it("returns null with no captured start (the start guard)", () => {
+    expect(decideClassifyDiagnostic({ startedAtMs: null, settledAtMs: 9, classification: classOf("class", 3) })).toBeNull();
+  });
+
+  it("returns null when no classification streamed", () => {
+    expect(decideClassifyDiagnostic({ startedAtMs: 0, settledAtMs: 9, classification: undefined })).toBeNull();
+  });
+
+  it("never yields a negative duration", () => {
+    expect(decideClassifyDiagnostic({ startedAtMs: 500, settledAtMs: 400, classification: classOf("class", 2) })?.durationMs).toBe(0);
+  });
+
+  it("every classify operation has a label", () => {
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_submission_class).toBe("Classified: class bundle");
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_submission_single).toBe("Classified: single submission");
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_submission_unknown).toBe("Classification: undetermined");
+  });
+});
+
+describe("recordClassifySettled (call shape)", () => {
+  it("records one success entry carrying the student count and no names", () => {
+    expect(
+      recordClassifySettled({ startedAtMs: 0, settledAtMs: 12, classification: classOf("class", 23), at: "2026-10-08T10:00:04.000Z" })
+    ).toBe(true);
+    const entries = readSessionDiagnosticSurfaceEntries("grading").entries;
+    expect(entries.length).toBe(1);
+    expect(entries[0].operation).toBe("classify_submission_class");
+    expect(entries[0].outcome).toBe("success");
+    expect(entries[0].classificationStudentCount).toBe(23);
+    expect(entries[0].durationMs).toBe(12);
+    expect(entries[0].error).toBe("");
+  });
+
+  it("records nothing without a start or a classification", () => {
+    expect(recordClassifySettled({ startedAtMs: null, settledAtMs: 1, classification: classOf("class", 3), at: "x" })).toBe(false);
+    expect(recordClassifySettled({ startedAtMs: 0, settledAtMs: 1, classification: undefined, at: "x" })).toBe(false);
+    expect(readSessionDiagnosticLogState().entries.length).toBe(0);
   });
 });

@@ -607,8 +607,39 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
     expect(lines[headerIndex]).toContain("Duration (ms)");
-    expect(lines[headerIndex + 1].endsWith(",2360")).toBe(true);
-    expect(lines[headerIndex + 2].endsWith(",")).toBe(true);
+    expect(lines[headerIndex]).toContain("Students");
+    expect(lines[headerIndex + 1].endsWith(",2360,")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",,")).toBe(true);
+  });
+
+  it("round-trips classificationStudentCount (JSON + CSV), omitting the key when absent", () => {
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:01.000Z",
+      surface: "grading",
+      operation: "classify_submission_class",
+      label: "Classified: class bundle",
+      outcome: "success",
+      durationMs: 5,
+      classificationStudentCount: 23,
+    });
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:02.000Z",
+      surface: "grading",
+      operation: "plain_op",
+      label: "Plain op",
+      outcome: "success",
+    });
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries[0].classificationStudentCount).toBe(23);
+    expect("classificationStudentCount" in state.entries[1]).toBe(false);
+    const log = buildSessionDiagnosticLog(state, CONTEXT, "2026-09-07T12:00:00.000Z");
+    const parsed = JSON.parse(formatSessionDiagnosticLogJson(log));
+    const reparsed = parseSessionDiagnosticLogEntries(parsed.entries);
+    expect(reparsed).toEqual([...state.entries]);
+    expect("classificationStudentCount" in reparsed[1]).toBe(false);
+    const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
+    const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
+    expect(lines[headerIndex + 1].endsWith(",5,23")).toBe(true);
   });
 
   it("drops a malformed entry rather than throwing", () => {

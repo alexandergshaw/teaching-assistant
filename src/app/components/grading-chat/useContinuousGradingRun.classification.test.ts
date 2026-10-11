@@ -49,6 +49,10 @@ vi.mock("@/app/actions/grading-chat-intake", () => ({
 }));
 
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
+import {
+  readSessionDiagnosticSurfaceEntries,
+  resetSessionDiagnosticLogForTests,
+} from "@/lib/session-diagnostic-log";
 import type { GradeResult, StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 
 type Ingest = NonNullable<Parameters<typeof useContinuousGradingRun>[0]["ingestZip"]>;
@@ -129,6 +133,7 @@ function ingestWith(classification: SubmissionZipClassification | undefined): In
 }
 
 beforeEach(() => {
+  resetSessionDiagnosticLogForTests("2026-10-08T10:00:00.000Z");
   h0.reset();
   resolveChatRunHeaderActionMock.mockReset();
   prepareChatSubmissionActionMock.mockReset();
@@ -277,5 +282,54 @@ describe("useContinuousGradingRun - submissionClassification carrier", () => {
     await driver.submit({ kind: "url", url: "https://example.com/doc" });
     await flushMicrotasks();
     expect(renderDriver(ingest).run?.submissionClassification).toBeUndefined();
+  });
+});
+
+describe("useContinuousGradingRun - classify diagnostic (one record per zip ingest)", () => {
+  const classifyEntries = () =>
+    readSessionDiagnosticSurfaceEntries("grading").entries.filter((e) => e.operation.startsWith("classify_submission_"));
+
+  it("the storaged-zip branch records exactly one entry with the count and no student name", async () => {
+    const ingest = ingestWith(CLASS_OF_3);
+    const driver = await readyDriver(ingest);
+    await driver.submit(zipInput);
+    await flushMicrotasks();
+    const entries = classifyEntries();
+    expect(entries.length).toBe(1);
+    expect(entries[0].operation).toBe("classify_submission_class");
+    expect(entries[0].classificationStudentCount).toBe(3);
+    const serialized = JSON.stringify(entries);
+    for (const name of ["A", "B", "C", "class.zip", "a.zip"]) {
+      expect(serialized).not.toContain(`"${name}"`);
+      expect(serialized).not.toContain(name + ".zip");
+    }
+  });
+
+  it("the small-zip file branch records exactly one entry per ingest", async () => {
+    const single: SubmissionZipClassification = { kind: "single", studentCount: 1, markerStudentCount: 1, signal: "single-group" };
+    prepareChatSubmissionActionMock.mockResolvedValue({
+      kind: "entries",
+      entries: [entryOf("Zelda Q")],
+      pointsPossible: null,
+      classification: single,
+    });
+    const driver = await readyDriver(ingestWith(undefined));
+    await driver.submit({ kind: "url", url: "https://example.com/small.zip" });
+    await flushMicrotasks();
+    const entries = classifyEntries();
+    expect(entries.length).toBe(1);
+    expect(entries[0].operation).toBe("classify_submission_single");
+    expect(entries[0].classificationStudentCount).toBe(1);
+    expect(JSON.stringify(entries)).not.toContain("Zelda");
+  });
+
+  it("a non-zip submit and an old-server ingest record nothing", async () => {
+    const ingest = ingestWith(undefined);
+    let driver = await readyDriver(ingest);
+    await driver.submit(zipInput);
+    driver = renderDriver(ingest);
+    await driver.submit({ kind: "text", content: "my essay", label: "Solo" });
+    await flushMicrotasks();
+    expect(classifyEntries().length).toBe(0);
   });
 });

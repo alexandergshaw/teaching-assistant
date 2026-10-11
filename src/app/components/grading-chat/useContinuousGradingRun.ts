@@ -44,6 +44,7 @@ import type {
 } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
+import { recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
@@ -324,6 +325,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const sessionAtStart = sessionIdRef.current;
       const collected: StudentSubmissionEntry[] = [];
       let ingest: IngestOutcome;
+      const classifyStartedAtMs = chatSeamNowMs();
       try {
         ingest = await ingestZip(input.storagePath, provider, (entry) => collected.push(entry));
       } catch {
@@ -340,6 +342,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const completedLedger = ingest.ledger;
       setIngestLedger((prev) => mergeIngestLedgers(prev, completedLedger));
       zipClassification = completedLedger.classification;
+      recordClassifySettled({
+        startedAtMs: classifyStartedAtMs,
+        settledAtMs: chatSeamNowMs(),
+        classification: zipClassification,
+        at: new Date().toISOString(),
+      });
       if (collected.length === 0 && ingestSkipped.length === 0) {
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
@@ -417,6 +425,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       entries = outcome.entries;
       pointsPossible = outcome.pointsPossible;
       zipClassification = outcome.classification;
+      recordClassifySettled({
+        startedAtMs: prepareStartedAtMs,
+        settledAtMs: chatSeamNowMs(),
+        classification: zipClassification,
+        at: new Date().toISOString(),
+      });
     }
 
     // RES-GC-8: clip to what the session ceiling still allows; refuse only

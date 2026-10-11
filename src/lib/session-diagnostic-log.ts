@@ -145,6 +145,9 @@ export interface SessionDiagnosticEntry {
   /** Elapsed milliseconds for a slow operation. OPTIONAL and OMITTED (never an
    * explicit undefined) when the caller supplied none. */
   durationMs?: number;
+  /** Students found in a classified zip upload. A bare count (no names), OPTIONAL
+   * and OMITTED (never an explicit undefined) when the caller supplied none. */
+  classificationStudentCount?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +216,8 @@ export interface RecordSessionDiagnosticArgs {
   error?: string;
   /** Optional elapsed milliseconds; stored only when supplied. */
   durationMs?: number;
+  /** Optional classified-zip student count; stored only when supplied. */
+  classificationStudentCount?: number;
 }
 
 /** Append one entry to the session store. Side-effecting on purpose: this is
@@ -231,6 +236,9 @@ export function recordSessionDiagnosticEntry(args: RecordSessionDiagnosticArgs):
     outcome: args.outcome,
     error: args.outcome === "failure" ? sanitizeSessionDiagnosticError(args.error ?? "") : "",
     ...(args.durationMs !== undefined ? { durationMs: args.durationMs } : {}),
+    ...(args.classificationStudentCount !== undefined
+      ? { classificationStudentCount: args.classificationStudentCount }
+      : {}),
   };
   storedEntries.push(entry);
   while (storedEntries.length > MAX_SESSION_DIAGNOSTIC_LOG_ENTRIES) {
@@ -378,7 +386,7 @@ export function buildSessionDiagnosticLog(
 
 const RUN_CSV_HEADER = ["Field", "Value"];
 const COVERAGE_CSV_HEADER = ["Area", "Instrumented", "What is recorded"];
-const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)"];
+const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)", "Students"];
 
 /** CSV export: a "Session" header block, then the COVERAGE block (what this
  * file does and does not claim), then one row per entry, oldest first - the
@@ -431,6 +439,7 @@ export function formatSessionDiagnosticLogCsv(log: SessionDiagnosticLog): string
         entry.outcome,
         entry.error,
         entry.durationMs === undefined ? "" : String(entry.durationMs),
+        entry.classificationStudentCount === undefined ? "" : String(entry.classificationStudentCount),
       ])
     );
   }
@@ -518,6 +527,9 @@ function parseOneEntry(raw: unknown): SessionDiagnosticEntry | null {
     error,
     ...(typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
       ? { durationMs: record.durationMs }
+      : {}),
+    ...(typeof record.classificationStudentCount === "number" && Number.isFinite(record.classificationStudentCount)
+      ? { classificationStudentCount: record.classificationStudentCount }
       : {}),
   };
 }

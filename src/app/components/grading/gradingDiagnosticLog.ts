@@ -13,6 +13,7 @@
 // student name or submission text. `error` is the grading action's own error
 // string, handed in RAW so the core scrubs then caps it.
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
+import type { SubmissionZipClassification } from "@/lib/grade/types";
 
 export type GradingDiagnosticOperation =
   | "resolve_header"
@@ -26,7 +27,10 @@ export type GradingDiagnosticOperation =
   | "fetch_canvas_meta"
   | "post_grades"
   | "post_draft"
-  | "capture_screenshot";
+  | "capture_screenshot"
+  | "classify_submission_class"
+  | "classify_submission_single"
+  | "classify_submission_unknown";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
   resolve_header: "Resolve run header",
@@ -41,6 +45,9 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   post_grades: "Post grades to Canvas",
   post_draft: "Post drafted grade",
   capture_screenshot: "Capture screenshot",
+  classify_submission_class: "Classified: class bundle",
+  classify_submission_single: "Classified: single submission",
+  classify_submission_unknown: "Classification: undetermined",
 };
 
 export interface RecordGradingDiagnosticArgs {
@@ -53,6 +60,8 @@ export interface RecordGradingDiagnosticArgs {
   course?: string;
   /** The action's own RAW error message; ignored on success. */
   error?: string;
+  /** Students found in a classified zip (a bare count, never names). */
+  classificationStudentCount?: number;
 }
 
 /** Record one grading operation into the app-wide session log. Call it
@@ -68,6 +77,7 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     outcome: args.outcome,
     error: args.error,
     durationMs: args.durationMs,
+    classificationStudentCount: args.classificationStudentCount,
   });
 }
 
@@ -117,6 +127,51 @@ export function recordWholeRunSettled(args: {
     outcome: decision.outcome,
     durationMs: decision.durationMs,
     error: decision.error,
+  });
+  return true;
+}
+
+export interface ClassifyDiagnosticDecision {
+  operation: "classify_submission_class" | "classify_submission_single" | "classify_submission_unknown";
+  studentCount: number;
+  durationMs: number;
+}
+
+/** PURE. Whether, and what, to record when a zip upload has been classified.
+ * `null` when no ingest start was captured, and `null` when no classification
+ * streamed (a non-zip submission, or an old-server sentinel). Operation and a
+ * bare count only: NO student data. */
+export function decideClassifyDiagnostic(args: {
+  startedAtMs: number | null;
+  settledAtMs: number;
+  classification: SubmissionZipClassification | undefined;
+}): ClassifyDiagnosticDecision | null {
+  if (args.startedAtMs === null) return null;
+  if (args.classification === undefined) return null;
+  return {
+    operation: `classify_submission_${args.classification.kind}`,
+    studentCount: args.classification.studentCount,
+    durationMs: Math.max(0, Math.round(args.settledAtMs - args.startedAtMs)),
+  };
+}
+
+/** The thin caller the chat driver's zip-ingest branches use: decide, then
+ * record. Returns whether an entry was recorded. `startedAtMs` and
+ * `settledAtMs` are performance.now() captures. */
+export function recordClassifySettled(args: {
+  startedAtMs: number | null;
+  settledAtMs: number;
+  classification: SubmissionZipClassification | undefined;
+  at: string;
+}): boolean {
+  const decision = decideClassifyDiagnostic(args);
+  if (!decision) return false;
+  recordGradingDiagnosticEntry({
+    at: args.at,
+    operation: decision.operation,
+    outcome: "success",
+    durationMs: decision.durationMs,
+    classificationStudentCount: decision.studentCount,
   });
   return true;
 }

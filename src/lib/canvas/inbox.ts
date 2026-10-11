@@ -487,6 +487,105 @@ export async function createCourseConversation(
   }
 }
 
+/**
+ * The only recipient shape sendStudentConversation will emit: a bare numeric
+ * Canvas user id. A value such as `course_123` would turn the per-student send
+ * into a course broadcast, so anything but 1 to 12 digits is refused before
+ * any request leaves the process.
+ */
+export const STUDENT_RECIPIENT_PATTERN = /^\d{1,12}$/;
+
+/** Enumerated outcome codes of a per-student send (no Canvas free text). */
+export type StudentSendCode =
+  | "ok"
+  | "refused-pre-send"
+  | "refused-http"
+  | "refused-rate-limited"
+  | "unknown-http"
+  | "unknown-no-response";
+
+/** Three-state outcome of a per-student send. */
+export type StudentSendResult =
+  | { status: "accepted"; code: "ok"; httpStatus?: number }
+  | { status: "refused"; code: "refused-pre-send" | "refused-http" | "refused-rate-limited"; httpStatus?: number }
+  | { status: "unknown"; code: "unknown-http" | "unknown-no-response"; httpStatus?: number };
+
+/**
+ * Pure and total over every HTTP status. Accepted is exactly {200, 201} (a 202
+ * or 204 is NOT accepted); refused is exactly {400, 401, 403, 404, 422, 429};
+ * everything else, including every 5xx and every 3xx, is unknown. 429 is the
+ * one deliberate divergence from createCourseConversation: Canvas throttles
+ * before the write is applied, so a 429 is a retryable refusal.
+ */
+export function classifyConversationPostStatus(status: number): StudentSendResult {
+  if (status === 200 || status === 201) return { status: "accepted", code: "ok", httpStatus: status };
+  if (status === 429) return { status: "refused", code: "refused-rate-limited", httpStatus: status };
+  if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422) {
+    return { status: "refused", code: "refused-http", httpStatus: status };
+  }
+  return { status: "unknown", code: "unknown-http", httpStatus: Number.isInteger(status) ? status : undefined };
+}
+
+/**
+ * Send ONE direct message to ONE student in a course and report a three-state
+ * outcome. The request is createConversation's, byte for byte; the difference
+ * is the outcome is classified from response.status and split at a hard phase
+ * boundary: anything that fails BEFORE the request is a provable non-delivery
+ * (refused); anything that fails AFTER it may have been applied (unknown).
+ * Never throws.
+ */
+export async function sendStudentConversation(
+  courseUrl: string,
+  recipientUserId: string,
+  body: string,
+  subject?: string
+): Promise<StudentSendResult> {
+  const refusedPre: StudentSendResult = { status: "refused", code: "refused-pre-send" };
+
+  // Phase A: nothing has left the process.
+  let token: string;
+  let baseUrl: string;
+  let courseId: string;
+  try {
+    if (typeof recipientUserId !== "string" || !STUDENT_RECIPIENT_PATTERN.test(recipientUserId)) return refusedPre;
+    if (typeof body !== "string" || !body.trim()) return refusedPre;
+    const courseIdMatch = courseUrl.match(/\/courses\/(\d+)/);
+    if (!courseIdMatch) return refusedPre;
+    courseId = courseIdMatch[1];
+    const resolved = await resolveInstitution(courseUrl);
+    token = resolved.token;
+    baseUrl = resolved.baseUrl;
+  } catch {
+    return refusedPre;
+  }
+
+  const params = new URLSearchParams();
+  params.append("recipients[]", recipientUserId);
+  params.append("body", body.trim());
+  if (subject && subject.trim()) {
+    params.append("subject", subject.trim());
+  }
+  params.append("context_code", `course_${courseId}`);
+  params.append("force_new", "1");
+
+  // Phase B: the request may have been applied. Any throw from here is unknown.
+  try {
+    const response = await canvasRequest(
+      `${baseUrl}/api/v1/conversations`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      },
+      token
+    );
+    // Phase C: classify the answer.
+    return classifyConversationPostStatus(response.status);
+  } catch {
+    return { status: "unknown", code: "unknown-no-response" };
+  }
+}
+
 /** Unread Canvas inbox conversation count for an institution (for badges). */
 export async function getUnreadCount(code: string): Promise<number> {
   const { institution, token, baseUrl } = await resolveInbox(code);

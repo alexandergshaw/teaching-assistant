@@ -699,7 +699,15 @@ const GRADING_WRAPPER_SPECIFIER = "gradingDiagnosticLog";
 // a server file importing either would be the same bug past the scans above.
 const CHAT_SEAM_SPECIFIER = "chatSeamDiagnostic";
 const ACTION_SEAM_SPECIFIER = "gradingActionSeam";
-const BROWSER_ONLY_SPECIFIERS = [MODULE_SPECIFIER, GRADING_WRAPPER_SPECIFIER, CHAT_SEAM_SPECIFIER, ACTION_SEAM_SPECIFIER];
+// The messaging wrapper records through the same store (LIVE-LMS-STUDENT-MESSAGING W4).
+const MESSAGING_WRAPPER_SPECIFIER = "messagingDiagnosticLog";
+const BROWSER_ONLY_SPECIFIERS = [
+  MODULE_SPECIFIER,
+  GRADING_WRAPPER_SPECIFIER,
+  CHAT_SEAM_SPECIFIER,
+  ACTION_SEAM_SPECIFIER,
+  MESSAGING_WRAPPER_SPECIFIER,
+];
 
 // The DIRECTIVE, on its own line - not a mention of the words. A substring
 // scan for `"use server"` also matches this file and the module itself, both

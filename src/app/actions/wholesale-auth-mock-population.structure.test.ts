@@ -211,6 +211,11 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "learning-resource-links.yield.test.ts",
   "legibility-probe.test.ts",
   "live-class.test.ts",
+  // LIVE-LMS-STUDENT-MESSAGING W4 (deliberate, reviewed): the guard's ORDER is the
+  // only guard fact asserted here (a rejecting guard stops every action before
+  // any downstream work); the guard's textual position and weight are pinned in
+  // components/live-messaging/LiveSend.wiring.test.ts.
+  "live-messaging-send.test.ts",
   "lms-generation-refine.subject.test.ts",
   "lms-generation-refine.test.ts",
   "lms-generation.intro-discussion.test.ts",

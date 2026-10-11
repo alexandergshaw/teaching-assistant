@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 // LIVE-LMS-STUDENT-MESSAGING W3 reachability pins. No component is rendered by
 // any test in this repo, so these read source to prove the shipped W1/W3-logic
 // modules are reachable from the surface and the surface from the app, and that
-// W3 contains no send path (W4).
+// the send path is confined to the W4 driver.
 
 const ROOT = process.cwd();
 const COMPONENT_DIR = path.join(ROOT, "src", "app", "components", "live-messaging");
@@ -163,9 +163,9 @@ describe("client bundle stays free of Canvas server code", () => {
   });
 });
 
-describe("W3 has NO send path (that is W4)", () => {
-  it("no component or read action references a send primitive", () => {
-    const forbidden = /createConversation|createCourseConversation|sendLiveMessages|sendMessage|conversations/;
+describe("the send path is confined to the W4 driver (LiveSend.wiring.test.ts owns the detailed pins)", () => {
+  it("no component or read action references a Canvas conversation builder", () => {
+    const forbidden = /createConversation|createCourseConversation|sendStudentConversation|sendLiveMessages|sendMessage|conversations/;
     for (const name of fs.readdirSync(COMPONENT_DIR)) {
       if (!/\.tsx?$/.test(name) || name.includes(".test.")) continue;
       expect(component(name), name).not.toMatch(forbidden);
@@ -173,11 +173,12 @@ describe("W3 has NO send path (that is W4)", () => {
     expect(codeOnly(read("src", "app", "actions", "live-messaging-enrollments.ts"))).not.toMatch(forbidden);
   });
 
-  it("the modal exposes Cancel and Preview but no Send control", () => {
+  it("the modal exposes Cancel, Preview and Send, and hands the send to the confirm panel", () => {
     const modal = component("MessagingModal.tsx");
     expect(modal).toMatch(/Cancel/);
     expect(modal).toMatch(/Preview/);
-    expect(modal).not.toMatch(/>\s*Send\b/);
+    expect(modal).toMatch(/>\s*Send\s*</);
+    expect(modal).toMatch(/<SendPanel\b/);
   });
 });
 

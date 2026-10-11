@@ -306,6 +306,19 @@ const OWNER_ONLY: Record<string, string> = {
   demoteAccountAction:
     "Removes another account's owner-level control over the workspace; only the owner may revoke that standing.",
 
+  // LIVE-LMS-STUDENT-MESSAGING W4 (docs/live-lms-student-messaging-ops.md S2):
+  // the irreversible student-facing send. requireAppOwner, never requireUser.
+  prepareLiveMessageBatchAction:
+    "Dry-runs a live student message batch against the owner's Canvas and send ledger; part of the irreversible student-facing send, owner-only.",
+  startLiveMessageBatchAction:
+    "Creates the pending send-ledger rows for a live student message batch after a verified digest; owner-only by the same send design.",
+  sendLiveMessageAction:
+    "POSTs ONE real direct message to a student through the owner's Canvas credential; the only outward send in the app, owner-only.",
+  getLiveMessageBatchAction:
+    "Reconciles and reads the owner's send-ledger rows for a batch; owner-only by the same send design.",
+  requeueRefusedLiveMessagesAction:
+    "Returns Canvas-refused rows of the owner's batch to pending so they can be retried; owner-only by the same send design.",
+
   // Media cohort (R3, splitting R2): reclassified from the deprecated
   // requireOwner() alias. These reach an owner-private identity - HeyGen's
   // single configured avatar (media-avatar.ts) or a Tavus-trained likeness

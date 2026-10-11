@@ -13,6 +13,7 @@ import { useRef, useState } from "react";
 import type { EnrollmentRow } from "@/lib/live-messaging/enrollment-aggregator";
 import type { MessagingDraft } from "@/lib/live-messaging/messaging-draft";
 import { insertAtSelection, rowToTokenValues, tokenText } from "@/lib/live-messaging/preview-model";
+import { snapshotKey, type RenderedRecipient } from "@/lib/live-messaging/send-job";
 import {
   TEMPLATE_TOKENS,
   isSendable,
@@ -20,6 +21,8 @@ import {
   type RenderedForStudent,
 } from "@/lib/live-messaging/template-substitution";
 import { ModalShell } from "../ui/ModalShell";
+import SendPanel from "./SendPanel";
+import { useLiveSend } from "./useLiveSend";
 import styles from "./SuccessTracking.module.css";
 
 // Constant, generic accessible name for ModalShell (never built from a name or
@@ -27,6 +30,8 @@ import styles from "./SuccessTracking.module.css";
 const MODAL_LABEL = "Message selected students";
 
 export interface MessagingModalProps {
+  /** The ONE institution this modal sends to. */
+  institution: string;
   students: readonly EnrollmentRow[];
   draft: MessagingDraft;
   onDraftChange: (patch: Partial<MessagingDraft>) => void;
@@ -38,9 +43,25 @@ interface PreviewEntry {
   rendered: RenderedForStudent;
 }
 
-export default function MessagingModal({ students, draft, onDraftChange, onClose }: MessagingModalProps) {
+export default function MessagingModal({ institution, students, draft, onDraftChange, onClose }: MessagingModalProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [previews, setPreviews] = useState<PreviewEntry[] | null>(null);
+
+  // What a send would carry: only the rows that were previewed, rendered per
+  // student. Editing the draft clears the preview, which empties this and
+  // closes the confirm gate (the snapshot below no longer matches).
+  const recipients: RenderedRecipient[] = (previews ?? []).map(({ row, rendered }) => ({
+    rowKey: row.key,
+    courseId: row.courseId,
+    userId: row.userId,
+    rendered,
+  }));
+  const send = useLiveSend({
+    institution,
+    recipients,
+    snapshot: snapshotKey(institution, draft.subject, draft.body, recipients.map((r) => r.rowKey)),
+  });
+  const busy = send.state.phase === "preparing" || send.state.phase === "starting" || send.state.phase === "sending";
 
   // Editing the draft invalidates a rendered preview, so it is cleared.
   const edit = (patch: Partial<MessagingDraft>) => {
@@ -77,7 +98,7 @@ export default function MessagingModal({ students, draft, onDraftChange, onClose
   };
 
   return (
-    <ModalShell label={MODAL_LABEL} onDismiss={onClose} contentStyle={{ maxWidth: "720px" }}>
+    <ModalShell label={MODAL_LABEL} onDismiss={busy ? () => undefined : onClose} contentStyle={{ maxWidth: "720px" }}>
       <div className={styles.modalBody}>
         <h2 className={styles.modalTitle}>
           {`Messaging (${students.length}) Selected Students`}
@@ -139,20 +160,32 @@ export default function MessagingModal({ students, draft, onDraftChange, onClose
           </ul>
         ) : null}
 
+        <SendPanel send={send} institution={institution} students={students} />
+
         <div className={styles.modalActions}>
-          <button type="button" className={styles.button} onClick={onClose}>
+          <button type="button" className={styles.button} onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button
             type="button"
             className={`${styles.button} ${styles.buttonPrimary}`}
-            disabled={students.length === 0}
+            disabled={students.length === 0 || busy}
             onClick={runPreview}
           >
             Preview
           </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonPrimary}`}
+            disabled={recipients.length === 0 || busy || send.state.phase !== "idle"}
+            onClick={() => void send.prepare()}
+          >
+            Send
+          </button>
         </div>
-        <p className={styles.hintMuted}>Preview only. Sending is not available yet.</p>
+        <p className={styles.hintMuted}>
+          {`Send checks the previewed messages first. Nothing goes out until you confirm. Messages go to ${institution} only.`}
+        </p>
       </div>
     </ModalShell>
   );

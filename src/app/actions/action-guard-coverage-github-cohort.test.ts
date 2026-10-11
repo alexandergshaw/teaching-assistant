@@ -319,6 +319,10 @@ const GITHUB_FILES = new Set([
   // loadCourseEnrollmentsAction) call requireAppOwner() as their first
   // statement - owner-only reads of live Canvas rosters, reviewed at birth.
   "actions/live-messaging-enrollments.ts",
+  // LIVE-LMS-STUDENT-MESSAGING W4: all five exports (prepare, start, send, get,
+  // requeue) call requireAppOwner() as their first statement - the irreversible
+  // student-facing send is owner-only by design (docs/live-lms-student-messaging-ops.md S2).
+  "actions/live-messaging-send.ts",
   "actions/llm-tools.ts",
   "actions/lms-generation-refine.ts",
   "actions/lms-generation.ts",

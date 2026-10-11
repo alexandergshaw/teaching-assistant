@@ -70,14 +70,15 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   "lms-content": "Course Content",
   diagnostics: "Diagnostics (Settings)",
   grading: "Grading",
+  messaging: "Student Messaging",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -96,6 +97,8 @@ const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = 
     "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, and cancelling a migration job.",
   grading:
     "Grading: the main grading tab's whole-run grade (zip and Canvas), chat grading (run header, submission preparation, each submission graded, Canvas assignment details), repo grading (one repository or a cohort, and rubric generation from a repo), deriving an assignment checklist, posting grades back to Canvas and posting drafted grades - each operation's outcome and elapsed time as seen by the browser.",
+  messaging:
+    "Live student messaging: each finished or stopped send batch is recorded as three counts only (messages accepted by Canvas, refused by Canvas, and with unconfirmed delivery), with enumerated outcome codes and no student names, subjects or message text. A page closed mid-batch cannot record; the send ledger is the durable record.",
 };
 
 export const SESSION_DIAGNOSTIC_COVERAGE: readonly SessionDiagnosticCoverageRow[] = SURFACES.map((surface) => ({
@@ -145,7 +148,8 @@ export interface SessionDiagnosticEntry {
   /** Elapsed milliseconds for a slow operation. OPTIONAL and OMITTED (never an
    * explicit undefined) when the caller supplied none. */
   durationMs?: number;
-  /** Students found in a classified zip upload. A bare count (no names), OPTIONAL
+  /** Students found in a classified zip upload, or recipients in one send-batch
+   * outcome class (the messaging surface). A bare count (no names), OPTIONAL
    * and OMITTED (never an explicit undefined) when the caller supplied none. */
   classificationStudentCount?: number;
 }

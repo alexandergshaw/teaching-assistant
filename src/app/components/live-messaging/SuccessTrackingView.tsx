@@ -158,6 +158,7 @@ export default function SuccessTrackingView() {
 
       {modalFor !== null && modalFor === institution ? (
         <MessagingModal
+          institution={institution}
           students={selectedRows}
           draft={draft}
           onDraftChange={setDraft}

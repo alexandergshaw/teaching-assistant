@@ -17,7 +17,7 @@
 // composer field after clearing it, so the next paste does not cost an extra
 // click back into the field (clicking Send moves focus to the button;
 // pressing Enter does not move focus at all).
-import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import SegmentedToggle from "../ui/SegmentedToggle";
@@ -26,6 +26,7 @@ import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { MAX_RECORDING_FRAMES, useChatScreenFrameCapture } from "./chatFrameCapture";
+import { loadComposerHeight, persistComposerHeight } from "./composerHeight";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -91,6 +92,36 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     addParts(files.map((file): CompositePartInput => ({ kind: "file", file })))
   );
   const trayRoom = MAX_RECORDING_FRAMES - parts.length;
+  // Vertical expand (docs/grading-chat-consolidation-scope.md W1, A): the
+  // persisted floor is a min-height on the TEXTAREA (see composerHeight.ts for
+  // why min-height and not height). The drag-end height is captured only when
+  // a press-and-release actually changed the box, so a plain click never
+  // ratchets the floor up to the autosized content height.
+  // The stored floor is restored in a mount effect, not a state initializer:
+  // the server HTML has no floor, so an initializer would mismatch on hydrate.
+  const [composerHeight, setComposerHeight] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadComposerHeight());
+      if (!cancelled && stored !== null) setComposerHeight(stored);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const pressHeightRef = useRef<number | null>(null);
+  const handleTextareaMouseDown = (event: MouseEvent<HTMLTextAreaElement>) => {
+    pressHeightRef.current = event.currentTarget.offsetHeight;
+  };
+  const handleTextareaMouseUp = (event: MouseEvent<HTMLTextAreaElement>) => {
+    const before = pressHeightRef.current;
+    pressHeightRef.current = null;
+    const after = event.currentTarget.offsetHeight;
+    if (before === null || after === before) return;
+    const saved = persistComposerHeight(after);
+    if (saved !== null) setComposerHeight(saved);
+  };
   const removePart = (index: number) => setParts((prev) => prev.filter((_, i) => i !== index));
 
   const selectMode = (next: InputMode) => {
@@ -250,6 +281,20 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         <Button variant="text" size="small" aria-label="Add part to composite submission" disabled={addPartDisabled} onClick={handleAddPart}>
           + Add part
         </Button>
+        <Button
+          variant="text"
+          size="small"
+          aria-label="Capture a screenshot of a window as a part"
+          disabled={disabled || trayRoom < 1 || capture.recording || capture.snapping}
+          onClick={() => void capture.snapOnce()}
+        >
+          {capture.snapping ? "Capturing..." : "Snap screenshot"}
+        </Button>
+        {mode !== "record" && capture.error && (
+          <span role="alert" className={styles.ghMeta}>
+            {capture.error}
+          </span>
+        )}
       </div>
 
       {trayActive && (
@@ -288,6 +333,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             multiline
             maxRows={6}
             className={chatStyles.composerGrow}
+            style={composerHeight === null ? undefined : ({ "--composer-floor": `${composerHeight}px` } as CSSProperties)}
             size="small"
             label="Submission text"
             placeholder="Paste a student's submission"
@@ -296,6 +342,16 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             disabled={disabled}
             slotProps={{
               input: { onKeyDown: handleTextKeyDown },
+              // resize reaches the real <textarea> (not .MuiInputBase-root):
+              // MUI's CSS sets resize:none on it, an inline style wins. The
+              // min-height floor is NOT inline: inline style is also spread onto
+              // MUI's hidden measuring textarea and would lift the maxRows cap.
+              // It comes from --composer-floor via .composerGrow in the CSS.
+              htmlInput: {
+                onMouseDown: handleTextareaMouseDown,
+                onMouseUp: handleTextareaMouseUp,
+                style: { resize: "vertical" },
+              },
             }}
           />
           <TextField

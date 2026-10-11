@@ -25,7 +25,8 @@ export type GradingDiagnosticOperation =
   | "derive_checklist"
   | "fetch_canvas_meta"
   | "post_grades"
-  | "post_draft";
+  | "post_draft"
+  | "capture_screenshot";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
   resolve_header: "Resolve run header",
@@ -39,6 +40,7 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   fetch_canvas_meta: "Fetch Canvas assignment details",
   post_grades: "Post grades to Canvas",
   post_draft: "Post drafted grade",
+  capture_screenshot: "Capture screenshot",
 };
 
 export interface RecordGradingDiagnosticArgs {

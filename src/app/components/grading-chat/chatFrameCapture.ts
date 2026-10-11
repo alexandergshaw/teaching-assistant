@@ -9,6 +9,7 @@
 // upload-budget). The capture hook is owner-walk (getDisplayMedia and canvas do
 // not exist under vitest); frameToImageFile is the pure, tested leaf.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { recordGradingDiagnosticEntry } from "@/app/components/grading/gradingDiagnosticLog";
 import { MAX_SHOTS, SNAP_JPEG_QUALITY, resolveSnapTargetWidth } from "../snapshot-grading/snapshot-shot";
 
 /** Frame cap. Equals the server's per-composite part cap (12, the
@@ -28,6 +29,47 @@ export function frameToImageFile(base64: string, index: number): File {
   return new File([bytes], `screen-recording-${index}.jpg`, { type: "image/jpeg" });
 }
 
+/** Fixed, student-free error classes for the single-snap diagnostic. The raw
+ *  error text is never recorded (it can carry window titles). */
+export type SnapFailureClass = "no frame" | "capture failed";
+
+/** PURE. Map a raw getDisplayMedia / grab error to one fixed class. */
+export function classifySnapFailure(err: unknown): SnapFailureClass {
+  if (err instanceof Error && err.message === "no frame") return "no frame";
+  return "capture failed";
+}
+
+/** Record one screenshot-snap outcome. No student data: `error` is always a
+ *  SnapFailureClass string. */
+export function recordSnapDiagnostic(startedAtMs: number, failure: SnapFailureClass | null): void {
+  recordGradingDiagnosticEntry({
+    at: new Date().toISOString(),
+    operation: "capture_screenshot",
+    outcome: failure ? "failure" : "success",
+    durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
+    error: failure ?? undefined,
+  });
+}
+
+/** Max wait for the shared window's first decodable frame. */
+export const SNAP_READY_TIMEOUT_MS = 4000;
+
+/** Draw the video's current frame to a (reused) canvas and return raw JPEG
+ *  base64, or null when the video is not ready or has no 2d context. */
+function encodeVideoFrame(video: HTMLVideoElement, canvasRef: { current: HTMLCanvasElement | null }): string | null {
+  if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return null;
+  const width = resolveSnapTargetWidth(video.videoWidth);
+  const height = Math.round(video.videoHeight * (width / video.videoWidth));
+  const canvas = canvasRef.current ?? document.createElement("canvas");
+  canvasRef.current = canvas;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", SNAP_JPEG_QUALITY).split(",")[1] || null;
+}
+
 function errorName(err: unknown): string {
   return err instanceof Error ? err.name : "";
 }
@@ -40,12 +82,18 @@ export interface ChatScreenFrameCapture {
   readonly start: (maxFrames: number) => Promise<void>;
   /** Stop; the frames captured so far are delivered to onFrames as Files. */
   readonly stop: () => void;
+  /** One immediate screenshot: pick a window, wait for the first decodable
+   *  frame, deliver ONE image File through onFrames, release the share. */
+  readonly snapOnce: () => Promise<void>;
+  readonly snapping: boolean;
 }
 
 export function useChatScreenFrameCapture(onFrames: (files: File[]) => void): ChatScreenFrameCapture {
   const [recording, setRecording] = useState(false);
   const [frameCount, setFrameCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [snapping, setSnapping] = useState(false);
+  const snapBusyRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -64,16 +112,7 @@ export function useChatScreenFrameCapture(onFrames: (files: File[]) => void): Ch
     const video = videoRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
     if (framesRef.current.length >= capRef.current) return;
-    const width = resolveSnapTargetWidth(video.videoWidth);
-    const height = Math.round(video.videoHeight * (width / video.videoWidth));
-    const canvas = canvasRef.current ?? document.createElement("canvas");
-    canvasRef.current = canvas;
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, width, height);
-    const base64 = canvas.toDataURL("image/jpeg", SNAP_JPEG_QUALITY).split(",")[1];
+    const base64 = encodeVideoFrame(video, canvasRef);
     if (!base64) return;
     framesRef.current.push(base64);
     if (mountedRef.current) setFrameCount(framesRef.current.length);
@@ -147,5 +186,44 @@ export function useChatScreenFrameCapture(onFrames: (files: File[]) => void): Ch
 
   const stop = useCallback((): void => finish(true), [finish]);
 
-  return { recording, frameCount, error, start, stop };
+  const snapOnce = useCallback(async (): Promise<void> => {
+    if (streamRef.current || snapBusyRef.current) return;
+    snapBusyRef.current = true;
+    setError(null);
+    setSnapping(true);
+    const startedAt = performance.now();
+    let stream: MediaStream | null = null;
+    try {
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "window" }, audio: false });
+      } catch (err) {
+        // A cancelled picker is not a failure and records nothing.
+        if (errorName(err) === "NotAllowedError") return;
+        throw err;
+      }
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      void video.play().catch(() => {});
+      // Readiness gate: a frame can only be encoded once readyState >= 2.
+      const deadline = performance.now() + SNAP_READY_TIMEOUT_MS;
+      while ((video.readyState < 2 || !video.videoWidth || !video.videoHeight) && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const base64 = encodeVideoFrame(video, canvasRef);
+      if (!base64) throw new Error("no frame");
+      onFramesRef.current([frameToImageFile(base64, 1)]);
+      recordSnapDiagnostic(startedAt, null);
+    } catch (err) {
+      recordSnapDiagnostic(startedAt, classifySnapFailure(err));
+      if (mountedRef.current) setError("Could not capture a screenshot. Try again.");
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      snapBusyRef.current = false;
+      if (mountedRef.current) setSnapping(false);
+    }
+  }, []);
+
+  return { recording, frameCount, error, start, stop, snapOnce, snapping };
 }

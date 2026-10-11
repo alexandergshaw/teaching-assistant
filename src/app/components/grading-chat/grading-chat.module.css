@@ -63,6 +63,13 @@
   min-width: 0;
 }
 
+/* Persisted composer floor (--composer-floor, set inline on the root). The
+   hidden measuring textarea carries aria-hidden, so it is excluded and
+   autosize's maxRows cap still measures an unfloored single row. */
+.composerGrow textarea:not([aria-hidden="true"]) {
+  min-height: var(--composer-floor);
+}
+
 .composerLabel {
   flex: 0 1 180px;
 }

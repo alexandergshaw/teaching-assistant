@@ -80,6 +80,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
   });
 
@@ -99,6 +100,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
   });
 
@@ -117,6 +119,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
@@ -132,6 +135,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
   });
 
@@ -152,6 +156,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
+        setupOpen: null,
       })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBeNull();
@@ -174,6 +179,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
+        setupOpen: null,
       })
     ).not.toThrow();
   });
@@ -203,6 +209,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     expect(loadRepoGradesUiState().linkSource).toBe("live");
   });
@@ -227,6 +234,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     const loaded = loadRepoGradesUiState();
     expect(loaded.useReadmeInstructions).toBe(false);
@@ -258,6 +266,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     expect(loadRepoGradesUiState().runCodeScoring).toBe(true);
   });
@@ -278,6 +287,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "jane",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     expect(fakeStorage.getItem("ta-repo-grades-search")).toBe("jane");
     expect(loadRepoGradesUiState().searchQuery).toBe("jane");
@@ -303,6 +313,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBe("course-9");
     expect(fakeStorage.getItem("ta-repo-grades-org-prefix")).toBe("wk");
@@ -330,7 +341,17 @@ describe("collapse overrides (A7 W2): settingsOpen / linkPanelOpen tri-state", (
     bulkSelectionOnly: false,
     runCodeScoring: false,
     searchQuery: "",
+    setupOpen: null,
   };
+
+  it("P2a-setup: setupOpen round-trips its tri-state under ta-repo-grades-setup-open", () => {
+    expect(loadRepoGradesUiState().setupOpen).toBeNull();
+    persistRepoGradesUiState({ ...base, settingsOpen: null, linkPanelOpen: null, setupOpen: false });
+    expect(fakeStorage.getItem("ta-repo-grades-setup-open")).toBe("0");
+    expect(loadRepoGradesUiState().setupOpen).toBe(false);
+    persistRepoGradesUiState({ ...base, settingsOpen: null, linkPanelOpen: null, setupOpen: null });
+    expect(fakeStorage.getItem("ta-repo-grades-setup-open")).toBeNull();
+  });
 
   it("P2a: never-written reads back as null for both", () => {
     const loaded = loadRepoGradesUiState();
@@ -654,6 +675,7 @@ describe("loadRepoGradeManualRubricText / persistRepoGradeManualRubricText (item
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
+      setupOpen: null,
     });
     persistRepoGradeManualRubricText("course-1", "the per-course rubric text");
     expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("the global rubric text");

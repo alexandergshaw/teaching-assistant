@@ -115,6 +115,9 @@ const FOLDER_KEY = "ta-repo-grades-folder";
 // "0" mean the instructor explicitly opened or closed it and that choice wins.
 const SETTINGS_OPEN_KEY = "ta-repo-grades-settings-open";
 const LINK_OPEN_KEY = "ta-repo-grades-link-open";
+// W4: the same tri-state for the parent "Run setup" disclosure that wraps the
+// controls and the link panel.
+const SETUP_OPEN_KEY = "ta-repo-grades-setup-open";
 
 export interface RepoGradesUiState {
   courseId: string;
@@ -149,6 +152,8 @@ export interface RepoGradesUiState {
   settingsOpen: boolean | null;
   /** Same tri-state for the link-usernames panel. */
   linkPanelOpen: boolean | null;
+  /** Same tri-state for the parent "Run setup" disclosure. */
+  setupOpen: boolean | null;
 }
 
 function defaultUiState(): RepoGradesUiState {
@@ -166,6 +171,7 @@ function defaultUiState(): RepoGradesUiState {
     searchQuery: "",
     settingsOpen: null,
     linkPanelOpen: null,
+    setupOpen: null,
   };
 }
 
@@ -237,6 +243,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     searchQuery: localStorage.getItem(SEARCH_KEY) ?? "",
     settingsOpen: parseCollapseOverride(localStorage.getItem(SETTINGS_OPEN_KEY)),
     linkPanelOpen: parseCollapseOverride(localStorage.getItem(LINK_OPEN_KEY)),
+    setupOpen: parseCollapseOverride(localStorage.getItem(SETUP_OPEN_KEY)),
   };
 }
 
@@ -256,6 +263,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(SEARCH_KEY, state.searchQuery);
     writeCollapseOverride(SETTINGS_OPEN_KEY, state.settingsOpen);
     writeCollapseOverride(LINK_OPEN_KEY, state.linkPanelOpen);
+    writeCollapseOverride(SETUP_OPEN_KEY, state.setupOpen);
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

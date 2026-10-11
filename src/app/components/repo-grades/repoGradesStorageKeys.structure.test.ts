@@ -35,11 +35,12 @@ const FROZEN_KEYS = [
   "ta-repo-grades-search",
   "ta-repo-grades-selected",
   "ta-repo-grades-settings-open",
+  "ta-repo-grades-setup-open",
   "ta-repo-grades-sort",
 ];
 
 describe("repo-grades persistence keys (exact set)", () => {
-  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 19", () => {
+  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 20", () => {
     expect(collectKeys(source)).toEqual(FROZEN_KEYS);
   });
 
@@ -56,8 +57,8 @@ describe("repo-grades persistence keys (exact set)", () => {
     expect(collectKeys(mutated)).not.toEqual(FROZEN_KEYS);
   });
 
-  it("RW4d: both new keys are read on load and written on persist", () => {
-    for (const name of ["SETTINGS_OPEN_KEY", "LINK_OPEN_KEY"]) {
+  it("RW4d: all three collapse keys are read on load and written on persist", () => {
+    for (const name of ["SETTINGS_OPEN_KEY", "LINK_OPEN_KEY", "SETUP_OPEN_KEY"]) {
       expect(source).toContain(`localStorage.getItem(${name})`);
       expect(source).toContain(`writeCollapseOverride(${name},`);
     }

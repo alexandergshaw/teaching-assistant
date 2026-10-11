@@ -207,3 +207,59 @@ describe("REPO-GRADES-STATUS-PROMINENCE: sticky grading banner", () => {
     expect(banner).not.toMatch(/\brole=/);
   });
 });
+
+// REPO-PAGE-OVERHAUL W3 (re-scan in the sticky header) and W4 (one persisted
+// "Run setup" disclosure wrapping BOTH the controls and the link panel).
+describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
+  const W_INDEX = withoutLineComments(read("index.tsx"));
+  const W_HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
+  const W_CONTROLS = withoutLineComments(read("RepoGradesControls.tsx"));
+  const rescanProp = (): string => sliceBetween(W_INDEX, "rescanControl={", "folderControl={");
+
+  it("AC-W3-1: the header accepts and renders rescanControl inside .stickyWorkingHeader; index passes it", () => {
+    expect(W_HEADER).toMatch(/rescanControl\?: ReactNode/);
+    expect(sliceBetween(W_HEADER, "styles.stickyWorkingHeader", "{children}")).toContain("{rescanControl}");
+    expect(W_INDEX).toContain("<RepoGradesStickyHeader");
+    expect(rescanProp()).toContain("<button");
+  });
+
+  it("AC-W3-2: the node is wired to reloadScan and disabled on scanLoading (not dead)", () => {
+    const node = rescanProp();
+    expect(node).toContain("disabled={scanLoading}");
+    expect(node).toMatch(/onClick=\{\(\) => reloadScan\(\)\}/);
+  });
+
+  it("AC-W3-3: the Refresh button and its props are gone from RepoGradesControls and its call", () => {
+    expect(W_CONTROLS).not.toContain("onRefreshScan");
+    expect(W_CONTROLS).not.toContain("scanLoading");
+    expect(W_CONTROLS).not.toContain("Refresh");
+    expect(W_INDEX).not.toContain("onRefreshScan");
+  });
+});
+
+describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
+  const W_INDEX = withoutLineComments(read("index.tsx"));
+
+  it("AC-W4-1/3: the parent details is persisted via setupOpen and defaults open while !allBound", () => {
+    expect(W_INDEX).toContain("effectiveOpen(uiState.setupOpen, !allBound)");
+    expect(W_INDEX).toMatch(/setupOpen: value/);
+  });
+
+  it("AC-W4-7: the parent <details> contains BOTH RepoGradesControls and LinkUsernamesPanel", () => {
+    const open = W_INDEX.indexOf("<details");
+    const controls = W_INDEX.indexOf("<RepoGradesControls");
+    const link = W_INDEX.indexOf("<LinkUsernamesPanel");
+    const close = W_INDEX.indexOf("</details>");
+    expect(open).toBeGreaterThan(-1);
+    expect(W_INDEX.slice(open, open + 120)).toContain("setupRegion");
+    expect(controls).toBeGreaterThan(open);
+    expect(link).toBeGreaterThan(controls);
+    expect(close).toBeGreaterThan(link);
+    // The status banners stay outside (visible when collapsed).
+    expect(W_INDEX.indexOf("<RepoGradesStatusBanners")).toBeGreaterThan(close);
+  });
+
+  it("AC-W4-4: still exactly one aria-live in comment-stripped index.tsx", () => {
+    expect((W_INDEX.match(/aria-live/g) ?? []).length).toBe(1);
+  });
+});

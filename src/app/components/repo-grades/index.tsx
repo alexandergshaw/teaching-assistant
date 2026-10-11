@@ -600,6 +600,22 @@ export default function RepoGradesTab() {
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
 
+      {/* W4: one persisted "Run setup" disclosure wrapping BOTH the setup
+          controls and the link-usernames panel. Defaults open until every repo
+          is bound (!allBound), then collapses; an explicit toggle wins. The
+          status banners sit after it so errors stay visible while collapsed. */}
+      <details
+        className={gridStyles.setupRegion}
+        open={effectiveOpen(uiState.setupOpen, !allBound)}
+        onToggle={(e) => {
+          // Persist only a real user toggle, never a default flipping `open`.
+          if (e.currentTarget.open !== effectiveOpen(uiState.setupOpen, !allBound)) {
+            const value = e.currentTarget.open;
+            setUiState((prev) => ({ ...prev, setupOpen: value }));
+          }
+        }}
+      >
+      <summary>Run setup</summary>
       <RepoGradesControls
         courses={courses}
         coursesLoading={coursesLoading}
@@ -609,8 +625,6 @@ export default function RepoGradesTab() {
         showOrgPrefixFilter={!!course && !missingOrg}
         orgPrefix={uiState.orgPrefix}
         onOrgPrefixChange={(value) => setUiState((prev) => ({ ...prev, orgPrefix: value }))}
-        scanLoading={scanLoading}
-        onRefreshScan={() => reloadScan()}
         showRowDependentFields={!!model && model.rows.length > 0}
         sort={uiState.sort}
         onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
@@ -635,24 +649,6 @@ export default function RepoGradesTab() {
         onRunCodeScoringChange={(value) => setUiState((prev) => ({ ...prev, runCodeScoring: value }))}
         settingsOpen={effectiveOpen(uiState.settingsOpen, currentSelectedFolder === ALL_FOLDERS)}
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
-      />
-
-      <RepoGradesStatusBanners
-        hasCourse={!!course}
-        coursesLoading={coursesLoading}
-        courseName={course?.name ?? ""}
-        canvasGateBlockedReason={canvasGateBlockedReason}
-        missingOrg={missingOrg}
-        githubOrg={course?.githubOrg ?? ""}
-        scanLoading={scanLoading}
-        scanError={scanError}
-        rosterLoading={rosterLoading}
-        rosterError={rosterError}
-        assignmentsLoading={assignmentsLoading}
-        assignmentsError={assignmentsError}
-        assignmentsEmpty={assignmentsEmpty}
-        scanTruncated={!!scan?.truncated}
-        rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
 
       {/* Instructor complaint this wave fixes: the mechanism used to live only
@@ -691,6 +687,25 @@ export default function RepoGradesTab() {
           boundSummary={`${confirmedCount} of ${model?.rows.length ?? 0} repos bound`}
         />
       )}
+      </details>
+
+      <RepoGradesStatusBanners
+        hasCourse={!!course}
+        coursesLoading={coursesLoading}
+        courseName={course?.name ?? ""}
+        canvasGateBlockedReason={canvasGateBlockedReason}
+        missingOrg={missingOrg}
+        githubOrg={course?.githubOrg ?? ""}
+        scanLoading={scanLoading}
+        scanError={scanError}
+        rosterLoading={rosterLoading}
+        rosterError={rosterError}
+        assignmentsLoading={assignmentsLoading}
+        assignmentsError={assignmentsError}
+        assignmentsEmpty={assignmentsEmpty}
+        scanTruncated={!!scan?.truncated}
+        rateLimitMessage={scan?.rateLimit?.message ?? null}
+      />
 
       {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
           comment near the top of this file): LinkUsernamesPanel.tsx already
@@ -758,6 +773,11 @@ export default function RepoGradesTab() {
           one folder only, same confirmed handlers as the column header) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
+        rescanControl={course && !missingOrg ? (
+          <button type="button" className={pageStyles.linkButton} disabled={scanLoading} onClick={() => reloadScan()}>
+            {scanLoading ? "Scanning..." : "Refresh"}
+          </button>
+        ) : null}
         folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
         statusBanner={bulkRunningFolder ? (
           // Visual-only: no role and no aria-live (the postSummary region is the one live region).

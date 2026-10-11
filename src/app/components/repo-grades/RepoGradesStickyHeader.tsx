@@ -28,10 +28,13 @@ export interface RepoGradesStickyHeaderProps {
   // REPO-GRADES-STATUS-PROMINENCE: the visual-only grading progress banner
   // (spinner + count); index.tsx gates it on the view-level bulkRunningFolder.
   statusBanner?: ReactNode;
+  // REPO-PAGE-OVERHAUL W3: the re-scan (Refresh) button, promoted out of the
+  // setup stack; index.tsx wires it to the same reloadScan + scanLoading.
+  rescanControl?: ReactNode;
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = runBar !== null || typeof onSearchChange === "function";
@@ -61,6 +64,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
           {runBar && <RepoGradesRunBar {...runBar} />}
           {statusBanner}
           {folderControl}
+          {rescanControl}
           {gradeSetControl}
           <label className={styles.headerField}>
             <span className={styles.headerInputLabel}>Search</span>

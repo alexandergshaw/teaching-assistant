@@ -171,8 +171,6 @@ export interface RepoGradesControlsProps {
   showOrgPrefixFilter: boolean;
   orgPrefix: string;
   onOrgPrefixChange: (value: string) => void;
-  scanLoading: boolean;
-  onRefreshScan: () => void;
 
   /** `model && model.rows.length > 0` from index.tsx - gates the sort
    * control and the instructions/rubric pair, matching the two separate but
@@ -293,8 +291,6 @@ export default function RepoGradesControls({
   showOrgPrefixFilter,
   orgPrefix,
   onOrgPrefixChange,
-  scanLoading,
-  onRefreshScan,
   showRowDependentFields,
   sort,
   onSortChange,
@@ -334,7 +330,7 @@ export default function RepoGradesControls({
     } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"}`;
   return (
     <>
-      {/* A7 W3 R4: the cheap pickers (course, repo filter + Refresh, folder, sort) share one wrapping row so they sit together instead of stacking. */}
+      {/* A7 W3 R4: the cheap pickers (course, repo filter, folder, sort) share one wrapping row so they sit together instead of stacking. */}
       <div className={styles.adaptRow}>
         <div className={styles.field} style={PICKER_FIELD_STYLE}>
           <label htmlFor="repo-grades-course">Course</label>
@@ -375,9 +371,6 @@ export default function RepoGradesControls({
                 placeholder="e.g. module"
                 sx={{ flex: "1 1 220px" }}
               />
-              <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => onRefreshScan()}>
-                {scanLoading ? "Scanning…" : "Refresh"}
-              </button>
             </div>
           </div>
         )}

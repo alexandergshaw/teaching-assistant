@@ -558,3 +558,46 @@ describe("PipelineTab auto-download wiring (source-text pin)", () => {
     expect(src.match(/serializeDeckToPptx\(/g)?.length).toBe(1);
   });
 });
+
+describe("PipelineTab template wiring (PPT-TEMPLATE-UPLOAD-PLACE W3, source-text pin)", () => {
+  const src = readFileSync(join(__dirname, "PipelineTab.tsx"), "utf8");
+  const hooks = readFileSync(join(__dirname, "../../ppt-design/hooks.ts"), "utf8");
+
+  it("mounts the shared picker bound to the shared selection hook", () => {
+    expect(src).toContain("<DeckTemplatePicker");
+    expect(src).toContain("useSelectedDeckTemplateFileId()");
+    expect(src).toContain("selectedId={templateFileId}");
+  });
+
+  it("introduces no new ta- template key (shared ta-ppt-template-file-id only)", () => {
+    expect(hooks).toContain('"ta-ppt-template-file-id"');
+    expect(src).not.toMatch(/["']ta-[a-z-]*template[a-z-]*["']/);
+  });
+
+  it("routes the download by plan: template through the fill action, own through serializeDeckToPptx", () => {
+    const plan = src.indexOf('chooseDeckDownloadPlan(templateFileId) === "template"');
+    const fill = src.indexOf("fillDeckTemplateFileAction(templateFileId");
+    const own = src.indexOf("serializeDeckToPptx(deck)");
+    expect(plan).toBeGreaterThan(-1);
+    expect(fill).toBeGreaterThan(plan);
+    expect(own).toBeGreaterThan(fill);
+  });
+
+  it("returns the fill refusal and shows it inline instead of throwing", () => {
+    expect(src).toMatch(/"error" in result\) return result\.error/);
+    expect(src).toMatch(/if \(refusal !== null\) setDownloadError\(refusal\)/);
+  });
+
+  it("gates the completion auto-download on the own plan and lists templateFileId in its deps", () => {
+    const effect = src.slice(src.indexOf("if (chooseDeckDownloadPlan(templateFileId) !== "+JSON.stringify("own")));
+    const gate = effect.indexOf('chooseDeckDownloadPlan(templateFileId) !== "own"');
+    const decision = effect.indexOf("shouldAutoDownloadDeck(");
+    expect(gate).toBeGreaterThan(-1);
+    expect(decision).toBeGreaterThan(gate);
+    expect(effect).toMatch(/\[pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateFileId\]/);
+  });
+
+  it("never auto-downloads with a template id (auto call passes the empty id)", () => {
+    expect(src).toContain('downloadDeckPptx(deck, "")');
+  });
+});

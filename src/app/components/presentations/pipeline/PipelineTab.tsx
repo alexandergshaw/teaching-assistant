@@ -42,7 +42,10 @@ import TabHeader from "../../TabHeader";
 import SourcesEditor from "../SourcesEditor";
 import SlideDeckPreview from "../SlideDeckPreview";
 import { usePersistedJSON } from "../hooks";
-import { deckDownloadFilename } from "../panel-logic";
+import { base64ToArrayBuffer, chooseDeckDownloadPlan, deckDownloadFilename } from "../panel-logic";
+import DeckTemplatePicker from "../DeckTemplatePicker";
+import { useSelectedDeckTemplateFileId } from "../../ppt-design/hooks";
+import { fillDeckTemplateFileAction } from "@/app/actions/deck-template-files";
 import type { DeckContent, PresentationSource } from "@/lib/presentations/types";
 import {
   ALL_STAGE_IDS,
@@ -80,11 +83,25 @@ function subscribeNoop(): () => void {
   return () => {};
 }
 
-// The ONE serialize-and-save path: the manual button and the completion
-// auto-download both call this, so they produce the identical file.
-async function downloadDeckPptx(deck: DeckContent): Promise<void> {
-  const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
-  const buffer = await serializeDeckToPptx(deck);
+// The ONE save path: the manual button and the completion auto-download both
+// call this. With a template selected (shared ta-ppt-template-file-id) the
+// deck is written into it through fillDeckTemplateFileAction, which can REFUSE
+// (slide-count fit report) - that refusal is RETURNED as a worded string, never
+// thrown or swallowed. Returns null on success. The auto path only ever calls
+// this with no template (Fork B1).
+async function downloadDeckPptx(deck: DeckContent, templateFileId: string): Promise<string | null> {
+  let buffer: ArrayBuffer;
+  if (chooseDeckDownloadPlan(templateFileId) === "template") {
+    const result = await fillDeckTemplateFileAction(templateFileId, {
+      presentationTitle: deck.presentationTitle,
+      slides: deck.slides,
+    });
+    if ("error" in result) return result.error;
+    buffer = base64ToArrayBuffer(result.base64);
+  } else {
+    const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
+    buffer = await serializeDeckToPptx(deck);
+  }
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
@@ -96,6 +113,7 @@ async function downloadDeckPptx(deck: DeckContent): Promise<void> {
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
+  return null;
 }
 
 // The route-op each auto-runnable stage maps to (S6.6's inverse table,
@@ -197,6 +215,7 @@ export default function PipelineTab() {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [autoDlFingerprint, setAutoDlFingerprint] = usePersistedJSON<string>(PIPELINE_AUTODL_FINGERPRINT_KEY, "");
+  const [templateFileId, setTemplateFileId] = useSelectedDeckTemplateFileId();
   const [regenOpen, setRegenOpen] = usePersistedJSON<boolean>(PIPELINE_REGEN_OPEN_KEY, false);
   // Hydration guard: the persisted open flag must not choose the first paint.
   // false on the server / first render, true once mounted on the client.
@@ -205,13 +224,17 @@ export default function PipelineTab() {
   // Auto-download once when the pipeline completes. The fingerprint is
   // persisted BEFORE the download so a re-render or reload of the same
   // completed deck never fires again; a new run (different deck) does.
+  // FORK B1: with a template selected the auto-download is SUPPRESSED - a
+  // templated download is a server action that can refuse (slide-count), so it
+  // is never auto-fired; the user downloads manually.
   useEffect(() => {
+    if (chooseDeckDownloadPlan(templateFileId) !== "own") return;
     const decision = shouldAutoDownloadDeck(pipelineState, autoDlFingerprint);
     const deck = pipelineState.deck.artifact;
     if (!decision.download || decision.fingerprint === null || !deck) return;
     setAutoDlFingerprint(decision.fingerprint);
-    downloadDeckPptx(deck).catch(() => setDownloadError("Could not build the .pptx"));
-  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint]);
+    downloadDeckPptx(deck, "").catch(() => setDownloadError("Could not build the .pptx"));
+  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateFileId]);
 
   async function runOneStage(stage: StageId) {
     setRegenOpen(false); // a stale open flag must not re-open the sub-view later
@@ -295,7 +318,8 @@ export default function PipelineTab() {
     setDownloading(true);
     setDownloadError(null);
     try {
-      await downloadDeckPptx(deck);
+      const refusal = await downloadDeckPptx(deck, templateFileId);
+      if (refusal !== null) setDownloadError(refusal);
     } catch {
       setDownloadError("Could not build the .pptx");
     } finally {
@@ -519,6 +543,12 @@ export default function PipelineTab() {
 
           {activeStage === "deck" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <DeckTemplatePicker selectedId={templateFileId} onSelectId={setTemplateFileId} />
+              {chooseDeckDownloadPlan(templateFileId) === "template" && (
+                <Alert severity="info" variant="outlined">
+                  A template is selected, so the deck is not downloaded automatically. Use Download .pptx to apply it.
+                </Alert>
+              )}
               <div style={{ display: "flex", gap: "var(--space-2)" }}>
                 <Button variant="outlined" onClick={() => runOneStage("deck")} disabled={busy} sx={{ textTransform: "none" }}>
                   Generate deck

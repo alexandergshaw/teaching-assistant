@@ -695,10 +695,9 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
   const setup = stripComments(read("useWalkthroughSetup.ts"));
 
   describe("W3-R1: capture controls and Start precede the format/options controls", () => {
-    it("fieldset: Course and the disclosure come before the paste box, Save for reuse and the three toggles", () => {
+    it("fieldset: Course comes before the paste box, Save for reuse and the three toggles", () => {
       const anchors = [
         'label="Course"',
-        "Frames from your screen",
         'label="Paste a previous announcement to match its format (optional)"',
         "Save for reuse",
         "Use emojis in the draft",
@@ -712,27 +711,48 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
       }
     });
 
-    it("fieldset: two fieldsets, with {children} (the run bar) between the first close and the second open", () => {
-      const firstClose = fieldset.indexOf("</fieldset>");
-      const childrenIdx = fieldset.indexOf("{children}");
-      const secondOpen = fieldset.indexOf("<fieldset", firstClose);
-      expect(firstClose).toBeGreaterThan(-1);
-      expect(childrenIdx).toBeGreaterThan(-1);
-      expect(secondOpen).toBeGreaterThan(-1);
-      expect(childrenIdx).toBeGreaterThan(firstClose);
-      expect(secondOpen).toBeGreaterThan(childrenIdx);
+    it("fieldset: still two input fieldsets, no {children} run-bar slot", () => {
+      expect(fieldset).not.toContain("{children}");
       expect((fieldset.match(/<fieldset\b/g) ?? []).length).toBe(2);
     });
 
-    it("panel: Start is rendered as a child of the fieldset mount, after its opening tag", () => {
+    it("panel: AC-1 the run bar is a panel-body sibling, NOT inside the fieldset mount", () => {
       const mount = panel.indexOf("<AnnouncementCourseFieldset");
       const startIdx = panel.indexOf("Start capture");
-      const mountClose = panel.indexOf("</AnnouncementCourseFieldset>");
       expect(mount).toBeGreaterThan(-1);
       expect(startIdx).toBeGreaterThan(-1);
-      expect(mountClose).toBeGreaterThan(-1);
-      expect(startIdx).toBeGreaterThan(mount);
-      expect(startIdx).toBeLessThan(mountClose);
+      // The mount is self-closing: no closing tag exists for Start to sit inside.
+      expect(panel).not.toContain("</AnnouncementCourseFieldset>");
+      const selfClose = panel.indexOf("/>", mount);
+      expect(selfClose).toBeGreaterThan(mount);
+      expect(startIdx).toBeGreaterThan(selfClose);
+    });
+
+    it("AC-2: the fieldset has a collapsed branch; summary side uses annChat.setupSummary, inputs side holds both fieldsets", () => {
+      const branch = fieldset.indexOf("collapsed ? (");
+      const summary = fieldset.indexOf("annChat.setupSummary");
+      const firstField = fieldset.indexOf("<fieldset");
+      const secondField = fieldset.indexOf("<fieldset", firstField + 1);
+      expect(branch).toBeGreaterThan(-1);
+      expect(summary).toBeGreaterThan(branch);
+      expect(firstField).toBeGreaterThan(summary);
+      expect(secondField).toBeGreaterThan(firstField);
+      expect(fieldset).toContain("Change setup");
+      expect(fieldset).toContain("onClick={onExpand}");
+    });
+
+    it("AC-3 (G4): the screen-share disclosure sits BEFORE the collapse branch and is guarded by exactly !capturing", () => {
+      const disclosure = fieldset.indexOf("Frames from your screen");
+      const branch = fieldset.indexOf("collapsed ? (");
+      expect(disclosure).toBeGreaterThan(-1);
+      expect(branch).toBeGreaterThan(-1);
+      expect(disclosure).toBeLessThan(branch);
+      const guardOpen = fieldset.lastIndexOf("{!capturing && (", disclosure);
+      expect(guardOpen).toBeGreaterThan(-1);
+      // Nothing between the guard and the disclosure except the opening <p>.
+      expect(fieldset.slice(guardOpen, disclosure)).toMatch(/^\{!capturing && \(\s*<p className=\{styles\.fieldHint\}>\s*$/);
+      // Exactly one disclosure.
+      expect((fieldset.match(/Frames from your screen/g) ?? []).length).toBe(1);
     });
   });
 
@@ -758,31 +778,32 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
     });
   });
 
-  describe("W3-F-STICKY: the run bar carries a specific class whose OWN rule is sticky with a top offset", () => {
+  describe("W3-F-STICKY: the run bar carries a specific class whose OWN rule is sticky with a BOTTOM offset", () => {
     // MECHANISM PROXY, argued: position:sticky only works when no ancestor clips
     // overflow, which nothing here can check. The real test is owner AC-1.
     const openTag = panel.slice(barOpen, panel.indexOf(">", barOpen) + 1);
-    const classRef = openTag.match(/\$\{([A-Za-z_$][\w$]*)\.runBarSticky\}/);
+    const classRef = openTag.match(/\$\{([A-Za-z_$][\w$]*)\.runBarDock\}/);
     const css = fs
       .readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughRunBar.module.css"), "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, "");
-    const ruleStart = css.indexOf(".runBarSticky {");
+    const ruleStart = css.indexOf(".runBarDock {");
     const ruleEnd = css.indexOf("}", ruleStart);
     const rule = css.slice(ruleStart, ruleEnd);
 
-    it("the bar wrapper's className references <alias>.runBarSticky", () => {
-      expect(classRef, `expected runBarSticky in ${openTag}`).toBeTruthy();
+    it("the bar wrapper's className references <alias>.runBarDock", () => {
+      expect(classRef, `expected runBarDock in ${openTag}`).toBeTruthy();
     });
     it("that alias is the panel's import of WalkthroughRunBar.module.css", () => {
       const imp = panel.match(/import\s+([A-Za-z_$][\w$]*)\s+from\s+"\.\/WalkthroughRunBar\.module\.css"/);
       expect(imp).toBeTruthy();
       expect(imp![1]).toBe(classRef![1]);
     });
-    it("the .runBarSticky rule block resolves and itself holds position: sticky and a top offset", () => {
+    it("the .runBarDock rule block resolves and itself holds position: sticky and a bottom offset", () => {
       expect(ruleStart).toBeGreaterThan(-1);
       expect(ruleEnd).toBeGreaterThan(ruleStart);
       expect(rule).toMatch(/position:\s*sticky/);
-      expect(rule).toMatch(/\btop:\s*-?\d/);
+      expect(rule).toMatch(/\bbottom:\s*-?\d/);
+      expect(rule).not.toMatch(/\btop:/);
     });
   });
 

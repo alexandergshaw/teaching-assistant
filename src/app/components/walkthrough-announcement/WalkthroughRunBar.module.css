@@ -1,13 +1,17 @@
-/* SMOOTH-WALKTHROUGH W3 sticky run bar (WalkthroughAnnouncementPanel.tsx).
-   The bar holds Start/Stop, the legibility probe and both Generate buttons, so
-   they stay under the instructor's cursor while the setup and the drafts
-   scroll past. Its OWN rule carries the sticky mechanism. Whether it actually
-   sticks depends on no ancestor clipping overflow - an owner check (the
-   SMOOTH-BASELINE walk), not something a test here can measure. The bar
-   holds no Post or other irreversible control by design. */
-.runBarSticky {
+/* SMOOTH-WALKTHROUGH W3 run bar, relocated by WALKTHROUGH-MIMIC-CHAT (M2) to a
+   sticky BOTTOM dock (WalkthroughAnnouncementPanel.tsx), mirroring the grading
+   chat's stickyComposer (grading-chat.module.css). The bar holds Start/Stop,
+   the legibility probe and both Generate buttons, so the phase-primary action
+   stays under the instructor's cursor while the setup and the drafts scroll
+   past. Its OWN rule carries the sticky mechanism. It sticks against the
+   viewport because the panel is a bare display-toggled sibling in
+   .tabContainer, which is overflow: clip and not a scroll container; that is
+   an owner check, not something a test here can measure. The dock holds no Post
+   or other irreversible control by design: the per-slot confirm stays in the
+   draft row. */
+.runBarDock {
   position: sticky;
-  top: 0;
+  bottom: 0;
   z-index: 2;
   padding: var(--space-2) var(--space-3);
   background: var(--field-background);

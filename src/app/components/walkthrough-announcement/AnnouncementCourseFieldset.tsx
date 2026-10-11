@@ -21,10 +21,10 @@
 // against the 1000-line ceiling in the abstract - the repo has already paid
 // once for extracting against the wrong target (modulesview-at-ceiling.md).
 
-import type { ReactNode } from "react";
 import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
+import annChat from "../recording/announcement-chat.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { savedFormatsStatusText, type SavedFormatsState } from "./announcement-draft-slots";
@@ -88,9 +88,14 @@ export interface AnnouncementCourseFieldsetProps {
    * automatically. Persisted under ta-rec-wta-autodraft. */
   readonly autoDraftOn: boolean;
   readonly onAutoDraftOnChange: (value: boolean) => void;
-  /** Rendered between the capture fieldset and the format/options fieldset
-   * (the panel's run bar). */
-  readonly children?: ReactNode;
+  /** WALKTHROUGH-MIMIC-CHAT (M1): when true the two input fieldsets are hidden
+   * and a one-line setup summary (with a Change setup button) renders instead.
+   * Derived by the panel via isSetupCollapsed. */
+  readonly collapsed: boolean;
+  readonly onExpand: () => void;
+  /** Whether a capture is in progress. Gates the screen-share disclosure
+   * (G4): it renders whenever NOT capturing, outside the collapse branch. */
+  readonly capturing: boolean;
 }
 
 export default function AnnouncementCourseFieldset({
@@ -127,9 +132,33 @@ export default function AnnouncementCourseFieldset({
   onResearchOnChange,
   autoDraftOn,
   onAutoDraftOnChange,
-  children,
+  collapsed,
+  onExpand,
+  capturing,
 }: AnnouncementCourseFieldsetProps) {
+  const courseName = (courses ?? []).find((c) => c.id === courseId)?.name ?? "No course selected";
   return (
+    <>
+    {/* G4: the screen-share disclosure sits OUTSIDE the collapse branch and is
+        gated on exactly !capturing, so it shows before every reachable Start,
+        including the second run (capturing false, material still held). */}
+    {!capturing && (
+      <p className={styles.fieldHint}>
+        Frames from your screen are sent to a third-party AI provider to be read while you capture. Share a single
+        window rather than your whole screen, and close any gradebook, inbox, or student submission first.
+      </p>
+    )}
+    {collapsed ? (
+    <div className={annChat.setupSummary}>
+      <span>
+        Course: {courseName}
+        {moduleLabel.trim() ? ` - Module: ${moduleLabel.trim()}` : ""}
+      </span>
+      <Button size="small" variant="text" onClick={onExpand}>
+        Change setup
+      </Button>
+    </div>
+    ) : (
     <>
     <fieldset className={controls.section}>
       <legend className={controls.sectionLegend}>Course and walkthrough</legend>
@@ -172,14 +201,7 @@ export default function AnnouncementCourseFieldset({
         minRows={2}
         fullWidth
       />
-
-      <p className={styles.fieldHint}>
-        Frames from your screen are sent to a third-party AI provider to be read while you capture. Share a single
-        window rather than your whole screen, and close any gradebook, inbox, or student submission first.
-      </p>
     </fieldset>
-
-    {children}
 
     <fieldset className={controls.section}>
       <legend className={controls.sectionLegend}>Draft format and options</legend>
@@ -283,6 +305,8 @@ export default function AnnouncementCourseFieldset({
       </div>
 
     </fieldset>
+    </>
+    )}
     </>
   );
 }

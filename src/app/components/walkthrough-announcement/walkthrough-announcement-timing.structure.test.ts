@@ -420,16 +420,16 @@ describe("A18 AC-3: the privacy disclosure's first sentence drops \"record\"; th
     "utf-8"
   );
 
-  // W3 (M1) split the component into TWO fieldsets with the disclosure in the
-  // FIRST (capture) one, so the anchor is the FIRST </fieldset>: lastIndexOf
-  // would latch onto the format/options fieldset's close and a different hint.
-  const fieldsetCloseIdx = fieldsetSource.indexOf("</fieldset>");
-  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+  // The disclosure now sits above the collapse branch; anchor on its own text.
+  const pOpenIdx = fieldsetSource.lastIndexOf(
+    '<p className={styles.fieldHint}>',
+    fieldsetSource.indexOf("Frames from your screen")
+  );
 
-  it("finds the privacy disclosure's opening <p> before the fieldset's close (anchor resolves)", () => {
+  it("finds the privacy disclosure's opening <p> by its own text (anchor resolves)", () => {
     expect(
       pOpenIdx,
-      "expected to find the privacy disclosure's opening <p> before the fieldset's close"
+      "expected to find the privacy disclosure's opening <p> by its own text"
     ).toBeGreaterThan(-1);
   });
 
@@ -496,7 +496,10 @@ describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, 
   // First </fieldset>, not the last: see the A18 AC-3 block above (W3 M1 added
   // a SECOND fieldset after the one holding the disclosure).
   const fieldsetCloseIdx = fieldsetSource.indexOf("</fieldset>");
-  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+  const pOpenIdx = fieldsetSource.lastIndexOf(
+    '<p className={styles.fieldHint}>',
+    fieldsetSource.indexOf("Frames from your screen")
+  );
   const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
   const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
   const normalized = raw.replace(/\s+/g, " ").trim();
@@ -512,8 +515,11 @@ describe("A18 5.9: the privacy disclosure is frozen whole (Ruling 5's option 1, 
   });
 
   it("no later hint sits between the disclosure's </p> and the first </fieldset> - the anchor resolved to the disclosure, not a sibling", () => {
-    const between = fieldsetSource.slice(pCloseIdx, fieldsetCloseIdx);
-    expect(between).not.toContain('<p className={styles.fieldHint}>');
+    // WALKTHROUGH-MIMIC-CHAT: the disclosure moved above the collapse branch
+    // (before the first fieldset), so the anchor is its own text; the opening
+    // <p> must sit directly on it.
+    const between = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, fieldsetSource.indexOf("Frames from your screen"));
+    expect(between.trim()).toBe("");
   });
 
   it("the whole disclosure, whitespace-normalized, is byte-equal to the frozen literal", () => {

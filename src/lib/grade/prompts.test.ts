@@ -251,3 +251,35 @@ describe("buildSystemPrompt - enumerate stated requirements and cite evidence", 
     expect(prompt).not.toContain('"comment"');
   });
 });
+
+describe("buildSystemPrompt - naming deduction toggle (applyNamingDeduction)", () => {
+  // Full-phrase anchor: the OFF directive itself mentions file names, so a
+  // loose /required file name/ anchor would match both branches. This phrase
+  // appears only in the deduction rule.
+  const RULE_ANCHOR = "required file names for the submission";
+  const OFF_ANCHOR = "Do not treat file names";
+
+  it("emits the deduction rule and no suppression when omitted (default)", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+    expect(prompt).toContain(RULE_ANCHOR);
+    expect(prompt).not.toContain(OFF_ANCHOR);
+  });
+
+  it("emits the deduction rule and no suppression when explicitly true", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced", undefined, true);
+    expect(prompt).toContain(RULE_ANCHOR);
+    expect(prompt).not.toContain(OFF_ANCHOR);
+  });
+
+  it("omits the deduction rule and emits the suppression directive when false", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.", [], "some", "in-overall-comment", "all", "balanced", undefined, false);
+    expect(prompt).not.toContain(RULE_ANCHOR);
+    expect(prompt).toContain(OFF_ANCHOR);
+  });
+
+  it("the explicit-true output is identical to the default output", () => {
+    expect(buildSystemPrompt("I.", "R.", [], "some", "in-overall-comment", "all", "balanced", undefined, true)).toBe(
+      buildSystemPrompt("I.", "R.")
+    );
+  });
+});

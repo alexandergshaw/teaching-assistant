@@ -88,6 +88,9 @@ export interface UseRepoGradesBulkGradeParams {
    * carries no pinned argument-count guard, so it is a plain positional
    * argument - no ordering trick required. */
   runCodeScoring: boolean;
+  /** repoGradesUiState.ts's applyNamingDeduction, passed to every
+   * gradeOneTarget call as gradeRepoAction's trailing argument. */
+  applyNamingDeduction: boolean;
   /** Writes one cell's edit - index.tsx's setCellEdits wrapper. Called with
    * the same field shape handleGradeCell already writes. */
   onCellUpdate: (repo: string, folder: string, patch: Partial<RepoGradeCellEdit>) => void;
@@ -194,7 +197,7 @@ export interface UseRepoGradesBulkGradeResult {
  * or a rejecting grading call from leaving it stuck (backlog row A27).
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
-  const { provider, instructions, useReadmeInstructions, runCodeScoring, onCellUpdate, onAnnounce } = params;
+  const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, onCellUpdate, onAnnounce } = params;
   const runLockRef = useRef(false);
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -269,7 +272,8 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         undefined,
         target.folder,
         useReadmeInstructions,
-        runCodeScoring
+        runCodeScoring,
+        applyNamingDeduction
       )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
 
       if ("error" in result) {

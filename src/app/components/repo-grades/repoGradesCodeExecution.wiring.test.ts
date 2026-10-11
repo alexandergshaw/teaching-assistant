@@ -410,7 +410,7 @@ describe("useRepoGradesGradingActions.ts's per-cell call threads runCodeScoring 
 
   it("that call passes useReadmeInstructions seventh and runCodeScoring eighth", () => {
     const args = callArgs(gradingActionsSource, "gradeRepoAction");
-    expect(args).toHaveLength(8);
+    expect(args.length).toBeGreaterThanOrEqual(8);
     expect(args[6]).toBe("useReadmeInstructions");
     expect(args[7]).toBe("runCodeScoring");
   });
@@ -438,6 +438,34 @@ describe("useRepoGradesBulkGrade.ts's bulk gradeRepoAction call threads runCodeS
       bulkGradeSource,
       "rubricArg: string): Promise<{ rubricUsed: string | null }> =>"
     );
-    expect(body).toMatch(/gradeRepoAction\(\s*target\.repo,\s*instructions,\s*rubricArg,\s*provider,\s*undefined,\s*target\.folder,\s*useReadmeInstructions,\s*runCodeScoring\s*\)/);
+    expect(body).toMatch(/gradeRepoAction\(\s*target\.repo,\s*instructions,\s*rubricArg,\s*provider,\s*undefined,\s*target\.folder,\s*useReadmeInstructions,\s*runCodeScoring\s*(?:,[^)]*)?\)/);
+  });
+});
+
+describe("applyNamingDeduction is threaded to gradeRepoAction in both grading paths (I2)", () => {
+  it("the per-cell call passes applyNamingDeduction", () => {
+    const args = callArgs(gradingActionsSource, "gradeRepoAction");
+    expect(args).toContain("applyNamingDeduction");
+  });
+
+  it("the bulk call passes applyNamingDeduction", () => {
+    const body = extractFunctionBody(
+      bulkGradeSource,
+      "rubricArg: string): Promise<{ rubricUsed: string | null }> =>"
+    );
+    expect(body).toMatch(/gradeRepoAction\([^)]*applyNamingDeduction[^)]*\)/);
+  });
+
+  it("index.tsx passes uiState.applyNamingDeduction into the grading-actions hook and the control", () => {
+    expect(indexSource).toMatch(/applyNamingDeduction:\s*uiState\.applyNamingDeduction/);
+    expect(indexSource).toMatch(/applyNamingDeduction=\{uiState\.applyNamingDeduction\}/);
+  });
+
+  it("the grading-actions hook forwards applyNamingDeduction into the bulk hook", () => {
+    expect(gradingActionsSource).toMatch(/useRepoGradesBulkGrade\(\{[^}]*applyNamingDeduction[^}]*\}\)/);
+  });
+
+  it("the grading-settings summary names the file-name deduction state (I5)", () => {
+    expect(controlsSource).toContain("File-name deductions:");
   });
 });

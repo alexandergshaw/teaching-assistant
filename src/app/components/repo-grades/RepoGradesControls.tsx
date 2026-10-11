@@ -254,6 +254,10 @@ export interface RepoGradesControlsProps {
    * instructor's choice here is not lost by switching providers and back. */
   runCodeScoring: boolean;
   onRunCodeScoringChange: (value: boolean) => void;
+  /** Whether the grading prompt deducts for wrong or missing required file
+   * names. Default on; applies to the LLM engine only. */
+  applyNamingDeduction: boolean;
+  onApplyNamingDeductionChange: (value: boolean) => void;
 
   /** A7 W2: whether the "Grading settings" disclosure is open. index.tsx
    * resolves it (a persisted override wins over the derived default) and the
@@ -313,6 +317,8 @@ export default function RepoGradesControls({
   onBulkSelectionOnlyChange,
   runCodeScoring,
   onRunCodeScoringChange,
+  applyNamingDeduction,
+  onApplyNamingDeductionChange,
   settingsOpen,
   onSettingsOpenChange,
 }: RepoGradesControlsProps) {
@@ -327,7 +333,7 @@ export default function RepoGradesControls({
         : hasInstructions
         ? "typed text"
         : "none yet - nothing to grade against"
-    } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"}`;
+    } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"} | File-name deductions: ${applyNamingDeduction ? "on" : "off"}`;
   return (
     <>
       {/* A7 W3 R4: the cheap pickers (course, repo filter, folder, sort) share one wrapping row so they sit together instead of stacking. */}
@@ -487,6 +493,23 @@ export default function RepoGradesControls({
               the score - only on the deterministic engine (the LLM engine already always runs code and folds it
               into its judgment). This changes scores, so it defaults off. Canvas&apos;s SpeedGrader rubric has no
               matching criterion, so this line will not appear there even though it still moves the posted total.
+            </p>
+          </div>
+          <div className={styles.field}>
+            <FormControlLabel
+              sx={CHECKBOX_LABEL_SX}
+              control={
+                <Checkbox
+                  id="repo-grades-apply-naming-deduction"
+                  checked={applyNamingDeduction}
+                  onChange={(e) => onApplyNamingDeductionChange(e.target.checked)}
+                />
+              }
+              label="Deduct for wrong file names"
+            />
+            <p className={styles.fieldHint}>
+              When on, an assignment that states required file names is graded with a deduction for any that are
+              missing or misnamed. Turn it off to grade only the content. Applies to the LLM engine.
             </p>
           </div>
           <div className={styles.field}>

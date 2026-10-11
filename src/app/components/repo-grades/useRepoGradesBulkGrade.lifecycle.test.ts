@@ -237,6 +237,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       useReadmeInstructions: false,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       courseId: "course-1",
       course: { name: "Course One" } as Course,
       provider: "gemini",

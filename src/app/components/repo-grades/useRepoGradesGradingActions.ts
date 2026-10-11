@@ -102,6 +102,9 @@ export interface UseRepoGradesGradingActionsParams {
    * "one shared input, never two copies" rule this hook's own header
    * comment already states for `resolveRubricForColumn`. */
   runCodeScoring: boolean;
+  /** repoGradesUiState.ts's applyNamingDeduction, passed to gradeRepoAction by
+   * BOTH grading paths (handleGradeCell and the bulk hook). */
+  applyNamingDeduction: boolean;
   /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
    * to {} on a course switch, via the SAME render-phase compare-and-adjust
    * idiom index.tsx's own cellStateResetForCourse branch uses for cellEdits/
@@ -157,6 +160,7 @@ export function useRepoGradesGradingActions(
     useReadmeInstructions,
     bulkSelectionOnly,
     runCodeScoring,
+    applyNamingDeduction,
     courseId,
     course,
     provider,
@@ -274,7 +278,8 @@ export function useRepoGradesGradingActions(
       undefined,
       column.folder,
       useReadmeInstructions,
-      runCodeScoring
+      runCodeScoring,
+      applyNamingDeduction
     )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
@@ -553,6 +558,7 @@ export function useRepoGradesGradingActions(
     instructions,
     useReadmeInstructions,
     runCodeScoring,
+    applyNamingDeduction,
     onCellUpdate: handleBulkCellUpdate,
     onAnnounce: setPostSummary,
   });

@@ -659,7 +659,8 @@ export async function gradeRepoAction(
   branch?: string,
   pathPrefix?: string,
   useReadmeInstructions?: boolean,
-  runCode?: boolean
+  runCode?: boolean,
+  applyNamingDeduction?: boolean
 ): Promise<
   | {
       run: GradingRun;
@@ -868,7 +869,7 @@ export async function gradeRepoAction(
     // second entry with an always-empty submittedFiles - that emptiness was
     // the reason a repo-graded row never had a file list to preview.
     const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
-    const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
+    const run = await gradeEntries([entry], instructions, effectiveRubric, provider, null, { applyNamingDeduction });
     return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };

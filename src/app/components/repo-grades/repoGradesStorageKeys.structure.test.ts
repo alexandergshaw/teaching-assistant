@@ -17,6 +17,7 @@ function collectKeys(text: string): string[] {
 }
 
 const FROZEN_KEYS = [
+  "ta-repo-grades-apply-naming-deduction",
   "ta-repo-grades-assignment-map",
   "ta-repo-grades-bulk-selection-only",
   "ta-repo-grades-cells",
@@ -40,7 +41,7 @@ const FROZEN_KEYS = [
 ];
 
 describe("repo-grades persistence keys (exact set)", () => {
-  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 20", () => {
+  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 21", () => {
     expect(collectKeys(source)).toEqual(FROZEN_KEYS);
   });
 

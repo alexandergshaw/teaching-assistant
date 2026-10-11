@@ -99,7 +99,11 @@ export function buildSystemPrompt(
    *  section 4). Trailing and appended LAST, after the harshness directive.
    *  Undefined (or any value outside the valid range) appends nothing, so every
    *  existing call is byte-identical to before this parameter existed. */
-  feedbackWordTarget?: number
+  feedbackWordTarget?: number,
+  /** Repo-page naming-deduction toggle. True (the default) emits the
+   *  required-file-name deduction rule exactly as before; false omits it and
+   *  emits a directive that countermands it. */
+  applyNamingDeduction: boolean = true
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -176,6 +180,9 @@ You MUST return exactly one rubricResults item for each required area listed abo
             : ""
         }`
       : "";
+  const namingRule = applyNamingDeduction
+    ? `- If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. A required file that is missing from that list, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.`
+    : `- Do not treat file names, file naming, or naming conventions as a basis for any deduction. Even if the assignment instructions state them, a file submitted under a different name than requested is NOT a rubric violation for this run; evaluate only the content of what was submitted against each rubric area, and never deduct, or note a deduction, for a filename mismatch.`;
   const basePrompt = `You are a teaching assistant helping to grade student submissions.
 
 ASSIGNMENT INSTRUCTIONS:
@@ -204,7 +211,7 @@ Rules:
 - Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
 - If nothing in the submission explicitly violates a rubric area, award full points for that area.
 - Do not deduct points for ambiguity, missing assumptions, or speculative issues that are not explicit rubric violations.
-- If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. A required file that is missing from that list, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.
+${namingRule}
 - Example code, sample solutions, and worked examples printed in the assignment instructions are not a reference solution and are not themselves evidence that a rubric requirement is met. Resemblance between the submission and code shown in the instructions does not, by itself, satisfy a requirement. If the instructions state that an example demonstrates a different scenario or task than the one assigned, a submission that reproduces that example instead of completing the assigned task has not met the requirements the example does not cover.
 - If the assignment instructions state required functionality the submission must implement (for example, specific operations, calculations, features, or behaviors), check each one against what the submission actually does. A required behavior that is absent from the submission is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the specific missing behavior in overallComment. If the assignment instructions state no required functionality beyond the general task description, this rule does not apply and must not be used as grounds for any deduction.
 ${strengthsRoutingRule}

@@ -88,6 +88,11 @@ const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
 // columns of the SAME grading run disagree about whether code scoring is on
 // with no way to see that from the grid.
 const RUN_CODE_SCORING_KEY = "ta-repo-grades-run-code-scoring";
+// Whether the grading model is told to deduct for wrong file names. Unlike
+// runCodeScoring this defaults ON (an absent key reads true), because the
+// deduction rule is emitted unconditionally today and must stay so until an
+// instructor explicitly turns it off. One global flag, like its siblings.
+const APPLY_NAMING_DEDUCTION_KEY = "ta-repo-grades-apply-naming-deduction";
 // RG-SEARCH-STICKY Wave B: the sticky header's search box text. Display-only -
 // it narrows the table body and nothing else (never a plan, count or Post gate).
 const SEARCH_KEY = "ta-repo-grades-search";
@@ -145,6 +150,10 @@ export interface RepoGradesUiState {
    * false - see RUN_CODE_SCORING_KEY's comment above for why this must never
    * default on. */
   runCodeScoring: boolean;
+  /** When true (the default), the grading prompt keeps its rule deducting for
+   * required file names that are missing or misnamed; when false the rule is
+   * suppressed. See APPLY_NAMING_DEDUCTION_KEY's comment above. */
+  applyNamingDeduction: boolean;
   /** The search box text (RG-SEARCH-STICKY). Default "" (no narrowing). */
   searchQuery: string;
   /** Explicit open (true) / closed (false) choice for the grading-settings
@@ -168,6 +177,7 @@ function defaultUiState(): RepoGradesUiState {
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
     runCodeScoring: false,
+    applyNamingDeduction: true,
     searchQuery: "",
     settingsOpen: null,
     linkPanelOpen: null,
@@ -206,6 +216,12 @@ function parseBulkSelectionOnly(raw: string | null): boolean {
   return raw === "1";
 }
 
+/** Parses the persisted naming-deduction flag. Default TRUE: an absent key
+ * reads true (today's behaviour), only an explicit stored "" reads false. */
+function parseApplyNamingDeduction(raw: string | null): boolean {
+  return raw === null ? true : raw === "1";
+}
+
 /** Parses the persisted "score code execution" flag - same shape as
  * parseBulkSelectionOnly above (default false, only the exact "1" marker
  * reads as true). */
@@ -240,6 +256,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     useReadmeInstructions: parseUseReadmeInstructions(localStorage.getItem(README_INSTRUCTIONS_KEY)),
     bulkSelectionOnly: parseBulkSelectionOnly(localStorage.getItem(BULK_SELECTION_ONLY_KEY)),
     runCodeScoring: parseRunCodeScoring(localStorage.getItem(RUN_CODE_SCORING_KEY)),
+    applyNamingDeduction: parseApplyNamingDeduction(localStorage.getItem(APPLY_NAMING_DEDUCTION_KEY)),
     searchQuery: localStorage.getItem(SEARCH_KEY) ?? "",
     settingsOpen: parseCollapseOverride(localStorage.getItem(SETTINGS_OPEN_KEY)),
     linkPanelOpen: parseCollapseOverride(localStorage.getItem(LINK_OPEN_KEY)),
@@ -260,6 +277,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(README_INSTRUCTIONS_KEY, state.useReadmeInstructions ? "1" : "");
     localStorage.setItem(BULK_SELECTION_ONLY_KEY, state.bulkSelectionOnly ? "1" : "");
     localStorage.setItem(RUN_CODE_SCORING_KEY, state.runCodeScoring ? "1" : "");
+    localStorage.setItem(APPLY_NAMING_DEDUCTION_KEY, state.applyNamingDeduction ? "1" : "");
     localStorage.setItem(SEARCH_KEY, state.searchQuery);
     writeCollapseOverride(SETTINGS_OPEN_KEY, state.settingsOpen);
     writeCollapseOverride(LINK_OPEN_KEY, state.linkPanelOpen);

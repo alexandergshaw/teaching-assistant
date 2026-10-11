@@ -569,6 +569,7 @@ export default function RepoGradesTab() {
     useReadmeInstructions: uiState.useReadmeInstructions,
     bulkSelectionOnly: uiState.bulkSelectionOnly,
     runCodeScoring: uiState.runCodeScoring,
+    applyNamingDeduction: uiState.applyNamingDeduction,
     courseId: uiState.courseId,
     course,
     provider,
@@ -647,6 +648,8 @@ export default function RepoGradesTab() {
         onBulkSelectionOnlyChange={(value) => setUiState((prev) => ({ ...prev, bulkSelectionOnly: value }))}
         runCodeScoring={uiState.runCodeScoring}
         onRunCodeScoringChange={(value) => setUiState((prev) => ({ ...prev, runCodeScoring: value }))}
+        applyNamingDeduction={uiState.applyNamingDeduction}
+        onApplyNamingDeductionChange={(value) => setUiState((prev) => ({ ...prev, applyNamingDeduction: value }))}
         settingsOpen={effectiveOpen(uiState.settingsOpen, currentSelectedFolder === ALL_FOLDERS)}
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />

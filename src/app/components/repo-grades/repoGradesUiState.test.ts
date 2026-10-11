@@ -77,6 +77,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -97,6 +98,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -116,6 +118,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -132,6 +135,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -153,6 +157,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        applyNamingDeduction: true,
         searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
@@ -176,6 +181,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         useReadmeInstructions: true,
         bulkSelectionOnly: false,
         runCodeScoring: false,
+        applyNamingDeduction: true,
         searchQuery: "",
         settingsOpen: null,
         linkPanelOpen: null,
@@ -206,6 +212,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -231,6 +238,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -263,12 +271,28 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: true,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
       setupOpen: null,
     });
     expect(loadRepoGradesUiState().runCodeScoring).toBe(true);
+  });
+
+  it("I3: applyNamingDeduction defaults to true when never persisted and round-trips false under its ta- key", () => {
+    expect(loadRepoGradesUiState().applyNamingDeduction).toBe(true);
+    persistRepoGradesUiState({
+      ...loadRepoGradesUiState(),
+      applyNamingDeduction: false,
+    });
+    expect(fakeStorage.getItem("ta-repo-grades-apply-naming-deduction")).toBe("");
+    expect(loadRepoGradesUiState().applyNamingDeduction).toBe(false);
+    persistRepoGradesUiState({
+      ...loadRepoGradesUiState(),
+      applyNamingDeduction: true,
+    });
+    expect(loadRepoGradesUiState().applyNamingDeduction).toBe(true);
   });
 
   it("W-B-PERSIST: round-trips searchQuery through persist then load under ta-repo-grades-search, defaulting to empty", () => {
@@ -284,6 +308,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "jane",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -310,6 +335,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       useReadmeInstructions: false,
       bulkSelectionOnly: true,
       runCodeScoring: true,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,
@@ -340,6 +366,7 @@ describe("collapse overrides (A7 W2): settingsOpen / linkPanelOpen tri-state", (
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
     runCodeScoring: false,
+    applyNamingDeduction: true,
     searchQuery: "",
     setupOpen: null,
   };
@@ -672,6 +699,7 @@ describe("loadRepoGradeManualRubricText / persistRepoGradeManualRubricText (item
       useReadmeInstructions: true,
       bulkSelectionOnly: false,
       runCodeScoring: false,
+      applyNamingDeduction: true,
       searchQuery: "",
       settingsOpen: null,
       linkPanelOpen: null,

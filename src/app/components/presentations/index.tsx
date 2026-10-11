@@ -29,6 +29,8 @@ import {
 } from "./panel-logic";
 import { usePersistedJSON } from "./hooks";
 import SourcesEditor from "./SourcesEditor";
+import DeckTemplatePicker from "./DeckTemplatePicker";
+import { useSelectedDeckTemplateFileId } from "../ppt-design/hooks";
 import ArtifactCard, { type ArtifactCardState } from "./ArtifactCard";
 
 const GENERATE_URL = "/api/presentations/generate";
@@ -44,6 +46,8 @@ export default function PresentationsTab() {
   );
   const [artifactStates, setArtifactStates] = useState<ArtifactStates>({});
   const [generating, setGenerating] = useState(false);
+  // Shared with the PowerPoint Design tab: one selected template everywhere.
+  const [templateFileId, setTemplateFileId] = useSelectedDeckTemplateFileId();
 
   const context: PresentationContext = { text: contextText, sources };
 
@@ -152,6 +156,8 @@ export default function PresentationsTab() {
         onSourcesChange={setSources}
       />
 
+      <DeckTemplatePicker selectedId={templateFileId} onSelectId={setTemplateFileId} />
+
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <strong>Generate</strong>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-4)" }}>
@@ -193,6 +199,7 @@ export default function PresentationsTab() {
               state={artifactStates[kind] ?? { phase: "idle" }}
               onRegenerate={() => handleRegenerateClick(kind)}
               regenerating={artifactStates[kind]?.phase === "loading"}
+              templateFileId={templateFileId}
             />
           ))}
         </div>

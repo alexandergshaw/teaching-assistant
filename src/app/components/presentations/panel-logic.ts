@@ -281,3 +281,41 @@ export function appendExtractedSourceNamed(
   );
   return appendExtractedSources(prev, [{ name, text }]);
 }
+
+// ---------------------------------------------------------------------------
+// PPT-TEMPLATE-UPLOAD-PLACE wave 2: template-aware deck download.
+// ---------------------------------------------------------------------------
+
+export type DeckDownloadPlan = "template" | "own";
+
+/**
+ * Mirrors ppt-design/index.tsx's `if (selectedFileId)` branch: a selected
+ * uploaded .pptx template routes the download through
+ * fillDeckTemplateFileAction; otherwise the deck's own design is serialized.
+ */
+export function chooseDeckDownloadPlan(templateFileId: string): DeckDownloadPlan {
+  return templateFileId.trim() ? "template" : "own";
+}
+
+/**
+ * The stale-id advisory: once the user-scoped template list has LOADED, a
+ * stored selection that is absent from it (deleted, or another account's) is
+ * cleared. Returns the id to keep. Before the list has loaded, nothing is
+ * cleared - an empty not-yet-loaded list must not wipe a valid selection.
+ */
+export function keepTemplateIdIfPresent(
+  selectedId: string,
+  knownIds: ReadonlyArray<string>,
+  loaded: boolean
+): string {
+  if (!loaded || !selectedId) return selectedId;
+  return knownIds.includes(selectedId) ? selectedId : "";
+}
+
+/** Decode a base64 payload (a server-action return) into an ArrayBuffer. */
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}

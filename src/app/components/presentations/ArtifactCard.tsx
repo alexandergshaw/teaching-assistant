@@ -7,7 +7,13 @@
 import { useState } from "react";
 import { Button, CircularProgress } from "@mui/material";
 import type { ContentArtifactKind, ProducedArtifact } from "@/lib/presentations/types";
-import { KIND_LABELS, deckDownloadFilename } from "./panel-logic";
+import { fillDeckTemplateFileAction } from "@/app/actions/deck-template-files";
+import {
+  KIND_LABELS,
+  base64ToArrayBuffer,
+  chooseDeckDownloadPlan,
+  deckDownloadFilename,
+} from "./panel-logic";
 import SlideDeckPreview from "./SlideDeckPreview";
 
 export type ArtifactCardState =
@@ -21,11 +27,13 @@ export default function ArtifactCard({
   state,
   onRegenerate,
   regenerating,
+  templateFileId = "",
 }: {
   kind: ContentArtifactKind;
   state: ArtifactCardState;
   onRegenerate: () => void;
   regenerating: boolean;
+  templateFileId?: string;
 }) {
   return (
     <div
@@ -77,6 +85,7 @@ export default function ArtifactCard({
           reviewSkipped={state.reviewSkipped}
           onRegenerate={onRegenerate}
           regenerating={regenerating}
+          templateFileId={templateFileId}
         />
       )}
     </div>
@@ -88,11 +97,13 @@ function ArtifactContent({
   reviewSkipped,
   onRegenerate,
   regenerating,
+  templateFileId,
 }: {
   artifact: ProducedArtifact;
   reviewSkipped: boolean;
   onRegenerate: () => void;
   regenerating: boolean;
+  templateFileId: string;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
@@ -121,7 +132,7 @@ function ArtifactContent({
       )}
 
       {artifact.kind === "deck" && (
-        <DeckArtifact deck={artifact.content} />
+        <DeckArtifact deck={artifact.content} templateFileId={templateFileId} />
       )}
 
       {artifact.critique && (
@@ -177,7 +188,13 @@ function ArtifactContent({
   );
 }
 
-function DeckArtifact({ deck }: { deck: import("@/lib/presentations/types").DeckContent }) {
+function DeckArtifact({
+  deck,
+  templateFileId,
+}: {
+  deck: import("@/lib/presentations/types").DeckContent;
+  templateFileId: string;
+}) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -185,8 +202,23 @@ function DeckArtifact({ deck }: { deck: import("@/lib/presentations/types").Deck
     setDownloading(true);
     setDownloadError(null);
     try {
-      const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
-      const buffer = await serializeDeckToPptx(deck);
+      let buffer: ArrayBuffer;
+      if (chooseDeckDownloadPlan(templateFileId) === "template") {
+        // A deck with more slides than the template is REFUSED by the fill
+        // action with a worded fit-report; surface it, never drop slides.
+        const result = await fillDeckTemplateFileAction(templateFileId, {
+          presentationTitle: deck.presentationTitle,
+          slides: deck.slides,
+        });
+        if ("error" in result) {
+          setDownloadError(result.error);
+          return;
+        }
+        buffer = base64ToArrayBuffer(result.base64);
+      } else {
+        const { serializeDeckToPptx } = await import("@/lib/presentations/deck-file");
+        buffer = await serializeDeckToPptx(deck);
+      }
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       });

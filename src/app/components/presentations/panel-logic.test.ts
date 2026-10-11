@@ -5,6 +5,9 @@ import {
   selectedKinds,
   reduceGenerateResponse,
   deckDownloadFilename,
+  chooseDeckDownloadPlan,
+  keepTemplateIdIfPresent,
+  base64ToArrayBuffer,
   readPersistedString,
   readPersistedJSON,
   writePersistedString,
@@ -363,5 +366,32 @@ describe("uniqueSourceName", () => {
 
   it("keeps incrementing past an already-taken (2)", () => {
     expect(uniqueSourceName(["notes.txt", "notes.txt (2)"], "notes.txt")).toBe("notes.txt (3)");
+  });
+});
+
+describe("chooseDeckDownloadPlan", () => {
+  it("routes to the template when one is selected", () => {
+    expect(chooseDeckDownloadPlan("3f2b8c1e-0000-4000-8000-000000000000")).toBe("template");
+  });
+
+  it("uses the deck's own design when none is selected", () => {
+    expect(chooseDeckDownloadPlan("")).toBe("own");
+    expect(chooseDeckDownloadPlan("   ")).toBe("own");
+  });
+});
+
+describe("keepTemplateIdIfPresent", () => {
+  it("keeps a present id, clears an absent one, and never clears before load", () => {
+    expect(keepTemplateIdIfPresent("a", ["a", "b"], true)).toBe("a");
+    expect(keepTemplateIdIfPresent("gone", ["a", "b"], true)).toBe("");
+    expect(keepTemplateIdIfPresent("gone", [], false)).toBe("gone");
+    expect(keepTemplateIdIfPresent("", ["a"], true)).toBe("");
+  });
+});
+
+describe("base64ToArrayBuffer", () => {
+  it("round-trips bytes", () => {
+    const bytes = new Uint8Array(base64ToArrayBuffer(Buffer.from([80, 75, 3, 4]).toString("base64")));
+    expect(Array.from(bytes)).toEqual([80, 75, 3, 4]);
   });
 });

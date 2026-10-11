@@ -26,7 +26,7 @@
   blocked_by: []
   instrument: 'Scope docs/repo-grades-module-picker-header-scope.md (loop-architect dispatched 2026-10-11). Move the module picker control into the Repo Grades table header (reachable with the sticky header, minimize-clicks/scroll). Machine-checkable = source-text/structure pin the picker is inside the header element + wired to the same handler/state; sticky/column/sort intact + the real render are owner-walk. SEQUENCES after REPO-GRADING-REMOVE-ACTIVITY-LOG (shared index.tsx) - build waits for that commit then re-baselines.'
   from: 'Owner request 2026-10-11 (direct chat).'
-  note: 'Presentational relocation of an existing control; keep the onChange wired to the same state + the persistence (do not ship it visible-but-dead - reachability). COLLIDES on index.tsx (and maybe RepoGradesGrid.tsx) with the in-flight activity-log removal + the status-prominence feature; BUILDS SERIALIZE (scope is read-only, safe now). No new diagnostic expected (presentational).'
+  note: 'Presentational relocation of an existing control; keep the onChange wired to the same state + the persistence (do not ship it visible-but-dead - reachability). COLLIDES on index.tsx (and maybe RepoGradesGrid.tsx) with the in-flight activity-log removal + the status-prominence feature; BUILDS SERIALIZE (scope is read-only, safe now). No new diagnostic expected (presentational). The activity-log removal SHIPPED cef512f0 (its full-npm-test surfaced two PRE-EXISTING main-reds from earlier zip waves - grading-chat-intake stale ingestZipEntries mock + the wholesale-auth frozen set - fixed 758e8b12; orphan sweep complete, FROZEN_KEYS 20->19, FROZEN_REPO_GRADES_ROOTS 41->39, Opus check SHIP round 2; RES-1 audit-trail-loss surfaced to owner).'
   question: null
 - id: 'REPO-GRADES-STATUS-PROMINENCE'
   state: 'actionable'
@@ -41,7 +41,7 @@
   note: 'Prominence = visual + placement, not new data; keep the live status transitions + aria-live (accessibility). COLLIDES on index.tsx/RepoGradesGrid.tsx/useRepoGradesGradingActions.ts (the activity-log removal edits useRepoGradesGradingActions.ts too) with the other two in-flight repo-grades items; BUILDS SERIALIZE. No new diagnostic expected (presentational), unless a progress-count adds a failure mode.'
   question: null
 - id: 'REPO-GRADING-REMOVE-ACTIVITY-LOG'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'repo-grader-workflow'
   title: 'Owner 2026-10-11: remove the activity log from the repo grading view.'

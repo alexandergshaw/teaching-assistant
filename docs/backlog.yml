@@ -17,7 +17,7 @@
   note: 'NEW diagnostics-representation rule (DEV_LOOP b907ff8e) applies: the screenshot-snap path needs a diagnostic. SCOPING - do not build W2 (tab removal) until W1 ships AND the capability-coverage table proves no lost capability; if "From a recording" has no chat equivalent, surface to owner before removing it.'
   question: null
 - id: 'COURSE-TABLE-EMAIL-COPY'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'grading-setup-interaction-cost'
   title: 'Owner 2026-10-11: course table - add a copy-to-clipboard icon for each row email, and move the email to the START of the row (first column).'
@@ -26,7 +26,7 @@
   blocked_by: []
   instrument: 'Scope docs/course-table-email-column-scope.md (loop-architect dispatched 2026-10-11). Machine-checkable = column ORDER with email first (if columns are a data array), a source-text pin that the copy handler passes the ROW''s email not a shared/stale value (per-row-correctness class, A36/RES-FILL-11 lesson); icon render + clipboard are owner-walk. Reuse the app''s existing copy-icon/clipboard pattern, no emojis.'
   from: 'Owner request 2026-10-11 (direct chat, pasted feature list).'
-  note: 'Diagnostics-rep rule: a pure presentational reorder may legitimately have no diagnostic, but the copy action could fail silently - the scope assesses and states which. UI/UX professional+minimal, reuse the app visual language.'
+  note: 'Diagnostics-rep rule: a pure presentational reorder may legitimately have no diagnostic, but the copy action could fail silently - the scope assesses and states which. UI/UX professional+minimal, reuse the app visual language. SHIPPED 0f303219 (Reading B, scope docs/course-table-email-column-scope.md, Opus check SHIP round 2): email is ALL_COLUMN_IDS[0] (first data column after the frozen Name cell), emailClient (a provider enum, not an address) stays; a one-time migration (CURRENT_COLUMNS_VERSION 13->14, parseColumnOrder now reads stored v - bare array = v0 - and unshifts email when v<14, ending once a moveColumn write re-stamps v14); new EmailCopyButton leaf (writeClipboardText, re-declared 16px CopyIcon/CheckIcon, stopPropagation so the editor does not open, hidden when empty, role=status announcement) copies THIS row email. :782 adjacency pin updated to the new invariant (email first, roster/emailClient adjacent); parseColumnSet arrays untouched (appends from COLUMNS_ADDED_IN); versioned parseColumnOrder tests reconciled; I3 covers the bare-array v0 mid-list case; both sabotages red-then-green. NO diagnostic (presentational, per DEV_LOOP b907ff8e). Residuals: owner-walk (click each icon, editor stays shut, empty-email no icon, failure hint, SR announcement), RES-CT-EMAIL-FORK A-vs-B ruled B, the reposition runs every load until a moveColumn write re-stamps (output stable).'
   question: null
 - id: 'ZIP-CLASS-OR-SINGLE'
   state: 'actionable'

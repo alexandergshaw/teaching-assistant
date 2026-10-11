@@ -42,6 +42,13 @@ export const ZIP_MAX_MEMBER_RATIO = 100;
 export const ZIP_MAX_ARCHIVE_RATIO = 100;
 /** Leaf members read at once. */
 export const ZIP_EXTRACTION_CONCURRENCY = 4;
+/**
+ * Video members across the archive and everything nested in it (VIDEO-GRADING
+ * W2, ops section 5.2). Equal to ZIP_EXTRACTION_CONCURRENCY so every video
+ * stages in ONE pool round. Enforced by the extractor from the PLAN pass,
+ * before any member is read. An unmeasured starting value, like its siblings.
+ */
+export const ZIP_MAX_VIDEO_MEMBERS = 4;
 /** Student-controlled entry names are truncated to this in an error message. */
 export const ZIP_ERROR_NAME_MAX_CHARS = 120;
 
@@ -89,7 +96,8 @@ export type ZipCapCode =
   | "member-ratio"
   | "archive-ratio"
   | "stream-overrun"
-  | "unverifiable-size";
+  | "unverifiable-size"
+  | "video-count";
 
 export interface ZipCapDetail {
   readonly code: ZipCapCode;
@@ -136,6 +144,8 @@ function reasonClause(detail: ZipCapDetail): string {
       return `holds more data than its header declares, so it was not read`;
     case "unverifiable-size":
       return `has no readable size in its header, so it could not be checked and was not read`;
+    case "video-count":
+      return `pushes the archive past the maximum number of video files (counted across the archive and every archive inside it)`;
   }
 }
 

@@ -142,6 +142,16 @@ export function coerceFeedbackWordTarget(value: unknown): number | undefined {
   return n;
 }
 
+/**
+ * VIDEO-GRADING W2 (ops O-1): where a video lives, never its bytes. A video
+ * file carries `videoRef` and NEVER `rawBase64`; the entry rides an NDJSON line
+ * and a 3.5MiB request, which a 40MiB video would overrun.
+ */
+export interface VideoRef {
+  storagePath: string;
+  sizeBytes: number;
+}
+
 export interface SubmittedFileInfo {
   name: string;
   extension: string;
@@ -149,6 +159,7 @@ export interface SubmittedFileInfo {
   previewTruncated: boolean;
   rawBase64?: string;
   mimeType?: string;
+  videoRef?: VideoRef;
 }
 
 /**

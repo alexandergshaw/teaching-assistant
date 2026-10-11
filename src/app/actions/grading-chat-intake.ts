@@ -202,7 +202,11 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
       // an invalid one is an unsupported format. Never reaches the zip path.
       const head = new Uint8Array(await file.slice(0, VIDEO_HEAD_BYTES).arrayBuffer());
       const sniff = sniffVideoContainer(head, getFileExtension(file.name));
-      return { kind: "refused", reason: sniff.ok ? VIDEO_PENDING_MESSAGE : VIDEO_UNSUPPORTED_FORMAT_MESSAGE };
+      return {
+        kind: "refused",
+        reason: sniff.ok ? VIDEO_PENDING_MESSAGE : VIDEO_UNSUPPORTED_FORMAT_MESSAGE,
+        videoFailure: sniff.ok ? "not supported here" : "unsupported format",
+      };
     }
 
     try {
@@ -287,7 +291,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           return { kind: "refused", reason: DRIVE_UNSUPPORTED_TYPE_MESSAGE };
         }
         if (uploadKind === "video") {
-          return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE };
+          return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here" };
         }
         let entries: StudentSubmissionEntry[];
         if (uploadKind === "single") {

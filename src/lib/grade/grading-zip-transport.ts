@@ -11,6 +11,7 @@
 
 import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabus-upload-source";
 import { checkFileWireBudget, formatMB } from "@/lib/upload-budget";
+import { ZIP_MAX_CUMULATIVE_DECLARED_BYTES } from "@/lib/zip-caps";
 
 /**
  * Whether the server-side streaming ingest (BW2, POST /api/grade-submission-zip)
@@ -20,10 +21,14 @@ import { checkFileWireBudget, formatMB } from "@/lib/upload-budget";
  */
 export const GRADING_ZIP_STORAGE_INGEST_ENABLED = true;
 
-/** Pre-flight ceiling for the stored zip (scope section 2; the syllabus
- * precedent, syllabus-upload-validation.ts MAX_FILE_SIZE). BW2 re-checks the
- * stored object's real size server-side. */
-export const GRADING_ZIP_MAX_BYTES = 25 * 1024 * 1024;
+/** Pre-flight ceiling for the stored zip. VIDEO-GRADING W2 (ops D3, section
+ * 5.4): derived by import from the cumulative uncompressed cap (100MiB) plus
+ * 5MiB of headroom for the central directory and uncharged members, so the
+ * ceiling can never sit below the cap it fronts. Video does not compress, so a
+ * zip of videos is about its declared size. ONE constant used in three places:
+ * this transport's choice, and the ingest route's stat gate and its
+ * post-download re-check, so raising it also relaxes the server re-check. */
+export const GRADING_ZIP_MAX_BYTES = ZIP_MAX_CUMULATIVE_DECLARED_BYTES + 5 * 1024 * 1024;
 
 export type ZipTransport =
   | { readonly kind: "body" }

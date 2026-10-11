@@ -59,7 +59,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     const outcome = await prepareChatSubmissionAction(
       fileForm(new File([mp4Bytes() as BlobPart], "walkthrough.mp4", { type: "video/mp4" }))
     );
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_PENDING_MESSAGE });
+    expect(outcome).toMatchObject({ kind: "refused", reason: VIDEO_PENDING_MESSAGE, videoFailure: "not supported here" });
     expect(loadAsync).not.toHaveBeenCalled();
     expect(vi.mocked(ingestZipEntries)).not.toHaveBeenCalled();
     expect(vi.mocked(extractStudentEntries)).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     const outcome = await prepareChatSubmissionAction(
       fileForm(new File([zipBytes as BlobPart], "fake.mp4", { type: "video/mp4" }))
     );
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_UNSUPPORTED_FORMAT_MESSAGE });
+    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_UNSUPPORTED_FORMAT_MESSAGE, videoFailure: "unsupported format" });
     expect(loadAsync).not.toHaveBeenCalled();
     expect(vi.mocked(ingestZipEntries)).not.toHaveBeenCalled();
     loadAsync.mockRestore();
@@ -83,7 +83,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     const outcome = await prepareChatSubmissionAction(
       fileForm(new File([mp4Bytes() as BlobPart], "clip.mp4", { type: "text/plain" }))
     );
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_PENDING_MESSAGE });
+    expect(outcome).toMatchObject({ kind: "refused", reason: VIDEO_PENDING_MESSAGE, videoFailure: "not supported here" });
   });
 
   it("a composite with a video part is refused through the same sink (nothing graded)", async () => {
@@ -93,7 +93,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     fd.set("part.0.kind", "file");
     fd.set("part.0.file", new File([mp4Bytes() as BlobPart], "clip.mp4", { type: "video/mp4" }));
     const outcome = await prepareCompositeSubmissionAction(fd);
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_PENDING_MESSAGE });
+    expect(outcome).toMatchObject({ kind: "refused", reason: VIDEO_PENDING_MESSAGE });
   });
 
   it("a Google Drive link to a video is refused with the Drive wording, never extracted", async () => {
@@ -102,7 +102,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     fd.set("kind", "url");
     fd.set("url", "https://drive.google.com/file/d/1AbC_dEf-123/view");
     const outcome = await prepareChatSubmissionAction(fd);
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_DRIVE_MESSAGE });
+    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here" });
     expect(vi.mocked(extractStudentEntries)).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,7 @@
  */
 import type { StudentSubmissionEntry, SubmissionZipClassification, SubmittedFileInfo } from "@/lib/grade/types";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
+import type { VideoFailureClass } from "@/lib/grade/video-failure";
 
 /** The owner's "text submissions, zip submissions, url submissions, other
  * file submissions" taxonomy. `file` covers a single supported file OR a
@@ -59,7 +60,12 @@ export type IntakeOutcome =
       /** Present only for a zip upload (ZIP-CLASS-VS-SINGLE); absent otherwise. */
       readonly classification?: SubmissionZipClassification;
     }
-  | { readonly kind: "refused"; readonly reason: string };
+  | {
+      readonly kind: "refused";
+      readonly reason: string;
+      /** VIDEO-GRADING W2: the TYPED video failure class (ops O-7); never parsed from `reason`. */
+      readonly videoFailure?: VideoFailureClass;
+    };
 
 /** Matches route.ts's MAX_STUDENT_CHARS (the wire-level bound every
  * dispatched entry's `student` field is already checked against) - reused

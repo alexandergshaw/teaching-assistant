@@ -9,6 +9,7 @@
 import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
 import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 import { VIDEO_PENDING_MESSAGE, isVideoOnlyEntry } from "@/lib/grade/video-grading";
+import { isVideoFailureClass, parseVideoOutcomes, type VideoFailureClass, type VideoOutcomes } from "@/lib/grade/video-failure";
 
 export interface IngestSkip {
   readonly student: string;
@@ -22,13 +23,15 @@ export interface IngestLedger {
   readonly failedSupportedFiles: readonly string[];
   /** ZIP-CLASS-VS-SINGLE: absent from an old-server sentinel or a malformed one. */
   readonly classification?: SubmissionZipClassification;
+  /** VIDEO-GRADING W2: COUNTS of video outcomes (never names); absent unless a video was seen. */
+  readonly videoOutcomes?: VideoOutcomes;
 }
 
 export type IngestLine =
   | { readonly type: "entry"; readonly entry: StudentSubmissionEntry; readonly pointsPossible: null }
   | { readonly type: "skip"; readonly student: string; readonly reason: string }
   | ({ readonly type: "done" } & IngestLedger)
-  | { readonly type: "done"; readonly error: string };
+  | { readonly type: "done"; readonly error: string; readonly videoFailure?: VideoFailureClass };
 
 export const OVERSIZED_SKIP_REASON = "too large to grade on this surface";
 
@@ -42,7 +45,8 @@ export function buildIngestLines(
   entries: readonly StudentSubmissionEntry[],
   failedSupportedFiles: readonly string[],
   budget: number = ITEM_REQUEST_BYTE_BUDGET,
-  classification?: SubmissionZipClassification
+  classification?: SubmissionZipClassification,
+  videoOutcomes?: VideoOutcomes
 ): IngestLine[] {
   const lines: IngestLine[] = [];
   const skipped: IngestSkip[] = [];
@@ -70,8 +74,13 @@ export function buildIngestLines(
     skipped,
     failedSupportedFiles: [...failedSupportedFiles],
     ...(classification ? { classification } : {}),
+    ...(videoOutcomes && hasVideoOutcomes(videoOutcomes) ? { videoOutcomes } : {}),
   });
   return lines;
+}
+
+function hasVideoOutcomes(outcomes: VideoOutcomes): boolean {
+  return outcomes.accepted > 0 || Object.keys(outcomes.failed).length > 0;
 }
 
 export function encodeIngestLine(line: IngestLine): string {
@@ -80,7 +89,7 @@ export function encodeIngestLine(line: IngestLine): string {
 
 export type IngestOutcome =
   | { readonly kind: "complete"; readonly ledger: IngestLedger; readonly entryCount: number }
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string; readonly videoFailure?: VideoFailureClass };
 
 /** The narrow fetch slice the parser needs, injectable so tests never touch the network. */
 export type IngestFetch = (
@@ -229,10 +238,17 @@ export async function ingestStoragedZip(
         entryCount += 1;
         onEntry(parsed.entry);
       } else if (parsed.type === "done") {
-        if (typeof parsed.error === "string") return { kind: "refused", reason: parsed.error };
+        if (typeof parsed.error === "string") {
+          return {
+            kind: "refused",
+            reason: parsed.error,
+            ...(isVideoFailureClass(parsed.videoFailure) ? { videoFailure: parsed.videoFailure } : {}),
+          };
+        }
         const studentsFound = typeof parsed.studentsFound === "number" ? parsed.studentsFound : entryCount;
         const studentsEmitted = typeof parsed.studentsEmitted === "number" ? parsed.studentsEmitted : entryCount;
         const classification = classificationFrom(parsed.classification);
+        const videoOutcomes = parseVideoOutcomes(parsed.videoOutcomes);
         return {
           kind: "complete",
           entryCount,
@@ -242,6 +258,7 @@ export async function ingestStoragedZip(
             skipped: skipList(parsed.skipped),
             failedSupportedFiles: stringList(parsed.failedSupportedFiles),
             ...(classification ? { classification } : {}),
+            ...(videoOutcomes ? { videoOutcomes } : {}),
           },
         };
       }

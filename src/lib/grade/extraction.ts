@@ -40,6 +40,8 @@ import {
   assertNeverUploadKind,
   videoPlaceholderNote,
 } from "./video-grading";
+import { chargeVideoCount, stageVideoMember, type StageVideoFn, type VideoStaging } from "./video-leaf";
+import { emptyVideoOutcomes, withAcceptedVideo, withFailedVideo, type VideoFailureClass, type VideoOutcomes } from "./video-failure";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { classifySubmissionZip } from "./classify-submission-zip";
@@ -57,6 +59,8 @@ interface LeafOutcome {
   readonly isImage: boolean;
   /** VIDEO-GRADING W1: a video member. Never carries bytes (ops O-1). */
   readonly isVideo?: boolean;
+  readonly staging?: VideoStaging;
+  readonly videoFailure?: VideoFailureClass;
   readonly submission: string | null;
   readonly raw: string | null;
 }
@@ -77,6 +81,11 @@ export async function extractSubmissions(
     readonly limits?: Partial<ZipLimits>;
     /** VIDEO-GRADING W1: defaults to the VIDEO_GRADING_ENABLED dark flag. */
     readonly videoEnabled?: boolean;
+    /** VIDEO-GRADING W2: injected stager (the ingest route builds it). Absent =
+     * the W1 placeholder, no bytes read. */
+    readonly stageVideo?: StageVideoFn;
+    /** VIDEO-GRADING W2: per-zip video cap; tests only, defaults to ZIP_MAX_VIDEO_MEMBERS. */
+    readonly maxVideoMembers?: number;
   }
 ): Promise<{
   submissions: Record<string, string>;
@@ -91,6 +100,8 @@ export async function extractSubmissions(
   // missing key the same as an empty chain, which reproduces today's exact
   // behavior for that file.
   zipParents: Record<string, string[]>;
+  videoStaging: Record<string, VideoStaging>;
+  videoOutcomes: VideoOutcomes;
 }> {
   const submissions: Record<string, string> = {};
   const rawData: Record<string, string> = {};
@@ -99,6 +110,9 @@ export async function extractSubmissions(
   const failedSupportedFiles: string[] = [];
   const budget = createZipBudget(options?.limits);
   const videoEnabled = options?.videoEnabled ?? VIDEO_GRADING_ENABLED;
+  const videoStaging: Record<string, VideoStaging> = {};
+  let videoOutcomes = emptyVideoOutcomes();
+  let videoMembersSeen = 0;
 
   async function collectFromZip(
     zip: JSZip,
@@ -121,6 +135,11 @@ export async function extractSubmissions(
       },
     });
 
+    // Per-zip video cap, from the plan and BEFORE any member is read.
+    if (videoEnabled) {
+      videoMembersSeen = chargeVideoCount(planned, videoMembersSeen, zipChain, options?.maxVideoMembers);
+    }
+
     const leaves: PlannedZipMember[] = planned.filter((member) => member.kind === "leaf");
     const nested: PlannedZipMember[] = planned.filter((member) => member.kind === "nested");
     const outcomes: Array<LeafOutcome | null> = leaves.map(() => null);
@@ -129,8 +148,25 @@ export async function extractSubmissions(
       const { name, fullName, entry, declared } = member;
       const extension = getFileExtension(name);
 
+      if (videoEnabled && VIDEO_EXTENSIONS.has(extension) && options?.stageVideo) {
+        // Sniff, stage to Storage via the injected stager, keep only a ref. The
+        // generic branch's catch shape: one bad video is one failed file.
+        const baseName = name.split("/").pop() ?? name;
+        try {
+          const bytes = await readMemberBounded(entry, declared, fullName, zipChain, budget.limits);
+          const staged = await stageVideoMember({ bytes, extension, baseName, stageVideo: options.stageVideo });
+          outcomes[index] = staged.ok
+            ? { fullName, isImage: false, isVideo: true, staging: staged.staging, submission: staged.note, raw: "" }
+            : { fullName, isImage: false, isVideo: true, videoFailure: staged.failure, submission: null, raw: null };
+        } catch (err) {
+          if (err instanceof ZipCapError) throw err;
+          outcomes[index] = { fullName, isImage: false, isVideo: true, videoFailure: "extraction failed", submission: null, raw: null };
+        }
+        return;
+      }
+
       if (videoEnabled && VIDEO_EXTENSIONS.has(extension)) {
-        // No model seam yet: record a worded placeholder and read NO bytes.
+        // No stager: record a worded placeholder and read NO bytes.
         // raw "" (not null, which means failed) and isVideo keep the video
         // out of rawData, so no rawBase64 ever rides a video entry (ops O-1).
         const baseName = name.split("/").pop() ?? name;
@@ -182,7 +218,12 @@ export async function extractSubmissions(
       if (!outcome.isImage) attemptedSupportedFiles += 1;
       if (outcome.submission === null || outcome.raw === null) {
         failedSupportedFiles.push(outcome.fullName);
+        if (outcome.videoFailure) videoOutcomes = withFailedVideo(videoOutcomes, outcome.videoFailure);
         continue;
+      }
+      if (outcome.staging) {
+        videoStaging[outcome.fullName] = outcome.staging;
+        videoOutcomes = withAcceptedVideo(videoOutcomes);
       }
       submissions[outcome.fullName] = outcome.submission;
       if (!outcome.isVideo) rawData[outcome.fullName] = outcome.raw;
@@ -223,6 +264,8 @@ export async function extractSubmissions(
     attemptedSupportedFiles,
     failedSupportedFiles,
     zipParents,
+    videoStaging,
+    videoOutcomes,
   };
 }
 
@@ -268,15 +311,18 @@ export async function ingestZipEntries(
     readonly deferLinks?: boolean;
     /** VIDEO-GRADING W1: defaults to the VIDEO_GRADING_ENABLED dark flag. */
     readonly videoEnabled?: boolean;
+    /** VIDEO-GRADING W2: injected stager (see extractSubmissions). */
+    readonly stageVideo?: StageVideoFn;
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
   classification: SubmissionZipClassification;
+  videoOutcomes?: VideoOutcomes;
 }> {
-  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles } =
-    await extractSubmissions(zipBuffer, { videoEnabled: options?.videoEnabled });
+  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles, videoStaging, videoOutcomes } =
+    await extractSubmissions(zipBuffer, { videoEnabled: options?.videoEnabled, stageVideo: options?.stageVideo });
   // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
   // before grouping - the same seam Wave 1's fold lives in - and NOT inside
   // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
@@ -300,12 +346,12 @@ export async function ingestZipEntries(
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
-  const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents);
+  const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging);
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
   }
   const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
-  return { entries, attemptedSupportedFiles, failedSupportedFiles, classification };
+  return { entries, attemptedSupportedFiles, failedSupportedFiles, classification, videoOutcomes };
 }
 
 /**

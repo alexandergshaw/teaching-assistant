@@ -1,4 +1,4 @@
-import type { SubmittedFileInfo, InferredFileNameLookup } from "./types";
+import type { SubmittedFileInfo, InferredFileNameLookup, VideoRef } from "./types";
 import type { CodeRunResult } from "../code-runner";
 import { getMimeType } from "./constants";
 
@@ -440,7 +440,10 @@ export function groupSubmissionsByStudent(
   submissions: Record<string, string>,
   inferredLookup?: InferredFileNameLookup,
   rawData?: Record<string, string>,
-  zipParents?: Record<string, string[]>
+  zipParents?: Record<string, string[]>,
+  // VIDEO-GRADING W2: per-file staged-video refs (keyed like `submissions`). A
+  // staged video gets `videoRef` + its sniffed MIME and never a rawBase64.
+  videoStaging?: Record<string, { videoRef: VideoRef; mimeType: string }>
 ): Array<{
   student: string;
   content: string;
@@ -518,13 +521,15 @@ export function groupSubmissionsByStudent(
       const parsed = parseSubmissionFileName(filePath, inferredLookup, zipParents?.[filePath]);
       const preview = toPreviewContent(content);
 
+      const staged = videoStaging?.[filePath];
       return {
         name: parsed.citationFileName,
         extension: parsed.extension,
         previewContent: preview.text,
         previewTruncated: preview.truncated,
         rawBase64: rawData?.[filePath],
-        mimeType: getMimeType(parsed.extension),
+        mimeType: staged ? staged.mimeType : getMimeType(parsed.extension),
+        ...(staged ? { videoRef: staged.videoRef } : {}),
       };
     });
 

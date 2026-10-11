@@ -76,12 +76,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * VIDEO-GRADING W2 (ops O-1, T14): a videoRef is exactly `{storagePath,
+ * sizeBytes}` and nothing else - an extra key (a `fileUri`, a `url`) is a
+ * client-forged provider handle and is refused. The path SHAPE is checked
+ * against the caller's id where the ref is consumed, not here.
+ */
+function isVideoRef(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 2 || !keys.includes("storagePath") || !keys.includes("sizeBytes")) return false;
+  if (typeof value.storagePath !== "string" || value.storagePath.length === 0 || value.storagePath.length > MAX_URL_CHARS) {
+    return false;
+  }
+  return typeof value.sizeBytes === "number" && Number.isFinite(value.sizeBytes) && value.sizeBytes >= 0;
+}
+
 function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
   if (!isRecord(value)) return false;
   if (typeof value.name !== "string" || typeof value.extension !== "string") return false;
   if (typeof value.previewContent !== "string" || typeof value.previewTruncated !== "boolean") return false;
   if (value.rawBase64 !== undefined && typeof value.rawBase64 !== "string") return false;
   if (value.mimeType !== undefined && typeof value.mimeType !== "string") return false;
+  if (value.videoRef !== undefined) {
+    // A video entry carries videoRef, NEVER rawBase64 (T14).
+    if (value.rawBase64 !== undefined) return false;
+    if (!isVideoRef(value.videoRef)) return false;
+  }
   return true;
 }
 

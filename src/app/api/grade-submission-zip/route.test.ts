@@ -89,7 +89,9 @@ vi.mock("@/lib/grade/extraction", () => ({
   ingestZipEntries: (...args: unknown[]) => ingestZipEntriesMock(...args),
 }));
 
+import { ZipCapError } from "@/lib/zip-caps";
 import { POST } from "./route";
+import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
 import type { NextRequest } from "next/server";
 
 const USER = "user-1";
@@ -162,8 +164,22 @@ describe("POST /api/grade-submission-zip", () => {
     expect(ingestZipEntriesMock).not.toHaveBeenCalled();
   });
 
-  it("S4: an object reported over the ceiling is refused before download", async () => {
+  it("W2: a size between the OLD 25MiB ceiling and the new one is no longer refused (the raise reaches the stat gate)", async () => {
     listMock.mockResolvedValue({ data: [{ name: "abc.zip", metadata: { size: 30 * 1024 * 1024 } }], error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(200);
+    expect(downloadFileMock).toHaveBeenCalled();
+  });
+
+  it("W2 (T6): both ceiling uses in route.ts read the ONE imported constant", () => {
+    const uses = routeSource.match(/GRADING_ZIP_MAX_BYTES/g) ?? [];
+    // the import, the stat gate and the post-download re-check
+    expect(uses.length).toBe(3);
+    expect(routeSource).not.toMatch(/\d+\s*\*\s*1024\s*\*\s*1024/);
+  });
+
+  it("S4: an object reported over the ceiling is refused before download", async () => {
+    listMock.mockResolvedValue({ data: [{ name: "abc.zip", metadata: { size: GRADING_ZIP_MAX_BYTES + 1 } }], error: null });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
     expect(res.status).toBe(413);
     expect(downloadFileMock).not.toHaveBeenCalled();
@@ -172,7 +188,7 @@ describe("POST /api/grade-submission-zip", () => {
 
   it("S4 backstop: an unknown stat size with an over-ceiling blob is refused before extraction, and the object is deleted", async () => {
     listMock.mockResolvedValue({ data: [], error: null });
-    downloadFileMock.mockResolvedValue({ data: { size: 30 * 1024 * 1024, arrayBuffer: vi.fn() }, error: null });
+    downloadFileMock.mockResolvedValue({ data: { size: GRADING_ZIP_MAX_BYTES + 1, arrayBuffer: vi.fn() }, error: null });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
     const lines = await readLines(res);
     expect(lines).toHaveLength(1);
@@ -205,6 +221,49 @@ describe("POST /api/grade-submission-zip", () => {
     });
     expect(lines[3]).not.toHaveProperty("nestedZipFailures");
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
+  });
+
+  it("O-10: a video object path posted to the ZIP route is refused 400 and is NEVER stat'ed, downloaded or deleted", async () => {
+    for (const ext of ["mp4", "webm", "mov", "m4v", "MP4"]) {
+      const res = await POST(jsonRequest({ storagePath: `${USER}/grading-uploads/2f8a4b1e-5c3d-4e6f-8a9b-0c1d2e3f4a5b.${ext}` }));
+      expect(res.status).toBe(400);
+    }
+    expect(listMock).not.toHaveBeenCalled();
+    expect(downloadFileMock).not.toHaveBeenCalled();
+    expect(removeFilesMock).not.toHaveBeenCalled();
+    expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF: no stager is handed to extraction, so the pre-feature path is unchanged", async () => {
+    await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    const options = ingestZipEntriesMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(options.stageVideo).toBeUndefined();
+    expect(options).toMatchObject({ deferLinks: true });
+  });
+
+  it("a thrown video-count ZipCapError becomes a done-with-error line carrying the TYPED class", async () => {
+    ingestZipEntriesMock.mockRejectedValue(
+      new ZipCapError({
+        code: "video-count",
+        entryName: "a/5.mp4",
+        chain: [],
+        limitName: "ZIP_MAX_VIDEO_MEMBERS",
+        limitValue: 4,
+        limitIsBytes: false,
+        observed: 5,
+      })
+    );
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    const lines = await readLines(res);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ type: "done", videoFailure: "too many videos" });
+    expect(String(lines[0].error).startsWith("Refused: ")).toBe(true);
+  });
+
+  it("an ordinary refusal carries NO videoFailure key (flag-off wire stays byte-identical)", async () => {
+    ingestZipEntriesMock.mockRejectedValue(new Error("Refused: too many entries"));
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
+    expect(lines[0]).not.toHaveProperty("videoFailure");
   });
 
   it("an extraction refusal becomes a worded done-with-error line, and the object is still deleted", async () => {

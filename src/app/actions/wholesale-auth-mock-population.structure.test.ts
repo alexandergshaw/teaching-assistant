@@ -210,6 +210,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "lms-generation.post-and-list.test.ts",
   "lms-generation.test.ts",
   "lms-syllabus-buttons.test.ts",
+  "materials-extract.zip-caps.test.ts",
   "media-likeness.test.ts",
   "media-voice.budget.test.ts",
   "media.budget.test.ts",

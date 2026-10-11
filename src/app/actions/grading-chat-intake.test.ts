@@ -13,7 +13,7 @@ vi.mock("@/lib/supabase/auth", () => ({
 // without needing a real zip fixture or a live Canvas fetch (network stays
 // blocked - vitest.setup.ts throws on any real fetch).
 vi.mock("@/lib/grade/extraction", () => ({
-  extractStudentEntries: vi.fn(),
+  ingestZipEntries: vi.fn(),
   extractCanvasEntries: vi.fn(),
 }));
 
@@ -36,7 +36,7 @@ vi.mock("@/lib/grade/rubric", async () => {
 });
 
 import { requireAppOwner } from "@/lib/supabase/auth";
-import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
+import { ingestZipEntries, extractCanvasEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent } from "@/lib/grade/repo-content";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { generateRubric } from "@/lib/grade/rubric";
@@ -45,7 +45,22 @@ import type { StudentSubmissionEntry } from "@/lib/grade/types";
 import { ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 
 const mockRequireAppOwner = vi.mocked(requireAppOwner);
-const mockExtractStudentEntries = vi.mocked(extractStudentEntries);
+const mockIngestZipEntries = vi.mocked(ingestZipEntries);
+
+// Shape resolveOnePart consumes from the real ingestZipEntries (extraction.ts).
+function ingested(entries: StudentSubmissionEntry[]): Awaited<ReturnType<typeof ingestZipEntries>> {
+  return {
+    entries,
+    attemptedSupportedFiles: entries.length,
+    failedSupportedFiles: [],
+    classification: {
+      kind: entries.length > 1 ? "class" : "single",
+      studentCount: entries.length,
+      markerStudentCount: 0,
+      signal: entries.length > 1 ? "folders" : "single-group",
+    },
+  };
+}
 const mockExtractCanvasEntries = vi.mocked(extractCanvasEntries);
 const mockFetchGradableRepoContent = vi.mocked(fetchGradableRepoContent);
 const mockDetectCanvasUrlKind = vi.mocked(detectCanvasUrlKind);
@@ -155,11 +170,11 @@ describe("prepareChatSubmissionAction - file", () => {
     }
   });
 
-  // AC-9: the collision refusal thrown from inside extractStudentEntries
+  // AC-9: the collision refusal thrown from inside ingestZipEntries
   // must surface as a refusal, not a blended row. RED if the catch swallows
   // it into `mode: "whole-run"`-style fallback entries instead.
-  it("surfaces extractStudentEntries' collision refusal for a zip upload", async () => {
-    mockExtractStudentEntries.mockRejectedValue(new Error('Refused: 2 files resolve to the same student name "X".'));
+  it("surfaces ingestZipEntries' collision refusal for a zip upload", async () => {
+    mockIngestZipEntries.mockRejectedValue(new Error('Refused: 2 files resolve to the same student name "X".'));
     const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
     const outcome = await prepareChatSubmissionAction(fileFormData(file));
     expect(outcome.kind).toBe("refused");
@@ -169,7 +184,7 @@ describe("prepareChatSubmissionAction - file", () => {
   });
 
   it("dispatches a non-colliding zip to entries", async () => {
-    mockExtractStudentEntries.mockResolvedValue([canvasEntry]);
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry]));
     const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
     const outcome = await prepareChatSubmissionAction(fileFormData(file));
     expect(outcome.kind).toBe("entries");
@@ -186,9 +201,9 @@ describe("prepareChatSubmissionAction - file", () => {
       ],
     });
     const file = new File(["zip bytes"], "submissions.zip", { type: "application/zip" });
-    mockExtractStudentEntries.mockResolvedValue([heavy("application/zip")]);
+    mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/zip")]));
     expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("entries");
-    mockExtractStudentEntries.mockResolvedValue([heavy("application/pdf")]);
+    mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/pdf")]));
     const refused = await prepareChatSubmissionAction(fileFormData(file));
     expect(refused).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface." });
   });
@@ -303,7 +318,7 @@ describe("prepareCompositeSubmissionAction", () => {
   });
 
   it("refuses the whole composite when a part resolves to more than one entry (class zip)", async () => {
-    mockExtractStudentEntries.mockResolvedValue([canvasEntry, { ...canvasEntry, student: "Bob" }]);
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, { ...canvasEntry, student: "Bob" }]));
     const outcome = await prepareCompositeSubmissionAction(
       compositeFormData("Ada", [
         { kind: "text", content: "x" },

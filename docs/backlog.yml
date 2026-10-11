@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'REPO-GRADES-BRANCH-MERGE-CHECK'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Owner 2026-10-11: repo grading - a control to specify which branch students'' changes should have been merged to, detect whether each student merged to it, and if not add a note in the comments and score appropriately.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/repo-grades-branch-merge-check-scope.md (loop-architect dispatched 2026-10-11). THREE parts: (1) a persisted target-branch control (sticky header, coordinate with the overhaul); (2) GitHub DETECTION - define "changes merged to branch X" operationally (recommend: student work-branch commits reachable from/contained in the target branch via the compare API), error-partitioned per student (branch-missing/API-error = unknown, never crash the run), via the existing submission-repo.ts getRepo/ghFetch (GITHUB-URL-TRAVERSAL-hardened, requireAppOwner); (3) grading integration - a not-merged NOTE threaded into the comment + "score appropriately" (OWNER scoring-policy fork: A note+instructor-flag only [recommended], B auto-deduction owner sets, C rubric criterion failed). NEEDS a diagnostic (new data path: merged/not-merged/unknown per student) + a SECURITY pass (student-controlled branch name must not steer the authed GitHub call) + a DATA/reliability pass (rate limits, per-student error partition). Machine-checkable = a PURE merge-detection decision fn over mocked GitHub-API fixtures (frozen oracle merged/not-merged/unknown) + source-text pins the note threads into the comment + the score path; the live GitHub call is owner-walk. Tests network-blocked - mock the GitHub client, not fetch.'
+  from: 'Owner request 2026-10-11 (direct chat).'
+  note: 'The one SUBSTANTIVE (non-presentational) repo-grades ask in the 2026-10-11 batch - a GitHub data path + a grading-behaviour change, so it gets a security + data pass (or a folded survey) before build, unlike the UI moves. Scoring policy is an OWNER fork (recommend note+flag, no silent auto score change the instructor cannot see; surface alongside). BUILD SERIALIZES after the other repo-grades work (shared index.tsx / useRepoGradesGradingActions.ts / the grade action / sticky header): activity-log removal SHIPPED cef512f0, then picker-header + status-prominence + the overhaul. Scope is read-only, safe now.'
+  question: null
 - id: 'REPO-GRADES-MODULE-PICKER-HEADER'
   state: 'actionable'
   kind: 'feature'

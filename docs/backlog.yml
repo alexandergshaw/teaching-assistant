@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'WALKTHROUGH-MIMIC-CHAT'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'walkthrough-announcement-surface'
+  title: 'Owner 2026-10-11: make the "announcement from a walkthrough" view mimic the LLM chat grading view; minimize clicks, click distance, and scroll distance.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/walkthrough-mimic-chat-scope.md (loop-architect dispatched 2026-10-11). The target look = the grading chat (GradingChatPanel/ChatComposer - stream area + sticky bottom composer + compact setup, post-SMOOTH-GRADER + W1). The view to restyle = the Recording tab walkthrough-announcement panel (already smoothed by SMOOTH-WALKTHROUGH; this goes BEYOND smoothing to mimic the chat SHAPE). PARAMOUNT: minimize clicks + click distance + scroll distance (co-equal). Machine-checkable = source-text/CSS-structure pins for the sticky action bar, compact setup, composer position; the Post-to-students confirm MUST survive; real look/feel + scroll are owner-walk (vitest renders nothing). Carries the diagnostics-rep decision (DEV_LOOP b907ff8e).'
+  from: 'Owner request 2026-10-11 (direct chat).'
+  note: 'Related: SMOOTH-WALKTHROUGH (already shipped the sticky run bar, two-fieldset split, auto-draft toggle, extractions on this panel) and SMOOTH-GRADER (the chat smoothing that is the target look). This ask is to make the walkthrough-announcement view MIMIC the chat view''s shape (stream/transcript area + sticky bottom composer/action bar + collapsed setup), not merely be smoother. Scope decides what transfers (sticky action bar, compact setup, minimal scroll to the primary action, the draft shown inline like a chat turn) vs what does not (a walkthrough is not a conversation). Do NOT drop the Post confirm. Disjoint from the in-flight zip/grading work (walkthrough-announcement surface).'
+  question: null
 - id: 'CHAT-SUBMISSION-CONSOLIDATE'
   state: 'verification'
   kind: 'feature'

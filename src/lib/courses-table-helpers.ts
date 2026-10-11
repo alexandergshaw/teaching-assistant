@@ -28,6 +28,9 @@ export const ALL_COLUMN_IDS = [
   // course content, then generated artifacts and files. This array is also the
   // DEFAULT left-to-right order of the table; a user's own arrangement is
   // stored separately (see parseColumnOrder).
+  // Instructor contact email leads the data columns (first after the frozen
+  // Name cell); emailClient stays in People and contact below.
+  "email",
   // Term logistics
   "institution",
   "modality",
@@ -60,7 +63,6 @@ export const ALL_COLUMN_IDS = [
   "studentRepos",
   // People and contact
   "roster",
-  "email",
   "emailClient",
   // C: the instructor's own profile, rendered verbatim into the "About Your
   // Instructor" guide document (generate-course-guides) - sits with
@@ -116,7 +118,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 13;
+export const CURRENT_COLUMNS_VERSION = 14;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -222,10 +224,13 @@ export function parseColumnOrder(raw: string | null | undefined): ColumnId[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     let stored: unknown;
+    let storedVersion = 0;
     if (Array.isArray(parsed)) {
       stored = parsed;
     } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { order?: unknown }).order)) {
       stored = (parsed as { order: unknown[] }).order;
+      const v = (parsed as { v?: unknown }).v;
+      if (typeof v === "number") storedVersion = v;
     } else {
       return fallback;
     }
@@ -242,6 +247,14 @@ export function parseColumnOrder(raw: string | null | undefined): ColumnId[] {
     }
     for (const id of ALL_COLUMN_IDS) {
       if (!seen.has(id)) order.push(id);
+    }
+    // Version 14: email leads the data columns. Orders stored before that
+    // (bare arrays count as v0) are repositioned; a moveColumn write re-stamps
+    // CURRENT_COLUMNS_VERSION so the user's own arrangement then sticks.
+    if (storedVersion < 14) {
+      const at = order.indexOf("email");
+      if (at > 0) order.splice(at, 1);
+      if (at !== 0) order.unshift("email");
     }
     return order;
   } catch {

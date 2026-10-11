@@ -27,6 +27,7 @@ import {
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import CellMenu, { type CellMenuItem } from "./CellMenu";
 import EditableCell from "./EditableCell";
+import EmailCopyButton from "./EmailCopyButton";
 import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
 import SyllabusTemplateCell from "./SyllabusTemplateCell";
@@ -531,7 +532,7 @@ export default function CourseRow({
     ),
     breaks: <BreaksCell course={course} onSave={save("breaks")} menu={cellMenuFor("breaks")} />,
     assignmentDue: <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} menu={cellMenuFor("assignmentDue")} />,
-    email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} menu={cellMenuFor("email")} />,
+    email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} actions={<EmailCopyButton email={course.email ?? ""} label={course.name} />} menu={cellMenuFor("email")} />,
     // C: the instructor's own profile, rendered verbatim (no LLM) into the
     // "About Your Instructor" guide document (generate-course-guides,
     // steps.course-guides.ts) - see Course.instructorBio's own comment for

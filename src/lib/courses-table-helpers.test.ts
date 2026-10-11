@@ -19,6 +19,7 @@ import {
   truncateForCell,
   computeFieldPatch,
   type SortState,
+  type ColumnId,
 } from "./courses-table-helpers";
 import { makeCourse } from "./courses-table-helpers.fixtures";
 
@@ -700,9 +701,10 @@ describe("column order", () => {
       // A stored order naming only two columns stands in for one written before
       // every other column existed.
       const order = parseColumnOrder(JSON.stringify({ v: 1, order: ["weeks", "tests"] }));
-      expect(order.slice(0, 2)).toEqual(["weeks", "tests"]);
-      const rest = ALL_COLUMN_IDS.filter((id) => id !== "weeks" && id !== "tests");
-      expect(order.slice(2)).toEqual(rest);
+      // v1 < 14, so email is repositioned to the front ahead of the stored ids.
+      expect(order.slice(0, 3)).toEqual(["email", "weeks", "tests"]);
+      const rest = ALL_COLUMN_IDS.filter((id) => id !== "weeks" && id !== "tests" && id !== "email");
+      expect(order.slice(3)).toEqual(rest);
     });
 
     it("drops unknown ids and de-duplicates repeats", () => {
@@ -711,18 +713,53 @@ describe("column order", () => {
       );
       expect(order.length).toBe(ALL_COLUMN_IDS.length);
       expect(new Set(order).size).toBe(ALL_COLUMN_IDS.length);
-      expect(order[0]).toBe("institution");
+      // v8 < 14: email is repositioned ahead of the stored first id.
+      expect(order[0]).toBe("email");
+      expect(order[1]).toBe("institution");
     });
 
     it("migrates legacy count ids the same way parseColumnSet does", () => {
       const order = parseColumnOrder(JSON.stringify({ v: 0, order: ["rosterCount"] }));
-      expect(order[0]).toBe("roster");
+      // v0 < 14: email leads; the migrated id follows.
+      expect(order[0]).toBe("email");
+      expect(order[1]).toBe("roster");
     });
 
     it("accepts the legacy bare-array shape", () => {
       const order = parseColumnOrder(JSON.stringify(["email"]));
       expect(order[0]).toBe("email");
       expect(order.length).toBe(ALL_COLUMN_IDS.length);
+    });
+
+    it("repositions email to the front of a pre-v14 stored order, no dup / no drop", () => {
+      const midList: ColumnId[] = ALL_COLUMN_IDS.filter((id) => id !== "email");
+      midList.splice(5, 0, "email");
+      const order = parseColumnOrder(JSON.stringify({ v: 13, order: midList }));
+      expect(order[0]).toBe("email");
+      expect(order.length).toBe(ALL_COLUMN_IDS.length);
+      expect(new Set(order).size).toBe(ALL_COLUMN_IDS.length);
+      for (const id of ALL_COLUMN_IDS) expect(order).toContain(id);
+      // Everything else keeps its relative stored order.
+      expect(order.slice(1)).toEqual(midList.filter((id) => id !== "email"));
+    });
+
+    it("repositions email for a bare-array (v0) order with email mid-list", () => {
+      const midList: ColumnId[] = ALL_COLUMN_IDS.filter((id) => id !== "email");
+      midList.splice(7, 0, "email");
+      expect(midList.indexOf("email")).toBe(7);
+      const order = parseColumnOrder(JSON.stringify(midList));
+      expect(order[0]).toBe("email");
+      expect(order.length).toBe(ALL_COLUMN_IDS.length);
+      expect(new Set(order).size).toBe(ALL_COLUMN_IDS.length);
+    });
+
+    it("leaves a v14 order untouched, email at its stored index", () => {
+      const custom: ColumnId[] = ALL_COLUMN_IDS.filter((id) => id !== "email");
+      custom.splice(5, 0, "email");
+      const order = parseColumnOrder(serializeColumnOrder(custom));
+      expect(CURRENT_COLUMNS_VERSION).toBe(14);
+      expect(order).toEqual(custom);
+      expect(order.indexOf("email")).toBe(5);
     });
 
     it("round-trips through serializeColumnOrder", () => {
@@ -778,8 +815,12 @@ describe("column order", () => {
       // shape as start/endDate, not the recurring-rule Assessment cadence
       // group assignmentDue/weeklyChecklist live in.
       expect(at("gradesDue")).toBe(at("endDate") + 1);
-      // The email pair sits together.
-      expect(at("emailClient")).toBe(at("email") + 1);
+      // email leads the data columns; with it gone from between them,
+      // roster and emailClient are adjacent.
+      expect(at("email")).toBe(0);
+      expect(at("emailClient")).toBe(at("roster") + 1);
+      expect(ALL_COLUMN_IDS).not.toContain("name");
+      expect(DEFAULT_VISIBLE_COLUMNS[0]).toBe("email");
       // Both syllabus columns sit together.
       expect(at("syllabusTemplate")).toBe(at("syllabusId") + 1);
       // File-bearing columns are contiguous at the end.

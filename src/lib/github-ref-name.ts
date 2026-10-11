@@ -49,6 +49,25 @@ export function normalizeTargetBranch(raw: string): NormalizedBranch {
   return { ok: true, branch };
 }
 
+// Owner / repo name policy (differs from the ref policy above: a repo name
+// permits none of "/", "%", "#", "?"). Mirrors submission-repo.ts SAFE_NAME and
+// DOT_SEGMENT. SAFE_NAME alone passes a bare "." or "..", so DOT_SEGMENT is
+// load-bearing.
+const SAFE_NAME = /^[A-Za-z0-9_.-]+$/;
+const DOT_SEGMENT = /^\.{1,2}$/;
+
+/**
+ * True when owner and repo are each safe to interpolate UNENCODED into
+ * /repos/<owner>/<repo>/... : only [A-Za-z0-9_.-], and neither is a bare
+ * dot-segment (. or ..), which the WHATWG URL parser would collapse.
+ */
+export function validateGithubOwnerRepo(owner: string, repo: string): boolean {
+  for (const part of [owner, repo]) {
+    if (!SAFE_NAME.test(part) || DOT_SEGMENT.test(part)) return false;
+  }
+  return true;
+}
+
 /**
  * encodeURIComponent for a ref placed in a GitHub URL, but throws on a bare "."
  * or ".." (after trim) - the one shape encodeURIComponent does not neutralise.

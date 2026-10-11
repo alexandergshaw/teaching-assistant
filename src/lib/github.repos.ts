@@ -1,6 +1,7 @@
 // Repository CRUD, listing, and discovery operations.
 
 import { GithubHttpError } from "./github-http-error";
+import { validateGithubOwnerRepo } from "./github-ref-name";
 
 const API = "https://api.github.com";
 
@@ -99,9 +100,12 @@ function mapRepo(r: RawRepo): GithubRepo {
 export function parseRepoRef(ref: string): { owner: string; repo: string } | null {
   const trimmed = ref.trim().replace(/\.git$/, "");
   const url = trimmed.match(/github\.com[/:]([^/]+)\/([^/]+)/);
-  if (url) return { owner: url[1], repo: url[2] };
+  // Both branches reject (null) an owner/repo that is not path-safe: callers
+  // interpolate these unencoded into /repos/<owner>/<repo>/... and every caller
+  // already maps null to its "enter owner/name" error.
+  if (url) return validateGithubOwnerRepo(url[1], url[2]) ? { owner: url[1], repo: url[2] } : null;
   const slug = trimmed.match(/^([^/\s]+)\/([^/\s]+)$/);
-  if (slug) return { owner: slug[1], repo: slug[2] };
+  if (slug) return validateGithubOwnerRepo(slug[1], slug[2]) ? { owner: slug[1], repo: slug[2] } : null;
   return null;
 }
 

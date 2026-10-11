@@ -1,6 +1,6 @@
 // I-1: pure validator table for normalizeTargetBranch / encodeRefSegment.
 import { describe, expect, it } from "vitest";
-import { encodeRefSegment, normalizeTargetBranch } from "./github-ref-name";
+import { encodeRefSegment, normalizeTargetBranch, validateGithubOwnerRepo } from "./github-ref-name";
 
 describe("normalizeTargetBranch", () => {
   const rejected: Array<[string, string]> = [
@@ -64,5 +64,35 @@ describe("encodeRefSegment", () => {
     expect(encodeRefSegment("main")).toBe("main");
     expect(encodeRefSegment("feature/x")).toBe("feature%2Fx");
     expect(encodeRefSegment(" main ")).toBe("main");
+  });
+});
+
+describe("validateGithubOwnerRepo", () => {
+  const rejected: Array<[string, string, string]> = [
+    ["dot-dot owner", "..", "x"],
+    ["dot-dot repo", "o", ".."],
+    ["single dot repo", "o", "."],
+    ["single dot owner", ".", "x"],
+    ["percent-encoded dot", "o", "%2e%2e"],
+    ["query char", "o", "r?x=1"],
+    ["fragment char", "o", "r#f"],
+    ["ampersand", "o", "r&y=1"],
+    ["slash", "o", "r/x"],
+    ["space", "a b", "c"],
+    ["empty owner", "", "r"],
+    ["empty repo", "o", ""],
+  ];
+  it.each(rejected)("rejects %s", (_label, owner, repo) => {
+    expect(validateGithubOwnerRepo(owner, repo)).toBe(false);
+  });
+
+  const accepted: Array<[string, string, string]> = [
+    ["plain", "octocat", "Hello-World"],
+    ["underscore and dots", "my-org_1", "repo.name-2_x"],
+    ["internal dots", "org", "repo.with.dots"],
+    ["three dots is a real name", "o", "..."],
+  ];
+  it.each(accepted)("accepts %s", (_label, owner, repo) => {
+    expect(validateGithubOwnerRepo(owner, repo)).toBe(true);
   });
 });

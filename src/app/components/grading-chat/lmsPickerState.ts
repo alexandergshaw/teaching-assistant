@@ -55,6 +55,54 @@ export function parseLmsPickerSelection(raw: string | null): LmsPickerSelection 
   }
 }
 
+export interface LmsFieldIndication {
+  readonly disabled: boolean;
+  readonly error: boolean;
+  readonly helperText: string;
+}
+
+export interface LmsFieldIndicationInput {
+  readonly globallyDisabled: boolean;
+  /** Institution chosen (Course) / course chosen (Assignment); always true for Institution. */
+  readonly parentSelected: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly optionCount: number;
+  readonly promptBeforeParent: string;
+  readonly loadingText: string;
+  readonly emptyOkText: string;
+}
+
+/** PURE. One field's disabled/helper/error state. Every branch except the last
+ * returns disabled, and the last is reached only when optionCount is non-zero,
+ * so an openable-but-empty select is unrepresentable. First match wins. */
+export function lmsFieldIndication(i: LmsFieldIndicationInput): LmsFieldIndication {
+  if (i.globallyDisabled) return { disabled: true, error: false, helperText: "" };
+  if (!i.parentSelected) return { disabled: true, error: false, helperText: i.promptBeforeParent };
+  if (i.loading) return { disabled: true, error: false, helperText: i.loadingText };
+  if (i.error) return { disabled: true, error: true, helperText: i.error };
+  if (i.optionCount === 0) return { disabled: true, error: false, helperText: i.emptyOkText };
+  return { disabled: false, error: false, helperText: "" };
+}
+
+export const LMS_INSTITUTION_COPY = {
+  promptBeforeParent: "",
+  loadingText: "Loading institutions...",
+  emptyOkText: "No connected institutions",
+} as const;
+
+export const LMS_COURSE_COPY = {
+  promptBeforeParent: "Select an institution first",
+  loadingText: "Loading courses...",
+  emptyOkText: "No active courses for this institution",
+} as const;
+
+export const LMS_ASSIGNMENT_COPY = {
+  promptBeforeParent: "Select a course first",
+  loadingText: "Loading assignments...",
+  emptyOkText: "No assignments for this course",
+} as const;
+
 export function loadLmsPickerSelection(): LmsPickerSelection {
   if (typeof window === "undefined") return EMPTY_LMS_PICKER_SELECTION;
   try {

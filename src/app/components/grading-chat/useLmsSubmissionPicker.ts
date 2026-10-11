@@ -35,6 +35,7 @@ export interface LmsPickerState {
   readonly assignments: CanvasAssignmentBrief[];
   readonly assignmentId: string;
   readonly loading: { institutions: boolean; courses: boolean; assignments: boolean };
+  readonly errors: { institutions: string | null; courses: string | null; assignments: string | null };
   readonly error: string | null;
   readonly selectInstitution: (code: string) => void;
   readonly selectCourse: (id: string) => void;
@@ -83,7 +84,13 @@ export function useLmsSubmissionPicker(): LmsPickerState {
     if (courseKey === null) return;
     let cancelled = false;
     void (async () => {
+      const startedAtMs = chatSeamNowMs();
       const r = await listCoursesAction(courseKey);
+      recordChatSeamSettled({
+        operation: "list_lms_courses",
+        startedAtMs,
+        failureClass: "error" in r ? classifyChatSeamFailure(r.error) : null,
+      });
       if (cancelled) return;
       if ("error" in r) setCourseResult({ key: courseKey, items: [], error: r.error });
       else setCourseResult({ key: courseKey, items: r.courses, error: null });
@@ -142,6 +149,11 @@ export function useLmsSubmissionPicker(): LmsPickerState {
       institutions: instResult === null,
       courses: courseKey !== null && !courseMatch,
       assignments: assignmentKey !== null && !assignmentMatch,
+    },
+    errors: {
+      institutions: instResult?.error ?? null,
+      courses: courseMatch ? courseResult!.error : null,
+      assignments: assignmentMatch ? assignmentResult!.error : null,
     },
     error: (instResult?.error ?? null) || (courseMatch ? courseResult!.error : null) || (assignmentMatch ? assignmentResult!.error : null),
     selectInstitution: (code) => apply(selectLmsInstitution(sel, code)),

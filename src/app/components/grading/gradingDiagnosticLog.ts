@@ -27,6 +27,7 @@ export type GradingDiagnosticOperation =
   | "derive_checklist"
   | "fetch_canvas_meta"
   | "list_lms_assignments"
+  | "list_lms_courses"
   | "post_grades"
   | "post_draft"
   | "capture_screenshot"
@@ -46,6 +47,7 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   derive_checklist: "Derive assignment checklist",
   fetch_canvas_meta: "Fetch Canvas assignment details",
   list_lms_assignments: "List LMS assignments",
+  list_lms_courses: "List LMS courses",
   post_grades: "Post grades to Canvas",
   post_draft: "Post drafted grade",
   capture_screenshot: "Capture screenshot",

@@ -15,7 +15,8 @@ export type ChatSeamOperation =
   | "prepare_submission"
   | "grade_item"
   | "fetch_canvas_meta"
-  | "list_lms_assignments";
+  | "list_lms_assignments"
+  | "list_lms_courses";
 
 export const CHAT_SEAM_FAILURE_CLASSES = [
   "name collision",

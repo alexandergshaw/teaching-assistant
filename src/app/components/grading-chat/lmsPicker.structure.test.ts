@@ -47,6 +47,34 @@ describe("ChatComposer - From LMS segment: every reachability hop", () => {
   });
 });
 
+describe("ChatComposer - per-field indication reaches all three selects", () => {
+  const block = composer.slice(composer.indexOf('mode === "lms" && ('));
+  const call = (src: string, label: string): string => {
+    const i = src.indexOf(label);
+    expect(i).toBeGreaterThan(-1);
+    return src.slice(i, i + 400);
+  };
+
+  it("each field is fed lmsFieldIndication with its OWN error source", () => {
+    expect(block.match(/lmsFieldIndication\(/g)?.length).toBe(3);
+    expect(call(block, "const instInd = lmsFieldIndication(")).toContain("error: lms.errors.institutions");
+    expect(call(block, "const courseInd = lmsFieldIndication(")).toContain("error: lms.errors.courses");
+    expect(call(block, "const assignmentInd = lmsFieldIndication(")).toContain("error: lms.errors.assignments");
+  });
+
+  it("each select reads disabled, error and helperText from its indication", () => {
+    for (const ind of ["instInd", "courseInd", "assignmentInd"]) {
+      expect(block).toContain(`disabled={${ind}.disabled}`);
+      expect(block).toContain(`error={${ind}.error}`);
+      expect(block).toContain(`helperText={${ind}.helperText}`);
+    }
+  });
+
+  it("the bottom alert renders only lmsError, not the merged lms.error", () => {
+    expect(block).not.toMatch(/lms\.error\b/);
+  });
+});
+
 describe("buildLmsAssignmentUrlAction and the hook sources", () => {
   it("the action is an owner-guarded named async export that builds the assignment path", () => {
     expect(action).toMatch(/export async function buildLmsAssignmentUrlAction\([\s\S]*?\{\s*await requireAppOwner\(\);/);

@@ -30,6 +30,7 @@ import { MAX_RECORDING_FRAMES, useChatScreenFrameCapture } from "./chatFrameCapt
 import { loadComposerHeight, persistComposerHeight } from "./composerHeight";
 import { buildLmsAssignmentUrlAction } from "@/app/actions/grading-chat-intake";
 import { useLmsSubmissionPicker } from "./useLmsSubmissionPicker";
+import { LMS_ASSIGNMENT_COPY, LMS_COURSE_COPY, LMS_INSTITUTION_COPY, lmsFieldIndication } from "./lmsPickerState";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -455,7 +456,32 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         </div>
       )}
 
-      {mode === "lms" && (
+      {mode === "lms" && (() => {
+        const instInd = lmsFieldIndication({
+          globallyDisabled: disabled,
+          parentSelected: true,
+          loading: lms.loading.institutions,
+          error: lms.errors.institutions,
+          optionCount: lms.institutions.length,
+          ...LMS_INSTITUTION_COPY,
+        });
+        const courseInd = lmsFieldIndication({
+          globallyDisabled: disabled,
+          parentSelected: !!lms.institution,
+          loading: lms.loading.courses,
+          error: lms.errors.courses,
+          optionCount: lms.courses.length,
+          ...LMS_COURSE_COPY,
+        });
+        const assignmentInd = lmsFieldIndication({
+          globallyDisabled: disabled,
+          parentSelected: !!lms.courseId,
+          loading: lms.loading.assignments,
+          error: lms.errors.assignments,
+          optionCount: lms.assignments.length,
+          ...LMS_ASSIGNMENT_COPY,
+        });
+        return (
         <div className={styles.adaptRow}>
           <TextField
             select
@@ -464,7 +490,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             label="Institution"
             value={lms.institution}
             onChange={(event) => lms.selectInstitution(event.target.value)}
-            disabled={disabled || lms.loading.institutions}
+            disabled={instInd.disabled}
+            error={instInd.error}
+            helperText={instInd.helperText}
           >
             {lms.institutions.map((code) => (
               <MenuItem key={code} value={code}>
@@ -479,7 +507,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             label="Course"
             value={lms.courseId}
             onChange={(event) => lms.selectCourse(event.target.value)}
-            disabled={disabled || !lms.institution || lms.loading.courses}
+            disabled={courseInd.disabled}
+            error={courseInd.error}
+            helperText={courseInd.helperText}
           >
             {lms.courses.map((course) => (
               <MenuItem key={course.id} value={course.id}>
@@ -494,7 +524,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             label="Assignment"
             value={lms.assignmentId}
             onChange={(event) => lms.selectAssignment(event.target.value)}
-            disabled={disabled || !lms.courseId || lms.loading.assignments}
+            disabled={assignmentInd.disabled}
+            error={assignmentInd.error}
+            helperText={assignmentInd.helperText}
           >
             {lms.assignments.map((assignment) => (
               <MenuItem key={assignment.id} value={assignment.id}>
@@ -505,13 +537,14 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={disabled || lmsBusy || !lms.canSubmit} onClick={() => void handleSendLms()}>
             {lmsBusy ? "Working..." : "Grade"}
           </Button>
-          {(lmsError ?? lms.error) && (
+          {lmsError && (
             <span role="alert" className={styles.ghMeta}>
-              {lmsError ?? lms.error}
+              {lmsError}
             </span>
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

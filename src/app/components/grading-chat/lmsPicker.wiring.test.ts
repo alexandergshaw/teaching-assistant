@@ -26,3 +26,22 @@ describe("LMS picker list_lms_assignments diagnostic wiring", () => {
     expect(hook).toMatch(/classifyChatSeamFailure\(r\.error\)/);
   });
 });
+
+describe("LMS picker list_lms_courses diagnostic wiring", () => {
+  it("both unions carry the member and the label", () => {
+    expect(leaf).toContain('"list_lms_courses"');
+    const log = withoutLineComments(readFileSync("src/app/components/grading/gradingDiagnosticLog.ts", "utf-8"));
+    expect(log).toContain('"list_lms_courses"');
+    expect(log).toMatch(/list_lms_courses: "/);
+  });
+
+  it("captures a start before the course fetch and records after it", () => {
+    const call = hook.indexOf("await listCoursesAction(");
+    const start = hook.lastIndexOf("startedAtMs = chatSeamNowMs()", call);
+    const record = hook.indexOf('operation: "list_lms_courses"');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(call);
+    expect(call).toBeLessThan(record);
+    expect(hook).toMatch(/recordChatSeamSettled\(\{\s*operation: "list_lms_courses"/);
+  });
+});

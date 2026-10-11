@@ -22,10 +22,13 @@ export interface RepoGradesStickyHeaderProps {
   onSearchChange: (value: string) => void;
   // RG-SEARCH-STICKY Wave C: the grade-set typeahead (index.tsx owns its state).
   gradeSetControl?: ReactNode;
+  // The assignment-folder picker (RepoGradesFolderPicker), moved here from the
+  // stacked controls panel; index.tsx owns its state and handler.
+  folderControl?: ReactNode;
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = runBar !== null || typeof onSearchChange === "function";
@@ -53,6 +56,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
           {runBar && <RepoGradesRunBar {...runBar} />}
+          {folderControl}
           {gradeSetControl}
           <label className={styles.headerField}>
             <span className={styles.headerInputLabel}>Search</span>

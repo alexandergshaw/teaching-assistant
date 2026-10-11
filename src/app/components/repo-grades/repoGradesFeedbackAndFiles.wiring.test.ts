@@ -299,7 +299,7 @@ const OPTIONS = {
 
 // R-2: the derived root set against a HAND-FROZEN literal, never a second
 // readdirSync - a directoryRoots-vs-readdirSync comparison is circular and
-// discharges nothing (both go to zero together). 39 non-test, non-.d.ts
+// discharges nothing (both go to zero together). 40 non-test, non-.d.ts
 // .ts/.tsx basenames of this directory.
 const FROZEN_REPO_GRADES_ROOTS = [
   "LinkUsernamesPanel.tsx",
@@ -310,6 +310,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoGradesGrid.tsx",
   // RG-SEARCH-STICKY Wave C: the grade-set typeahead (browser-safe imports only).
   "RepoGradesGradeSetTypeahead.tsx",
+  // REPO-GRADES-MODULE-PICKER-HEADER: the folder picker relocated into the sticky header.
+  "RepoGradesFolderPicker.tsx",
   // A7 W3: the sticky run bar, a new non-test root (browser-safe leaves only).
   "RepoGradesRunBar.tsx",
   "RepoGradesStatusBanners.tsx",
@@ -355,7 +357,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
 ].sort();
 
 describe("R-2: the derived repo-grades root set matches the hand-frozen list", () => {
-  it("directoryRoots(repo-grades) names exactly the 39 frozen basenames", () => {
+  it("directoryRoots(repo-grades) names exactly the 40 frozen basenames", () => {
     const derived = directoryRoots(REPO_GRADES_DIR)
       .map((abs) => abs.slice(REPO_GRADES_DIR.length + 1))
       .sort();

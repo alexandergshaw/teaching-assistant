@@ -255,15 +255,23 @@ describe("RepoGradesGridProps.selectedFolder is REQUIRED, and index.tsx actually
   });
 });
 
-describe("RepoGradesControls.tsx states the branch approximation, only while a specific folder is selected (Ruling A5-9)", () => {
-  it("contains the exact disclosure sentence", () => {
-    expect(controlsSource).toContain("Links open the branch recorded when the repos were scanned.");
+// The folder picker (and its disclosure sentence) moved from RepoGradesControls.tsx
+// into the sticky-header leaf RepoGradesFolderPicker.tsx.
+const folderPickerSource = readFileSync(
+  join(process.cwd(), "src/app/components/repo-grades/RepoGradesFolderPicker.tsx"),
+  "utf8"
+);
+
+describe("RepoGradesFolderPicker.tsx states the branch approximation, only while a specific folder is selected (Ruling A5-9)", () => {
+  it("contains the exact disclosure sentence, and RepoGradesControls.tsx no longer does", () => {
+    expect(folderPickerSource).toContain("Links open the branch recorded when the repos were scanned.");
+    expect(controlsSource).not.toContain("Links open the branch recorded when the repos were scanned.");
   });
 
   it("the sentence is gated on selectedFolder !== ALL_FOLDERS - in the ALL_FOLDERS view the href pins no branch, so stating one would be false", () => {
-    const sentenceIdx = controlsSource.indexOf("Links open the branch recorded when the repos were scanned.");
+    const sentenceIdx = folderPickerSource.indexOf("Links open the branch recorded when the repos were scanned.");
     expect(sentenceIdx).toBeGreaterThan(-1);
-    const before = controlsSource.slice(Math.max(0, sentenceIdx - 300), sentenceIdx);
+    const before = folderPickerSource.slice(Math.max(0, sentenceIdx - 300), sentenceIdx);
     expect(before).toContain("selectedFolder !== ALL_FOLDERS");
   });
 });

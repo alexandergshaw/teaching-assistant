@@ -870,16 +870,40 @@ describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Gr
     expect(rule).toMatch(/\b(top|bottom):/);
   });
 
-  it("W3-R7: the course, repo-filter, folder and sort pickers share ONE existing-class wrapper row", () => {
+  it("W3-R7: the course, repo-filter and sort pickers share ONE existing-class wrapper row", () => {
     const wrapperIdx = controlsText.indexOf("<div className={styles.adaptRow}>");
     expect(wrapperIdx).toBeGreaterThan(-1);
     const detailsIdx = controlsText.indexOf("<details", wrapperIdx);
     expect(detailsIdx).toBeGreaterThan(wrapperIdx);
-    for (const id of ["repo-grades-course", "repo-grades-org-prefix", "repo-grades-folder", "repo-grades-sort"]) {
+    for (const id of ["repo-grades-course", "repo-grades-org-prefix", "repo-grades-sort"]) {
       const at = controlsText.indexOf(`htmlFor="${id}"`);
       expect(at).toBeGreaterThan(wrapperIdx);
       expect(at).toBeLessThan(detailsIdx);
     }
+  });
+
+  it("W3-R7b: the folder picker MOVED to the sticky header - absent from the controls row, present in RepoGradesFolderPicker, reached via index.tsx's folderControl= slot", () => {
+    expect(controlsText).not.toContain("repo-grades-folder");
+    const pickerText = stripComments(
+      readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesFolderPicker.tsx"), "utf8")
+    );
+    expect(pickerText).toContain('htmlFor="repo-grades-folder"');
+    expect(pickerText).toContain('id="repo-grades-folder"');
+    expect(pickerText).toContain("onChange={(e) => onSelectedFolderChange(e.target.value)}");
+    // Anchored to the <RepoGradesStickyHeader ...> tag region, not a file-wide match.
+    const tagIdx = indexText.indexOf("<RepoGradesStickyHeader");
+    expect(tagIdx).toBeGreaterThan(-1);
+    const openIdx = indexText.indexOf("folderControl={", tagIdx);
+    expect(openIdx).toBeGreaterThan(tagIdx);
+    const braceIdx = indexText.indexOf("{", openIdx);
+    const slot = indexText.slice(braceIdx, findMatchingBraceEnd(indexText, braceIdx));
+    expect(slot).toContain("<RepoGradesFolderPicker");
+    expect(slot).toContain("selectedFolder={currentSelectedFolder}");
+    expect(slot).toContain("onSelectedFolderChange={handleFolderChange}");
+    expect(stickyHeaderText).toContain("{folderControl}");
+    // The slot must sit inside the sticky header's own open tag (before its children).
+    const childrenIdx = indexText.indexOf("<RepoGradesGrid", tagIdx);
+    expect(braceIdx).toBeLessThan(childrenIdx);
   });
 
   it("W3-R5: the W2 confirm-all and bulk-selection guards are still present (no confirm dropped)", () => {

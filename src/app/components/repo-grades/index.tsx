@@ -73,6 +73,7 @@ import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
 import { visibleRepoRows } from "./repoGradesVisibleRows";
 import { toggleRepoInGradeSet } from "./repoGradesGradeSet";
 import RepoGradesGradeSetTypeahead from "./RepoGradesGradeSetTypeahead";
+import RepoGradesFolderPicker from "./RepoGradesFolderPicker";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 // A16 wave 3: mounts this run's trends above the grid - see
 // classTrendsFolderEntry.ts's header for why the leaf lives in this
@@ -613,11 +614,6 @@ export default function RepoGradesTab() {
         showRowDependentFields={!!model && model.rows.length > 0}
         sort={uiState.sort}
         onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
-        folderOptions={folderCensus.options}
-        folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }}
-        selectedFolder={currentSelectedFolder}
-        onSelectedFolderChange={handleFolderChange}
-        folderDropNotice={folderDropNotice}
         instructions={uiState.instructions}
         onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
         rubricSourceValue={rubricSource.value}
@@ -762,6 +758,7 @@ export default function RepoGradesTab() {
           one folder only, same confirmed handlers as the column header) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
+        folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
         runBar={

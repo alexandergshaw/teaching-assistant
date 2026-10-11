@@ -39,7 +39,6 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
 import type { RepoGradeSortState } from "./repoGradesRows";
 import { parseRepoGradeSortSelectValue, repoGradeSortSelectValue } from "./repoGradesRows";
-import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
 import { buildCourseOptions } from "./repoGradesCoursePicker";
 import Typeahead from "../ui/Typeahead";
 import {
@@ -231,22 +230,6 @@ export interface RepoGradesControlsProps {
   rubricLiveHint: RepoGradeRubricListHint | null;
   rubricExportHint: RepoGradeRubricListHint | null;
 
-  /** U1.1/U1.3 - which assignment folder this view is scoped to right now:
-   * a raw folder name, or ALL_FOLDERS (repoGradesFolderSelection.ts). The
-   * options and the census both come from index.tsx's `buildFolderOptions`
-   * call over the current scan - this component renders them, it does not
-   * derive them. */
-  folderOptions: FolderOption[];
-  folderCensus: { scannedRepos: number; unknownRepos: number };
-  selectedFolder: string;
-  onSelectedFolderChange: (value: string) => void;
-  /** U1.6b - non-null only right after a previously-persisted folder was
-   * genuinely dropped (gone from an unfiltered scan, not merely hidden by
-   * the org-prefix filter - see shouldPersistFolderDrop). Rendered inline
-   * next to the folder control so the instructor is told, not left to
-   * notice the view silently reset to "All folders". */
-  folderDropNotice: string | null;
-
   /** When true, every "Grade" / "Grade all" call reads a folder's own README
    * as that folder's assignment instructions instead of the instructions
    * textarea below - the action falls back to the textarea only for a repo
@@ -315,11 +298,6 @@ export default function RepoGradesControls({
   showRowDependentFields,
   sort,
   onSortChange,
-  folderOptions,
-  folderCensus,
-  selectedFolder,
-  onSelectedFolderChange,
-  folderDropNotice,
   instructions,
   onInstructionsChange,
   rubricSourceValue,
@@ -404,48 +382,9 @@ export default function RepoGradesControls({
           </div>
         )}
 
-        {/* U1.1/U1.3 - the folder chooser, in the view's own control surface
-            rather than buried in a table column header. describeFolderOption
-            gives each option its "in N of M repos" hint (U1.4) so the
-            instructor can see how common a folder is BEFORE grading it. */}
-        {showRowDependentFields && (
-          <div className={styles.field} style={PICKER_FIELD_STYLE}>
-            <label htmlFor="repo-grades-folder">Assignment folder to grade</label>
-            <TextField
-              select
-              size="small"
-              fullWidth
-              id="repo-grades-folder"
-              value={selectedFolder}
-              onChange={(e) => onSelectedFolderChange(e.target.value)}
-            >
-              <MenuItem value={ALL_FOLDERS}>All folders</MenuItem>
-              {folderOptions.map((option) => (
-                <MenuItem key={option.folder} value={option.folder}>
-                  {describeFolderOption(option, folderCensus)}
-                </MenuItem>
-              ))}
-            </TextField>
-            {/* A5 (Ruling A5-6/A5-9) - the only place this page states that a
-                row's GitHub link opens the branch RECORDED AT SCAN TIME, not
-                necessarily the org's current default branch (see
-                repoGradeTreeLink.ts's header comment for the full staleness
-                note). Conditional on a specific folder being selected: in the
-                ALL_FOLDERS view the link falls back to the bare repo root and
-                pins no branch at all, so this sentence would be false there. */}
-            {selectedFolder !== ALL_FOLDERS && (
-              <p className={styles.fieldHint}>Links open the branch recorded when the repos were scanned.</p>
-            )}
-            {folderOptions.length === 0 && (
-              <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
-            )}
-            {folderDropNotice && (
-              <p className={styles.error} role="alert">
-                {folderDropNotice}
-              </p>
-            )}
-          </div>
-        )}
+        {/* The assignment-folder picker moved to the sticky working header
+            (RepoGradesFolderPicker.tsx, via RepoGradesStickyHeader's
+            folderControl slot). */}
 
         {/* N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-
             criteria.md) - every column is ALSO sortable via its own header
@@ -617,7 +556,7 @@ export default function RepoGradesControls({
             {/* AC item 21 - a stale persisted choice is reported here, next
                 to the control that would let the instructor pick again, not
                 only buried in the log. `role="alert"` matches this file's
-                own `folderDropNotice` precedent above. */}
+                the folder picker's `folderDropNotice` precedent. */}
             {rubricStaleNote && (
               <p className={styles.error} role="alert">
                 {rubricStaleNote}

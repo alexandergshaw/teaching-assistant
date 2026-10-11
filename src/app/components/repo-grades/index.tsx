@@ -586,6 +586,7 @@ export default function RepoGradesTab() {
 
   const confirmedCount = model ? model.rows.filter((row) => row.binding.state === "confirmed").length : 0;
   const allBound = !!model && model.rows.length > 0 && confirmedCount === model.rows.length;
+  const boundSummary = `${confirmedCount} of ${model?.rows.length ?? 0} repos bound`;
   const missingOrg = !!course && !(course.githubOrg ?? "").trim();
   const noConfirmedRows = !!model && model.rows.length > 0 && model.rows.every((row) => row.binding.state !== "confirmed");
   // U4.19d state (f): the assignments load succeeded, cleanly, with nothing
@@ -624,7 +625,10 @@ export default function RepoGradesTab() {
           }
         }}
       >
-      <summary>Run setup</summary>
+      <summary className={gridStyles.disclosureSummary}>
+        <span>Run setup</span>
+        <span className={gridStyles.setupSummaryMeta}>{boundSummary}</span>
+      </summary>
       <RepoGradesControls
         courses={courses}
         coursesLoading={coursesLoading}
@@ -695,7 +699,7 @@ export default function RepoGradesTab() {
           onAnnounce={setPostSummary}
           linkPanelOpen={effectiveOpen(uiState.linkPanelOpen, !allBound)}
           onLinkPanelOpenChange={(value) => setUiState((prev) => ({ ...prev, linkPanelOpen: value }))}
-          boundSummary={`${confirmedCount} of ${model?.rows.length ?? 0} repos bound`}
+          boundSummary={boundSummary}
         />
       )}
       </details>
@@ -780,8 +784,8 @@ export default function RepoGradesTab() {
         />
       )}
 
-      {/* RG-SEARCH-STICKY Wave A: one shell encloses the sticky run bar (A7 W3,
-          one folder only, same confirmed handlers as the column header) and the grid. */}
+      {/* RG-SEARCH-STICKY Wave A: one shell encloses the sticky working header
+          (the column header below it owns Grade/Post) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
         rescanControl={course && !missingOrg ? (
@@ -803,7 +807,6 @@ export default function RepoGradesTab() {
         ) : null}
         targetBranchControl={
           <label className={styles.headerField}>
-            <span className={styles.headerInputLabel}>Target branch (merged to)</span>
             <input
               type="text"
               className={styles.headerInput}
@@ -819,17 +822,6 @@ export default function RepoGradesTab() {
         }
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
-        runBar={
-          model && currentSelectedFolder !== ALL_FOLDERS && displayedColumns[0]
-            ? {
-                column: displayedColumns[0], rows: displayedRows, selected, assignments,
-                cellEdits, columnPosting, bulkRunningFolder,
-                bulkProgress, bulkSelectionOnly: uiState.bulkSelectionOnly, scanTruncated: !!scan?.truncated,
-                describeColumnRubric: rubricSource.describeColumn,
-                onGradeColumn: handleGradeColumn, onPostColumn: handlePostColumn,
-              }
-            : null
-        }
       >
       {model && (
         <RepoGradesGrid

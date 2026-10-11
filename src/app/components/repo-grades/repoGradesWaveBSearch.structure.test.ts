@@ -56,8 +56,8 @@ describe("Wave B display-only: index wiring keeps plan inputs query-free", () =>
     expect(grid).not.toMatch(/\brows=\{bodyRows\}/);
   });
 
-  it("the run bar keeps rows: displayedRows and never rows: bodyRows", () => {
-    expect(INDEX).toMatch(/rows:\s*displayedRows/);
+  it("the plan inputs keep rows={displayedRows} and never rows: bodyRows", () => {
+    expect(INDEX).toMatch(/rows=\{displayedRows\}/);
     expect(INDEX).not.toMatch(/rows:\s*bodyRows/);
   });
 
@@ -104,7 +104,7 @@ describe("Wave B search input: placement and wiring", () => {
   });
 
   it("index passes the persisted query and a setter that writes searchQuery", () => {
-    const el = slice(INDEX, "<RepoGradesStickyHeader", "runBar={");
+    const el = slice(INDEX, "<RepoGradesStickyHeader", "<RepoGradesGrid");
     expect(el).toMatch(/searchQuery=\{\s*uiState\.searchQuery\s*\}/);
     expect(el).toMatch(/onSearchChange=\{[^}]*searchQuery:/);
   });

@@ -36,7 +36,7 @@
 // directory's established duplicate-with-citation convention
 // (repoGradesRows.ts:43-56, repoGradesFolderSelection.ts:73-84).
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 const CONTROL_PATH = join(process.cwd(), "src/app/components/repo-grades/RepoBindingControl.tsx");
@@ -69,7 +69,6 @@ const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGra
 const hookSource = readFileSync(HOOK_PATH, "utf8");
 const RUN_PLAN_PATH = join(process.cwd(), "src/app/components/repo-grades/repoGradesRunPlan.ts");
 const runPlanSource = readFileSync(RUN_PLAN_PATH, "utf8");
-const runBarSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesRunBar.tsx"), "utf8");
 
 /**
  * Starting at `openBraceIdx` (which must point at a `{`), walks forward
@@ -742,7 +741,6 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(countCalls(hookSource)).toBe(2);
     expect(countCalls(gridSource)).toBe(0);
     expect(countCalls(runPlanSource)).toBe(0);
-    expect(countCalls(runBarSource)).toBe(0);
   });
 });
 
@@ -783,13 +781,10 @@ describe("A7 W2: single-course default and the two disclosure overrides are wire
   });
 });
 
-describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Grade/Post, and sticks by its own class", () => {
+describe("A7 W3 (retired by REPO-GRADES-HEADER-SETUP-VISUAL C1): the sticky run bar is GONE; Grade/Post live in the grid's sticky column header", () => {
   // Mechanism proxies only: nothing renders under vitest, so these prove the
-  // source carries the run bar, its sticky rule and its wiring - never that the
-  // bar paints or sticks at runtime (owner residuals RW3-1..9 in
-  // docs/repo-grader-w3-surface-test-notes.md).
+  // source no longer carries the run bar and still carries the surviving wiring.
   const indexText = stripComments(indexSource);
-  const barText = stripComments(runBarSource);
   const cssText = readFileSync(join(process.cwd(), "src/app/components/repo-grades/repo-grades.module.css"), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
     ""
@@ -802,72 +797,23 @@ describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Gr
     readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesStickyHeader.tsx"), "utf8")
   );
 
-  /**
-   * RG-SEARCH-STICKY Wave A relocated the run-bar mount into RepoGradesStickyHeader;
-   * index.tsx now builds the `runBar={...}` prop. `guard` is the condition before
-   * the `?` (the one-folder gate), `tag` is the whole prop expression (handlers).
-   */
-  function mountSlice(): { guard: string; tag: string } {
-    const propIdx = indexText.indexOf("runBar={");
-    expect(propIdx).toBeGreaterThan(-1);
-    const openIdx = indexText.indexOf("{", propIdx);
-    const endIdx = findMatchingBraceEnd(indexText, openIdx);
-    expect(endIdx).toBeGreaterThan(openIdx);
-    const tag = indexText.slice(openIdx, endIdx);
-    const qIdx = tag.indexOf("?");
-    expect(qIdx).toBeGreaterThan(-1);
-    return { guard: tag.slice(0, qIdx), tag };
-  }
-
-  it("W3-R1: index.tsx mounts the sticky header whose run bar is gated on one folder being selected, and the header renders the run bar", () => {
+  it("W3-R1: index.tsx mounts the sticky header, which no longer carries a run bar prop or mount", () => {
     expect(indexText).toMatch(/import RepoGradesStickyHeader from "\.\/RepoGradesStickyHeader"/);
     expect(indexText).toMatch(/<RepoGradesStickyHeader\b/);
-    expect(stickyHeaderText).toMatch(/import RepoGradesRunBar\b[^;]*from "\.\/RepoGradesRunBar"/);
-    expect(stickyHeaderText).toMatch(/<RepoGradesRunBar\b/);
-    const { guard } = mountSlice();
-    expect(guard).toContain("currentSelectedFolder");
-    expect(guard).toContain("ALL_FOLDERS");
+    expect(indexText).not.toMatch(/\brunBar=/);
+    expect(stickyHeaderText).not.toMatch(/RepoGradesRunBar/);
+    expect(stickyHeaderText).not.toMatch(/\brunBar\b/);
   });
 
-  it("W3-R2: the run bar consumes the shared label leaf and calls the same plan builders as the column header, without re-inlining a label", () => {
-    expect(barText).toMatch(/import \{[^}]*repoGradesRunPlanLabels[^}]*\} from "\.\/repoGradesRunPlan"/);
-    expect(barText).toMatch(/[:\s]gradeLabel\b/);
-    expect(barText).toMatch(/[:\s]postLabel\b/);
-    for (const call of ["buildBulkGradePlan(", "buildRepoGradePostPlan(", "repoGradePostCandidateRows(", "scopeRepoGradeRowsToSelection("]) {
-      expect(barText).toContain(call);
-    }
-    expect(barText).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
-    expect(barText).not.toContain("Nothing to grade in");
+  it("W3-R2: the run bar component file and its CSS classes are deleted", () => {
+    expect(existsSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesRunBar.tsx"))).toBe(false);
+    expect(cssText).not.toMatch(/\.runBar/);
   });
 
-  it("W3-R3: Grade and Post sit in ONE run-bar wrapper, forward only to the confirmed handlers, and the mount passes the real handlers", () => {
-    const start = barText.indexOf("<div className={styles.runBar}");
-    expect(start).toBeGreaterThan(-1);
-    const end = barText.indexOf("</div>", start);
-    expect(end).toBeGreaterThan(start);
-    const wrapper = barText.slice(start, end);
-    expect(wrapper).toMatch(/onGradeColumn\(column\.folder\)/);
-    expect(wrapper).toMatch(/onPostColumn\(column, pointsPossible\)/);
-    expect((wrapper.match(/<Button\b/g) ?? []).length).toBe(2);
-    expect(barText).not.toContain("postCanvasGradesAction(");
-    expect(barText).not.toContain("gradeRepoAction(");
-    const { tag } = mountSlice();
-    expect(tag).toContain("onGradeColumn: handleGradeColumn");
-    expect(tag).toContain("onPostColumn: handlePostColumn");
-    expect(stickyHeaderText).toContain("<RepoGradesRunBar {...runBar}");
-  });
-
-  it("W3-R4: the wrapper carries a class whose OWN rule is position: sticky with a vertical offset (not the grid's thead rule)", () => {
-    const m = /<div className=\{styles\.([A-Za-z0-9_]+)\}/.exec(barText.slice(barText.indexOf("<div className={styles.runBar}")));
-    expect(m).not.toBeNull();
-    const stickyClass = m![1];
-    const open = cssText.indexOf(`.${stickyClass} {`);
-    expect(open).toBeGreaterThan(-1);
-    const close = cssText.indexOf("}", open);
-    expect(close).toBeGreaterThan(open);
-    const rule = cssText.slice(open, close);
-    expect(rule).toMatch(/position:\s*sticky/);
-    expect(rule).toMatch(/\b(top|bottom):/);
+  it("W3-R3: the grid column header still owns Grade/Post and the assignment select, wired to the confirmed handlers", () => {
+    expect(indexText).toContain("onGradeColumn={handleGradeColumn}");
+    expect(indexText).toContain("onPostColumn={handlePostColumn}");
+    expect(indexText).toContain("onAssignmentChange={handleAssignmentChange}");
   });
 
   it("W3-R7: the course, repo-filter and sort pickers share ONE existing-class wrapper row", () => {

@@ -37,8 +37,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3);
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -786,10 +786,57 @@
   background: var(--surface-subtle);
 }
 
-.setupRegion > summary {
+.setupRegion[open] > summary {
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* Shared disclosure header (parent "Run setup" and nested "Grading settings"):
+   label, CSS-only chevron, optional right-aligned collapsed-state summary. */
+.disclosureSummary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
   cursor: pointer;
   font-weight: 600;
+  color: var(--text-primary);
+  list-style: none;
 }
+
+.disclosureSummary::-webkit-details-marker { display: none; }
+
+.disclosureSummary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+details[open] > .disclosureSummary::before { transform: rotate(45deg); }
+
+.disclosureSummary:hover {
+  color: var(--text-secondary);
+}
+
+.disclosureSummary:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.setupSummaryMeta {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+details[open] > .disclosureSummary .setupSummaryMeta { display: none; }
 
 .linkPanel {
   margin-top: var(--space-5);
@@ -944,42 +991,4 @@
 .linkSourceButtonActive:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-}
-
-/* A7 W3 sticky run bar (RepoGradesRunBar.tsx). Its OWN rule carries the
-   sticky mechanism (the grid's thead th rule above is a different element).
-   z-index sits above the sticky table header so the bar never slides under
-   it. Whether it actually sticks depends on no ancestor clipping overflow -
-   an owner check (docs/repo-grader-w3-surface-test-notes.md RW3-4). */
-.runBar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  flex: 1 1 100%;
-}
-
-.runBarContext {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: var(--space-3);
-  flex: 1 1 240px;
-  min-width: 0;
-}
-
-.runBarContext .postReason {
-  font-style: normal;
-  color: var(--text-secondary);
-}
-
-.runBarFolder {
-  flex: 1 0 100%;
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  color: var(--text-primary);
 }

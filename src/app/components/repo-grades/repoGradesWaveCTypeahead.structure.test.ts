@@ -28,7 +28,6 @@ function slice(src: string, start: string, end: string): string {
 
 const INDEX = withoutLineComments(read("index.tsx"));
 const HOME = withoutLineComments(read("RepoGradesGradeSetTypeahead.tsx"));
-const RUNBAR = withoutLineComments(read("RepoGradesRunBar.tsx"));
 const GRID = withoutLineComments(read("RepoGradesGrid.tsx"));
 const ACTIONS = withoutLineComments(read("useRepoGradesGradingActions.ts"));
 const HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
@@ -36,7 +35,6 @@ const HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
 describe("F3-c: every grade-plan site routes through resolveGradeScope", () => {
   for (const [name, src] of [
     ["useRepoGradesGradingActions.ts", ACTIONS],
-    ["RepoGradesRunBar.tsx", RUNBAR],
     ["RepoGradesGrid.tsx", GRID],
   ] as const) {
     it(`${name} imports and calls it, with no bare pre-F3-c expression`, () => {
@@ -48,8 +46,7 @@ describe("F3-c: every grade-plan site routes through resolveGradeScope", () => {
     });
   }
 
-  it("the two label sites read scopedToSelection off the resolved scope", () => {
-    expect(RUNBAR).toContain("gradeScope.scopedToSelection");
+  it("the label site reads scopedToSelection off the resolved scope", () => {
     expect(GRID).toContain("gradeScope.scopedToSelection");
   });
 });
@@ -89,7 +86,7 @@ describe("AC-F4: the auto-filter and its affordance", () => {
   it("bodyRows comes from visibleRepoRows over the query-free displayedRows", () => {
     const def = slice(INDEX, "const bodyRows =", ";");
     expect(def).toContain("visibleRepoRows(displayedRows, uiState.searchQuery");
-    expect(INDEX).toMatch(/rows:\s*displayedRows/);
+    expect(INDEX).toMatch(/rows=\{displayedRows\}/);
   });
 
   it("the typeahead renders the counter whenever a summary exists, with both actions", () => {

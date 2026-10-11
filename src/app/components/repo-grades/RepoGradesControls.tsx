@@ -48,6 +48,7 @@ import {
 } from "./repoGradesRubricSource";
 import type { RepoGradeRubricListHint } from "./useRepoGradesRubricSource";
 import styles from "../../page.module.css";
+import gridStyles from "./repo-grades.module.css";
 
 /** One contiguous run of `RepoGradeRubricOption`s sharing the same
  * `<optgroup>` label (or `null` for a top-level option), in the order
@@ -442,7 +443,7 @@ export default function RepoGradesControls({
             if (e.currentTarget.open !== settingsOpen) onSettingsOpenChange(e.currentTarget.open);
           }}
         >
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Grading settings - {settingsSummary}</summary>
+          <summary className={gridStyles.disclosureSummary}>Grading settings - {settingsSummary}</summary>
           <div className={styles.field}>
             <FormControlLabel
               sx={CHECKBOX_LABEL_SX}

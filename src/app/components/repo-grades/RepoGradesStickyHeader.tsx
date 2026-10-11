@@ -2,22 +2,19 @@
 
 // RG-SEARCH-STICKY Wave A (docs/repo-grades-wave-a-sticky-shell-test-notes.md):
 // the one sticky working-header container. A single bounded scroll shell
-// (.stickyShell) encloses BOTH the working-header tier (the relocated run bar)
+// (.stickyShell) encloses BOTH the working-header tier (the control slots)
 // AND the table passed as children, so the two sticky tiers share one scroll
 // context and travel together. The header's rendered height is published as
 // --rg-working-header-h on the shell so the column header (thead) sticks just
-// below it. Imports only browser-safe leaves (React, the run bar, the CSS
+// below it. Imports only browser-safe leaves (React, the CSS
 // module); ResizeObserver is a DOM API, not an import.
 import { useEffect, useRef, type ReactNode } from "react";
-import RepoGradesRunBar, { type RepoGradesRunBarProps } from "./RepoGradesRunBar";
 import styles from "./repo-grades.module.css";
 
 export interface RepoGradesStickyHeaderProps {
-  // Null when no run bar applies (no folder, or the all-folders view).
-  runBar: RepoGradesRunBarProps | null;
   // RG-SEARCH-STICKY Wave B: the persisted search box text and its setter. The
   // box narrows the table body only (index.tsx's bodyRows); it renders in every
-  // folder view, so the working-header tier no longer depends on the run bar.
+  // folder view, so the working-header tier is always present.
   searchQuery: string;
   onSearchChange: (value: string) => void;
   // RG-SEARCH-STICKY Wave C: the grade-set typeahead (index.tsx owns its state).
@@ -37,10 +34,10 @@ export interface RepoGradesStickyHeaderProps {
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, targetBranchControl, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, targetBranchControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
-  const hasHeader = runBar !== null || typeof onSearchChange === "function";
+  const hasHeader = typeof onSearchChange === "function";
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -64,14 +61,12 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
     <div className={styles.stickyShell} ref={shellRef}>
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
-          {runBar && <RepoGradesRunBar {...runBar} />}
           {statusBanner}
           {folderControl}
           {rescanControl}
           {gradeSetControl}
           {targetBranchControl}
           <label className={styles.headerField}>
-            <span className={styles.headerInputLabel}>Search</span>
             <input
               type="search"
               className={styles.headerInput}

@@ -6,7 +6,7 @@
 // had a sticky thead and the run bar already had a sticky rule, so a file-wide
 // position:sticky match would pass vacuously.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 const read = (name: string): string => readFileSync(join(__dirname, name), "utf8");
@@ -36,7 +36,6 @@ function ruleBlock(css: string, selector: string, from = 0): string {
 const CSS = withoutCssComments(read("repo-grades.module.css"));
 const INDEX = withoutLineComments(read("index.tsx"));
 const HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
-const RUNBAR = withoutLineComments(read("RepoGradesRunBar.tsx"));
 const TYPEAHEAD = withoutLineComments(read("RepoGradesGradeSetTypeahead.tsx"));
 
 // Slice one element by its own anchors; both ends must resolve or the test
@@ -103,21 +102,24 @@ describe("Wave A wiring", () => {
     expect(INDEX).toMatch(/<RepoGradesStickyHeader\b/);
   });
 
-  it("W-A7: the run bar is relocated into the sticky header, not duplicated", () => {
-    expect(HEADER).toMatch(/import\s+RepoGradesRunBar\b/);
-    expect(HEADER).toMatch(/<RepoGradesRunBar\b/);
-    expect(INDEX).not.toMatch(/<RepoGradesRunBar\b/);
+  it("W-A7: the run bar is GONE from the sticky header (REPO-GRADES-HEADER-SETUP-VISUAL C1); the grid thead owns Grade/Post", () => {
+    expect(HEADER).not.toMatch(/RepoGradesRunBar/);
+    expect(HEADER).not.toMatch(/\brunBar\b/);
+    expect(INDEX).not.toMatch(/RepoGradesRunBar/);
+    expect(INDEX).not.toMatch(/\brunBar\b/);
+    expect(existsSync(join(__dirname, "RepoGradesRunBar.tsx"))).toBe(false);
+    expect(CSS).not.toMatch(/\.runBar/);
   });
 
-  it("W-A8: shell, then working header (holding the run bar), then children", () => {
+  it("W-A8: shell, then working header (holding the control slots), then children", () => {
     const shell = HEADER.indexOf("styles.stickyShell");
     const hdr = HEADER.indexOf("styles.stickyWorkingHeader");
-    const bar = HEADER.indexOf("<RepoGradesRunBar");
+    const slot = HEADER.indexOf("{statusBanner}");
     const kids = HEADER.indexOf("{children}");
     expect(shell).toBeGreaterThan(-1);
     expect(hdr).toBeGreaterThan(shell);
-    expect(bar).toBeGreaterThan(hdr);
-    expect(kids).toBeGreaterThan(bar);
+    expect(slot).toBeGreaterThan(hdr);
+    expect(kids).toBeGreaterThan(slot);
   });
 
   it("W-A9: the header height var is published by the component", () => {
@@ -125,20 +127,13 @@ describe("Wave A wiring", () => {
     expect(HEADER).toMatch(/setProperty\(\s*["']--rg-working-header-h["']/);
   });
 
-  it("W-A10: Wave A leaves the run bar plan inputs and Wave C identifiers alone", () => {
-    // Wave C (F3-c) reverses the pre-F3-c pins: the run bar now routes through
-    // resolveGradeScope and no longer carries the bare bulkSelectionOnly forms.
-    expect(RUNBAR).toContain("resolveGradeScope(selected, bulkSelectionOnly)");
-    expect(RUNBAR).toContain("scopedToSelection: gradeScope.scopedToSelection");
-    expect(RUNBAR).not.toContain("selectionOnly: bulkSelectionOnly");
-    expect(RUNBAR).not.toContain("scopedToSelection: bulkSelectionOnly && selected.size > 0");
-    expect(INDEX).toMatch(/rows:\s*displayedRows/);
+  it("W-A10: Wave A leaves the plan inputs alone and keeps the banned identifiers out of the header", () => {
+    expect(INDEX).toMatch(/rows=\{displayedRows\}/);
     // Wave B retires the bodyRows ban for index.tsx ONLY (it legitimately feeds
-    // the grid's bodyRows prop); the full ban stays on the header and run bar.
+    // the grid's bodyRows prop); the full ban stays on the header.
     for (const [name, src, banned] of [
       ["index.tsx", INDEX, ["planRows"]],
       ["RepoGradesStickyHeader.tsx", HEADER, ["visibleRepoRows", "bodyRows", "planRows"]],
-      ["RepoGradesRunBar.tsx", RUNBAR, ["visibleRepoRows", "bodyRows", "planRows"]],
     ] as const) {
       for (const id of banned) {
         expect(src, `${name} must not contain ${id}`).not.toContain(id);
@@ -243,6 +238,21 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
   it("AC-W4-1/3: the parent details is persisted via setupOpen and defaults open while !allBound", () => {
     expect(W_INDEX).toContain("effectiveOpen(uiState.setupOpen, !allBound)");
     expect(W_INDEX).toMatch(/setupOpen: value/);
+  });
+
+  it("VISUAL-B: the parent summary and the nested Grading settings summary share the .disclosureSummary class, with the bound summary shown collapsed", () => {
+    expect(W_INDEX).toMatch(/<summary className=\{gridStyles\.disclosureSummary\}>/);
+    expect(W_INDEX).toContain("{boundSummary}");
+    expect(withoutLineComments(read("RepoGradesControls.tsx"))).toMatch(/<summary className=\{gridStyles\.disclosureSummary\}>Grading settings/);
+    expect(ruleBlock(CSS, ".disclosureSummary::before")).toMatch(/border-right/);
+  });
+
+  it("VISUAL-A: the working header uses the compact padding and carries no stacked visible Search/Target-branch caption", () => {
+    expect(ruleBlock(CSS, ".stickyWorkingHeader")).toMatch(/padding:\s*var\(--space-2\) var\(--space-3\)/);
+    expect(HEADER).not.toMatch(/>Search</);
+    expect(W_INDEX).not.toMatch(/>Target branch \(merged to\)</);
+    expect(HEADER).toContain('aria-label="Search repositories"');
+    expect(W_INDEX).toContain('aria-label="Target branch (merged to)"');
   });
 
   it("AC-W4-7: the parent <details> contains BOTH RepoGradesControls and LinkUsernamesPanel", () => {

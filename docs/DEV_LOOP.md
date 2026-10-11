@@ -140,6 +140,17 @@ produces a claim, a removal test (the test seat's, below) and, at Verify, a
 finding. Classes derived from this tree, the classes deliberately struck as
 inherited, and the worked negative example are in `docs/loop/leverage.md`.
 
+**Diagnostics representation (owner, 2026-10-11).** Every new feature a user
+reaches carries REPRESENTATION IN THE DIAGNOSTICS - the app's diagnostics
+surface a run reports through - so a shipped capability is observable there
+rather than invisible. Like the leverage claim, this is an acceptance criterion
+the AC seat writes and the Verify half re-judges against the built diff: the
+criteria name the diagnostic the feature adds - what it reports, and the failure
+it makes visible. A pure presentational change with no new data path and no new
+failure mode may legitimately carry none, but that absence is STATED and
+justified in the criteria, never assumed. A new behaviour shipped with no
+diagnostic rep is an unmet criterion, the same as a missing test.
+
 **Design seats, in DEPENDENCY WAVES - never all at once.** Wave 1 is structure
 and state (architect + reuse survey, data and storage) plus anything that only
 reads and reports (baseline, external-facts research). Wave 2 is constraints

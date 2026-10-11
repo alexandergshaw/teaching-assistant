@@ -173,6 +173,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "castletop.test.ts",
   "chat-style.test.ts",
   "course-calendar.test.ts",
+  "deck-template-files.test.ts",
   "course-hub-core.storage-path.test.ts",
   "course-hub-integrations.test.ts",
   "course-planning-grounding.test.ts",

@@ -27,7 +27,9 @@ import { createHash } from "crypto";
 import { requireUser } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
-import { checkWireBudget } from "@/lib/upload-budget";
+import { checkWireBudget, formatMB, maxFileBytesForWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
+import { ZipCapError } from "@/lib/zip-caps";
+import { assertPptxContainer } from "@/lib/decks/pptx-validate";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import {
   fillOfficeTemplate,
@@ -53,6 +55,36 @@ export interface DeckTemplateFileMeta {
 function table() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (createServiceClient() as any).from("deck_template_files");
+}
+
+const TEMPLATE_TOO_HEAVY_MESSAGE = "That file is too large or too heavily compressed to open safely.";
+const TEMPLATE_GONE_MESSAGE = "That template no longer exists.";
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A stale or tampered id must not reach Postgres (a uuid column answers a
+// non-uuid with a raw "invalid input syntax" message). Module-private on
+// purpose: a "use server" file exports only async actions.
+function isUuid(id: string): boolean {
+  return UUID_SHAPE.test(id.trim());
+}
+
+// A ZipCapError's own text is grading-worded ("Nothing was graded..."), which
+// is wrong for a template; map it to template copy. Everything else keeps the
+// existing pass-through of the error text.
+function templateErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ZipCapError) return TEMPLATE_TOO_HEAVY_MESSAGE;
+  return err instanceof Error ? err.message : fallback;
+}
+
+function isDeckShape(deck: unknown): deck is { presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> } {
+  if (!deck || typeof deck !== "object") return false;
+  const d = deck as { presentationTitle?: unknown; slides?: unknown };
+  if (typeof d.presentationTitle !== "string" || !Array.isArray(d.slides)) return false;
+  return d.slides.every((s: unknown) => {
+    if (!s || typeof s !== "object") return false;
+    const slide = s as { title?: unknown; bullets?: unknown };
+    return typeof slide.title === "string" && Array.isArray(slide.bullets) && slide.bullets.every((b: unknown) => typeof b === "string");
+  });
 }
 
 /** List the owner's uploaded deck template files (metadata only), newest first. */
@@ -90,6 +122,9 @@ export async function uploadDeckTemplateFileAction(
     if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That template is too large to upload in one request." };
 
     const buffer = Buffer.from(base64, "base64");
+    // The authoritative magic-byte boundary: validate BEFORE the parse, the
+    // sha256 and the insert, so a rejected file is cheap and never persisted.
+    await assertPptxContainer(buffer);
     const paragraphs = await parseOfficeParagraphs("pptx", buffer);
     if (paragraphs.length === 0) {
       return {
@@ -111,7 +146,7 @@ export async function uploadDeckTemplateFileAction(
     const r = data as { id: string; name: string; file_name: string; updated_at: string };
     return { template: { id: r.id, name: r.name, fileName: r.file_name, updatedAt: r.updated_at } };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not save the template." };
+    return { error: templateErrorMessage(err, "Could not save the template.") };
   }
 }
 
@@ -120,6 +155,7 @@ export async function deleteDeckTemplateFileAction(id: string): Promise<{ ok: tr
   try {
     const user = await requireUser();
     if (!id.trim()) return { error: "Choose a template." };
+    if (!isUuid(id)) return { error: TEMPLATE_GONE_MESSAGE };
     const { error } = await table().delete().eq("user_id", user.id).eq("id", id);
     if (error) return { error: `Could not delete the template: ${error.message}` };
     return { ok: true };
@@ -149,6 +185,8 @@ export async function fillDeckTemplateFileAction(
   try {
     const user = await requireUser();
     if (!templateFileId.trim()) return { error: "Choose an uploaded template." };
+    if (!isUuid(templateFileId)) return { error: TEMPLATE_GONE_MESSAGE };
+    if (!isDeckShape(deck)) return { error: "The deck is not in the expected shape. Generate it again and retry." };
 
     const { data, error } = await table()
       .select("id, name, file_name, content, updated_at")
@@ -156,7 +194,7 @@ export async function fillDeckTemplateFileAction(
       .eq("id", templateFileId)
       .maybeSingle();
     if (error) return { error: error.message };
-    if (!data) return { error: "That template no longer exists." };
+    if (!data) return { error: TEMPLATE_GONE_MESSAGE };
     const row = data as { id: string; name: string; file_name: string; content: string; updated_at: string };
 
     const buffer = Buffer.from(row.content, "base64");
@@ -171,8 +209,20 @@ export async function fillDeckTemplateFileAction(
     }
 
     const out = await fillOfficeTemplate("pptx", buffer, plan.replacements);
-    return { base64: out.toString("base64"), name: deck.presentationTitle.trim() || row.name };
+    const outBase64 = out.toString("base64");
+    // The fill re-emits the package uncompressed, so a template that passed the
+    // upload gate can still exceed what one response can carry. Refuse cleanly
+    // rather than return a payload the platform will reject.
+    if (outBase64.length > UPLOAD_WIRE_BUDGET_BYTES) {
+      return {
+        error:
+          `The filled deck is ${formatMB(out.length)}, larger than the ` +
+          `${formatMB(maxFileBytesForWireBudget())} this app can return in one response. ` +
+          `Use a smaller template (fewer or lighter images).`,
+      };
+    }
+    return { base64: outBase64, name: deck.presentationTitle.trim() || row.name };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not fill the template." };
+    return { error: templateErrorMessage(err, "Could not fill the template.") };
   }
 }

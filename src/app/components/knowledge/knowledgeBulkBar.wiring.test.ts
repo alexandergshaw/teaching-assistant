@@ -89,7 +89,8 @@ describe("KnowledgeBulkBar.tsx - the resting row is exactly one row, everything 
     // (K1-K10) must NOT still be directly in the resting slice - they belong
     // in the menu now.
     expect(restingSlice, "Start recording must not render in the resting row").not.toMatch(/onStartRecording/);
-    expect(restingSlice, "Grade via recording must not render in the resting row").not.toMatch(/onStartGrading/);
+    expect(stripped, "Grade via recording was removed (GRADING-CHAT-CONSOLIDATE W2)").not.toMatch(/onStartGrading/);
+    expect(stripped, "Grade via recording was removed (GRADING-CHAT-CONSOLIDATE W2)").not.toContain("Grade via recording");
     expect(restingSlice, "the selection description must not render in the resting row").not.toMatch(
       /selectionDescription\.text/
     );
@@ -99,12 +100,12 @@ describe("KnowledgeBulkBar.tsx - the resting row is exactly one row, everything 
 describe("Every bulk action still carries its consequence tag (K7), wherever it now lives", () => {
   const stripped = stripComments(bulkBarSource);
 
-  it("SABOTAGE TARGET: all three tiers are called - read-only (Ask AI), fan-out x2 (Start recording, Grade via recording), destructive (Delete)", () => {
+  it("SABOTAGE TARGET: all three tiers are called - read-only (Ask AI), fan-out x1 (Start recording), destructive (Delete)", () => {
     const readOnlyCalls = [...stripped.matchAll(/kbBulkActionConsequenceTag\("read-only"\)/g)];
     const fanOutCalls = [...stripped.matchAll(/kbBulkActionConsequenceTag\("fan-out"\)/g)];
     const destructiveCalls = [...stripped.matchAll(/kbBulkActionConsequenceTag\("destructive"\)/g)];
     expect(readOnlyCalls.length, "Ask AI's read-only tag is missing").toBeGreaterThanOrEqual(1);
-    expect(fanOutCalls.length, "Start recording / Grade via recording must each carry a fan-out tag").toBe(2);
+    expect(fanOutCalls.length, "Start recording must carry a fan-out tag").toBe(1);
     expect(destructiveCalls.length, "Delete's destructive tag is missing").toBeGreaterThanOrEqual(1);
   });
 

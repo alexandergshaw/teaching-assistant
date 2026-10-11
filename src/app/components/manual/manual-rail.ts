@@ -42,7 +42,7 @@ export type BuildViewType = "new" | "prebuilt";
 // submission stream, not a fill of "run". Always-mounted like
 // "recording"/"snapshots" (it holds an in-flight continuous run), not a
 // plain conditional like "drafts" - see page.tsx's mount comment.
-export type GradingView = "run" | "repos" | "recording" | "snapshots" | "drafts" | "chat";
+export type GradingView = "repos" | "drafts" | "chat";
 
 // The Presentations sub-tab's own inner selection (PRES-2 S6.7,
 // RES-S6-A/docs/pres-2-s6-plan.md section 0.1): which of its two children is
@@ -114,10 +114,7 @@ export function isAnnouncementsView(value: unknown): value is AnnouncementsView 
 }
 
 const GRADING_VIEW_PRESENCE: Record<GradingView, true> = {
-  run: true,
   repos: true,
-  recording: true,
-  snapshots: true,
   drafts: true,
   chat: true,
 };
@@ -200,10 +197,7 @@ export const destinations: DestinationGroup[] = [
   {
     name: "Grading",
     destinations: [
-      { id: "grading-run", label: "Submissions", description: "Grade student submissions and post results to Canvas" },
       { id: "grading-repos", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
-      { id: "grading-recording", label: "From a recording", description: "Grade submissions by narrating over a screen recording" },
-      { id: "grading-snapshots", label: "From screenshots", description: "Grade submissions from screenshots of student work" },
       { id: "grading-drafts", label: "Drafted Grades", description: "Review and post grades saved as drafts" },
       { id: "grading-chat", label: "Chat", description: "Grade a continuous stream of submissions in a chat-style surface" },
     ],
@@ -357,14 +351,14 @@ export interface GradingPointerTarget {
 export const RETIRED_GRADING_POINTERS: Record<string, GradingPointerTarget> = {
   // ta-content-view = "grading" (paired with a stored/URL manualView of
   // "content"), and ?manualView=content&contentView=grading.
-  "content-view:grading": { manualView: "grading", gradingView: "run" },
+  "content-view:grading": { manualView: "grading", gradingView: "chat" },
   // The rail destination id, for a persisted or hand-typed destination.
-  "lms-grading": { manualView: "grading", gradingView: "run" },
+  "lms-grading": { manualView: "grading", gradingView: "chat" },
   // ta-manual-view = "repo-grades", and ?manualView=repo-grades.
   "repo-grades": { manualView: "grading", gradingView: "repos" },
   // ta-active-tab = "grading", the pre-merge top-level tab value still
   // handled by useAppNavigation.ts's manualView initializer.
-  "active-tab:grading": { manualView: "grading", gradingView: "run" },
+  "active-tab:grading": { manualView: "grading", gradingView: "chat" },
   // Drafts > Grades (workflowsView=drafts + draftsView=grades) is now Tools >
   // Grading > Drafted Grades (GRAD-SUBTAB wave 3). Unlike every pointer above,
   // its SOURCE sits in the workflows family (toolsSection="workflows") while
@@ -374,6 +368,12 @@ export const RETIRED_GRADING_POINTERS: Record<string, GradingPointerTarget> = {
   // originates in the manual family and needs no override); see
   // docs/tools-grading-subtab-wave3-architecture.md section 3.3.
   "drafts-view:grades": { manualView: "grading", gradingView: "drafts" },
+  // GRADING-CHAT-CONSOLIDATE W2: the Submissions / From a recording / From
+  // screenshots sub-tabs are removed; a stored or bookmarked raw id for any of
+  // them lands on Chat, never on a dead view.
+  "grading-run": { manualView: "grading", gradingView: "chat" },
+  "grading-recording": { manualView: "grading", gradingView: "chat" },
+  "grading-snapshots": { manualView: "grading", gradingView: "chat" },
 };
 
 export function resolveStateFromDestinationId(
@@ -437,10 +437,7 @@ export function resolveStateFromDestinationId(
   })();
 
   const gradingView: GradingView = (() => {
-    if (id === "grading-run") return "run";
     if (id === "grading-repos") return "repos";
-    if (id === "grading-recording") return "recording";
-    if (id === "grading-snapshots") return "snapshots";
     if (id === "grading-drafts") return "drafts";
     if (id === "grading-chat") return "chat";
     return currentGradingView;

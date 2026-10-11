@@ -62,11 +62,9 @@ export type RecordingLaunchView =
   | "captions"
   | "slides"
   | "avatar"
-  | "grading"
   | "moduledeck"
   | "walkannounce"
   | "messages"
-  | "snapgrade"
   | "remembered";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
@@ -77,33 +75,24 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "captions",
   "slides",
   "avatar",
-  "grading",
   "moduledeck",
   "walkannounce",
   "messages",
-  "snapgrade",
   "remembered",
 ];
 
-/** Where a launch lands in the app shell: Tools > (Grading | Announcements |
- * Recording). "grading"/"snapgrade" go to Tools > Grading; "walkannounce" goes
+/** Where a launch lands in the app shell: Tools > (Announcements |
+ * Recording). "walkannounce" goes
  * to Tools > Announcements > From a walkthrough (ANNOUNCEMENTS-TAB wave A-W2:
  * its capture panel moved out of Recording); every other view, including
  * the "remembered" sentinel (the fab's view-less entry, which RecordingTab
  * resolves to its own persisted sub-view), goes to Tools > Recording. */
 export function resolveRecordingLaunchRoute(view: RecordingLaunchView): {
-  manualView: "grading" | "recording" | "announcements";
-  gradingView?: "recording" | "snapshots";
+  manualView: "recording" | "announcements";
   announcementsView?: "walkthrough";
   toolsSection: "manual";
   activeTab: "manual";
 } {
-  if (view === "grading") {
-    return { manualView: "grading", gradingView: "recording", toolsSection: "manual", activeTab: "manual" };
-  }
-  if (view === "snapgrade") {
-    return { manualView: "grading", gradingView: "snapshots", toolsSection: "manual", activeTab: "manual" };
-  }
   if (view === "walkannounce") {
     return { manualView: "announcements", announcementsView: "walkthrough", toolsSection: "manual", activeTab: "manual" };
   }

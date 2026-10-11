@@ -567,22 +567,22 @@ describe("the two moved grading-capture panels stay mounted while hidden (I-W2)"
     }
   }
 
-  it("GradingRecordingPanel is a display toggle on an always-rendered element, never a conditional render", () => {
-    assertAlwaysMounted("GradingRecordingPanel", [
-      'activeTab === "manual"',
-      'toolsSection === "manual"',
-      'manualView === "grading"',
-      'gradingView === "recording"',
-    ]);
+  // GRADING-CHAT-CONSOLIDATE W2: the two moved capture panels are no longer
+  // mounted anywhere in page.tsx (nav-only removal; the panel files remain,
+  // deleted later under RES-GCC-DELETE). A zero-mount-site guard replaces the
+  // two always-mounted guards that stood here.
+  it("GradingRecordingPanel and SnapshotGradingPanel have zero mount sites in page.tsx", () => {
+    const source = read(PAGE);
+    for (const tag of ["GradingRecordingPanel", "SnapshotGradingPanel"]) {
+      expect(source.includes(`<${tag}`), `page.tsx still renders <${tag}`).toBe(false);
+      expect(source.includes(`import ${tag}`), `page.tsx still imports ${tag}`).toBe(false);
+    }
   });
 
-  it("SnapshotGradingPanel is a display toggle on an always-rendered element, never a conditional render", () => {
-    assertAlwaysMounted("SnapshotGradingPanel", [
-      'activeTab === "manual"',
-      'toolsSection === "manual"',
-      'manualView === "grading"',
-      'gradingView === "snapshots"',
-    ]);
+  it("GradingTab (the Submissions surface) has zero mount sites in page.tsx", () => {
+    const source = read(PAGE);
+    expect(source.includes("<GradingTab"), "page.tsx still renders <GradingTab").toBe(false);
+    expect(source.includes("import GradingTab"), "page.tsx still imports GradingTab").toBe(false);
   });
 
   // GRADING-CHAT wave 1 (docs/grading-chat-architecture.md section 7,
@@ -671,27 +671,22 @@ describe("moved announcement surfaces have exactly one mount site (REQ-1, REQ-6)
   });
 });
 
-// GRAD-SUBTAB wave 2 check residual R-1: without this guard,
-// gradingView === "recording" (or "snapshots") would render BOTH GradingTab
-// (the manualView === "grading" ternary's else arm) AND the new
-// always-mounted panel for the same chip - two surfaces answering one click.
-// Proven red (named mutation): dropping the `(gradingView === "run" ||
-// gradingView === "repos")` clause from the branch guard makes this
-// assertion fail.
-describe('the manualView === "grading" branch renders GradingTab/RepoGradesTab ONLY for gradingView run/repos (R-1)', () => {
-  it("the grading render branch is scoped to gradingView run/repos, excluding the two moved capture views", () => {
+// GRADING-CHAT-CONSOLIDATE W2 (supersedes GRAD-SUBTAB wave 2 R-1): the
+// manualView === "grading" conditional branch renders RepoGradesTab ONLY, for
+// gradingView === "repos". Without the repos-only guard a removed view could
+// fall into an else arm and render a stale surface.
+describe('the manualView === "grading" branch renders RepoGradesTab ONLY for gradingView repos (R-1)', () => {
+  it("the grading render branch is scoped to gradingView repos and renders no GradingTab", () => {
     const source = read(PAGE);
     const start = source.indexOf('manualView === "grading" &&');
     expect(start, 'expected to find the manualView === "grading" render branch in page.tsx').toBeGreaterThan(-1);
     const end = source.indexOf("</TabShell>", start);
     expect(end).toBeGreaterThan(start);
     const branch = source.slice(start, end);
-    expect(
-      branch,
-      "the grading branch guard does not restrict gradingView to run/repos - without this, " +
-        "gradingView === \"recording\"/\"snapshots\" would render GradingTab AND the new " +
-        "always-mounted capture panel at the same time"
-    ).toMatch(/gradingView === "run"[\s\S]{0,80}gradingView === "repos"/);
+    expect(branch).toMatch(/gradingView === "repos"/);
+    expect(branch).not.toMatch(/gradingView === "run"/);
+    expect(branch).toContain("<RepoGradesTab");
+    expect(branch).not.toContain("<GradingTab");
   });
 });
 

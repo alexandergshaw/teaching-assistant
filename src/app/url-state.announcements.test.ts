@@ -16,7 +16,7 @@ const DEFAULT_STATE: UrlNavState = {
   automateView: "templates",
   buildView: "prebuilt",
   contentView: "modules",
-  gradingView: "run",
+  gradingView: "chat",
   presentationsView: "slide-deck",
   announcementsView: "post",
   tasksView: "term",

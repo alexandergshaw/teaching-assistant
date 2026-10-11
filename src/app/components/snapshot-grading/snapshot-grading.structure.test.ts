@@ -63,39 +63,22 @@ const pageSource = fs.readFileSync(PAGE_PATH, "utf-8");
 
 const SNAPSHOT_GRADING_DIR = path.resolve(process.cwd(), "src/app/components/snapshot-grading");
 
-// GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md 2.2):
-// re-parented from RecordingTab into page.tsx, always-mounted/display-toggled,
-// reached through gradingView rather than recView. SUBJECT unchanged (mounted,
-// reachable, never unmounted - the panel holds a live MediaStream a
-// conditional mount would kill); only the location pin moved.
-describe("SnapshotGradingPanel is actually mounted by page.tsx (reachability, entry point a)", () => {
-  it("page.tsx imports the default export from ./components/snapshot-grading/SnapshotGradingPanel", () => {
-    expect(pageSource).toMatch(
-      /import SnapshotGradingPanel from "\.\/components\/snapshot-grading\/SnapshotGradingPanel"/
-    );
+// GRADING-CHAT-CONSOLIDATE W2: the "From screenshots" sub-tab is removed.
+// This block FLIPS from "mounted by page.tsx" to "mount is gone": page.tsx no
+// longer imports or renders SnapshotGradingPanel and no display-gate remains.
+// The panel file itself is deliberately kept (deleted later under
+// RES-GCC-DELETE).
+describe("SnapshotGradingPanel is no longer mounted by page.tsx (nav-only removal)", () => {
+  it("page.tsx does not import SnapshotGradingPanel", () => {
+    expect(pageSource).not.toMatch(/import SnapshotGradingPanel\b/);
   });
 
-  it("page.tsx actually renders <SnapshotGradingPanel - an import alone proves nothing", () => {
-    expect(pageSource).toMatch(/<SnapshotGradingPanel\b/);
+  it("page.tsx does not render <SnapshotGradingPanel", () => {
+    expect(pageSource).not.toMatch(/<SnapshotGradingPanel\b/);
   });
 
-  it('the rendered panel is wrapped in an always-mounted, display:none-toggled element gated on manualView === "grading" && gradingView === "snapshots" - never unmounted on tab switch', () => {
-    // Exactly one render site, and the immediate wrapper must set `display`
-    // (never a conditional render) - mirrors topLevelTabs.wiring.test.ts's
-    // RecordingTab assertion.
-    const renderIndex = pageSource.indexOf("<SnapshotGradingPanel");
-    expect(renderIndex, "expected to find <SnapshotGradingPanel in page.tsx").toBeGreaterThan(-1);
-    expect(pageSource.indexOf("<SnapshotGradingPanel", renderIndex + 1)).toBe(-1);
-    expect(
-      pageSource,
-      "SnapshotGradingPanel is no longer wrapped in an element whose style sets `display` - a conditional render here destroys a live MediaStream on navigation."
-    ).toMatch(/style=\{\{[\s\S]{0,300}?display:[\s\S]{0,300}?"none"[\s\S]{0,120}?\}\}\s*>\s*<SnapshotGradingPanel/);
-
-    const wrapper = pageSource.slice(Math.max(0, renderIndex - 500), renderIndex);
-    expect(wrapper).toContain('activeTab === "manual"');
-    expect(wrapper).toContain('toolsSection === "manual"');
-    expect(wrapper).toContain('manualView === "grading"');
-    expect(wrapper).toContain('gradingView === "snapshots"');
+  it('page.tsx has no display gate on gradingView === "snapshots"', () => {
+    expect(pageSource).not.toContain('gradingView === "snapshots"');
   });
 });
 
@@ -122,17 +105,19 @@ describe('"snapgrade" is fully retired from RecordingTab (recView union, restore
   });
 });
 
-describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECORDING_LAUNCH_VIEWS runtime validator (src/lib/recording-launch.ts)', () => {
+describe('"snapgrade" is no longer a member of the RecordingLaunchView union or the RECORDING_LAUNCH_VIEWS validator (GRADING-CHAT-CONSOLIDATE W2)', () => {
   const recordingLaunchSource = fs.readFileSync(path.resolve(process.cwd(), "src/lib/recording-launch.ts"), "utf-8");
 
-  it('"snapgrade" is in the RecordingLaunchView union type', () => {
-    expect(recordingLaunchSource).toMatch(/export type RecordingLaunchView =[\s\S]*?"snapgrade"[\s\S]*?;/);
+  it('"snapgrade" is gone from the RecordingLaunchView union type', () => {
+    const unionMatch = recordingLaunchSource.match(/export type RecordingLaunchView =[\s\S]*?;/);
+    expect(unionMatch, "expected to find the RecordingLaunchView union").toBeTruthy();
+    expect(unionMatch![0]).not.toMatch(/"snapgrade"/);
   });
 
-  it('"snapgrade" is in the RECORDING_LAUNCH_VIEWS runtime array - the array is the actual validator, the union is only the type', () => {
+  it('"snapgrade" is gone from the RECORDING_LAUNCH_VIEWS runtime array', () => {
     const arrayMatch = recordingLaunchSource.match(/const RECORDING_LAUNCH_VIEWS[\s\S]*?\];/);
     expect(arrayMatch, "expected to find the RECORDING_LAUNCH_VIEWS array literal").toBeTruthy();
-    expect(arrayMatch![0]).toMatch(/"snapgrade"/);
+    expect(arrayMatch![0]).not.toMatch(/"snapgrade"/);
   });
 });
 

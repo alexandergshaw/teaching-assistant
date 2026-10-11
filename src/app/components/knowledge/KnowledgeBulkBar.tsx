@@ -65,10 +65,9 @@ export interface KnowledgeBulkBarProps {
   onClear: () => void;
   onAskAi: () => void;
   onStartRecording: () => void;
-  onStartGrading: () => void;
   bulkDelete: UseKbBulkActionsReturn;
-  /** False while page bodies are still loading: Start recording and Grade
-   *  via recording read checked bodies, so they stay disabled until then.
+  /** False while page bodies are still loading: Start recording
+   *  reads checked bodies, so they stay disabled until then.
    *  Ask AI sends ids only and is never gated. */
   bodiesReady: boolean;
 }
@@ -84,7 +83,6 @@ export default function KnowledgeBulkBar({
   onClear,
   onAskAi,
   onStartRecording,
-  onStartGrading,
   bulkDelete,
   bodiesReady,
 }: KnowledgeBulkBarProps) {
@@ -215,19 +213,6 @@ export default function KnowledgeBulkBar({
             slotProps={{ secondary: { className: `${kbStyles.kbConsequenceTag} ${kbStyles.kbConsequenceTagFanOut}` } }}
           />
         </MenuItem>
-        <MenuItem
-          disabled={!bodiesReady}
-          onClick={() => {
-            closeMenu();
-            onStartGrading();
-          }}
-        >
-          <ListItemText
-            primary="Grade via recording"
-            secondary={bodiesReady ? kbBulkActionConsequenceTag("fan-out") : BODIES_LOADING_HINT}
-            slotProps={{ secondary: { className: `${kbStyles.kbConsequenceTag} ${kbStyles.kbConsequenceTagFanOut}` } }}
-          />
-        </MenuItem>
 
         {/* B5: nothing else on this surface says selecting a page sends its
             text to the model - state it once, here, and make it match what
@@ -235,8 +220,8 @@ export default function KnowledgeBulkBar({
             three whose server-side path also includes attachments. */}
         <div className={kbStyles.kbMenuSection}>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
-            Selected pages are sent to the model as context. Ask AI also includes any attached files; Start recording and
-            Grade via recording send page text only, and may omit a page if the selection is too large for the context
+            Selected pages are sent to the model as context. Ask AI also includes any attached files; Start recording
+            sends page text only, and may omit a page if the selection is too large for the context
             budget.
           </p>
         </div>

@@ -301,7 +301,7 @@ describe("the popstate ladder restores every inner-nav view's own state (I5)", (
 describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grading pointer (verify BLOCKER 1)", () => {
   it("resolveGradingPointer resolves both bookmarked shapes to the Grading sub-tab (the behavioral half)", () => {
     // "?manualView=content&contentView=grading" - the old LMS Grading URL.
-    expect(resolveGradingPointer("content", "grading")).toEqual({ manualView: "grading", gradingView: "run" });
+    expect(resolveGradingPointer("content", "grading")).toEqual({ manualView: "grading", gradingView: "chat" });
     // "?manualView=repo-grades" - the old standalone Repo Grades subtab.
     expect(resolveGradingPointer("repo-grades", null)).toEqual({ manualView: "grading", gradingView: "repos" });
     // A manualView of "content" with any OTHER contentView, or any other

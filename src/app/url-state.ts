@@ -216,7 +216,7 @@ export function normalizeContentView(value: string | null): ContentView {
 }
 
 export function normalizeGradingView(value: string | null): GradingView {
-  return isGradingView(value) ? value : "run";
+  return isGradingView(value) ? value : "chat";
 }
 
 // WORKFLOWS-COLLAPSE W2: the Automate container's own inner selection, same

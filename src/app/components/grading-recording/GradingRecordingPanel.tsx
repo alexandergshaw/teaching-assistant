@@ -74,12 +74,7 @@ import RunLogRow from "../recording/RunLogRow";
 // parameterised sentence/hook DiscussionRepliesPanel.tsx's own file-local
 // versions were extracted from.
 import { composeCaptureLiveSentence, useThrottledLiveSentence } from "../recording/captureLiveRegion";
-import {
-  RECORDING_LAUNCH_EVENT,
-  parseRecordingLaunch,
-  takeRecordingKnowledgeContext,
-  type RecordingKnowledgeContext,
-} from "@/lib/recording-launch";
+import { type RecordingKnowledgeContext } from "@/lib/recording-launch";
 // AC3/AC3/4b (docs/knowledge-recording-handoff-acceptance-criteria.md section
 // 4): the carried-Knowledge-Base-pages notice and the always-mounted "add a
 // page" control - moved into this NEW leaf once this file was pressing on
@@ -392,7 +387,6 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // useGradingRubric (see grading-rubric-memory.ts for the resolution order).
   const rubric = useGradingRubric(selectedCourse?.name ?? "", assessmentId);
   const rubricText = rubric.rubricText;
-  const setRubricModalOpen = rubric.setModalOpen;
   const rubricUploadRef = useRef<HTMLButtonElement>(null);
 
   const [knowledgeContext, setKnowledgeContext] = useState<RecordingKnowledgeContext | null>(null);
@@ -441,24 +435,6 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // is: `totalCount` equals the count of non-dismissed tracked entries plus
   // any preserved rows.
   const [totalReadingsCount, setTotalReadingsCount] = useState(0);
-
-  // Launch handoff (items 2/3) - see this file's own header for the full
-  // reasoning on the live-listener shape and the one-shot knowledgeContext
-  // drain guard.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
-      if (!detail || detail.view !== "grading") return;
-      if (detail.openRubric) setRubricModalOpen(true);
-      if (detail.knowledgeContext) {
-        const taken = takeRecordingKnowledgeContext();
-        if (taken) setKnowledgeContext(taken);
-      }
-    };
-    window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
-    return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-    // setRubricModalOpen is a useState setter: stable, so this still registers once.
-  }, [setRubricModalOpen]);
 
   const { extracting, ledger, coverage } = useGradingRecordingExtraction({
     takeFrameBatch,

@@ -1,19 +1,15 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from "./components/home/HomeIcons";
-import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
 import TasksTab from "./components/TasksTab";
 import VersionControlTab from "./components/VersionControlTab";
 import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
-import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
-import GradingRecordingPanel from "./components/grading-recording/GradingRecordingPanel";
-import SnapshotGradingPanel from "./components/snapshot-grading/SnapshotGradingPanel";
 import GradingChatPanel from "./components/grading-chat/GradingChatPanel";
 import WalkthroughAnnouncementPanel from "./components/walkthrough-announcement/WalkthroughAnnouncementPanel";
 import FilesTab from "./components/FilesTab";
@@ -69,16 +65,11 @@ import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
 import { ANNOUNCEMENTS_NAV_EVENT } from "@/lib/announcements-nav";
 
-const initialState: GradeActionState = { run: null, error: null };
-const initialTestState: TestGeminiState = { result: null, error: null };
-
 export default function Home() {
-  const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
   const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, refresh: refreshDrafts } = useDraftedGradesInbox();
-  const [testState] = useActionState(testGeminiAction, initialTestState);
 
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
@@ -172,14 +163,13 @@ export default function Home() {
         return;
       }
       setManualView(route.manualView);
-      if (route.gradingView) setGradingView(route.gradingView);
       if (route.announcementsView) setAnnouncementsView(route.announcementsView);
       setToolsSection(route.toolsSection);
       setActiveTab(route.activeTab);
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, [setManualView, setToolsSection, setActiveTab, setGradingView, setAnnouncementsView]);
+  }, [setManualView, setToolsSection, setActiveTab, setAnnouncementsView]);
 
   // TOOLS-IA-REORG W2: Tools > Announcements > From a recording is showing.
   const announcementsRecordingShown =
@@ -698,29 +688,12 @@ export default function Home() {
                   </TabShell>
                 )}
 
-                {/* GRAD-SUBTAB wave 2 (R-1): the two moved capture surfaces
-                    (grading-via-recording, snapshot grading) are now
-                    always-mounted siblings below (after RecordingTab's own
-                    always-mounted div) - this ternary must NOT also try to
-                    render something for those gradingView values, or both
-                    the (empty-else) GradingTab branch AND the always-mounted
-                    panel would be on screen for the same chip at once. */}
-                {manualView === "grading" && (gradingView === "run" || gradingView === "repos") && (
+                {/* GRADING-CHAT-CONSOLIDATE W2: the Submissions, From a recording
+                    and From screenshots sub-tabs are removed; Repo Grades is
+                    the only conditional surface in this block. */}
+                {manualView === "grading" && gradingView === "repos" && (
                   <TabShell>
-                    {gradingView === "repos" ? (
-                      <RepoGradesTab />
-                    ) : (
-                      <GradingTab
-                        formAction={formAction}
-                        pending={pending}
-                        state={state}
-                        testState={testState}
-                        copiedKey={copiedKey}
-                        onCopy={handleCopy}
-                        onOpenPreview={handleOpenPreview}
-                        resultsSectionFallbackRef={resultsSectionFallbackRef}
-                      />
-                    )}
+                    <RepoGradesTab />
                   </TabShell>
                 )}
 
@@ -775,43 +748,6 @@ export default function Home() {
           <RecordingTab
             active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"}
             announcementsActive={announcementsRecordingShown}
-          />
-        </div>
-
-        {/* GRAD-SUBTAB wave 2 (docs/tools-grading-subtab-wave2-architecture.md
-            section 2.2): the two Recording grading surfaces re-parented into
-            Tools > Grading. Each holds live capture (a MediaStream, or a
-            RECORDING_LAUNCH_EVENT listener) that a conditional mount would
-            kill on every navigation - so, exactly like RecordingTab above,
-            these are always-rendered, display-toggled top-level siblings,
-            OUTSIDE the `activeTab === "manual"` block, never inside the
-            `manualView === "grading"` ternary. Do not move these into that
-            ternary - see this file's own I-W2 guard in
-            topLevelTabs.wiring.test.ts, which exists to catch exactly that
-            regression. */}
-        <div
-          style={{
-            display:
-              activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "recording"
-                ? undefined
-                : "none",
-          }}
-        >
-          <GradingRecordingPanel
-            active={activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "recording"}
-          />
-        </div>
-
-        <div
-          style={{
-            display:
-              activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "snapshots"
-                ? undefined
-                : "none",
-          }}
-        >
-          <SnapshotGradingPanel
-            active={activeTab === "manual" && toolsSection === "manual" && manualView === "grading" && gradingView === "snapshots"}
           />
         </div>
 

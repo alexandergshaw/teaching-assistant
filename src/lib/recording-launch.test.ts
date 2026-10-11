@@ -20,27 +20,28 @@ describe("recording-launch", () => {
       expect(parseRecordingLaunch({ view: "announcement" })).toEqual({ view: "announcement" });
     });
 
-    it("accepts the grading view - grading-via-recording's own dedicated view", () => {
-      expect(parseRecordingLaunch({ view: "grading" })).toEqual({ view: "grading" });
+    it("rejects the removed grading and snapgrade views (GRADING-CHAT-CONSOLIDATE W2)", () => {
+      expect(parseRecordingLaunch({ view: "grading" })).toBeNull();
+      expect(parseRecordingLaunch({ view: "snapgrade" })).toBeNull();
     });
 
-    it("accepts openRubric: true alongside the grading view", () => {
-      expect(parseRecordingLaunch({ view: "grading", openRubric: true })).toEqual({
-        view: "grading",
+    it("accepts openRubric: true alongside a view", () => {
+      expect(parseRecordingLaunch({ view: "discussions", openRubric: true })).toEqual({
+        view: "discussions",
         openRubric: true,
       });
     });
 
     it("drops openRubric when it is not literally true (false, missing, or a non-boolean), without invalidating the view", () => {
-      expect(parseRecordingLaunch({ view: "grading", openRubric: false })).toEqual({ view: "grading" });
-      expect(parseRecordingLaunch({ view: "grading" })).toEqual({ view: "grading" });
-      expect(parseRecordingLaunch({ view: "grading", openRubric: "yes" })).toEqual({ view: "grading" });
+      expect(parseRecordingLaunch({ view: "discussions", openRubric: false })).toEqual({ view: "discussions" });
+      expect(parseRecordingLaunch({ view: "discussions" })).toEqual({ view: "discussions" });
+      expect(parseRecordingLaunch({ view: "discussions", openRubric: "yes" })).toEqual({ view: "discussions" });
     });
 
-    it("accepts openRubric alongside a knowledgeContext in the same launch (the Knowledge base's 'Grade via recording' button sets both)", () => {
+    it("accepts openRubric alongside a knowledgeContext in the same launch", () => {
       expect(
-        parseRecordingLaunch({ view: "grading", openRubric: true, knowledgeContext: { text: "policy text" } })
-      ).toEqual({ view: "grading", openRubric: true, knowledgeContext: { text: "policy text" } });
+        parseRecordingLaunch({ view: "discussions", openRubric: true, knowledgeContext: { text: "policy text" } })
+      ).toEqual({ view: "discussions", openRubric: true, knowledgeContext: { text: "policy text" } });
     });
 
     it("accepts a view with a usable knowledgeContext", () => {
@@ -472,37 +473,10 @@ describe("recording-launch", () => {
       eventSpy.mockRestore();
     });
 
-    // The fab's own "grading" entry (item 3 of this task) uses
-    // navigateToRecordingTool, never openRecordingTool with openRubric - see
-    // this module's own header on RecordingLaunch.openRubric for why a plain
-    // fab visit must not surprise the instructor with the rubric modal.
-    it("navigateToRecordingTool dispatches RECORDING_LAUNCH_EVENT for the grading view, with no openRubric", () => {
+    it("navigateToRecordingTool does NOT dispatch for the removed grading view (GRADING-CHAT-CONSOLIDATE W2)", () => {
       const eventSpy = vi.spyOn(window, "dispatchEvent");
-      navigateToRecordingTool("grading");
-      expect(eventSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: RECORDING_LAUNCH_EVENT,
-          detail: { view: "grading" },
-        })
-      );
-      eventSpy.mockRestore();
-    });
-
-    // The Knowledge base's "Grade via recording" button (item 2 of this
-    // task) is expected to call openRecordingTool({ view: "grading",
-    // openRubric: true, ... }) - this proves that exact shape is a
-    // dispatchable, non-degraded launch, carrying BOTH the view switch
-    // RecordingTab reacts to and the openRubric flag GradingRecordingPanel
-    // reacts to, from ONE dispatch.
-    it("openRecordingTool dispatches RECORDING_LAUNCH_EVENT with openRubric true for a grading launch", () => {
-      const eventSpy = vi.spyOn(window, "dispatchEvent");
-      openRecordingTool({ view: "grading", openRubric: true });
-      expect(eventSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: RECORDING_LAUNCH_EVENT,
-          detail: { view: "grading", openRubric: true },
-        })
-      );
+      navigateToRecordingTool("grading" as never);
+      expect(eventSpy).not.toHaveBeenCalled();
       eventSpy.mockRestore();
     });
 
@@ -641,19 +615,17 @@ describe("remembered sentinel (discussion-clicks W-B-1)", () => {
   });
 });
 
-describe("launch view set is exactly the frozen 13 (discussion-clicks W-B-2)", () => {
-  const FROZEN_13 = [
+describe("launch view set is exactly the frozen 11 (discussion-clicks W-B-2)", () => {
+  const FROZEN_11 = [
     "announcement",
     "avatar",
     "captions",
     "discussions",
-    "grading",
     "messages",
     "moduledeck",
     "record",
     "remembered",
     "slides",
-    "snapgrade",
     "speed",
     "walkannounce",
   ];
@@ -663,25 +635,25 @@ describe("launch view set is exactly the frozen 13 (discussion-clicks W-B-2)", (
       .map((m) => m[1])
       .sort();
 
-  it("the union members equal the frozen 13 (source-text exact set)", () => {
+  it("the union members equal the frozen 11 (source-text exact set)", () => {
     const start = src.indexOf("export type RecordingLaunchView =");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf(";", start);
     expect(end).toBeGreaterThan(start);
-    expect(quoted(src.slice(start, end))).toEqual(FROZEN_13);
+    expect(quoted(src.slice(start, end))).toEqual(FROZEN_11);
   });
 
-  it("the RECORDING_LAUNCH_VIEWS array members equal the frozen 13 (source-text exact set)", () => {
+  it("the RECORDING_LAUNCH_VIEWS array members equal the frozen 11 (source-text exact set)", () => {
     const start = src.indexOf("const RECORDING_LAUNCH_VIEWS");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf("];", start);
     expect(end).toBeGreaterThan(start);
     const afterEq = src.indexOf("= [", start);
-    expect(quoted(src.slice(afterEq, end))).toEqual(FROZEN_13);
+    expect(quoted(src.slice(afterEq, end))).toEqual(FROZEN_11);
   });
 
   it("every frozen view still parses to itself", () => {
-    for (const v of FROZEN_13) {
+    for (const v of FROZEN_11) {
       expect(parseRecordingLaunch({ view: v })).toEqual({ view: v });
     }
   });
@@ -704,22 +676,10 @@ describe("resolveRecordingLaunchRoute (discussion-clicks W-B-5)", () => {
     });
   });
 
-  it("routes grading to Tools > Grading > recording", () => {
-    expect(resolveRecordingLaunchRoute("grading")).toEqual({
-      manualView: "grading",
-      gradingView: "recording",
-      toolsSection: "manual",
-      activeTab: "manual",
-    });
-  });
-
-  it("routes snapgrade to Tools > Grading > snapshots", () => {
-    expect(resolveRecordingLaunchRoute("snapgrade")).toEqual({
-      manualView: "grading",
-      gradingView: "snapshots",
-      toolsSection: "manual",
-      activeTab: "manual",
-    });
+  it("GRADING-CHAT-CONSOLIDATE W2: no launch view routes to Tools > Grading any more (gradingView field removed)", () => {
+    const route = resolveRecordingLaunchRoute("discussions");
+    expect(route.manualView).not.toBe("grading");
+    expect("gradingView" in route).toBe(false);
   });
 
   // ANNOUNCEMENTS-TAB A-W2 (REQ-8): the walkthrough-announcement capture panel

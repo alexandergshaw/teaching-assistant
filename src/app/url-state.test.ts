@@ -23,6 +23,7 @@ import {
   buildUrlSearch,
   resolveGradingPointer,
   type UrlNavState,
+  normalizeGradingView,
 } from "./url-state";
 import { RETIRED_TAB_DESTINATIONS, TAB_ORDER } from "./components/tabs/tab-sections";
 
@@ -37,7 +38,7 @@ const DEFAULT_STATE: UrlNavState = {
   automateView: "templates",
   buildView: "prebuilt",
   contentView: "modules",
-  gradingView: "run",
+  gradingView: "chat",
   presentationsView: "slide-deck",
   announcementsView: "post",
   tasksView: "term",
@@ -791,6 +792,16 @@ describe("url-state", () => {
     // default or leaked onto a non-Grading branch, but not a THIRTEENTH param
     // emitted under some other name (that is I4's job, the frozen-oracle
     // extension in tab-rails.test.ts). Both are required.
+    it.each(["run", "recording", "snapshots"])(
+      "GRADING-CHAT-CONSOLIDATE W2: a bookmarked ?gradingView=%s (a removed view) normalizes to chat, never a dead view",
+      (removed) => {
+        const parsed = parseUrlState(`?tab=manual&manualView=grading&gradingView=${removed}`);
+        expect(parsed.manualView).toBe("grading");
+        expect(parsed.gradingView).toBe("chat");
+        expect(normalizeGradingView(removed)).toBe("chat");
+      }
+    );
+
     it("preserves a non-default gradingView through Grading, and drops it elsewhere (I3)", () => {
       const reposState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "repos" };
       const url = buildUrlSearch(reposState);
@@ -798,7 +809,7 @@ describe("url-state", () => {
       expect(parseUrlState(url)).toEqual(reposState);
 
       // At the default, the param is omitted entirely.
-      const runState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "run" };
+      const runState: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "grading", gradingView: "chat" };
       expect(buildUrlSearch(runState)).toBe("?tab=manual&manualView=grading");
       expect(parseUrlState(buildUrlSearch(runState))).toEqual(runState);
 
@@ -850,10 +861,10 @@ describe("url-state", () => {
   // pointer) also resolves to the Grading sub-tab rather than silently
   // falling back to Modules within LMS once "grading" leaves ContentView.
   describe("the retired 'content-view:grading' pointer resolves to the Grading sub-tab", () => {
-    it("resolves ?tab=manual&manualView=content&contentView=grading to Grading with its Submissions inner item selected", () => {
+    it("resolves ?tab=manual&manualView=content&contentView=grading to Grading with its Chat inner item selected", () => {
       const parsed = parseUrlState("?tab=manual&manualView=content&contentView=grading");
       expect(parsed.manualView).toBe("grading");
-      expect(parsed.gradingView).toBe("run");
+      expect(parsed.gradingView).toBe("chat");
       expect(parsed.contentView).toBe("modules");
     });
 

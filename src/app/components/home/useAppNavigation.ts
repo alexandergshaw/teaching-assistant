@@ -478,7 +478,7 @@ export function useAppNavigation() {
   // first-sync block, not this one - see this file's own popstate/URL-sync
   // code below for the actual guarded window).
   const [gradingView, setGradingView] = useState<GradingView>(() => {
-    if (typeof window === "undefined") return "run";
+    if (typeof window === "undefined") return "chat";
     // The URL wins over localStorage, but only when it actually named Tools >
     // Manual > Grading as the branch being restored into - see the matching
     // comment on buildView above.

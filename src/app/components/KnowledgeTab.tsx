@@ -443,54 +443,6 @@ export default function KnowledgeTab({
     });
   };
 
-  // Grade via recording (docs/grading-via-recording-acceptance-criteria.md,
-  // the owner's own words: "select the relevant grading/feedback knowledge
-  // pages as context / a grading-via-screen-recording option appears / paste
-  // a rubric into a modal ... "). A SECOND bulk-bar button beside "Start
-  // recording", on the exact same selection condition - reuses
-  // buildKnowledgeContextBlock and the openRecordingTool handoff exactly the
-  // way startRecordingWithSelection above does (same page-text-not-ids
-  // reasoning, same "omit the field entirely when there is no usable text"
-  // rule for knowledgeContext), differing only in the destination view and
-  // in also asking the landing panel to open the rubric modal
-  // (`openRubric: true` - see recording-launch.ts's own doc comment on that
-  // field for why this is carried on the event `detail` rather than a
-  // one-shot slot like knowledgeContext).
-  const startGradingWithSelection = () => {
-    const selectedPages = (pages ?? []).filter((p) => kbSelection.selected.has(p.id));
-    if (selectedPages.length === 0) return;
-    const block = buildKnowledgeContextBlock({
-      pages: selectedPages.map((p) => ({ title: p.title, body: p.body })),
-      attachments: [],
-    });
-    // AC1: see startRecordingWithSelection's identical comment above - this
-    // is the higher-stakes of the two paths (the pipeline this lands on
-    // writes feedback a student reads), so naming a page the model never
-    // actually read here is the worse of the two instances of the same risk.
-    const contextPages = includedContextPages(
-      selectedPages.map((p) => ({ id: p.id, title: p.title, body: p.body })),
-      block.pageResults
-    );
-    openRecordingTool({
-      view: "grading",
-      openRubric: true,
-      ...(block.text
-        ? {
-            // K1: same fix as startRecordingWithSelection above - see its
-            // comment. This is the higher-stakes of the two paths (the
-            // pipeline this lands on writes feedback a student reads), so a
-            // silently-dropped rubric/policy page here is the worse of the
-            // two instances of the same defect.
-            knowledgeContext: {
-              text: block.text,
-              label: describeKnowledgeContextLabel(selectedPages.length, block.includedPages, block.omittedPages),
-              ...(contextPages.length > 0 ? { pages: contextPages } : {}),
-            },
-          }
-        : {}),
-    });
-  };
-
   // Full-text once bodies are present; title-only (with a hint) while they
   // are still loading in the background.
   const { hits: searchHits, titleOnly: searchTitleOnly } = useMemo(
@@ -779,7 +731,6 @@ export default function KnowledgeTab({
             onClear={kbSelection.clear}
             onAskAi={askAiAboutSelection}
             onStartRecording={startRecordingWithSelection}
-            onStartGrading={startGradingWithSelection}
             bodiesReady={bodiesReady}
             bulkDelete={bulkDelete}
           />

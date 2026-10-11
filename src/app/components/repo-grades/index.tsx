@@ -24,7 +24,7 @@
 // async body that awaits before any setState. This file only reads that
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
@@ -33,13 +33,11 @@ import {
   loadAssignmentMapping,
   loadFolderSelection,
   loadRepoGradeCells,
-  loadRepoGradeLog,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
   persistFolderSelection,
   persistRepoGradeCells,
-  persistRepoGradeLog,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
   type RepoGradesUiState,
@@ -50,17 +48,10 @@ import {
   resolveSelectedFolder,
   shouldPersistFolderDrop,
 } from "./repoGradesFolderSelection";
-import {
-  appendRepoGradeLogEntries,
-  type RepoGradeLogEntry,
-  type RepoGradeLogEventKind,
-} from "./repoGradesLog";
-import RepoGradesLogPanel from "./RepoGradesLogPanel";
 import RepoGradesControls from "./RepoGradesControls";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
-import { linkUsernamesLogDetail } from "./linkRepoUsernames";
 import { confirmableBindingSummary, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
 import {
   buildRepoGradeGridModel,
@@ -422,58 +413,19 @@ export default function RepoGradesTab() {
     const next = setRepoGradeAssignmentMapping(assignmentMapping, folder, assignmentId);
     setAssignmentMapping(next);
     persistAssignmentMapping(uiState.courseId, next);
-    // L1 item 8: which assignment a column posts to is the single setting
-    // most able to send a whole column's grades to the wrong place, so the
-    // change is recorded with the assignment's NAME as well as its id - an id
-    // alone is unreadable months later, and the name is only resolvable while
-    // `assignments` is still loaded.
-    const assignmentName = assignmentId ? (assignments.find((a) => a.id === assignmentId)?.name ?? assignmentId) : "";
-    recordLog([
-      buildLogEntry("assignment-mapped", {
-        folder,
-        assignmentId: assignmentId ?? "",
-        detail: assignmentId ? `Mapped to "${assignmentName}"` : "Mapping cleared",
-      }),
-    ]);
   };
 
-  // L1 item 7: a binding decides WHICH student a later post lands on, so it
-  // belongs in the same trail as the grades themselves. This wrapper only
-  // observes - it forwards useRepoGradesData's own acceptBinding result
-  // through unchanged, and records nothing when that call reports an error,
-  // so the log never claims a binding that did not actually persist.
+  // Forwards useRepoGradesData's own acceptBinding result through unchanged.
   const handleAcceptBinding = async (repo: string, canvasUserId: string, student: string, username: string | null) => {
-    const result = await acceptBinding(repo, canvasUserId, student, username);
-    if ("ok" in result) {
-      recordLog([
-        buildLogEntry("binding-confirmed", {
-          repo,
-          detail: `Bound to ${student}${username ? ` (${username})` : ""}, Canvas user ${canvasUserId}`,
-        }),
-      ]);
-    }
-    return result;
+    return await acceptBinding(repo, canvasUserId, student, username);
   };
 
-  // Companion to handleAcceptBinding above, same spirit: linking usernames
-  // decides which repos become SUGGESTED bindings (never confirmed ones - see
-  // LinkUsernamesPanel.tsx's header comment on the "honest two-step"), and
-  // the Canvas assignment read that grounds it is worth a durable record for
-  // the same reason a binding accept is. Forwards useRepoGradesData's own
-  // linkGithubUsernames result UNCHANGED and records nothing when it reports
-  // an error, so the log can never claim a link that did not actually
-  // persist - the same rule handleAcceptBinding follows above.
+  // Linking usernames decides which repos become SUGGESTED bindings (never
+  // confirmed ones - see LinkUsernamesPanel.tsx's header comment on the
+  // "honest two-step"). Forwards useRepoGradesData's own linkGithubUsernames
+  // result UNCHANGED.
   const handleLinkUsernames = async (assignmentId: string, assignmentName: string) => {
-    const result = await linkGithubUsernames(assignmentId, assignmentName);
-    if (!("error" in result)) {
-      recordLog([
-        buildLogEntry("usernames-linked", {
-          assignmentId: result.assignmentId,
-          detail: linkUsernamesLogDetail(result),
-        }),
-      ]);
-    }
-    return result;
+    return await linkGithubUsernames(assignmentId, assignmentName);
   };
 
   // Confirms every currently-suggested row in one write - the "Confirm all"
@@ -499,57 +451,18 @@ export default function RepoGradesTab() {
       canvasUserId: entry.canvasUserId,
       student: entry.student,
     }));
-    const result = await confirmSuggestedBindings(bindings);
-    if (!("error" in result)) {
-      // One entry PER binding, same detail shape handleAcceptBinding uses
-      // above (minus the optional username, which a suggested candidate does
-      // not carry) - so the log reads a batch confirm as N individual
-      // confirmations, indistinguishable from N per-row clicks.
-      recordLog(
-        bindings.map((binding) =>
-          buildLogEntry("binding-confirmed", {
-            repo: binding.repo,
-            detail: `Bound to ${binding.student}, Canvas user ${binding.canvasUserId}`,
-          })
-        )
-      );
-    }
-    return result;
+    return await confirmSuggestedBindings(bindings);
   };
 
-  // Companion to handleLinkUsernames above, for the OTHER source this wave
-  // adds: applying usernames already saved in the course table's Roster tile
-  // instead of reading them fresh off Canvas (see the `model` comment above
-  // for the actual fix). Forwards linkFromCourseRoster's result UNCHANGED and
-  // records nothing on error - the same rule handleAcceptBinding and
-  // handleLinkUsernames both follow. Reuses the SAME "usernames-linked" log
-  // kind (another way a repo becomes SUGGESTED via a linked username, not a
-  // new event kind), with detail text naming the course table as the source.
+  // Companion to handleLinkUsernames above, for the OTHER source: applying
+  // usernames already saved in the course table's Roster tile instead of
+  // reading them fresh off Canvas (see the `model` comment above for the
+  // actual fix). Forwards linkFromCourseRoster's result UNCHANGED.
   const handleLinkFromCourseRoster = async () => {
-    const result = await linkFromCourseRoster();
-    if (!("error" in result)) {
-      recordLog([
-        buildLogEntry("usernames-linked", {
-          detail:
-            `Linked from the course table roster - matched ${result.matched}, added ${result.added}` +
-            (result.withoutCanvasId > 0 ? `, ${result.withoutCanvasId} without a Canvas user id` : "") +
-            ".",
-        }),
-      ]);
-    }
-    return result;
+    return await linkFromCourseRoster();
   };
 
   const [postSummary, setPostSummary] = useState("");
-  // ---- the activity log (docs/repo-grades-activity-log-acceptance-criteria.md).
-  // Unlike cellEdits above this one DOES persist (L3): it is the record of
-  // what this view did to a live gradebook, and postCanvasGradesAction keeps
-  // no such record anywhere else - not in Canvas's own UI beyond the final
-  // score, and not on our server at all. It is restored per course in the
-  // very same compare-and-adjust branch that resets the ephemeral cell state,
-  // so a course switch always swaps BOTH together and one course's log can
-  // never be shown, appended to, or persisted under another course's id.
-  const [log, setLog] = useState<readonly RepoGradeLogEntry[]>([]);
   const [cellStateResetForCourse, setCellStateResetForCourse] = useState<string | null>(null);
   const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
   const [persistError, setPersistError] = useState<string | null>(null);
@@ -559,10 +472,9 @@ export default function RepoGradesTab() {
     setCellEdits(restoredEdits);
     setRestoredNotice(describeRestoredRepoGradeCells(restoredEdits));
     setPostSummary("");
-    setLog(loadRepoGradeLog(uiState.courseId));
     // U1.5/U1.6 - folded in here rather than a separate branch, per this
     // feature's own design note above: this block IS index.tsx's "the course
-    // changed" trigger already (it resets cellEdits/postSummary/log
+    // changed" trigger already (it resets cellEdits/postSummary
     // together for the identical reason). The folder restore's OTHER
     // trigger - the scan settling, above near `model` - runs EARLIER in this
     // file's top-to-bottom render order, so if both could ever fire in the
@@ -578,30 +490,12 @@ export default function RepoGradesTab() {
     setFolderDropNotice(null);
   }
 
-  // The log is the ONE piece of state in this file persisted from an effect
-  // rather than from its explicit mutators, and the reason is concurrency,
-  // not convenience: two "Grade" calls (or a column post and a grade) can be
-  // in flight at once, and each resolves with a closure over the `log` value
-  // from ITS render - so computing `next` at each call site and persisting
-  // that would let the slower handler write a log missing the faster one's
-  // entries. Appending inside the setState updater (pure array math, safe to
-  // re-run) is what keeps concurrent appends correct, and this effect then
-  // persists whatever those appends actually produced.
-  //
-  // The first-commit hazard this file's other comments warn about
-  // (an effect firing with an untouched default and overwriting real stored
-  // data before the restore branch has run) is closed by the
-  // `cellStateResetForCourse !== courseId` guard: that branch above runs
+  // Graded results persist from an effect guarded by the restore-ran check
+  // (`cellStateResetForCourse !== courseId`): the restore branch above runs
   // during render and is what makes the two equal, so this effect cannot fire
-  // with `log`'s pre-restore `[]` for a course whose stored log has not been
-  // read yet.
-  useEffect(() => {
-    if (cellStateResetForCourse !== uiState.courseId) return;
-    persistRepoGradeLog(uiState.courseId, log);
-  }, [log, uiState.courseId, cellStateResetForCourse]);
-
-  // Graded results persist likewise (same restore-ran guard); the error is
-  // surfaced after an await so no setState is synchronous in the effect.
+  // with the untouched default and overwrite real stored data before it has
+  // been read. The error is surfaced after an await so no setState is
+  // synchronous in the effect.
   useEffect(() => {
     if (cellStateResetForCourse !== uiState.courseId) return;
     const error = persistRepoGradeCells(uiState.courseId, cellEdits);
@@ -623,54 +517,6 @@ export default function RepoGradesTab() {
     setPostSummary("Saved results discarded for this course.");
   };
 
-  /** Builds one entry, stamped now, already carrying this view's course
-   * identity - callers only supply what is specific to their event. Every
-   * field defaults to "" (never null/absent) so a CSV row always has the same
-   * column count (L2 item 10). */
-  const buildLogEntry = (
-    kind: RepoGradeLogEventKind,
-    fields: Partial<Omit<RepoGradeLogEntry, "kind" | "at" | "courseId" | "courseName">> = {}
-  ): RepoGradeLogEntry => ({
-    at: new Date().toISOString(),
-    kind,
-    courseId: uiState.courseId,
-    courseName: course?.name ?? "",
-    repo: "",
-    folder: "",
-    assignmentId: "",
-    score: "",
-    detail: "",
-    ...fields,
-  });
-
-  const recordLog = (entries: readonly RepoGradeLogEntry[]) => {
-    if (entries.length === 0) return;
-    setLog((prev) => appendRepoGradeLogEntries(prev, entries));
-  };
-
-  // L1 item 9: a failed org scan is recorded ONCE per distinct message, never
-  // once per render - `scanError` is a value that survives re-renders, so
-  // appending it unconditionally from an effect keyed on it would still be
-  // safe, but a re-scan that fails the same way twice deserves a second
-  // entry while a re-render deserves none. A ref (not state) holds the
-  // last-recorded message: writing state here is exactly what
-  // react-hooks/set-state-in-effect forbids, and this value is bookkeeping
-  // that must never itself trigger a render.
-  const lastLoggedScanError = useRef<string | null>(null);
-  useEffect(() => {
-    if (!scanError) {
-      lastLoggedScanError.current = null;
-      return;
-    }
-    if (lastLoggedScanError.current === scanError) return;
-    lastLoggedScanError.current = scanError;
-    recordLog([buildLogEntry("scan-failed", { detail: scanError })]);
-    // recordLog/buildLogEntry are redefined every render by design (they close
-    // over the current course); depending on them here would re-run this
-    // effect constantly. The ref guard above is what makes that safe.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanError]);
-
   // Rubric picker (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
   // ONE hook instance, shared by RepoGradesControls' picker below and every
   // grading call in useRepoGradesGradingActions (item 16: two grading paths
@@ -681,7 +527,7 @@ export default function RepoGradesTab() {
   // `course` alone. `exportRubrics` is useRepoGradesData's own already-loaded
   // export content's rubric list (no second fetch); `onAnnounce` routes this
   // feature's one announcement channel (UX notes 3.3) through the SAME
-  // action-outcome region LinkUsernamesPanel/RepoGradesLogPanel already use
+  // action-outcome region LinkUsernamesPanel already uses
   // below, not a new live region.
   const lmsSources = course ? lmsRenderSourcesFor(course) : { live: false, export: false };
   const rubricSource = useRepoGradesRubricSource({
@@ -725,8 +571,6 @@ export default function RepoGradesTab() {
     courseId: uiState.courseId,
     course,
     provider,
-    recordLog,
-    buildLogEntry,
     setPostSummary,
   });
 
@@ -747,7 +591,7 @@ export default function RepoGradesTab() {
     // shells around it. Rendering a THIRD `styles.tabContainer` here (as this
     // file used to) sets `gap: 0` on top of that, which is what removed every
     // vertical gap between the header, controls, banners, link panel, grid
-    // and log below. A plain fragment adds no frame and no gap override.
+    // below. A plain fragment adds no frame and no gap override.
     <>
       <TabHeader
         eyebrow="Grading"
@@ -821,7 +665,7 @@ export default function RepoGradesTab() {
           LinkUsernamesPanel puts the same mechanism - reading a Canvas
           assignment's own text submissions, not an inferred name-based guess
           - directly on this page. Gated on `course` alone (matching
-          RepoGradesLogPanel below), not on `model && noConfirmedRows` the way
+          the course picker), not on `model && noConfirmedRows` the way
           the banner beneath it still is: an instructor whose org scan failed
           or whose org is unset has the LEAST other way to get repos bound, so
           this is exactly the state the panel must not disappear in. Placed
@@ -970,11 +814,6 @@ export default function RepoGradesTab() {
       )}
       </RepoGradesStickyHeader>
 
-      {/* L4 item 17: shown for any chosen course, including one whose scan
-          failed or whose org is unset - a log of what went wrong is most
-          useful exactly when the grid itself has nothing to render. It
-          announces through setPostSummary, the view's existing role="status"
-          region above, rather than adding a second live region (item 21). */}
       {course && (
         <div>
           {restoredNotice && <p className={pageStyles.fieldHint}>{restoredNotice}</p>}
@@ -983,15 +822,6 @@ export default function RepoGradesTab() {
             Discard saved results for this course
           </button>
         </div>
-      )}
-      {course && (
-        <RepoGradesLogPanel
-          log={log}
-          courseId={uiState.courseId}
-          courseName={course.name}
-          onClear={() => setLog([])}
-          onAnnounce={setPostSummary}
-        />
       )}
     </>
   );

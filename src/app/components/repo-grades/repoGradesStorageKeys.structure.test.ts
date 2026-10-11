@@ -26,7 +26,6 @@ const FROZEN_KEYS = [
   "ta-repo-grades-link-assignment",
   "ta-repo-grades-link-open",
   "ta-repo-grades-link-source",
-  "ta-repo-grades-log",
   "ta-repo-grades-org-prefix",
   "ta-repo-grades-readme-instructions",
   "ta-repo-grades-rubric",
@@ -40,7 +39,7 @@ const FROZEN_KEYS = [
 ];
 
 describe("repo-grades persistence keys (exact set)", () => {
-  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 20", () => {
+  it("K1: the keys in repoGradesUiState.ts are exactly the frozen 19", () => {
     expect(collectKeys(source)).toEqual(FROZEN_KEYS);
   });
 

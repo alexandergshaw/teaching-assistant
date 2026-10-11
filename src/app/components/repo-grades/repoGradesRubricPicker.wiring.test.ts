@@ -401,12 +401,7 @@ describe("AC item 76: the prologue gate and the log's rubric gate were BOTH upda
     expect(stripJsComments(bulkGradeSource)).not.toMatch(/\brubric\.trim\(\) === ""/);
   });
 
-  it("the bulk hook's log-detail line calls describeResolvedRubricForLog, replacing the old blank-string ternary", () => {
-    expect(bulkGradeSource).toMatch(/const rubricNote = describeResolvedRubricForLog\(resolved, result\.rubric\);/);
-  });
-
-  it("the per-cell hook's log-detail line does the same (AC item 64, the per-cell counterpart)", () => {
-    expect(gradingActionsSource).toMatch(/const rubricNote = describeResolvedRubricForLog\(resolved, result\.rubric\);/);
+  it("the per-cell hook carries no page-level empty-rubric gate (AC item 64, the per-cell counterpart)", () => {
     expect(stripJsComments(gradingActionsSource)).not.toMatch(/\brubric\.trim\(\) === ""/);
   });
 });

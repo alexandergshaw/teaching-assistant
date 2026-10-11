@@ -79,7 +79,7 @@ describe("index.tsx renders LinkUsernamesPanel above the grid, wired to the view
     expect(indexSource).toContain("onAnnounce={setPostSummary}");
   });
 
-  it("gates the panel on `course` alone, matching how RepoGradesLogPanel below it is gated - never on `model && noConfirmedRows`, which would hide it exactly when an instructor has the least other way to bind repos (a failed scan or an unset org)", () => {
+  it("gates the panel on `course` alone, never on `model && noConfirmedRows`, which would hide it exactly when an instructor has the least other way to bind repos (a failed scan or an unset org)", () => {
     const panelIdx = indexSource.indexOf("<LinkUsernamesPanel");
     expect(panelIdx).toBeGreaterThan(-1);
     // Structural bound, not a fixed character window: a fixed 60-character
@@ -178,35 +178,6 @@ describe("isCallSiteWithinIfBlock (canary: proves the guard-membership check act
   it("does NOT false-positive on a call inside a DIFFERENT, unrelated if block that happens to appear first", () => {
     const fixture = `if (someOtherCondition) {\n  buildLogEntry("x");\n}\nif (!("error" in result)) {\n  doNothing();\n}`;
     expect(isCallSiteWithinIfBlock(fixture, 'if (!("error" in result))', 'buildLogEntry("x"')).toBe(false);
-  });
-});
-
-describe("handleLinkUsernames records a log entry only when linkGithubUsernames succeeds - the log must never claim a link that did not persist", () => {
-  it("the buildLogEntry(\"usernames-linked\" call site sits inside handleLinkUsernames's own non-error guard, the same shape handleAcceptBinding's \"ok\" in result guard already uses above", () => {
-    const defIdx = indexSource.indexOf("const handleLinkUsernames = async");
-    expect(defIdx).toBeGreaterThan(-1);
-    const nextFnIdx = indexSource.indexOf("const handleConfirmAllSuggested", defIdx);
-    expect(nextFnIdx).toBeGreaterThan(defIdx);
-    const body = indexSource.slice(defIdx, nextFnIdx);
-    expect(body).toContain('buildLogEntry("usernames-linked"');
-    expect(isCallSiteWithinIfBlock(body, 'if (!("error" in result))', 'buildLogEntry("usernames-linked"')).toBe(true);
-  });
-});
-
-describe("handleConfirmAllSuggested records a log entry only when confirmSuggestedBindings succeeds - same rule, same shape", () => {
-  it("the buildLogEntry(\"binding-confirmed\" call site sits inside handleConfirmAllSuggested's own non-error guard", () => {
-    const defIdx = indexSource.indexOf("const handleConfirmAllSuggested = async");
-    expect(defIdx).toBeGreaterThan(-1);
-    // Bounded by the next function actually declared in index.tsx
-    // (handleLinkFromCourseRoster) rather than by handleGradeCell, which
-    // used to follow it here but has since moved into
-    // useRepoGradesGradingActions.ts along with the rest of the grading/
-    // posting handlers - see that hook's own header comment.
-    const nextFnIdx = indexSource.indexOf("const handleLinkFromCourseRoster = async", defIdx);
-    expect(nextFnIdx).toBeGreaterThan(defIdx);
-    const body = indexSource.slice(defIdx, nextFnIdx);
-    expect(body).toContain('buildLogEntry("binding-confirmed"');
-    expect(isCallSiteWithinIfBlock(body, 'if (!("error" in result))', 'buildLogEntry("binding-confirmed"')).toBe(true);
   });
 });
 

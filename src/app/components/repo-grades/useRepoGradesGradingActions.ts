@@ -6,7 +6,7 @@
 // their own - they are the biggest cohesive block of real logic that file
 // had left. This hook owns the on-demand per-cell grading call
 // (handleGradeCell), the "grade this whole column" bulk run (the
-// useRepoGradesBulkGrade wiring plus handleBulkCellUpdate/handleBulkOutcomes/
+// useRepoGradesBulkGrade wiring plus handleBulkCellUpdate/
 // handleGradeColumn), and posting to the live Canvas gradebook
 // (handlePostColumn, handlePostOneCell), along with the `columnPosting`
 // per-column busy state; a bulk-grade plan is built from
@@ -16,15 +16,14 @@
 // acceptance-criteria.md N4 item 13 required consolidating it). Everything
 // this hook reads that index.tsx itself owns (rows,
 // cellEdits and its setter, the current selection, the relevant uiState
-// fields, the activity-log recorder, setPostSummary, the LLM provider, and
+// fields, setPostSummary, the LLM provider, and
 // the current course) comes in as an explicit params object - this hook owns
 // no state index.tsx did not already own before the move, except
 // `columnPosting`, which belongs entirely to the posting handlers here.
 //
 // vitest in this codebase is node-env and collects only src/**/*.test.ts, so
 // this hook is never rendered by any test - the "dangerous call is only ever
-// reachable from a real onClick, never an effect" and "a log entry is never
-// recorded for a write that did not persist" guarantees are instead proven by
+// reachable from a real onClick, never an effect" guarantee is instead proven by
 // repoGrades.wiring.test.ts's source-reading guards against this file, the
 // same idiom that file already used against index.tsx before this move.
 //
@@ -47,7 +46,6 @@ import {
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
-import type { RepoGradeLogEntry, RepoGradeLogEventKind } from "./repoGradesLog";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import {
   buildRepoGradePostPlan,
@@ -57,7 +55,7 @@ import {
   scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
 import { resolveGradeScope } from "./repoGradesGradeSet";
-import { buildBulkGradePlan, bulkGradeOutcomeFromRun, type BulkGradeOutcome } from "./repoGradesBulkGrade";
+import { buildBulkGradePlan, bulkGradeOutcomeFromRun } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
 // A16 wave 3 (docs/a16-wave3-scope.md section 7): the folder-entry adapter.
 // This hook CALLS both, and holds no condition over either result - see
@@ -72,27 +70,6 @@ import type { GradingRunEntry } from "@/lib/grade/types";
 // can never disagree about which rubric a column uses.
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 import { timeGradingAction } from "../grading/gradingActionSeam";
-
-/** AC item 64/76: both grading paths' log `detail` used to gate a
- * `Rubric used: <text>` line on the page-level rubric field being blank
- * (baseline docs/REGRESSION.md entry 352). That field no longer exists here
- * - `ResolvedRubric` replaces it - so the gate becomes source-aware instead
- * of blank-aware: `generate` (the field was left blank, exactly today's
- * behaviour) still logs the full generated text, because that text is the
- * only place it is ever visible. Every OTHER source (`assignment`, `live`,
- * `export`, `manual`) is already visible elsewhere (the textarea, or the
- * column header's rubric description) - repeating its full text on every
- * graded cell would bloat the log for no new information, so this logs only
- * WHICH source and WHICH rubric were used, matching the "only show if it
- * adds something" rule this file already applies to `feedbackNote` below.
- * `failureReason` is appended whenever the resolver set one (AC item 13: a
- * lookup failure never blocks grading, but it must never be silent either). */
-function describeResolvedRubricForLog(resolved: ResolvedRubric, generatedRubricText: string): string {
-  if (resolved.source === "generate") return `Rubric used: ${generatedRubricText}`;
-  const identity = resolved.identity ? ` "${resolved.identity}"` : "";
-  const failure = resolved.failureReason ? ` - ${resolved.failureReason}` : "";
-  return `Rubric source: ${resolved.source}${identity}${failure}`;
-}
 
 export interface UseRepoGradesGradingActionsParams {
   /** The rows currently shown, in display order (index.tsx's sortedRows). */
@@ -128,7 +105,7 @@ export interface UseRepoGradesGradingActionsParams {
   /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
    * to {} on a course switch, via the SAME render-phase compare-and-adjust
    * idiom index.tsx's own cellStateResetForCourse branch uses for cellEdits/
-   * postSummary/log - the two must stay in the same commit so a course
+   * postSummary - the two must stay in the same commit so a course
    * switch can never leave one course's posting-busy flags visible against a
    * different course's rows. */
   courseId: string;
@@ -136,14 +113,6 @@ export interface UseRepoGradesGradingActionsParams {
    * (both handlers return immediately) while this is null. */
   course: Course | null;
   provider: LlmProvider;
-  /** index.tsx's activity-log recorder pair - unchanged from before the
-   * move, including the rule that a log entry is only ever recorded inside
-   * the non-error branch of the call it describes. */
-  recordLog: (entries: readonly RepoGradeLogEntry[]) => void;
-  buildLogEntry: (
-    kind: RepoGradeLogEventKind,
-    fields?: Partial<Omit<RepoGradeLogEntry, "kind" | "at" | "courseId" | "courseName">>
-  ) => RepoGradeLogEntry;
   /** index.tsx's single role="status" aria-live region. Never add a second. */
   setPostSummary: (message: string) => void;
 }
@@ -191,8 +160,6 @@ export function useRepoGradesGradingActions(
     courseId,
     course,
     provider,
-    recordLog,
-    buildLogEntry,
     setPostSummary,
   } = params;
 
@@ -298,7 +265,7 @@ export function useRepoGradesGradingActions(
     // R-6 (docs/a26-a27-scope.md): the same P3 fix as the bulk path's
     // gradeOneTarget - a rejected call (transport, never gradeRepoAction's
     // own body) becomes an ordinary `{ error }` outcome instead of leaving
-    // this cell's `grading: true` set forever with no log entry.
+    // this cell's `grading: true` set forever.
     const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
       row.repo,
       instructions,
@@ -311,22 +278,16 @@ export function useRepoGradesGradingActions(
     )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
-      // L1 item 2. A grading failure otherwise leaves only a per-cell error
-      // string that the next attempt overwrites.
-      recordLog([buildLogEntry("grade-failed", { repo: row.repo, folder: column.folder, detail: result.error })]);
       return;
     }
 
     // FIX 2: nothing was submitted - never a grade, never a failure. The
     // cell returns to its untouched (not-yet-graded) state; the reason is
-    // still recorded in the activity log under its own "grade-no-submission"
-    // kind (never "grade-failed" - nothing went wrong here).
+    // announced below (never a failure - nothing went wrong here).
     if ("noSubmission" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: null }));
-      recordLog([buildLogEntry("grade-no-submission", { repo: row.repo, folder: column.folder, detail: result.reason })]);
       // S1: without this, the cell returns to byte-identical to its
-      // pre-click state and the reason lives only inside the separate
-      // activity-log panel - a click that produces no visible change reads
+      // pre-click state - a click that produces no visible change reads
       // as a no-op, not as "nothing was submitted". The bulk path already
       // announces its outcome this way (onAnnounce: setPostSummary, above);
       // this is the per-cell equivalent.
@@ -338,23 +299,12 @@ export function useRepoGradesGradingActions(
     // A30 (RR-1, docs/a28-scope.md): the SAME question A28 answered for the
     // bulk path - "did this success-shaped return actually grade anything?"
     // - reused here rather than re-derived from `first`/`isUngraded` a
-    // second time. `detail` (the log's own free text) is built first so it
-    // can double as the classifier's `successDetail`, exactly the way
-    // useRepoGradesBulkGrade.ts's gradeOneTarget already builds its detail
-    // before calling bulkGradeOutcomeFromRun.
+    // second time. `successDetail` is "" - `outcome.detail` is only read on
+    // failure, where it is the classifier's own failure text.
     const cuts: string[] = [];
     if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
     if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
-    const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
-    const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
-    const detail = [
-      cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`,
-      rubricNote,
-      feedbackNote,
-    ]
-      .filter((part) => part !== "")
-      .join(" | ");
-    const outcome = bulkGradeOutcomeFromRun({ repo: row.repo, folder: column.folder }, result.run.results, detail);
+    const outcome = bulkGradeOutcomeFromRun({ repo: row.repo, folder: column.folder }, result.run.results, "");
     setCellEdits((prev) =>
       setRepoGradeCellEdit(prev, row.repo, column.folder, {
         grading: false,
@@ -404,60 +354,25 @@ export function useRepoGradesGradingActions(
         codeExecution: first?.codeExecution ?? null,
       })
     );
-    // L1 item 1: the score AS GENERATED, with the provider that produced it -
-    // so a later "why is this score what it is" question can tell an AI
-    // result from a hand-typed one even after the instructor has edited the
-    // cell (the same distinction repoGradeScoreWasEdited makes at post time).
     // docs/folder-scoped-grading-completeness-acceptance-criteria.md C2: the
     // grading path used to COMPUTE whether the submission was cut and then
     // throw both flags away, so an instructor could not tell "the model read
     // my whole folder" from "it read the first fraction of it". Both are now
-    // returned, and this is where they become visible - in the log that is
-    // already this view's durable, downloadable record (entry 333), so the
-    // fact survives the note and travels in the CSV.
+    // returned and announced below.
     //
     // `digestTruncated` means the INGEST hit a cap collecting the folder;
     // `submissionTruncated` means the assembled text was cut again before the
     // model saw it. They are different cuts at different layers, so they are
     // named separately rather than merged into one "truncated" - a reader
-    // chasing missing code needs to know WHICH budget to raise. `cuts` itself
-    // (along with `rubricNote`/`feedbackNote`/`detail`) is computed ABOVE now,
-    // before `outcome` is classified - U12.50: `result.rubric` and
-    // `first.feedback` (src/lib/grade/types.ts:30) used to be requested off
-    // this call and then never read again - neither is discarded now. There
-    // is no per-cell UI slot for either yet (that would mean extending
-    // RepoGradeCellEdit, out of this wave's file set), so both are captured
-    // into THIS call's own log entry instead - RepoGradeLogEntry.detail is
-    // already free text (L2 item 10's own comment), so this needs no schema
-    // change, and the log is already this view's durable, downloadable
-    // record. The rubric is only worth logging when it was GENERATED (the
-    // instructor left the rubric field blank) - an instructor-typed rubric is
-    // already visible in the textarea, and repeating a possibly-long rubric on
-    // every one of a run's graded cells would bloat the log for no new
-    // information. `feedback` is only logged when it differs from
-    // `overallComment` (the same "only show if it adds something" rule
-    // DraftedGradesTab.tsx:663 already applies to the two).
+    // chasing missing code needs to know WHICH budget to raise.
     //
     // A30 (RR-1): the "graded, but <cuts>" announcement only fires on an
     // ACTUAL grade - a model-failed repo (outcome.status === "failed") is
-    // already announced through its own gradeError/log path below, and
+    // already announced through its own gradeError path, and
     // "graded, but ..." would misdescribe a call that produced no grade.
     if (outcome.status !== "failed" && cuts.length > 0) {
       setPostSummary(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
     }
-
-    // A30 (RR-1, docs/a28-scope.md): a model-failed, success-shaped result is
-    // now logged the same way the bulk path already logs it (A28) -
-    // "grade-failed" with a GRADING_FAILURE_PREFIX detail - instead of
-    // "grade-succeeded" for a call that graded nothing.
-    recordLog([
-      buildLogEntry(outcome.status === "failed" ? "grade-failed" : "grade-succeeded", {
-        repo: row.repo,
-        folder: column.folder,
-        score: outcome.score,
-        detail: outcome.detail,
-      }),
-    ]);
   };
 
   // AC5 items 27-32: the dangerous half. ONE postCanvasGradesAction call for
@@ -499,21 +414,6 @@ export function useRepoGradesGradingActions(
         ? `${column.folder}: none of the ${selected.size} selected row(s) are postable in this column.`
         : `${column.folder}: nothing is postable in this column yet.`;
       setPostSummary(summary);
-      // L1 item 5: every skipped row with its OWN reason from the plan, not
-      // just the one-line summary - "why was this student not posted" is the
-      // question the log exists to answer, and the reasons differ per row
-      // (unbound, no folder, no score, no assignment mapped).
-      recordLog([
-        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
-        ...plan.skipped.map((skip) =>
-          buildLogEntry("post-skipped", {
-            repo: skip.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            detail: skip.reason,
-          })
-        ),
-      ]);
       return;
     }
 
@@ -522,15 +422,6 @@ export function useRepoGradesGradingActions(
       ? ` This posts only your ${plan.postable.length} selected row(s), not the whole column.`
       : ` No rows are selected, so this posts the whole column (all ${plan.postable.length} postable row(s)).`;
     if (!window.confirm(`Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.${scopeSentence}`)) {
-      // L1 item 6: "nothing happened and I do not remember why" is exactly
-      // the question a log exists to answer.
-      recordLog([
-        buildLogEntry("post-cancelled", {
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: `Declined the confirm for ${plan.postable.length} grade(s)`,
-        }),
-      ]);
       return;
     }
 
@@ -538,9 +429,6 @@ export function useRepoGradesGradingActions(
     if (!assignmentUrl) {
       const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
       setPostSummary(summary);
-      recordLog([
-        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
-      ]);
       return;
     }
 
@@ -570,41 +458,6 @@ export function useRepoGradesGradingActions(
       return next;
     });
     setColumnPosting((prev) => ({ ...prev, [column.folder]: false }));
-
-    // L1 items 3-5: one entry per ATTEMPTED row carrying the exact score that
-    // went out (read off the plan, never re-read from the edit state, which
-    // the instructor may have kept typing into while the call was in flight),
-    // plus one per row the plan dropped before the call. B1: a row
-    // postCanvasGradesAction itself skipped (no grade or comment to send)
-    // logs under the SAME "post-skipped" kind as a plan-level drop, since
-    // both describe "this row was never written to Canvas."
-    const gradeByRepo = new Map(plan.postable.map((item) => [item.repo, item.grade.grade]));
-    recordLog([
-      ...fanout.map((outcome) =>
-        buildLogEntry(
-          outcome.postStatus === "error"
-            ? "post-failed"
-            : outcome.postStatus === "skipped"
-              ? "post-skipped"
-              : "post-succeeded",
-          {
-            repo: outcome.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            score: gradeByRepo.get(outcome.repo) ?? "",
-            detail: outcome.postMessage ?? "",
-          }
-        )
-      ),
-      ...plan.skipped.map((skip) =>
-        buildLogEntry("post-skipped", {
-          repo: skip.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: skip.reason,
-        })
-      ),
-    ]);
 
     // B1: state the denominator and both non-success outcomes separately -
     // "posted 54, 3 failed" used to be indistinguishable from a batch where a
@@ -640,19 +493,7 @@ export function useRepoGradesGradingActions(
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
     if (plan.postable.length === 0) {
       // This path is otherwise completely silent (by design - the button that
-      // reaches it is already only rendered for a plausible cell), which is
-      // precisely why the log should say the retry did nothing and name the
-      // plan's own reason for it.
-      recordLog(
-        plan.skipped.map((skip) =>
-          buildLogEntry("post-skipped", {
-            repo: skip.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            detail: skip.reason,
-          })
-        )
-      );
+      // reaches it is already only rendered for a plausible cell).
       return;
     }
 
@@ -660,14 +501,6 @@ export function useRepoGradesGradingActions(
     if (!assignmentUrl) {
       const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
       setPostSummary(summary);
-      recordLog([
-        buildLogEntry("post-skipped", {
-          repo: row.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: summary,
-        }),
-      ]);
       return;
     }
 
@@ -689,26 +522,6 @@ export function useRepoGradesGradingActions(
       }
       return next;
     });
-
-    const singleGrade = plan.postable[0]?.grade.grade ?? "";
-    recordLog(
-      fanout.map((outcome) =>
-        buildLogEntry(
-          outcome.postStatus === "error"
-            ? "post-failed"
-            : outcome.postStatus === "skipped"
-              ? "post-skipped"
-              : "post-succeeded",
-          {
-            repo: outcome.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            score: singleGrade,
-            detail: outcome.postMessage ?? "Single-row retry",
-          }
-        )
-      )
-    );
 
     // B1: a skip is neither "posted" nor "failed to post" - Canvas was never
     // called for this row, and saying "posted" would be exactly the false
@@ -735,28 +548,12 @@ export function useRepoGradesGradingActions(
     setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, patch));
   };
 
-  // Same log kinds handleGradeCell already records above - a bulk grade is
-  // still, per row, an on-demand AI grading call. "no-submission" (FIX 2) is
-  // its own log kind - never "grade-failed" (nothing went wrong) and never
-  // "grade-succeeded" (no score was produced).
-  const handleBulkOutcomes = (outcomes: readonly BulkGradeOutcome[]) => {
-    recordLog(
-      outcomes.map((o) =>
-        buildLogEntry(
-          o.status === "graded" ? "grade-succeeded" : o.status === "no-submission" ? "grade-no-submission" : "grade-failed",
-          { repo: o.repo, folder: o.folder, score: o.score, detail: o.detail }
-        )
-      )
-    );
-  };
-
   const { runningFolder: bulkRunningFolder, progress: bulkProgress, runBulkGrade } = useRepoGradesBulkGrade({
     provider,
     instructions,
     useReadmeInstructions,
     runCodeScoring,
     onCellUpdate: handleBulkCellUpdate,
-    onOutcomes: handleBulkOutcomes,
     onAnnounce: setPostSummary,
   });
 

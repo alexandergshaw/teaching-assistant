@@ -16,7 +16,6 @@
 
 import { DEFAULT_REPO_GRADE_SORT, parseRepoGradeSortState, type RepoGradeSortState } from "./repoGradesRows";
 import type { RepoGradeAssignmentMap } from "./repoGradesAssignmentMapping";
-import { parseRepoGradeLogEntries, type RepoGradeLogEntry } from "./repoGradesLog";
 import { EMPTY_REPO_GRADE_CELL_EDITS, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
   clearRepoGradeCellsIn,
@@ -92,15 +91,6 @@ const RUN_CODE_SCORING_KEY = "ta-repo-grades-run-code-scoring";
 // RG-SEARCH-STICKY Wave B: the sticky header's search box text. Display-only -
 // it narrows the table body and nothing else (never a plan, count or Post gate).
 const SEARCH_KEY = "ta-repo-grades-search";
-// L3 (docs/repo-grades-activity-log-acceptance-criteria.md): the activity
-// log, stored per COURSE inside one blob for the same reason
-// ASSIGNMENT_MAP_KEY is - one course's record of "who did I post, at what
-// score" means nothing under another course, and a single key stays simple to
-// reason about and to clear. Unlike every other key here this one holds a
-// RECORD of what the view did rather than a control's value; it is still a
-// `ta-` localStorage key because that is the only durable store this view has
-// (postCanvasGradesAction writes to Canvas and keeps nothing locally).
-const LOG_KEY = "ta-repo-grades-log";
 // RG-PERSIST-RESULTS (W5): graded cells, per course. NOT on the sign-out
 // keep-list - client-state-sweep erases it (pinned by its test).
 const CELLS_KEY = "ta-repo-grades-cells";
@@ -365,54 +355,6 @@ export function persistAssignmentMapping(courseId: string, mapping: RepoGradeAss
 }
 
 // ---------------------------------------------------------------------------
-// Per-course activity log (docs/repo-grades-activity-log-acceptance-criteria.md
-// L3). Same shape as the assignment mapping above: the raw stored blob is
-// `Record<courseId, RepoGradeLogEntry[]>`, and the two functions below only
-// read/write ONE course's slice of it, leaving every other course's log
-// untouched. The VALIDATION (dropping a malformed entry) is deliberately not
-// done here - it lives in repoGradesLog.ts's parseRepoGradeLogEntries, a pure
-// module a node-env test can import without stubbing a localStorage.
-
-function parseLogByCourse(raw: string | null): Record<string, RepoGradeLogEntry[]> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: Record<string, RepoGradeLogEntry[]> = {};
-    for (const [courseId, entries] of Object.entries(parsed as Record<string, unknown>)) {
-      result[courseId] = parseRepoGradeLogEntries(entries);
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-/** Reads `courseId`'s slice of the persisted activity log - always an array
- * (never null), already validated and capped by parseRepoGradeLogEntries, so
- * a malformed or hand-edited blob degrades to "fewer entries" rather than to
- * a crashed view (L3 item 14). */
-export function loadRepoGradeLog(courseId: string): RepoGradeLogEntry[] {
-  if (typeof window === "undefined" || !courseId) return [];
-  return parseLogByCourse(localStorage.getItem(LOG_KEY))[courseId] ?? [];
-}
-
-/** Writes `courseId`'s slice of the persisted activity log, preserving every
- * OTHER course's slice untouched. Best-effort: a throw (quota, private
- * browsing) loses persistence for this one change and nothing else (L3 item
- * 16), matching persistRepoGradesUiState above. */
-export function persistRepoGradeLog(courseId: string, entries: readonly RepoGradeLogEntry[]): void {
-  if (typeof window === "undefined" || !courseId) return;
-  try {
-    const byCourse = parseLogByCourse(localStorage.getItem(LOG_KEY));
-    byCourse[courseId] = entries.slice();
-    localStorage.setItem(LOG_KEY, JSON.stringify(byCourse));
-  } catch {
-    // best-effort persistence only, matching persistRepoGradesUiState above.
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Per-course graded results (RG-PERSIST-RESULTS W5). All logic lives in the
 // pure leaf repoGradesResultsStore.ts; these are the `typeof window`-guarded
 // wrappers binding it to localStorage and to CELLS_KEY (the one home of the
@@ -580,7 +522,7 @@ export function decodeRepoGradeRubricChoice(value: string): RepoGradeRubricChoic
 // parses above, just for a different key. Kept as its own named function
 // (rather than reusing parseFolderByCourse directly under a name that talks
 // about folders) so this section's comments and behaviour stay
-// self-contained, matching how parseAssignmentMapByCourse/parseLogByCourse/
+// self-contained, matching how parseAssignmentMapByCourse/
 // parseFolderByCourse are each their own function despite sharing the same
 // "never trust stored data" shape.
 function parseRubricStringByCourse(raw: string | null): Record<string, string> {

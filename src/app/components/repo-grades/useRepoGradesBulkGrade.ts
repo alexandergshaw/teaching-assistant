@@ -11,14 +11,11 @@
 // `rubricAreas`/`generatedScore` are set only by a grading call, never by a
 // hand-edit) so a bulk-graded cell and a one-off-graded cell are
 // indistinguishable to most downstream consumers (posting,
-// repoGradeScoreWasEdited). CORRECTED (A28, docs/a28-scope.md): this used to
-// say "indistinguishable ... including the activity log", which stopped
-// being true once bulkGradeOutcomeFromRun (repoGradesBulkGrade.ts) started
-// classifying a model-failed repo as "failed" here. A30 (RR-1) closed the
-// gap this comment used to describe: handleGradeCell
-// (useRepoGradesGradingActions.ts) now reuses the SAME bulkGradeOutcomeFromRun
-// classifier, so a model failure logs `grade-failed` and shows a cell error
-// from both paths, not just this one.
+// repoGradeScoreWasEdited). A28 (docs/a28-scope.md) / A30 (RR-1):
+// bulkGradeOutcomeFromRun (repoGradesBulkGrade.ts) classifies a model-failed
+// repo as "failed", and handleGradeCell (useRepoGradesGradingActions.ts)
+// reuses the SAME classifier, so a model failure shows a cell error from
+// both paths, not just this one.
 //
 // Why a worker pool and not Promise.all(plan.targets.map(...)): fanning out
 // every target at once would multiply the GitHub-ingest and model rate-limit
@@ -79,20 +76,6 @@ import {
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 import { timeGradingAction } from "../grading/gradingActionSeam";
 
-/** AC item 64/76 - the sibling of useRepoGradesGradingActions.ts's own
- * describeResolvedRubricForLog (duplicated rather than shared: this wave's
- * three-agent split gives each hook file to a different owner, so a shared
- * helper module is out of scope here - see that file's own copy for the full
- * rationale, identical in both). `generate` keeps the existing full-text
- * `Rubric used:` line; every other source logs its SOURCE and IDENTITY
- * instead, plus `failureReason` when the resolver set one. */
-function describeResolvedRubricForLog(resolved: ResolvedRubric, generatedRubricText: string): string {
-  if (resolved.source === "generate") return `Rubric used: ${generatedRubricText}`;
-  const identity = resolved.identity ? ` "${resolved.identity}"` : "";
-  const failure = resolved.failureReason ? ` - ${resolved.failureReason}` : "";
-  return `Rubric source: ${resolved.source}${identity}${failure}`;
-}
-
 export interface UseRepoGradesBulkGradeParams {
   /** Grading provider, from the view's existing useLlmProvider(). */
   provider: LlmProvider;
@@ -108,8 +91,6 @@ export interface UseRepoGradesBulkGradeParams {
   /** Writes one cell's edit - index.tsx's setCellEdits wrapper. Called with
    * the same field shape handleGradeCell already writes. */
   onCellUpdate: (repo: string, folder: string, patch: Partial<RepoGradeCellEdit>) => void;
-  /** Appends activity-log entries - index.tsx's recordLog/buildLogEntry pair. */
-  onOutcomes: (outcomes: readonly BulkGradeOutcome[]) => void;
   /** One line into the view's EXISTING role="status" region. Never add a
    * second. */
   onAnnounce: (message: string) => void;
@@ -187,7 +168,7 @@ export interface UseRepoGradesBulkGradeResult {
 
 /**
  * Grades every target in `plan` with at most BULK_GRADE_CONCURRENCY requests
- * in flight, then reports once via onOutcomes/onAnnounce. Refuses to start a
+ * in flight, then reports once via onAnnounce. Refuses to start a
  * second run while one is already in progress - returns immediately rather
  * than queueing or replacing it, because two concurrent fan-outs would
  * multiply exactly the GitHub- and model-rate-limit pressure
@@ -213,7 +194,7 @@ export interface UseRepoGradesBulkGradeResult {
  * or a rejecting grading call from leaving it stuck (backlog row A27).
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
-  const { provider, instructions, useReadmeInstructions, runCodeScoring, onCellUpdate, onOutcomes, onAnnounce } = params;
+  const { provider, instructions, useReadmeInstructions, runCodeScoring, onCellUpdate, onAnnounce } = params;
   const runLockRef = useRef(false);
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -276,9 +257,9 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // call - transport, not gradeRepoAction's own body, which never throws
       // - is mapped onto the SAME `{ error }` shape the "error" branch below
       // already handles, so a rejection becomes an ordinary failed outcome
-      // (cell released, logged, retryable) instead of leaving this worker's
+      // (cell released, retryable) instead of leaving this worker's
       // `await` unsettled forever, which used to be what left the whole
-      // run's flag, progress, log and summary stuck (docs/REGRESSION.md,
+      // run's flag, progress and summary stuck (docs/REGRESSION.md,
       // this entry's own baseline).
       const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
         target.repo,
@@ -313,12 +294,11 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       const score = first?.totalScore ?? "";
       // A30 (RR-1, docs/a28-scope.md): reuse A28's classifier here too, so
       // the cell shows the SAME "did this call actually grade anything"
-      // answer the outcome pushed below (and the log kind derived from it)
+      // answer the outcome pushed below
       // already uses - never a second predicate on `first`/`isUngraded`.
-      // `successDetail` is "" here (the full detail string is only built
-      // below, after this call) - on failure that leaves `provisionalOutcome
-      // .detail` as exactly `first.ungraded.message`, the same
-      // GRADING_FAILURE_PREFIX-prefixed text the log entry carries.
+      // `successDetail` is "" here - on failure that leaves
+      // `provisionalOutcome.detail` as exactly `first.ungraded.message`, the
+      // GRADING_FAILURE_PREFIX-prefixed text.
       const provisionalOutcome = bulkGradeOutcomeFromRun(target, result.run.results, "");
       onCellUpdate(target.repo, target.folder, {
         grading: false,
@@ -365,38 +345,12 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // consumer, same as every other field set alongside it above.
         codeExecution: first?.codeExecution ?? null,
       });
-      // `detail` on success names the README path actually used (or a
-      // missing-README fallback note - never silent about which repos fell
-      // back to the typed instructions vs. read a per-folder README), plus
-      // U12.50/AC item 64's capture of `result.rubric`/`first.feedback` (see
-      // useRepoGradesGradingActions.ts's handleGradeCell for why the log's
-      // free-text `detail` is where both land: neither is discarded, and
-      // there is no per-cell UI slot for either without extending
-      // RepoGradeCellEdit, out of this wave's file set). `describeResolvedRubricForLog`
-      // reads the RUN's own `resolved` (this run's shared, picked rubric),
-      // never `rubricArg` - `rubricArg` is per-ATTEMPT (a prologue attempt
-      // can differ from the eventual `sharedRubric`), but the log must
-      // describe what the instructor actually picked for this run, which
-      // never changes mid-run.
-      // Wording fix: "graded from <path>" used to read as "this is what was
-      // graded" when it actually names where the INSTRUCTIONS came from -
-      // the folder's own content (with that same file excluded, FIX 1) is
-      // what was graded, never the README itself. Reworded to say exactly
-      // that.
-      const readmeNote = result.readmeMissing
-        ? "no README found in this folder - instructions came from the typed text instead"
-        : result.readmePath
-          ? `instructions came from ${result.readmePath}`
-          : "";
-      const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
-      const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
-      const detail = [readmeNote, rubricNote, feedbackNote].filter((part) => part !== "").join(" | ");
       // A28 (docs/a28-scope.md section 6.1): a success-shaped `result` can
       // still carry a model failure in `result.run.results[0].ungraded` -
       // bulkGradeOutcomeFromRun is the one place that turns this return into
       // an outcome, so that case is classified "failed" instead of the
       // literal "graded" this line used to write unconditionally.
-      outcomes.push(bulkGradeOutcomeFromRun(target, result.run.results, detail));
+      outcomes.push(bulkGradeOutcomeFromRun(target, result.run.results, ""));
       // A16 wave 3: pushes onto the run's trends collector above. A direct
       // statement, following both early-return branches - never nested.
       runResults.push(...result.run.results);
@@ -439,11 +393,9 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     // uses (item 16) - so a picked, non-blank rubric always skips this
     // prologue and grades every target against the real thing, while a
     // `generate` choice (still blank `resolved.text`) runs this prologue
-    // exactly as before. AC item 76: this is one of the two gates that used
-    // to be the SAME expression on the SAME variable as the log's `Rubric
-    // used` gate above (AC item 64 changed that one); a guard in
-    // repoGradesRubricPicker.wiring.test.ts pins that both moved off the old
-    // page-level string.
+    // exactly as before. AC item 76: a guard in
+    // repoGradesRubricPicker.wiring.test.ts pins that this gate moved off the
+    // old page-level string.
     let sharedRubric = resolved.text;
     let cursor = 0;
     if (resolved.text.trim() === "" && targets.length > 0) {
@@ -478,7 +430,6 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     const workerCount = Math.min(BULK_GRADE_CONCURRENCY, Math.max(targets.length - cursor, 0));
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
-    onOutcomes(outcomes);
     onAnnounce(bulkGradeSummaryLine(outcomes, plan));
     // The lock, `runningFolder` and `progress` reset is runBulkGrade's own
     // `finally` now (above) - it has to cover a rejecting rubric fetch too,

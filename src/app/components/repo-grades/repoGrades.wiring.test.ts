@@ -28,9 +28,8 @@
 // success-only branch, never from render or an effect" - binding acceptance
 // (RepoBindingControl.tsx), grading a cell and posting a column
 // (RepoGradeCellControl.tsx / useRepoGradesGradingActions.ts), the
-// selection-persistence mount-time race (index.tsx), the shared postability
-// derivation (RepoGradesGrid.tsx / useRepoGradesGradingActions.ts), and the
-// activity log's download/clear (RepoGradesLogPanel.tsx). The two NEWEST
+// selection-persistence mount-time race (index.tsx), and the shared postability
+// derivation (RepoGradesGrid.tsx / useRepoGradesGradingActions.ts). The two NEWEST
 // waves - LinkUsernamesPanel's instructor-complaint fix and A5's row-link/
 // selectedFolder wiring - moved to repoGrades.wiring.linking.test.ts, which
 // duplicates findMatchingBraceEnd (below) with a citation comment, per this
@@ -107,7 +106,7 @@ function findMatchingBraceEnd(text: string, openBraceIdx: number): number {
  * of whether it was actually inside it, because the old check never found a
  * "}}" to signal the handler had already closed. Depth-counting the ACTUAL
  * braces from the `onClick={`'s own `{` recognizes both forms correctly and
- * is proven against the concise-arrow case (RepoGradesLogPanel.tsx's shape)
+ * is proven against the concise-arrow case
  * in the canary block below, not just the "present vs absent" pair that
  * caught this file's other two files' block-body handlers before.
  *
@@ -429,8 +428,8 @@ describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanv
     // character count (the sibling gradeRepoAction assertion above already
     // does this): a fixed window silently turns "the call moved out of this
     // handler" and "this handler grew past N characters" into the same
-    // failure, and the activity-log wave's added recordLog calls are exactly
-    // the benign growth that tripped the old 2000-character bound.
+    // failure, and benign growth of the handler body is exactly what tripped
+    // the old 2000-character bound.
     const nextFnIdx = hookSource.indexOf("const handlePostOneCell", defIdx);
     const body = hookSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : hookSource.length);
     expect(body).toContain("postCanvasGradesAction(");
@@ -744,102 +743,6 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(countCalls(gridSource)).toBe(0);
     expect(countCalls(runPlanSource)).toBe(0);
     expect(countCalls(runBarSource)).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Activity log wiring (docs/repo-grades-activity-log-acceptance-criteria.md
-// L6 item 28). Two guarantees this file's text-reading approach can prove
-// that a node-env test of the pure module cannot:
-//   1. The download and the destructive clear happen only from a real click -
-//      a download that fired on render would drop a file into the
-//      instructor's Downloads folder every time the view re-rendered, and a
-//      clear that fired on render would destroy the audit trail outright.
-//   2. index.tsx actually renders the panel and actually appends entries on
-//      the post path - the log is worthless if nothing writes to it, and a
-//      pure-module test passes happily against a log nothing ever calls.
-// callSitesGatedByClick's canary (top of this file) is what stops these from
-// passing vacuously.
-const LOG_PANEL_PATH = join(process.cwd(), "src/app/components/repo-grades/RepoGradesLogPanel.tsx");
-const logPanelSource = readFileSync(LOG_PANEL_PATH, "utf8");
-
-describe("the activity log's download and clear are click-gated", () => {
-  it("every triggerFileDownload call site sits inside an onClick handler", () => {
-    const sites = callSitesGatedByClick(logPanelSource, "handleDownload");
-    expect(sites.length).toBeGreaterThan(0);
-    expect(sites.every(Boolean)).toBe(true);
-    // The download itself lives in that handler, never at module or render scope.
-    const defIdx = logPanelSource.indexOf("const handleDownload =");
-    const endIdx = logPanelSource.indexOf("const handleClear =", defIdx);
-    expect(logPanelSource.slice(defIdx, endIdx)).toContain("triggerFileDownload(");
-  });
-
-  it("clearing the log is behind a window.confirm that runs before onClear", () => {
-    const defIdx = logPanelSource.indexOf("const handleClear =");
-    expect(defIdx).toBeGreaterThan(-1);
-    const confirmIdx = logPanelSource.indexOf("window.confirm(", defIdx);
-    const clearIdx = logPanelSource.indexOf("onClear()", defIdx);
-    expect(confirmIdx).toBeGreaterThan(-1);
-    expect(confirmIdx).toBeLessThan(clearIdx);
-  });
-
-  it("the file defines no effect at all, so there is no mount-time or state-change-triggered path that could download or clear the log automatically - the same backstop RepoBindingControl.tsx (line 138 above) and useRepoGradesGradingActions.ts (line 316 above) already have", () => {
-    expect(stripComments(logPanelSource)).not.toContain("useEffect");
-  });
-  // A "no download or clear is reachable from a useEffect body" pair used to
-  // live here, built on extractUseEffectBodies exactly like the checks above
-  // index.tsx's own effects. It was vacuous for the same reason as the
-  // deleted hookSource pair above: this file contains no
-  // `useEffect(() => {` at all, so extractUseEffectBodies(logPanelSource) is
-  // always `[]` and `[].some(...)` is `false` regardless of what
-  // triggerFileDownload/onClear's call sites looked like - this file
-  // previously had NO backstop proving that at all (unlike hookSource, which
-  // already had the stripComments check). The assertion directly above is
-  // that backstop, added now, and is strictly the stronger guarantee: it
-  // fails on any occurrence of the literal text "useEffect" anywhere in this
-  // file, which is a necessary condition for a real effect to exist, so
-  // there is no path by which either call could reach an effect body without
-  // that check already failing first.
-
-  it("the panel builds its file through the shared triggerFileDownload, not a hand-rolled object URL", () => {
-    expect(logPanelSource).toContain("triggerFileDownload");
-    // Matched as CALLS, not as bare words: RepoGradesLogPanel.tsx's own
-    // header comment names the hand-rolled dance it is avoiding, so a
-    // substring check for "createObjectURL" alone goes red on a comment that
-    // is documenting the very rule this test enforces.
-    expect(logPanelSource).not.toContain("URL.createObjectURL(");
-    expect(logPanelSource).not.toContain("document.createElement(");
-  });
-});
-
-describe("index.tsx actually feeds and renders the activity log", () => {
-  it("renders RepoGradesLogPanel with this course's log and a clear handler", () => {
-    expect(indexSource).toContain("<RepoGradesLogPanel");
-    expect(indexSource).toContain("log={log}");
-    expect(indexSource).toContain("onClear={() => setLog([])}");
-  });
-
-  it("records an entry on both post outcomes and on both grading outcomes - these four record sites moved into useRepoGradesGradingActions.ts along with the handlers that own them", () => {
-    for (const kind of ['"post-succeeded"', '"post-failed"', '"grade-succeeded"', '"grade-failed"']) {
-      expect(hookSource).toContain(kind);
-    }
-  });
-
-  it("restores this course's log in the same branch that resets the ephemeral cell state", () => {
-    const branchIdx = indexSource.indexOf("if (uiState.courseId !== cellStateResetForCourse)");
-    expect(branchIdx).toBeGreaterThan(-1);
-    const branch = indexSource.slice(branchIdx, branchIdx + 400);
-    expect(branch).toContain("setLog(loadRepoGradeLog(uiState.courseId))");
-  });
-
-  it("persists the log only once the restore for the CURRENT course has run", () => {
-    const bodies = extractUseEffectBodies(indexSource);
-    const persistBody = bodies.find((b) => b.includes("persistRepoGradeLog("));
-    expect(persistBody).toBeDefined();
-    // The guard is what stops this effect from firing on the first commit
-    // with the untouched `[]` default and wiping a real stored log - the
-    // exact mount-time race the selection Set's own regression above records.
-    expect(persistBody).toContain("if (cellStateResetForCourse !== uiState.courseId) return;");
   });
 });
 

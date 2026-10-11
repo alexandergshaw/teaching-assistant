@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'REPO-GRADING-REMOVE-ACTIVITY-LOG'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Owner 2026-10-11: remove the activity log from the repo grading view.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/repo-grading-remove-activity-log-scope.md (loop-architect dispatched 2026-10-11). Locate the activity-log component in the Repo Grades view (src/app/components/repo-grades/) + its data source/append sites/ta- key. Removal + orphan sweep (dead data source, append sites, props, imports - tsc-clean the whole closure) + canary flips (a mount pin flipped to assert-removed; a removed ta- key bumps the frozen-key canary + N same commit). Machine-checkable = structure pin the log mount is absent + tsc clean after the orphan removal; the view-without-log is owner-walk. No new diagnostic (removal); confirm no diagnostic op orphaned.'
+  from: 'Owner request 2026-10-11 (direct chat).'
+  note: 'Bounded removal. The orphan sweep is the risk (the reachability/tsc discipline - a removal that leaves a dead data source/append site/prop reds tsc, and a removed file needs the directory frozen-roots canary bumped same commit). Confirm no KEPT repo-grades capability (grade-all, grid, search/sticky, per-cell post) depends on the activity log. Disjoint from the in-flight zip/walkthrough work.'
+  question: null
 - id: 'WALKTHROUGH-MIMIC-CHAT'
   state: 'actionable'
   kind: 'feature'

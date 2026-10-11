@@ -88,6 +88,18 @@
   from: 'Owner request 2026-10-11 (direct chat).'
   note: 'Pure visual/UX pass on a shipped control - NOT a behavior change. The risk is the 985/1000 CSS ceiling (a facelift adds styles - plan a css split if needed) and NOT regressing the W4 behavior/AC (default-open-when-not-ready, persistence, nesting, aria-live, banners-after-close). BUILD serializes behind the in-flight repo-grades work on the shared tsc/full-test + collides on index.tsx/repo-grades.module.css with any other repo-grades build. Scope is read-only, safe now.'
   question: null
+- id: 'LMS-PICKER-DROPDOWN-INDICATION'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Owner 2026-10-11: no indication why a course cannot be selected from the From-LMS picker after choosing an institution, and the course dropdown opens empty / as a sliver.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Scope docs/lms-picker-dropdown-indication-scope.md (loop-architect a2ceb60a); CHECK a87e09cd dispatched. CONFIRMED diagnosis: ChatComposer.tsx:482 disables the Course select on disabled||!institution||loading.courses with NO zero-options term, so an EMPTY-but-OK course list leaves the field ENABLED with zero MenuItems -> MUI opens an empty Menu (the owner "sliver"); same on Assignment :497 / Institution :467. NOT a CSS-height bug (no custom MenuProps) - a zero-children sliver. NO reachability bug (the course effect fires on institution select; indication-only). A "configured" institution (credential-presence, no live probe) can BOTH error (stale token) AND be empty-ok (no active courses) - so error vs empty-ok COPY must differ. FIX (reading A): a pure lmsFieldIndication leaf in lmsPickerState.ts making empty-sliver UNREPRESENTABLE (enabled only when optionCount!=0; empty/loading/error/pre-parent -> disabled + helperText), all 3 fields; add errors:{institutions,courses,assignments} to the hook (additive, the 3 sub-exprs already exist at :146); add a list_lms_courses diagnostic bumping BOTH linked unions (ChatSeamOperation + GradingDiagnosticOperation, tsc-enforced). Machine-checkable = pure decision-table + the never-openable-but-empty invariant (optionCount===0 => disabled) + source-text render/diagnostic-wiring pins; real dropdown render owner-walk. Residuals RES-LMS-IND-1 (surface the dropped attemptedHost in the course error), RES-LMS-IND-2 (owner live-render walk).'
+  from: 'Owner request 2026-10-11 (direct chat, two messages: no-indication + empty/sliver).'
+  note: 'Indication-only bug on the shipped From-LMS picker (LMS-SUBMISSIONS-ZIP-INTAKE 40887f9d). One small wave. BUILD serializes + COLLIDES on ChatComposer.tsx with LMS-META-OVERRIDE-OFFER (a22017e0, same area) - sequence those two builds, do not run concurrently. The grading-chat ta- key canary (exact-set of 8) is NOT touched (no new ta- key). Ceilings all <1000 (ChatComposer 519); grading.ts 984 not in the write set.'
+  question: null
 - id: 'LMS-META-OVERRIDE-OFFER'
   state: 'actionable'
   kind: 'feature'

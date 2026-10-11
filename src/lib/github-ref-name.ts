@@ -77,3 +77,16 @@ export function encodeRefSegment(ref: string): string {
   if (trimmed === "." || trimmed === "..") throw new Error(INVALID);
   return encodeURIComponent(trimmed);
 }
+
+const INVALID_WORKFLOW = "That is not a valid workflow id or file name.";
+
+/**
+ * encodeURIComponent for a workflow id or file name placed in a GitHub Actions
+ * URL path, but throws on a bare "." or ".." (after trim) - the one shape
+ * encodeURIComponent does not neutralise, which collapses the dispatch path.
+ */
+export function encodeWorkflowSegment(ref: string): string {
+  const trimmed = ref.trim();
+  if (trimmed === "." || trimmed === "..") throw new Error(INVALID_WORKFLOW);
+  return encodeURIComponent(trimmed);
+}

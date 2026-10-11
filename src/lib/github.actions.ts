@@ -1,6 +1,7 @@
 // GitHub Actions: workflows, runs, jobs, artifacts, and pending deployments.
 
 import { ghFetch, ghJson, ghError, githubToken } from "./github.repos";
+import { encodeWorkflowSegment } from "./github-ref-name";
 
 const API = "https://api.github.com";
 
@@ -102,7 +103,7 @@ export async function dispatchWorkflow(
   ref: string,
   inputs?: Record<string, string>
 ): Promise<void> {
-  await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowRef)}/dispatches`, {
+  await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${encodeWorkflowSegment(workflowRef)}/dispatches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(inputs && Object.keys(inputs).length > 0 ? { ref, inputs } : { ref }),

@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { readSessionDiagnosticSurfaceEntries, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
 import {
   GRADING_ACTION_FAILURE_CLASSES,
+  MERGE_CHECK_FAILURE_CLASSES,
   classifyGradingActionResult,
+  classifyMergeCheckResult,
   decideGradingActionDiagnostic,
   timeGradingAction,
   timePostGrades,
@@ -105,5 +107,52 @@ describe("timeGradingAction (wrapper call shape)", () => {
   it("timePostGrades records the post_grades operation (not a mislabel)", async () => {
     await timePostGrades(async () => ({ posted: 1, failures: [], skipped: [] }));
     expect(grading()[0].operation).toBe("post_grades");
+  });
+});
+
+describe("merge-check diagnostic (AC-8)", () => {
+  it("classifyMergeCheckResult reads only the fixed status set by shape", () => {
+    for (const status of ["merged", "not-merged", "no-submission", "unknown"]) {
+      expect(classifyMergeCheckResult({ branchMergeCheck: { status, targetBranch: "main" } })).toBe(status);
+    }
+    expect(classifyMergeCheckResult({ run: {} })).toBeNull();
+    expect(classifyMergeCheckResult({ branchMergeCheck: { status: "made-up" } })).toBeNull();
+    expect(classifyMergeCheckResult(undefined)).toBeNull();
+  });
+
+  it("decideGradingActionDiagnostic carries mergeCheck only when supplied", () => {
+    const base = { operation: "grade_repo" as const, startedAtMs: 0, settledAtMs: 10, failureClass: null };
+    expect(decideGradingActionDiagnostic({ ...base, mergeCheck: "not-merged" }).mergeCheck).toBe("not-merged");
+    expect("mergeCheck" in decideGradingActionDiagnostic(base)).toBe(false);
+    expect("mergeCheck" in decideGradingActionDiagnostic({ ...base, mergeCheck: null })).toBe(false);
+  });
+
+  it("a merged grade (either engine) records only the ordinary success entry", async () => {
+    await timeGradingAction("grade_repo", async () => ({ run: {}, branchMergeCheck: { status: "merged", targetBranch: "main" } }));
+    const e = grading();
+    expect(e).toHaveLength(1);
+    expect(e[0].outcome).toBe("success");
+  });
+
+  it("each non-merged outcome adds one fixed-class entry and never records a branch or repo name", async () => {
+    for (const status of ["not-merged", "no-submission", "unknown"] as const) {
+      resetSessionDiagnosticLogForTests("2026-10-08T10:00:00.000Z");
+      await timeGradingAction("grade_repo", async () => ({
+        noSubmission: true,
+        fullName: "org/jane-smith",
+        reason: "Jane Smith feature-secret",
+        branchMergeCheck: { status, targetBranch: "release-secret", foundOnBranch: "feature-secret" },
+      }));
+      const e = grading();
+      expect(e).toHaveLength(2);
+      expect(e[1].error).toBe(MERGE_CHECK_FAILURE_CLASSES[status]);
+      const dump = JSON.stringify(e);
+      for (const leak of ["Jane", "jane-smith", "feature-secret", "release-secret"]) expect(dump).not.toContain(leak);
+    }
+  });
+
+  it("other operations never read a merge check", async () => {
+    await timeGradingAction("post_grades", async () => ({ branchMergeCheck: { status: "not-merged", targetBranch: "m" } }));
+    expect(grading()).toHaveLength(1);
   });
 });

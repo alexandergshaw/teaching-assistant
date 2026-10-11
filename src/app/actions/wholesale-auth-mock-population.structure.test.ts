@@ -185,6 +185,7 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "discussion-replies-draft.test.ts",
   "discussion-replies-extract.test.ts",
   "discussion-replies-resources.test.ts",
+  "github-repos.branch-merge-check.test.ts",
   "github-repos.grading.test.ts",
   "github-repos.grading.unmerged-branch.test.ts",
   "github-student-repos.test.ts",

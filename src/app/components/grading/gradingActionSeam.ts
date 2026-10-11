@@ -13,6 +13,7 @@
 // from the SHAPE of the result (never its text); the raw text is never passed
 // on.
 import { recordGradingDiagnosticEntry } from "./gradingDiagnosticLog";
+import type { BranchMergeStatus } from "@/lib/repo-grade-merge-check";
 
 export type GradingActionOperation =
   | "generate_rubric"
@@ -51,12 +52,36 @@ export function classifyGradingActionResult(result: unknown): GradingActionFailu
   return null;
 }
 
+const MERGE_STATUSES: readonly BranchMergeStatus[] = ["merged", "not-merged", "no-submission", "unknown"];
+
+/** The fixed text-free class recorded for a non-merged merge-check outcome.
+ * The log core keeps `error` only on failure entries, so a non-merged outcome
+ * is recorded as one extra failure entry carrying exactly one of these. */
+export const MERGE_CHECK_FAILURE_CLASSES: Readonly<Record<Exclude<BranchMergeStatus, "merged">, string>> = {
+  "not-merged": "merge check: not merged",
+  "no-submission": "merge check: no submission",
+  unknown: "merge check: undetermined",
+};
+
+/** PURE. Read `branchMergeCheck.status` from a resolved grade_repo result by
+ * SHAPE. Returns a member of the fixed status set or null (no target set, or
+ * not a repo grade). Never returns, and never reads, branch or repo text. */
+export function classifyMergeCheckResult(result: unknown): BranchMergeStatus | null {
+  const rec = asRecord(result);
+  const check = rec ? asRecord(rec.branchMergeCheck) : null;
+  const status = check?.status;
+  return MERGE_STATUSES.find((m) => m === status) ?? null;
+}
+
 export interface GradingActionDecision {
   operation: GradingActionOperation;
   outcome: "success" | "failure";
   durationMs: number;
   /** A member of GRADING_ACTION_FAILURE_CLASSES; present only on failure. */
   error?: GradingActionFailureClass;
+  /** Merge-check outcome (fixed status set); present only when the result
+   * carried one. Never a branch name. */
+  mergeCheck?: BranchMergeStatus;
 }
 
 /** PURE. `failureClass` null = success. Duration is rounded and never negative. */
@@ -65,12 +90,14 @@ export function decideGradingActionDiagnostic(args: {
   startedAtMs: number;
   settledAtMs: number;
   failureClass: GradingActionFailureClass | null;
+  mergeCheck?: BranchMergeStatus | null;
 }): GradingActionDecision {
   const durationMs = Math.max(0, Math.round(args.settledAtMs - args.startedAtMs));
+  const merge = args.mergeCheck ? { mergeCheck: args.mergeCheck } : {};
   if (args.failureClass) {
-    return { operation: args.operation, outcome: "failure", durationMs, error: args.failureClass };
+    return { operation: args.operation, outcome: "failure", durationMs, error: args.failureClass, ...merge };
   }
-  return { operation: args.operation, outcome: "success", durationMs };
+  return { operation: args.operation, outcome: "success", durationMs, ...merge };
 }
 
 /** The monotonic clock the seams capture their start from. */
@@ -78,12 +105,18 @@ export function gradingActionNowMs(): number {
   return performance.now();
 }
 
-function recordSettled(operation: GradingActionOperation, startedAtMs: number, failureClass: GradingActionFailureClass | null): void {
+function recordSettled(
+  operation: GradingActionOperation,
+  startedAtMs: number,
+  failureClass: GradingActionFailureClass | null,
+  mergeCheck: BranchMergeStatus | null = null
+): void {
   const decision = decideGradingActionDiagnostic({
     operation,
     startedAtMs,
     settledAtMs: gradingActionNowMs(),
     failureClass,
+    mergeCheck,
   });
   recordGradingDiagnosticEntry({
     at: new Date().toISOString(),
@@ -92,6 +125,18 @@ function recordSettled(operation: GradingActionOperation, startedAtMs: number, f
     durationMs: decision.durationMs,
     error: decision.error,
   });
+  // The session log has no merge-check field, so a non-merged outcome rides as
+  // one extra fixed-class entry (text-free). A merged outcome adds none: it is
+  // the ordinary success entry above.
+  if (decision.mergeCheck && decision.mergeCheck !== "merged") {
+    recordGradingDiagnosticEntry({
+      at: new Date().toISOString(),
+      operation: decision.operation,
+      outcome: "failure",
+      durationMs: decision.durationMs,
+      error: MERGE_CHECK_FAILURE_CLASSES[decision.mergeCheck],
+    });
+  }
 }
 
 /** `timeGradingAction("post_grades", ...)` with the operation bound. Exists so
@@ -112,6 +157,11 @@ export async function timeGradingAction<T>(operation: GradingActionOperation, ru
     recordSettled(operation, startedAtMs, "request threw");
     throw err;
   }
-  recordSettled(operation, startedAtMs, classifyGradingActionResult(result));
+  recordSettled(
+    operation,
+    startedAtMs,
+    classifyGradingActionResult(result),
+    operation === "grade_repo" ? classifyMergeCheckResult(result) : null
+  );
   return result;
 }

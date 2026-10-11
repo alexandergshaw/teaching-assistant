@@ -2,6 +2,7 @@
 
 import { getRepo } from "./github.repos";
 import { ghFetch, ghJson } from "./github.repos";
+import { encodeRefSegment } from "./github-ref-name";
 
 const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
 
@@ -30,11 +31,12 @@ export interface RepoTreeResult {
 /** The full recursive file tree of a repo at `ref` (default branch when omitted),
  *  plus whether GitHub's own listing was truncated. */
 export async function getRepoTreeWithMeta(owner: string, repo: string, ref?: string): Promise<RepoTreeResult> {
-  const branch = ref || (await getRepo(owner, repo)).defaultBranch;
+  // A blank-but-present ref ("  ") is truthy; never forward it as a branch name.
+  const branch = ref && ref.trim() ? ref.trim() : (await getRepo(owner, repo)).defaultBranch;
   const data = await ghJson<{
     tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }>;
     truncated?: boolean;
-  }>(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  }>(`/repos/${owner}/${repo}/git/trees/${encodeRefSegment(branch)}?recursive=1`);
   const entries = (data.tree ?? [])
     .filter((t): t is { path: string; type: "blob" | "tree"; size?: number; sha?: string; mode?: string } => !!t.path && (t.type === "blob" || t.type === "tree"))
     .map((t) => ({ path: t.path, type: t.type, size: t.size ?? 0, sha: t.sha ?? "", mode: t.mode }));
@@ -49,7 +51,7 @@ export async function getRepoTree(owner: string, repo: string, ref?: string): Pr
 /** Read one file's text content (raw). */
 export async function getFileText(owner: string, repo: string, path: string, ref?: string): Promise<string> {
   const res = await ghFetch(
-    `/repos/${owner}/${repo}/contents/${encodePath(path)}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
+    `/repos/${owner}/${repo}/contents/${encodePath(path)}${ref && ref.trim() ? `?ref=${encodeRefSegment(ref)}` : ""}`,
     { headers: { Accept: "application/vnd.github.raw" } }
   );
   return res.text();

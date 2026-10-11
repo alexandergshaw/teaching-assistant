@@ -69,6 +69,8 @@ import { type LlmProvider } from "@/lib/llm";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED } from "@/lib/repo-grade-branch-scan";
+import { classifyBranchMergeCheck, describeBranchMergeNote, type BranchMergeCheck } from "@/lib/repo-grade-merge-check";
+import { normalizeTargetBranch } from "@/lib/github-ref-name";
 
 type RepoFile = { path: string; content: string; truncated: boolean };
 type RepoDigest = { fullName: string; text: string; fileCount: number; files: RepoFile[] };
@@ -666,6 +668,8 @@ export async function gradeRepoAction(
       digestTruncated?: boolean;
       readmePath?: string;
       readmeMissing?: boolean;
+      /** Typed merge-check outcome; present only when a target branch was set. */
+      branchMergeCheck?: BranchMergeCheck;
     }
   | {
       // FIX 2: a folder with nothing student-authored in it must never come
@@ -691,14 +695,23 @@ export async function gradeRepoAction(
       // way). The score/outcome never changes either way (G3a) - this is
       // additive information only.
       determination?: GradeDetermination;
+      /** Typed merge-check outcome; present only when a target branch was set. */
+      branchMergeCheck?: BranchMergeCheck;
     }
   | { error: string }
 > {
   try {
     await requireAppOwner();
+    // Target-branch validation is the FIRST step after the owner guard: an
+    // invalid ref returns { error } having made zero GitHub calls. A blank
+    // value means "unset" and is forwarded as undefined, never as a
+    // whitespace string.
+    const normalizedBranch = normalizeTargetBranch(branch ?? "");
+    if (!normalizedBranch.ok) return { error: normalizedBranch.error };
+    const targetBranch = normalizedBranch.branch || undefined;
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, branch);
+    const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, targetBranch);
     // `digest.truncated` used to be read (fileCount/text) and dropped right
     // here - the one signal that the ingest budget cut off part of the repo
     // before grading ever saw it. Both return branches below now carry it
@@ -767,7 +780,7 @@ export async function gradeRepoAction(
         parsed.owner,
         parsed.repo,
         pathPrefix,
-        branch,
+        targetBranch,
         {
           listBranches,
           fetchTree: async (owner, repo, b) => {
@@ -787,8 +800,10 @@ export async function gradeRepoAction(
         // implying misconduct - an unmerged branch is a process mistake, the
         // most common innocent cause of a missing submission.
         determination = "no-submission-unmerged-branch";
-        reason = `${reason} The same folder does appear on another branch of this repository, "${scan.branch}", which was never merged into the graded branch - it looks like the work exists, just not where it was graded. Merging or re-pointing the submission to "${scan.branch}" would let it be graded.`;
-      } else if (scan.kind === "undetermined") {
+        // With a target set, the distinct typed-state note below replaces this
+        // sentence (it names the target and the found-on branch).
+        if (!targetBranch) reason = `${reason} The same folder does appear on another branch of this repository, "${scan.branch}", which was never merged into the graded branch - it looks like the work exists, just not where it was graded. Merging or re-pointing the submission to "${scan.branch}" would let it be graded.`;
+      } else if (scan.kind === "undetermined" && !targetBranch) {
         // G3d: never "no unmerged work found" when the check itself could
         // not be completed - the honest statement is that other branches
         // could not be checked, not that they were checked and came up
@@ -802,8 +817,25 @@ export async function gradeRepoAction(
         reason = `${reason} (${scan.branchesSkipped} other branch${scan.branchesSkipped === 1 ? "" : "es"} of this repository were not checked - past the ${MAX_BRANCHES_SCANNED}-branch limit for this check.)`;
       }
 
-      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, determination };
+      // Typed merge-check outcome, only when the instructor set a target. The
+      // distinct note per state is appended to `reason`; the typed field is
+      // the source of truth (never parsed back out of the text).
+      const branchMergeCheck = targetBranch
+        ? classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: false, scan })
+        : undefined;
+      if (branchMergeCheck) {
+        const note = describeBranchMergeNote(branchMergeCheck);
+        if (note) reason = `${reason} ${note}`;
+      }
+
+      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, determination, branchMergeCheck };
     }
+
+    // The target branch had gradable content, so the work is merged there
+    // (no scan ran). Absent when no target was set.
+    const mergedCheck = targetBranch
+      ? classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: true, scan: null })
+      : undefined;
 
     const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 
@@ -827,7 +859,7 @@ export async function gradeRepoAction(
       // own doc comment on `runCode`.
       if (runCode) await attachCodeRuns(entries);
       const run = gradeEntriesEmbedded(entries, builtRubric);
-      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
+      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
     }
 
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${gradedDigest.text}`, provider));
@@ -837,7 +869,7 @@ export async function gradeRepoAction(
     // the reason a repo-graded row never had a file list to preview.
     const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
     const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
-    return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
+    return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };
   }

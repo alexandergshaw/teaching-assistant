@@ -16,6 +16,7 @@ const EXPECTED: readonly string[] = [
   "ta-grading-chat-harshness",
   "ta-grading-chat-input-mode",
   "ta-grading-chat-instructions",
+  "ta-grading-chat-lms-picker",
   "ta-grading-chat-rubric",
   "ta-grading-chat-rubric-memory",
 ];

@@ -10,7 +10,12 @@
 // from the raw text by pattern; the raw text itself is never passed on.
 import { recordGradingDiagnosticEntry } from "@/app/components/grading/gradingDiagnosticLog";
 
-export type ChatSeamOperation = "resolve_header" | "prepare_submission" | "grade_item" | "fetch_canvas_meta";
+export type ChatSeamOperation =
+  | "resolve_header"
+  | "prepare_submission"
+  | "grade_item"
+  | "fetch_canvas_meta"
+  | "list_lms_assignments";
 
 export const CHAT_SEAM_FAILURE_CLASSES = [
   "name collision",

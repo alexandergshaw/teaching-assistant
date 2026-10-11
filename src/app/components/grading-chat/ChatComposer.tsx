@@ -19,6 +19,7 @@
 // pressing Enter does not move focus at all).
 import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { submitOnEnter } from "../ui/submitOnEnter";
@@ -27,16 +28,18 @@ import chatStyles from "./grading-chat.module.css";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { MAX_RECORDING_FRAMES, useChatScreenFrameCapture } from "./chatFrameCapture";
 import { loadComposerHeight, persistComposerHeight } from "./composerHeight";
+import { buildLmsAssignmentUrlAction } from "@/app/actions/grading-chat-intake";
+import { useLmsSubmissionPicker } from "./useLmsSubmissionPicker";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
-type InputMode = "text" | "file" | "url" | "record";
+type InputMode = "text" | "file" | "url" | "record" | "lms";
 
 function loadInputMode(): InputMode {
   if (typeof window === "undefined") return "text";
   try {
     const stored = localStorage.getItem(INPUT_MODE_STORAGE_KEY);
-    if (stored === "text" || stored === "file" || stored === "url" || stored === "record") return stored;
+    if (stored === "text" || stored === "file" || stored === "url" || stored === "record" || stored === "lms") return stored;
   } catch {
     // Private window / blocked storage: degrade to the default.
   }
@@ -73,6 +76,9 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("");
+  const lms = useLmsSubmissionPicker();
+  const [lmsBusy, setLmsBusy] = useState(false);
+  const [lmsError, setLmsError] = useState<string | null>(null);
   const textFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -192,6 +198,24 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     setUrl("");
   };
 
+  // From LMS: the picked ids resolve to a Canvas assignment url on the server,
+  // then the EXISTING url submit takes over (meta-fill and the all-submissions
+  // pull are inherited from it).
+  const handleSendLms = async () => {
+    if (disabled || lmsBusy || !lms.canSubmit) return;
+    setLmsBusy(true);
+    setLmsError(null);
+    try {
+      const built = await buildLmsAssignmentUrlAction(lms.institution, lms.courseId, lms.assignmentId);
+      if ("error" in built) setLmsError(built.error);
+      else onSubmitUrl(built.url, label.trim() ? label.trim() : undefined);
+    } catch {
+      setLmsError("Could not build the assignment link.");
+    } finally {
+      setLmsBusy(false);
+    }
+  };
+
   // The secondary "+ Add part" control: moves the current mode's input into the
   // tray. File mode opens the picker and marks the pick as an add, not a submit.
   const handleAddPart = () => {
@@ -203,7 +227,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
     }
   };
   const addPartDisabled =
-    disabled || mode === "record" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
+    disabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
 
   const handleGrade = () => {
     if (disabled || !trayActive) return;
@@ -257,6 +281,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
             { value: "file", label: "File" },
             { value: "url", label: "URL" },
             { value: "record", label: "Record" },
+            { value: "lms", label: "From LMS" },
           ]}
           value={mode}
           onChange={selectMode}
@@ -427,6 +452,64 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           <Button variant="outlined" disabled={disabled || !url.trim()} onClick={handleSendUrl}>
             Add
           </Button>
+        </div>
+      )}
+
+      {mode === "lms" && (
+        <div className={styles.adaptRow}>
+          <TextField
+            select
+            size="small"
+            className={chatStyles.composerLabel}
+            label="Institution"
+            value={lms.institution}
+            onChange={(event) => lms.selectInstitution(event.target.value)}
+            disabled={disabled || lms.loading.institutions}
+          >
+            {lms.institutions.map((code) => (
+              <MenuItem key={code} value={code}>
+                {code}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            className={chatStyles.composerGrow}
+            label="Course"
+            value={lms.courseId}
+            onChange={(event) => lms.selectCourse(event.target.value)}
+            disabled={disabled || !lms.institution || lms.loading.courses}
+          >
+            {lms.courses.map((course) => (
+              <MenuItem key={course.id} value={course.id}>
+                {course.name}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            className={chatStyles.composerGrow}
+            label="Assignment"
+            value={lms.assignmentId}
+            onChange={(event) => lms.selectAssignment(event.target.value)}
+            disabled={disabled || !lms.courseId || lms.loading.assignments}
+          >
+            {lms.assignments.map((assignment) => (
+              <MenuItem key={assignment.id} value={assignment.id}>
+                {assignment.name}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={disabled || lmsBusy || !lms.canSubmit} onClick={() => void handleSendLms()}>
+            {lmsBusy ? "Working..." : "Grade"}
+          </Button>
+          {(lmsError ?? lms.error) && (
+            <span role="alert" className={styles.ghMeta}>
+              {lmsError ?? lms.error}
+            </span>
+          )}
         </div>
       )}
     </div>

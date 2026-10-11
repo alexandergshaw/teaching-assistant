@@ -22,6 +22,7 @@ import { extractStudentEntries, extractCanvasEntries, ingestZipEntries } from "@
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
+import { resolveInstitutionByCode } from "@/lib/canvas-core";
 import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
@@ -337,4 +338,29 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
   const oversized = firstOversizedEntryReason([merged]);
   if (oversized) return { kind: "refused", reason: oversized };
   return { kind: "entries", entries: [merged], pointsPossible: null };
+}
+
+/**
+ * LMS-SUBMISSIONS-ZIP-INTAKE: resolves a picked institution + course + assignment
+ * to the Canvas assignment url the existing url intake already understands. The
+ * url host is the owner's own configured base url (owner-only surface; the url
+ * field already round-trips a pasted host). The Canvas token never leaves here.
+ */
+export async function buildLmsAssignmentUrlAction(
+  institution: string,
+  courseId: string,
+  assignmentId: string,
+): Promise<{ url: string } | { error: string }> {
+  await requireAppOwner();
+  const course = courseId.trim();
+  const assignment = assignmentId.trim();
+  if (!/^\d+$/.test(course) || !/^\d+$/.test(assignment)) {
+    return { error: "Choose a course and an assignment." };
+  }
+  try {
+    const { baseUrl } = await resolveInstitutionByCode(institution);
+    return { url: `${baseUrl.replace(/\/+$/, "")}/courses/${course}/assignments/${assignment}` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not resolve the institution." };
+  }
 }

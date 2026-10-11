@@ -18,6 +18,13 @@ import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { getFileExtension } from "@/lib/office-extract";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
+import {
+  VIDEO_DRIVE_MESSAGE,
+  VIDEO_PENDING_MESSAGE,
+  VIDEO_UNSUPPORTED_FORMAT_MESSAGE,
+  assertNeverUploadKind,
+} from "@/lib/grade/video-grading";
+import { VIDEO_HEAD_BYTES, sniffVideoContainer } from "@/lib/grade/video-magic";
 import { extractStudentEntries, extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
@@ -189,6 +196,14 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         reason: "This file type isn't supported for grading. Upload a text file, document, image, or a zip archive.",
       };
     }
+    if (uploadKind === "video") {
+      // VIDEO-GRADING W1: no model seam yet. Bytes decide validity (magic
+      // bytes), never the extension; a valid video is received-not-graded,
+      // an invalid one is an unsupported format. Never reaches the zip path.
+      const head = new Uint8Array(await file.slice(0, VIDEO_HEAD_BYTES).arrayBuffer());
+      const sniff = sniffVideoContainer(head, getFileExtension(file.name));
+      return { kind: "refused", reason: sniff.ok ? VIDEO_PENDING_MESSAGE : VIDEO_UNSUPPORTED_FORMAT_MESSAGE };
+    }
 
     try {
       let entries: StudentSubmissionEntry[];
@@ -199,7 +214,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           return { kind: "refused", reason: "This file could not be read." };
         }
         entries = [entry];
-      } else {
+      } else if (uploadKind === "zip") {
         // A44's collision refusal throws from inside ingestZipEntries,
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
@@ -207,6 +222,8 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
         entries = ingested.entries;
         classification = ingested.classification;
+      } else {
+        return assertNeverUploadKind(uploadKind);
       }
       const oversized = firstOversizedEntryReason(entries);
       if (oversized) return { kind: "refused", reason: oversized };
@@ -269,16 +286,21 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         if (uploadKind === "unsupported") {
           return { kind: "refused", reason: DRIVE_UNSUPPORTED_TYPE_MESSAGE };
         }
+        if (uploadKind === "video") {
+          return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE };
+        }
         let entries: StudentSubmissionEntry[];
         if (uploadKind === "single") {
           const entry = await buildSingleFileEntry(fetched.name, fetched.buffer, provider, data.labelled);
           if (!entry) return { kind: "refused", reason: "This file could not be read." };
           entries = [entry];
-        } else {
+        } else if (uploadKind === "zip") {
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
           // throws from here and is surfaced verbatim by the catch below.
           const bytes = new Uint8Array(fetched.buffer).slice().buffer;
           entries = await extractStudentEntries(bytes, { inferFileNamesWith: provider });
+        } else {
+          return assertNeverUploadKind(uploadKind);
         }
         const oversized = firstOversizedEntryReason(entries);
         if (oversized) return { kind: "refused", reason: oversized };

@@ -8,6 +8,7 @@
 
 import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
 import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
+import { VIDEO_PENDING_MESSAGE, isVideoOnlyEntry } from "@/lib/grade/video-grading";
 
 export interface IngestSkip {
   readonly student: string;
@@ -47,7 +48,13 @@ export function buildIngestLines(
   const skipped: IngestSkip[] = [];
   let emitted = 0;
   for (const entry of entries) {
-    if (estimateNeededWireBytes(entry) > budget) {
+    if (isVideoOnlyEntry(entry)) {
+      // VIDEO-GRADING W1: nothing the grader can read yet; a NAMED skip, never
+      // a computed grade from absent evidence and never a silent drop.
+      const skip: IngestSkip = { student: entry.student, reason: VIDEO_PENDING_MESSAGE };
+      skipped.push(skip);
+      lines.push({ type: "skip", ...skip });
+    } else if (estimateNeededWireBytes(entry) > budget) {
       const skip: IngestSkip = { student: entry.student, reason: OVERSIZED_SKIP_REASON };
       skipped.push(skip);
       lines.push({ type: "skip", ...skip });

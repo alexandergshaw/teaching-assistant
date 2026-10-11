@@ -20,6 +20,7 @@ import { gradingApiToRun } from "./grading-run-mapping";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
+import { VIDEO_BATCH_MESSAGE, assertNeverUploadKind } from "@/lib/grade/video-grading";
 import {
   parseCourseIdFromCanvasUrl,
   parseSingleAssignmentId,
@@ -833,6 +834,9 @@ export async function gradeAction(
     // below instead of requiring an archive - classified by extension only,
     // never by sniffing the bytes.
     const uploadKind = classifyGradingUpload(file.name);
+    if (uploadKind === "video") {
+      return { run: null, error: VIDEO_BATCH_MESSAGE };
+    }
 
     // This form's body shares the platform's request-body cap with every other
     // field on it (see src/lib/upload-budget.ts's header comment), and nothing
@@ -904,6 +908,9 @@ export async function gradeAction(
       ]);
       return { run: { ...run, fullCreditChecklist, sampleAnswer }, error: null, generatedRubric };
     }
+    // Exhaustive: only the zip path (and the legacy unsupported fall-through)
+    // may continue; a new upload kind fails tsc here instead of reaching JSZip.
+    if (uploadKind !== "zip" && uploadKind !== "unsupported") return assertNeverUploadKind(uploadKind);
 
     // Tier 1 step 1 (design 4.3): free, and it must precede step 2's
     // extraction/collision check below - byte-identical to resolveRunHeader's

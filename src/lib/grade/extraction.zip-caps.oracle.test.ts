@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
-import { extractSubmissions, extractStudentEntries } from "./extraction";
+import { extractSubmissions, extractStudentEntries, ingestZipEntries } from "./extraction";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -365,5 +365,75 @@ describe("extractSubmissions - frozen fold-equivalence oracle (I7)", () => {
     expect(text("crlf")).toBe("a\r\nb\r\n");
     expect(text("nul")).toBe("a" + String.fromCharCode(0) + "b");
     expect(text("invalid").startsWith("ab" + FFFD)).toBe(true);
+  }, 60000);
+});
+
+
+// VIDEO-GRADING W1 (docs/video-grading-chat-intake-ops.md O-8, 10.1 item 6):
+// the DELIBERATE RE-FREEZE. The block above is UNCHANGED: with the dark flag
+// OFF (the default) hal's .mp4 is still a silent skip and the snapshot is
+// byte-identical to HEAD - that is the "zero user impact" proof. The block
+// below freezes the flag-ON delta, and the ONLY permitted diffs against the
+// OFF snapshot are: hal's clip.mp4 becomes a counted placeholder leaf
+// (attemptedSupportedFiles 22 -> 23, one new submissions key, NO rawData key
+// so no rawBase64 rides a video, and hal gains a video-only entry). Any other
+// diff means the change leaked past the video branch.
+async function takeVideoOnSnapshot(): Promise<OracleSnapshot> {
+  const result = await extractSubmissions(await buildOwnerShapeZip(), { videoEnabled: true });
+  const keys = Object.keys(result.submissions).sort();
+  const submissionSha: Record<string, string> = {};
+  const rawSha: Record<string, string> = {};
+  for (const key of keys) submissionSha[key] = sha256(result.submissions[key]);
+  for (const key of Object.keys(result.rawData).sort()) rawSha[key] = sha256(result.rawData[key]);
+  const zipParents: Record<string, string[]> = {};
+  for (const key of Object.keys(result.zipParents).sort()) zipParents[key] = result.zipParents[key];
+  const { entries: grouped } = await ingestZipEntries(await buildOwnerShapeZip(), { videoEnabled: true });
+  const entries = grouped
+    .map((entry) => ({
+      student: entry.student,
+      contentLength: entry.content.length,
+      mergedFileCount: entry.mergedFileCount,
+      files: entry.submittedFiles.map((file) => `${file.name}|${sha256(file.rawBase64 ?? "")}`).sort(),
+    }))
+    .sort((a, b) => a.student.localeCompare(b.student));
+  return {
+    keys,
+    submissionSha,
+    rawSha,
+    zipParents,
+    attemptedSupportedFiles: result.attemptedSupportedFiles,
+    failedSupportedFiles: [...result.failedSupportedFiles].sort(),
+    entries,
+  };
+}
+
+const EXPECTED_VIDEO_ON: OracleSnapshot = {
+  ...EXPECTED,
+  keys: [...EXPECTED.keys, "HW1/hal_1008_2008_clip.mp4"],
+  submissionSha: {
+    ...EXPECTED.submissionSha,
+    "HW1/hal_1008_2008_clip.mp4": "607eb81e443ce5d683396d0be9d1f6970626bde9f6ca62d2d12d7e8d75e36c04",
+  },
+  attemptedSupportedFiles: 23,
+  entries: [
+    ...EXPECTED.entries,
+    {
+      student: "hal",
+      contentLength: 146,
+      mergedFileCount: 1,
+      // sha256 of the empty string: the video file carries NO rawBase64.
+      files: ["clip.mp4|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    },
+  ],
+};
+
+describe("extractSubmissions - video re-freeze (flag ON) vs flag OFF", () => {
+  it("flag OFF (default): hal's clip is still dropped, snapshot identical to HEAD", async () => {
+    expect(await takeSnapshot()).toEqual(EXPECTED);
+    expect((await extractSubmissions(await buildOwnerShapeZip(), { videoEnabled: false })).attemptedSupportedFiles).toBe(22);
+  }, 60000);
+
+  it("flag ON: the only diff is hal's counted, byte-free video placeholder", async () => {
+    expect(await takeVideoOnSnapshot()).toEqual(EXPECTED_VIDEO_ON);
   }, 60000);
 });

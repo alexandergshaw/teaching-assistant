@@ -25,6 +25,7 @@ import { normalizeProvider } from "@/lib/llm";
 import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
+import { VIDEO_BATCH_MESSAGE, assertNeverUploadKind } from "@/lib/grade/video-grading";
 import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import { synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade/rubric";
@@ -120,10 +121,13 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
       }
 
       const uploadKind = classifyGradingUpload(file.name);
+      if (uploadKind === "video") {
+        return { mode: "refused", reason: VIDEO_BATCH_MESSAGE };
+      }
       if (uploadKind === "single") {
         const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()));
         entries = entry ? [entry] : [];
-      } else {
+      } else if (uploadKind === "zip" || uploadKind === "unsupported") {
         // A44's collision refusal throws from inside this call, strictly
         // before any ticket is built - see this file's own header comment.
         // Tier 1 step 3 (item #9): the same filename-convention inference
@@ -131,6 +135,8 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
         // not a new cost - so the incremental route derives student names
         // the way the route beside it does.
         entries = await extractStudentEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+      } else {
+        return assertNeverUploadKind(uploadKind);
       }
     }
 

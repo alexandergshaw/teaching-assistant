@@ -191,6 +191,11 @@ const FROZEN_WHOLESALE_AUTH_MOCK_FILES: readonly string[] = [
   "github-student-repos.test.ts",
   "github.grading.test.ts",
   "grading-chat-intake.test.ts",
+  // VIDEO-GRADING W1 (deliberate, reviewed): pure dispatch tests of resolveOnePart's
+  // video branch; the guard itself is already executed in grading-chat-intake.test.ts's
+  // sibling coverage and is not a branch under test here.
+  "grading-chat-intake.video-off.test.ts",
+  "grading-chat-intake.video.test.ts",
   "grading-checklist.test.ts",
   "grading-incremental.test.ts",
   "grading-picture-transcribe.test.ts",

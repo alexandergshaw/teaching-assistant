@@ -21,7 +21,7 @@
  * not reimplemented.
  */
 import { getFileExtension, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, extractTextFromBuffer } from "../office-extract";
-import { IMAGE_EXTENSIONS, getMimeType } from "./constants";
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED, getMimeType } from "./constants";
 import { toPreviewContent } from "./utils";
 import type { StudentSubmissionEntry } from "./types";
 import { callLlm, type LlmProvider } from "../llm";
@@ -95,18 +95,24 @@ export async function inferStudentNameFromContent(
   }
 }
 
-export type GradingUploadKind = "zip" | "single" | "unsupported";
+export type GradingUploadKind = "zip" | "single" | "video" | "unsupported";
 
 /**
  * Classifies an uploaded grading file by its extension alone. `"zip"` keeps
  * routing through the existing archive path unchanged; `"single"` is a file
  * this module can turn directly into one gradable entry; `"unsupported"` is
  * neither (the caller keeps today's "please upload a zip" refusal for it).
+ * `"video"` is returned only while VIDEO_GRADING_ENABLED (or the explicit
+ * `videoEnabled` argument, for tests) is true; with the flag off a video is
+ * `"unsupported"` exactly as before this feature.
  */
-export function classifyGradingUpload(name: string): GradingUploadKind {
+export function classifyGradingUpload(name: string, videoEnabled: boolean = VIDEO_GRADING_ENABLED): GradingUploadKind {
   const extension = getFileExtension(name);
   if (extension === "zip") {
     return "zip";
+  }
+  if (videoEnabled && VIDEO_EXTENSIONS.has(extension)) {
+    return "video";
   }
   if (TEXT_EXTENSIONS.has(extension) || DOCUMENT_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension)) {
     return "single";

@@ -34,7 +34,12 @@ import {
   type SubmittedFileInfo,
   type StudentSubmissionEntry,
 } from "./types";
-import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
+import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED, getMimeType } from "./constants";
+import {
+  VIDEO_LINK_NOTE,
+  assertNeverUploadKind,
+  videoPlaceholderNote,
+} from "./video-grading";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
 import { classifySubmissionZip } from "./classify-submission-zip";
@@ -50,6 +55,8 @@ import { classifyGradingUpload, buildSingleFileEntry } from "./single-file-entry
 interface LeafOutcome {
   readonly fullName: string;
   readonly isImage: boolean;
+  /** VIDEO-GRADING W1: a video member. Never carries bytes (ops O-1). */
+  readonly isVideo?: boolean;
   readonly submission: string | null;
   readonly raw: string | null;
 }
@@ -66,7 +73,11 @@ interface LeafOutcome {
  */
 export async function extractSubmissions(
   zipBuffer: ArrayBuffer,
-  options?: { readonly limits?: Partial<ZipLimits> }
+  options?: {
+    readonly limits?: Partial<ZipLimits>;
+    /** VIDEO-GRADING W1: defaults to the VIDEO_GRADING_ENABLED dark flag. */
+    readonly videoEnabled?: boolean;
+  }
 ): Promise<{
   submissions: Record<string, string>;
   rawData: Record<string, string>;
@@ -87,6 +98,7 @@ export async function extractSubmissions(
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
   const budget = createZipBudget(options?.limits);
+  const videoEnabled = options?.videoEnabled ?? VIDEO_GRADING_ENABLED;
 
   async function collectFromZip(
     zip: JSZip,
@@ -102,6 +114,9 @@ export async function extractSubmissions(
         if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) return "nested";
         if (IMAGE_EXTENSIONS.has(extension)) return "leaf";
         if (TEXT_EXTENSIONS.has(extension) || DOCUMENT_EXTENSIONS.has(extension)) return "leaf";
+        // A video is a leaf (charged against the caps and counted), never a
+        // silent skip; flag off keeps today's skip.
+        if (videoEnabled && VIDEO_EXTENSIONS.has(extension)) return "leaf";
         return "skip";
       },
     });
@@ -113,6 +128,21 @@ export async function extractSubmissions(
     await runBounded(leaves, budget.limits.concurrency, async (member, index) => {
       const { name, fullName, entry, declared } = member;
       const extension = getFileExtension(name);
+
+      if (videoEnabled && VIDEO_EXTENSIONS.has(extension)) {
+        // No model seam yet: record a worded placeholder and read NO bytes.
+        // raw "" (not null, which means failed) and isVideo keep the video
+        // out of rawData, so no rawBase64 ever rides a video entry (ops O-1).
+        const baseName = name.split("/").pop() ?? name;
+        outcomes[index] = {
+          fullName,
+          isImage: false,
+          isVideo: true,
+          submission: videoPlaceholderNote(baseName),
+          raw: "",
+        };
+        return;
+      }
 
       if (IMAGE_EXTENSIONS.has(extension)) {
         // Images carry no extractable text, but their presence matters (e.g.
@@ -155,7 +185,7 @@ export async function extractSubmissions(
         continue;
       }
       submissions[outcome.fullName] = outcome.submission;
-      rawData[outcome.fullName] = outcome.raw;
+      if (!outcome.isVideo) rawData[outcome.fullName] = outcome.raw;
       if (zipChain.length > 0) zipParents[outcome.fullName] = zipChain;
     }
 
@@ -236,6 +266,8 @@ export async function ingestZipEntries(
      * per item at grade time (resolveEntryLinks).
      */
     readonly deferLinks?: boolean;
+    /** VIDEO-GRADING W1: defaults to the VIDEO_GRADING_ENABLED dark flag. */
+    readonly videoEnabled?: boolean;
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
@@ -244,7 +276,7 @@ export async function ingestZipEntries(
   classification: SubmissionZipClassification;
 }> {
   const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles } =
-    await extractSubmissions(zipBuffer);
+    await extractSubmissions(zipBuffer, { videoEnabled: options?.videoEnabled });
   // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
   // before grouping - the same seam Wave 1's fold lives in - and NOT inside
   // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
@@ -705,13 +737,18 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
   if (kind === "unsupported") {
     return withLinkNote(entry, "flagged", "link not fetched: the linked Drive file type is not supported for grading");
   }
+  if (kind === "video") {
+    return withLinkNote(entry, "flagged", VIDEO_LINK_NOTE);
+  }
   let linked: StudentSubmissionEntry[];
   if (kind === "single") {
     const single = await buildSingleFileEntry(fetched.name, fetched.buffer, undefined, true);
     linked = single ? [single] : [];
-  } else {
+  } else if (kind === "zip") {
     // Own ArrayBuffer, not Node's pooled one.
     linked = await extractStudentEntries(new Uint8Array(fetched.buffer).slice().buffer);
+  } else {
+    return assertNeverUploadKind(kind);
   }
   // M1 single-entry guard: an archive (or an unreadable file) must never fan
   // several students into this one row (the A44 blend).

@@ -105,6 +105,9 @@ export interface UseRepoGradesGradingActionsParams {
   /** repoGradesUiState.ts's applyNamingDeduction, passed to gradeRepoAction by
    * BOTH grading paths (handleGradeCell and the bulk hook). */
   applyNamingDeduction: boolean;
+  /** The trimmed target branch ("merged to"); undefined when blank, which
+   * keeps gradeRepoAction's 5th argument undefined (no branch-merge check). */
+  targetBranch?: string;
   /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
    * to {} on a course switch, via the SAME render-phase compare-and-adjust
    * idiom index.tsx's own cellStateResetForCourse branch uses for cellEdits/
@@ -161,6 +164,7 @@ export function useRepoGradesGradingActions(
     bulkSelectionOnly,
     runCodeScoring,
     applyNamingDeduction,
+    targetBranch,
     courseId,
     course,
     provider,
@@ -275,7 +279,7 @@ export function useRepoGradesGradingActions(
       instructions,
       resolved.text,
       provider,
-      undefined,
+      targetBranch,
       column.folder,
       useReadmeInstructions,
       runCodeScoring,
@@ -559,6 +563,7 @@ export function useRepoGradesGradingActions(
     useReadmeInstructions,
     runCodeScoring,
     applyNamingDeduction,
+    targetBranch,
     onCellUpdate: handleBulkCellUpdate,
     onAnnounce: setPostSummary,
   });

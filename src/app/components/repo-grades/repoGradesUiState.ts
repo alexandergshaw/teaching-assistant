@@ -455,6 +455,37 @@ export function persistFolderSelection(courseId: string, folder: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Per-course target branch (branch-merge check). Same shape as the folder pair
+// above, stored under its own key. The value is a raw branch name kept
+// verbatim; trimming happens at the call boundary, not in storage.
+const TARGET_BRANCH_KEY = "ta-repo-grades-target-branch";
+
+/** Reads `courseId`'s persisted target branch - "" when never persisted or
+ * when courseId is blank. */
+export function loadTargetBranch(courseId: string): string {
+  if (typeof window === "undefined" || !courseId) return "";
+  try {
+    const byCourse = parseFolderByCourse(localStorage.getItem(TARGET_BRANCH_KEY));
+    return byCourse[courseId] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Writes `courseId`'s target branch, preserving every other course's value.
+ * Best-effort, matching persistFolderSelection. */
+export function persistTargetBranch(courseId: string, value: string): void {
+  if (typeof window === "undefined" || !courseId) return;
+  try {
+    const byCourse = parseFolderByCourse(localStorage.getItem(TARGET_BRANCH_KEY));
+    byCourse[courseId] = value;
+    localStorage.setItem(TARGET_BRANCH_KEY, JSON.stringify(byCourse));
+  } catch {
+    // best-effort persistence only.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-course rubric picker choice
 // (docs/repo-grades-rubric-picker-acceptance-criteria.md item 19, overridden
 // by item 46). Item 46: "ONE key, not two" - the source AND the chosen

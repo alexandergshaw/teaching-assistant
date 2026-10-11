@@ -34,12 +34,14 @@ import {
   loadFolderSelection,
   loadRepoGradeCells,
   loadRepoGradesUiState,
+  loadTargetBranch,
   loadSelectedRepoIds,
   persistAssignmentMapping,
   persistFolderSelection,
   persistRepoGradeCells,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
+  persistTargetBranch,
   type RepoGradesUiState,
 } from "./repoGradesUiState";
 import {
@@ -85,6 +87,7 @@ import { useRepoGradesRubricSource } from "./useRepoGradesRubricSource";
 import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
 import gridStyles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
+import styles from "./repo-grades.module.css";
 
 // AC2 item 7 (reframed by this wave): the instructor complaint this wave
 // fixes is that the grid's own empty state used to NAME this workflow step
@@ -342,6 +345,9 @@ export default function RepoGradesTab() {
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [folderResolvedForKey, setFolderResolvedForKey] = useState<string | null>(null);
   const [folderDropNotice, setFolderDropNotice] = useState<string | null>(null);
+  // Branch-merge check target (per course, ta-repo-grades-target-branch). Raw
+  // text as typed; trimmed only at the grading call boundary below.
+  const [targetBranch, setTargetBranch] = useState<string>("");
   const folderCensus = scan ? buildFolderOptions(scan.repos) : { options: [], scannedRepos: 0, unknownRepos: 0 };
   const currentSelectedFolder = model ? resolveSelectedFolder(folderCensus.options, selectedFolder) : ALL_FOLDERS;
   // Keyed on the course AND the resolved folder set, so a narrower PREFIXED
@@ -489,6 +495,7 @@ export default function RepoGradesTab() {
     // later render, by which point this reset has already run.
     setSelectedFolder(loadFolderSelection(uiState.courseId));
     setFolderDropNotice(null);
+    setTargetBranch(loadTargetBranch(uiState.courseId));
   }
 
   // Graded results persist from an effect guarded by the restore-ran check
@@ -570,6 +577,7 @@ export default function RepoGradesTab() {
     bulkSelectionOnly: uiState.bulkSelectionOnly,
     runCodeScoring: uiState.runCodeScoring,
     applyNamingDeduction: uiState.applyNamingDeduction,
+    targetBranch: targetBranch.trim() || undefined,
     courseId: uiState.courseId,
     course,
     provider,
@@ -793,6 +801,22 @@ export default function RepoGradesTab() {
             </div>
           </div>
         ) : null}
+        targetBranchControl={
+          <label className={styles.headerField}>
+            <span className={styles.headerInputLabel}>Target branch (merged to)</span>
+            <input
+              type="text"
+              className={styles.headerInput}
+              aria-label="Target branch (merged to)"
+              placeholder="Optional, e.g. main"
+              value={targetBranch}
+              onChange={(e) => {
+                setTargetBranch(e.target.value);
+                persistTargetBranch(uiState.courseId, e.target.value);
+              }}
+            />
+          </label>
+        }
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
         runBar={

@@ -91,6 +91,9 @@ export interface UseRepoGradesBulkGradeParams {
   /** repoGradesUiState.ts's applyNamingDeduction, passed to every
    * gradeOneTarget call as gradeRepoAction's trailing argument. */
   applyNamingDeduction: boolean;
+  /** Trimmed target branch, passed as gradeRepoAction's 5th argument;
+   * undefined when blank (no branch-merge check). */
+  targetBranch?: string;
   /** Writes one cell's edit - index.tsx's setCellEdits wrapper. Called with
    * the same field shape handleGradeCell already writes. */
   onCellUpdate: (repo: string, folder: string, patch: Partial<RepoGradeCellEdit>) => void;
@@ -197,7 +200,7 @@ export interface UseRepoGradesBulkGradeResult {
  * or a rejecting grading call from leaving it stuck (backlog row A27).
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
-  const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, onCellUpdate, onAnnounce } = params;
+  const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, targetBranch, onCellUpdate, onAnnounce } = params;
   const runLockRef = useRef(false);
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -269,7 +272,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         instructions,
         rubricArg,
         provider,
-        undefined,
+        targetBranch,
         target.folder,
         useReadmeInstructions,
         runCodeScoring,

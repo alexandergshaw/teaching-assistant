@@ -31,10 +31,13 @@ export interface RepoGradesStickyHeaderProps {
   // REPO-PAGE-OVERHAUL W3: the re-scan (Refresh) button, promoted out of the
   // setup stack; index.tsx wires it to the same reloadScan + scanLoading.
   rescanControl?: ReactNode;
+  // REPO-GRADES-BRANCH-MERGE-CHECK W2: the optional target-branch text field
+  // (index.tsx owns its state and persistence).
+  targetBranchControl?: ReactNode;
   children: ReactNode;
 }
 
-export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, children }: RepoGradesStickyHeaderProps) {
+export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchChange, gradeSetControl, folderControl, statusBanner, rescanControl, targetBranchControl, children }: RepoGradesStickyHeaderProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const hasHeader = runBar !== null || typeof onSearchChange === "function";
@@ -66,6 +69,7 @@ export default function RepoGradesStickyHeader({ runBar, searchQuery, onSearchCh
           {folderControl}
           {rescanControl}
           {gradeSetControl}
+          {targetBranchControl}
           <label className={styles.headerField}>
             <span className={styles.headerInputLabel}>Search</span>
             <input

@@ -438,7 +438,7 @@ describe("useRepoGradesBulkGrade.ts's bulk gradeRepoAction call threads runCodeS
       bulkGradeSource,
       "rubricArg: string): Promise<{ rubricUsed: string | null }> =>"
     );
-    expect(body).toMatch(/gradeRepoAction\(\s*target\.repo,\s*instructions,\s*rubricArg,\s*provider,\s*undefined,\s*target\.folder,\s*useReadmeInstructions,\s*runCodeScoring\s*(?:,[^)]*)?\)/);
+    expect(body).toMatch(/gradeRepoAction\(\s*target\.repo,\s*instructions,\s*rubricArg,\s*provider,\s*\w+,\s*target\.folder,\s*useReadmeInstructions,\s*runCodeScoring\s*(?:,[^)]*)?\)/);
   });
 });
 

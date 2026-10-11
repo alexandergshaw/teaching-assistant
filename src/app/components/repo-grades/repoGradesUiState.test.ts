@@ -15,11 +15,13 @@ import {
   loadRepoGradeRubricChoice,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
+  loadTargetBranch,
   persistAssignmentMapping,
   persistRepoGradeManualRubricText,
   persistRepoGradeRubricChoice,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
+  persistTargetBranch,
   type RepoGradeRubricChoice,
 } from "./repoGradesUiState";
 import { DEFAULT_REPO_GRADE_SORT } from "./repoGradesRows";
@@ -490,6 +492,40 @@ describe("loadAssignmentMapping / persistAssignmentMapping - AC5 items 25-26, ta
   it("swallows a localStorage write failure rather than throwing", () => {
     fakeStorage.throwOnSet = true;
     expect(() => persistAssignmentMapping("course-1", { "week-1": "501" })).not.toThrow();
+  });
+});
+
+describe("loadTargetBranch / persistTargetBranch - branch-merge check AC-1", () => {
+  it("defaults to an empty string when nothing is stored", () => {
+    expect(loadTargetBranch("course-1")).toBe("");
+  });
+
+  it("round-trips the raw value under ta-repo-grades-target-branch", () => {
+    persistTargetBranch("course-1", " main ");
+    expect(loadTargetBranch("course-1")).toBe(" main ");
+    expect(JSON.parse(fakeStorage.getItem("ta-repo-grades-target-branch") as string)).toEqual({ "course-1": " main " });
+  });
+
+  it("is course-keyed: one course's target does not leak to another", () => {
+    persistTargetBranch("course-1", "main");
+    persistTargetBranch("course-2", "release");
+    expect(loadTargetBranch("course-1")).toBe("main");
+    expect(loadTargetBranch("course-2")).toBe("release");
+    expect(loadTargetBranch("course-3")).toBe("");
+  });
+
+  it("a blank courseId is a no-op on both sides", () => {
+    persistTargetBranch("", "main");
+    expect(fakeStorage.getItem("ta-repo-grades-target-branch")).toBeNull();
+    expect(loadTargetBranch("")).toBe("");
+  });
+
+  it("returns empty without window, and swallows a write failure", () => {
+    persistTargetBranch("course-1", "main");
+    fakeStorage.throwOnSet = true;
+    expect(() => persistTargetBranch("course-1", "x")).not.toThrow();
+    delete (globalThis as { window?: unknown }).window;
+    expect(loadTargetBranch("course-1")).toBe("");
   });
 });
 

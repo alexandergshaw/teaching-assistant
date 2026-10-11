@@ -914,3 +914,37 @@ describe("A7 W3: the sticky run bar is mounted, shares the label leaf, groups Gr
     );
   });
 });
+
+// REPO-GRADES-BRANCH-MERGE-CHECK Wave 2: the target-branch control and its
+// threading into both grading paths.
+describe("target-branch control wiring (branch-merge check AC-1 / AC-3)", () => {
+  const bulkSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/useRepoGradesBulkGrade.ts"), "utf8");
+  const headerSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesStickyHeader.tsx"), "utf8");
+
+  it("AC-1: the control is passed to, and rendered by, the sticky header", () => {
+    expect(indexSource).toContain("targetBranchControl={");
+    expect(indexSource).toContain("persistTargetBranch(uiState.courseId");
+    expect(indexSource).toContain("loadTargetBranch(uiState.courseId)");
+    expect(headerSource).toContain("{targetBranchControl}");
+  });
+
+  it("AC-2: index passes a trimmed value that is undefined when blank", () => {
+    expect(indexSource).toContain("targetBranch: targetBranch.trim() || undefined");
+  });
+
+  it("AC-3: the per-cell call site passes the target branch as gradeRepoAction's 5th argument", () => {
+    const m = /gradeRepoAction\(\s*row\.repo,\s*instructions,\s*resolved\.text,\s*provider,\s*(\w+),/.exec(hookSource);
+    expect(m).not.toBeNull();
+    expect((m as RegExpExecArray)[1]).toBe("targetBranch");
+  });
+
+  it("AC-3: the bulk call site passes the target branch as gradeRepoAction's 5th argument", () => {
+    const m = /gradeRepoAction\(\s*target\.repo,\s*instructions,\s*rubricArg,\s*provider,\s*(\w+),/.exec(bulkSource);
+    expect(m).not.toBeNull();
+    expect((m as RegExpExecArray)[1]).toBe("targetBranch");
+  });
+
+  it("AC-3: the actions hook forwards targetBranch into the bulk hook", () => {
+    expect(hookSource).toMatch(/targetBranch,\s+onCellUpdate: handleBulkCellUpdate,/);
+  });
+});

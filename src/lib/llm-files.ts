@@ -1,4 +1,4 @@
-import type { LlmPart } from "./llm";
+import type { LlmInlinePart } from "./llm";
 import { extractTextFromBuffer } from "./office-extract";
 
 /**
@@ -25,7 +25,7 @@ export function isGeminiInlineSupported(mimeType: string): boolean {
 }
 
 export interface FilesToLlmPartsResult {
-  parts: LlmPart[];
+  parts: LlmInlinePart[];
   /** Names of files that produced nothing: unreadable, empty, or extraction failure. */
   skipped: string[];
 }
@@ -41,7 +41,7 @@ export async function filesToLlmPartsDetailed(
   files: UploadedFile[],
   label = "CONTEXT FILE"
 ): Promise<FilesToLlmPartsResult> {
-  const parts: LlmPart[] = [];
+  const parts: LlmInlinePart[] = [];
   const skipped: string[] = [];
 
   for (const file of files) {
@@ -72,6 +72,6 @@ export async function filesToLlmPartsDetailed(
 export async function filesToLlmParts(
   files: UploadedFile[],
   label = "CONTEXT FILE"
-): Promise<LlmPart[]> {
+): Promise<LlmInlinePart[]> {
   return (await filesToLlmPartsDetailed(files, label)).parts;
 }

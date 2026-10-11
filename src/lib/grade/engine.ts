@@ -42,6 +42,14 @@ import { reconcileRun } from "./reconcile";
 import { stampRubricProvenance } from "./rubric-provenance-stamp";
 
 /**
+ * One non-text part sent with a submission: inline bytes (image/PDF) or, for a
+ * video (VIDEO-GRADING W3), a reference to a Files API upload (`fileUri`).
+ */
+export type GradeAttachment =
+  | { name: string; base64: string; mimeType: string }
+  | { name: string; fileUri: string; mimeType: string };
+
+/**
  * A8 Wave B (docs/a8-scoring-architecture.md 3.1): what ONE scored axis yields
  * before any aggregate is finalised. An object literal type, deliberately NOT
  * a GradingRun / GradedResult, so it adds no producer to the
@@ -62,7 +70,7 @@ async function scoreAxis(
   studentName: string,
   content: string,
   provider: LlmProvider,
-  inlineFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  inlineFiles: GradeAttachment[] = [],
   codeRun: CodeRunResult | null = null,
   // The real submitted file names, given to the model as an explicit list
   // (see buildSubmittedFileNamesBlock) so it can check a stated filename
@@ -97,9 +105,11 @@ async function scoreAxis(
     {
       text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}`,
     },
-    ...inlineFiles.map((f) => ({
-      inlineData: { mimeType: f.mimeType, data: f.base64 },
-    })),
+    ...inlineFiles.map((f): LlmPart =>
+      "fileUri" in f
+        ? { fileData: { fileUri: f.fileUri, mimeType: f.mimeType } }
+        : { inlineData: { mimeType: f.mimeType, data: f.base64 } }
+    ),
   ];
 
   const result = await callLlm(
@@ -191,7 +201,7 @@ async function gradeSubmission(
   studentName: string,
   content: string,
   provider: LlmProvider,
-  inlineFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  inlineFiles: GradeAttachment[] = [],
   // When set (the Canvas path), re-base the total onto the assignment's real
   // points so the tool grades out of the same total Canvas shows.
   pointsPossible: number | null = null,
@@ -237,7 +247,7 @@ async function gradeDiscussionAxes(a: {
   replyText: string | null;
   replyCount: number;
   provider: LlmProvider;
-  inlineFiles: Array<{ name: string; base64: string; mimeType: string }>;
+  inlineFiles: GradeAttachment[];
   codeRun: CodeRunResult | null;
   submittedFiles: SubmittedFileInfo[];
   commentSplit: boolean;
@@ -299,6 +309,10 @@ export interface GradingRunOptions {
   /** A37: the grading surface, stamped onto each not-attempted row so the
    *  review table can name a surface-specific action. Display-copy only. */
   readonly source?: GradingSource;
+  /** VIDEO-GRADING W3: Files API attachments (videos) sent with EVERY entry
+   *  graded in this call. Only the single-entry grade-run-item route sets it;
+   *  unset keeps every other caller byte-identical. */
+  readonly extraAttachments?: readonly GradeAttachment[];
 }
 
 /**
@@ -410,7 +424,10 @@ async function gradeStudentEntries(
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
       : contentTruncated;
 
-    const inlineFiles = await collectInlineVisualParts(submittedFiles);
+    const inlineFiles: GradeAttachment[] = [
+      ...(await collectInlineVisualParts(submittedFiles)),
+      ...(options.extraAttachments ?? []),
+    ];
 
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). Never throws.

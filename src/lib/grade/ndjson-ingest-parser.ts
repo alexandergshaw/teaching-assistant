@@ -8,6 +8,7 @@
 
 import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
 import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
+import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { VIDEO_PENDING_MESSAGE, isVideoOnlyEntry } from "@/lib/grade/video-grading";
 import { isVideoFailureClass, parseVideoOutcomes, type VideoFailureClass, type VideoOutcomes } from "@/lib/grade/video-failure";
 
@@ -52,7 +53,10 @@ export function buildIngestLines(
   const skipped: IngestSkip[] = [];
   let emitted = 0;
   for (const entry of entries) {
-    if (isVideoOnlyEntry(entry)) {
+    // VIDEO-GRADING W3: with the flag on, a video-only student is graded at
+    // grade time through the Files API (the entry carries videoRef), so it is no
+    // longer a pending skip. Flag off: unchanged.
+    if (!VIDEO_GRADING_ENABLED && isVideoOnlyEntry(entry)) {
       // VIDEO-GRADING W1: nothing the grader can read yet; a NAMED skip, never
       // a computed grade from absent evidence and never a silent drop.
       const skip: IngestSkip = { student: entry.student, reason: VIDEO_PENDING_MESSAGE };

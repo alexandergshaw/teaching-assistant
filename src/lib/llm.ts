@@ -30,9 +30,16 @@ export function normalizeProvider(value: string | undefined | null): LlmProvider
   return "gemini";
 }
 
-export type LlmPart =
+/** The parts every feature builds: text and inline bytes. */
+export type LlmInlinePart =
   | { text: string }
   | { inlineData: { mimeType: string; data: string } };
+
+export type LlmPart =
+  | LlmInlinePart
+  // VIDEO-GRADING W3: a reference to a file already uploaded to the Gemini
+  // Files API (a video is far too large to ride inline). camelCase: REST JSON.
+  | { fileData: { fileUri: string; mimeType: string } };
 
 export interface LlmContent {
   role: "user" | "model";

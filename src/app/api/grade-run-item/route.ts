@@ -5,6 +5,12 @@ import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
+import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
+import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
+import { createGeminiFilesClient } from "@/lib/gemini-files";
+import { getGeminiApiKey } from "@/lib/gemini";
+import { downloadFile, removeFiles } from "@/lib/supabase/storage";
+import { SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import { coerceFeedbackWordTarget } from "@/lib/grade/types";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
@@ -51,6 +57,9 @@ export const dynamic = "force-dynamic";
 // invents a third.
 const TOTAL_BUDGET_MS = 50_000;
 const MODEL_WAIT_RESERVE_MS = 2_000;
+// VIDEO-GRADING W3 (ops 7.2): download + sniff + Files upload + ACTIVE-wait gets
+// at most this long; the rest of the budget is reserved for generateContent.
+const VIDEO_PREPARE_BUDGET_MS = 25_000;
 
 const MAX_RUBRIC_CHARS = 20_000;
 const MAX_INSTRUCTIONS_CHARS = 20_000;
@@ -189,6 +198,26 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : "an unexpected error";
 }
 
+/** The seam's real Storage + Files deps. Built only on the flagged video path. */
+function buildVideoSeamDeps(): VideoSeamDeps {
+  return {
+    download: async (storagePath) => {
+      const { data, error } = await downloadFile(SYLLABUS_UPLOAD_BUCKET, storagePath);
+      return error || !data ? null : data;
+    },
+    removeObjects: async (paths) => {
+      await removeFiles(SYLLABUS_UPLOAD_BUCKET, paths);
+    },
+    filesClient: createGeminiFilesClient({ apiKey: getGeminiApiKey() }),
+  };
+}
+
+function videoFailureStatus(failure: string): number {
+  if (failure === "too large" || failure === "unsupported format") return 422;
+  if (failure === "timed out") return 504;
+  return 502;
+}
+
 export async function POST(req: NextRequest) {
   const startedAtMs = Date.now();
 
@@ -224,6 +253,22 @@ export async function POST(req: NextRequest) {
   }
   const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget } = parsed;
 
+  // VIDEO-GRADING W3 (T11): dark behind VIDEO_GRADING_ENABLED. With the flag on,
+  // a videoRef must name an object in THIS caller's own grading-uploads
+  // namespace; a foreign-user path is refused before any Storage call.
+  const videoMode = VIDEO_GRADING_ENABLED && videoFilesOf(entry).length > 0;
+  let videoOwnerId = "";
+  if (videoMode) {
+    const owner = await requireAppOwner();
+    videoOwnerId = owner.id;
+    if (!videoRefsOwnedBy(videoOwnerId, entry)) {
+      return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
+    }
+  }
+  // Aborted at the route's own deadline: raceWithTimeout cannot cancel its
+  // loser (ops O-4), so this is what makes the Files API cleanup fire.
+  const videoAbort = new AbortController();
+
   // THE SOFT BUDGET IS UNDER THE HARD CAP (S1 check 3): TOTAL_BUDGET_MS is
   // strictly below maxDuration * 1000, so this handler stops itself, on its
   // own clock, with a worded response, before the platform kills it silently.
@@ -242,6 +287,19 @@ export async function POST(req: NextRequest) {
     const outcome = await raceWithTimeout(
       (async () => {
         const resolved = await resolveEntryLinks(entry);
+        if (videoMode) {
+          const options = { commentSplit, harshness, feedbackWordTarget };
+          const videoOutcome = await withEntryVideos(
+            buildVideoSeamDeps(),
+            { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
+            resolved,
+            (extraAttachments) =>
+              gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { ...options, extraAttachments }),
+            (run) => run.results[0]?.ungraded?.kind === "grading-failed"
+          );
+          if (!videoOutcome.ok) return { videoFailure: { failure: videoOutcome.failure, message: videoOutcome.message } };
+          return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
+        }
         const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
@@ -249,6 +307,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (outcome.kind === "timedout") {
+      videoAbort.abort();
       return NextResponse.json(
         { error: "This submission did not finish grading in time. It was not graded." },
         { status: 504 }
@@ -258,6 +317,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: describeError(outcome.error) }, { status: 502 });
     }
 
+    const videoFailure = outcome.value.videoFailure;
+    if (videoFailure) {
+      return NextResponse.json(
+        { error: videoFailure.message, videoFailure: videoFailure.failure },
+        { status: videoFailureStatus(videoFailure.failure) }
+      );
+    }
+    if (!outcome.value.graded) return NextResponse.json({ error: "an unexpected error" }, { status: 502 });
     const result = outcome.value.graded.results[0];
     return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch } });
   } catch (err) {

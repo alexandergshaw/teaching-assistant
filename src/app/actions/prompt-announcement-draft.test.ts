@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { LlmPart } from "@/lib/llm";
 
 import { readFileSync, statSync, readdirSync } from "node:fs";
 import { join, dirname, normalize, relative, sep } from "node:path";
@@ -66,7 +67,7 @@ function jsonResponse(title: string, message: string) {
 /** LlmPart is a union ({text} | {inlineData}); every call in this file sends
  * a plain text part, so this narrows without a runtime check cluttering
  * every call site. */
-function partText(part: { text: string } | { inlineData: { mimeType: string; data: string } }): string {
+function partText(part: LlmPart): string {
   return "text" in part ? part.text : "";
 }
 

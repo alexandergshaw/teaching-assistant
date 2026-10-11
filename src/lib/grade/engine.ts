@@ -13,6 +13,7 @@ import {
   composeOverallComment,
   type GradeHarshness,
   type GradeResult,
+  type GradingSource,
   type GradedResult,
   type UngradedResult,
   type UngradedOutcome,
@@ -292,6 +293,9 @@ export interface GradingRunOptions {
   /** Grading-chat feedback word-count target. Unset (or out of range) appends
    *  no directive, keeping today's prompt byte-identical. */
   readonly feedbackWordTarget?: number;
+  /** A37: the grading surface, stamped onto each not-attempted row so the
+   *  review table can name a surface-specific action. Display-copy only. */
+  readonly source?: GradingSource;
 }
 
 /**
@@ -346,7 +350,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit, harshness, feedbackWordTarget } = options;
+  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source } = options;
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
@@ -502,6 +506,7 @@ async function gradeStudentEntries(
       buildUngradedRow(entry, {
         kind: "not-attempted",
         stoppedBy: "run-deadline",
+        source,
         sourceIndex: i,
         student: entry.student,
         canvasUserId: entry.userId,
@@ -515,6 +520,7 @@ async function gradeStudentEntries(
       buildUngradedRow(entry, {
         kind: "not-attempted",
         stoppedBy: "submission-count-bound",
+        source,
         sourceIndex: i,
         student: entry.student,
         canvasUserId: entry.userId,

@@ -103,6 +103,7 @@ const _exhaustiveFieldCheck: MissingFields extends never ? true : ["add the miss
 const ALL_UNGRADED_OUTCOME_FIELDS = [
   "kind",
   "stoppedBy",
+  "source",
   "sourceIndex",
   "student",
   "canvasUserId",
@@ -210,7 +211,28 @@ function ungradedSentinel(): UngradedResult {
   };
 }
 
-const SENTINELS: readonly GradeResult[] = [gradedSentinel(), ungradedSentinel()];
+/** A37: a NOT-ATTEMPTED ungraded sentinel. Cloned from ungradedSentinel() with
+ *  only its `ungraded` member swapped, so every top-level field stays defined.
+ *  `source` MUST be a VALID GradingSource: coerceUngradedOutcome validates it
+ *  against the union, so an arbitrary string would be dropped to undefined and
+ *  the round-trip would false-red on a correct implementation. Without this
+ *  sentinel nothing exercises `source` through the three allowlists. */
+function notAttemptedSentinel(): UngradedResult {
+  return {
+    ...ungradedSentinel(),
+    ungraded: {
+      kind: "not-attempted",
+      stoppedBy: "submission-count-bound",
+      source: "zip",
+      sourceIndex: 43,
+      student: "SENTINEL_student",
+      canvasUserId: 556,
+      message: "SENTINEL_ungraded_message",
+    },
+  };
+}
+
+const SENTINELS: readonly GradeResult[] = [gradedSentinel(), ungradedSentinel(), notAttemptedSentinel()];
 
 // RUNTIME HALF OF THE GUARD, N13a Ruling 6: every field on every sentinel
 // EXCEPT that member's own excluded key (a two-element exclusion set:

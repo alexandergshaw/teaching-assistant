@@ -606,6 +606,56 @@ describe("ungradedDisclosure.ts stays client-bundle-safe - AC-8", () => {
   });
 });
 
+// ── A37: per-surface action copy, driven through the USER-FACING seed path ──
+// The strings below are FROZEN literals, deliberately not imported from the
+// leaf: importing the constant the implementation reads would be a tautology.
+// The copy reaches the screen via correctUngradedSeeds -> edit.strengths
+// (GradingResults.tsx seeds from it), not via classifyRow(...).message.
+
+const A37_BARE = "Not graded: this run reached its submission limit before this submission.";
+const A37_ZIP =
+  "Not graded: this run reached its submission limit before this submission. To grade the rest, upload a new zip containing only the students this run did not reach.";
+const A37_GITHUB =
+  "Not graded: this run reached its submission limit before this submission. To grade the rest, remove the already-graded repositories from the queue, then grade again.";
+
+function seededStrengths(source: NotAttemptedOutcome["source"]): string {
+  const outcome: NotAttemptedOutcome = { ...countBoundOutcome, source };
+  const row = makeUngradedRow(outcome);
+  const run: GradingRun = { results: [row], rubricAreaNames: [], fullCreditChecklist: [] };
+  const edits: Record<string, RowEdit> = {
+    [row.student]: makeEdit({ strengths: outcome.message, overall: outcome.message }),
+  };
+  return correctUngradedSeeds(run, edits)[row.student].strengths;
+}
+
+describe("A37: source-aware not-attempted copy", () => {
+  it("seeds the zip action copy for source zip", () => {
+    expect(seededStrengths("zip")).toBe(A37_ZIP);
+  });
+  it("seeds the github action copy for source github", () => {
+    expect(seededStrengths("github")).toBe(A37_GITHUB);
+  });
+  it("seeds the bare copy with no action clause for source canvas", () => {
+    expect(seededStrengths("canvas")).toBe(A37_BARE);
+  });
+  it("seeds the bare copy for an absent source (rows persisted before A37)", () => {
+    expect(seededStrengths(undefined)).toBe(A37_BARE);
+  });
+  it("classifyRow carries the same per-source message", () => {
+    const row = (source: NotAttemptedOutcome["source"]) => makeUngradedRow({ ...countBoundOutcome, source });
+    expect(classifyRow(row("zip"), makeEdit()).message).toBe(A37_ZIP);
+    expect(classifyRow(row("github"), makeEdit()).message).toBe(A37_GITHUB);
+    expect(classifyRow(row("canvas"), makeEdit()).message).toBe(A37_BARE);
+    expect(classifyRow(row(undefined), makeEdit()).message).toBe(A37_BARE);
+  });
+  it("the run-deadline member is unaffected by source", () => {
+    const row = makeUngradedRow({ ...deadlineOutcome, source: "zip" });
+    expect(classifyRow(row, makeEdit()).message).toBe(
+      "Not graded: this run's time budget ran out before this submission was started."
+    );
+  });
+});
+
 // ── AC-7/S14: compile-time exhaustiveness lives in the leaf's own switch ───
 // No vitest instrument exists for this - it is `npx tsc --noEmit`, at the
 // wave gate only (docs/a12-a13-scope.md section 6). Recorded here as a

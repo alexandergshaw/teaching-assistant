@@ -758,7 +758,7 @@ export async function gradeReposAction(
     // reason a repo-graded row never had a file list to preview.
     const entries: StudentSubmissionEntry[] = digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label));
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
-    const run = await gradeEntries(entries, instructions, effectiveRubric, provider);
+    const run = await gradeEntries(entries, instructions, effectiveRubric, provider, null, { source: "github" });
     return { run, rubric: effectiveRubric, truncatedRepos, noSubmissionRepos, undeterminedRepos };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repositories." };

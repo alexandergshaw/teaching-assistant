@@ -21,7 +21,12 @@
 // "grading-results client files stay client-bundle-safe") bans the alias
 // prefix outright, even for a safe submodule, and postable.ts's own header
 // says it imports nothing outside its own directory's types.
-import { isUngraded, UNGRADED_NOT_ATTEMPTED_MESSAGES, type NotAttemptedOutcome } from "@/lib/grade/types";
+import {
+  isUngraded,
+  UNGRADED_NOT_ATTEMPTED_MESSAGES,
+  type GradingSource,
+  type NotAttemptedOutcome,
+} from "@/lib/grade/types";
 import { checkRowPostability } from "../../../lib/grade/postable";
 import {
   applyFeedbackFieldEdit,
@@ -84,10 +89,25 @@ export interface RowDisclosure {
 // silent fallthrough - types.ts:137-138 says a third reason is added to that
 // union, never a new independent field, so this switch is where a third
 // member is caught.
-function notAttemptedMessage(stoppedBy: StoppedBy): string {
+//
+// A37: the count-bound member is source-aware. Each action clause names only
+// a manual or EXISTING-control step (never an in-app re-run: no row identity
+// exists to re-dispatch one student). Re-grading the same input re-takes the
+// same prefix, so the true action always reduces the input to the remainder.
+// Canvas and an absent source (rows persisted before A37) keep the bare copy.
+const COUNT_BOUND_ACTION_COPY: Record<GradingSource, string> = {
+  zip: " To grade the rest, upload a new zip containing only the students this run did not reach.",
+  github: " To grade the rest, remove the already-graded repositories from the queue, then grade again.",
+  canvas: "",
+};
+
+function notAttemptedMessage(stoppedBy: StoppedBy, source?: GradingSource): string {
   switch (stoppedBy) {
     case "submission-count-bound":
-      return UNGRADED_DISCLOSURE_COPY["submission-count-bound"];
+      return (
+        UNGRADED_DISCLOSURE_COPY["submission-count-bound"] +
+        (source === undefined ? "" : COUNT_BOUND_ACTION_COPY[source])
+      );
     case "run-deadline":
       return UNGRADED_DISCLOSURE_COPY["run-deadline"];
     default: {
@@ -119,7 +139,7 @@ export function classifyRow(result: GradeRow, edit: RowEdit): RowDisclosure {
         result.ungraded.stoppedBy === "run-deadline"
           ? "not-attempted-run-deadline"
           : "not-attempted-count-bound",
-      message: notAttemptedMessage(result.ungraded.stoppedBy),
+      message: notAttemptedMessage(result.ungraded.stoppedBy, result.ungraded.source),
     };
   }
   const check = checkRowPostability({
@@ -172,7 +192,7 @@ export function correctUngradedFeedbackSeed(result: GradeRow, edit: RowEdit): Ro
     // here as the trade, not discovered later.
     edit.strengths.includes("Re-run to grade");
   if (!isCorrectableStrengths) return edit;
-  return applyFeedbackFieldEdit(edit, "strengths", notAttemptedMessage(result.ungraded.stoppedBy));
+  return applyFeedbackFieldEdit(edit, "strengths", notAttemptedMessage(result.ungraded.stoppedBy, result.ungraded.source));
 }
 
 /**

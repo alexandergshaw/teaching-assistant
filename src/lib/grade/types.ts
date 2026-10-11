@@ -163,9 +163,22 @@ export interface SubmittedFileInfo {
  * records that the tool produced nothing at all. A third reason adds a
  * member HERE, never a new independent field on GradeResult.
  */
+/** A37: the grading surface that can produce a count-bound not-attempted row. */
+export type GradingSource = "zip" | "canvas" | "github";
+
+const GRADING_SOURCES: readonly GradingSource[] = ["zip", "canvas", "github"];
+
+/** Validates an untrusted value against GradingSource; anything else is undefined. */
+export function coerceGradingSource(value: unknown): GradingSource | undefined {
+  return (GRADING_SOURCES as readonly unknown[]).includes(value) ? (value as GradingSource) : undefined;
+}
+
 export interface NotAttemptedOutcome {
   readonly kind: "not-attempted";
   readonly stoppedBy: "submission-count-bound" | "run-deadline";
+  // A37: which grading surface produced this row. Display-copy selection
+  // only (ungradedDisclosure.ts); absent on rows persisted before A37.
+  readonly source?: GradingSource;
   // The zero-based position of this student's entry in the array
   // gradeStudentEntries received - NOT an index into any caller's own input
   // array. For example on the GitHub path this indexes `entries` (built from
@@ -353,6 +366,7 @@ export function coerceUngradedOutcome(value: unknown): UngradedOutcome | undefin
     return {
       kind: "not-attempted",
       stoppedBy: v.stoppedBy,
+      source: coerceGradingSource(v.source),
       sourceIndex: v.sourceIndex,
       student: v.student,
       canvasUserId,

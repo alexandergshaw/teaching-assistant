@@ -818,7 +818,7 @@ export async function gradeAction(
       // No rubric synthesis on the Canvas path: grade with whatever rubric was
       // retrieved from Canvas (may be empty), using the instructions otherwise.
       const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-        gradeCanvasUrl(canvasUrl, assignmentInstructions, header.effectiveRubric, provider, gradingRunOptions),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, header.effectiveRubric, provider, { ...gradingRunOptions, source: "canvas" }),
         synthesizeFullCreditChecklist(assignmentInstructions, header.effectiveRubric, provider),
         generateSampleAnswer(assignmentInstructions, header.effectiveRubric, provider),
       ]);
@@ -940,7 +940,7 @@ export async function gradeAction(
     const { effectiveRubric, generatedRubric } = header;
 
     const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider, gradingRunOptions),
+      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider, { ...gradingRunOptions, source: "zip" }),
       synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
       generateSampleAnswer(assignmentInstructions, effectiveRubric, provider),
     ]);

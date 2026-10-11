@@ -26,6 +26,7 @@ export type GradingDiagnosticOperation =
   | "grade_repos"
   | "derive_checklist"
   | "fetch_canvas_meta"
+  | "override_setup_fields"
   | "list_lms_assignments"
   | "list_lms_courses"
   | "post_grades"
@@ -46,6 +47,7 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   grade_repos: "Grade repository cohort",
   derive_checklist: "Derive assignment checklist",
   fetch_canvas_meta: "Fetch Canvas assignment details",
+  override_setup_fields: "Override setup fields with Canvas values",
   list_lms_assignments: "List LMS assignments",
   list_lms_courses: "List LMS courses",
   post_grades: "Post grades to Canvas",

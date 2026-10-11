@@ -277,27 +277,68 @@ describe("GradingChatPanel - W2 AR1: the Canvas fetch is awaited before beginSes
   });
 });
 
-describe("GradingChatPanel - W2 AR1b: beginSession is fed the resolved fill values", () => {
-  it("passes fill.instructions and fill.rubric, not the stale state vars", () => {
+describe("GradingChatPanel - W2 AR1b: beginSession is fed the resolved (override-composed) values", () => {
+  it("passes resolved.instructions and resolved.rubric, not the stale state vars", () => {
     const block = ensureSessionBlock();
     const beginStart = block.indexOf("driver.beginSession(");
     expect(beginStart, "expected the beginSession call").toBeGreaterThan(-1);
     const beginEnd = block.indexOf("});", beginStart);
     expect(beginEnd, "expected the beginSession call terminator").toBeGreaterThan(-1);
     const beginBlock = block.slice(beginStart, beginEnd);
-    expect(beginBlock).toMatch(/assignmentInstructions:\s*fill\.instructions\b/);
-    expect(beginBlock).toMatch(/\brubric:\s*fill\.rubric\b/);
+    expect(beginBlock).toMatch(/assignmentInstructions:\s*resolved\.instructions\b/);
+    expect(beginBlock).toMatch(/\brubric:\s*resolved\.rubric\b/);
   });
 });
 
-describe("GradingChatPanel - W2 AR1c: the Canvas fetch is gated by needsFill (fetch avoidance, not precedence)", () => {
-  it("fetchCanvasMetaAction lives inside the if (canvasUrl && scope && needsFill) block", () => {
+describe("GradingChatPanel - W2 AR1c: the Canvas fetch is gated by canvasUrl && scope only (LMS-META-OVERRIDE-OFFER)", () => {
+  it("fetchCanvasMetaAction lives inside the if (canvasUrl && scope) block, not behind needsFill", () => {
     const block = ensureSessionBlock();
-    const guardIdx = block.indexOf("if (canvasUrl && scope && needsFill)");
-    expect(guardIdx, "expected the needsFill guard").toBeGreaterThan(-1);
+    const guardIdx = block.indexOf("if (canvasUrl && scope) {");
+    expect(guardIdx, "expected the canvasUrl && scope guard").toBeGreaterThan(-1);
+    expect(block).not.toContain("canvasUrl && scope && needsFill");
     const loadedIdx = block.indexOf("const loaded =", guardIdx);
     expect(loadedIdx, "expected the statement after the guard").toBeGreaterThan(-1);
     expect(block.slice(guardIdx, loadedIdx)).toContain("fetchCanvasMetaAction");
+  });
+});
+
+describe("GradingChatPanel - LMS-META-OVERRIDE-OFFER wiring (reachability pins)", () => {
+  it("composes the override over the fill result, offers via window.confirm, and applies before beginSession", () => {
+    const block = ensureSessionBlock();
+    expect(block).toMatch(/computeOverrideOffer\(\{\s*typed:\s*\{\s*instructions,\s*rubric\s*\},\s*canvasMeta\s*\}\)/);
+    expect(block).toMatch(/applyOverride\(\{\s*base:\s*fill,/);
+    const confirmIdx = block.indexOf("window.confirm(");
+    const applyIdx = block.indexOf("applyOverride(");
+    const setInsIdx = block.indexOf("setInstructions(resolved.instructions)");
+    const setRubIdx = block.indexOf("setRubric(resolved.rubric)");
+    const beginIdx = block.indexOf("driver.beginSession(");
+    expect(confirmIdx).toBeGreaterThan(-1);
+    expect(confirmIdx).toBeLessThan(applyIdx);
+    expect(applyIdx).toBeLessThan(setInsIdx);
+    expect(applyIdx).toBeLessThan(setRubIdx);
+    expect(setInsIdx).toBeLessThan(beginIdx);
+  });
+
+  it("persists the resolved values and the note reads the resolved sources", () => {
+    const block = ensureSessionBlock();
+    expect(block).toMatch(/saveChatSetupMemory\(scope,\s*\{\s*rubric:\s*resolved\.rubric,\s*instructions:\s*resolved\.instructions\s*\}\)/);
+    expect(block).toMatch(/resolved\.instructionsSource === "canvas" \|\| resolved\.rubricSource === "canvas"/);
+    expect(block).not.toMatch(/fill\.(instructions|rubric)Source/);
+  });
+
+  it("records the override diagnostic through recordGradingDiagnosticEntry with no student text", () => {
+    const block = ensureSessionBlock();
+    const recordIdx = block.indexOf("recordGradingDiagnosticEntry(");
+    expect(recordIdx).toBeGreaterThan(-1);
+    const call = block.slice(recordIdx, block.indexOf("});", recordIdx));
+    expect(call).toContain('operation: "override_setup_fields"');
+    expect(call).not.toMatch(/error:|institution:|course:/);
+  });
+
+  it("the offer is computed only in ensureSession, which the Canvas URL submit reaches", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source.split("computeOverrideOffer(").length - 1).toBe(1);
+    expect(source).toMatch(/ensureSession\(url\)/);
   });
 });
 

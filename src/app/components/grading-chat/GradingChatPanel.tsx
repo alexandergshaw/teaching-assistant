@@ -33,6 +33,8 @@ import {
   type GradeHarshness,
 } from "@/lib/grade/types";
 import { resolveSetupFill, type ResolveSetupFillResult } from "./chatSetupFill";
+import { applyOverride, computeOverrideOffer, countOverriddenFields, type OverrideDecision } from "./chatOverrideOffer";
+import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
 import { submitFilesSequentially } from "./chatFileBatch";
 import type { CompositePartInput } from "./chatSubmissionIntake";
 import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChatSetupMemory } from "./chatSetupMemory";
@@ -266,7 +268,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     const needsFill = !instructions.trim() || !rubric.trim();
 
     let canvasMeta: { instructions: string; rubric: string } | null = null;
-    if (canvasUrl && scope && needsFill) {
+    if (canvasUrl && scope) {
       const metaStartedAtMs = chatSeamNowMs();
       const meta = await fetchCanvasMetaAction(canvasUrl.trim());
       recordChatSeamSettled({
@@ -282,10 +284,32 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       canvasMeta,
       storedMemory: loaded ? { instructions: loaded.entry.instructions ?? "", rubric: loaded.entry.rubric } : null,
     });
-    if (fill.instructions !== instructions) setInstructions(fill.instructions);
-    if (fill.rubric !== rubric) setRubric(fill.rubric);
+    // Typed non-blank fields that differ from Canvas are OFFERED for override
+    // (window.confirm, per field, differing fields only). The apply composes
+    // over the fill result, so a blank field filled from Canvas stays filled.
+    const offer = computeOverrideOffer({ typed: { instructions, rubric }, canvasMeta });
+    const canPrompt = offer.anyOfferable && typeof window !== "undefined";
+    const decision: OverrideDecision = {
+      instructions: canPrompt && offer.instructions.offerable &&
+        window.confirm("Replace the directions you typed with the directions from Canvas?"),
+      rubric: canPrompt && offer.rubric.offerable &&
+        window.confirm("Replace the rubric you typed with the rubric from Canvas?"),
+    };
+    const resolved: ResolveSetupFillResult = applyOverride({ base: fill, offer, decision });
+    const overridden = countOverriddenFields(offer, decision);
+    if (overridden > 0) {
+      recordGradingDiagnosticEntry({
+        at: new Date().toISOString(),
+        operation: "override_setup_fields",
+        outcome: "success",
+        durationMs: 0,
+        classificationStudentCount: overridden,
+      });
+    }
+    if (resolved.instructions !== instructions) setInstructions(resolved.instructions);
+    if (resolved.rubric !== rubric) setRubric(resolved.rubric);
 
-    const result = await driver.beginSession({ assignmentInstructions: fill.instructions, rubric: fill.rubric,
+    const result = await driver.beginSession({ assignmentInstructions: resolved.instructions, rubric: resolved.rubric,
       harshness,
       feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText),
     });
@@ -295,12 +319,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return false;
     }
     setSubmitError(null);
-    if (scope) saveChatSetupMemory(scope, { rubric: fill.rubric, instructions: fill.instructions });
+    if (scope) saveChatSetupMemory(scope, { rubric: resolved.rubric, instructions: resolved.instructions });
     const notes: string[] = [];
-    if (fill.instructionsSource === "canvas" || fill.rubricSource === "canvas") {
-      notes.push("Instructions and rubric not typed here were read from Canvas.");
+    if (resolved.instructionsSource === "canvas" || resolved.rubricSource === "canvas") {
+      notes.push("Instructions and rubric not typed here, or replaced at your choice, were read from Canvas.");
     }
-    if (loaded && (fill.instructionsSource === "memory" || fill.rubricSource === "memory")) {
+    if (loaded && (resolved.instructionsSource === "memory" || resolved.rubricSource === "memory")) {
       notes.push(describeChatSetupOrigin(loaded, scope));
     }
     setSetupNote(notes.length > 0 ? notes.join(" ") : null);

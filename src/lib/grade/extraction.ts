@@ -30,12 +30,14 @@ import type { LlmProvider } from "../llm";
 import {
   MAX_NESTED_ZIP_DEPTH,
   type InferredFileNameLookup,
+  type SubmissionZipClassification,
   type SubmittedFileInfo,
   type StudentSubmissionEntry,
 } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
 import { toPreviewContent, groupSubmissionsByStudent, assignUnclaimedLabel, parseSubmissionFileName } from "./utils";
 import { decideCollisionRefusal, describeCollisionRefusal } from "./collisionRefusal";
+import { classifySubmissionZip } from "./classify-submission-zip";
 import { looksLikeGithubUrl } from "../submission-repo";
 import { fetchGradableRepoContent } from "./repo-content";
 import { parseGoogleDriveUrl } from "../google-drive-url";
@@ -239,6 +241,7 @@ export async function ingestZipEntries(
   entries: StudentSubmissionEntry[];
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
+  classification: SubmissionZipClassification;
 }> {
   const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
@@ -269,7 +272,8 @@ export async function ingestZipEntries(
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
   }
-  return { entries, attemptedSupportedFiles, failedSupportedFiles };
+  const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
+  return { entries, attemptedSupportedFiles, failedSupportedFiles, classification };
 }
 
 /**

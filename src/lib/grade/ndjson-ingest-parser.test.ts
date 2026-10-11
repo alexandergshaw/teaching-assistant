@@ -184,3 +184,55 @@ describe("buildIngestLines (W2: budget counts only bytes the grader reads)", () 
     expect(lines[0].type).toBe("skip");
   });
 });
+
+describe("classification carrier (ZIP-CLASS-VS-SINGLE)", () => {
+  const classification = {
+    kind: "class",
+    studentCount: 2,
+    markerStudentCount: 2,
+    signal: "folders",
+  } as const;
+
+  it("buildIngestLines appends classification as the LAST argument and stamps it on the sentinel", () => {
+    const withIt = buildIngestLines([entryOf("A")], [], 100, classification);
+    expect(withIt[withIt.length - 1]).toMatchObject({ type: "done", classification });
+    const without = buildIngestLines([entryOf("A")], [], 100);
+    expect("classification" in without[without.length - 1]).toBe(false);
+  });
+
+  it("round-trips the classification onto IngestOutcome.ledger.classification", async () => {
+    const lines = buildIngestLines([entryOf("A"), entryOf("B")], [], undefined, classification);
+    const outcome = await ingestStoragedZip("p", "gemini", () => {}, okFetch(lines));
+    expect(outcome.kind).toBe("complete");
+    if (outcome.kind === "complete") expect(outcome.ledger.classification).toEqual(classification);
+  });
+
+  it("an old-server sentinel without a classification yields undefined", async () => {
+    const outcome = await ingestStoragedZip("p", "gemini", () => {}, okFetch(buildIngestLines([entryOf("A")], [])));
+    expect(outcome.kind).toBe("complete");
+    if (outcome.kind === "complete") expect(outcome.ledger.classification).toBeUndefined();
+  });
+
+  it("a malformed classification yields undefined, never a refusal", async () => {
+    const bad = [
+      { type: "entry", entry: entryOf("A"), pointsPossible: null },
+      {
+        type: "done",
+        studentsFound: 1,
+        studentsEmitted: 1,
+        skipped: [],
+        failedSupportedFiles: [],
+        classification: { kind: "everyone", studentCount: "many", markerStudentCount: 1, signal: "folders" },
+      },
+    ];
+    const fetchImpl: IngestFetch = async () => ({
+      ok: true,
+      status: 200,
+      body: streamOf(bad.map((l) => JSON.stringify(l) + "\n").join("")),
+      text: async () => "",
+    });
+    const outcome = await ingestStoragedZip("p", "gemini", () => {}, fetchImpl);
+    expect(outcome.kind).toBe("complete");
+    if (outcome.kind === "complete") expect(outcome.ledger.classification).toBeUndefined();
+  });
+});

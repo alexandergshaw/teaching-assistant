@@ -530,3 +530,26 @@ describe("buildIncrementalRun (F21): never consumes its own reconciled output; a
     expect(second.rubricAreaNames).toEqual(["Clarity", "Structure"]);
   });
 });
+
+describe("buildIncrementalRun (ZIP-CLASS-VS-SINGLE): stamps the zip classification", () => {
+  const header = okHeader();
+  const classification = { kind: "class", studentCount: 3, markerStudentCount: 3, signal: "canvas-convention" } as const;
+
+  it("sets run.submissionClassification when given one", () => {
+    const run = buildIncrementalRun({
+      header,
+      speedGraderUrl: null,
+      totalTicketCount: 0,
+      arrived: [],
+      phase: "running",
+      tier2: null,
+      submissionClassification: classification,
+    });
+    expect(run.submissionClassification).toEqual(classification);
+  });
+
+  it("leaves the field absent when omitted", () => {
+    const run = buildIncrementalRun({ header, speedGraderUrl: null, totalTicketCount: 0, arrived: [], phase: "running", tier2: null });
+    expect("submissionClassification" in run).toBe(false);
+  });
+});

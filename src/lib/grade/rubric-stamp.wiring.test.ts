@@ -148,6 +148,7 @@ describe("grading actually stamps the rubricUsed/rubricFingerprint pair on the p
       entries: [],
       attemptedSupportedFiles: 0,
       failedSupportedFiles: [],
+      classification: { kind: "unknown", studentCount: 0, markerStudentCount: 0, signal: "empty" },
     });
 
     const rubricText = "Criterion A (100%): completeness.";

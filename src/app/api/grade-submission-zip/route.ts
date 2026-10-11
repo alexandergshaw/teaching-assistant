@@ -144,6 +144,8 @@ export async function POST(req: NextRequest) {
     return ndjsonResponse([encodeIngestLine({ type: "done", error: outcome.value.error })]);
   }
 
-  const { entries, failedSupportedFiles } = outcome.value.value;
-  return ndjsonResponse(buildIngestLines(entries, failedSupportedFiles).map(encodeIngestLine));
+  const { entries, failedSupportedFiles, classification } = outcome.value.value;
+  return ndjsonResponse(
+    buildIngestLines(entries, failedSupportedFiles, undefined, classification).map(encodeIngestLine)
+  );
 }

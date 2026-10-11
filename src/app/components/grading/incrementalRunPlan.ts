@@ -13,7 +13,7 @@
  * row never moves, it only appears" (a39-architecture.md, RULING 30).
  */
 import type { LlmProvider } from "@/lib/llm";
-import type { GradeHarshness, GradeResult, SubmittedFileInfo, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradeHarshness, GradeResult, SubmittedFileInfo, GradingRun, GradingRunHeader, GradingRunTier2, StampedRubricText, StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 import { GRADING_FAILURE_PREFIX } from "@/lib/grade/types";
 import { OFFICE_IMAGE_SOURCE_MIME_TYPES, graderNeedsFileBytes } from "@/lib/grade/constants";
 import { UPLOAD_WIRE_BUDGET_BYTES, wireBytesForFile } from "@/lib/upload-budget";
@@ -308,10 +308,12 @@ export interface BuildIncrementalRunParams {
   readonly arrived: readonly ArrivedItemResult[];
   readonly phase: IncrementalPhase;
   readonly tier2: GradingRunTier2 | null;
+  /** ZIP-CLASS-VS-SINGLE: the latest zip ingest's classification, when one occurred. */
+  readonly submissionClassification?: SubmissionZipClassification;
 }
 
 export function buildIncrementalRun(params: BuildIncrementalRunParams): GradingRun {
-  const { header, speedGraderUrl, totalTicketCount, arrived, phase, tier2 } = params;
+  const { header, speedGraderUrl, totalTicketCount, arrived, phase, tier2, submissionClassification } = params;
   const rows = mergeArrivedResults(totalTicketCount, arrived);
   const canonical = canonicalColumns(header, arrived, rows, phase);
   const projected = reconcileRun(rows, canonical);
@@ -325,6 +327,7 @@ export function buildIncrementalRun(params: BuildIncrementalRunParams): GradingR
     // through as the already-stamped BRANDED value - never a fresh string.
     rubricUsed: header.rubricUsed as StampedRubricText,
     rubricFingerprint: header.rubricFingerprint as StampedRubricText,
+    ...(submissionClassification ? { submissionClassification } : {}),
   };
 }
 

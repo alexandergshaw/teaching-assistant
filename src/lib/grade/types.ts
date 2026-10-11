@@ -412,6 +412,10 @@ export interface GradingRun {
   // header for the enumeration.
   rubricUsed?: StampedRubricText;
   rubricFingerprint?: StampedRubricText;
+  // ZIP-CLASS-VS-SINGLE W1: whether the most recent zip ingest behind this run
+  // was a whole-class bundle or a single submission. Absent on runs with no
+  // zip ingest. Per-ingest, not per-session.
+  submissionClassification?: SubmissionZipClassification;
 }
 
 // A39 incremental-fill W2 (RULING 133): everything that is per-RUN rather
@@ -510,6 +514,20 @@ export interface InferredFileNameParts {
 
 export interface InferredFileNameLookup {
   byRaw: Map<string, InferredFileNameParts>;
+}
+
+// ZIP-CLASS-VS-SINGLE W1: the classifier's result. The type lives here (not in
+// classify-submission-zip.ts) so GradingRun can carry it without a
+// types <-> leaf import cycle. Counts and enums only - no student data.
+export type SubmissionZipKind = "class" | "single" | "unknown";
+
+export interface SubmissionZipClassification {
+  readonly kind: SubmissionZipKind;
+  /** Distinct student groups; equals groupSubmissionsByStudent's entry count. */
+  readonly studentCount: number;
+  /** Groups resting on a roster or structure marker rather than a bare stem. */
+  readonly markerStudentCount: number;
+  readonly signal: "canvas-convention" | "folders" | "nested-archives" | "single-group" | "ambiguous" | "empty";
 }
 
 export interface RubricCriterion {

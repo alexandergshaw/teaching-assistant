@@ -371,7 +371,10 @@ const ALL_GRADING_RUN_FIELDS = [
   "rubricFingerprint",
 ] as const;
 
-type MissingRunFields = Exclude<keyof GradingRun, (typeof ALL_GRADING_RUN_FIELDS)[number]>;
+// submissionClassification (ZIP-CLASS-VS-SINGLE) is a TRANSIENT per-ingest badge
+// value on the live chat run; it is deliberately never persisted, so it is
+// excluded from the persistence-carry enumeration.
+type MissingRunFields = Exclude<keyof GradingRun, (typeof ALL_GRADING_RUN_FIELDS)[number] | "submissionClassification">;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _exhaustiveRunFieldCheck: MissingRunFields extends never ? true : ["add the missing field(s) to ALL_GRADING_RUN_FIELDS above", MissingRunFields] = true;
 

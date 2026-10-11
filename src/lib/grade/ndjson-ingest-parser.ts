@@ -7,7 +7,7 @@
 // exercise every decision (no component is rendered there).
 
 import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
-import type { StudentSubmissionEntry } from "@/lib/grade/types";
+import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 
 export interface IngestSkip {
   readonly student: string;
@@ -19,6 +19,8 @@ export interface IngestLedger {
   readonly studentsEmitted: number;
   readonly skipped: readonly IngestSkip[];
   readonly failedSupportedFiles: readonly string[];
+  /** ZIP-CLASS-VS-SINGLE: absent from an old-server sentinel or a malformed one. */
+  readonly classification?: SubmissionZipClassification;
 }
 
 export type IngestLine =
@@ -38,7 +40,8 @@ export const OVERSIZED_SKIP_REASON = "too large to grade on this surface";
 export function buildIngestLines(
   entries: readonly StudentSubmissionEntry[],
   failedSupportedFiles: readonly string[],
-  budget: number = ITEM_REQUEST_BYTE_BUDGET
+  budget: number = ITEM_REQUEST_BYTE_BUDGET,
+  classification?: SubmissionZipClassification
 ): IngestLine[] {
   const lines: IngestLine[] = [];
   const skipped: IngestSkip[] = [];
@@ -59,6 +62,7 @@ export function buildIngestLines(
     studentsEmitted: emitted,
     skipped,
     failedSupportedFiles: [...failedSupportedFiles],
+    ...(classification ? { classification } : {}),
   });
   return lines;
 }
@@ -112,6 +116,40 @@ function skipList(value: unknown): IngestSkip[] {
     }
   }
   return out;
+}
+
+const CLASSIFICATION_KINDS: readonly string[] = ["class", "single", "unknown"];
+const CLASSIFICATION_SIGNALS: readonly string[] = [
+  "canvas-convention",
+  "folders",
+  "nested-archives",
+  "single-group",
+  "ambiguous",
+  "empty",
+];
+
+/** Accepts only a well-formed classification; anything else yields undefined. */
+function classificationFrom(value: unknown): SubmissionZipClassification | undefined {
+  if (!isRecord(value)) return undefined;
+  const { kind, studentCount, markerStudentCount, signal } = value;
+  if (
+    typeof kind !== "string" ||
+    !CLASSIFICATION_KINDS.includes(kind) ||
+    typeof signal !== "string" ||
+    !CLASSIFICATION_SIGNALS.includes(signal) ||
+    typeof studentCount !== "number" ||
+    !Number.isFinite(studentCount) ||
+    typeof markerStudentCount !== "number" ||
+    !Number.isFinite(markerStudentCount)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: kind as SubmissionZipClassification["kind"],
+    studentCount,
+    markerStudentCount,
+    signal: signal as SubmissionZipClassification["signal"],
+  };
 }
 
 async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -187,6 +225,7 @@ export async function ingestStoragedZip(
         if (typeof parsed.error === "string") return { kind: "refused", reason: parsed.error };
         const studentsFound = typeof parsed.studentsFound === "number" ? parsed.studentsFound : entryCount;
         const studentsEmitted = typeof parsed.studentsEmitted === "number" ? parsed.studentsEmitted : entryCount;
+        const classification = classificationFrom(parsed.classification);
         return {
           kind: "complete",
           entryCount,
@@ -195,6 +234,7 @@ export async function ingestStoragedZip(
             studentsEmitted,
             skipped: skipList(parsed.skipped),
             failedSupportedFiles: stringList(parsed.failedSupportedFiles),
+            ...(classification ? { classification } : {}),
           },
         };
       }

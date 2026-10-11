@@ -15,7 +15,7 @@
  * SERVER-side only, inside N2's prepareChatSubmissionAction; the composer's
  * file-mode `accept` filter uses a plain extension list, not this module.
  */
-import type { StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
+import type { StudentSubmissionEntry, SubmissionZipClassification, SubmittedFileInfo } from "@/lib/grade/types";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 
 /** The owner's "text submissions, zip submissions, url submissions, other
@@ -52,7 +52,13 @@ export type CompositePartInput =
  * graded on the batch `run` surface.
  */
 export type IntakeOutcome =
-  | { readonly kind: "entries"; readonly entries: StudentSubmissionEntry[]; readonly pointsPossible: number | null }
+  | {
+      readonly kind: "entries";
+      readonly entries: StudentSubmissionEntry[];
+      readonly pointsPossible: number | null;
+      /** Present only for a zip upload (ZIP-CLASS-VS-SINGLE); absent otherwise. */
+      readonly classification?: SubmissionZipClassification;
+    }
   | { readonly kind: "refused"; readonly reason: string };
 
 /** Matches route.ts's MAX_STUDENT_CHARS (the wire-level bound every

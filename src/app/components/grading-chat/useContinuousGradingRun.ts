@@ -34,7 +34,14 @@ import {
   prepareCompositeSubmissionAction,
 } from "@/app/actions/grading-chat-intake";
 import { buildTextEntry, CHAT_LABEL_MAX_CHARS, type ChatSubmissionInput } from "./chatSubmissionIntake";
-import type { GradeHarshness, GradeResult, GradingRun, GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
+import type {
+  GradeHarshness,
+  GradeResult,
+  GradingRun,
+  GradingRunHeader,
+  StudentSubmissionEntry,
+  SubmissionZipClassification,
+} from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -176,6 +183,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const takenLabelsRef = useRef<Set<string>>(new Set());
   const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
   const pendingRef = useRef<Set<number>>(new Set());
+  // ZIP-CLASS-VS-SINGLE: the latest zip ingest's classification (per-ingest;
+  // a non-zip submit leaves it untouched). Stamped onto every rebuilt run.
+  const classificationRef = useRef<SubmissionZipClassification | null>(null);
 
   const [headerState, setHeaderState] = useState<HeaderState>("unset");
   const [results, setResults] = useState<readonly GradeResult[]>([]);
@@ -199,6 +209,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         arrived: arrivedRef.current,
         phase: "running",
         tier2: null,
+        submissionClassification: classificationRef.current ?? undefined,
       })
     );
   };
@@ -302,6 +313,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     let canvasUrlToPin: string | null = null;
     // BULK-ZIP BW2: students the ingest route skipped (named reason each),
     // reported on the outcome so nothing is dropped silently.
+    // ZIP-CLASS-VS-SINGLE: held until every refusal check has passed, so a
+    // refused zip never overwrites a prior ingest's badge.
+    let zipClassification: SubmissionZipClassification | undefined;
     let ingestSkipped: readonly { readonly student: string; readonly reason: string }[] = [];
 
     if (input.kind === "storaged-zip") {
@@ -325,6 +339,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       // submit's transient outcome string.
       const completedLedger = ingest.ledger;
       setIngestLedger((prev) => mergeIngestLedgers(prev, completedLedger));
+      zipClassification = completedLedger.classification;
       if (collected.length === 0 && ingestSkipped.length === 0) {
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
@@ -401,6 +416,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       }
       entries = outcome.entries;
       pointsPossible = outcome.pointsPossible;
+      zipClassification = outcome.classification;
     }
 
     // RES-GC-8: clip to what the session ceiling still allows; refuse only
@@ -413,6 +429,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       };
     }
     if (canvasUrlToPin !== null) canvasUrlRef.current = canvasUrlToPin;
+    // The storaged-zip and file/url/composite branches share this point. Assign
+    // ONLY when a classification is present (NIT-A): a text/single-file/URL
+    // submit must never wipe a prior zip's badge.
+    if (zipClassification !== undefined) classificationRef.current = zipClassification;
     const admitted = entries.slice(0, available);
     const refusedCount = entries.length - admitted.length;
 
@@ -513,6 +533,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();
     pendingRef.current = new Set();
+    classificationRef.current = null;
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
     harshnessRef.current = "balanced";

@@ -21,6 +21,7 @@ import Button from "@mui/material/Button";
 import GradingResults from "../GradingResults";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
+import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView, describeBulkProgress, type LedgerView } from "./ingestLedger";
@@ -515,6 +516,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       {hasRows && driver.run ? (
         <div className={chatStyles.stream}>
         {driver.run && <RubricProvenance run={driver.run} />}
+        <SubmissionClassificationBadge classification={driver.run.submissionClassification} />
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
           run={driver.run}

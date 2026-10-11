@@ -18,14 +18,14 @@ import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { getFileExtension } from "@/lib/office-extract";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
-import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
+import { extractStudentEntries, extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
-import type { GradingRunHeader, StudentSubmissionEntry } from "@/lib/grade/types";
+import type { GradingRunHeader, StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 import { estimateNeededWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 import {
   buildTextEntry,
@@ -191,6 +191,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
 
     try {
       let entries: StudentSubmissionEntry[];
+      let classification: SubmissionZipClassification | undefined;
       if (uploadKind === "single") {
         const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider, data.labelled);
         if (!entry) {
@@ -198,13 +199,19 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         }
         entries = [entry];
       } else {
-        // A44's collision refusal throws from inside extractStudentEntries,
+        // A44's collision refusal throws from inside ingestZipEntries,
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
-        entries = await extractStudentEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+        // ingestZipEntries is called directly (not extractStudentEntries) so
+        // the zip's class-vs-single classification is not discarded.
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+        entries = ingested.entries;
+        classification = ingested.classification;
       }
       const oversized = firstOversizedEntryReason(entries);
       if (oversized) return { kind: "refused", reason: oversized };
-      return { kind: "entries", entries, pointsPossible: null };
+      return classification
+        ? { kind: "entries", entries, pointsPossible: null, classification }
+        : { kind: "entries", entries, pointsPossible: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not read this file.";
       return { kind: "refused", reason: message };

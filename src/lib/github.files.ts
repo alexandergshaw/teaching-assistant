@@ -110,7 +110,7 @@ async function commitTreeChanges(
   message: string
 ): Promise<void> {
   const ref = await ghJson<{ object?: { sha?: string } }>(
-    `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`
+    `/repos/${owner}/${repo}/git/ref/heads/${encodeRefSegment(branch)}`
   );
   const baseSha = ref.object?.sha;
   if (!baseSha) throw new Error(`Could not read the head of branch "${branch}".`);
@@ -131,7 +131,7 @@ async function commitTreeChanges(
     body: JSON.stringify({ message, tree: newTree.sha, parents: [baseSha] }),
   });
   if (!newCommit.sha) throw new Error("GitHub did not return a new commit.");
-  await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+  await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeRefSegment(branch)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sha: newCommit.sha }),

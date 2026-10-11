@@ -5,6 +5,7 @@ import { ghFetch } from "./github.repos";
 import { downloadRepoZipball } from "./github.digest";
 import { getRepoTopics, setRepoTopics, listRepoLabels, createRepoLabel } from "./github.metadata";
 import { updateRepo } from "./github.repos";
+import { encodeRefSegment } from "./github-ref-name";
 
 export interface CopyRepoOptions {
   sourceBranch?: string;
@@ -44,7 +45,7 @@ export async function copyRepo(owner: string, repo: string, opts: CopyRepoOption
     // b. Get tree, filter by paths and workflows, identify submodules
     const branch = opts.sourceBranch || sourceRepo.defaultBranch;
     const rawTreeData = await ghJson<{ tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }> }>(
-      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
+      `/repos/${owner}/${repo}/git/trees/${encodeRefSegment(branch)}?recursive=1`
     );
     const rawEntries = rawTreeData.tree ?? [];
     const pathsSet = opts.paths ? new Set(opts.paths) : null;
@@ -156,7 +157,7 @@ export async function copyRepo(owner: string, repo: string, opts: CopyRepoOption
 
     // Get parent commit SHA
     const refRes = await ghJson<{ object?: { sha?: string } }>(
-      `/repos/${destOwner}/${destRepo.name}/git/ref/heads/${encodeURIComponent(destRepo.defaultBranch)}`
+      `/repos/${destOwner}/${destRepo.name}/git/ref/heads/${encodeRefSegment(destRepo.defaultBranch)}`
     );
     const parentSha = refRes.object?.sha;
     if (!parentSha) throw new Error("Could not read the destination branch head");
@@ -174,7 +175,7 @@ export async function copyRepo(owner: string, repo: string, opts: CopyRepoOption
     const commitSha = commitRes.sha;
     if (!commitSha) throw new Error("GitHub did not return a commit SHA");
 
-    await ghFetch(`/repos/${destOwner}/${destRepo.name}/git/refs/heads/${encodeURIComponent(destRepo.defaultBranch)}`, {
+    await ghFetch(`/repos/${destOwner}/${destRepo.name}/git/refs/heads/${encodeRefSegment(destRepo.defaultBranch)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sha: commitSha, force: true }),
@@ -259,7 +260,7 @@ export async function copyPathsToRepo(owner: string, repo: string, opts: CopyPat
 
     // 2. Get tree, filter by paths
     const rawTreeData = await ghJson<{ tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }> }>(
-      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(sourceBranch)}?recursive=1`
+      `/repos/${owner}/${repo}/git/trees/${encodeRefSegment(sourceBranch)}?recursive=1`
     );
     const rawEntries = rawTreeData.tree ?? [];
     const pathsSet = new Set(opts.paths);
@@ -334,7 +335,7 @@ export async function copyPathsToRepo(owner: string, repo: string, opts: CopyPat
 
     // 5. Get destination branch head commit and tree
     const destRefRes = await ghJson<{ object?: { sha?: string } }>(
-      `/repos/${opts.destOwner}/${opts.destRepo}/git/ref/heads/${encodeURIComponent(destBranch)}`
+      `/repos/${opts.destOwner}/${opts.destRepo}/git/ref/heads/${encodeRefSegment(destBranch)}`
     );
     const headSha = destRefRes.object?.sha;
     if (!headSha) throw new Error("Could not read the destination branch head");
@@ -382,7 +383,7 @@ export async function copyPathsToRepo(owner: string, repo: string, opts: CopyPat
     if (!commitSha) throw new Error("GitHub did not return a commit SHA");
 
     // 9. Update ref
-    await ghFetch(`/repos/${opts.destOwner}/${opts.destRepo}/git/refs/heads/${encodeURIComponent(destBranch)}`, {
+    await ghFetch(`/repos/${opts.destOwner}/${opts.destRepo}/git/refs/heads/${encodeRefSegment(destBranch)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sha: commitSha }),

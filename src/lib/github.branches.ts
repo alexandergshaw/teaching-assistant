@@ -1,10 +1,11 @@
 // Branch and commit history operations.
 
 import { ghFetch, ghJson } from "./github.repos";
+import { encodeRefSegment } from "./github-ref-name";
 
 export async function createBranch(owner: string, repo: string, newBranch: string, fromBranch: string): Promise<void> {
   const ref = await ghJson<{ object?: { sha?: string } }>(
-    `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(fromBranch)}`
+    `/repos/${owner}/${repo}/git/ref/heads/${encodeRefSegment(fromBranch)}`
   );
   const sha = ref.object?.sha;
   if (!sha) throw new Error(`Could not resolve branch "${fromBranch}".`);
@@ -17,7 +18,7 @@ export async function createBranch(owner: string, repo: string, newBranch: strin
 
 /** Delete a branch. */
 export async function deleteBranch(owner: string, repo: string, branch: string): Promise<void> {
-  await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { method: "DELETE" });
+  await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeRefSegment(branch)}`, { method: "DELETE" });
 }
 
 export interface CommitInfo {

@@ -1,6 +1,7 @@
 // Per-repo collaborator access control, branch protection, and PR creation.
 
 import { ghFetch, ghJson } from "./github.repos";
+import { encodeRefSegment } from "./github-ref-name";
 
 export type RepoPermission = "pull" | "triage" | "push" | "maintain" | "admin";
 
@@ -83,7 +84,7 @@ export async function setBranchProtection(
     restrictions: null,
     required_linear_history: opts.requireLinearHistory,
   };
-  await ghFetch(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}/protection`, {
+  await ghFetch(`/repos/${owner}/${repo}/branches/${encodeRefSegment(branch)}/protection`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

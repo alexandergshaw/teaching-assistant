@@ -3,6 +3,7 @@
 import { getRepo } from "./github.repos";
 import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "./github.files";
 import { ghFetch } from "./github.repos";
+import { encodeRefSegment } from "./github-ref-name";
 
 // Text/code file extensions worth feeding to a model. Broad on purpose - a
 // student submission can be written in almost anything - but deliberately
@@ -442,6 +443,6 @@ export function isScaffoldingFile(path: string): boolean {
 /** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */
 export async function downloadRepoZipball(owner: string, repo: string, ref?: string): Promise<Buffer> {
   const branch = ref || (await getRepo(owner, repo)).defaultBranch;
-  const res = await ghFetch(`/repos/${owner}/${repo}/zipball/${encodeURIComponent(branch)}`);
+  const res = await ghFetch(`/repos/${owner}/${repo}/zipball/${encodeRefSegment(branch)}`);
   return Buffer.from(await res.arrayBuffer());
 }

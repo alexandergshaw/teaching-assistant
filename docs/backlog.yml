@@ -5,16 +5,16 @@
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
 - id: 'REPO-GRADES-NAMING-DEDUCTION-TOGGLE'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'repo-grader-workflow'
   title: 'Owner 2026-10-11: a control on the repo page that dictates whether naming deductions for wrong file names are applied.'
-  owns: []
+  owns: ['src/lib/grade/prompts.ts', 'src/lib/grade/engine.ts', 'src/app/actions/github-repos.ts', 'src/app/components/repo-grades/RepoGradesControls.tsx', 'src/app/components/repo-grades/index.tsx', 'src/app/components/repo-grades/repoGradesUiState.ts', 'src/app/components/repo-grades/useRepoGradesGradingActions.ts', 'src/app/components/repo-grades/useRepoGradesBulkGrade.ts']
   verify: null
   blocked_by: []
   instrument: 'Scope docs/repo-grades-naming-deduction-toggle-scope.md (loop-architect dispatched 2026-10-11). Locate the existing naming-deduction/wrong-file-name logic in the repo grader, add a persisted toggle (default ON = current behavior) that gates it. Machine-checkable = a PURE test the deduction is applied when ON, suppressed when OFF (frozen oracle over fixtures) + a source-text pin the toggle reaches the gate + the ta- key round-trip (FROZEN_KEYS bump + canary same commit); the render is owner-walk. If the deduction logic lives in a grade lib (disjoint from the UI), the gating part may parallel the UI builds; the CONTROL (sticky header) + its wiring SERIALIZE after the other repo-grades work.'
   from: 'Owner request 2026-10-11 (direct chat).'
-  note: 'Control + a grading-behavior gate. The naming-deduction LOGIC may be disjoint from the UI moves (could parallel like branch-merge Wave 1); the control (sticky header) + index.tsx wiring COLLIDE with the module-picker/status/overhaul/branch-merge work and SERIALIZE. Default ON preserves current behavior. Trace the toggle end-to-end to the deduction (reachability - not dead). Diagnostics: likely report applied/suppressed (new gated data path) - scope decides. If NO naming-deduction logic exists yet, the scope surfaces that (feature becomes add+toggle, larger).'
+  note: 'SHIPPED 61bdf2ce (Wave L+U combined; scope check a95d2d96 design-SOUND with measurement/ruling fixes applied). The deduction was a MODEL-FACING PROMPT RULE emitted unconditionally at prompts.ts:207 (no TS computes it), so this GATED it: buildSystemPrompt gained a trailing applyNamingDeduction=true (default byte-identical), OFF omits the rule + emits an explicit suppression directive; threaded GradingRunOptions->gradeRepoAction->both hooks; "Deduct for wrong file names" checkbox in Grading settings (default checked) + summary readout; new default-ON key ta-repo-grades-apply-naming-deduction, FROZEN_KEYS 20->21 (first in sorted array). I1 FULL-PHRASE off-anchor (avoids the tautology the loose /required file name/i would cause), I2 threading pins with two runCodeScoring arity assertions loosened; OFF-anchor + ships-dead sabotages red-then-green; full npm test 25775 passed. NO diagnostic (justified, matches runCodeScoring precedent). Control + a grading-behavior gate. The naming-deduction LOGIC may be disjoint from the UI moves (could parallel like branch-merge Wave 1); the control (sticky header) + index.tsx wiring COLLIDE with the module-picker/status/overhaul/branch-merge work and SERIALIZE. Default ON preserves current behavior. Trace the toggle end-to-end to the deduction (reachability - not dead). Diagnostics: likely report applied/suppressed (new gated data path) - scope decides. If NO naming-deduction logic exists yet, the scope surfaces that (feature becomes add+toggle, larger).'
   question: null
 - id: 'REPO-PAGE-OVERHAUL'
   state: 'verification'

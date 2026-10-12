@@ -77,3 +77,74 @@ describe("Live Class menu entry's accessible name never embeds elapsed time (F6)
     expect(block.includes("elapsedSeconds")).toBe(false);
   });
 });
+
+// FAB open animation pins (AC5-AC7). Source-text only: nothing renders here.
+describe("FAB open animation wiring", () => {
+  const iconsSource = readFileSync(path.join(__dirname, "fab-icons.tsx"), "utf8");
+  const motionSource = readFileSync(path.join(__dirname, "fab-motion.ts"), "utf8");
+  const globalsSource = readFileSync(path.join(__dirname, "..", "globals.css"), "utf8");
+
+  function extractFab(src: string): string {
+    const start = src.indexOf("<Fab\n");
+    const end = src.indexOf("</Fab>", start);
+    if (start === -1 || end === -1) {
+      throw new Error(
+        "FabQuickActionsMenu.wiring.test.ts: could not find <Fab ... </Fab> in FabQuickActionsMenu.tsx - " +
+          "has it been restructured? Update this test's extraction to match."
+      );
+    }
+    return src.slice(start, end + "</Fab>".length);
+  }
+
+  it("imports the motion constants from ./fab-motion", () => {
+    expect(source).toMatch(/from "\.\/fab-motion"/);
+  });
+
+  it("the Menu has a transitionDuration that is not \"auto\" and comes from fab-motion", () => {
+    const tag = extractMenuOpenTag(source);
+    expect(tag).toContain("transitionDuration=");
+    expect(tag).not.toMatch(/transitionDuration=["{]\s*["']?auto/);
+    expect(tag).toContain("transitionDuration={FAB_MENU_TRANSITION_MS}");
+  });
+
+  it("the Menu slotProps carry transition.easing from fab-motion", () => {
+    const tag = extractMenuOpenTag(source);
+    expect(tag).toMatch(/transition:\s*\{\s*easing:\s*FAB_EASING\s*\}/);
+  });
+
+  it("both glyphs are mounted inside the Fab and the glyph layers use fabIconLayerStyle", () => {
+    const fab = extractFab(source);
+    expect(fab).toContain("<MenuTriggerIcon />");
+    expect(fab).toContain("<FabCloseIcon />");
+    expect(fab).toContain("fabIconLayerStyle(open");
+    expect(fab).toContain("FAB_ICON_STACK_STYLE");
+  });
+
+  it("the accessible name stays a static string and aria-expanded stays wired", () => {
+    const fab = extractFab(source);
+    expect(fab).toContain('aria-label="Quick actions"');
+    expect(fab).not.toMatch(/aria-label=\{/);
+    expect(fab).toContain("aria-expanded={open}");
+  });
+
+  it("FabCloseIcon's svg is aria-hidden", () => {
+    const start = iconsSource.indexOf("export function FabCloseIcon");
+    if (start === -1) throw new Error("FabCloseIcon not found in fab-icons.tsx");
+    const svg = iconsSource.slice(start, iconsSource.indexOf("</svg>", start));
+    expect(svg).toContain('aria-hidden="true"');
+  });
+
+  it("neither TS source adds a second reduced-motion mechanism", () => {
+    const pattern = /prefers-reduced-motion|matchMedia|useMediaQuery/;
+    expect(pattern.test(source)).toBe(false);
+    expect(pattern.test(motionSource)).toBe(false);
+  });
+
+  it("globals.css still carries the single global reduced-motion block", () => {
+    const start = globalsSource.indexOf("@media (prefers-reduced-motion: reduce)");
+    expect(start).toBeGreaterThan(-1);
+    const block = globalsSource.slice(start, start + 600);
+    expect(block).toContain("transition-duration");
+    expect(block).toContain("!important");
+  });
+});

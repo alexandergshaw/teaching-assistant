@@ -42,6 +42,11 @@
 // computeLiveBadgePosition's "beside, not above" placement for the live
 // badge stays correct without any change to that function.
 //
+// MOTION: the trigger glyph turns sparkle -> X and the Menu's Grow is tuned
+// (200ms in, 150ms out, a non-overshooting ease-out), all from fab-motion.ts.
+// Reduced motion is the single global block in globals.css; no second
+// mechanism lives here.
+//
 // F4: five entries, not seven - AI Chatbot, Live Class, Checklist Overview
 // and Check screen legibility stay top-level; the three former recording-
 // variant entries (Discussions/Announcement/Grading) are merged into one
@@ -58,7 +63,15 @@ import MenuItem from "@mui/material/MenuItem";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Tooltip from "@mui/material/Tooltip";
-import { ChatIcon, LegibilityProbeIcon, RecordingToolsIcon, MenuTriggerIcon, AccommodationsIcon } from "./fab-icons";
+import {
+  ChatIcon,
+  LegibilityProbeIcon,
+  RecordingToolsIcon,
+  MenuTriggerIcon,
+  FabCloseIcon,
+  AccommodationsIcon,
+} from "./fab-icons";
+import { FAB_EASING, FAB_ICON_STACK_STYLE, FAB_MENU_TRANSITION_MS, fabIconLayerStyle } from "./fab-motion";
 import { LiveClassIcon } from "./live-class/LiveClassWindow";
 import { ChecklistIcon } from "./courses/WeeklyChecklistOverviewModal";
 
@@ -202,7 +215,17 @@ const FabQuickActionsMenu = forwardRef<HTMLButtonElement, FabQuickActionsMenuPro
           "&:hover": { background: "var(--accent-hover)" },
         }}
       >
-        <MenuTriggerIcon />
+        {/* Two stacked decorative glyphs cross-fade and quarter-turn on the
+            single `open` boolean (sparkle out, X in). The accessible name stays
+            the static "Quick actions"; aria-expanded carries the state. */}
+        <span style={FAB_ICON_STACK_STYLE}>
+          <span style={fabIconLayerStyle(open, "sparkle")}>
+            <MenuTriggerIcon />
+          </span>
+          <span style={fabIconLayerStyle(open, "close")}>
+            <FabCloseIcon />
+          </span>
+        </span>
       </Fab>
       {/* keepMounted deliberately left unset - see this file's own header
           for why the default (false) is load-bearing; do not add it. */}
@@ -213,7 +236,8 @@ const FabQuickActionsMenu = forwardRef<HTMLButtonElement, FabQuickActionsMenuPro
         onClose={closeMenu}
         anchorOrigin={{ vertical: "top", horizontal: "right" }}
         transformOrigin={{ vertical: "bottom", horizontal: "right" }}
-        slotProps={{ list: { "aria-label": "Quick actions" } }}
+        transitionDuration={FAB_MENU_TRANSITION_MS}
+        slotProps={{ list: { "aria-label": "Quick actions" }, transition: { easing: FAB_EASING } }}
       >
         {actions.map((action) => {
           const menuItem = (

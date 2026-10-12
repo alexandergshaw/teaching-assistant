@@ -113,3 +113,14 @@ export function MenuTriggerIcon() {
     </svg>
   );
 }
+
+// The X shown in place of the sparkle while the quick-actions menu is open
+// (cross-faded by fab-motion.ts's fabIconLayerStyle). Same 24px box, stroke
+// and currentColor as MenuTriggerIcon above; decorative, so hidden from AT.
+export function FabCloseIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}

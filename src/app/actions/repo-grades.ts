@@ -24,6 +24,7 @@
 import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { listOrgRepos, getRepoTree } from "@/lib/github";
 import { listAssignments, type CanvasAssignmentBrief } from "@/lib/canvas";
+import { resolveInstitutionByCode } from "@/lib/canvas-core";
 import { scanOrgRepoTrees, type OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 
 /** List a course's Canvas assignments, for the Repo Grades column-to-assignment
@@ -33,7 +34,7 @@ import { scanOrgRepoTrees, type OrgRepoTreesResult } from "@/lib/repo-grade-tree
 export async function listCourseAssignmentsAction(
   institution: string,
   courseId: string
-): Promise<{ assignments: CanvasAssignmentBrief[] } | { error: string }> {
+): Promise<{ assignments: CanvasAssignmentBrief[] } | { error: string; attemptedHost?: string }> {
   try {
     await requireUser();
     if (!institution.trim()) return { error: "Choose an institution." };
@@ -41,7 +42,23 @@ export async function listCourseAssignmentsAction(
     const assignments = await listAssignments(institution.trim().toUpperCase(), courseId.trim());
     return { assignments };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not load the course's assignments." };
+    const base = err instanceof Error ? err.message : "Could not load the course's assignments.";
+    const host = await describeAttemptedCanvasHost(institution);
+    return { error: host ? `${base} (dialed ${host})` : base, attemptedHost: host };
+  }
+}
+
+// The HOST this institution is configured to dial, for a diagnostic message.
+// HOST ONLY: a path can carry ids and a query can carry credentials. Runs on an
+// error path, so it never throws (same rationale as describeAttemptedCanvasHost
+// in canvas-inbox.ts; the helper is triplicated by design for now).
+async function describeAttemptedCanvasHost(institution: string): Promise<string | undefined> {
+  try {
+    const { baseUrl } = await resolveInstitutionByCode(institution.trim().toUpperCase());
+    const host = new URL(baseUrl).host;
+    return host || undefined;
+  } catch {
+    return undefined;
   }
 }
 

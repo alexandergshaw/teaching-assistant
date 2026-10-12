@@ -79,10 +79,12 @@ export async function listCoursesAction(
     await requireUser();
     return { courses: await listCourses(acronym) };
   } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Could not load courses.",
-      attemptedHost: await describeAttemptedCanvasHost(acronym),
-    };
+    const base = err instanceof Error ? err.message : "Could not load courses.";
+    const host = await describeAttemptedCanvasHost(acronym);
+    // Folded into the string too: the picker passes the error through verbatim,
+    // so naming the host here reaches the instructor with no UI change. The
+    // discrete attemptedHost stays for the diagnostic.
+    return { error: host ? `${base} (dialed ${host})` : base, attemptedHost: host };
   }
 }
 

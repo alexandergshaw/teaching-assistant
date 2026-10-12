@@ -17,6 +17,7 @@ import {
 import { classifyMigration } from "@/lib/canvas-modules/migration-verdict";
 import type { ContentMigrationRow, MigrationProgress } from "@/lib/canvas-modules";
 import SessionLogSection from "./SessionLogSection";
+import ConnectivitySection from "./ConnectivitySection";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import styles from "../security/security.module.css";
 
@@ -315,6 +316,8 @@ export default function DiagnosticsPage() {
               SessionLogSection.tsx's own header on why an empty log still has
               to render, and say so. */}
           <SessionLogSection currentInstitution={activeInstitution || ""} currentCourse={courseUrl} />
+
+          <ConnectivitySection />
 
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Canvas import jobs</p>

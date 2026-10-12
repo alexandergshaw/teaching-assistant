@@ -305,6 +305,10 @@ const OWNER_ONLY: Record<string, string> = {
   demoteAccountAction:
     "Removes another account's owner-level control over the workspace; only the owner may revoke that standing.",
 
+  // LMS connectivity diagnostics W3 (docs/lms-connectivity-diagnostics-deep-scope.md 4.9).
+  probeLmsConnectivityAction:
+    "Dials each owner-configured Canvas host with the owner's own credential and returns the classified transport cause and runtime facts; the finer cause is owner tooling (SEC9), so only the owner may run it.",
+
   // LIVE-LMS-STUDENT-MESSAGING W4 (docs/live-lms-student-messaging-ops.md S2):
   // the irreversible student-facing send. requireAppOwner, never requireUser.
   prepareLiveMessageBatchAction:

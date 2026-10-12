@@ -94,7 +94,7 @@ const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = 
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",
   diagnostics:
-    "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, and cancelling a migration job.",
+    "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, cancelling a migration job, and the owner's LMS connectivity tests.",
   grading:
     "Grading: the main grading tab's whole-run grade (zip and Canvas), chat grading (run header, submission preparation, each submission graded, Canvas assignment details), repo grading (one repository or a cohort, and rubric generation from a repo), deriving an assignment checklist, posting grades back to Canvas and posting drafted grades - each operation's outcome and elapsed time as seen by the browser.",
   messaging:

@@ -34,7 +34,9 @@ export type GradingDiagnosticOperation =
   | "capture_screenshot"
   | "classify_submission_class"
   | "classify_submission_single"
-  | "classify_submission_unknown";
+  | "classify_submission_unknown"
+  | "classify_recording_single"
+  | "classify_recording_multiple";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
   resolve_header: "Resolve run header",
@@ -56,6 +58,8 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   classify_submission_class: "Classified: class bundle",
   classify_submission_single: "Classified: single submission",
   classify_submission_unknown: "Classification: undetermined",
+  classify_recording_single: "Classified: single recording",
+  classify_recording_multiple: "Classified: multiple submissions in one recording",
 };
 
 export interface RecordGradingDiagnosticArgs {

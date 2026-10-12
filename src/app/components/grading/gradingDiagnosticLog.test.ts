@@ -126,6 +126,13 @@ describe("decideClassifyDiagnostic (pure)", () => {
     expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_submission_single).toBe("Classified: single submission");
     expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_submission_unknown).toBe("Classification: undetermined");
   });
+
+  it("the recording one-vs-many operations have labels", () => {
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_recording_single).toBe("Classified: single recording");
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.classify_recording_multiple).toBe(
+      "Classified: multiple submissions in one recording"
+    );
+  });
 });
 
 describe("recordClassifySettled (call shape)", () => {

@@ -69,6 +69,7 @@ import { type LlmProvider } from "@/lib/llm";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED, type BranchScanResult } from "@/lib/repo-grade-branch-scan";
+import { buildRepoNoSubmissionResult, withBranchNote } from "@/lib/grade-zeros";
 import { classifyBranchMergeCheck, describeBranchMergeNote, type BranchMergeCheck } from "@/lib/repo-grade-merge-check";
 import { normalizeTargetBranch } from "@/lib/github-ref-name";
 
@@ -651,6 +652,12 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
 // copy - see that function's own comment, and isScaffoldingFile's own doc
 // comment in github.digest.ts, for the full rationale.
 
+// The not-merged note (null for every other status) that withBranchNote folds
+// into a REAL grade's comment (AC4: the grade is kept, never zeroed).
+function branchNoteFor(check: BranchMergeCheck): string | null {
+  return check.status === "not-merged" ? describeBranchMergeNote(check) : null;
+}
+
 export async function gradeRepoAction(
   repoRef: string,
   assignmentInstructions: string,
@@ -669,7 +676,7 @@ export async function gradeRepoAction(
       digestTruncated?: boolean;
       readmePath?: string;
       readmeMissing?: boolean;
-      /** Typed merge-check outcome; present only when a target branch was set. */
+      /** Typed merge-check outcome (graded ref = typed target, else the default branch). */
       branchMergeCheck?: BranchMergeCheck;
     }
   | {
@@ -696,7 +703,7 @@ export async function gradeRepoAction(
       // way). The score/outcome never changes either way (G3a) - this is
       // additive information only.
       determination?: GradeDetermination;
-      /** Typed merge-check outcome; present only when a target branch was set. */
+      /** Typed merge-check outcome (graded ref = typed target, else the default branch). */
       branchMergeCheck?: BranchMergeCheck;
     }
   | { error: string }
@@ -767,7 +774,6 @@ export async function gradeRepoAction(
       const folderLabel = pathPrefix ? `"${pathPrefix}"` : "the repository";
       const removed = readmePath ? "the assignment instructions file and scaffolding (.gitkeep)" : "scaffolding (.gitkeep)";
       let reason = `Nothing was submitted in ${folderLabel} - after removing ${removed}, no student-authored files remain.`;
-      let determination: GradeDetermination | undefined;
 
       // G3 (docs/no-submission-and-requirement-checking-acceptance-criteria.md
       // section 3): the most common innocent cause of a missing submission
@@ -791,57 +797,50 @@ export async function gradeRepoAction(
         }
       );
 
-      if (scan.kind === "found") {
-        // G3/G1a: the fact is a field (determination), never encoded into
-        // the score string - totalScore is not touched anywhere on this
-        // path, and this branch does not produce one at all. The comment
-        // below is written to be actionable and non-accusatory (G3, and this
-        // doc's own "must not accuse" note): it names the branch and states
-        // plainly that the work was not on the graded branch, without
-        // implying misconduct - an unmerged branch is a process mistake, the
-        // most common innocent cause of a missing submission.
-        determination = "no-submission-unmerged-branch";
-        // With a target set, the distinct typed-state note below replaces this
-        // sentence (it names the target and the found-on branch).
-        if (!targetBranch) reason = `${reason} The same folder does appear on another branch of this repository, "${scan.branch}", which was never merged into the graded branch - it looks like the work exists, just not where it was graded. Merging or re-pointing the submission to "${scan.branch}" would let it be graded.`;
-      } else if (scan.kind === "undetermined" && !targetBranch) {
-        // G3d: never "no unmerged work found" when the check itself could
-        // not be completed - the honest statement is that other branches
-        // could not be checked, not that they were checked and came up
-        // empty.
-        reason = `${reason} Other branches of this repository could not be checked for the same folder (${scan.reason}), so it is possible the work exists there unseen.`;
-      }
-      if (scan.branchesSkipped > 0) {
-        // G3c: a silent cap reads as "checked everywhere" when it did not -
-        // always say how many branches were left unchecked past the cap,
-        // regardless of whether the check that did run found anything.
-        reason = `${reason} (${scan.branchesSkipped} other branch${scan.branchesSkipped === 1 ? "" : "es"} of this repository were not checked - past the ${MAX_BRANCHES_SCANNED}-branch limit for this check.)`;
+      const gradedBranchName = scan.gradedBranch || targetBranch || "";
+      const noSubCheck = classifyBranchMergeCheck({
+        targetBranch: gradedBranchName,
+        targetWasExplicit: targetBranch !== undefined,
+        gradedTargetHadSubmission: false,
+        scan,
+      });
+      // G3c: a silent cap reads as "checked everywhere" when it did not.
+      const skippedNote =
+        scan.branchesSkipped > 0
+          ? ` (${scan.branchesSkipped} other branch${scan.branchesSkipped === 1 ? "" : "es"} of this repository were not checked - past the ${MAX_BRANCHES_SCANNED}-branch limit for this check.)`
+          : "";
+
+      if (scan.kind === "undetermined") {
+        // RES-1 / G3d: never zero on UNCONFIRMED absence - the work may sit on
+        // an unscanned or rate-limited branch. Stay ungraded with the honest caveat.
+        reason = `${reason} ${describeBranchMergeNote(noSubCheck) ?? ""}${skippedNote}`.trim();
+        return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, branchMergeCheck: noSubCheck };
       }
 
-      // Typed merge-check outcome, only when the instructor set a target. The
-      // distinct note per state is appended to `reason`; the typed field is
-      // the source of truth (never parsed back out of the text).
-      const branchMergeCheck = targetBranch
-        ? classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: false, scan })
-        : undefined;
-      if (branchMergeCheck) {
-        const note = describeBranchMergeNote(branchMergeCheck);
-        if (note) reason = `${reason} ${note}`;
-      }
-
-      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, determination, branchMergeCheck };
+      // Confirmed zero: either the work sits on an unmerged branch ("found",
+      // still a no-submission outcome, G3a) or on no branch at all. Both are a
+      // GRADED "0" with the branch-aware note in the comment, no model call.
+      const unmerged = scan.kind === "found";
+      const zero = buildRepoNoSubmissionResult({
+        student: digest.fullName,
+        folder: pathPrefix,
+        note: `${describeBranchMergeNote(noSubCheck) ?? ""}${skippedNote}`.trim(),
+        determination: unmerged ? "no-submission-unmerged-branch" : "no-submission",
+      });
+      const zeroRun: GradingRun = { results: [zero], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl: null };
+      return { run: zeroRun, rubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: noSubCheck };
     }
 
-    // The target branch had gradable content. With a target set (the opt-in),
-    // still check the repo's OTHER branches: "not merged" is a path-set
+    // The graded ref had gradable content. Still check the repo's OTHER
+    // branches (against the default branch when no target was typed): "not merged" is a path-set
     // DIFFERENCE - another branch holds a candidate submission path the graded
     // ref's own TREE lacks. The graded-ref set comes from that ref's tree (one
     // extra call), NOT from the digest: the digest drops non-text and
     // over-budget files, which would make it asymmetric with the branch side
     // and flag a merged repo. If that tree cannot be read completely the scan
-    // is skipped (scan: null -> merged), never guessed. Absent when no target.
-    let mergedCheck: BranchMergeCheck | undefined;
-    if (targetBranch) {
+    // is skipped (scan: null -> merged), never guessed.
+    let mergedCheck: BranchMergeCheck;
+    {
       let successScan: BranchScanResult | null = null;
       try {
         const gradedTree = await getRepoTreeWithMeta(parsed.owner, parsed.repo, targetBranch);
@@ -864,7 +863,12 @@ export async function gradeRepoAction(
       } catch {
         successScan = null;
       }
-      mergedCheck = classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: true, scan: successScan });
+      mergedCheck = classifyBranchMergeCheck({
+        targetBranch: successScan?.gradedBranch || targetBranch || "",
+        targetWasExplicit: targetBranch !== undefined,
+        gradedTargetHadSubmission: true,
+        scan: successScan,
+      });
     }
 
     const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
@@ -888,7 +892,7 @@ export async function gradeRepoAction(
       // the LLM path does. Opt-in and off by default - see this function's
       // own doc comment on `runCode`.
       if (runCode) await attachCodeRuns(entries);
-      const run = gradeEntriesEmbedded(entries, builtRubric);
+      const run = withBranchNote(gradeEntriesEmbedded(entries, builtRubric), branchNoteFor(mergedCheck));
       return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
     }
 
@@ -898,7 +902,7 @@ export async function gradeRepoAction(
     // second entry with an always-empty submittedFiles - that emptiness was
     // the reason a repo-graded row never had a file list to preview.
     const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
-    const run = await gradeEntries([entry], instructions, effectiveRubric, provider, null, { applyNamingDeduction });
+    const run = withBranchNote(await gradeEntries([entry], instructions, effectiveRubric, provider, null, { applyNamingDeduction }), branchNoteFor(mergedCheck));
     return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };

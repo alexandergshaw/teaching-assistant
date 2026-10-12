@@ -11,8 +11,9 @@
 // FIX 1: the file used as instructions is excluded from what is graded
 // (excludeInstructionsFromDigest, github.digest.ts).
 // FIX 2: once that file and universal scaffolding (.gitkeep) are removed, an
-// empty graded folder must not receive a grade at all - gradeRepoAction
-// returns `{ noSubmission: true, ... }` instead.
+// empty graded folder must never be MODEL-graded. It now returns a
+// deterministic graded "0" (determination "no-submission", no model call)
+// whose comment says nothing was submitted - see expectGradedZero below.
 //
 // This is a "use server" action with heavy runtime dependencies
 // (requireOwner -> Supabase auth, ingestRepo -> live GitHub fetches,
@@ -71,7 +72,10 @@ vi.mock("@/lib/github", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/grade", () => ({
+vi.mock("@/lib/grade", async (importOriginal) => ({
+  // Partial: the real comment composers stay real (grade-zeros.ts builds the
+  // graded-zero result from them); only the network/LLM entry points are mocked.
+  ...(await importOriginal<typeof import("@/lib/grade")>()),
   generateRubric: (...args: unknown[]) => generateRubric(...args),
   gradeEntries: (...args: unknown[]) => gradeEntries(...args),
 }));
@@ -122,6 +126,17 @@ beforeEach(() => {
   getRepoTreeWithMeta.mockResolvedValue({ entries: [], truncated: false });
 });
 
+// An empty graded folder with no other branch holding it: a graded bare "0",
+// determination "no-submission", NO model call (the leverage removal test).
+function expectGradedZero(result: unknown): void {
+  if (typeof result !== "object" || result === null || !("run" in result)) throw new Error("expected a graded zero run");
+  const first = (result as { run: { results: Array<{ totalScore: string; determination?: string; overallComment: string }> } }).run.results[0];
+  expect(first.totalScore).toBe("0");
+  expect(first.determination).toBe("no-submission");
+  expect(first.overallComment.toLowerCase()).toContain("nothing was submitted");
+  expect("noSubmission" in result).toBe(false);
+}
+
 const SOLUTION_README = "How to complete this assignment:\n\ndef trip_math():\n    return 42  # full worked solution";
 
 describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must never also be graded as the submission", () => {
@@ -154,7 +169,7 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
   // is left to grade is empty, so noSubmission correctly fires. This is why
   // the reported student was NOT graded on the course's test harness: it was
   // never in scope to begin with.
-  it("THE HIGHEST-VALUE CASE: a folder scoped to just a solution README (its course-provided test harness sits outside the folder) produces noSubmission, never a score", async () => {
+  it("THE HIGHEST-VALUE CASE: a folder scoped to just a solution README (its course-provided test harness sits outside the folder) produces a graded zero, never a model score", async () => {
     ingestRepo.mockResolvedValue(digestOf([file("assignments/module_02/README.md", SOLUTION_README)]));
 
     const result = await gradeRepoAction(
@@ -167,12 +182,9 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
       /* useReadmeInstructions */ true
     );
 
-    expect("noSubmission" in result).toBe(true);
-    if (!("noSubmission" in result)) throw new Error("expected noSubmission");
-    expect(result.reason.toLowerCase()).toContain("nothing was submitted");
-    // Never a score, and never the vector that produced the wrong grade in
-    // the reported case.
-    expect("run" in result).toBe(false);
+    expectGradedZero(result);
+    // Never a MODEL score, and never the vector that produced the wrong grade
+    // in the reported case.
     expect(gradeEntries).not.toHaveBeenCalled();
     expect(generateRubric).not.toHaveBeenCalled();
   });
@@ -196,7 +208,7 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
       /* useReadmeInstructions */ true
     );
 
-    expect("noSubmission" in result).toBe(true);
+    expectGradedZero(result);
     expect(gradeEntries).not.toHaveBeenCalled();
   });
 
@@ -241,16 +253,16 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
       // useReadmeInstructions omitted entirely
     );
 
-    expect("noSubmission" in result).toBe(true);
+    expectGradedZero(result);
     expect(gradeEntries).not.toHaveBeenCalled();
   });
 
-  it("an entirely empty (or nonexistent) folder is also reported as noSubmission, not graded as a zero", async () => {
+  it("an entirely empty (or nonexistent) folder is also reported as a deterministic graded zero (no model call)", async () => {
     ingestRepo.mockResolvedValue(digestOf([], { prefixMatchedNothing: true }));
 
     const result = await gradeRepoAction("org/student-repo", "Do the assignment.", "", "gemini", undefined, "module_09");
 
-    expect("noSubmission" in result).toBe(true);
+    expectGradedZero(result);
     expect(gradeEntries).not.toHaveBeenCalled();
   });
 
@@ -267,7 +279,7 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
       true
     );
 
-    expect("noSubmission" in result).toBe(true);
+    expectGradedZero(result);
     expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
     expect(buildEmbeddedRubric).not.toHaveBeenCalled();
   });

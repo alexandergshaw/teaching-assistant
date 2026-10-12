@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildZeroGradingEntry, isZeroableAssignment } from "./grade-zeros";
+import { appendBranchNoteToResult, buildRepoNoSubmissionResult, buildZeroGradingEntry, isZeroableAssignment } from "./grade-zeros";
+import type { GradedResult } from "./grade";
 import { RESUBMIT_NOTICE } from "./grade";
 
 // Phrases that would imply the student did something wrong. Deliberately
@@ -282,5 +283,69 @@ describe("isZeroableAssignment", () => {
         omitFromFinalGrade: true,
       })
     ).toBe(false);
+  });
+});
+
+describe("buildRepoNoSubmissionResult (frozen oracle)", () => {
+  const NOTE = 'The work exists on the branch "module-08", which was never merged into the default branch "main". Merging or re-pointing it to "main" would let it be graded.';
+  const r = buildRepoNoSubmissionResult({
+    student: "org/info-1255-x",
+    folder: "module_08",
+    note: NOTE,
+    determination: "no-submission-unmerged-branch",
+  });
+
+  it("is a bare 0 with the determination as its own field and no rubric/files", () => {
+    expect(r.totalScore).toBe("0");
+    expect(r.determination).toBe("no-submission-unmerged-branch");
+    expect(r.rubricAreas).toEqual([]);
+    expect(r.submittedFiles).toEqual([]);
+    expect(r.mergedFileCount).toBe(0);
+    expect(r.student).toBe("org/info-1255-x");
+    expect(r.ungraded).toBeUndefined();
+  });
+
+  it("folds the note into improvements and the recomposed overallComment, with the resubmit notice last", () => {
+    expect(r.strengths).toContain('Nothing was submitted in "module_08"');
+    expect(r.improvements.startsWith(NOTE)).toBe(true);
+    expect(r.overallComment).toBe(`${r.strengths} ${r.improvements} ${RESUBMIT_NOTICE}`);
+    expect(r.resubmitNotice).toBe(RESUBMIT_NOTICE);
+    expect(r.feedback).toContain("Total Score: 0");
+    assertNotAccusatory(r.overallComment);
+  });
+
+  it("names the repository when no folder was scoped", () => {
+    const whole = buildRepoNoSubmissionResult({ student: "o/r", note: "n.", determination: "no-submission" });
+    expect(whole.strengths).toContain("Nothing was submitted in the repository");
+    expect(whole.determination).toBe("no-submission");
+  });
+});
+
+describe("appendBranchNoteToResult (frozen oracle)", () => {
+  const base: GradedResult = {
+    student: "s",
+    totalScore: "8/10",
+    strengths: "Good work.",
+    improvements: "Add docstrings.",
+    resubmitNotice: "R.",
+    overallComment: "Good work. Add docstrings. R.",
+    rubricAreas: [],
+    feedback: "",
+    mergedFileCount: 1,
+    submittedFiles: [],
+  };
+
+  it("appends to improvements, recomposes the comment, keeps score and strengths, never mutates", () => {
+    const out = appendBranchNoteToResult(base, "Note.");
+    expect(out.improvements).toBe("Add docstrings. Note.");
+    expect(out.overallComment).toBe("Good work. Add docstrings. Note. R.");
+    expect(out.totalScore).toBe("8/10");
+    expect(out.strengths).toBe("Good work.");
+    expect(out.feedback).toBe("");
+    expect(base.improvements).toBe("Add docstrings.");
+  });
+
+  it("uses the note alone when improvements was empty", () => {
+    expect(appendBranchNoteToResult({ ...base, improvements: "" }, "Note.").improvements).toBe("Note.");
   });
 });

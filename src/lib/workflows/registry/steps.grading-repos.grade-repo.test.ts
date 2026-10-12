@@ -778,6 +778,39 @@ describe("grade-repo step run() - draft persistence (AC1/AC3/AC4/AC5/AC6)", () =
     expect(result.outputs.draftId).toBe("draft-new");
   });
 
+  it("a graded zero for a missing submission enters the saved draft AND keeps its no-submission log outcome (Wave 3)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")],
+    });
+    mockGradeRepoAction.mockImplementation(async (repo: string) => {
+      if (repo === "acme-university/bob-hw1") {
+        const run = fakeGradeRunFor(repo, "0");
+        run.results[0] = { ...run.results[0], determination: "no-submission", improvements: "No submission was found." };
+        return { run, rubric: "", fullName: repo };
+      }
+      return { run: fakeGradeRunFor(repo, "9/10"), rubric: "", fullName: repo };
+    });
+
+    await step.run({ repo: "", instructions: "Do the thing.", hubCourse: "course-1" }, testHelpers(), vi.fn());
+
+    const payload = mockSaveGradingDraftAction.mock.calls[0][1];
+    // The zero is a real row in the draft...
+    expect(payload.runs[0].run.results.map((r) => r.student).sort()).toEqual([
+      "acme-university/alice-hw1",
+      "acme-university/bob-hw1",
+    ]);
+    // ...and the log still accounts for it as a no-submission outcome.
+    const log = payload.repoGradingLog;
+    const bob = log?.entries.find((e) => e.repo === "acme-university/bob-hw1");
+    const alice = log?.entries.find((e) => e.repo === "acme-university/alice-hw1");
+    expect(bob?.outcome).toBe("no-submission");
+    expect(bob?.score).toBe("0");
+    expect(alice?.outcome).toBe("graded");
+  });
+
   it("the org fan-out saves exactly ONE draft covering every repo it graded (AC2)", async () => {
     mockListCourseHubAction.mockResolvedValue({
       courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],

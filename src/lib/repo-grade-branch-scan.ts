@@ -150,6 +150,11 @@ export type BranchScanResult =
       /** The other branch that holds real, non-scaffolding, non-README
        * content under the scoped folder. */
       branch: string;
+      /** The effective graded ref (`explicitBranch || defaultBranch`) this scan
+       * excluded from its candidates. Additive: surfaced so callers can name the
+       * graded ref without a second GitHub call. Empty only when the branch list
+       * itself could not be read and no explicit branch was given. */
+      gradedBranch: string;
       branchesChecked: number;
       branchesSkipped: number;
     }
@@ -160,6 +165,11 @@ export type BranchScanResult =
        * for a repo whose other branches are all as empty as the graded one -
        * G3d's four could-not-determine states are never folded in here. */
       kind: "not-found";
+      /** The effective graded ref (`explicitBranch || defaultBranch`) this scan
+       * excluded from its candidates. Additive: surfaced so callers can name the
+       * graded ref without a second GitHub call. Empty only when the branch list
+       * itself could not be read and no explicit branch was given. */
+      gradedBranch: string;
       branchesChecked: number;
       branchesSkipped: number;
     }
@@ -172,6 +182,11 @@ export type BranchScanResult =
        * found nothing". */
       kind: "undetermined";
       reason: string;
+      /** The effective graded ref (`explicitBranch || defaultBranch`) this scan
+       * excluded from its candidates. Additive: surfaced so callers can name the
+       * graded ref without a second GitHub call. Empty only when the branch list
+       * itself could not be read and no explicit branch was given. */
+      gradedBranch: string;
       branchesChecked: number;
       branchesSkipped: number;
     };
@@ -275,6 +290,7 @@ export async function scanBranchesForUnmergedSubmission(
     return {
       kind: "undetermined",
       reason: verdict ? verdict.message : describeNonGithubError(err),
+      gradedBranch: explicitBranch || "",
       branchesChecked: 0,
       branchesSkipped: 0,
     };
@@ -283,7 +299,7 @@ export async function scanBranchesForUnmergedSubmission(
   const gradedBranch = explicitBranch || listed.defaultBranch;
   const candidates = listed.branches.filter((b) => b !== gradedBranch);
   if (candidates.length === 0) {
-    return { kind: "not-found", branchesChecked: 0, branchesSkipped: 0 };
+    return { kind: "not-found", gradedBranch, branchesChecked: 0, branchesSkipped: 0 };
   }
 
   const toCheck = candidates.slice(0, maxBranches);
@@ -302,7 +318,7 @@ export async function scanBranchesForUnmergedSubmission(
 
   const found = outcomes.find((o): o is Extract<BranchCheckOutcome, { kind: "found" }> => o.kind === "found");
   if (found) {
-    return { kind: "found", branch: found.branch, branchesChecked: toCheck.length, branchesSkipped };
+    return { kind: "found", branch: found.branch, gradedBranch, branchesChecked: toCheck.length, branchesSkipped };
   }
 
   const undetermined = outcomes.filter(
@@ -312,10 +328,11 @@ export async function scanBranchesForUnmergedSubmission(
     return {
       kind: "undetermined",
       reason: combineUndetermined(undetermined),
+      gradedBranch,
       branchesChecked: toCheck.length,
       branchesSkipped,
     };
   }
 
-  return { kind: "not-found", branchesChecked: toCheck.length, branchesSkipped };
+  return { kind: "not-found", gradedBranch, branchesChecked: toCheck.length, branchesSkipped };
 }

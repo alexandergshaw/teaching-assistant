@@ -3,7 +3,16 @@
  * by its deadline. Pure function, testable without network calls.
  */
 
-import { composeOverallComment, formatFeedback, RESUBMIT_NOTICE, type GradingRunEntry } from "./grade";
+import {
+  composeOverallComment,
+  formatFeedback,
+  RESUBMIT_NOTICE,
+  type GradedResult,
+  type GradeDetermination,
+  type GradeResult,
+  type GradingRun,
+  type GradingRunEntry,
+} from "./grade";
 
 // Canvas submission_types that record an online submission state we can trust to
 // mean "turned in". on_paper / none / external_tool are NOT here: for those the
@@ -118,4 +127,73 @@ export function buildZeroGradingEntry(input: BuildZeroGradingEntryInput): Gradin
     assignmentId: input.assignmentId,
     pointsPossible: input.pointsPossible,
   };
+}
+
+export interface BuildRepoNoSubmissionResultInput {
+  /** The row label the grader would have used (the repo's full name). */
+  student: string;
+  /** The graded folder, when the grade was scoped to one; omitted for the whole repo. */
+  folder?: string;
+  /** describeBranchMergeNote's sentence for this outcome: names the branch the
+   * work sits on (never merged) or states nothing exists on any branch. */
+  note: string;
+  /** "no-submission-unmerged-branch" when the work exists on an unmerged
+   * branch; plain "no-submission" when it is absent everywhere. */
+  determination: GradeDetermination;
+}
+
+const REPO_NO_SUBMISSION_IMPROVEMENTS =
+  "If you completed the work but it did not make it into the graded branch (for example it was never merged), please let me know and I will take a look.";
+
+/**
+ * One GradeResult for a repository row with nothing student-authored on the
+ * graded ref: a bare "0" with the branch-aware note in its comment. No model
+ * call is made (deterministic). Not a Canvas-shaped entry - gradeRepoAction
+ * wraps it in a GradingRun like its other branches. The no-submission fact is
+ * the `determination` field, never encoded in the score (G1a).
+ */
+export function buildRepoNoSubmissionResult(input: BuildRepoNoSubmissionResultInput): GradedResult {
+  const folderLabel = input.folder ? `"${input.folder}"` : "the repository";
+  const strengths = `Nothing was submitted in ${folderLabel} - no student-authored files were found there, so there is nothing yet to grade. This is not a judgment on your work, only a record of what the graded branch contains.`;
+  const improvements = `${input.note} ${REPO_NO_SUBMISSION_IMPROVEMENTS}`;
+  const overallComment = composeOverallComment(strengths, improvements, RESUBMIT_NOTICE);
+  const totalScore = "0";
+  return {
+    student: input.student,
+    overallComment,
+    strengths,
+    improvements,
+    resubmitNotice: RESUBMIT_NOTICE,
+    rubricAreas: [],
+    totalScore,
+    feedback: formatFeedback(overallComment, [], totalScore),
+    mergedFileCount: 0,
+    submittedFiles: [],
+    determination: input.determination,
+  };
+}
+
+/**
+ * A real grade plus a branch note: appends `note` to `improvements` and
+ * recomposes `overallComment` through composeOverallComment (never
+ * hand-concatenated). Pure; never mutates; leaves score and strengths alone.
+ * `feedback` is recomposed only when the producer had set one.
+ */
+export function appendBranchNoteToResult(result: GradeResult, note: string): GradeResult {
+  const improvements = result.improvements.trim() ? `${result.improvements} ${note}` : note;
+  const overallComment = composeOverallComment(result.strengths, improvements, result.resubmitNotice);
+  const feedback = result.feedback ? formatFeedback(overallComment, result.rubricAreas, result.totalScore) : result.feedback;
+  return { ...result, improvements, overallComment, feedback };
+}
+
+/**
+ * Folds `note` into the first result of a REAL grade (the grade is kept, never
+ * zeroed). A null note, an empty run or an ungraded first row returns the run
+ * unchanged. Spreads the run, so the top-level rubricUsed/rubricFingerprint
+ * pair survives (RULING 57: a transform, not a producer).
+ */
+export function withBranchNote(run: GradingRun, note: string | null): GradingRun {
+  const first = run.results[0];
+  if (!note || !first || first.ungraded) return run;
+  return { ...run, results: [appendBranchNoteToResult(first, note), ...run.results.slice(1)] };
 }

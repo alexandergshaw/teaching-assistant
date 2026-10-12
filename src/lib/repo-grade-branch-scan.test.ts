@@ -30,7 +30,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 0, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 0, branchesSkipped: 0 });
   });
 
   it("finds a populated scoped folder on another branch and names it", async () => {
@@ -49,7 +49,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "found", branch: "feature-work", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "found", branch: "feature-work", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("does not count a scaffolding-only (.gitkeep) branch as found", async () => {
@@ -65,7 +65,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("does not count a README-only branch as found (best-effort basename heuristic, G3c)", async () => {
@@ -81,7 +81,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("ignores a real file OUTSIDE the scoped prefix on another branch", async () => {
@@ -97,7 +97,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("excludes a tree entry (folder), not just a blob, from counting as found", async () => {
@@ -113,7 +113,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   describe("could-not-determine states (G3d) never collapse into not-found", () => {
@@ -194,7 +194,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
         { now: () => NOW_MS }
       );
 
-      expect(result).toEqual({ kind: "found", branch: "big-branch", branchesChecked: 1, branchesSkipped: 0 });
+      expect(result).toEqual({ kind: "found", branch: "big-branch", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
     });
 
     it("a rate-limit refusal fetching a branch's tree is undetermined, and its message is preferred over a plain error from another branch", async () => {
@@ -235,6 +235,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
 
       expect(result).toEqual({
         kind: "not-found",
+        gradedBranch: "main",
         branchesChecked: MAX_BRANCHES_SCANNED,
         branchesSkipped: 4,
       });
@@ -251,7 +252,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
         { now: () => NOW_MS, maxBranches: 2 }
       );
 
-      expect(result).toEqual({ kind: "not-found", branchesChecked: 2, branchesSkipped: 3 });
+      expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 2, branchesSkipped: 3 });
     });
 
     it("a maxBranches of 0 checks nothing and reports every candidate as skipped", async () => {
@@ -269,7 +270,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
         { now: () => NOW_MS, maxBranches: 0 }
       );
 
-      expect(result).toEqual({ kind: "not-found", branchesChecked: 0, branchesSkipped: 2 });
+      expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 0, branchesSkipped: 2 });
     });
   });
 
@@ -292,7 +293,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
 
       // Two candidates left: "main" and "other-branch" - "the-graded-branch"
       // itself must never be checked against itself.
-      expect(result).toEqual({ kind: "not-found", branchesChecked: 2, branchesSkipped: 0 });
+      expect(result).toEqual({ kind: "not-found", gradedBranch: "the-graded-branch", branchesChecked: 2, branchesSkipped: 0 });
     });
 
     it("falls back to the repo's default branch when no explicit branch was graded", async () => {
@@ -313,7 +314,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       );
 
       expect(checked).toEqual(["side-branch"]);
-      expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+      expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
     });
   });
 
@@ -331,7 +332,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("with no pathPrefix, any real file anywhere in the repo on another branch counts as found", async () => {
@@ -347,7 +348,7 @@ describe("scanBranchesForUnmergedSubmission", () => {
       { now: () => NOW_MS }
     );
 
-    expect(result).toEqual({ kind: "found", branch: "other", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "found", branch: "other", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 });
 
@@ -367,7 +368,7 @@ describe("gradedRefPaths: not-merged is a path-set DIFFERENCE, not bare presence
       other(["module_02/a.py", "module_02/b.py"]),
       { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py", "module_02/b.py"] }
     );
-    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "not-found", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("another branch holding an EXTRA candidate path -> found, naming it", async () => {
@@ -376,7 +377,7 @@ describe("gradedRefPaths: not-merged is a path-set DIFFERENCE, not bare presence
       other(["module_02/a.py", "module_02/extra.py"]),
       { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py"] }
     );
-    expect(result).toEqual({ kind: "found", branch: "stale", branchesChecked: 1, branchesSkipped: 0 });
+    expect(result).toEqual({ kind: "found", branch: "stale", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
   });
 
   it("symmetry: a graded-ref path the DIGEST would drop (non-text) is excluded too, so a merged repo is not flagged", async () => {
@@ -412,7 +413,7 @@ describe("gradedRefPaths: not-merged is a path-set DIFFERENCE, not bare presence
     const tree = other(["module_02/a.py"]);
     const omitted = await scanBranchesForUnmergedSubmission("org", "r", "module_02", "main", tree, { now: () => NOW_MS });
     const empty = await scanBranchesForUnmergedSubmission("org", "r", "module_02", "main", tree, { now: () => NOW_MS, gradedRefPaths: [] });
-    expect(omitted).toEqual({ kind: "found", branch: "stale", branchesChecked: 1, branchesSkipped: 0 });
+    expect(omitted).toEqual({ kind: "found", branch: "stale", gradedBranch: "main", branchesChecked: 1, branchesSkipped: 0 });
     expect(empty).toEqual(omitted);
   });
 });

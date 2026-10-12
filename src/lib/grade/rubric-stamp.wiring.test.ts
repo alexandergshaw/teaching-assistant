@@ -87,6 +87,8 @@ import type { EmbeddedRubric } from "@/lib/embedded-grader";
 import { buildIncrementalRun } from "@/app/components/grading/incrementalRunPlan";
 import { projectRun } from "@/app/components/grading/oneUploadQueue";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
+import { withBranchNote } from "@/lib/grade-zeros";
+import type { GradingRun } from "./types";
 
 const mockCallLlm = vi.mocked(callLlm);
 const mockIngestZipEntries = vi.mocked(ingestZipEntries);
@@ -319,5 +321,38 @@ describe("stripGradingRunForDraft preserves an incoming run's pair unchanged (RU
 
     expect(stripped.rubricUsed).toBe(stamped.rubricUsed);
     expect(stripped.rubricFingerprint).toBe(stamped.rubricFingerprint);
+  });
+});
+
+describe("withBranchNote preserves an incoming run's pair unchanged (RULING-57-excluded transform, not a producer)", () => {
+  it("the pair survives byte-for-byte and results[0]'s comment gains the not-merged note", () => {
+    const stamped = stampRubricProvenance("Criterion A (100%): completeness.");
+    const run: GradingRun = {
+      results: [
+        {
+          student: "s",
+          totalScore: "8/10",
+          strengths: "Good.",
+          improvements: "More.",
+          resubmitNotice: "R.",
+          overallComment: "Good. More. R.",
+          rubricAreas: [],
+          feedback: "",
+          mergedFileCount: 1,
+          submittedFiles: [],
+        },
+      ],
+      rubricAreaNames: [],
+      fullCreditChecklist: [],
+      rubricUsed: stamped.rubricUsed,
+      rubricFingerprint: stamped.rubricFingerprint,
+    };
+
+    const out = withBranchNote(run, "Work exists on branch x.");
+
+    expect(out.rubricUsed).toBe(stamped.rubricUsed);
+    expect(out.rubricFingerprint).toBe(stamped.rubricFingerprint);
+    expect(out.results[0].overallComment).toBe("Good. More. Work exists on branch x. R.");
+    expect(withBranchNote(run, null)).toBe(run);
   });
 });

@@ -127,6 +127,11 @@ const EXPECTED_PRODUCERS: readonly ProducerExpectation[] = [
     disposition: "transform-excluded",
     coveredBy: "behavioural: stripGradingRunForDraft pair-survives-the-transform driver (rubric-stamp.wiring.test.ts)",
   },
+  {
+    id: "src/lib/grade-zeros.ts::withBranchNote",
+    disposition: "transform-excluded",
+    coveredBy: "behavioural: withBranchNote pair-survives-the-transform driver (rubric-stamp.wiring.test.ts)",
+  },
 ];
 
 /** Live-derives the `<repo-relative-posix-path>::<function-name>` id for

@@ -319,7 +319,10 @@ export async function gradeTileRepos(opts: {
       logEntries.push(
         buildRepoGradingLogEntry({
           repo: student.repo,
-          outcome: "graded",
+          // A graded "0" for a missing submission keeps its no-submission
+          // accounting in the log (the result still enters `results`).
+          outcome: gr.determination ? "no-submission" : "graded",
+          reason: gr.determination ? gr.improvements : undefined,
           score: gr.totalScore,
           at: new Date().toISOString(),
           digestTruncated: r.digestTruncated,

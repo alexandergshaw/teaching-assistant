@@ -466,12 +466,13 @@ describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas 
     expect(source).not.toContain("loadPersisted");
     expect(source).not.toContain("INSTRUCTIONS_STORAGE_KEY");
     expect(source).not.toContain("RUBRIC_STORAGE_KEY");
-    // The only localStorage reads are the harshness and feedback-length
-    // preferences; neither seeds the instructions or rubric fields.
+    // The only localStorage reads are the harshness, feedback-length and
+    // file-name-deduction preferences; neither seeds the instructions or rubric fields.
     const reads = source.match(/localStorage\.getItem\([^)]*\)/g) ?? [];
     expect(reads).toEqual([
       "localStorage.getItem(HARSHNESS_STORAGE_KEY)",
       "localStorage.getItem(FEEDBACK_LENGTH_STORAGE_KEY)",
+      "localStorage.getItem(APPLY_NAMING_DEDUCTION_STORAGE_KEY)",
     ]);
   });
 
@@ -667,6 +668,42 @@ describe("GradingChatPanel - controls #3: harshness control and wire", () => {
     expect(driver).toContain('...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {})');
     // Default-wire canary: no unconditional harshness key on the body.
     expect(driver).not.toMatch(/^\s*harshness(:|,)/m);
+  });
+});
+
+describe("GradingChatPanel - deduction controls W1: file-name deduction control and wire", () => {
+  it("renders a Deduct for wrong file names checkbox, checked from state, locked after the session starts", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf('label="Deduct for wrong file names"');
+    expect(start).toBeGreaterThan(-1);
+    const open = source.lastIndexOf("<FormControlLabel", start);
+    const control = source.slice(open, start);
+    expect(control).toContain("<Checkbox");
+    expect(control).toContain("checked={applyNamingDeduction}");
+    expect(control).toContain("disabled={sessionReady}");
+  });
+
+  it("persists under its own key, defaults ON, and restores in a mount effect", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain('APPLY_NAMING_DEDUCTION_STORAGE_KEY = "ta-grading-chat-apply-naming-deduction"');
+    expect(source).toContain("localStorage.setItem(APPLY_NAMING_DEDUCTION_STORAGE_KEY");
+    expect(source).toMatch(/useState\(true\)/);
+    expect(source).toContain("loadApplyNamingDeduction()");
+  });
+
+  it("captures the flag at beginSession (not per submit)", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("driver.beginSession(");
+    const call = source.slice(start, source.indexOf("});", start));
+    expect(call).toMatch(/\bapplyNamingDeduction\b/);
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toMatch(/applyNamingDeductionRef\.current\s*=\s*sessionParams\.applyNamingDeduction\s*\?\?\s*true/);
+  });
+
+  it("the driver conditional-spreads the flag only when OFF, default wire byte-identical", () => {
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toContain("...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {})");
+    expect(driver).not.toMatch(/^\s*applyNamingDeduction(:|,)/m);
   });
 });
 

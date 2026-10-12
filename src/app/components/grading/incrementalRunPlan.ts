@@ -69,6 +69,8 @@ export interface GradeRunItemRequestBody {
   readonly harshness?: GradeHarshness;
   /** Feedback word-count target; type-only here, buildRunItemRequests leaves it unset like harshness. */
   readonly feedbackWordTarget?: number;
+  /** File-name deduction; type-only here, sent only as false (default on), buildRunItemRequests leaves it unset. */
+  readonly applyNamingDeduction?: boolean;
 }
 
 export interface ArrivedItemResult {

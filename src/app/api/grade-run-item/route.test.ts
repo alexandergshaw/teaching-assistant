@@ -281,6 +281,36 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     });
   });
 
+  describe("applyNamingDeduction parse is default-safe, default ON (deduction controls wave 1)", () => {
+    async function namingReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
+      vi.clearAllMocks();
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, ...extra }) as any);
+      const options = mockGradeEntries.mock.calls[0][5];
+      return options?.applyNamingDeduction;
+    }
+
+    it("resolves an absent value to true", async () => {
+      expect(await namingReachedEngine({})).toBe(true);
+    });
+
+    it("resolves an invalid value (string, number, null) to true", async () => {
+      for (const bad of ["false", 0, null, "no"]) {
+        expect(await namingReachedEngine({ applyNamingDeduction: bad })).toBe(true);
+      }
+    });
+
+    it("passes an explicit false through to the engine options", async () => {
+      expect(await namingReachedEngine({ applyNamingDeduction: false })).toBe(false);
+    });
+
+    it("passes an explicit true through", async () => {
+      expect(await namingReachedEngine({ applyNamingDeduction: true })).toBe(true);
+    });
+  });
+
   describe("feedbackWordTarget parse is default-safe (feedback length wave 1)", () => {
     async function targetReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
       vi.clearAllMocks();

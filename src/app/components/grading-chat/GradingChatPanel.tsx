@@ -18,6 +18,8 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import GradingResults from "../GradingResults";
 import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
@@ -112,6 +114,26 @@ function persistFeedbackLength(text: string) {
   }
 }
 
+// File-name deduction (docs/grading-chat-deduction-controls-scope.md PART A):
+// default ON; only an explicit stored "false" turns it off.
+const APPLY_NAMING_DEDUCTION_STORAGE_KEY = "ta-grading-chat-apply-naming-deduction";
+
+function loadApplyNamingDeduction(): boolean {
+  try {
+    return localStorage.getItem(APPLY_NAMING_DEDUCTION_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function persistApplyNamingDeduction(on: boolean) {
+  try {
+    localStorage.setItem(APPLY_NAMING_DEDUCTION_STORAGE_KEY, on ? "true" : "false");
+  } catch {
+    // ignore
+  }
+}
+
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -169,6 +191,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [setupNote, setSetupNote] = useState<string | null>(null);
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
+  const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
@@ -202,6 +225,23 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       cancelled = true;
     };
   }, []);
+
+  // Same mount-effect restore (no state initializer: hydration).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadApplyNamingDeduction());
+      if (!cancelled) setApplyNamingDeduction(stored);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const changeApplyNamingDeduction = (next: boolean) => {
+    setApplyNamingDeduction(next);
+    persistApplyNamingDeduction(next);
+  };
 
   const changeFeedbackLength = (next: string) => {
     setFeedbackLengthText(next);
@@ -304,6 +344,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     const result = await driver.beginSession({ assignmentInstructions: resolved.instructions, rubric: resolved.rubric,
       harshness,
       feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText),
+      applyNamingDeduction,
     });
     if (result.kind === "refused") {
       sessionRefusalRef.current = result.reason;
@@ -548,6 +589,18 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           slotProps={{
             htmlInput: { min: FEEDBACK_WORD_TARGET_MIN, max: FEEDBACK_WORD_TARGET_MAX, step: 10 },
           }}
+        />
+        <FormControlLabel
+          control={
+            <Checkbox
+              id="grading-chat-apply-naming-deduction"
+              size="small"
+              checked={applyNamingDeduction}
+              onChange={(event) => changeApplyNamingDeduction(event.target.checked)}
+              disabled={sessionReady}
+            />
+          }
+          label="Deduct for wrong file names"
         />
         {!sessionReady && (instructions !== "" || rubric !== "") && (
           <Button variant="text" size="small" aria-label="Clear all setup fields" onClick={handleClearAll}>

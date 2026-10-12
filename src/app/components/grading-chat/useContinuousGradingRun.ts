@@ -119,6 +119,8 @@ export interface UseContinuousGradingRunResult {
     readonly harshness?: GradeHarshness;
     /** Captured once and frozen for the session; absent = no length directive. */
     readonly feedbackWordTarget?: number;
+    /** Captured once and frozen for the session; absent = deduct (default on). */
+    readonly applyNamingDeduction?: boolean;
   }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
   readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
   readonly reset: () => void;
@@ -195,6 +197,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const assignmentInstructionsRef = useRef("");
   const harshnessRef = useRef<GradeHarshness>("balanced");
   const feedbackWordTargetRef = useRef<number | undefined>(undefined);
+  const applyNamingDeductionRef = useRef(true);
   const arrivedRef = useRef<ArrivedItemResult[]>([]);
   const queueRef = useRef<GradeRunItemRequestBody[]>([]);
   const inFlightRef = useRef(0);
@@ -325,7 +328,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     }
   };
 
-  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; harshness?: GradeHarshness; feedbackWordTarget?: number }) => {
+  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean }) => {
     // Idempotent: a header already resolved for this session is a no-op, so
     // a second call (e.g. from every submit()) never re-spends a
     // generateRubric model call.
@@ -349,6 +352,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     assignmentInstructionsRef.current = sessionParams.assignmentInstructions;
     harshnessRef.current = sessionParams.harshness ?? "balanced";
     feedbackWordTargetRef.current = sessionParams.feedbackWordTarget;
+    applyNamingDeductionRef.current = sessionParams.applyNamingDeduction ?? true;
     setHeaderState("ready");
     setSessionError(null);
     return { kind: "ready" as const };
@@ -588,6 +592,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ...(commentSplit ? { commentSplit: true } : {}),
         ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}),
         ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}),
+        ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
       pendingRef.current.add(sourceIndex);
@@ -673,6 +678,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     assignmentInstructionsRef.current = "";
     harshnessRef.current = "balanced";
     feedbackWordTargetRef.current = undefined;
+    applyNamingDeductionRef.current = true;
     arrivedRef.current = [];
     queueRef.current = [];
     inFlightRef.current = 0;

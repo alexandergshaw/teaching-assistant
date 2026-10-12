@@ -42,9 +42,13 @@ import {
 
 // ── Canvas announcements + inbox (the Canvas tab) ───────────────────────────
 //
-// Every action below is owner-gated (owner allowlist + AAL2) because it uses the
-// privileged Canvas API token, or — for the AI drafts — bills LLM usage. Each
-// returns plain serializable data or an { error } string the UI surfaces inline.
+// Every action below is gated by requireUser(): any active, approved account can
+// call it. They are NOT owner-only. The owner-private Canvas API token is
+// contained at the credential layer instead - resolveCanvasCredential (in
+// src/lib/canvas-credentials.ts) falls back to the env token only when
+// identity.role === "owner", so a permissive guard here does not expose it.
+// The AI drafts additionally bill LLM usage. Each returns plain serializable
+// data or an { error } string the UI surfaces inline.
 
 /** Load a course's name + recent announcements for the announcements panel. */
 /** List the active teacher courses for an institution (announcements picker). */

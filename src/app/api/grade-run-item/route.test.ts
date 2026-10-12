@@ -341,6 +341,37 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     });
   });
 
+  describe("gradeWindowSec parse (recording one-vs-many W3): absent = whole recording, malformed = 400", () => {
+    async function windowReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
+      vi.clearAllMocks();
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, ...extra }) as any);
+      const options = mockGradeEntries.mock.calls[0][5];
+      return options?.videoGradeWindowSec;
+    }
+
+    it("threads a valid window into the engine options", async () => {
+      expect(await windowReachedEngine({ gradeWindowSec: { startSec: 10, endSec: 95 } })).toEqual({ startSec: 10, endSec: 95 });
+    });
+
+    it("leaves the options key ABSENT when no window is sent (default body byte-identical)", async () => {
+      expect(await windowReachedEngine({})).toBeUndefined();
+      expect(Object.keys(mockGradeEntries.mock.calls[0][5] ?? {})).not.toContain("videoGradeWindowSec");
+    });
+
+    it("refuses a malformed window with a 400 instead of widening it to the whole recording", async () => {
+      for (const bad of [null, "0-9", { startSec: 5, endSec: 5 }, { startSec: -1, endSec: 5 }, { startSec: 1 }, { startSec: 0, endSec: 999999 }]) {
+        vi.clearAllMocks();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await POST(jsonRequest({ ...VALID_BODY, gradeWindowSec: bad }) as any);
+        expect(res.status).toBe(400);
+        expect(mockGradeEntries).not.toHaveBeenCalled();
+      }
+    });
+  });
+
   describe("feedbackWordTarget parse is default-safe (feedback length wave 1)", () => {
     async function targetReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
       vi.clearAllMocks();

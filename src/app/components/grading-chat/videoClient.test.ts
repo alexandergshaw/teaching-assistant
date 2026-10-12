@@ -2,7 +2,7 @@
 // sink iterated) and the default prepareVideo POST, with every dependency
 // injected. Nothing dials out.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { submitLooseVideo, postPrepareVideo, videoFailureOf, VideoGradeError, type SubmitLooseVideoArgs } from "./videoClient";
+import { submitLooseVideo, postPrepareVideo, postClassifyRecording, videoFailureOf, VideoGradeError, type SubmitLooseVideoArgs } from "./videoClient";
 import { VIDEO_MAX_BYTES, VIDEO_MAX_PENDING_STAGED } from "@/lib/grade/video-limits";
 import type { GradingZipStorage } from "@/lib/grade/grading-zip-transport";
 
@@ -178,5 +178,53 @@ describe("videoFailureOf", () => {
     expect(videoFailureOf(new VideoGradeError("m", "timed out"))).toBe("timed out");
     expect(videoFailureOf(new Error("timed out"))).toBeNull();
     expect(videoFailureOf("timed out")).toBeNull();
+  });
+});
+
+describe("postClassifyRecording (RECORDING ONE-VS-MANY W2): never throws, fails safe to a failed single", () => {
+  const ARGS = { storagePath: PATH, sizeBytes: 10, assignmentInstructions: "A", rubric: "R" };
+  const FAILED_SINGLE = { split: { kind: "single" }, failed: true };
+  const TWO = {
+    kind: "multiple",
+    segments: [
+      { startSec: 0, endSec: 50, label: "A" },
+      { startSec: 50, endSec: 99, label: "B" },
+    ],
+  };
+
+  function stubFetch(impl: () => Promise<unknown>) {
+    const fn = vi.fn(impl);
+    vi.stubGlobal("fetch", fn);
+    return fn;
+  }
+
+  it("POSTs the ref and context to /api/classify-recording and reads a multiple", async () => {
+    const fn = stubFetch(async () => ({ ok: true, json: async () => ({ split: TWO }) }));
+    expect(await postClassifyRecording(ARGS)).toEqual({ split: TWO, failed: false });
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/classify-recording");
+    expect(JSON.parse(String(init.body))).toEqual(ARGS);
+  });
+
+  it("carries the route's failed flag through", async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ split: { kind: "single" }, failed: true }) }));
+    expect(await postClassifyRecording(ARGS)).toEqual(FAILED_SINGLE);
+  });
+
+  it("a non-OK status, a thrown fetch and a non-JSON body are all the failed single", async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    expect(await postClassifyRecording(ARGS)).toEqual(FAILED_SINGLE);
+    stubFetch(async () => {
+      throw new Error("network");
+    });
+    expect(await postClassifyRecording(ARGS)).toEqual(FAILED_SINGLE);
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => {
+        throw new Error("bad json");
+      },
+    }));
+    expect(await postClassifyRecording(ARGS)).toEqual(FAILED_SINGLE);
+    vi.unstubAllGlobals();
   });
 });

@@ -73,6 +73,8 @@ export interface GradeRunItemRequestBody {
   readonly applyNamingDeduction?: boolean;
   /** Length deduction; type-only here, sent only as true (default off), buildRunItemRequests leaves it unset. */
   readonly applyLengthDeduction?: boolean;
+  /** Recording split: grade only this segment of a multi-submission video; absent = whole recording. */
+  readonly gradeWindowSec?: { readonly startSec: number; readonly endSec: number };
 }
 
 export interface ArrivedItemResult {

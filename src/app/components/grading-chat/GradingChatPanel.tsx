@@ -25,6 +25,7 @@ import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
+import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView, type LedgerView } from "./ingestLedger";
 import { describeRunStatus, type RunStatus } from "./runStatus";
@@ -502,6 +503,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     });
     setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
   });
+  // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
+  const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+  const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());
+  const handleRejectSplit = () => reportSplitOutcome(driver.rejectRecordingSplit());
+
   const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
       if (!(await ensureSession(url))) return;
@@ -703,12 +709,15 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           </p>
         )}
         <LedgerNotice view={ledgerView} />
+        {driver.pendingSplit !== null && (
+          <RecordingSplitConfirm pending={driver.pendingSplit} onConfirm={handleConfirmSplit} onReject={handleRejectSplit} />
+        )}
         <GradingProgress
           status={describeRunStatus({
             preparing,
             zipPhase,
             headerState: driver.headerState,
-            intakeNote,
+            intakeNote: driver.classifyingRecording ? "Analyzing the recording..." : intakeNote,
             pendingCount: Math.max(driver.pendingStudents.size, driver.dispatchedCount - driver.completedCount),
             inFlightStudents: driver.inFlightStudents,
             inFlightCount: driver.inFlight,

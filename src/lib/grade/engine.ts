@@ -32,6 +32,7 @@ import { buildSubmittedFileNamesBlock, composeReplyExclusionDisclosure, SUBMISSI
 // that used to be inline here is now a PURE projection (reconcile.ts),
 // called once after the loop closes - this is a call, not the logic itself.
 import { reconcileRun } from "./reconcile";
+import { buildVideoWindowNote, type RecordingWindow } from "./recording-split";
 // A39 wave 2 (docs/a39-architecture.md 5.2), tightened by RULING 57/58: the
 // stamp itself (never a raw rubricFingerprint() call plus an inline literal)
 // so every producer of a GradingRun - not only this file's three - stamps
@@ -80,7 +81,10 @@ async function scoreAxis(
   // G8/F1=B: when true the prompt ran in "separate-strengths" mode, so the
   // model's praise is in parsed.strengths and its deductions are in
   // overallComment (see the routing below).
-  commentSplit = false
+  commentSplit = false,
+  // RECORDING ONE-VS-MANY W3: when set, this call grades ONE segment of a
+  // multi-submission recording; a fixed-wording note confines the model to it.
+  videoGradeWindowSec?: RecordingWindow
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -103,7 +107,7 @@ async function scoreAxis(
 
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}`,
+      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${SUBMISSION_FRAMING_HEADER}\n\n${content}${imageNote}${codeNote}${videoGradeWindowSec ? buildVideoWindowNote(videoGradeWindowSec) : ""}`,
     },
     ...inlineFiles.map((f): LlmPart =>
       "fileUri" in f
@@ -207,9 +211,10 @@ async function gradeSubmission(
   pointsPossible: number | null = null,
   codeRun: CodeRunResult | null = null,
   submittedFiles: SubmittedFileInfo[] = [],
-  commentSplit = false
+  commentSplit = false,
+  videoGradeWindowSec?: RecordingWindow
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -251,9 +256,10 @@ async function gradeDiscussionAxes(a: {
   codeRun: CodeRunResult | null;
   submittedFiles: SubmittedFileInfo[];
   commentSplit: boolean;
+  videoGradeWindowSec?: RecordingWindow;
   pointsPossible: number | null;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit);
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec);
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -297,6 +303,9 @@ export interface GradingRunOptions {
   /** G8/F1=B: separate praise (What Went Well) from deductions + advice
    *  (What Could Be Better). Unset/false keeps today's byte-identical mapping. */
   readonly commentSplit?: boolean;
+  /** RECORDING ONE-VS-MANY W3: confine this grade to one segment of a
+   *  multi-submission video (a prompt note, not a wire field). Unset = today. */
+  readonly videoGradeWindowSec?: RecordingWindow;
   /** Grading-chat harshness. Unset/"balanced" appends no directive, keeping
    *  today's prompt byte-identical. */
   readonly harshness?: GradeHarshness;
@@ -373,7 +382,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source } = options;
+  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec } = options;
   const namingDeduction = options.applyNamingDeduction ?? true;
   const lengthDeduction = options.applyLengthDeduction ?? false;
   const maxSubmissions = getGeminiMaxSubmissions();
@@ -455,6 +464,7 @@ async function gradeStudentEntries(
             codeRun,
             submittedFiles,
             commentSplit: commentSplit === true,
+            videoGradeWindowSec,
             pointsPossible,
           })
         : await gradeSubmission(
@@ -466,7 +476,8 @@ async function gradeStudentEntries(
             pointsPossible,
             codeRun,
             submittedFiles,
-            commentSplit === true
+            commentSplit === true,
+            videoGradeWindowSec
           );
       results.push({
         ...result,

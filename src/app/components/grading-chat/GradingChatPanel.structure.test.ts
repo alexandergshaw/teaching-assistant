@@ -804,3 +804,23 @@ describe("ChatComposer - record-a-submission: frames become composite parts", ()
     expect(withoutLineComments(read("src/app/components/grading-chat/chatFrameCapture.ts"))).not.toContain("ta-");
   });
 });
+
+describe("GradingChatPanel - recording split confirm surface (reachability)", () => {
+  it("renders RecordingSplitConfirm from driver.pendingSplit, inside the sticky composer wrapper, wired to both driver actions", () => {
+    const source = withoutLineComments(read(PANEL));
+    const sticky = source.indexOf("chatStyles.stickyComposer");
+    const at = source.indexOf("<RecordingSplitConfirm");
+    expect(sticky).toBeGreaterThan(-1);
+    expect(at).toBeGreaterThan(sticky);
+    const tag = source.slice(at, source.indexOf("/>", at));
+    expect(tag).toContain("pending={driver.pendingSplit}");
+    expect(tag).toContain("onConfirm={handleConfirmSplit}");
+    expect(tag).toContain("onReject={handleRejectSplit}");
+    expect(source).toContain("driver.confirmRecordingSplit()");
+    expect(source).toContain("driver.rejectRecordingSplit()");
+  });
+
+  it("the confirm component introduces no persisted ta- key", () => {
+    expect(withoutLineComments(read("src/app/components/grading-chat/RecordingSplitConfirm.tsx"))).not.toContain("ta-");
+  });
+});

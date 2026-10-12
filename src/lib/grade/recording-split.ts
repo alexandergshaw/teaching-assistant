@@ -126,3 +126,62 @@ export function parseRecordingSplit(modelText: string): ParsedRecordingSplit {
   }
   return { split: { kind: "multiple", segments }, confident: true };
 }
+
+/** A time window inside one recording, in whole-or-fractional seconds. */
+export interface RecordingWindow {
+  startSec: number;
+  endSec: number;
+}
+
+function clock(totalSec: number): string {
+  const whole = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/** Renders a window as "M:SS" / "H:MM:SS" start and end (display + prompt). */
+export function formatRecordingWindow(window: RecordingWindow): string {
+  return `${clock(window.startSec)} to ${clock(window.endSec)}`;
+}
+
+/** Fixed-wording prompt note confining ONE grade call to ONE segment of a
+ * multi-submission recording. Appended to the scoreAxis prompt like imageNote. */
+export function buildVideoWindowNote(window: RecordingWindow): string {
+  return (
+    "\n\nThe attached video contains several students' submissions back to back. " +
+    `Grade ONLY the portion from ${clock(window.startSec)} to ${clock(window.endSec)} of the video, ` +
+    "which is this student's submission; ignore everything outside that window."
+  );
+}
+
+/** Validates an untrusted window (finite, non-negative, end after start). */
+export function isRecordingWindow(value: unknown): value is RecordingWindow {
+  if (!isRecord(value)) return false;
+  const { startSec, endSec } = value;
+  return (
+    typeof startSec === "number" &&
+    typeof endSec === "number" &&
+    Number.isFinite(startSec) &&
+    Number.isFinite(endSec) &&
+    startSec >= 0 &&
+    endSec > startSec &&
+    endSec <= 24 * 3600
+  );
+}
+
+/**
+ * Reads the /api/classify-recording response body on the client. FAIL-SAFE:
+ * anything malformed is { single, failed: true } so the run grades as one.
+ * `failed` stays a transport flag; the split is re-validated through the same
+ * parser the server used, so a forged shape cannot widen the type.
+ */
+export function readRecordingSplitResponse(body: unknown): { split: RecordingSplit; failed: boolean } {
+  if (!isRecord(body) || !isRecord(body.split)) return { split: { kind: "single" }, failed: true };
+  if (body.failed === true) return { split: { kind: "single" }, failed: true };
+  const parsed = parseRecordingSplit(JSON.stringify(body.split));
+  if (!parsed.confident) return { split: { kind: "single" }, failed: true };
+  return { split: parsed.split, failed: false };
+}

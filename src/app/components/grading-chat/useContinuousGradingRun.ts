@@ -45,11 +45,14 @@ import type {
 import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
+import { RECORDING_SPLIT_ENABLED } from "@/lib/grade/constants";
+import type { RecordingSplit, RecordingWindow } from "@/lib/grade/recording-split";
+import { buildSplitEntries, classifyVideoEntry, videoRefOf, type PendingSplit } from "./recordingSplitDriver";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
-import { gradeFailureFromBody, postPrepareVideo, videoFailureOf, type PrepareVideoFn } from "./videoClient";
+import { gradeFailureFromBody, postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
 import {
@@ -101,6 +104,10 @@ export interface UseContinuousGradingRunParams {
   /** Injected loose-video prepare (VIDEO-GRADING W4). Defaults to the real
    * never-throw POST /api/grade-submission-video. */
   readonly prepareVideo?: PrepareVideoFn;
+  /** Injected one-vs-many classifier (RECORDING ONE-VS-MANY W2). Defaults to the
+   * real never-throw POST /api/classify-recording; only consulted when
+   * RECORDING_SPLIT_ENABLED is on. */
+  readonly classifyRecording?: ClassifyRecordingFn;
   /** Injected large-single-file prepare (LARGE-SINGLE-FILE W2). Defaults to the
    * real never-throw POST /api/grade-submission-file. */
   readonly prepareSingleFile?: PrepareSingleFileFn;
@@ -167,6 +174,15 @@ export interface UseContinuousGradingRunResult {
   /** Read-only presentation signal: student labels being graded right now (the
    * active concurrency slots), in dispatch order. */
   readonly inFlightStudents: readonly string[];
+  /** RECORDING ONE-VS-MANY: the oldest multi-submission recording awaiting the
+   * instructor's confirm; null when none. Nothing is graded until it resolves. */
+  readonly pendingSplit: PendingSplit | null;
+  /** True while a prepared video is being classified (the "Analyzing" phase). */
+  readonly classifyingRecording: boolean;
+  /** Grades the held recording as one distinct row per detected segment. */
+  readonly confirmRecordingSplit: () => SubmitOutcome;
+  /** Grades the held recording as ONE submission (today's path). */
+  readonly rejectRecordingSplit: () => SubmitOutcome;
 }
 
 interface GradeRunItemResponse {
@@ -193,6 +209,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
   const ingestZip = params.ingestZip ?? ingestStoragedZip;
   const prepareVideo = params.prepareVideo ?? postPrepareVideo;
+  const classifyRecording = params.classifyRecording ?? postClassifyRecording;
   const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
@@ -215,6 +232,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // ZIP-CLASS-VS-SINGLE: the latest zip ingest's classification (per-ingest;
   // a non-zip submit leaves it untouched). Stamped onto every rebuilt run.
   const classificationRef = useRef<SubmissionZipClassification | null>(null);
+  // Multi-submission recordings held for confirm, oldest first (a batch of
+  // videos can hold several). The state mirrors the head for the confirm card.
+  const pendingSplitsRef = useRef<PendingSplit[]>([]);
 
   const [headerState, setHeaderState] = useState<HeaderState>("unset");
   const [results, setResults] = useState<readonly GradeResult[]>([]);
@@ -227,6 +247,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [ingestLedger, setIngestLedger] = useState<IngestLedger | null>(null);
   const [pendingStudents, setPendingStudents] = useState<ReadonlySet<string>>(new Set());
   const [inFlightStudents, setInFlightStudents] = useState<readonly string[]>([]);
+  const [pendingSplit, setPendingSplit] = useState<PendingSplit | null>(null);
+  const [classifyingRecording, setClassifyingRecording] = useState(false);
 
   // Presentation only: mirrors pendingRef / inFlightIndexRef as student labels.
   const publishPending = () => {
@@ -329,6 +351,55 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           pump();
         });
     }
+  };
+
+  // The admit loop shared by submit() and the recording-split settle: each
+  // entry gets a session-UNIQUE display (assign-then-add against the taken set,
+  // so two entries can never share a gradebook row), a retained body and a slot
+  // in the queue. `windows` is index-aligned and carries a split segment's grade
+  // window onto its request body.
+  const enqueueAdmitted = (
+    header: ResolvedRunHeader,
+    admitted: readonly StudentSubmissionEntry[],
+    opts: { pointsPossible: number | null; submitLabel: string; windows?: readonly RecordingWindow[] }
+  ) => {
+    const flaggedNow: string[] = [];
+    admitted.forEach((rawEntry, index) => {
+      const sourceIndex = dispatchedCountRef.current;
+      dispatchedCountRef.current += 1;
+      // Cross-event duplicate display names: the first claimant keeps its
+      // name, later ones get " (2)", " (3)" so row identity stays unique.
+      const baseStudent = opts.submitLabel.length > 0 ? opts.submitLabel : rawEntry.student;
+      const label = assignUnclaimedLabel(baseStudent, takenLabelsRef.current);
+      takenLabelsRef.current.add(label);
+      const entry = label === rawEntry.student ? rawEntry : { ...rawEntry, student: label };
+      // A labelled row is NEVER flagged: the instructor already named it.
+      if (rawEntry.studentNameSource === "unresolved" && opts.submitLabel === "") flaggedNow.push(label);
+      const window = opts.windows?.[index];
+      const body: GradeRunItemRequestBody = {
+        sourceIndex,
+        entry,
+        assignmentInstructions: assignmentInstructionsRef.current,
+        rubric: header.effectiveRubric,
+        provider,
+        pointsPossible: opts.pointsPossible,
+        ...(commentSplit ? { commentSplit: true } : {}),
+        ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}),
+        ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}),
+        ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}),
+        ...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {}),
+        ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
+      };
+      retainedBodiesRef.current.set(sourceIndex, body);
+      pendingRef.current.add(sourceIndex);
+      queueRef.current.push(body);
+    });
+    setDispatchedCount(dispatchedCountRef.current);
+    publishPending();
+    if (flaggedNow.length > 0) {
+      setUnresolvedStudents((prev) => new Set([...prev, ...flaggedNow]));
+    }
+    pump();
   };
 
   const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean }) => {
@@ -439,8 +510,36 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: prepared.reason };
       }
       recordVideoSettled({ startedAtMs: prepareStartedAtMs, settledAtMs: chatSeamNowMs(), failure: null });
+      // RECORDING ONE-VS-MANY (dark behind RECORDING_SPLIT_ENABLED): ask once
+      // whether the recording is one submission or several. Anything but a
+      // clean "multiple" (single, failed, uncertain) grades as one, as today.
+      let split: RecordingSplit = { kind: "single" };
+      if (RECORDING_SPLIT_ENABLED && videoRefOf(prepared.entry) !== null) {
+        setClassifyingRecording(true);
+        try {
+          split = await classifyVideoEntry({
+            classify: classifyRecording,
+            entry: prepared.entry,
+            assignmentInstructions: assignmentInstructionsRef.current,
+            rubric: header.effectiveRubric,
+          });
+        } finally {
+          setClassifyingRecording(false);
+        }
+      }
       if (sessionIdRef.current !== sessionAtStart) {
         return { kind: "refused", reason: "The session was reset while the video was being prepared. Nothing was graded." };
+      }
+      if (split.kind === "multiple") {
+        // HOLD: nothing is dispatched until the instructor confirms or declines.
+        pendingSplitsRef.current.push({
+          entry: prepared.entry,
+          segments: split.segments,
+          name: input.name,
+          label: input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "",
+        });
+        setPendingSplit(pendingSplitsRef.current[0]);
+        return { kind: "accepted", entryCount: 0 };
       }
       entries = [prepared.entry];
     } else if (input.kind === "storaged-file") {
@@ -574,41 +673,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
-    const flaggedNow: string[] = [];
-    for (const rawEntry of admitted) {
-      const sourceIndex = dispatchedCountRef.current;
-      dispatchedCountRef.current += 1;
-      // Cross-event duplicate display names: the first claimant keeps its
-      // name, later ones get " (2)", " (3)" so row identity stays unique.
-      const baseStudent = submitLabel.length > 0 ? submitLabel : rawEntry.student;
-      const label = assignUnclaimedLabel(baseStudent, takenLabelsRef.current);
-      takenLabelsRef.current.add(label);
-      const entry = label === rawEntry.student ? rawEntry : { ...rawEntry, student: label };
-      // A labelled row is NEVER flagged: the instructor already named it.
-      if (rawEntry.studentNameSource === "unresolved" && submitLabel === "") flaggedNow.push(label);
-      const body: GradeRunItemRequestBody = {
-        sourceIndex,
-        entry,
-        assignmentInstructions: assignmentInstructionsRef.current,
-        rubric: header.effectiveRubric,
-        provider,
-        pointsPossible,
-        ...(commentSplit ? { commentSplit: true } : {}),
-        ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}),
-        ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}),
-        ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}),
-        ...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {}),
-      };
-      retainedBodiesRef.current.set(sourceIndex, body);
-      pendingRef.current.add(sourceIndex);
-      queueRef.current.push(body);
-    }
-    setDispatchedCount(dispatchedCountRef.current);
-    publishPending();
-    if (flaggedNow.length > 0) {
-      setUnresolvedStudents((prev) => new Set([...prev, ...flaggedNow]));
-    }
-    pump();
+    enqueueAdmitted(header, admitted, { pointsPossible, submitLabel });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
       const skipNote =
@@ -629,6 +694,41 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     }
     return { kind: "accepted", entryCount: admitted.length };
   };
+
+  // Resolves the OLDEST held recording: as one distinct row per segment
+  // (split=true, each through the shared admit loop with its own window) or as
+  // ONE whole-video row (split=false, today's path with its submit-time label).
+  const settlePendingSplit = (split: boolean): SubmitOutcome => {
+    const pending = pendingSplitsRef.current[0];
+    const header = headerRef.current;
+    if (!pending || !header) return { kind: "refused", reason: "There is no recording waiting to be graded." };
+    const available = maxEntries - dispatchedCountRef.current;
+    if (available <= 0) {
+      return {
+        kind: "refused",
+        reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
+      };
+    }
+    pendingSplitsRef.current.shift();
+    setPendingSplit(pendingSplitsRef.current[0] ?? null);
+    const built = split ? buildSplitEntries(pending) : { entries: [pending.entry], windows: [] };
+    const admitted = built.entries.slice(0, available);
+    enqueueAdmitted(header, admitted, { pointsPossible: null, submitLabel: split ? "" : pending.label, windows: built.windows });
+    const refusedCount = built.entries.length - admitted.length;
+    if (refusedCount > 0) {
+      return {
+        kind: "partial",
+        dispatchedCount: admitted.length,
+        refusedCount,
+        reason:
+          `Graded the first ${admitted.length} of ${built.entries.length} submissions in this recording; ` +
+          `the session's ${maxEntries}-submission limit was reached. Start a new session to grade the rest.`,
+      };
+    }
+    return { kind: "accepted", entryCount: admitted.length };
+  };
+  const confirmRecordingSplit = () => settlePendingSplit(true);
+  const rejectRecordingSplit = () => settlePendingSplit(false);
 
   const retry = (sourceIndex: number) => {
     const body = retainedBodiesRef.current.get(sourceIndex);
@@ -679,6 +779,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pendingRef.current = new Set();
     inFlightIndexRef.current = new Set();
     classificationRef.current = null;
+    pendingSplitsRef.current = [];
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
     harshnessRef.current = "balanced";
@@ -701,6 +802,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setIngestLedger(null);
     setPendingStudents(new Set());
     setInFlightStudents([]);
+    setPendingSplit(null);
+    setClassifyingRecording(false);
   };
 
   return {
@@ -727,5 +830,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     ingestLedger,
     pendingStudents,
     inFlightStudents,
+    pendingSplit,
+    classifyingRecording,
+    confirmRecordingSplit,
+    rejectRecordingSplit,
   };
 }

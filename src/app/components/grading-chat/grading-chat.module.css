@@ -112,3 +112,19 @@
   color: var(--text-secondary);
   line-height: var(--line-normal);
 }
+
+/* RECORDING ONE-VS-MANY: the confirm card's segment list and action row. The
+   card itself reuses the shared .notice surface. */
+.splitList {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.splitActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

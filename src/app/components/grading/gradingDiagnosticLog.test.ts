@@ -9,6 +9,8 @@ import {
 import {
   GRADING_DIAGNOSTIC_OPERATION_LABELS,
   decideClassifyDiagnostic,
+  decideClassifyRecordingDiagnostic,
+  recordClassifyRecordingSettled,
   decideWholeRunDiagnostic,
   recordClassifySettled,
   recordGradingDiagnosticEntry,
@@ -153,5 +155,53 @@ describe("recordClassifySettled (call shape)", () => {
     expect(recordClassifySettled({ startedAtMs: null, settledAtMs: 1, classification: classOf("class", 3), at: "x" })).toBe(false);
     expect(recordClassifySettled({ startedAtMs: 0, settledAtMs: 1, classification: undefined, at: "x" })).toBe(false);
     expect(readSessionDiagnosticLogState().entries.length).toBe(0);
+  });
+});
+
+describe("classify-recording diagnostic (RECORDING ONE-VS-MANY W2): counts only, failure distinguishable", () => {
+  const multiple = {
+    kind: "multiple" as const,
+    segments: [
+      { startSec: 0, endSec: 50, label: "Alice Smith" },
+      { startSec: 50, endSec: 99, label: "Bob Jones" },
+    ],
+  };
+
+  it("a model-confirmed single records a success single", () => {
+    expect(decideClassifyRecordingDiagnostic({ startedAtMs: 0, settledAtMs: 40.4, split: { kind: "single" }, failed: false })).toEqual({
+      operation: "classify_recording_single",
+      outcome: "success",
+      durationMs: 40,
+    });
+  });
+
+  it("a multiple records the bare segment count", () => {
+    expect(decideClassifyRecordingDiagnostic({ startedAtMs: 0, settledAtMs: 10, split: multiple, failed: false })).toEqual({
+      operation: "classify_recording_multiple",
+      outcome: "success",
+      durationMs: 10,
+      segmentCount: 2,
+    });
+  });
+
+  it("failed:true is a FAILURE entry, not a success single", () => {
+    const d = decideClassifyRecordingDiagnostic({ startedAtMs: 0, settledAtMs: 10, split: { kind: "single" }, failed: true });
+    expect(d?.outcome).toBe("failure");
+    expect(d?.error).toBe("Recording classification failed");
+  });
+
+  it("returns null with no captured start", () => {
+    expect(decideClassifyRecordingDiagnostic({ startedAtMs: null, settledAtMs: 1, split: { kind: "single" }, failed: false })).toBeNull();
+  });
+
+  it("the recorded entries carry no segment label or student name", () => {
+    expect(recordClassifyRecordingSettled({ startedAtMs: 0, settledAtMs: 5, split: multiple, failed: false, at: "2026-10-08T10:00:05.000Z" })).toBe(true);
+    expect(recordClassifyRecordingSettled({ startedAtMs: 0, settledAtMs: 5, split: { kind: "single" }, failed: true, at: "2026-10-08T10:00:06.000Z" })).toBe(true);
+    const entries = readSessionDiagnosticSurfaceEntries("grading").entries;
+    expect(entries.map((e) => [e.operation, e.outcome, e.classificationStudentCount])).toEqual([
+      ["classify_recording_multiple", "success", 2],
+      ["classify_recording_single", "failure", undefined],
+    ]);
+    expect(JSON.stringify(entries)).not.toMatch(/Alice|Bob/);
   });
 });

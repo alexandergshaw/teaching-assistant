@@ -14,6 +14,7 @@
 // string, handed in RAW so the core scrubs then caps it.
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import type { SubmissionZipClassification } from "@/lib/grade/types";
+import type { RecordingSplit } from "@/lib/grade/recording-split";
 
 export type GradingDiagnosticOperation =
   | "resolve_header"
@@ -187,6 +188,59 @@ export function recordClassifySettled(args: {
     outcome: "success",
     durationMs: decision.durationMs,
     classificationStudentCount: decision.studentCount,
+  });
+  return true;
+}
+
+export interface ClassifyRecordingDiagnosticDecision {
+  operation: "classify_recording_single" | "classify_recording_multiple";
+  outcome: "success" | "failure";
+  durationMs: number;
+  /** Segments found (a bare count, never labels). Present only on a multiple. */
+  segmentCount?: number;
+  /** A FIXED string, never the response text. Present only on failure. */
+  error?: string;
+}
+
+/** PURE. What to record when /api/classify-recording settles. A `failed`
+ * response is the error-fallback single: recorded as a failure so it stays
+ * distinguishable from a model-confirmed single. `null` with no captured start.
+ * Operation, duration and a bare count only: NO student data. */
+export function decideClassifyRecordingDiagnostic(args: {
+  startedAtMs: number | null;
+  settledAtMs: number;
+  split: RecordingSplit;
+  failed: boolean;
+}): ClassifyRecordingDiagnosticDecision | null {
+  if (args.startedAtMs === null) return null;
+  const durationMs = Math.max(0, Math.round(args.settledAtMs - args.startedAtMs));
+  if (args.failed) {
+    return { operation: "classify_recording_single", outcome: "failure", durationMs, error: "Recording classification failed" };
+  }
+  if (args.split.kind === "multiple") {
+    return { operation: "classify_recording_multiple", outcome: "success", durationMs, segmentCount: args.split.segments.length };
+  }
+  return { operation: "classify_recording_single", outcome: "success", durationMs };
+}
+
+/** The thin caller the chat driver's storaged-video branch uses: decide, then
+ * record. Returns whether an entry was recorded. */
+export function recordClassifyRecordingSettled(args: {
+  startedAtMs: number | null;
+  settledAtMs: number;
+  split: RecordingSplit;
+  failed: boolean;
+  at: string;
+}): boolean {
+  const decision = decideClassifyRecordingDiagnostic(args);
+  if (!decision) return false;
+  recordGradingDiagnosticEntry({
+    at: args.at,
+    operation: decision.operation,
+    outcome: decision.outcome,
+    durationMs: decision.durationMs,
+    error: decision.error,
+    classificationStudentCount: decision.segmentCount,
   });
   return true;
 }

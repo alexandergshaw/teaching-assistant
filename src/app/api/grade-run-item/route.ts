@@ -12,6 +12,7 @@ import { getGeminiApiKey } from "@/lib/gemini";
 import { downloadFile, removeFiles } from "@/lib/supabase/storage";
 import { SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import { coerceFeedbackWordTarget } from "@/lib/grade/types";
+import { isRecordingWindow, type RecordingWindow } from "@/lib/grade/recording-split";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
   ITEM_REQUEST_BYTE_BUDGET,
@@ -81,6 +82,7 @@ interface GradeRunItemRequestBody {
   feedbackWordTarget?: unknown;
   applyNamingDeduction?: unknown;
   applyLengthDeduction?: unknown;
+  gradeWindowSec?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -136,6 +138,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   feedbackWordTarget: number | undefined;
   applyNamingDeduction: boolean;
   applyLengthDeduction: boolean;
+  videoGradeWindowSec: RecordingWindow | undefined;
 } | null {
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
@@ -179,6 +182,14 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   }
   if (typeof body.rubric !== "string" || body.rubric.length > MAX_RUBRIC_CHARS) return null;
   if (body.pointsPossible !== null && typeof body.pointsPossible !== "number") return null;
+  // RECORDING ONE-VS-MANY W3: absent = grade the whole recording; present but
+  // malformed is refused, never silently widened to the whole recording.
+  const rawWindow = body.gradeWindowSec;
+  let videoGradeWindowSec: RecordingWindow | undefined;
+  if (rawWindow !== undefined) {
+    if (!isRecordingWindow(rawWindow)) return null;
+    videoGradeWindowSec = { startSec: rawWindow.startSec, endSec: rawWindow.endSec };
+  }
 
   return {
     sourceIndex: body.sourceIndex,
@@ -201,6 +212,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     // Default-safe, default OFF: only a literal true turns the length deduction
     // on; an absent or invalid value keeps today's prompt.
     applyLengthDeduction: body.applyLengthDeduction === true,
+    videoGradeWindowSec,
   };
 }
 
@@ -261,7 +273,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, videoGradeWindowSec } = parsed;
 
   // VIDEO-GRADING W3 (T11): dark behind VIDEO_GRADING_ENABLED. With the flag on,
   // a videoRef must name an object in THIS caller's own grading-uploads
@@ -298,7 +310,7 @@ export async function POST(req: NextRequest) {
       (async () => {
         const resolved = await resolveEntryLinks(entry);
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
@@ -310,7 +322,7 @@ export async function POST(req: NextRequest) {
           if (!videoOutcome.ok) return { videoFailure: { failure: videoOutcome.failure, message: videoOutcome.message } };
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
-        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction });
+        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs

@@ -72,3 +72,41 @@ describe("video grading ships ENABLED", () => {
     expect(constants).toMatch(/export const VIDEO_GRADING_ENABLED = true;/);
   });
 });
+
+describe("recording one-vs-many wiring (W2/W3, source text)", () => {
+  const confirm = read("src/app/components/grading-chat/RecordingSplitConfirm.tsx");
+
+  it("ships DARK: RECORDING_SPLIT_ENABLED is false", () => {
+    expect(constants).toMatch(/export const RECORDING_SPLIT_ENABLED = false;/);
+  });
+
+  it("the driver classifies only behind the flag and BEFORE the entry is queued", () => {
+    const flagAt = driver.indexOf("RECORDING_SPLIT_ENABLED &&");
+    expect(flagAt).toBeGreaterThan(0);
+    expect(flagAt).toBeLessThan(driver.indexOf("classifyVideoEntry({"));
+    expect(driver.indexOf("classifyVideoEntry({")).toBeLessThan(driver.indexOf("entries = [prepared.entry]"));
+  });
+
+  it("split segments go through the SHARED admit loop (one assignUnclaimedLabel call site)", () => {
+    expect(driver.match(/assignUnclaimedLabel\(/g)?.length).toBe(1);
+    expect(driver).toContain("enqueueAdmitted(header, admitted, { pointsPossible: null");
+  });
+
+  it("the panel renders the confirm card from driver.pendingSplit with both handlers wired", () => {
+    expect(panel).toContain("<RecordingSplitConfirm");
+    expect(panel).toContain("pending={driver.pendingSplit}");
+    expect(panel).toContain("driver.confirmRecordingSplit()");
+    expect(panel).toContain("driver.rejectRecordingSplit()");
+    expect(panel).toContain("driver.classifyingRecording");
+  });
+
+  it("the card offers confirm and decline actions", () => {
+    expect(confirm).toContain("onClick={onConfirm}");
+    expect(confirm).toContain("onClick={onReject}");
+  });
+
+  it("the window rides the request body as gradeWindowSec, never on videoRef", () => {
+    expect(driver).toContain("gradeWindowSec:");
+    expect(read("src/app/api/grade-run-item/route.ts")).toContain("body.gradeWindowSec");
+  });
+});

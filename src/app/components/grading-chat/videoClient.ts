@@ -12,6 +12,7 @@
 //
 // BROWSER-ONLY: imports the browser diagnostics recorder.
 import type { StudentSubmissionEntry } from "@/lib/grade/types";
+import { readRecordingSplitResponse, type RecordingSplit } from "@/lib/grade/recording-split";
 import { deleteGradingZipBestEffort, type GradingZipStorage } from "@/lib/grade/grading-zip-transport";
 import { isVideoFailureClass, type VideoFailureClass } from "@/lib/grade/video-failure";
 import { decideVideoTransport, uploadGradingVideo, type GradingVideoUploadResult } from "@/lib/grade/video-transport";
@@ -62,6 +63,33 @@ export const postPrepareVideo: PrepareVideoFn = async (storagePath, name, label)
     return { kind: "refused", reason, videoFailure: failure };
   } catch {
     return { kind: "refused", reason: "The video could not be prepared.", videoFailure: "upload failed" };
+  }
+};
+
+/** What the driver needs from the classifier: the (always valid) split, and
+ * whether it is the error-fallback single (`failed`, a transport flag). */
+export type ClassifyRecordingOutcome = { readonly split: RecordingSplit; readonly failed: boolean };
+
+export type ClassifyRecordingFn = (args: {
+  readonly storagePath: string;
+  readonly sizeBytes: number;
+  readonly assignmentInstructions: string;
+  readonly rubric: string;
+}) => Promise<ClassifyRecordingOutcome>;
+
+/** The default `classifyRecording`: POST /api/classify-recording. Never throws;
+ * any transport or shape problem is { single, failed: true } (grade as one). */
+export const postClassifyRecording: ClassifyRecordingFn = async (args) => {
+  try {
+    const res = await fetch("/api/classify-recording", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) return { split: { kind: "single" }, failed: true };
+    return readRecordingSplitResponse(await res.json().catch(() => null));
+  } catch {
+    return { split: { kind: "single" }, failed: true };
   }
 };
 

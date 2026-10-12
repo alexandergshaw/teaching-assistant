@@ -68,7 +68,7 @@ import { rememberRubric } from "@/lib/research/rubric-bank";
 import { type LlmProvider } from "@/lib/llm";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
-import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED } from "@/lib/repo-grade-branch-scan";
+import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED, type BranchScanResult } from "@/lib/repo-grade-branch-scan";
 import { classifyBranchMergeCheck, describeBranchMergeNote, type BranchMergeCheck } from "@/lib/repo-grade-merge-check";
 import { normalizeTargetBranch } from "@/lib/github-ref-name";
 
@@ -832,11 +832,40 @@ export async function gradeRepoAction(
       return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, determination, branchMergeCheck };
     }
 
-    // The target branch had gradable content, so the work is merged there
-    // (no scan ran). Absent when no target was set.
-    const mergedCheck = targetBranch
-      ? classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: true, scan: null })
-      : undefined;
+    // The target branch had gradable content. With a target set (the opt-in),
+    // still check the repo's OTHER branches: "not merged" is a path-set
+    // DIFFERENCE - another branch holds a candidate submission path the graded
+    // ref's own TREE lacks. The graded-ref set comes from that ref's tree (one
+    // extra call), NOT from the digest: the digest drops non-text and
+    // over-budget files, which would make it asymmetric with the branch side
+    // and flag a merged repo. If that tree cannot be read completely the scan
+    // is skipped (scan: null -> merged), never guessed. Absent when no target.
+    let mergedCheck: BranchMergeCheck | undefined;
+    if (targetBranch) {
+      let successScan: BranchScanResult | null = null;
+      try {
+        const gradedTree = await getRepoTreeWithMeta(parsed.owner, parsed.repo, targetBranch);
+        if (!gradedTree.truncated) {
+          successScan = await scanBranchesForUnmergedSubmission(
+            parsed.owner,
+            parsed.repo,
+            pathPrefix,
+            targetBranch,
+            {
+              listBranches,
+              fetchTree: async (owner, repo, b) => {
+                const { entries, truncated } = await getRepoTreeWithMeta(owner, repo, b);
+                return { entries, truncated };
+              },
+            },
+            { gradedRefPaths: gradedTree.entries.filter((e) => e.type === "blob").map((e) => e.path) }
+          );
+        }
+      } catch {
+        successScan = null;
+      }
+      mergedCheck = classifyBranchMergeCheck({ targetBranch, gradedTargetHadSubmission: true, scan: successScan });
+    }
 
     const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 

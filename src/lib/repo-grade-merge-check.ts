@@ -17,22 +17,30 @@ export interface BranchMergeCheck {
   undeterminedReason?: string;
 }
 
-/** Total 4-way classification. `scan` is null when the target had a
- * submission (the scan never ran). */
+/** Total 4-way classification. `scan` is null when the scan did not
+ * run (no target set, or the graded ref's tree could not be read). */
 export function classifyBranchMergeCheck(args: {
   targetBranch: string;
   gradedTargetHadSubmission: boolean;
   scan: BranchScanResult | null;
 }): BranchMergeCheck {
   const { targetBranch, gradedTargetHadSubmission, scan } = args;
-  if (gradedTargetHadSubmission || scan === null) return { status: "merged", targetBranch };
+  if (scan === null) return { status: "merged", targetBranch };
   switch (scan.kind) {
     case "found":
+      // Another branch carries folder work the graded ref lacks - on BOTH the
+      // empty-target and the non-empty-target path.
       return { status: "not-merged", targetBranch, foundOnBranch: scan.branch };
     case "not-found":
-      return { status: "no-submission", targetBranch };
+      return gradedTargetHadSubmission
+        ? { status: "merged", targetBranch }
+        : { status: "no-submission", targetBranch };
     case "undetermined":
-      return { status: "unknown", targetBranch, undeterminedReason: scan.reason };
+      // With a submission on the target the primary fact is certain, so scan
+      // uncertainty does not downgrade it to "unknown" (scope RES-2).
+      return gradedTargetHadSubmission
+        ? { status: "merged", targetBranch }
+        : { status: "unknown", targetBranch, undeterminedReason: scan.reason };
   }
 }
 

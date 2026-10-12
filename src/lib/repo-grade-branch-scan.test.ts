@@ -350,3 +350,69 @@ describe("scanBranchesForUnmergedSubmission", () => {
     expect(result).toEqual({ kind: "found", branch: "other", branchesChecked: 1, branchesSkipped: 0 });
   });
 });
+
+describe("gradedRefPaths: not-merged is a path-set DIFFERENCE, not bare presence", () => {
+  const other = (paths: string[]) =>
+    fetchers({
+      listBranches: async () => ({ branches: ["main", "stale"], defaultBranch: "main" }),
+      fetchTree: async (_o, _r, branch) =>
+        branch === "stale"
+          ? { entries: paths.map((path) => ({ path, type: "blob" as const })), truncated: false }
+          : { entries: [], truncated: false },
+    });
+
+  it("another branch holding EXACTLY the graded ref's candidate paths -> not-found (SB5)", async () => {
+    const result = await scanBranchesForUnmergedSubmission(
+      "org", "student-repo", "module_02", "main",
+      other(["module_02/a.py", "module_02/b.py"]),
+      { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py", "module_02/b.py"] }
+    );
+    expect(result).toEqual({ kind: "not-found", branchesChecked: 1, branchesSkipped: 0 });
+  });
+
+  it("another branch holding an EXTRA candidate path -> found, naming it", async () => {
+    const result = await scanBranchesForUnmergedSubmission(
+      "org", "student-repo", "module_02", "main",
+      other(["module_02/a.py", "module_02/extra.py"]),
+      { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py"] }
+    );
+    expect(result).toEqual({ kind: "found", branch: "stale", branchesChecked: 1, branchesSkipped: 0 });
+  });
+
+  it("symmetry: a graded-ref path the DIGEST would drop (non-text) is excluded too, so a merged repo is not flagged", async () => {
+    // The graded tree holds a binary the grading digest drops (isTextCandidate).
+    // The stale branch holds the same binary. Both sides use the same predicate,
+    // so the path is on both and nothing is "missing" from the graded ref.
+    const result = await scanBranchesForUnmergedSubmission(
+      "org", "student-repo", "module_02", "main",
+      other(["module_02/a.py", "module_02/diagram.png"]),
+      { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py", "module_02/diagram.png"] }
+    );
+    expect(result.kind).toBe("not-found");
+    // Control: had the graded set been sourced from text-only digest files, the
+    // same stale branch would be wrongly "found" on the PNG.
+    const digestShaped = await scanBranchesForUnmergedSubmission(
+      "org", "student-repo", "module_02", "main",
+      other(["module_02/a.py", "module_02/diagram.png"]),
+      { now: () => NOW_MS, gradedRefPaths: ["module_02/a.py"] }
+    );
+    expect(digestShaped.kind).toBe("found");
+  });
+
+  it("graded-ref paths outside the prefix / scaffolding are filtered by the same predicate and exclude nothing", async () => {
+    const result = await scanBranchesForUnmergedSubmission(
+      "org", "student-repo", "module_02", "main",
+      other(["module_02/a.py"]),
+      { now: () => NOW_MS, gradedRefPaths: ["other_folder/a.py", "module_02/.gitkeep"] }
+    );
+    expect(result.kind).toBe("found");
+  });
+
+  it("omitted and [] behave identically (today's behaviour)", async () => {
+    const tree = other(["module_02/a.py"]);
+    const omitted = await scanBranchesForUnmergedSubmission("org", "r", "module_02", "main", tree, { now: () => NOW_MS });
+    const empty = await scanBranchesForUnmergedSubmission("org", "r", "module_02", "main", tree, { now: () => NOW_MS, gradedRefPaths: [] });
+    expect(omitted).toEqual({ kind: "found", branch: "stale", branchesChecked: 1, branchesSkipped: 0 });
+    expect(empty).toEqual(omitted);
+  });
+});

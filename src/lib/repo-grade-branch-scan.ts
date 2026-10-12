@@ -133,6 +133,15 @@ export interface ScanBranchesForSubmissionOptions {
   /** Defaults to Date.now, called ONCE at the start of the scan - mirrors
    * ScanOrgRepoTreesOptions.now (repo-grade-tree-scan.ts:165). */
   now?: () => number;
+  /** Raw paths of the GRADED REF's own tree (sourced from that ref's tree, NOT
+   * from the grading digest - the digest drops non-text files and over-budget
+   * files, so a digest-derived set would be asymmetric with the other-branch
+   * side and manufacture a false "not merged"). Each is filtered through the
+   * SAME isCandidateSubmissionPath + normalizedPrefix the other-branch side
+   * uses. A candidate blob on another branch counts as "found" only when its
+   * exact path is NOT in this set. Omitted / empty => today's behaviour (any
+   * candidate path qualifies). */
+  gradedRefPaths?: readonly string[];
 }
 
 export type BranchScanResult =
@@ -178,7 +187,8 @@ async function checkOneBranch(
   branch: string,
   normalizedPrefix: string,
   fetchTree: BranchScanFetchers["fetchTree"],
-  nowMs: number
+  nowMs: number,
+  gradedCandidatePaths: ReadonlySet<string>
 ): Promise<BranchCheckOutcome> {
   let result: BranchTreeFetchResult;
   try {
@@ -193,7 +203,10 @@ async function checkOneBranch(
     };
   }
   const hasCandidate = result.entries.some(
-    (e) => e.type === "blob" && isCandidateSubmissionPath(e.path, normalizedPrefix)
+    (e) =>
+      e.type === "blob" &&
+      isCandidateSubmissionPath(e.path, normalizedPrefix) &&
+      !gradedCandidatePaths.has(e.path)
   );
   if (hasCandidate) return { kind: "found", branch };
   if (result.truncated) {
@@ -276,9 +289,15 @@ export async function scanBranchesForUnmergedSubmission(
   const toCheck = candidates.slice(0, maxBranches);
   const branchesSkipped = candidates.length - toCheck.length;
   const normalizedPrefix = normalizePrefix(pathPrefix);
+  // The graded ref's candidate paths, computed ONCE through the same predicate
+  // the other-branch side uses. "Not merged" is a path-set DIFFERENCE: another
+  // branch has a candidate path this set lacks.
+  const gradedCandidatePaths = new Set(
+    (options.gradedRefPaths ?? []).filter((p) => isCandidateSubmissionPath(p, normalizedPrefix))
+  );
 
   const outcomes = await mapWithConcurrency(toCheck, concurrency, (branch) =>
-    checkOneBranch(owner, repo, branch, normalizedPrefix, fetchers.fetchTree, nowMs)
+    checkOneBranch(owner, repo, branch, normalizedPrefix, fetchers.fetchTree, nowMs, gradedCandidatePaths)
   );
 
   const found = outcomes.find((o): o is Extract<BranchCheckOutcome, { kind: "found" }> => o.kind === "found");

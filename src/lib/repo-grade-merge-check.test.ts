@@ -23,21 +23,34 @@ const rows: Row[] = [
     in: { targetBranch: "main", gradedTargetHadSubmission: false, scan: { kind: "undetermined", reason: "a rate limit was hit", branchesChecked: 1, branchesSkipped: 0 } },
     out: { status: "unknown", targetBranch: "main", undeterminedReason: "a rate limit was hit" },
   },
+  // Submission present on the target AND a real scan ran (the success-path hoist).
+  {
+    in: { targetBranch: "main", gradedTargetHadSubmission: true, scan: { kind: "found", branch: "old-draft", branchesChecked: 1, branchesSkipped: 0 } },
+    out: { status: "not-merged", targetBranch: "main", foundOnBranch: "old-draft" },
+  },
+  {
+    in: { targetBranch: "main", gradedTargetHadSubmission: true, scan: { kind: "not-found", branchesChecked: 2, branchesSkipped: 0 } },
+    out: { status: "merged", targetBranch: "main" },
+  },
+  {
+    in: { targetBranch: "main", gradedTargetHadSubmission: true, scan: { kind: "undetermined", reason: "a rate limit was hit", branchesChecked: 1, branchesSkipped: 0 } },
+    out: { status: "merged", targetBranch: "main" },
+  },
 ];
 
 describe("classifyBranchMergeCheck frozen oracle", () => {
-  it.each(rows.map((r) => [r.out.status, r] as const))("%s", (_name, row) => {
+  it.each(rows.map((r, i) => [`${i}: ${r.out.status}`, r] as const))("%s", (_name, row) => {
     expect(classifyBranchMergeCheck(row.in)).toEqual(row.out);
   });
 
-  it("a submission on the target short-circuits even if a scan is present", () => {
+  it("a submission on the target no longer short-circuits a found scan: it is not-merged (the fix)", () => {
     expect(
       classifyBranchMergeCheck({
         targetBranch: "main",
         gradedTargetHadSubmission: true,
         scan: { kind: "found", branch: "x", branchesChecked: 1, branchesSkipped: 0 },
       }).status
-    ).toBe("merged");
+    ).toBe("not-merged");
   });
 
   it("not-merged and no-submission are distinct states; without a found scan no branch is named (AC-9)", () => {
@@ -49,7 +62,7 @@ describe("classifyBranchMergeCheck frozen oracle", () => {
 });
 
 describe("describeBranchMergeNote", () => {
-  const notes = rows.map((r) => describeBranchMergeNote(r.out));
+  const notes = rows.slice(0, 4).map((r) => describeBranchMergeNote(r.out));
   it("merged adds no note; the other three differ pairwise", () => {
     expect(notes[0]).toBeNull();
     expect(new Set(notes.slice(1)).size).toBe(3);

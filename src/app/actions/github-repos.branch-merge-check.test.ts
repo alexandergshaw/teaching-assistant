@@ -106,6 +106,10 @@ describe("gradeRepoAction - target branch validation (I-3)", () => {
 describe("gradeRepoAction - merged (work on the target branch), all return paths", () => {
   beforeEach(() => {
     ingestRepo.mockResolvedValue(digestOf([{ path: "module_02/a.py", content: "x=1" }]));
+    // The success path now scans: the graded ref (main) holds a.py and the only
+    // other branch holds the same path -> nothing is missing from the target.
+    listBranches.mockResolvedValue({ branches: ["main", "stale"], defaultBranch: "main" });
+    getRepoTreeWithMeta.mockResolvedValue({ entries: [{ path: "module_02/a.py", type: "blob" }], truncated: false });
   });
 
   it("gemini/LLM success return carries status merged and still grades", async () => {
@@ -113,7 +117,7 @@ describe("gradeRepoAction - merged (work on the target branch), all return paths
     if (!("run" in result)) throw new Error("expected a graded result");
     expect(result.branchMergeCheck).toEqual({ status: "merged", targetBranch: "main" });
     expect(gradeEntries).toHaveBeenCalled();
-    expect(listBranches).not.toHaveBeenCalled();
+    expect(listBranches).toHaveBeenCalledTimes(1);
   });
 
   it("EMBEDDED success return carries status merged", async () => {
@@ -121,16 +125,79 @@ describe("gradeRepoAction - merged (work on the target branch), all return paths
     if (!("run" in result)) throw new Error("expected a graded result");
     expect(result.branchMergeCheck).toEqual({ status: "merged", targetBranch: "main" });
     expect(gradeEntriesEmbedded).toHaveBeenCalled();
-    expect(listBranches).not.toHaveBeenCalled();
+    expect(listBranches).toHaveBeenCalledTimes(1);
   });
 
-  it("no target: no branchMergeCheck on either engine", async () => {
+  it("no target: no branchMergeCheck on either engine and NO scan runs", async () => {
     const a = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", undefined, "module_02");
     const b = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "embedded", undefined, "module_02");
     for (const r of [a, b]) {
       if (!("run" in r)) throw new Error("expected a graded result");
       expect(r.branchMergeCheck).toBeUndefined();
     }
+    expect(listBranches).not.toHaveBeenCalled();
+    expect(getRepoTreeWithMeta).not.toHaveBeenCalled();
+  });
+});
+
+describe("gradeRepoAction - success path with a non-empty target (the branch-merge fix)", () => {
+  const treeBy = (byBranch: Record<string, Array<{ path: string; type: string }>>) =>
+    getRepoTreeWithMeta.mockImplementation(async (_o: string, _r: string, b: string) => ({
+      entries: byBranch[b] ?? [],
+      truncated: false,
+    }));
+
+  beforeEach(() => {
+    ingestRepo.mockResolvedValue(digestOf([{ path: "module_02/a.py", content: "x=1" }]));
+    listBranches.mockResolvedValue({ branches: ["main", "old-draft"], defaultBranch: "main" });
+  });
+
+  it("another branch has a folder path the target lacks -> not-merged, grade stands, determination unset", async () => {
+    treeBy({
+      main: [{ path: "module_02/a.py", type: "blob" }],
+      "old-draft": [{ path: "module_02/a.py", type: "blob" }, { path: "module_02/b.py", type: "blob" }],
+    });
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", "main", "module_02");
+    if (!("run" in result)) throw new Error("expected a graded result");
+    expect(result.branchMergeCheck).toEqual({ status: "not-merged", targetBranch: "main", foundOnBranch: "old-draft" });
+    expect(gradeEntries).toHaveBeenCalled();
+    expect("determination" in result ? result.determination : undefined).toBeUndefined();
+  });
+
+  it("SYMMETRY: a non-text file on the graded tree that the digest drops, also on a stale branch, is NOT flagged", async () => {
+    // The ingest digest holds only a.py (diagram.png is dropped as non-text),
+    // but the graded REF's tree has both. A digest-sourced graded set would
+    // wrongly report not-merged on diagram.png.
+    treeBy({
+      main: [{ path: "module_02/a.py", type: "blob" }, { path: "module_02/diagram.png", type: "blob" }],
+      "old-draft": [{ path: "module_02/a.py", type: "blob" }, { path: "module_02/diagram.png", type: "blob" }],
+    });
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "embedded", "main", "module_02");
+    if (!("run" in result)) throw new Error("expected a graded result");
+    expect(result.branchMergeCheck).toEqual({ status: "merged", targetBranch: "main" });
+  });
+
+  it("call count (RES-4): one graded-ref tree, one branch list, one tree per other branch", async () => {
+    treeBy({ main: [{ path: "module_02/a.py", type: "blob" }], "old-draft": [] });
+    await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", "main", "module_02");
+    expect(listBranches).toHaveBeenCalledTimes(1);
+    expect(getRepoTreeWithMeta).toHaveBeenCalledTimes(2);
+    expect(getRepoTreeWithMeta.mock.calls.map((c) => c[2])).toEqual(["main", "old-draft"]);
+  });
+
+  it("an unreadable graded tree never throws and never guesses not-merged", async () => {
+    getRepoTreeWithMeta.mockRejectedValue(new Error("boom"));
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", "main", "module_02");
+    if (!("run" in result)) throw new Error("expected a graded result");
+    expect(result.branchMergeCheck).toEqual({ status: "merged", targetBranch: "main" });
+  });
+
+  it("a truncated graded tree skips the scan (the path set would be incomplete)", async () => {
+    getRepoTreeWithMeta.mockResolvedValue({ entries: [{ path: "module_02/a.py", type: "blob" }], truncated: true });
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", "main", "module_02");
+    if (!("run" in result)) throw new Error("expected a graded result");
+    expect(result.branchMergeCheck).toEqual({ status: "merged", targetBranch: "main" });
+    expect(listBranches).not.toHaveBeenCalled();
   });
 });
 
@@ -206,10 +273,38 @@ describe("gradeRepoAction - empty target: not-merged vs no-submission vs unknown
     expect(result.reason).toContain("never merged into the graded branch");
   });
 
-  it("AC-6: determination is unmerged-branch iff status is not-merged", async () => {
+  it("AC-6: determination no-submission-unmerged-branch IMPLIES status not-merged (one direction)", async () => {
+    listBranches.mockResolvedValue({ branches: ["main", "feature-x"], defaultBranch: "main" });
+    getRepoTreeWithMeta.mockImplementation(async (_o: string, _r: string, b: string) =>
+      b === "feature-x"
+        ? { entries: [{ path: "module_02/a.py", type: "blob" }], truncated: false }
+        : { entries: [], truncated: false }
+    );
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "", "gemini", "main", "module_02");
+    expectNoSubmission(result);
+    expect(result.determination).toBe("no-submission-unmerged-branch");
+    expect(result.branchMergeCheck?.status).toBe("not-merged");
+  });
+
+  it("AC-6: no determination is set when no branch holds the work", async () => {
     listBranches.mockResolvedValue({ branches: ["main"], defaultBranch: "main" });
     const result = await gradeRepoAction("org/student-repo", "Do it.", "", "gemini", "main", "module_02");
     expectNoSubmission(result);
-    expect(result.branchMergeCheck?.status === "not-merged").toBe(result.determination === "no-submission-unmerged-branch");
+    expect(result.determination).toBeUndefined();
+    expect(result.branchMergeCheck?.status).not.toBe("not-merged");
+  });
+
+  it("AC-6: a success-path not-merged carries NO determination (the old iff no longer holds)", async () => {
+    ingestRepo.mockResolvedValue(digestOf([{ path: "module_02/a.py", content: "x=1" }]));
+    listBranches.mockResolvedValue({ branches: ["main", "feature-x"], defaultBranch: "main" });
+    getRepoTreeWithMeta.mockImplementation(async (_o: string, _r: string, b: string) =>
+      b === "feature-x"
+        ? { entries: [{ path: "module_02/b.py", type: "blob" }], truncated: false }
+        : { entries: [{ path: "module_02/a.py", type: "blob" }], truncated: false }
+    );
+    const result = await gradeRepoAction("org/student-repo", "Do it.", "rubric", "gemini", "main", "module_02");
+    if (!("run" in result)) throw new Error("expected a graded result");
+    expect(result.branchMergeCheck?.status).toBe("not-merged");
+    expect("determination" in result ? result.determination : undefined).toBeUndefined();
   });
 });

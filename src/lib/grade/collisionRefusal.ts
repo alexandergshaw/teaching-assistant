@@ -1,4 +1,10 @@
-import { parseSubmissionFileName, a44DecodeKey, a44ContainerRelativeDir } from "./utils";
+import {
+  parseSubmissionFileName,
+  a44DecodeKey,
+  a44ContainerRelativeDir,
+  getBaseFileName,
+  removeLastExtension,
+} from "./utils";
 import { matchNameAgainstRoster } from "@/app/components/grading-recording/grading-roster-match";
 
 /**
@@ -21,6 +27,28 @@ interface CollidingGroup {
   display: string;
   /** Every colliding path, in the order `submissions` iterated them. */
   paths: string[];
+}
+
+/**
+ * Canvas per-student identity prefix on a base stem: `<digits>-<digits> - `.
+ * Canvas appends one such prefix, unique per student+submission, to every file
+ * of a submission. Deliberately narrow: it matches 0 of the 1,350,314 files the
+ * frozen A44 generator emits, so the same-stem amnesty below can never change a
+ * frozen unsound-allows count (docs/same-stem-collision-amnesty-scope.md 3.4).
+ */
+const CANVAS_IDENTITY_STEM = /^\d+-\d+ - /;
+
+/**
+ * True when every path in the group shares one trimmed, lower-cased base stem
+ * AND that shared stem is a Canvas identity stem. A name-only same-stem test is
+ * unsound (two students can both submit `midterm.txt` and `midterm.md`); the
+ * Canvas identity gate is what makes the shared stem one student's.
+ */
+function isSameStemCanvasGroup(paths: readonly string[]): boolean {
+  if (paths.length < 2) return false;
+  const stems = paths.map((p) => removeLastExtension(getBaseFileName(p)).trim().toLowerCase());
+  const shared = stems[0];
+  return stems.every((s) => s === shared) && CANVAS_IDENTITY_STEM.test(shared);
 }
 
 export type CollisionRefusalDecision =
@@ -74,6 +102,10 @@ export function decideCollisionRefusal(
   for (const key of sortedKeys) {
     const group = groups.get(key);
     if (!group || group.paths.length < 2) continue;
+
+    // Same-stem Canvas amnesty: checked FIRST, needs no roster and no run gate.
+    // The merge in groupSubmissionsByStudent grades these files as one row.
+    if (isSameStemCanvasGroup(group.paths)) continue;
 
     const decoded = a44DecodeKey(key);
     const hasFolder = decoded !== null && decoded.length === 2;

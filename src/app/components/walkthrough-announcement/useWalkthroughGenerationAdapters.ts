@@ -14,11 +14,33 @@ import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import {
   draftWalkthroughAnnouncementAction,
   postWalkthroughAnnouncementAction,
-  gatherWalkthroughResourcesAction,
 } from "@/app/actions/walkthrough-announcement";
+import type { gatherWalkthroughResourcesAction as gatherWalkthroughResourcesServerAction } from "@/app/actions/walkthrough-announcement";
+import { readActionRouteResponse } from "@/lib/action-route-response";
 import type { WtaCourseOption } from "./AnnouncementCourseFieldset";
 import type { ResearchNotice, ResourceOutcome } from "./announcement-draft-slots";
 import type { AnnouncementDraftRequestContext, AnnouncementDraftDispatchContext } from "./useAnnouncementDraftSlots";
+
+// G4 Wave 3b: the research call goes through a Route Handler that declares a
+// ceiling and races the work against an elapsed-aware budget, so a slow model
+// comes back as a worded failure (504) instead of a raw transport failure.
+// Same signature and result shape as the Server Action it wraps. A route-level
+// { error } (timeout, auth, bad response) is mapped to the action's own
+// { kind: "failed", reason } outcome so the caller sees one shape.
+const gatherWalkthroughResourcesAction: typeof gatherWalkthroughResourcesServerAction = async (...args) => {
+  try {
+    const res = await fetch("/api/walkthrough-resources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args }),
+    });
+    const parsed = await readActionRouteResponse<ResourceOutcome>(res);
+    if ("error" in parsed) return { kind: "failed", reason: parsed.error };
+    return parsed;
+  } catch (err) {
+    return { kind: "failed", reason: err instanceof Error ? err.message : "Could not research resources." };
+  }
+};
 
 export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption | null) {
   // G3 Ruling 2/9: the actual research call - the only site (per blocker 5)

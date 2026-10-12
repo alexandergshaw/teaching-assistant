@@ -11,10 +11,8 @@
 // file is trusted (REGRESSION entry 239 check 10: "a structural assertion
 // without a canary is worthless"):
 //
-//   1. N5 item 16 - the grid's name cells and repoGradesRows.ts's sort key
-//      read the SAME derivation (deriveRepoGradeStudentName), not two
-//      independent re-implementations of the split rules that could drift
-//      apart and sort by something other than what the table displays.
+//   1. The name/binding columns are removed from the grid (header and body
+//      together) and the name derivation survives only for search.
 //   2. N4 item 13 - the "merge cellEdits scores onto rows" helper has ONE
 //      copy (mergeRepoGradeLiveScores, repoGradesCellEdits.ts), not a
 //      second/third hand-rolled loop in RepoGradesGrid.tsx or
@@ -28,6 +26,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 const REPO_GRADES = "src/app/components/repo-grades";
 const gridSource = read(`${REPO_GRADES}/RepoGradesGrid.tsx`);
 const rowsSource = read(`${REPO_GRADES}/repoGradesRows.ts`);
+const searchSource = read(`${REPO_GRADES}/repoGradesSearch.ts`);
 const gradingActionsSource = read(`${REPO_GRADES}/useRepoGradesGradingActions.ts`);
 const cellEditsSource = read(`${REPO_GRADES}/repoGradesCellEdits.ts`);
 
@@ -72,22 +71,47 @@ describe("canary: usesSharedFunction actually discriminates", () => {
   });
 });
 
-describe("N5 item 16: the name cells and the sort key read the SAME derivation", () => {
+describe("name derivation: the name columns are gone, search still reads the one derivation", () => {
   const MODULE = "\\./repoGradeStudentName";
+  const gridCode = gridSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const rowsCode = rowsSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const theadCode = gridCode.slice(gridCode.indexOf("<thead"), gridCode.indexOf("</thead>"));
 
-  it("RepoGradesGrid.tsx's name cells call deriveRepoGradeStudentName", () => {
-    expect(usesSharedFunction(gridSource, "deriveRepoGradeStudentName", MODULE)).toBe(true);
+  it("repoGradesSearch.ts calls deriveRepoGradeStudentName (the derivation survives for search)", () => {
+    expect(usesSharedFunction(searchSource, "deriveRepoGradeStudentName", MODULE)).toBe(true);
   });
 
-  it("repoGradesRows.ts's sort key calls deriveRepoGradeStudentName", () => {
-    expect(usesSharedFunction(rowsSource, "deriveRepoGradeStudentName", MODULE)).toBe(true);
+  it("AC-1: the grid has no First name / Last name / Binding header or body cell", () => {
+    expect(theadCode).toContain('field="repo"');
+    for (const field of ["firstName", "lastName", "binding"]) {
+      expect(theadCode).not.toContain(`field="${field}"`);
+    }
+    for (const label of ["First name", "Last name", "Binding"]) {
+      expect(theadCode).not.toContain(`label="${label}"`);
+    }
+    expect(gridCode).not.toContain("nameParts");
+    expect(gridCode).not.toContain("repoGradeLastNameCellText");
+    expect(gridCode).not.toContain("deriveRepoGradeStudentName");
   });
 
-  it("the last-name SORT KEY reads the raw `.lastName` field, never repoGradeLastNameCellText's em-dash display substitution - a 'single token' row must sort as blank, not as a fixed dash string", () => {
-    // A cheap but load-bearing text check: the sort module may import
-    // repoGradeLastNameCellText for other reasons in the future, but its
-    // sortFieldValue function itself must read `.lastName` directly.
-    expect(rowsSource).toMatch(/parts\.lastName/);
+  it("AC-1: no fixed cell is left unpaired - exactly the select and repo cells precede the folder columns", () => {
+    const headFixedTh = (theadCode.slice(0, theadCode.indexOf("columns.map")).match(/<th[ >]|<SortableColumnHeader[ >]/g) ?? []).length;
+    const bodyStart = gridCode.indexOf("<tr role=\"row\" key={row.repo}>");
+    const bodyFixedTd = (gridCode.slice(bodyStart, gridCode.indexOf("columns.map", bodyStart)).match(/<td[ >]/g) ?? []).length;
+    expect(headFixedTh).toBe(2);
+    expect(bodyFixedTd).toBe(2);
+  });
+
+  it("AC-2: the binding control survives only as an unconfirmed-row <details> inside the Repo cell, never in its own cell", () => {
+    expect(gridCode).toMatch(/row\.binding\.state !== "confirmed" && \(\s*<details>\s*<summary>Bind student<\/summary>\s*<RepoBindingControl /);
+    expect(gridCode).not.toMatch(/<td[^>]*>\s*<RepoBindingControl/);
+  });
+
+  it("AC-4: the sort-field set carries no removed column and nothing in the sort module reads a name derivation", () => {
+    expect(rowsCode).toMatch(/export type RepoGradeSortField = "repo" \| "folder";/);
+    expect(rowsCode).not.toContain("deriveRepoGradeStudentName");
+    expect(rowsCode).not.toContain("BINDING_STATE_SORT_PRIORITY");
+    expect(rowsCode).not.toContain("repoGradeSortSelectValue");
   });
 });
 

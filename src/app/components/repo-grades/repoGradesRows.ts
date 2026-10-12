@@ -20,22 +20,9 @@ import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import {
   suggestRepoStudentBindings,
   type RepoBindingRosterEntry,
-  type RepoBindingState,
   type RepoBindingSuggestion,
 } from "@/lib/repo-student-bindings";
 import type { RepoFolderRow } from "@/lib/repo-grade-tree-scan";
-// N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md):
-// the sort key for "firstName"/"lastName" reads the EXACT SAME derivation
-// the grid's name cells render (repoGradeStudentName.ts), never a
-// re-implementation of the split rules - N5 item 16's failure mode is
-// precisely two call sites reading different derivations for the same
-// visible name. getRepoGradeCellEdit/RepoGradeCellEditsByRepo is a VALUE
-// import from repoGradesCellEdits.ts, which itself only TYPE-imports back
-// from this file (RepoGradePostStatus/RepoGradeCell/RepoGradeRow) - a
-// type-only import is erased at compile time, so this is not a runtime
-// circular dependency, the same reasoning RepoGradesGrid.tsx's own imports
-// from both files already rely on.
-import { deriveRepoGradeStudentName } from "./repoGradeStudentName";
 import { scorePercentValue } from "./repoGradeScoreDisplay";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 
@@ -272,7 +259,7 @@ export function applyRepoGradeBinding(
 // direction, and resolveRepoGradeSort mirroring resolveTaskSort's
 // stale-field degrade.
 
-export type RepoGradeSortField = "repo" | "binding" | "firstName" | "lastName" | "folder";
+export type RepoGradeSortField = "repo" | "folder";
 export type SortDirection = "asc" | "desc";
 
 export interface RepoGradeSortState {
@@ -295,25 +282,9 @@ export const DEFAULT_REPO_GRADE_SORT: RepoGradeSortState = { field: "repo", dire
 // own TASK_SORT_FIELD_MEMBERSHIP and the exact trap it exists to catch.
 const REPO_GRADE_SORT_FIELD_MEMBERSHIP: Record<RepoGradeSortField, true> = {
   repo: true,
-  binding: true,
-  firstName: true,
-  lastName: true,
   folder: true,
 };
 const REPO_GRADE_SORT_FIELDS: RepoGradeSortField[] = Object.keys(REPO_GRADE_SORT_FIELD_MEMBERSHIP) as RepoGradeSortField[];
-
-/** Sorting by "binding" surfaces rows that need attention first in ASCENDING
- * order: unbound (nothing known) before ambiguous (needs a human pick) before
- * suggested (needs one confirm click) before confirmed (already done,
- * postable). Exported so both the sort function below and its test share one
- * definition of "which state is more urgent" rather than restating the
- * ordering twice. */
-export const BINDING_STATE_SORT_PRIORITY: Record<RepoBindingState, number> = {
-  unbound: 0,
-  ambiguous: 1,
-  suggested: 2,
-  confirmed: 3,
-};
 
 /**
  * N5 item 17: `ta-repo-grades-sort` (repoGradesUiState.ts) is a GLOBAL
@@ -384,47 +355,6 @@ export function parseRepoGradeSortState(raw: string | null | undefined): RepoGra
   }
 }
 
-// The Sort <select>'s (RepoGradesControls.tsx) own plain option keys - every
-// field EXCEPT "folder", since a folder column is variable per course and
-// cannot be reasonably listed in a fixed <select>. N5 item 15:
-// `parseSortValue` used to coerce every unknown field to "repo", so a
-// header-set sort (any of these, or a folder sort) would visibly SNAP BACK to
-// "repo" the instant the instructor merely touched the select - the two
-// controls would disagree about what the sort actually was. The fix here is
-// that the select's own VALUE (repoGradeSortSelectValue below) resolves to
-// the "custom" placeholder whenever the active sort is not one of these four,
-// so the control never shows a value mismatching every one of its real
-// <option>s (the actual mechanism behind that snap-back - see this
-// function's sibling below) - and DECODING only ever accepts a value the
-// select could actually have produced.
-const SELECT_SORT_FIELDS: readonly Exclude<RepoGradeSortField, "folder">[] = ["repo", "binding", "firstName", "lastName"];
-
-/** The Sort `<select>`'s current value: `"<field>:<direction>"` for any of
- * the four plain fields, or the "custom" placeholder whenever the active
- * sort is a folder column (or, in principle, any future field the select
- * does not list) - which the select renders as a disabled option, so it is
- * never itself selectable and can never fire a spurious onChange. */
-export function repoGradeSortSelectValue(sort: RepoGradeSortState): string {
-  return (SELECT_SORT_FIELDS as readonly string[]).includes(sort.field) ? `${sort.field}:${sort.direction}` : "custom";
-}
-
-/** Decodes the Sort `<select>`'s onChange value. Only ever accepts one of
- * the four plain fields the select actually renders as real options -
- * anything else (including "custom", which is disabled and unselectable)
- * degrades to DEFAULT_REPO_GRADE_SORT rather than being coerced onto an
- * unrelated field, closing N5 item 15 for good: every value this function
- * can be CALLED with (there is no way for the browser to produce anything
- * else through this select) round-trips to the exact field the instructor
- * clicked. */
-export function parseRepoGradeSortSelectValue(value: string): RepoGradeSortState {
-  const [field, direction] = value.split(":");
-  const parsedDirection: SortDirection = direction === "desc" ? "desc" : "asc";
-  if ((SELECT_SORT_FIELDS as readonly string[]).includes(field)) {
-    return { field: field as RepoGradeSortField, direction: parsedDirection };
-  }
-  return DEFAULT_REPO_GRADE_SORT;
-}
-
 /** One row's sort-relevant value for `sort.field`, in the Tasks view's own
  * SortableValue shape: `empty` always sorts last, in BOTH directions - never
  * displacing real data regardless of which way the column points. */
@@ -438,24 +368,6 @@ function sortFieldValue(row: RepoGradeRow, sort: RepoGradeSortState, cellEdits: 
   switch (sort.field) {
     case "repo":
       return { kind: "text", value: row.repo, empty: false };
-    case "binding":
-      return { kind: "number", value: BINDING_STATE_SORT_PRIORITY[row.binding.state], empty: false };
-    case "firstName": {
-      // N5 item 16 - the SAME derivation the grid's First name cell renders
-      // (repoGradeStudentName.ts), over the SAME two binding fields. Never a
-      // second, hand-rolled split.
-      const parts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
-      return { kind: "text", value: parts.firstName, empty: parts.firstName === "" };
-    }
-    case "lastName": {
-      const parts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
-      // `.lastName` itself (never repoGradeLastNameCellText's em-dash
-      // substitution) - a "single token, last name unknown" row must sort as
-      // BLANK, not as some fixed dash-shaped string, matching how the CELL
-      // deliberately keeps those two ideas separate (repoGradeStudentName.ts
-      // header comment).
-      return { kind: "text", value: parts.lastName, empty: parts.lastName === "" };
-    }
     case "folder": {
       // N4 item 13: scores live in cellEdits, not on the row - reads exactly
       // the one (repo, folder) pair this sort needs via getRepoGradeCellEdit,

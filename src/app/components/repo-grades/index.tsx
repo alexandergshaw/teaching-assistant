@@ -639,8 +639,6 @@ export default function RepoGradesTab() {
         orgPrefix={uiState.orgPrefix}
         onOrgPrefixChange={(value) => setUiState((prev) => ({ ...prev, orgPrefix: value }))}
         showRowDependentFields={!!model && model.rows.length > 0}
-        sort={uiState.sort}
-        onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
         instructions={uiState.instructions}
         onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
         rubricSourceValue={rubricSource.value}
@@ -783,6 +781,13 @@ export default function RepoGradesTab() {
           scanErrors={folderScanErrorCount}
         />
       )}
+      {/* A5 (Ruling A5-6/A5-9) - the only place this page states that a row's
+          GitHub link opens the branch RECORDED AT SCAN TIME. Gated on a
+          specific folder: in the ALL_FOLDERS view the link pins no branch, so
+          this sentence would be false there. */}
+      {model && currentSelectedFolder !== ALL_FOLDERS && (
+        <p className={pageStyles.fieldHint}>Links open the branch recorded when the repos were scanned.</p>
+      )}
 
       {/* RG-SEARCH-STICKY Wave A: one shell encloses the sticky working header
           (the column header below it owns Grade/Post) and the grid. */}
@@ -807,6 +812,7 @@ export default function RepoGradesTab() {
         ) : null}
         targetBranchControl={
           <label className={styles.headerField}>
+            <span className={styles.headerInputLabel}>Target branch</span>
             <input
               type="text"
               className={styles.headerInput}

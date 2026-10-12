@@ -112,7 +112,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     persistRepoGradesUiState({
       courseId: "course-1",
       orgPrefix: "module",
-      sort: { field: "binding", direction: "desc" },
+      sort: { field: "repo", direction: "desc" },
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",
@@ -129,7 +129,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
       orgPrefix: "module",
-      sort: { field: "binding", direction: "desc" },
+      sort: { field: "repo", direction: "desc" },
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",

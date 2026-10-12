@@ -199,8 +199,7 @@ describe("isCallSiteWithinIfBlock (canary: proves the guard-membership check act
 // check's M2 finding).
 
 describe("the row-link call site (RepoGradesGrid.tsx) never leaves href bound to the bare row.htmlUrl", () => {
-  const startAnchor =
-    "const nameParts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);";
+  const startAnchor = "const repoLinkHref = buildRepoGradeRowLinkHref(";
   const endAnchor = '{row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}';
 
   function linkWindow(): string {
@@ -255,23 +254,27 @@ describe("RepoGradesGridProps.selectedFolder is REQUIRED, and index.tsx actually
   });
 });
 
-// The folder picker (and its disclosure sentence) moved from RepoGradesControls.tsx
-// into the sticky-header leaf RepoGradesFolderPicker.tsx.
+// The folder picker moved from RepoGradesControls.tsx into the sticky-header leaf
+// RepoGradesFolderPicker.tsx; its always-on disclosure sentence then moved out
+// of the sticky strip into index.tsx, beside RepoGradesFolderHint.
 const folderPickerSource = readFileSync(
   join(process.cwd(), "src/app/components/repo-grades/RepoGradesFolderPicker.tsx"),
   "utf8"
 );
+const indexSourceForHint = readFileSync(join(process.cwd(), "src/app/components/repo-grades/index.tsx"), "utf8");
+const HINT = "Links open the branch recorded when the repos were scanned.";
 
-describe("RepoGradesFolderPicker.tsx states the branch approximation, only while a specific folder is selected (Ruling A5-9)", () => {
-  it("contains the exact disclosure sentence, and RepoGradesControls.tsx no longer does", () => {
-    expect(folderPickerSource).toContain("Links open the branch recorded when the repos were scanned.");
-    expect(controlsSource).not.toContain("Links open the branch recorded when the repos were scanned.");
+describe("index.tsx states the branch approximation, only while a specific folder is selected (Ruling A5-9)", () => {
+  it("contains the exact disclosure sentence, and neither RepoGradesControls.tsx nor the sticky-strip folder picker does", () => {
+    expect(indexSourceForHint).toContain(HINT);
+    expect(controlsSource).not.toContain(HINT);
+    expect(folderPickerSource).not.toContain(HINT);
   });
 
-  it("the sentence is gated on selectedFolder !== ALL_FOLDERS - in the ALL_FOLDERS view the href pins no branch, so stating one would be false", () => {
-    const sentenceIdx = folderPickerSource.indexOf("Links open the branch recorded when the repos were scanned.");
+  it("the sentence is gated on currentSelectedFolder !== ALL_FOLDERS - in the ALL_FOLDERS view the href pins no branch, so stating one would be false", () => {
+    const sentenceIdx = indexSourceForHint.indexOf(HINT);
     expect(sentenceIdx).toBeGreaterThan(-1);
-    const before = folderPickerSource.slice(Math.max(0, sentenceIdx - 300), sentenceIdx);
-    expect(before).toContain("selectedFolder !== ALL_FOLDERS");
+    const before = indexSourceForHint.slice(Math.max(0, sentenceIdx - 300), sentenceIdx);
+    expect(before).toContain("currentSelectedFolder !== ALL_FOLDERS");
   });
 });

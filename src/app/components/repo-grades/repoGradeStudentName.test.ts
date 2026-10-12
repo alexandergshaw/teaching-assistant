@@ -6,11 +6,7 @@
 // tested the easy case would prove nothing about the ones that make this
 // feature honest.
 import { describe, it, expect } from "vitest";
-import {
-  deriveRepoGradeStudentName,
-  repoGradeLastNameCellText,
-  UNKNOWN_LAST_NAME_MARK,
-} from "./repoGradeStudentName";
+import { deriveRepoGradeStudentName } from "./repoGradeStudentName";
 
 describe("deriveRepoGradeStudentName - N2 item 4 rule order", () => {
   it("comma form: splits at the first comma, last name before, first name after - source 'explicit', no correction hint", () => {
@@ -96,22 +92,5 @@ describe("deriveRepoGradeStudentName - N2 item 6: preferring Canvas's own sortab
   it("a single-token sortableName with no student still reads as 'single', not 'canvas'", () => {
     const parts = deriveRepoGradeStudentName(null, "Cher");
     expect(parts).toEqual({ firstName: "Cher", lastName: "", source: "single", correctionHint: null });
-  });
-});
-
-describe("repoGradeLastNameCellText - the one display-only substitution", () => {
-  it("shows the em dash for a single-token name's unknown last name", () => {
-    const parts = deriveRepoGradeStudentName("Cher");
-    expect(repoGradeLastNameCellText(parts)).toBe(UNKNOWN_LAST_NAME_MARK);
-  });
-
-  it("shows nothing for no name at all - never the em dash (that would imply SOME name is known)", () => {
-    const parts = deriveRepoGradeStudentName(null);
-    expect(repoGradeLastNameCellText(parts)).toBe("");
-  });
-
-  it("shows the real last name for every other source", () => {
-    expect(repoGradeLastNameCellText(deriveRepoGradeStudentName("Ruiz, Ana"))).toBe("Ruiz");
-    expect(repoGradeLastNameCellText(deriveRepoGradeStudentName("Ana Ruiz"))).toBe("Ruiz");
   });
 });

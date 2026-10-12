@@ -247,12 +247,31 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(ruleBlock(CSS, ".disclosureSummary::before")).toMatch(/border-right/);
   });
 
-  it("VISUAL-A: the working header uses the compact padding and carries no stacked visible Search/Target-branch caption", () => {
+  it("VISUAL-A: the working header uses the compact padding, bottom-aligns its fields, captions Target branch (not Search) and names both", () => {
     expect(ruleBlock(CSS, ".stickyWorkingHeader")).toMatch(/padding:\s*var\(--space-2\) var\(--space-3\)/);
+    expect(ruleBlock(CSS, ".stickyWorkingHeader")).toMatch(/align-items:\s*flex-end/);
     expect(HEADER).not.toMatch(/>Search</);
+    expect(W_INDEX).toMatch(/<span className=\{styles\.headerInputLabel\}>Target branch<\/span>/);
     expect(W_INDEX).not.toMatch(/>Target branch \(merged to\)</);
     expect(HEADER).toContain('aria-label="Search repositories"');
+    expect(HEADER).toContain('placeholder="Search repos or students"');
     expect(W_INDEX).toContain('aria-label="Target branch (merged to)"');
+  });
+
+  it("AC-12: header-row polish - top-aligned th, no folder-name font-size rule, Grade and Post share one actions wrapper", () => {
+    expect(ruleBlock(CSS, ".grid thead th")).toMatch(/vertical-align:\s*top/);
+    expect(CSS).not.toContain(".columnHeaderFolder");
+    expect(ruleBlock(CSS, ".columnHeaderActions")).toMatch(/display:\s*flex/);
+    const grid = read("RepoGradesGrid.tsx");
+    const open = grid.indexOf("<div className={styles.columnHeaderActions}>");
+    expect(open).toBeGreaterThan(-1);
+    const close = grid.indexOf("</div>", open);
+    const wrapped = grid.slice(open, close);
+    expect(wrapped).toContain("onGradeColumn(column.folder)");
+    expect(wrapped).toContain("onPostColumn(column, pointsPossible)");
+    expect(grid).toContain('aria-label={`Canvas assignment for the ${column.folder} column`}');
+    expect(grid).toContain("<span className={styles.postReason}>{rubricDescription}</span>");
+    expect(grid).not.toContain("<span className={pageStyles.fieldHint}>Select</span>");
   });
 
   it("AC-W4-7: the parent <details> contains BOTH RepoGradesControls and LinkUsernamesPanel", () => {

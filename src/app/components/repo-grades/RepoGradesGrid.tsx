@@ -44,7 +44,6 @@ import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow, RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
 import { toggleRepoGradeSort } from "./repoGradesRows";
 import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import { deriveRepoGradeStudentName, repoGradeLastNameCellText } from "./repoGradeStudentName";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
 import { resolveGradeScope } from "./repoGradesGradeSet";
@@ -385,7 +384,7 @@ function ColumnHeaderControls({
         onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", column.folder))}
         aria-label={`Sort by ${column.folder} score`}
       >
-        <span className={styles.columnHeaderFolder}>{column.folder}</span>
+        <span>{column.folder}</span>
         {folderSortActive && <SortDirectionGlyph direction={sort.direction} />}
       </button>
       <select
@@ -419,29 +418,31 @@ function ColumnHeaderControls({
           rubric.
         </span>
       )}
-      <Button
-        type="button"
-        variant="contained"
-        size="small"
-        aria-label={gradeAllLabel}
-        disabled={bulkRunning}
-        onClick={() => {
-          onGradeColumn(column.folder);
-        }}
-      >
-        {gradeAllLabel}
-      </Button>
-      <Button
-        type="button"
-        variant="outlined"
-        size="small"
-        disabled={busy || plan.postable.length === 0}
-        onClick={() => {
-          onPostColumn(column, pointsPossible);
-        }}
-      >
-        {busy ? "Posting…" : postLabel}
-      </Button>
+      <div className={styles.columnHeaderActions}>
+        <Button
+          type="button"
+          variant="contained"
+          size="small"
+          aria-label={gradeAllLabel}
+          disabled={bulkRunning}
+          onClick={() => {
+            onGradeColumn(column.folder);
+          }}
+        >
+          {gradeAllLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="outlined"
+          size="small"
+          disabled={busy || plan.postable.length === 0}
+          onClick={() => {
+            onPostColumn(column, pointsPossible);
+          }}
+        >
+          {busy ? "Posting…" : postLabel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -497,15 +498,9 @@ export default function RepoGradesGrid({
         <thead role="rowgroup">
           <tr role="row">
             <th scope="col" role="columnheader" className={styles.selectHeader}>
-              <span className={pageStyles.fieldHint}>Select</span>
+              Select
             </th>
             <SortableColumnHeader field="repo" label="Repo" sort={sort} onSortChange={onSortChange} />
-            {/* N2/N3 - derived from `row.binding.student` alone (repoGradeStudentName.ts),
-                never a second roster lookup, so these two columns can never
-                disagree with the Binding cell rendered beside them. */}
-            <SortableColumnHeader field="firstName" label="First name" sort={sort} onSortChange={onSortChange} />
-            <SortableColumnHeader field="lastName" label="Last name" sort={sort} onSortChange={onSortChange} />
-            <SortableColumnHeader field="binding" label="Binding" sort={sort} onSortChange={onSortChange} />
             {columns.map((column) => {
               const folderSortActive = sort.field === "folder" && sort.folder === column.folder;
               return (
@@ -541,15 +536,6 @@ export default function RepoGradesGrid({
         </thead>
         <tbody role="rowgroup">
           {bodyRows.map((row) => {
-            // N2/N3 - the ONE derivation, read from `row.binding.student`/
-            // `row.binding.studentSortable` alone (repoGradeStudentName.ts),
-            // computed once per row and used by BOTH name cells below. The
-            // sort key (repoGradesRows.ts's sortFieldValue) calls the exact
-            // same function over the exact same two fields - never a second,
-            // independently-derived value - so the table can never sort by
-            // something other than what these two cells display (N5 item 16;
-            // repoGradesSliceB.guards.test.ts pins this with a canary).
-            const nameParts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
             // A5 - the row link points at the folder currently selected, on
             // the branch recorded when this repo was scanned (never a
             // literal like "main" - repo-grades.wiring.test.ts pins that the
@@ -589,25 +575,15 @@ export default function RepoGradesGrid({
                     row.repo
                   )}
                   {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
-                </td>
-                <td role="cell">{nameParts.firstName}</td>
-                <td role="cell">
-                  {repoGradeLastNameCellText(nameParts)}
-                  {/* N2 item 4 - a visible marker for a GUESSED split, with
-                      the correction instruction in a `title` tooltip rather
-                      than permanently expanding every row - "explicit"
-                      (comma), "canvas" (Canvas's own split) and "single"
-                      (last name honestly unknown) are never marked, only
-                      "derived" is. */}
-                  {nameParts.source === "derived" && (
-                    <span className={styles.nameDerivedMark} title={nameParts.correctionHint ?? undefined}>
-                      {" "}
-                      (derived)
-                    </span>
+                  {/* Binding is an exception affordance, not a column: only a
+                      repo whose binding is not confirmed needs it, and posting
+                      is gated on a confirmed binding. */}
+                  {row.binding.state !== "confirmed" && (
+                    <details>
+                      <summary>Bind student</summary>
+                      <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
+                    </details>
                   )}
-                </td>
-                <td role="cell">
-                  <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
                 </td>
                 {columns.map((column) => {
                   const cell = row.cells[column.folder];

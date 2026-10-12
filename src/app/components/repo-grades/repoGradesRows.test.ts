@@ -15,9 +15,6 @@ import {
   resolveRepoGradeSort,
   toggleRepoGradeSort,
   parseRepoGradeSortState,
-  repoGradeSortSelectValue,
-  parseRepoGradeSortSelectValue,
-  BINDING_STATE_SORT_PRIORITY,
   DEFAULT_REPO_GRADE_SORT,
   type RepoGradeColumn,
   type RepoGradeRow,
@@ -219,24 +216,6 @@ describe("sortRepoGradeRows", () => {
     expect(sorted.map((r) => r.repo)).toEqual(["org/b", "org/a"]);
   });
 
-  it("binding sort (asc) surfaces unbound, then ambiguous, then suggested, then confirmed", () => {
-    const rows = [row("org/c", "confirmed"), row("org/a", "unbound"), row("org/d", "suggested"), row("org/b", "ambiguous")];
-    const sorted = sortRepoGradeRows(rows, { field: "binding", direction: "asc" });
-    expect(sorted.map((r) => r.binding.state)).toEqual(["unbound", "ambiguous", "suggested", "confirmed"]);
-  });
-
-  it("binding sort (desc) reverses the priority order", () => {
-    const rows = [row("org/a", "unbound"), row("org/b", "confirmed")];
-    const sorted = sortRepoGradeRows(rows, { field: "binding", direction: "desc" });
-    expect(sorted.map((r) => r.binding.state)).toEqual(["confirmed", "unbound"]);
-  });
-
-  it("ties within the same binding state break by repo name", () => {
-    const rows = [row("org/z", "unbound"), row("org/a", "unbound")];
-    const sorted = sortRepoGradeRows(rows, { field: "binding", direction: "asc" });
-    expect(sorted.map((r) => r.repo)).toEqual(["org/a", "org/z"]);
-  });
-
   it("never mutates the input array", () => {
     const rows = [row("org/b", "confirmed"), row("org/a", "confirmed")];
     const original = [...rows];
@@ -244,15 +223,9 @@ describe("sortRepoGradeRows", () => {
     expect(rows).toEqual(original);
   });
 
-  it("BINDING_STATE_SORT_PRIORITY covers exactly the four binding states, each with a distinct rank", () => {
-    const values = Object.values(BINDING_STATE_SORT_PRIORITY);
-    expect(new Set(values).size).toBe(4);
-    expect(Object.keys(BINDING_STATE_SORT_PRIORITY).sort()).toEqual(["ambiguous", "confirmed", "suggested", "unbound"]);
-  });
-
   // -------------------------------------------------------------------------
   // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N4/N5 -
-  // the new sortable columns (firstName, lastName, folder) and the three
+  // the sortable folder column and the three
   // failure modes (N5 items 15-17) each get their own coverage below.
 
   function rowWithBinding(repo: string, binding: Partial<RepoBindingSuggestion>): RepoGradeRow {
@@ -266,44 +239,6 @@ describe("sortRepoGradeRows", () => {
       cells: {},
     };
   }
-
-  describe("firstName / lastName sort - reads deriveRepoGradeStudentName, blanks sort last", () => {
-    it("sorts by first name ascending", () => {
-      const rows = [
-        rowWithBinding("org/a", { student: "Zack Young" }),
-        rowWithBinding("org/b", { student: "Ana Ruiz" }),
-      ];
-      const sorted = sortRepoGradeRows(rows, { field: "firstName", direction: "asc" });
-      expect(sorted.map((r) => r.repo)).toEqual(["org/b", "org/a"]);
-    });
-
-    it("sorts by last name ascending, preferring studentSortable when present (N2 item 6)", () => {
-      const rows = [
-        rowWithBinding("org/a", { student: "Ana Ruiz" }), // derived last name "Ruiz"
-        rowWithBinding("org/b", { student: "Something Else", studentSortable: "Anderson, Bea" }), // canvas last name "Anderson"
-      ];
-      const sorted = sortRepoGradeRows(rows, { field: "lastName", direction: "asc" });
-      expect(sorted.map((r) => r.repo)).toEqual(["org/b", "org/a"]);
-    });
-
-    it("a row with no name (no roster match) sorts LAST on firstName, regardless of direction", () => {
-      const rows = [
-        rowWithBinding("org/a", { student: "Ana Ruiz" }),
-        rowWithBinding("org/b", { student: null }),
-      ];
-      expect(sortRepoGradeRows(rows, { field: "firstName", direction: "asc" }).map((r) => r.repo)).toEqual(["org/a", "org/b"]);
-      expect(sortRepoGradeRows(rows, { field: "firstName", direction: "desc" }).map((r) => r.repo)).toEqual(["org/a", "org/b"]);
-    });
-
-    it("a single-token name's UNKNOWN last name sorts LAST on lastName - never as a guessed value", () => {
-      const rows = [
-        rowWithBinding("org/a", { student: "Ana Ruiz" }), // has a last name
-        rowWithBinding("org/b", { student: "Cher" }), // single token - last name unknown
-      ];
-      expect(sortRepoGradeRows(rows, { field: "lastName", direction: "asc" }).map((r) => r.repo)).toEqual(["org/a", "org/b"]);
-      expect(sortRepoGradeRows(rows, { field: "lastName", direction: "desc" }).map((r) => r.repo)).toEqual(["org/a", "org/b"]);
-    });
-  });
 
   describe("folder sort - reads cellEdits, blanks/non-numeric/fraction scores all sort sensibly (N4 item 14)", () => {
     function withScore(repo: string, folder: string, score: string): { row: RepoGradeRow; edits: RepoGradeCellEditsByRepo } {
@@ -377,7 +312,7 @@ describe("sortRepoGradeRows", () => {
 
   describe("resolveRepoGradeSort - N5 item 17: a folder sort naming a column the current course lacks degrades to the default", () => {
     it("passes through every non-folder sort unchanged", () => {
-      const sort: RepoGradeSortState = { field: "binding", direction: "desc" };
+      const sort: RepoGradeSortState = { field: "repo", direction: "desc" };
       expect(resolveRepoGradeSort(sort, [])).toEqual(sort);
     });
 
@@ -401,7 +336,7 @@ describe("sortRepoGradeRows", () => {
 
   describe("toggleRepoGradeSort - the one decision a header click makes", () => {
     it("starts a new ascending sort when clicking a field that is not already active", () => {
-      expect(toggleRepoGradeSort(DEFAULT_REPO_GRADE_SORT, "binding")).toEqual({ field: "binding", direction: "asc" });
+      expect(toggleRepoGradeSort(DEFAULT_REPO_GRADE_SORT, "folder", "week-1")).toEqual({ field: "folder", folder: "week-1", direction: "asc" });
     });
 
     it("flips direction when clicking the already-active field", () => {
@@ -431,10 +366,23 @@ describe("sortRepoGradeRows", () => {
       expect(parseRepoGradeSortState("{not json")).toEqual(DEFAULT_REPO_GRADE_SORT);
     });
 
-    it("round-trips every plain field", () => {
-      for (const field of ["repo", "binding", "firstName", "lastName"] as const) {
-        const sort: RepoGradeSortState = { field, direction: "desc" };
-        expect(parseRepoGradeSortState(JSON.stringify(sort))).toEqual(sort);
+    it("round-trips the plain repo field", () => {
+      const sort: RepoGradeSortState = { field: "repo", direction: "desc" };
+      expect(parseRepoGradeSortState(JSON.stringify(sort))).toEqual(sort);
+    });
+
+    it("AC-4: the sort-field set is exactly repo and folder", () => {
+      const accepted = ["repo", "folder", "firstName", "lastName", "binding"].filter(
+        (field) => parseRepoGradeSortState(JSON.stringify({ field, folder: "week-1", direction: "asc" })) !== DEFAULT_REPO_GRADE_SORT
+      );
+      expect(accepted).toEqual(["repo", "folder"]);
+    });
+
+    it("AC-6: a stale persisted firstName / lastName / binding sort degrades to repo A-Z (an invisible column can never drive the order)", () => {
+      for (const field of ["firstName", "lastName", "binding"]) {
+        for (const direction of ["asc", "desc"]) {
+          expect(parseRepoGradeSortState(JSON.stringify({ field, direction }))).toEqual(DEFAULT_REPO_GRADE_SORT);
+        }
       }
     });
 
@@ -452,36 +400,6 @@ describe("sortRepoGradeRows", () => {
 
     it("degrades an unrecognised field to the default", () => {
       expect(parseRepoGradeSortState(JSON.stringify({ field: "score", direction: "asc" }))).toEqual(DEFAULT_REPO_GRADE_SORT);
-    });
-  });
-
-  describe("repoGradeSortSelectValue / parseRepoGradeSortSelectValue - N5 item 15: the Sort <select> and the header sort must agree", () => {
-    it("encodes every plain field as \"field:direction\"", () => {
-      expect(repoGradeSortSelectValue({ field: "repo", direction: "asc" })).toBe("repo:asc");
-      expect(repoGradeSortSelectValue({ field: "firstName", direction: "desc" })).toBe("firstName:desc");
-    });
-
-    it("encodes a folder sort (which the select cannot list) as the 'custom' placeholder - NOT as a mismatched, and NOT coerced to 'repo'", () => {
-      expect(repoGradeSortSelectValue({ field: "folder", folder: "week-1", direction: "asc" })).toBe("custom");
-    });
-
-    it("decodes every plain field back losslessly", () => {
-      expect(parseRepoGradeSortSelectValue("binding:desc")).toEqual({ field: "binding", direction: "desc" });
-      expect(parseRepoGradeSortSelectValue("lastName:asc")).toEqual({ field: "lastName", direction: "asc" });
-    });
-
-    it("the 'custom' placeholder decodes to the default rather than being selectable in practice (it is rendered disabled)", () => {
-      expect(parseRepoGradeSortSelectValue("custom")).toEqual(DEFAULT_REPO_GRADE_SORT);
-    });
-
-    it("canary for the exact N5 item 15 regression: an unrecognised value never silently becomes a DIFFERENT field's sort", () => {
-      // The old parseSortValue coerced anything unrecognised to "repo" - this
-      // proves the new decoder degrades to the DEFAULT instead, which for
-      // "repo:asc" happens to look the same, so this pins it against a value
-      // that would have exposed the old bug if "binding" had been the default.
-      const result = parseRepoGradeSortSelectValue("firstName-typo:asc");
-      expect(result).toEqual(DEFAULT_REPO_GRADE_SORT);
-      expect(result.field).not.toBe("firstName");
     });
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 // Repo Grades view - the stacked form controls (course picker, repo name
-// filter + refresh, sort, assignment instructions, rubric source + rubric)
+// filter + refresh, assignment instructions, rubric source + rubric)
 // that used to live inline in index.tsx's returned JSX. Pulled out ONLY
 // because index.tsx hit this codebase's 1000-line-per-file cap after gaining
 // a feature and had nowhere left to grow - not because these controls needed
@@ -33,12 +33,9 @@
 // exercised by any test, which is exactly why it must contain no logic worth
 // testing.
 import TextField from "@mui/material/TextField";
-import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
-import type { RepoGradeSortState } from "./repoGradesRows";
-import { parseRepoGradeSortSelectValue, repoGradeSortSelectValue } from "./repoGradesRows";
 import { buildCourseOptions } from "./repoGradesCoursePicker";
 import Typeahead from "../ui/Typeahead";
 import {
@@ -173,12 +170,10 @@ export interface RepoGradesControlsProps {
   orgPrefix: string;
   onOrgPrefixChange: (value: string) => void;
 
-  /** `model && model.rows.length > 0` from index.tsx - gates the sort
-   * control and the instructions/rubric pair, matching the two separate but
+  /** `model && model.rows.length > 0` from index.tsx - gates the
+   * instructions/rubric pair, matching the two separate but
    * identically-conditioned blocks index.tsx used to render. */
   showRowDependentFields: boolean;
-  sort: RepoGradeSortState;
-  onSortChange: (value: RepoGradeSortState) => void;
   instructions: string;
   onInstructionsChange: (value: string) => void;
 
@@ -297,8 +292,6 @@ export default function RepoGradesControls({
   orgPrefix,
   onOrgPrefixChange,
   showRowDependentFields,
-  sort,
-  onSortChange,
   instructions,
   onInstructionsChange,
   rubricSourceValue,
@@ -337,7 +330,7 @@ export default function RepoGradesControls({
     } | Rubric: ${rubricSource} | Code scoring: ${runCodeScoring ? "on (changes scores)" : "off"} | File-name deductions: ${applyNamingDeduction ? "on" : "off"}`;
   return (
     <>
-      {/* A7 W3 R4: the cheap pickers (course, repo filter, folder, sort) share one wrapping row so they sit together instead of stacking. */}
+      {/* A7 W3 R4: the cheap pickers (course, repo filter, folder) share one wrapping row so they sit together instead of stacking. */}
       <div className={styles.adaptRow}>
         <div className={styles.field} style={PICKER_FIELD_STYLE}>
           <label htmlFor="repo-grades-course">Course</label>
@@ -385,53 +378,6 @@ export default function RepoGradesControls({
         {/* The assignment-folder picker moved to the sticky working header
             (RepoGradesFolderPicker.tsx, via RepoGradesStickyHeader's
             folderControl slot). */}
-
-        {/* N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-
-            criteria.md) - every column is ALSO sortable via its own header
-            button now (RepoGradesGrid.tsx), including the per-folder score
-            columns this select cannot reasonably list. This control still
-            covers the four fields it always has, but its value and parsing now
-            both go through repoGradesRows.ts's repoGradeSortSelectValue/
-            parseRepoGradeSortSelectValue - N5 item 15: the OLD local
-            parseSortValue coerced any unrecognised field (e.g. a header-set
-            "firstName" or "folder" sort) to "repo", so simply rendering this
-            select with a mismatched value and then having the instructor
-            interact with it at all could silently snap the sort back to "repo".
-            repoGradeSortSelectValue instead resolves to the disabled "custom"
-            option below whenever the active sort is not one of these four, so
-            the select never shows (or can fire onChange from) a value that
-            does not match one of its own real options. */}
-        {showRowDependentFields && (
-          <div className={styles.field} style={PICKER_FIELD_STYLE}>
-            <label htmlFor="repo-grades-sort">Sort</label>
-            <TextField
-              select
-              size="small"
-              fullWidth
-              id="repo-grades-sort"
-              value={repoGradeSortSelectValue(sort)}
-              onChange={(e) => onSortChange(parseRepoGradeSortSelectValue(e.target.value))}
-            >
-              <MenuItem value="repo:asc">Repo name (A to Z)</MenuItem>
-              <MenuItem value="repo:desc">Repo name (Z to A)</MenuItem>
-              <MenuItem value="binding:asc">Needs attention first</MenuItem>
-              <MenuItem value="binding:desc">Confirmed first</MenuItem>
-              <MenuItem value="firstName:asc">First name (A to Z)</MenuItem>
-              <MenuItem value="firstName:desc">First name (Z to A)</MenuItem>
-              <MenuItem value="lastName:asc">Last name (A to Z)</MenuItem>
-              <MenuItem value="lastName:desc">Last name (Z to A)</MenuItem>
-              {/* Rendered only while it is the active value (repoGradeSortSelectValue
-                  only ever returns "custom" for a folder-column sort) - disabled
-                  so it can never itself be chosen, matching this file's own
-                  header comment above. */}
-              {repoGradeSortSelectValue(sort) === "custom" && (
-                <MenuItem value="custom" disabled>
-                  Sorted by a folder column (see the table header)
-                </MenuItem>
-              )}
-            </TextField>
-          </div>
-        )}
       </div>
 
       {showRowDependentFields && (

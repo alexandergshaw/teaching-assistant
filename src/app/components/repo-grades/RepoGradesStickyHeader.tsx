@@ -71,7 +71,7 @@ export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gr
               type="search"
               className={styles.headerInput}
               aria-label="Search repositories"
-              placeholder="Search repo, student or binding"
+              placeholder="Search repos or students"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
             />

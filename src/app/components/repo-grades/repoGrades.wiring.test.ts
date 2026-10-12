@@ -816,12 +816,12 @@ describe("A7 W3 (retired by REPO-GRADES-HEADER-SETUP-VISUAL C1): the sticky run 
     expect(indexText).toContain("onAssignmentChange={handleAssignmentChange}");
   });
 
-  it("W3-R7: the course, repo-filter and sort pickers share ONE existing-class wrapper row", () => {
+  it("W3-R7: the course and repo-filter pickers share ONE existing-class wrapper row", () => {
     const wrapperIdx = controlsText.indexOf("<div className={styles.adaptRow}>");
     expect(wrapperIdx).toBeGreaterThan(-1);
     const detailsIdx = controlsText.indexOf("<details", wrapperIdx);
     expect(detailsIdx).toBeGreaterThan(wrapperIdx);
-    for (const id of ["repo-grades-course", "repo-grades-org-prefix", "repo-grades-sort"]) {
+    for (const id of ["repo-grades-course", "repo-grades-org-prefix"]) {
       const at = controlsText.indexOf(`htmlFor="${id}"`);
       expect(at).toBeGreaterThan(wrapperIdx);
       expect(at).toBeLessThan(detailsIdx);

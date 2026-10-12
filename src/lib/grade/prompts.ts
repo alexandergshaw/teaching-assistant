@@ -103,7 +103,11 @@ export function buildSystemPrompt(
   /** Repo-page naming-deduction toggle. True (the default) emits the
    *  required-file-name deduction rule exactly as before; false omits it and
    *  emits a directive that countermands it. */
-  applyNamingDeduction: boolean = true
+  applyNamingDeduction: boolean = true,
+  /** Grading-chat length deduction (docs/grading-chat-deduction-controls-scope.md
+   *  PART B). Trailing 10th positional param, default false: appends nothing,
+   *  so every existing call is byte-identical. True appends the length rule. */
+  applyLengthDeduction: boolean = false
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -238,8 +242,15 @@ ${resubmissionRule}
   if (harshnessDirective) parts.push(harshnessDirective);
   const lengthDirective = feedbackLengthDirective(feedbackWordTarget);
   if (lengthDirective) parts.push(lengthDirective);
+  if (applyLengthDeduction) parts.push(LENGTH_DEDUCTION_DIRECTIVE);
   return parts.join("\n\n");
 }
+
+/** Length-deduction rule (too-short reading; owner may refine, residual
+ *  R-GCDC-2). The ONE swappable wording for the grading-chat "Deduct for length"
+ *  toggle. Authored without long or short dashes. */
+export const LENGTH_DEDUCTION_DIRECTIVE =
+  "Length: deduct points when the submission is substantially shorter than the assignment appears to require, for example a one-line answer to an essay prompt or a response that skips most of what was asked for. Name the shortfall in the feedback. Do not deduct for length when the submission is complete for what the assignment asks.";
 
 /** Pure word-count budget appended to the grading prompt. Returns "" for an
  *  unset, non-integer or out-of-range target so the default prompt is

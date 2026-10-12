@@ -134,6 +134,26 @@ function persistApplyNamingDeduction(on: boolean) {
   }
 }
 
+// Length deduction (docs/grading-chat-deduction-controls-scope.md PART B):
+// default OFF; only an explicit stored "true" turns it on.
+const APPLY_LENGTH_DEDUCTION_STORAGE_KEY = "ta-grading-chat-apply-length-deduction";
+
+function loadApplyLengthDeduction(): boolean {
+  try {
+    return localStorage.getItem(APPLY_LENGTH_DEDUCTION_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistApplyLengthDeduction(on: boolean) {
+  try {
+    localStorage.setItem(APPLY_LENGTH_DEDUCTION_STORAGE_KEY, on ? "true" : "false");
+  } catch {
+    // ignore
+  }
+}
+
 export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
@@ -192,6 +212,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [harshness, setHarshness] = useState<GradeHarshness>("balanced");
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
+  const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
@@ -237,6 +258,22 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadApplyLengthDeduction());
+      if (!cancelled) setApplyLengthDeduction(stored);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const changeApplyLengthDeduction = (next: boolean) => {
+    setApplyLengthDeduction(next);
+    persistApplyLengthDeduction(next);
+  };
 
   const changeApplyNamingDeduction = (next: boolean) => {
     setApplyNamingDeduction(next);
@@ -345,6 +382,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       harshness,
       feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText),
       applyNamingDeduction,
+      applyLengthDeduction,
     });
     if (result.kind === "refused") {
       sessionRefusalRef.current = result.reason;
@@ -601,6 +639,18 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
             />
           }
           label="Deduct for wrong file names"
+        />
+        <FormControlLabel
+          control={
+            <Checkbox
+              id="grading-chat-apply-length-deduction"
+              size="small"
+              checked={applyLengthDeduction}
+              onChange={(event) => changeApplyLengthDeduction(event.target.checked)}
+              disabled={sessionReady}
+            />
+          }
+          label="Deduct for length"
         />
         {!sessionReady && (instructions !== "" || rubric !== "") && (
           <Button variant="text" size="small" aria-label="Clear all setup fields" onClick={handleClearAll}>

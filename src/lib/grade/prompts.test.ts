@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { buildSubmittedFileNamesBlock, buildSystemPrompt, SUBMISSION_FRAMING_HEADER } from "./prompts";
+import { buildSubmittedFileNamesBlock, buildSystemPrompt, LENGTH_DEDUCTION_DIRECTIVE, SUBMISSION_FRAMING_HEADER } from "./prompts";
 import type { SubmittedFileInfo } from "./types";
 
 // A second live grading defect: the grader was told only the merged submission
@@ -281,5 +283,49 @@ describe("buildSystemPrompt - naming deduction toggle (applyNamingDeduction)", (
     expect(buildSystemPrompt("I.", "R.", [], "some", "in-overall-comment", "all", "balanced", undefined, true)).toBe(
       buildSystemPrompt("I.", "R.")
     );
+  });
+});
+
+describe("buildSystemPrompt - length deduction toggle (applyLengthDeduction, 10th positional)", () => {
+  const ANCHOR = "substantially shorter than the assignment appears to require";
+  const NAMING_RULE_ANCHOR = "required file names for the submission";
+  const NAMING_OFF_ANCHOR = "Do not treat file names";
+  const call = (naming: boolean, length: boolean | undefined) =>
+    buildSystemPrompt("I.", "R.", [], "some", "in-overall-comment", "all", "balanced", undefined, naming, length);
+
+  it("the directive constant carries the anchor", () => {
+    expect(LENGTH_DEDUCTION_DIRECTIVE).toContain(ANCHOR);
+  });
+
+  it("false is byte-identical to the default call and carries no length directive", () => {
+    expect(call(true, false)).toBe(buildSystemPrompt("I.", "R."));
+    expect(call(true, undefined)).toBe(buildSystemPrompt("I.", "R."));
+    expect(buildSystemPrompt("I.", "R.")).not.toContain(ANCHOR);
+  });
+
+  it("true appends the directive as the trailing part and leaves the rest unchanged", () => {
+    const on = call(true, true);
+    expect(on).toContain(ANCHOR);
+    expect(on).toBe(`${call(true, false)}
+
+${LENGTH_DEDUCTION_DIRECTIVE}`);
+  });
+
+  it("naming and length flags are independent (a transposed call site flips one of these)", () => {
+    const lengthOnly = call(false, true);
+    expect(lengthOnly).toContain(ANCHOR);
+    expect(lengthOnly).toContain(NAMING_OFF_ANCHOR);
+    expect(lengthOnly).not.toContain(NAMING_RULE_ANCHOR);
+    const namingOnly = call(true, false);
+    expect(namingOnly).not.toContain(ANCHOR);
+    expect(namingOnly).toContain(NAMING_RULE_ANCHOR);
+    expect(namingOnly).toBe(buildSystemPrompt("I.", "R."));
+  });
+
+  it("the engine resolves an unset applyLengthDeduction to false and passes it after namingDeduction at all four calls", () => {
+    const engine = readFileSync(join(process.cwd(), "src/lib/grade/engine.ts"), "utf8");
+    expect(engine).toContain("options.applyLengthDeduction ?? false");
+    const sites = engine.match(/feedbackWordTarget, namingDeduction, lengthDeduction\)/g) ?? [];
+    expect(sites).toHaveLength(4);
   });
 });

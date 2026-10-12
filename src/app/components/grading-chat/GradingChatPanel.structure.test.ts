@@ -473,6 +473,7 @@ describe("GradingChatPanel - RG-CLEANUP: no stale legacy seed on the non-Canvas 
       "localStorage.getItem(HARSHNESS_STORAGE_KEY)",
       "localStorage.getItem(FEEDBACK_LENGTH_STORAGE_KEY)",
       "localStorage.getItem(APPLY_NAMING_DEDUCTION_STORAGE_KEY)",
+      "localStorage.getItem(APPLY_LENGTH_DEDUCTION_STORAGE_KEY)",
     ]);
   });
 
@@ -704,6 +705,42 @@ describe("GradingChatPanel - deduction controls W1: file-name deduction control 
     const driver = withoutLineComments(read(DRIVER));
     expect(driver).toContain("...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {})");
     expect(driver).not.toMatch(/^\s*applyNamingDeduction(:|,)/m);
+  });
+});
+
+describe("GradingChatPanel - deduction controls W2: length deduction control and wire", () => {
+  it("renders a Deduct for length checkbox, checked from state, locked after the session starts", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf('label="Deduct for length"');
+    expect(start).toBeGreaterThan(-1);
+    const open = source.lastIndexOf("<FormControlLabel", start);
+    const control = source.slice(open, start);
+    expect(control).toContain("<Checkbox");
+    expect(control).toContain("checked={applyLengthDeduction}");
+    expect(control).toContain("disabled={sessionReady}");
+  });
+
+  it("persists under its own key, defaults OFF, and restores in a mount effect", () => {
+    const source = withoutLineComments(read(PANEL));
+    expect(source).toContain('APPLY_LENGTH_DEDUCTION_STORAGE_KEY = "ta-grading-chat-apply-length-deduction"');
+    expect(source).toContain("localStorage.setItem(APPLY_LENGTH_DEDUCTION_STORAGE_KEY");
+    expect(source).toContain("[applyLengthDeduction, setApplyLengthDeduction] = useState(false)");
+    expect(source).toContain("loadApplyLengthDeduction()");
+  });
+
+  it("captures the flag at beginSession (not per submit)", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf("driver.beginSession(");
+    const call = source.slice(start, source.indexOf("});", start));
+    expect(call).toMatch(/\bapplyLengthDeduction\b/);
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toMatch(/applyLengthDeductionRef\.current\s*=\s*sessionParams\.applyLengthDeduction\s*\?\?\s*false/);
+  });
+
+  it("the driver conditional-spreads the flag only when ON, default wire byte-identical", () => {
+    const driver = withoutLineComments(read(DRIVER));
+    expect(driver).toContain("...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {})");
+    expect(driver).not.toMatch(/^\s*applyLengthDeduction(:|,)/m);
   });
 });
 

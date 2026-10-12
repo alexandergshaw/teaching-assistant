@@ -80,6 +80,7 @@ interface GradeRunItemRequestBody {
   harshness?: unknown;
   feedbackWordTarget?: unknown;
   applyNamingDeduction?: unknown;
+  applyLengthDeduction?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,6 +135,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   harshness: GradeHarshness;
   feedbackWordTarget: number | undefined;
   applyNamingDeduction: boolean;
+  applyLengthDeduction: boolean;
 } | null {
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
@@ -196,6 +198,9 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     // Default-safe, default ON: only a literal false turns the file-name
     // deduction off; an absent or invalid value keeps today's behavior.
     applyNamingDeduction: body.applyNamingDeduction !== false,
+    // Default-safe, default OFF: only a literal true turns the length deduction
+    // on; an absent or invalid value keeps today's prompt.
+    applyLengthDeduction: body.applyLengthDeduction === true,
   };
 }
 
@@ -256,7 +261,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction } = parsed;
 
   // VIDEO-GRADING W3 (T11): dark behind VIDEO_GRADING_ENABLED. With the flag on,
   // a videoRef must name an object in THIS caller's own grading-uploads
@@ -293,7 +298,7 @@ export async function POST(req: NextRequest) {
       (async () => {
         const resolved = await resolveEntryLinks(entry);
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
@@ -305,7 +310,7 @@ export async function POST(req: NextRequest) {
           if (!videoOutcome.ok) return { videoFailure: { failure: videoOutcome.failure, message: videoOutcome.message } };
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
-        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction });
+        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs

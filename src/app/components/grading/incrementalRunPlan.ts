@@ -71,6 +71,8 @@ export interface GradeRunItemRequestBody {
   readonly feedbackWordTarget?: number;
   /** File-name deduction; type-only here, sent only as false (default on), buildRunItemRequests leaves it unset. */
   readonly applyNamingDeduction?: boolean;
+  /** Length deduction; type-only here, sent only as true (default off), buildRunItemRequests leaves it unset. */
+  readonly applyLengthDeduction?: boolean;
 }
 
 export interface ArrivedItemResult {

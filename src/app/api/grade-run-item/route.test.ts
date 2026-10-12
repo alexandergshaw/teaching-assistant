@@ -311,6 +311,36 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     });
   });
 
+  describe("applyLengthDeduction parse is default-safe, default OFF (deduction controls wave 2)", () => {
+    async function lengthReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
+      vi.clearAllMocks();
+      mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
+      mockRaceWithTimeout.mockImplementationOnce(async (work) => ({ kind: "settled", value: await work } as never));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await POST(jsonRequest({ ...VALID_BODY, ...extra }) as any);
+      const options = mockGradeEntries.mock.calls[0][5];
+      return options?.applyLengthDeduction;
+    }
+
+    it("resolves an absent value to false", async () => {
+      expect(await lengthReachedEngine({})).toBe(false);
+    });
+
+    it("resolves an invalid value (string, number, null) to false", async () => {
+      for (const bad of ["true", 1, null, "yes"]) {
+        expect(await lengthReachedEngine({ applyLengthDeduction: bad })).toBe(false);
+      }
+    });
+
+    it("passes an explicit true through to the engine options", async () => {
+      expect(await lengthReachedEngine({ applyLengthDeduction: true })).toBe(true);
+    });
+
+    it("passes an explicit false through", async () => {
+      expect(await lengthReachedEngine({ applyLengthDeduction: false })).toBe(false);
+    });
+  });
+
   describe("feedbackWordTarget parse is default-safe (feedback length wave 1)", () => {
     async function targetReachedEngine(extra: Record<string, unknown>): Promise<unknown> {
       vi.clearAllMocks();

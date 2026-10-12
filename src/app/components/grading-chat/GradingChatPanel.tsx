@@ -26,7 +26,7 @@ import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
-import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
+import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView, type LedgerView } from "./ingestLedger";
 import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
@@ -80,6 +80,7 @@ const HARSHNESS_STORAGE_KEY = "ta-grading-chat-harshness";
 // Keys for the shared copiedKey slot owned by page.tsx; not storage keys.
 const COPY_KEY_INSTRUCTIONS = "chat-setup-instructions";
 const COPY_KEY_RUBRIC = "chat-setup-rubric";
+const COPY_KEY_DIAGNOSTICS = "chat-run-diagnostics";
 
 function loadHarshness(): GradeHarshness {
   try {
@@ -188,6 +189,55 @@ function LedgerNotice({ view }: { view: LedgerView }) {
         <p className={styles.ghMeta}>Some students in the zip are not accounted for. Re-upload the zip to check.</p>
       )}
     </div>
+  );
+}
+
+// WD run-diagnostics panel. Reads the hook's `diagnostics` view model. The copied
+// text uses rowLabel ("Row N"), never the student label (the label is page-only).
+const diagVal = (d: ItemDiagnostic, key: string): string => String(d.detail[key] ?? "-");
+const diagSec = (d: ItemDiagnostic, key: string): string => (typeof d.detail[key] === "number" ? ((d.detail[key] as number) / 1000).toFixed(1) : "-");
+function summarizeDiagnostics(items: readonly ItemDiagnostic[]): string {
+  const graded = items.filter((d) => d.outcome === "graded").length;
+  const secs = items.map((d) => d.detail.serverMs).filter((v): v is number => typeof v === "number");
+  const avg = secs.length > 0 ? ((secs.reduce((a, b) => a + b, 0) / secs.length) / 1000).toFixed(1) : "-";
+  return `Run diagnostics - ${graded} graded, ${items.length - graded} needs-retry, avg ${avg}s`;
+}
+function formatDiagnosticsText(items: readonly ItemDiagnostic[]): string {
+  return items
+    .map((d) => `${d.rowLabel}: ${d.outcome}, model ${diagVal(d, "model")}, server ${diagSec(d, "serverMs")}s, model ${diagSec(d, "modelMs")}s, tokens ${diagVal(d, "promptTokens")}/${diagVal(d, "outputTokens")}, finish ${diagVal(d, "finishReason")}, failure ${diagVal(d, "failure")}, areas ${diagVal(d, "areas")}/${diagVal(d, "areasExpected")}, praise ${diagVal(d, "hasPraise")}, advice ${diagVal(d, "hasAdvice")}, truncated ${diagVal(d, "truncated")}, link ${diagVal(d, "link")}, code ${diagVal(d, "code")}, files ${diagVal(d, "files")}, video ${diagVal(d, "video")}`)
+    .join(String.fromCharCode(10));
+}
+const DIAG_COLUMNS: readonly (readonly [string, string])[] = [
+  ["Model", "model"], ["Tokens in", "promptTokens"], ["Tokens out", "outputTokens"], ["Finish", "finishReason"], ["Failure", "failure"],
+  ["Areas", "areas"], ["Expected", "areasExpected"], ["Praise", "hasPraise"], ["Advice", "hasAdvice"], ["Truncated", "truncated"],
+  ["Link", "link"], ["Code", "code"], ["Files", "files"], ["Video", "video"],
+];
+function RunDiagnostics({ items, copiedKey, onCopy }: { items: readonly ItemDiagnostic[]; copiedKey: string | null; onCopy: GradingChatPanelProps["onCopy"] }) {
+  if (items.length === 0) return null;
+  return (
+    <details className={styles.generatedRubricCard}>
+      <summary>{summarizeDiagnostics(items)}</summary>
+      <p className={styles.ghMeta}>Times are in seconds. Copied text uses row numbers, not student names.</p>
+      <Button variant="outlined" size="small" onClick={() => void onCopy(COPY_KEY_DIAGNOSTICS, formatDiagnosticsText(items))}>
+        {copiedKey === COPY_KEY_DIAGNOSTICS ? "Copied" : "Copy diagnostics"}
+      </Button>
+      <table className={styles.generatedRubricTable}>
+        <thead>
+          <tr>
+            <th>Row</th><th>Outcome</th><th>Server s</th><th>Model s</th>
+            {DIAG_COLUMNS.map(([title]) => <th key={title}>{title}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((d, i) => (
+            <tr key={`${d.sourceIndex}-${i}`}>
+              <td>{d.rowLabel}</td><td>{d.outcome}</td><td>{diagSec(d, "serverMs")}</td><td>{diagSec(d, "modelMs")}</td>
+              {DIAG_COLUMNS.map(([title, key]) => <td key={title}>{diagVal(d, key)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
 
@@ -756,6 +806,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           regradingStudents={driver.pendingStudents}
           unresolvedStudents={driver.unresolvedStudents}
         />
+        <RunDiagnostics items={driver.diagnostics} copiedKey={copiedKey} onCopy={onCopy} />
         </div>
       ) : (
         <p className={chatStyles.streamEmpty}>Set instructions and a rubric above, then drop in your first submission below.</p>

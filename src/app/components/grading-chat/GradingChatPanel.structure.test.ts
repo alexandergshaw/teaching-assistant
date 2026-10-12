@@ -889,3 +889,51 @@ describe("GradingChatPanel - recording analyzing indicator", () => {
     expect(d).toBeGreaterThan(c);
   });
 });
+
+// CHAT-GRADING-DIAGNOSTICS WD (docs/chat-grading-detailed-diagnostics-scope.md,
+// AC-16/AC-18). Source-text pins only: nothing renders under vitest, so the
+// rendered panel is an OWNER walk.
+describe("GradingChatPanel - WD run-diagnostics panel (reachability and copy safety)", () => {
+  const source = () => withoutLineComments(read(PANEL));
+  const fn = (name: string) => {
+    const src = source();
+    const start = src.indexOf(`function ${name}`);
+    expect(start, name).toBeGreaterThan(-1);
+    return src.slice(start, src.indexOf("\n}\n", start));
+  };
+
+  it("mounts RunDiagnostics with driver.diagnostics inside the results stream, after GradingResults", () => {
+    const src = source();
+    const mount = src.indexOf("<RunDiagnostics");
+    expect(mount).toBeGreaterThan(src.indexOf("<GradingResults"));
+    expect(mount).toBeLessThan(src.indexOf("chatStyles.stickyComposer"));
+    expect(src.slice(mount, src.indexOf("/>", mount))).toContain("items={driver.diagnostics}");
+  });
+
+  it("renders a collapsed native <details> with a summary line, reusing the existing classes", () => {
+    const body = fn("RunDiagnostics");
+    expect(body).toContain("<details className={styles.generatedRubricCard}>");
+    expect(body).not.toMatch(/<details[^>]*\sopen/);
+    expect(body).toContain("<summary>{summarizeDiagnostics(items)}</summary>");
+    expect(body).toContain("styles.generatedRubricTable");
+    expect(body).toContain("styles.ghMeta");
+    expect(fn("summarizeDiagnostics")).toMatch(/graded, .*needs-retry, avg/);
+  });
+
+  it("copies the text built by formatDiagnosticsText through onCopy", () => {
+    expect(fn("RunDiagnostics")).toMatch(/onCopy\(COPY_KEY_DIAGNOSTICS,\s*formatDiagnosticsText\(items\)\)/);
+  });
+
+  it("the copy text uses rowLabel and never the student label", () => {
+    const body = fn("formatDiagnosticsText");
+    expect(body).toContain("d.rowLabel");
+    expect(body).not.toMatch(/\.label\b/);
+    expect(body).not.toMatch(/\.student\b/);
+  });
+
+  it("adds no storage: the panel code never touches localStorage and the key is a copy slot, not a ta- key", () => {
+    const panel = fn("RunDiagnostics") + fn("summarizeDiagnostics") + fn("formatDiagnosticsText");
+    expect(panel).not.toContain("localStorage");
+    expect(source()).toContain('COPY_KEY_DIAGNOSTICS = "chat-run-diagnostics"');
+  });
+});

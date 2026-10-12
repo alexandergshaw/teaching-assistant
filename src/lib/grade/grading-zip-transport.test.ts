@@ -7,6 +7,8 @@ import {
   GRADING_ZIP_MAX_BYTES,
   GRADING_ZIP_STORAGE_INGEST_ENABLED,
   chooseZipTransport,
+  chooseSingleFileTransport,
+  SINGLE_FILE_MAX_BYTES,
   deleteGradingZipBestEffort,
   uploadGradingZip,
   type GradingZipStorage,
@@ -86,5 +88,40 @@ describe("deleteGradingZipBestEffort", () => {
       }),
     };
     await expect(deleteGradingZipBestEffort(storage, "user-1/grading-uploads/abc.zip")).resolves.toBeUndefined();
+  });
+});
+
+describe("chooseSingleFileTransport (large-single-file W1)", () => {
+  it("the single-file ceiling is the zip ceiling (one bucket limit covers both)", () => {
+    expect(SINGLE_FILE_MAX_BYTES).toBe(GRADING_ZIP_MAX_BYTES);
+    expect(SINGLE_FILE_MAX_BYTES).toBe(110_100_480);
+  });
+
+  it("a small docx under the wire budget stays on the body path", () => {
+    expect(chooseSingleFileTransport({ name: "a.docx", size: 1 * MB }).kind).toBe("body");
+    expect(chooseSingleFileTransport({ name: "a.docx", size: 2.5 * MB }).kind).toBe("body");
+  });
+
+  it("an over-budget office or text file goes to storage (the owner's 6 MiB docx)", () => {
+    expect(chooseSingleFileTransport({ name: "SecurityUpgradePaper.docx", size: 6_354_708 }).kind).toBe("storage");
+    expect(chooseSingleFileTransport({ name: "DECK.PPTX", size: 20 * MB }).kind).toBe("storage");
+    expect(chooseSingleFileTransport({ name: "notes.txt", size: 5 * MB }).kind).toBe("storage");
+  });
+
+  it("an over-ceiling file is refused with a worded message", () => {
+    const t = chooseSingleFileTransport({ name: "a.docx", size: SINGLE_FILE_MAX_BYTES + 1 });
+    expect(t.kind).toBe("refused");
+    if (t.kind === "refused") expect(t.message).toContain("Nothing was uploaded");
+    expect(chooseSingleFileTransport({ name: "a.docx", size: SINGLE_FILE_MAX_BYTES }).kind).toBe("storage");
+  });
+
+  it("pdf, images and unknown kinds over budget keep the body path (their own refusal)", () => {
+    for (const name of ["a.pdf", "a.png", "a.exe", "noext"]) {
+      expect(chooseSingleFileTransport({ name, size: 20 * MB }).kind).toBe("body");
+    }
+  });
+
+  it("ingest disabled over budget keeps the body path", () => {
+    expect(chooseSingleFileTransport({ name: "a.docx", size: 20 * MB }, false).kind).toBe("body");
   });
 });

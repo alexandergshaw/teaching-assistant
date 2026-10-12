@@ -115,3 +115,29 @@ describe("buildSingleFileEntry (W1-2)", () => {
     expect(entry).toBeNull();
   });
 });
+
+describe("buildSingleFileEntry textOnly option (large-single-file W1)", () => {
+  it("DEFAULT shape keeps rawBase64 for a small docx", async () => {
+    const buffer = await fakeDocxBuffer("Small paper.");
+    const entry = await buildSingleFileEntry("essay.docx", buffer);
+    expect(entry!.submittedFiles[0].rawBase64).toBe(buffer.toString("base64"));
+    const explicitOff = await buildSingleFileEntry("essay.docx", buffer, undefined, false, { textOnly: false });
+    expect(explicitOff).toEqual(entry);
+  });
+
+  it("textOnly omits rawBase64 but keeps the extracted text, preview and mime type", async () => {
+    const buffer = await fakeDocxBuffer("Large paper text.");
+    const entry = await buildSingleFileEntry("essay.docx", buffer, undefined, false, { textOnly: true });
+    expect(entry).not.toBeNull();
+    expect(entry!.content).toContain("Large paper text.");
+    expect(entry!.submittedFiles[0]).not.toHaveProperty("rawBase64");
+    expect(entry!.submittedFiles[0].previewContent).toContain("Large paper text.");
+    expect(entry!.submittedFiles[0].mimeType).toContain("wordprocessingml");
+  });
+
+  it("textOnly also omits rawBase64 for plain text, and refuses an image (no text form)", async () => {
+    const txt = await buildSingleFileEntry("a.txt", Buffer.from("hello"), undefined, false, { textOnly: true });
+    expect(txt!.submittedFiles[0]).not.toHaveProperty("rawBase64");
+    expect(await buildSingleFileEntry("a.png", Buffer.from("x"), undefined, false, { textOnly: true })).toBeNull();
+  });
+});

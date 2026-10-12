@@ -150,13 +150,23 @@ export async function buildSingleFileEntry(
   buffer: Buffer,
   provider?: LlmProvider,
   /** True when the user typed a label: the label wins, so no inference runs. */
-  labelled: boolean = false
+  labelled: boolean = false,
+  /**
+   * LARGE-SINGLE-FILE W1: when `textOnly` is true the text/document entry
+   * carries NO `rawBase64` (the extracted text is graded instead of the source
+   * container), so a large office file clears the per-item wire budget. The
+   * DEFAULT (omitted) keeps today's rawBase64 behavior byte-for-byte. Images
+   * have no text form, so a text-only image request returns null.
+   */
+  options: { readonly textOnly?: boolean } = {}
 ): Promise<StudentSubmissionEntry | null> {
+  const textOnly = options.textOnly === true;
   const extension = getFileExtension(name);
   const stem = studentLabelFromFileName(name);
   const needsName = !labelled && isUnusableStudentName(stem);
 
   if (IMAGE_EXTENSIONS.has(extension)) {
+    if (textOnly) return null;
     const mimeType = getMimeType(extension);
     const placeholder = `[Image file: ${name}]`;
     return {
@@ -215,7 +225,7 @@ export async function buildSingleFileEntry(
           extension,
           previewContent: preview.text,
           previewTruncated: preview.truncated,
-          rawBase64: buffer.toString("base64"),
+          ...(textOnly ? {} : { rawBase64: buffer.toString("base64") }),
           mimeType: getMimeType(extension),
         },
       ],

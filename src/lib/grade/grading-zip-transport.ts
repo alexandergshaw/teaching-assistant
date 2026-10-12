@@ -64,6 +64,55 @@ export function chooseZipTransport(
   return { kind: "storage" };
 }
 
+/** LARGE-SINGLE-FILE W1: the stored-object ceiling for one large single file.
+ * Deliberately the zip ceiling, so the Storage bucket limit already raised for
+ * zips covers it and the server route's stat gate shares ONE number. */
+export const SINGLE_FILE_MAX_BYTES = GRADING_ZIP_MAX_BYTES;
+
+/** Extensions the large-single-file lane accepts: office documents and plain
+ * text only. PDF and images are excluded on purpose (the grader needs their
+ * bytes inline, so a text-only entry is not an equivalent). A subset of the
+ * server's TEXT/DOCUMENT sets, pinned by a test because this leaf must stay
+ * client-importable and cannot import the server-only extractor. */
+export const SINGLE_FILE_STORAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "docx", "doc", "pptx", "ppt", "xlsx", "xls", "odt", "odp", "ods", "rtf",
+  "txt", "md", "markdown", "csv",
+]);
+
+/** Lower-cased extension of a file name, or "" when it has none. */
+export function singleFileExtension(name: string): string {
+  const base = name.trim().split(/[\\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  return dot < 0 ? "" : base.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * Picks the transport for one picked NON-zip, NON-video file (the caller
+ * consults the zip and video siblings first). Within the wire budget -> body
+ * (unchanged, keeps rawBase64 and images). Over the budget, an office/text
+ * kind, ingest enabled, and within SINGLE_FILE_MAX_BYTES -> storage. Over the
+ * ceiling -> a worded refusal. Any other over-budget kind (pdf, image, unknown)
+ * or ingest disabled -> body, so the caller's existing preflight produces its
+ * own refusal exactly as before.
+ */
+export function chooseSingleFileTransport(
+  file: { readonly name: string; readonly size: number },
+  ingestEnabled: boolean = GRADING_ZIP_STORAGE_INGEST_ENABLED
+): ZipTransport {
+  if (checkFileWireBudget(file.size, "This file").ok) return { kind: "body" };
+  if (!ingestEnabled) return { kind: "body" };
+  if (!SINGLE_FILE_STORAGE_EXTENSIONS.has(singleFileExtension(file.name))) return { kind: "body" };
+  if (file.size > SINGLE_FILE_MAX_BYTES) {
+    return {
+      kind: "refused",
+      message:
+        `This file is ${formatMB(file.size)}, over the ${formatMB(SINGLE_FILE_MAX_BYTES)} limit. ` +
+        "Nothing was uploaded. Reduce the file size, then try again.",
+    };
+  }
+  return { kind: "storage" };
+}
+
 /** The narrow slice of a Supabase Storage bucket client this leaf uses. */
 export interface GradingZipBucket {
   upload(

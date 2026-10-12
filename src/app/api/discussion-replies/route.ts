@@ -28,7 +28,7 @@ type RequestBody =
   | { op: "draft"; args: DraftArgs }
   | { op: "gather"; args: GatherArgs };
 
-// The wording carries "timed out" on purpose: chatSeamDiagnostic.ts's
+// The wording carries "timed out" on purpose: the client's chat-seam failure
 // classifier matches /time(d)?[ -]?out|deadline|aborted/i. withDeadline's own
 // "did not finish within N seconds" wording matches none of those.
 function timeoutMessage(op: RequestBody["op"]): string {

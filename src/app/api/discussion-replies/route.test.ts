@@ -36,7 +36,6 @@ import { getWritingStyleBlock } from "@/app/actions/shared";
 import { findResourceLinksForConceptsAction } from "@/app/actions/learning-resource-links";
 import { callLlm } from "@/lib/llm";
 import { DEFAULT_REPLY_COMPOSITION } from "@/lib/discussion-reply-prompt";
-import { classifyChatSeamFailure } from "@/app/components/grading-chat/chatSeamDiagnostic";
 import { POST } from "./route";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
@@ -99,7 +98,9 @@ describe("POST /api/discussion-replies", () => {
     expect(res.status).toBe(504);
     const json = await res.json();
     expect(json.error).toMatch(/timed out/i);
-    expect(classifyChatSeamFailure(json.error)).toBe("timed out");
+    // The client classifier's timed-out pattern, restated so this server test
+    // does not import the browser-only module.
+    expect(json.error).toMatch(/time(d)?[ -]?out|deadline|aborted/i);
     expect(callLlm).toHaveBeenCalledTimes(1);
   });
 
@@ -115,7 +116,7 @@ describe("POST /api/discussion-replies", () => {
     expect(res.status).toBe(504);
     const json = await res.json();
     expect(json.error).toMatch(/timed out/i);
-    expect(classifyChatSeamFailure(json.error)).toBe("timed out");
+    expect(json.error).toMatch(/time(d)?[ -]?out|deadline|aborted/i);
     expect(callLlm).toHaveBeenCalledTimes(0);
   });
 

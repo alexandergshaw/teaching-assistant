@@ -12,11 +12,61 @@ vi.mock("@/lib/llm", async () => {
   return { ...actual, callLlm: vi.fn() };
 });
 
+// Targeted-mock idiom (live-messaging-enrollments.test.ts, grading.guard.test.ts):
+// the client and the app-users lookup are mocked so the REAL requireAppOwner
+// runs and resolves for an active owner session. "@/lib/supabase/auth" itself
+// is never module-mocked.
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(),
+  createServiceClient: vi.fn(() => ({}) as never),
+}));
+vi.mock("@/lib/supabase/app-users", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/supabase/app-users")>();
+  return { ...actual, getAppUser: vi.fn(), ensureAppUser: vi.fn(), ensureAppUserRowExists: vi.fn() };
+});
+
 import { callLlm } from "@/lib/llm";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { testGeminiAction } from "./llm-content";
+
+function ownerRow(): AppUserRow {
+  return {
+    id: "u1",
+    email: "m@example.com",
+    displayName: null,
+    status: "active",
+    role: "owner",
+    approvedAt: null,
+    approvedBy: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    statusChangedAt: null,
+    statusChangedBy: null,
+    roleGrantedBy: null,
+  };
+}
+
+function makeFakeAuthClient(userId: string, email: string) {
+  return {
+    auth: {
+      getUser: () => Promise.resolve({ data: { user: { id: userId, email } }, error: null }),
+      mfa: {
+        getAuthenticatorAssuranceLevel: () =>
+          Promise.resolve({
+            data: { currentLevel: "aal1", nextLevel: "aal1" },
+            error: null,
+          }),
+      },
+    },
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(createClient).mockResolvedValue(makeFakeAuthClient("u1", "m@example.com") as never);
+  vi.mocked(createServiceClient).mockReturnValue({} as never);
+  vi.mocked(getAppUser).mockResolvedValue(ownerRow());
 });
 
 function seededBytes(length: number, seed: number): Uint8Array {

@@ -26,6 +26,8 @@ describe("classifyChatSeamFailure (pure)", () => {
     expect(classifyChatSeamFailure("This file could not be read.")).toBe("unreadable");
     expect(classifyChatSeamFailure("anything else for Alice Jones")).toBe("refused");
     expect(classifyChatSeamFailure(undefined)).toBe("refused");
+    expect(classifyChatSeamFailure("Canvas did not respond.")).toBe("no response");
+    expect(classifyChatSeamFailure("Canvas request refused: 401")).toBe("refused");
   });
 
   it("only ever returns a member of the fixed set, never the input", () => {

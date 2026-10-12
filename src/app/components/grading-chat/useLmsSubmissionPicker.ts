@@ -92,6 +92,8 @@ export function useLmsSubmissionPicker(): LmsPickerState {
         operation: "list_lms_courses",
         startedAtMs,
         failureClass: "error" in r ? classifyChatSeamFailure(r.error) : null,
+        institution: courseKey,
+        host: "error" in r ? r.attemptedHost : undefined,
       });
       if (cancelled) return;
       if ("error" in r) setCourseResult({ key: courseKey, items: [], error: r.error });
@@ -113,6 +115,8 @@ export function useLmsSubmissionPicker(): LmsPickerState {
         operation: "list_lms_assignments",
         startedAtMs,
         failureClass: "error" in r ? classifyChatSeamFailure(r.error) : null,
+        institution: sel.institution,
+        host: "error" in r ? r.attemptedHost : undefined,
       });
       if (cancelled) return;
       if ("error" in r) setAssignmentResult({ key: assignmentKey, items: [], error: r.error });

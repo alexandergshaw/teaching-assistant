@@ -70,6 +70,8 @@ export interface RecordGradingDiagnosticArgs {
   error?: string;
   /** Students found in a classified zip (a bare count, never names). */
   classificationStudentCount?: number;
+  /** Dialed LMS host (host only, no path or query). */
+  host?: string;
 }
 
 /** Record one grading operation into the app-wide session log. Call it
@@ -86,6 +88,7 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     error: args.error,
     durationMs: args.durationMs,
     classificationStudentCount: args.classificationStudentCount,
+    host: args.host,
   });
 }
 

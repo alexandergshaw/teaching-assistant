@@ -28,6 +28,7 @@ export const CHAT_SEAM_FAILURE_CLASSES = [
   "interrupted",
   "grade failed",
   "refused",
+  "no response",
 ] as const;
 
 export type ChatSeamFailureClass = (typeof CHAT_SEAM_FAILURE_CLASSES)[number];
@@ -42,6 +43,7 @@ export function classifyChatSeamFailure(raw: unknown): ChatSeamFailureClass {
   if (/too large|exceed|oversize|budget/i.test(text)) return "too large";
   if (/not supported|isn't supported|unsupported/i.test(text)) return "unsupported";
   if (/could not (be )?read|nothing to grade/i.test(text)) return "unreadable";
+  if (/did not respond|no response|unreachable|could not reach/i.test(text)) return "no response";
   return "refused";
 }
 
@@ -51,6 +53,10 @@ export interface ChatSeamDecision {
   durationMs: number;
   /** A member of CHAT_SEAM_FAILURE_CLASSES; present only on failure. */
   error?: ChatSeamFailureClass;
+  /** Owner-configured institution acronym, when the seam has one. */
+  institution?: string;
+  /** Dialed LMS host (host only), when the seam knows it. */
+  host?: string;
 }
 
 /** PURE. `null` when no start was captured. `failureClass` null = success. */
@@ -59,13 +65,19 @@ export function decideChatSeamDiagnostic(args: {
   startedAtMs: number | null;
   settledAtMs: number;
   failureClass: ChatSeamFailureClass | null;
+  institution?: string;
+  host?: string;
 }): ChatSeamDecision | null {
   if (args.startedAtMs === null) return null;
   const durationMs = Math.max(0, Math.round(args.settledAtMs - args.startedAtMs));
+  const where = {
+    ...(args.institution ? { institution: args.institution } : {}),
+    ...(args.host ? { host: args.host } : {}),
+  };
   if (args.failureClass) {
-    return { operation: args.operation, outcome: "failure", durationMs, error: args.failureClass };
+    return { operation: args.operation, outcome: "failure", durationMs, error: args.failureClass, ...where };
   }
-  return { operation: args.operation, outcome: "success", durationMs };
+  return { operation: args.operation, outcome: "success", durationMs, ...where };
 }
 
 /** The monotonic clock the seams capture their start from. A named export so a
@@ -80,6 +92,8 @@ export function recordChatSeamSettled(args: {
   operation: ChatSeamOperation;
   startedAtMs: number | null;
   failureClass: ChatSeamFailureClass | null;
+  institution?: string;
+  host?: string;
 }): boolean {
   const decision = decideChatSeamDiagnostic({ ...args, settledAtMs: chatSeamNowMs() });
   if (!decision) return false;
@@ -89,6 +103,8 @@ export function recordChatSeamSettled(args: {
     outcome: decision.outcome,
     durationMs: decision.durationMs,
     error: decision.error,
+    institution: decision.institution,
+    host: decision.host,
   });
   return true;
 }

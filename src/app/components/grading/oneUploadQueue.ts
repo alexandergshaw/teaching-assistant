@@ -15,6 +15,7 @@
  */
 import type { GradingRun, StudentSubmissionEntry } from "@/lib/grade/types";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
+import { stampRubricProvenance } from "@/lib/grade/rubric-provenance-stamp";
 import { buildIncrementalRun, type ArrivedItemResult } from "./incrementalRunPlan";
 
 export interface UploadIdentity {
@@ -101,9 +102,12 @@ export function describeOneUploadStatus(inFlight: number): string {
  * Projects the arrived rows into the ONE GradingRun the shared results mount
  * renders, through the same buildIncrementalRun the A39 route uses (no second
  * merge dialect). RULING 116's thin surface applies: the header is synthesized
- * client-side with the rubric passed through unchanged and unstamped
- * (rubricUsed/rubricFingerprint empty), and no criteria are frozen, so
- * columns follow arrival order while uploads are still landing.
+ * client-side with the rubric passed through unchanged, and no criteria are
+ * frozen, so columns follow arrival order while uploads are still landing.
+ * RULING 57: the header's rubricUsed/rubricFingerprint pair is stamped here via
+ * stampRubricProvenance on the exact rubric text the uploads were graded
+ * against (a blank rubric yields the empty pair), and buildIncrementalRun
+ * passes it through to the rendered run.
  */
 export function projectRun(args: {
   rubric: string;
@@ -111,14 +115,15 @@ export function projectRun(args: {
   /** True while any upload is still building, queued or grading. */
   inFlight: boolean;
 }): GradingRun {
+  const stamped = stampRubricProvenance(args.rubric);
   return buildIncrementalRun({
     header: {
       kind: "ok",
       effectiveRubric: args.rubric,
       generatedRubric: undefined,
       criteriaNames: [],
-      rubricUsed: "",
-      rubricFingerprint: "",
+      rubricUsed: stamped.rubricUsed ?? "",
+      rubricFingerprint: stamped.rubricFingerprint ?? "",
     },
     speedGraderUrl: null,
     totalTicketCount: args.arrived.length,

@@ -85,6 +85,7 @@ import {
 } from "@/lib/embedded-grader";
 import type { EmbeddedRubric } from "@/lib/embedded-grader";
 import { buildIncrementalRun } from "@/app/components/grading/incrementalRunPlan";
+import { projectRun } from "@/app/components/grading/oneUploadQueue";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 
 const mockCallLlm = vi.mocked(callLlm);
@@ -280,6 +281,25 @@ describe("buildIncrementalRun passes the header's already-stamped pair through u
     expect(run.rubricFingerprint).toBe(header.rubricFingerprint);
     expect(run.rubricUsed).toBe(stamped.rubricUsed);
     expect(run.rubricFingerprint).toBe(stamped.rubricFingerprint);
+  });
+});
+
+describe("projectRun stamps its synthesized header and the pair reaches the rendered run (pass-through via buildIncrementalRun, RULING-57-legal)", () => {
+  it("a non-blank rubric yields the stampRubricProvenance pair on the run", () => {
+    const rubricText = "1. Correctness (100%): the answer is right.";
+    const stamped = stampRubricProvenance(rubricText);
+
+    const run = projectRun({ rubric: rubricText, arrived: [], inFlight: false });
+
+    expect(run.rubricUsed).toBe(stamped.rubricUsed);
+    expect(run.rubricFingerprint).toBe(stamped.rubricFingerprint);
+    expect(run.rubricFingerprint).toBe(rubricFingerprint(rubricText));
+  });
+
+  it("a blank rubric carries no provenance pair (nothing was graded against a rubric)", () => {
+    const run = projectRun({ rubric: "   ", arrived: [], inFlight: false });
+    expect(run.rubricUsed).toBe("");
+    expect(run.rubricFingerprint).toBe("");
   });
 });
 

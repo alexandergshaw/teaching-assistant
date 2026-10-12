@@ -88,6 +88,11 @@ const EXPECTED_PRODUCERS: readonly ProducerExpectation[] = [
     coveredBy: "behavioural: buildIncrementalRun header pass-through driver (rubric-stamp.wiring.test.ts)",
   },
   {
+    id: "src/app/components/grading/oneUploadQueue.ts::projectRun",
+    disposition: "pass-through",
+    coveredBy: "behavioural: projectRun stamps its synthesized header, buildIncrementalRun passes it through (rubric-stamp.wiring.test.ts)",
+  },
+  {
     id: "src/lib/embedded-grader/discussion.ts::gradeDiscussion",
     disposition: "fresh",
     coveredBy: "behavioural: gradeDiscussion driver (rubric-stamp.wiring.test.ts)",

@@ -25,6 +25,8 @@ import {
 } from "../components/grading/incrementalRunPlan";
 import type { OneUploadBuildResult } from "../components/grading/oneUploadQueue";
 
+const MAX_LABEL_LENGTH = 120;
+
 export async function gradingOneUploadAction(formData: FormData): Promise<OneUploadBuildResult> {
   await requireAppOwner();
 
@@ -63,10 +65,18 @@ export async function gradingOneUploadAction(formData: FormData): Promise<OneUpl
   if (kind !== "single") return assertNeverUploadKind(kind);
 
   try {
-    const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider);
-    if (!entry) {
+    // N15a Wave 2: an optional typed label overrides the inferred student
+    // name. `labelled` stops buildSingleFileEntry running name inference; the
+    // label becomes the entry's student BASE, which the client still feeds
+    // through the distinctness reducer (assignNextUploadIdentity), so two
+    // identical overrides cannot collide into one gradebook row.
+    const label = ((formData.get("label") as string | null) ?? "").trim().slice(0, MAX_LABEL_LENGTH);
+    const labelled = label.length > 0;
+    const built = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider, labelled);
+    if (!built) {
       return { ok: false, reason: `Could not read any text from ${file.name}.` };
     }
+    const entry = labelled ? { ...built, student: label, studentNameSource: "filename" as const } : built;
     if (estimateEntryWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) {
       return { ok: false, reason: `${file.name} is too large to grade on its own.` };
     }

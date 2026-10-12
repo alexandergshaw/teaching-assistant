@@ -46,11 +46,11 @@ describe("GradingTab routes a zip-source upload through the one-upload hook", ()
     const body = hook.slice(i, hook.indexOf("return {", i));
     expect(body.indexOf("preflightUploadFile(")).toBeGreaterThan(-1);
     expect(body.indexOf("preflightUploadFile(")).toBeLessThan(body.indexOf('input.value = ""'));
-    expect(body.indexOf('input.value = ""')).toBeLessThan(body.indexOf("void enqueueUpload(chosen, context)"));
+    expect(body.indexOf('input.value = ""')).toBeLessThan(body.indexOf("void enqueueUpload(chosen, { ...context, label: pickLabel })"));
   });
 
   it("the checkbox is rendered from the hook's mode and setter", () => {
-    expect(tab).toContain("<OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} />");
+    expect(tab).toContain("<OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} label={oneUpload.label} onLabelChange={oneUpload.setLabel} />");
     const toggle = withoutComments(readFileSync("src/app/components/grading/OneUploadToggle.tsx", "utf-8"));
     expect(toggle).toContain("checked={checked}");
     expect(toggle).toContain("onToggle(e.target.checked)");

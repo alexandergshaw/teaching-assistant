@@ -365,7 +365,7 @@ export default function GradingTab({
                 onChange={handleUploadFileChange}
               />
               <p>Upload a zip archive of student submissions, or a single student&apos;s file (a document, text file, or image) to grade it on its own.</p>
-              <OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} />
+              <OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} label={oneUpload.label} onLabelChange={oneUpload.setLabel} />
               <GradingCoursePicker />
             </div>
           </div>

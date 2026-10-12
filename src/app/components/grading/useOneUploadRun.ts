@@ -66,6 +66,8 @@ export interface UseOneUploadRunParams {
 export interface OneUploadContext {
   assignmentInstructions: string;
   rubric: string;
+  /** Optional student-name override for THIS upload (N15a Wave 2). */
+  label?: string;
 }
 
 /** The slice of an <input type="file"> a pick needs. */
@@ -81,6 +83,9 @@ export interface UseOneUploadRunResult {
   /** The "each upload is one student" checkbox, persisted. */
   mode: boolean;
   setMode: (next: boolean) => void;
+  /** The optional name for the NEXT pick; cleared once a pick consumes it. */
+  label: string;
+  setLabel: (next: string) => void;
   statusLine: string;
   run: GradingRun | null;
   runKey: string;
@@ -130,6 +135,8 @@ export function useOneUploadRun(params: UseOneUploadRunParams): UseOneUploadRunR
     if (typeof window === "undefined") return false;
     return localStorage.getItem(modeStorageKey) === "1";
   });
+  const [label, setLabelState] = useState("");
+  const labelRef = useRef("");
   const [run, setRun] = useState<GradingRun | null>(null);
   const [inFlight, setInFlight] = useState(0);
 
@@ -138,6 +145,11 @@ export function useOneUploadRun(params: UseOneUploadRunParams): UseOneUploadRunR
     if (typeof window === "undefined") return;
     if (next) localStorage.setItem(modeStorageKey, "1");
     else localStorage.removeItem(modeStorageKey);
+  };
+
+  const setLabel = (next: string) => {
+    labelRef.current = next;
+    setLabelState(next);
   };
 
   const drain = async (): Promise<void> => {
@@ -193,6 +205,7 @@ export function useOneUploadRun(params: UseOneUploadRunParams): UseOneUploadRunR
       fd.set("upload", file);
       fd.set("assignmentInstructions", context.assignmentInstructions);
       fd.set("provider", provider);
+      if (context.label && context.label.trim()) fd.set("label", context.label);
       const built = await gradingOneUploadAction(fd);
       if (!built.ok) {
         onReject(built.reason);
@@ -232,7 +245,10 @@ export function useOneUploadRun(params: UseOneUploadRunParams): UseOneUploadRunR
       onReject(preflight.message);
       return;
     }
-    void enqueueUpload(chosen, context);
+    // The typed name belongs to THIS pick only; it never carries to the next.
+    const pickLabel = labelRef.current;
+    setLabel("");
+    void enqueueUpload(chosen, { ...context, label: pickLabel });
   };
 
   return {
@@ -240,6 +256,8 @@ export function useOneUploadRun(params: UseOneUploadRunParams): UseOneUploadRunR
     pick,
     mode,
     setMode,
+    label,
+    setLabel,
     statusLine: describeOneUploadStatus(inFlight),
     run,
     runKey: ONE_UPLOAD_RUN_KEY,

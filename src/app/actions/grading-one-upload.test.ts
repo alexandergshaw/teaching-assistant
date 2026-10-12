@@ -106,6 +106,23 @@ describe("gradingOneUploadAction - as the owner", () => {
     });
   });
 
+  it("a typed label wins: marks the build labelled and becomes the student", async () => {
+    const fd = formWith();
+    fd.set("label", "  Ada Lovelace  ");
+    const result = await gradingOneUploadAction(fd);
+    expect(vi.mocked(buildSingleFileEntry).mock.calls[0][3]).toBe(true);
+    expect(result.ok && result.entry.student).toBe("Ada Lovelace");
+    expect(result.ok && result.entry.studentNameSource).toBe("filename");
+  });
+
+  it("a blank label leaves the build unlabelled and the inferred name untouched", async () => {
+    const fd = formWith();
+    fd.set("label", "   ");
+    const result = await gradingOneUploadAction(fd);
+    expect(vi.mocked(buildSingleFileEntry).mock.calls[0][3]).toBe(false);
+    expect(result.ok && result.entry.student).toBe("scan");
+  });
+
   it("refuses blank instructions with the byte-identical whole-run message, before building", async () => {
     const result = await gradingOneUploadAction(formWith({ instructions: "   " }));
     expect(result).toEqual({ ok: false, reason: "Please provide assignment instructions." });

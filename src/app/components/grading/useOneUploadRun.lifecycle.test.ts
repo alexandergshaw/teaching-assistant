@@ -176,6 +176,46 @@ describe("useOneUploadRun - identity", () => {
   });
 });
 
+describe("useOneUploadRun - label override", () => {
+  it("sends the typed label with the build request and consumes it on pick", async () => {
+    buildMock.mockResolvedValue({ ok: true, entry: entryFor("Ada"), interRequestDelayMs: 0 });
+    const hook = useRender();
+    hook.setLabel("Ada");
+    expect(useRender().label).toBe("Ada");
+    hook.pick({ files: [new File(["1"], "a.txt")], value: "a.txt" }, CONTEXT);
+    await flush();
+
+    const sent = buildMock.mock.calls[0][0] as FormData;
+    expect(sent.get("label")).toBe("Ada");
+    expect(useRender().label).toBe("");
+    useRender().pick({ files: [new File(["2"], "b.txt")], value: "b.txt" }, CONTEXT);
+    await flush();
+    expect((buildMock.mock.calls[1][0] as FormData).has("label")).toBe(false);
+  });
+
+  it("keeps the typed label when the pick is refused by preflight", () => {
+    const hook = useRender();
+    hook.setLabel("Ada");
+    hook.pick({ files: [new File([new Uint8Array(3_000_000)], "big.jpg")], value: "big.jpg" }, CONTEXT);
+    expect(useRender().label).toBe("Ada");
+  });
+
+  it("cannot collide two identical overrides, or an override and an inferred name, into one row", async () => {
+    buildMock
+      .mockResolvedValueOnce({ ok: true, entry: entryFor("Ada"), interRequestDelayMs: 0 })
+      .mockResolvedValueOnce({ ok: true, entry: entryFor("Ada"), interRequestDelayMs: 0 })
+      .mockResolvedValueOnce({ ok: true, entry: entryFor("Ada"), interRequestDelayMs: 0 });
+    const hook = useRender();
+    await hook.enqueueUpload(new File(["a"], "x.txt"), { ...CONTEXT, label: "Ada" });
+    await hook.enqueueUpload(new File(["b"], "y.txt"), { ...CONTEXT, label: "Ada" });
+    await hook.enqueueUpload(new File(["c"], "Ada.txt"), CONTEXT);
+    await flush();
+
+    expect(posted.map((p) => p.entry.student)).toEqual(["Ada", "Ada (2)", "Ada (3)"]);
+    expect(posted.map((p) => p.sourceIndex)).toEqual([0, 1, 2]);
+  });
+});
+
 describe("useOneUploadRun - pacing", () => {
   it("spaces consecutive dispatches at least the server delay apart", async () => {
     buildMock.mockImplementation(async () => ({ ok: true, entry: entryFor("Ada"), interRequestDelayMs: 4000 }));

@@ -10,6 +10,7 @@
 // @/lib/live-messaging/enrollment-aggregator and are imported by the client.
 
 import { requireAppOwner } from "@/lib/supabase/auth";
+import { resolveInstitutionByCode } from "@/lib/canvas-core";
 import {
   aggregateEnrollments,
   type AggregateResult,
@@ -24,6 +25,19 @@ function messageOf(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+// The HOST the course list was dialed against, so a misconfigured base URL is
+// distinguishable from an outage. HOST ONLY: a path can carry ids and a query
+// can carry credentials (same rationale as describeAttemptedCanvasHost in
+// canvas-inbox.ts). Runs on an error path, so it never throws.
+async function attemptedCanvasHost(code: string): Promise<string | undefined> {
+  try {
+    const { baseUrl } = await resolveInstitutionByCode(code);
+    return new URL(baseUrl).host;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The institution's active courses (id, name, term) for the progressive load. */
 export async function listLiveCoursesAction(
   institution: string
@@ -35,7 +49,9 @@ export async function listLiveCoursesAction(
     const courses = await buildLiveEnrollmentReaders().listCourses(code);
     return { courses };
   } catch (err) {
-    return { error: messageOf(err, "Could not list courses.") };
+    const base = messageOf(err, "Could not list courses.");
+    const host = await attemptedCanvasHost(institution.trim());
+    return { error: host ? `${base} (dialed ${host})` : base };
   }
 }
 

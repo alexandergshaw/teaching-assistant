@@ -6,8 +6,9 @@
 // change handler come in as props from index.tsx, bound to the same
 // `currentSelectedFolder` / `handleFolderChange` the control always used, so
 // persistence (ta-repo-grades-folder) is unchanged. The hints travel with the
-// control: the branch-recorded sentence, the empty-scan hint, and the
-// role="alert" drop notice that must sit next to the control that resets it.
+// control: the empty-scan hint and the role="alert" drop notice, which now sit
+// on the header's full-width trailing line (.headerFullRow) under the control
+// row rather than stacked under the select, so the select stays on the band.
 import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
 import pageStyles from "../../page.module.css";
 import styles from "./repo-grades.module.css";
@@ -28,31 +29,37 @@ export default function RepoGradesFolderPicker({
   folderDropNotice,
 }: RepoGradesFolderPickerProps) {
   return (
-    <div className={styles.headerField}>
-      <label htmlFor="repo-grades-folder" className={styles.headerInputLabel}>
-        Assignment folder to grade
-      </label>
-      <select
-        id="repo-grades-folder"
-        className={styles.headerInput}
-        value={selectedFolder}
-        onChange={(e) => onSelectedFolderChange(e.target.value)}
-      >
-        <option value={ALL_FOLDERS}>All folders</option>
-        {folderOptions.map((option) => (
-          <option key={option.folder} value={option.folder}>
-            {describeFolderOption(option, folderCensus)}
-          </option>
-        ))}
-      </select>
-      {folderOptions.length === 0 && (
-        <p className={pageStyles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
+    <>
+      <div className={styles.headerField}>
+        <label htmlFor="repo-grades-folder" className={styles.headerInputLabel}>
+          Assignment folder to grade
+        </label>
+        <select
+          id="repo-grades-folder"
+          className={styles.headerInput}
+          value={selectedFolder}
+          onChange={(e) => onSelectedFolderChange(e.target.value)}
+        >
+          <option value={ALL_FOLDERS}>All folders</option>
+          {folderOptions.map((option) => (
+            <option key={option.folder} value={option.folder}>
+              {describeFolderOption(option, folderCensus)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {(folderOptions.length === 0 || folderDropNotice) && (
+        <div className={styles.headerFullRow}>
+          {folderOptions.length === 0 && (
+            <p className={pageStyles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
+          )}
+          {folderDropNotice && (
+            <p className={pageStyles.error} role="alert">
+              {folderDropNotice}
+            </p>
+          )}
+        </div>
       )}
-      {folderDropNotice && (
-        <p className={pageStyles.error} role="alert">
-          {folderDropNotice}
-        </p>
-      )}
-    </div>
+    </>
   );
 }

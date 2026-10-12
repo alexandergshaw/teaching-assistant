@@ -7,7 +7,9 @@
 // context and travel together. The header's rendered height is published as
 // --rg-working-header-h on the shell so the column header (thead) sticks just
 // below it. Imports only browser-safe leaves (React, the CSS
-// module); ResizeObserver is a DOM API, not an import.
+// module); ResizeObserver is a DOM API, not an import. Controls share one 34px
+// band; non-controls (banner, folder notices, grade-set chips/status) render on
+// full-width trailing lines (.headerFullRow, order: 1) after the controls.
 import { useEffect, useRef, type ReactNode } from "react";
 import styles from "./repo-grades.module.css";
 
@@ -61,9 +63,17 @@ export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gr
     <div className={styles.stickyShell} ref={shellRef}>
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
-          {statusBanner}
+          {statusBanner && (
+            <div className={styles.headerFullRow}>
+              {statusBanner}
+            </div>
+          )}
           {folderControl}
-          {rescanControl}
+          {rescanControl && (
+            <div className={styles.headerAction}>
+              {rescanControl}
+            </div>
+          )}
           {gradeSetControl}
           {targetBranchControl}
           <label className={styles.headerField}>

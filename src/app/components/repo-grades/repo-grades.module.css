@@ -1,22 +1,10 @@
-/* Repo Grades view - colocated styles, per the wave brief's instruction to
-   grow a new CSS module here rather than src/app/page.module.css (already
-   guarded at 1000+ lines by page-module-css-classes.test.ts, which only
-   scans files that import page.module.css - this file is deliberately a
-   separate import so that guard's scope is unaffected). Every custom
-   property referenced below (--success, --warning, --danger, their -surface/
-   -border variants, --text-muted, --text-secondary, --field-border,
-   --field-background) is already defined in src/app/globals.css and used the
-   same way throughout src/app/components/courses/*.module.css - no new
-   variables are introduced here.
-
-   2026-09-01 aesthetics pass (docs/aesthetics-pass-acceptance-criteria.md):
-   every font-size/radius/spacing/border value below now resolves to a token
-   from that contract. Table header CASE is deliberately left alone - see the
-   note on .grid thead th below - and .cellColumnLabel is the one place a
-   genuine tracked-uppercase micro-label already existed, so AM5's exact
-   idiom is pinned there. No box-shadow literal exists in this file and none
-   is added (AC4) - this view's only floating-adjacent elements are native
-   <select> dropdowns, which draw their own browser chrome. */
+/* Repo Grades view - colocated styles; a separate import from page.module.css
+   so page-module-css-classes.test.ts's scope is unaffected. Every custom
+   property used is defined in src/app/globals.css - no new variables.
+   Aesthetics pass (docs/aesthetics-pass-acceptance-criteria.md): values
+   resolve to tokens; table header CASE is left alone (see .grid thead th);
+   .cellColumnLabel pins AM5's tracked-uppercase idiom. No box-shadow literal
+   (AC4). Stylesheet ceiling: 1000 lines (pinned in repoGradesHeaderInline). */
 
 /* RG-SEARCH-STICKY Wave A: the ONE bounded scroll shell. It encloses the
    working-header tier and the table, so both sticky tiers share this scroll
@@ -37,7 +25,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-1) var(--space-3);
+  gap: var(--space-2) var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-soft);
 }
@@ -48,9 +36,10 @@
 
 /* One input recipe for the search box and the grade-set typeahead. */
 .headerInput {
-  flex: 0 1 320px;
+  flex: 0 0 auto;
   min-width: 0;
-  padding: var(--space-2) var(--space-3);
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
   border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
   background: var(--field-background);
@@ -63,12 +52,28 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 0 1 320px;
+  flex: 1 1 200px;
+  max-width: 320px;
   min-width: 0;
 }
 
-.headerField .headerInput {
-  flex: 0 0 auto;
+/* Refresh: centred on the same 34px band, at the control font size. */
+.headerAction {
+  display: flex;
+  align-items: center;
+  height: var(--control-height-md);
+  font-size: var(--font-size-md);
+}
+
+/* Trailing full-width line for non-controls (banner, folder notices, grade-set
+   chips and status); order: 1 draws it after every control. */
+.headerFullRow {
+  flex: 0 0 100%;
+  order: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
 }
 
 .headerInputLabel {
@@ -88,11 +93,9 @@
 
 .gradeSet {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
   position: relative;
-  flex: 0 1 auto;
+  flex: 1 1 200px;
+  max-width: 320px;
   min-width: 0;
 }
 
@@ -347,12 +350,8 @@
   font-size: var(--font-size-md);
 }
 
-/* AC5 item 31 - the aggregate post-result announcement region in index.tsx
-   is visually hidden but still reachable by assistive tech (a screen reader
-   user should not have to hunt the grid for what a post just did). Same
-   visually-hidden recipe as src/app/components/tasks/TasksGrid.module.css's
-   own .srOnly - clip-path + 1px box, never `display: none` (which would also
-   hide it from assistive tech, defeating the point). */
+/* AC5 item 31 - visually hidden post-result announcement region (same recipe
+   as tasks/TasksGrid.module.css .srOnly; never `display: none`). */
 .srOnly {
   position: absolute;
   width: 1px;
@@ -661,7 +660,8 @@
      SC 1.4.10 (Reflow) precedent: a sticky header stops helping once the
      view has already reflowed to a single narrow column, and at high zoom a
      sticky element can eat most of the visible viewport. */
-  .grid thead th {
+  .grid thead th,
+  .stickyWorkingHeader {
     position: static;
   }
 
@@ -714,11 +714,8 @@
     min-width: 0;
   }
 
-  /* AM5 - this label already uses the tracked-uppercase micro-label idiom
-     (text-transform: uppercase below), so its numeric properties are pinned
-     exactly to that idiom's spec rather than mapped to the nearest AC1
-     token: --font-size-2xs, weight 700, letter-spacing 0.06em,
-     --text-secondary. */
+  /* AM5 - tracked-uppercase micro-label idiom: --font-size-2xs, weight 700,
+     letter-spacing 0.06em, --text-secondary. */
   .cellColumnLabel {
     display: block;
     font-size: var(--font-size-2xs);
@@ -729,14 +726,9 @@
     margin-bottom: var(--space-1);
   }
 
-  /* B2 - the "Select" column header is a bare text label with no control of
-     its own (each checkbox already carries its own aria-label), so once it
-     can no longer sit above its column it is only clutter atop the card
-     list. Visually hidden with the same recipe as .srOnly above (never
-     display: none, which would also remove it - and the column association
-     it still carries via role="columnheader" - from assistive tech). The
-     extra `.grid` prefix raises specificity above the `.grid th` rule above,
-     which would otherwise win the `width` conflict by source order. */
+  /* B2 - the bare "Select" header is clutter atop the card list; visually
+     hidden with the same recipe as .srOnly above (never display: none). The
+     `.grid` prefix beats the `.grid th` width rule. */
   .grid .selectHeader {
     position: absolute;
     width: 1px;

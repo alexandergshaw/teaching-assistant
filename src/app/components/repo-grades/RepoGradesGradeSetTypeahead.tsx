@@ -34,6 +34,7 @@ export default function RepoGradesGradeSetTypeahead({ rows, selected, onToggleRe
   const listId = "repo-grades-grade-set-listbox";
 
   return (
+    <>
     <div className={styles.gradeSet}>
       <label className={styles.headerField}>
         <span className={styles.headerInputLabel}>Grade set</span>
@@ -82,25 +83,30 @@ export default function RepoGradesGradeSetTypeahead({ rows, selected, onToggleRe
           ))}
         </ul>
       )}
-      {chips.map((row) => (
-        <span key={row.repo} className={styles.gradeSetChip}>
-          {row.repo}
-          <button type="button" className={styles.gradeSetChipRemove} aria-label={`Remove ${row.repo} from the grade set`} onClick={() => onToggleRepo(row.repo)}>
-            x
-          </button>
-        </span>
-      ))}
-      {summary && (
-        <span role="status" className={styles.gradeSetStatus}>
-          {summary.counterText}
-          <Button size="small" onClick={() => onShowAllChange(!showAll)}>
-            {summary.primaryActionLabel}
-          </Button>
-          <Button size="small" onClick={onClearSelection}>
-            {summary.secondaryActionLabel}
-          </Button>
-        </span>
-      )}
     </div>
+    {(chips.length > 0 || summary) && (
+      <div className={styles.headerFullRow}>
+        {chips.map((row) => (
+          <span key={row.repo} className={styles.gradeSetChip}>
+            {row.repo}
+            <button type="button" className={styles.gradeSetChipRemove} aria-label={`Remove ${row.repo} from the grade set`} onClick={() => onToggleRepo(row.repo)}>
+              x
+            </button>
+          </span>
+        ))}
+        {summary && (
+          <span role="status" className={styles.gradeSetStatus}>
+            {summary.counterText}
+            <Button size="small" onClick={() => onShowAllChange(!showAll)}>
+              {summary.primaryActionLabel}
+            </Button>
+            <Button size="small" onClick={onClearSelection}>
+              {summary.secondaryActionLabel}
+            </Button>
+          </span>
+        )}
+      </div>
+    )}
+    </>
   );
 }

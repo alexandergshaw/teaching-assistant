@@ -13,7 +13,7 @@ import type { CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireOwner, requireAppOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./writing-style-block";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection } from "@/lib/resource-links";
@@ -78,7 +78,14 @@ export async function reviewKnowledgeEntryAction(
   edits?: { lesson?: string; organization?: string; year?: number }
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    // SEC-F4: discarding deletes a shared, owner-curated library entry, so it
+    // requires the real deployment owner. Verify is deliberately left on the
+    // existing guard.
+    if (decision === "discard") {
+      await requireAppOwner();
+    } else {
+      await requireOwner();
+    }
     const ok =
       decision === "verify" ? await verifyKnowledgeEntry(id, edits ?? {}) : await deleteKnowledgeEntry(id);
     return ok ? { ok: true } : { error: "The update didn't apply. Check the knowledge database configuration." };

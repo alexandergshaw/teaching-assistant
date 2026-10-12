@@ -50,11 +50,11 @@ const MIME_TYPES: Record<string, string> = {
 export const VIDEO_GRADING_ENABLED = true;
 
 /**
- * RECORDING ONE-VS-MANY W1 dark flag (docs/recording-one-vs-many-scope.md section
- * 3.1). FALSE = /api/classify-recording refuses before any Storage or model call,
- * so the whole feature is inert until W2 wires a surface and the owner flips this.
+ * RECORDING ONE-VS-MANY feature flag (docs/recording-one-vs-many-scope.md section
+ * 3.1). TRUE = /api/classify-recording classifies a loose video on intake and the
+ * grading-chat surface offers the one-vs-many confirm card. Default ON.
  */
-export const RECORDING_SPLIT_ENABLED = false;
+export const RECORDING_SPLIT_ENABLED = true;
 
 // Video containers accepted for grading (ops section 4). One owner, no drift.
 export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "webm", "mov", "m4v"]);

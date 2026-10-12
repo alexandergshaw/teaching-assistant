@@ -191,9 +191,9 @@ describe("source-text pins on the real route", () => {
   });
 });
 
-describe("the dark flag", () => {
-  it("is shipped FALSE", async () => {
+describe("the feature flag", () => {
+  it("is shipped ON", async () => {
     const actual = await vi.importActual<typeof import("@/lib/grade/constants")>("@/lib/grade/constants");
-    expect(actual.RECORDING_SPLIT_ENABLED).toBe(false);
+    expect(actual.RECORDING_SPLIT_ENABLED).toBe(true);
   });
 });

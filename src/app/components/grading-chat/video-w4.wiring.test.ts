@@ -76,8 +76,8 @@ describe("video grading ships ENABLED", () => {
 describe("recording one-vs-many wiring (W2/W3, source text)", () => {
   const confirm = read("src/app/components/grading-chat/RecordingSplitConfirm.tsx");
 
-  it("ships DARK: RECORDING_SPLIT_ENABLED is false", () => {
-    expect(constants).toMatch(/export const RECORDING_SPLIT_ENABLED = false;/);
+  it("ships ON: RECORDING_SPLIT_ENABLED is true", () => {
+    expect(constants).toMatch(/export const RECORDING_SPLIT_ENABLED = true;/);
   });
 
   it("the driver classifies only behind the flag and BEFORE the entry is queued", () => {

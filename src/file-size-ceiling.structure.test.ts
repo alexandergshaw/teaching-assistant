@@ -154,7 +154,7 @@ describe("repo-wide file size ceiling (honours DEV_LOOP.md's 1000-line rule)", (
   // already over 1000". Pinned at the measured post-wave count; the next writer
   // of GradingTab.tsx re-pins it (never raise it to fit growth - extract).
   it("keeps GradingTab.tsx at or under its RES-GRAD-5 ratchet", () => {
-    const GRADING_TAB_RATCHET = 620;
+    const GRADING_TAB_RATCHET = 616;
     const content = fs.readFileSync(
       path.resolve(repoRoot, "src/app/components/GradingTab.tsx"),
       "utf-8"

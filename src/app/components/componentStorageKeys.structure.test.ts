@@ -125,7 +125,8 @@ function collectTaKeys(source: string): string[] {
   return Array.from(found).sort();
 }
 
-// Frozen at 82 keys, measured by the command in the header comment above.
+// Frozen at 83 keys (82 measured by the command in the header comment above,
+// plus ta-grading-one-upload, N15a Wave 1).
 // Sorted; do not reorder by hand - EXPECTED_TA_KEYS.sort() below is the
 // actual comparison basis, this literal ordering is only for a readable
 // diff when this test goes red.
@@ -158,6 +159,7 @@ const EXPECTED_TA_KEYS = [
   "ta-files-view",
   "ta-files-workflow",
   "ta-github-grading-queue",
+  "ta-grading-one-upload",
   "ta-grading-rubric-memory",
   "ta-grading-source",
   "ta-in-session-banner-open",

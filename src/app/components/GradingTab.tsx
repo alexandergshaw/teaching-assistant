@@ -35,7 +35,10 @@ import { runResetKey } from "./grading-results/gradingResultsHelpers";
 import GradingPictureField from "./grading/GradingPictureField";
 import { useWholeRunDiagnostic } from "./grading/useWholeRunDiagnostic";
 import ReplySectionInsertField from "./grading/ReplySectionInsertField";
+import { useOneUploadRun } from "./grading/useOneUploadRun";
 import Button from "@mui/material/Button";
+import OneUploadToggle from "./grading/OneUploadToggle";
+import { describeCanvasRetrieval } from "./grading/canvasRetrieveMessage";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
@@ -47,6 +50,7 @@ type GradingMode = "zip" | "canvas" | "livefeed" | "github";
 // 9 (docs/owner-decisions-2026-09-23.md): ships with no exact-set canary;
 // write one when a sixth ta- key lands in this directory, covering all of them.
 const RUBRIC_MEMORY_STORAGE_KEY = "ta-grading-rubric-memory";
+const ONE_UPLOAD_STORAGE_KEY = "ta-grading-one-upload";
 
 type GradingTabProps = {
   formAction: (payload: FormData) => void;
@@ -112,6 +116,8 @@ export default function GradingTab({
   // key the restore handler below uses.
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadRejection, setUploadRejection] = useState<string | null>(null);
+  const oneUpload = useOneUploadRun({ provider: selectedProvider, modeStorageKey: ONE_UPLOAD_STORAGE_KEY, onReject: setUploadRejection });
+  const oneUploadActive = source === "zip" && oneUpload.mode;
 
   const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
 
@@ -148,20 +154,7 @@ export default function GradingTab({
     setRubric(result.rubricText);
     setCanvasRetrieved(true);
 
-    const parts: string[] = [];
-    if (result.description) parts.push("instructions");
-    if (result.rubricText) parts.push("rubric");
-    const base = parts.length
-      ? `Retrieved ${parts.join(" + ")} from Canvas.`
-      : "Retrieved from Canvas.";
-    const noRubric = result.rubricText
-      ? ""
-      : " No rubric was found in Canvas; none will be synthesized. Grading uses the assignment instructions only (attach a rubric in Canvas for per-criterion scoring).";
-    const caveat =
-      selectedProvider === "other" && result.rubricText
-        ? " Note: the deterministic grader needs a check-based CSV/JSON rubric; this Canvas rubric may not map to automated checks."
-        : "";
-    setCanvasMeta({ status: "done", message: base + noRubric + caveat });
+    setCanvasMeta({ status: "done", message: describeCanvasRetrieval(result, selectedProvider) });
   };
 
   const run = state.run;
@@ -191,8 +184,9 @@ export default function GradingTab({
   // A39 incremental-fill W5 (architecture 5.3): the ONE object the merged
   // mount renders, and the identity that distinguishes "a new run" from "the
   // same run, one row longer" (RULING 131).
-  const displayRun = selectDisplayRun(phase, incrementalRun, run);
-  const runKey = selectRunKey(phase, runId);
+  const oneUploadRun = oneUploadActive ? oneUpload.run : null;
+  const displayRun = oneUploadRun ?? selectDisplayRun(phase, incrementalRun, run);
+  const runKey = oneUploadRun ? oneUpload.runKey : selectRunKey(phase, runId);
   const progressLine = describeRunProgress(phase, incrementalDone, incrementalTotal);
   const terminalLine = isTerminal(phase) ? describeRunProgress(phase, incrementalDone, incrementalTotal) : null;
 
@@ -243,6 +237,7 @@ export default function GradingTab({
     // FIX-1 size pre-flight (CURRENT-transport guard: the file rides the Server
     // Action body). The bulk-zip Storage path will make this input
     // transport-aware: relax or branch on this one call, nothing depends on it.
+    if (oneUploadActive) return oneUpload.pick(e.target, { assignmentInstructions, rubric });
     const chosen = e.target.files?.[0];
     if (chosen) {
       const preflight = preflightUploadFile(chosen, "The student submissions file");
@@ -347,6 +342,7 @@ export default function GradingTab({
           // A39 wave 4c, step S5: action={formAction} deleted (W4-9b);
           // startReview decides whole-run vs incremental itself.
           event.preventDefault();
+          if (oneUploadActive) return; // N15a: graded per pick, no whole run
           // A39 wave 2: save under the same scope the restore handler reads.
           if (source === "zip" && uploadFileName) {
             saveRubricMemory(RUBRIC_MEMORY_STORAGE_KEY, `upload:${uploadFileName}`, {
@@ -370,6 +366,7 @@ export default function GradingTab({
                 onChange={handleUploadFileChange}
               />
               <p>Upload a zip archive of student submissions, or a single student&apos;s file (a document, text file, or image) to grade it on its own.</p>
+              <OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} />
             </div>
           </div>
         ) : (
@@ -484,7 +481,7 @@ export default function GradingTab({
           variant="contained"
           size="small"
           type="submit"
-          disabled={pending || incrementalRunning || (source === "canvas" && !canvasRetrieved)}
+          disabled={pending || incrementalRunning || oneUploadActive || (source === "canvas" && !canvasRetrieved)}
         >
           {pending || incrementalRunning ? (
             <>

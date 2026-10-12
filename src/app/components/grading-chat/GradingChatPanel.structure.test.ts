@@ -854,3 +854,38 @@ describe("GradingChatPanel - locked setup text stays copyable (read-only, not ed
     expect(lockedSlice()).toContain("copiedKey ===");
   });
 });
+
+describe("GradingChatPanel - recording analyzing indicator", () => {
+  const source = () => withoutLineComments(read(PANEL));
+
+  it("hands the driver's classifyingRecording flag to describeRunStatus and owns no copy for it", () => {
+    const src = source();
+    const start = src.indexOf("describeRunStatus({");
+    expect(start).toBeGreaterThan(-1);
+    const slice = src.slice(start, src.indexOf("})", start));
+    expect(slice).toMatch(/classifyingRecording:\s*driver\.classifyingRecording\b/);
+    expect(src).not.toContain("Analyzing the recording");
+  });
+
+  it("GradingProgress renders the canonical spinner as a busy status region", () => {
+    const src = source();
+    const start = src.indexOf("function GradingProgress");
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf("\n}\n", start));
+    expect(body).toContain("styles.spinner");
+    expect(body).toContain('role="status"');
+    expect(body).toContain("aria-busy");
+  });
+
+  it("keeps the sticky wrapper order: confirm card, then progress, then composer", () => {
+    const src = source();
+    const a = src.indexOf("chatStyles.stickyComposer");
+    const b = src.indexOf("<RecordingSplitConfirm", a);
+    const c = src.indexOf("<GradingProgress", a);
+    const d = src.indexOf("<ChatComposer", a);
+    expect(a).toBeGreaterThan(-1);
+    expect(b).toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
+    expect(d).toBeGreaterThan(c);
+  });
+});

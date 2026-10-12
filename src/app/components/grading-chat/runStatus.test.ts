@@ -7,6 +7,7 @@ function input(over: Partial<RunStatusInput>): RunStatusInput {
     zipPhase: null,
     headerState: "ready",
     intakeNote: null,
+    classifyingRecording: false,
     pendingCount: 0,
     inFlightStudents: [],
     inFlightCount: 0,
@@ -49,5 +50,30 @@ describe("describeRunStatus", () => {
   it("shows a regrade of an already-finished row (pending with nothing outstanding from the totals)", () => {
     const status = describeRunStatus(input({ pendingCount: 1, inFlightCount: 1, inFlightStudents: ["Ada"], completedCount: 4 }));
     expect(status?.title).toBe("Grading now: Ada");
+  });
+
+  it("shows the analyzing state with its explanatory detail when nothing else is pending", () => {
+    const status = describeRunStatus(input({ classifyingRecording: true, preparing: true }));
+    expect(status?.title).toBe("Analyzing the recording...");
+    expect(status?.detail).toBe("Checking whether it holds one submission or several");
+  });
+
+  it("does not let pending rows mask the analyzing state", () => {
+    const status = describeRunStatus(
+      input({ classifyingRecording: true, pendingCount: 3, inFlightCount: 2, inFlightStudents: ["Ada", "Grace"], completedCount: 4 })
+    );
+    expect(status?.title).toBe("Analyzing the recording...");
+    expect(status?.detail).toBe("4 finished so far, 3 still grading");
+  });
+
+  it("is driven by the flag alone, not by preparing", () => {
+    const status = describeRunStatus(input({ classifyingRecording: true, preparing: false, headerState: "ready", pendingCount: 0 }));
+    expect(status).not.toBeNull();
+    expect(status?.title).toBe("Analyzing the recording...");
+  });
+
+  it("leaves every other state unchanged when not classifying", () => {
+    expect(describeRunStatus(input({ classifyingRecording: false }))).toBeNull();
+    expect(describeRunStatus(input({ pendingCount: 1, inFlightCount: 1, inFlightStudents: ["Ada"] }))?.title).toBe("Grading now: Ada");
   });
 });

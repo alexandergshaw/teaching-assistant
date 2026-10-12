@@ -13,6 +13,8 @@ export interface RunStatusInput {
   readonly headerState: HeaderState;
   /** Free-text step the panel is in while preparing (e.g. fetching Canvas details). */
   readonly intakeNote: string | null;
+  /** True while a recording is being classified (one submission or several). Takes precedence over pending rows. */
+  readonly classifyingRecording: boolean;
   /** Rows queued or in flight (first grades, retries and regrades). */
   readonly pendingCount: number;
   /** Student labels being graded right now, in dispatch order. */
@@ -41,11 +43,20 @@ export function describeNamesNow(names: readonly string[], count: number): strin
 
 /** Null when nothing is happening (the indicator is not shown). */
 export function describeRunStatus(input: RunStatusInput): RunStatus | null {
-  const { preparing, zipPhase, headerState, intakeNote, pendingCount, inFlightStudents, inFlightCount, completedCount } = input;
+  const { preparing, zipPhase, headerState, intakeNote, classifyingRecording, pendingCount, inFlightStudents, inFlightCount, completedCount } = input;
   if (zipPhase !== null) {
     return {
       title: describeBulkProgress({ phase: zipPhase, dispatchedCount: 0, completedCount: 0 }),
       detail: pendingCount > 0 ? `${plural(completedCount, "submission")} finished so far` : "",
+    };
+  }
+  if (classifyingRecording) {
+    return {
+      title: "Analyzing the recording...",
+      detail:
+        pendingCount > 0
+          ? `${completedCount} finished so far, ${pendingCount} still grading`
+          : "Checking whether it holds one submission or several",
     };
   }
   if (pendingCount <= 0) {

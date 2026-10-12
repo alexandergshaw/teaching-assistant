@@ -1,4 +1,5 @@
 import { parseSubmissionFileName, a44DecodeKey, a44ContainerRelativeDir } from "./utils";
+import { matchNameAgainstRoster } from "@/app/components/grading-recording/grading-roster-match";
 
 /**
  * A44 wave 2, RULING 87's REFINED amnesty (the unrefined form was withdrawn
@@ -25,7 +26,8 @@ interface CollidingGroup {
 export type CollisionRefusalDecision =
   | { status: "ok" }
   | { status: "no-folder-signal"; group: CollidingGroup }
-  | { status: "flat-collision-in-foldered-run"; group: CollidingGroup };
+  | { status: "flat-collision-in-foldered-run"; group: CollidingGroup }
+  | { status: "uncorroborated-shared-folder"; group: CollidingGroup };
 
 /**
  * Decide whether a run's parse would silently blend two or more distinct
@@ -37,7 +39,8 @@ export type CollisionRefusalDecision =
  */
 export function decideCollisionRefusal(
   submissions: Record<string, string>,
-  zipParents: Record<string, string[]> | undefined
+  zipParents: Record<string, string[]> | undefined,
+  knownStudents?: readonly string[]
 ): CollisionRefusalDecision {
   const groups = new Map<string, { display: string; paths: string[] }>();
   const distinctFolders = new Set<string>();
@@ -74,12 +77,23 @@ export function decideCollisionRefusal(
 
     const decoded = a44DecodeKey(key);
     const hasFolder = decoded !== null && decoded.length === 2;
+    let uncorroborated = false;
     if (hasFolder && distinctFolders.size >= 2) {
-      continue; // RULING 87's refined amnesty: the run gate is open and this
-      // group's own folder makes it distinguishable from any other student's.
+      // A45 clause (ii): with a known-student list, the group's FOLDER
+      // (decoded[0], never the compound display) must corroborate to exactly
+      // one known student. No list -> match is "no-roster" -> A44 unchanged.
+      const match = matchNameAgainstRoster(decoded[0], knownStudents);
+      if (match.nameMatch === "no-roster" || match.nameMatch === "matched") {
+        continue; // RULING 87's refined amnesty: the run gate is open and this
+        // group's own folder makes it distinguishable from any other student's.
+      }
+      uncorroborated = true;
     }
 
     const collidingGroup: CollidingGroup = { key, display: group.display, paths: group.paths };
+    if (uncorroborated) {
+      return { status: "uncorroborated-shared-folder", group: collidingGroup };
+    }
     if (distinctFolders.size >= 2) {
       return { status: "flat-collision-in-foldered-run", group: collidingGroup };
     }
@@ -113,16 +127,22 @@ function folderForCopy(group: CollidingGroup, zipParents: Record<string, string[
 }
 
 function buildRefusalMessage(
-  decision: { status: "no-folder-signal" | "flat-collision-in-foldered-run"; group: CollidingGroup },
+  decision: {
+    status: "no-folder-signal" | "flat-collision-in-foldered-run" | "uncorroborated-shared-folder";
+    group: CollidingGroup;
+  },
   zipParents: Record<string, string[]> | undefined
 ): string {
   const { group } = decision;
   const folder = folderForCopy(group, zipParents);
   const folderClause = folder ? ` in folder "${folder}"` : "";
+  // Interim copy for the A45 variant; the final wording is RES-A45-7 (UX seat).
   const closing =
     decision.status === "no-folder-signal"
       ? "This archive has no other student folders, so the folder name is not enough to tell these apart."
-      : "Other files in this archive have their own student folders, but these do not, so the folder name is not enough to tell these apart.";
+      : decision.status === "uncorroborated-shared-folder"
+        ? "This folder does not match exactly one student on the course roster, so the folder name is not enough to tell these apart."
+        : "Other files in this archive have their own student folders, but these do not, so the folder name is not enough to tell these apart.";
 
   return (
     `Refused: ${group.paths.length} files${folderClause} resolve to the same student name "${group.display}", ` +
@@ -147,6 +167,7 @@ export function describeCollisionRefusal(
       return null;
     case "no-folder-signal":
     case "flat-collision-in-foldered-run":
+    case "uncorroborated-shared-folder":
       return buildRefusalMessage(decision, zipParents);
   }
 }

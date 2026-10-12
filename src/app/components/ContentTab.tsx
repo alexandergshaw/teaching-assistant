@@ -195,6 +195,10 @@ export default function ContentTab({
     const willAutoLoad = hasTarget && (sel.source === "export" || !!activeInstitution);
     return { status: willAutoLoad ? "loading" : "idle", message: "" };
   });
+  // In-flight silent reloads (reload()). A counter so overlapping reloads do
+  // not clear the indicator when the first one settles.
+  const [reloadsInFlight, setReloadsInFlight] = useState(0);
+  const refreshing = reloadsInFlight > 0;
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   // S1 (docs/ux-audit-files-content.md): this one node is the sole
   // reporting channel for every bulk-bar outcome in ModulesView and every
@@ -363,7 +367,15 @@ export default function ContentTab({
     }
 
     const id = parseCanvasCourseId(sel.courseUrl);
-    if (!id) return;
+    if (!id) {
+      // A bare return here left status "loading" with nothing to clear it (a
+      // forever spinner on a malformed saved-course link): end in an error.
+      const message = "That link does not name a Canvas course.";
+      recordDiag("load_course_content", sel.courseUrl, "failure", message);
+      if (silent) setNote({ kind: "error", text: message });
+      else setLoadState({ status: "error", message });
+      return;
+    }
     const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
     if ("error" in result) {
       recordDiag("load_course_content", sel.courseUrl, "failure", result.error);
@@ -517,7 +529,12 @@ export default function ContentTab({
 
   const reload = () => {
     const hasTarget = selection.source === "export" ? !!selection.courseId : !!selection.courseUrl;
-    if (hasTarget) void loadContent(selection, true);
+    if (hasTarget) {
+      // Counter, not a boolean: reloads can overlap. .finally runs on every
+      // early return inside loadContent, on completion and on rejection.
+      setReloadsInFlight((n) => n + 1);
+      void loadContent(selection, true).finally(() => setReloadsInFlight((n) => n - 1));
+    }
   };
 
   const toggleExpand = (id: number) =>
@@ -712,10 +729,11 @@ export default function ContentTab({
                   variant="outlined"
                   size="small"
                   onClick={reload}
-                  disabled={busy || loadState.status === "loading"}
+                  disabled={busy || refreshing}
                   title="Reload this course's content"
                 >
-                  {loadState.status === "loading" ? "Refreshing…" : "Refresh"}
+                  {refreshing && <span className={styles.spinner} aria-hidden="true" />}
+                  {refreshing ? "Refreshing…" : "Refresh"}
                 </Button>
               </div>
             </div>
@@ -809,7 +827,7 @@ export default function ContentTab({
               onExport={() => setCopyMode("export")}
               onImport={() => setCopyMode("import")}
               onCopyModalTrigger={onCopyModalTrigger}
-              refreshing={loadState.status === "loading"}
+              refreshing={refreshing}
               canCopy={!!courseId}
             />
             {/* AC5: sibling to the modules render, not nested inside

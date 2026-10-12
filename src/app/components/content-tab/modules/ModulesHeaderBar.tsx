@@ -239,6 +239,7 @@ export function ModulesHeaderBar({
             disabled={busy || refreshing}
             title="Reload this course's content"
           >
+            {refreshing && <span className={styles.spinner} aria-hidden="true" />}
             {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
         </div>

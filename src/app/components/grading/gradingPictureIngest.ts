@@ -3,8 +3,10 @@
 // stays executable under vitest. The return type is deliberately text /
 // error / rejection only (never a GradingRun shape).
 
-import { checkFileWireBudget } from "@/lib/upload-budget";
+import { checkFileWireBudget, maxFileBytesForWireBudget } from "@/lib/upload-budget";
 import { readFileBase64 } from "@/lib/courses-tab-helpers";
+import { downscaleImageToBudget } from "./downscaleImageToBudget";
+import { shouldAttemptDownscale } from "./imageDownscalePlan";
 import type { RubricPictureKind } from "@/lib/grade/rubric-picture-prompt";
 
 export type PictureIngestResult =
@@ -47,13 +49,21 @@ export async function ingestGradingPicture(
   file: File,
   kind: RubricPictureKind,
   transcribe: TranscribeFn,
-  readBase64: (file: File) => Promise<string> = readFileBase64
+  readBase64: (file: File) => Promise<string> = readFileBase64,
+  downscale: (file: File) => Promise<File | null> = downscaleImageToBudget
 ): Promise<PictureIngestResult> {
-  const rejected = describePictureRejection(file, kind);
+  let working = file;
+  if (shouldAttemptDownscale(file.type, file.size, maxFileBytesForWireBudget())) {
+    // null (no canvas / decode failed) keeps the original, which then hits the
+    // existing oversize refusal below. A downscale error never escapes.
+    const smaller = await downscale(file).catch(() => null);
+    if (smaller && smaller.size < file.size) working = smaller;
+  }
+  const rejected = describePictureRejection(working, kind);
   if (rejected) return { rejected };
   let base64: string;
   try {
-    base64 = await readBase64(file);
+    base64 = await readBase64(working);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the image file." };
   }

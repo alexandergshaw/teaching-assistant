@@ -68,6 +68,46 @@ describe("ingestGradingPicture", () => {
     expect(transcribe).not.toHaveBeenCalled();
   });
 
+  it("downscales an over-budget image then accepts and transcribes it", async () => {
+    const transcribe = vi.fn<TranscribeFn>(async () => ({ text: "ok" }));
+    const read = vi.fn<(f: File) => Promise<string>>(async () => "QUJD");
+    const small = fakeFile({ size: 500_000, type: "image/jpeg", name: "p.jpg" });
+    const downscale = vi.fn<(f: File) => Promise<File | null>>(async () => small);
+    const big = fakeFile({ size: maxFileBytesForWireBudget() + 1_000_000, type: "image/jpeg", name: "p.jpg" });
+    const result = await ingestGradingPicture(big, "rubric", transcribe, read, downscale);
+    expect(result).toEqual({ text: "ok" });
+    expect(downscale).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith(small);
+  });
+
+  it("never downscales a non-image and keeps its refusal", async () => {
+    const downscale = vi.fn<(f: File) => Promise<File | null>>(async () => null);
+    const result = await ingestGradingPicture(
+      fakeFile({ size: maxFileBytesForWireBudget() + 1000, type: "application/pdf", name: "r.pdf" }),
+      "rubric",
+      async () => ({ text: "x" }),
+      async () => "QUJD",
+      downscale
+    );
+    expect("rejected" in result).toBe(true);
+    expect(downscale).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the oversize refusal when downscale returns null, throws, or stays over", async () => {
+    const big = () => fakeFile({ size: maxFileBytesForWireBudget() + 1_000_000, type: "image/jpeg" });
+    const transcribe = vi.fn<TranscribeFn>(async () => ({ text: "x" }));
+    const read = async () => "QUJD";
+    const nul = await ingestGradingPicture(big(), "rubric", transcribe, read, async () => null);
+    expect(nul).toEqual({ rejected: expect.stringContaining("too large") });
+    const thrown = await ingestGradingPicture(big(), "rubric", transcribe, read, async () => {
+      throw new Error("decode");
+    });
+    expect("rejected" in thrown).toBe(true);
+    const still = await ingestGradingPicture(big(), "rubric", transcribe, read, async () => big());
+    expect("rejected" in still).toBe(true);
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
   it("surfaces a read failure as an error, never a transcribe call", async () => {
     const transcribe = vi.fn<TranscribeFn>(async () => ({ text: "x" }));
     const result = await ingestGradingPicture(fakeFile(), "rubric", transcribe, async () => {

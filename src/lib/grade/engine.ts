@@ -41,6 +41,10 @@ import { buildVideoWindowNote, type RecordingWindow } from "./recording-split";
 // widen the engine's runtime import closure to include a database client
 // (runtime-import-graph.test.ts is the instrument, W2-5).
 import { stampRubricProvenance } from "./rubric-provenance-stamp";
+// Chat-grading diagnostics WA: the failure class is TYPED at the throw site
+// (never recovered from message text). Both leaves are import-free.
+import { GradeCallError, gradeFailureClassForFinishReason, gradeFailureClassForStatus } from "./grade-failure";
+import type { GradeCallSink } from "./grade-item-diagnostic";
 
 /**
  * One non-text part sent with a submission: inline bytes (image/PDF) or, for a
@@ -84,7 +88,8 @@ async function scoreAxis(
   commentSplit = false,
   // RECORDING ONE-VS-MANY W3: when set, this call grades ONE segment of a
   // multi-submission recording; a fixed-wording note confines the model to it.
-  videoGradeWindowSec?: RecordingWindow
+  videoGradeWindowSec?: RecordingWindow,
+  callSink?: GradeCallSink
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -126,20 +131,29 @@ async function scoreAxis(
 
   if (!result.ok) {
     console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
-    throw new Error(normalizeGeminiError(result.status, result.body));
+    callSink?.recordCall({ status: result.status });
+    throw new GradeCallError(normalizeGeminiError(result.status, result.body), gradeFailureClassForStatus(result.status));
   }
+  callSink?.recordCall({
+    finishReason: result.finishReason,
+    promptTokens: result.usage?.promptTokenCount,
+    outputTokens: result.usage?.candidatesTokenCount,
+    elapsedMs: result.elapsedMs,
+  });
 
   // G5 bad-output guard. ALLOWLIST of complete reasons (absent or "STOP"):
   // an unbounded set of cap/blocked reasons must never become a graded row.
   // Throws into gradeStudentEntries's catch, which builds the grading-failed
   // row. The parser itself is shared with the recording path and stays as is.
   if (result.finishReason !== undefined && result.finishReason !== "STOP") {
-    throw new Error(
-      `The model's response was cut off or blocked before it finished (${result.finishReason}), so it was not graded.`
+    throw new GradeCallError(
+      `The model's response was cut off or blocked before it finished (${result.finishReason}), so it was not graded.`,
+      gradeFailureClassForFinishReason(result.finishReason),
+      result.finishReason
     );
   }
   if (!hasParseableRubricJson(result.text)) {
-    throw new Error("The model's response was not valid grading JSON, so it was not graded.");
+    throw new GradeCallError("The model's response was not valid grading JSON, so it was not graded.", "model unparseable");
   }
 
   const feedback = result.text.trim() || "No feedback generated.";
@@ -212,9 +226,10 @@ async function gradeSubmission(
   codeRun: CodeRunResult | null = null,
   submittedFiles: SubmittedFileInfo[] = [],
   commentSplit = false,
-  videoGradeWindowSec?: RecordingWindow
+  videoGradeWindowSec?: RecordingWindow,
+  callSink?: GradeCallSink
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -258,8 +273,9 @@ async function gradeDiscussionAxes(a: {
   commentSplit: boolean;
   videoGradeWindowSec?: RecordingWindow;
   pointsPossible: number | null;
+  callSink?: GradeCallSink;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec);
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink);
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -274,7 +290,7 @@ async function gradeDiscussionAxes(a: {
   let replyStrengths = "";
   let replyImprovements = "";
   if (a.replyCount > 0 && a.replyText !== null) {
-    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit);
+    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink);
     replyAreas = reply.rubricAreas;
     replyStrengths = reply.strengths;
     replyImprovements = reply.improvements;
@@ -328,6 +344,10 @@ export interface GradingRunOptions {
    *  graded in this call. Only the single-entry grade-run-item route sets it;
    *  unset keeps every other caller byte-identical. */
   readonly extraAttachments?: readonly GradeAttachment[];
+  /** Chat-grading diagnostics WA: receives one record per model call and the
+   *  typed failure class of a failed entry. Total (never throws), additive;
+   *  unset keeps every other caller byte-identical. */
+  readonly callSink?: GradeCallSink;
 }
 
 /**
@@ -382,7 +402,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec } = options;
+  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec, callSink } = options;
   const namingDeduction = options.applyNamingDeduction ?? true;
   const lengthDeduction = options.applyLengthDeduction ?? false;
   const maxSubmissions = getGeminiMaxSubmissions();
@@ -466,6 +486,7 @@ async function gradeStudentEntries(
             commentSplit: commentSplit === true,
             videoGradeWindowSec,
             pointsPossible,
+            callSink,
           })
         : await gradeSubmission(
             singleAxisPrompt,
@@ -477,7 +498,8 @@ async function gradeStudentEntries(
             codeRun,
             submittedFiles,
             commentSplit === true,
-            videoGradeWindowSec
+            videoGradeWindowSec,
+            callSink
           );
       results.push({
         ...result,
@@ -492,6 +514,7 @@ async function gradeStudentEntries(
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
+      callSink?.recordFailure(error instanceof GradeCallError ? error.failureClass : "unclassified");
       // A grading failure has no improvement guidance or resubmit policy to
       // offer - the whole message lives in strengths, and overallComment is
       // still composed (not authored directly) so it can never drift from it.

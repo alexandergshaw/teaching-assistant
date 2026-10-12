@@ -8,7 +8,13 @@ import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
 import { createGeminiFilesClient } from "@/lib/gemini-files";
-import { getGeminiApiKey } from "@/lib/gemini";
+import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
+import {
+  buildGradeItemDiagnostic,
+  createGradeCallSink,
+  type GradeItemDiagnostic,
+} from "@/lib/grade/grade-item-diagnostic";
+import type { GradeFailureClass } from "@/lib/grade/grade-failure";
 import { downloadFile, removeFiles } from "@/lib/supabase/storage";
 import { SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import { coerceFeedbackWordTarget } from "@/lib/grade/types";
@@ -220,6 +226,16 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : "an unexpected error";
 }
 
+/** The owner-set model name, or undefined. Never throws (a diagnostic must not
+ *  be able to fail a grade). */
+function safeModelName(): string | undefined {
+  try {
+    return getGeminiModel();
+  } catch {
+    return undefined;
+  }
+}
+
 /** The seam's real Storage + Files deps. Built only on the flagged video path. */
 function buildVideoSeamDeps(): VideoSeamDeps {
   return {
@@ -291,6 +307,29 @@ export async function POST(req: NextRequest) {
   // loser (ops O-4), so this is what makes the Files API cleanup fire.
   const videoAbort = new AbortController();
 
+  // Chat-grading diagnostics WA: an ADDITIVE `diagnostic` key on the response.
+  // Old clients read only body.result / body.error and never see it. The sink
+  // is total and the builder takes numbers and closed-union members only, so
+  // nothing here can change a grade, a status or an error string.
+  const callSink = createGradeCallSink();
+  let gradeStartedAtMs: number | undefined;
+  const diagnosticFor = (failure?: GradeFailureClass): { diagnostic?: GradeItemDiagnostic } => {
+    try {
+      const nowMs = Date.now();
+      const diagnostic = buildGradeItemDiagnostic({
+        serverMs: nowMs - startedAtMs,
+        prepMs: gradeStartedAtMs === undefined ? undefined : gradeStartedAtMs - startedAtMs,
+        gradeMs: gradeStartedAtMs === undefined ? undefined : nowMs - gradeStartedAtMs,
+        model: safeModelName(),
+        calls: callSink.calls,
+        failure: failure ?? callSink.failure,
+      });
+      return { diagnostic };
+    } catch {
+      return {};
+    }
+  };
+
   // THE SOFT BUDGET IS UNDER THE HARD CAP (S1 check 3): TOTAL_BUDGET_MS is
   // strictly below maxDuration * 1000, so this handler stops itself, on its
   // own clock, with a worded response, before the platform kills it silently.
@@ -310,19 +349,22 @@ export async function POST(req: NextRequest) {
       (async () => {
         const resolved = await resolveEntryLinks(entry);
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
             resolved,
-            (extraAttachments) =>
-              gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { ...options, extraAttachments }),
+            (extraAttachments) => {
+              gradeStartedAtMs = Date.now();
+              return gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { ...options, extraAttachments });
+            },
             (run) => run.results[0]?.ungraded?.kind === "grading-failed"
           );
           if (!videoOutcome.ok) return { videoFailure: { failure: videoOutcome.failure, message: videoOutcome.message } };
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
-        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
+        gradeStartedAtMs = Date.now();
+        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs
@@ -331,25 +373,25 @@ export async function POST(req: NextRequest) {
     if (outcome.kind === "timedout") {
       videoAbort.abort();
       return NextResponse.json(
-        { error: "This submission did not finish grading in time. It was not graded." },
+        { error: "This submission did not finish grading in time. It was not graded.", ...diagnosticFor("route budget") },
         { status: 504 }
       );
     }
     if (outcome.kind === "failed") {
-      return NextResponse.json({ error: describeError(outcome.error) }, { status: 502 });
+      return NextResponse.json({ error: describeError(outcome.error), ...diagnosticFor("route error") }, { status: 502 });
     }
 
     const videoFailure = outcome.value.videoFailure;
     if (videoFailure) {
       return NextResponse.json(
-        { error: videoFailure.message, videoFailure: videoFailure.failure },
+        { error: videoFailure.message, videoFailure: videoFailure.failure, ...diagnosticFor("route error") },
         { status: videoFailureStatus(videoFailure.failure) }
       );
     }
     if (!outcome.value.graded) return NextResponse.json({ error: "an unexpected error" }, { status: 502 });
     const result = outcome.value.graded.results[0];
-    return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch } });
+    return NextResponse.json({ sourceIndex, result: { ...result, linkFetch: outcome.value.linkFetch }, ...diagnosticFor() });
   } catch (err) {
-    return NextResponse.json({ error: describeError(err) }, { status: 502 });
+    return NextResponse.json({ error: describeError(err), ...diagnosticFor("route error") }, { status: 502 });
   }
 }

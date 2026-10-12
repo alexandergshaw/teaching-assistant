@@ -249,7 +249,7 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
     const res = await POST(jsonRequest(VALID_BODY) as any);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ sourceIndex: 0, result: fakeResult });
+    expect(body).toEqual({ sourceIndex: 0, result: fakeResult, diagnostic: expect.any(Object) });
   });
 
   describe("harshness parse is default-safe (harshness wave 1)", () => {

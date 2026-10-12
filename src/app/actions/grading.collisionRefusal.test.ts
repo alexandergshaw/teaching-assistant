@@ -168,3 +168,34 @@ describe("gradeAction - the A44 collision refusal on the embedded (deterministic
     expect(result.error).toContain('Refused: 2 files resolve to the same student name "Homework"');
   });
 });
+
+describe("gradeAction - A45: the course roster field reaches the collision check (reachability)", () => {
+  const SHARED = [
+    { path: "AlvarezMaria/Homework Final.txt", content: "final draft" },
+    { path: "AlvarezMaria/Homework Draft.txt", content: "earlier draft" },
+    { path: "BrownTom/paper.txt", content: "brown's paper" },
+  ];
+  const CORROBORATION_COPY = "does not match exactly one student on the course roster";
+
+  for (const provider of ["gemini", "embedded"] as const) {
+    it(`${provider}: no knownStudents field -> A44 amnesty unchanged (not refused)`, async () => {
+      const result = await gradeAction({ run: null, error: null }, formDataFor(await zipFileOf(SHARED), provider));
+      expect(result.error ?? "").not.toContain("Refused");
+    });
+
+    it(`${provider}: knownStudents containing the folder's student -> not refused`, async () => {
+      const fd = formDataFor(await zipFileOf(SHARED), provider);
+      fd.set("knownStudents", "AlvarezMaria\nBrownTom");
+      const result = await gradeAction({ run: null, error: null }, fd);
+      expect(result.error ?? "").not.toContain("Refused");
+    });
+
+    it(`${provider}: knownStudents omitting the folder's student -> refused with the corroboration copy`, async () => {
+      const fd = formDataFor(await zipFileOf(SHARED), provider);
+      fd.set("knownStudents", "CarterLee\nDiazRosa");
+      const result = await gradeAction({ run: null, error: null }, fd);
+      expect(result.run).toBeNull();
+      expect(result.error).toContain(CORROBORATION_COPY);
+    });
+  }
+});

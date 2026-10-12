@@ -283,7 +283,7 @@ export async function extractSubmissions(
  */
 export async function extractStudentEntries(
   zipBuffer: ArrayBuffer,
-  options?: { readonly inferFileNamesWith?: LlmProvider }
+  options?: { readonly inferFileNamesWith?: LlmProvider; readonly knownStudents?: readonly string[] }
 ): Promise<StudentSubmissionEntry[]> {
   const { entries } = await ingestZipEntries(zipBuffer, options);
   return entries;
@@ -313,6 +313,8 @@ export async function ingestZipEntries(
     readonly videoEnabled?: boolean;
     /** VIDEO-GRADING W2: injected stager (see extractSubmissions). */
     readonly stageVideo?: StageVideoFn;
+    /** A45: course roster names the collision check corroborates against. */
+    readonly knownStudents?: readonly string[];
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
@@ -331,7 +333,7 @@ export async function ingestZipEntries(
   // characterisation 28 pinned tests depend on). Strictly before the
   // filename inference below too, so a colliding zip never pays a model
   // call (design section 4.3 step 2 before step 3; instrument notes M4).
-  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
+  const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents, options?.knownStudents), zipParents);
   if (collisionMessage) {
     throw new Error(collisionMessage);
   }

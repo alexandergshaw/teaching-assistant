@@ -161,6 +161,36 @@ describe("prepareGradingRunAction - the refusal fires before any ticket exists (
   });
 });
 
+describe("prepareGradingRunAction - A45: the course roster field reaches the collision check (reachability)", () => {
+  const SHARED = [
+    { path: "AlvarezMaria/Homework Final.txt", content: "final draft" },
+    { path: "AlvarezMaria/Homework Draft.txt", content: "earlier draft" },
+    { path: "BrownTom/paper.txt", content: "brown's paper" },
+  ];
+
+  it("no knownStudents field -> A44 amnesty unchanged (incremental, tickets built)", async () => {
+    const result = await prepareGradingRunAction(formDataFor(await zipFileOf(SHARED)));
+    expect(result.mode).toBe("incremental");
+  });
+
+  it("knownStudents containing the folder's student -> still amnestied", async () => {
+    const fd = formDataFor(await zipFileOf(SHARED));
+    fd.set("knownStudents", "AlvarezMaria\nBrownTom");
+    expect((await prepareGradingRunAction(fd)).mode).toBe("incremental");
+  });
+
+  it("knownStudents omitting the folder's student -> refused with the corroboration copy, no model call", async () => {
+    const fd = formDataFor(await zipFileOf(SHARED));
+    fd.set("knownStudents", "CarterLee\nDiazRosa");
+    const result = await prepareGradingRunAction(fd);
+    expect(result.mode).toBe("refused");
+    if (result.mode === "refused") {
+      expect(result.reason).toContain("does not match exactly one student on the course roster");
+    }
+    expect(mockCallLlm).not.toHaveBeenCalled();
+  });
+});
+
 describe("prepareGradingRunAction - RULING 118: an ORDINARY (non-refusal) thrown error still falls back to whole-run", () => {
   it("a caught error whose message does not start with the collision refusal's 'Refused: ' prefix returns mode:'whole-run', not mode:'refused'", async () => {
     // A39 wave 4: extractCanvasEntries is now mocked at module scope (for

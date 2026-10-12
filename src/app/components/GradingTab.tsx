@@ -1,7 +1,6 @@
 "use client";
 
-import type { ChangeEvent, RefObject } from "react";
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import {
   fetchCanvasMetaAction,
   type GradeActionState,
@@ -38,6 +37,7 @@ import ReplySectionInsertField from "./grading/ReplySectionInsertField";
 import { useOneUploadRun } from "./grading/useOneUploadRun";
 import Button from "@mui/material/Button";
 import OneUploadToggle from "./grading/OneUploadToggle";
+import GradingCoursePicker from "./GradingCoursePicker";
 import { describeCanvasRetrieval } from "./grading/canvasRetrieveMessage";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -229,7 +229,6 @@ export default function GradingTab({
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => setAssignmentInstructions(e.target.value);
 
-
   // A39 wave 2, path A (docs/a39-architecture.md 6.2.1): nothing is
   // restored until a file is chosen, scoped to that file's own name; an
   // edited field is left alone rather than overwritten.
@@ -367,6 +366,7 @@ export default function GradingTab({
               />
               <p>Upload a zip archive of student submissions, or a single student&apos;s file (a document, text file, or image) to grade it on its own.</p>
               <OneUploadToggle checked={oneUpload.mode} onToggle={oneUpload.setMode} statusText={oneUpload.statusLine} active={oneUploadActive} />
+              <GradingCoursePicker />
             </div>
           </div>
         ) : (

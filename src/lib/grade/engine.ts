@@ -309,6 +309,9 @@ export interface GradingRunOptions {
   /** A37: the grading surface, stamped onto each not-attempted row so the
    *  review table can name a surface-specific action. Display-copy only. */
   readonly source?: GradingSource;
+  /** A45: course roster names for the zip collision corroboration; unset keeps
+   *  A44's path-only decision. Read only by gradeSubmissions. */
+  readonly knownStudents?: readonly string[];
   /** VIDEO-GRADING W3: Files API attachments (videos) sent with EVERY entry
    *  graded in this call. Only the single-entry grade-run-item route sets it;
    *  unset keeps every other caller byte-identical. */
@@ -594,7 +597,7 @@ export async function gradeSubmissions(
     entries: studentSubmissions,
     attemptedSupportedFiles,
     failedSupportedFiles,
-  } = await ingestZipEntries(zipBuffer, { inferFileNamesWith: provider });
+  } = await ingestZipEntries(zipBuffer, { inferFileNamesWith: provider, knownStudents: options.knownStudents });
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {
       const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");

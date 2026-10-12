@@ -3,6 +3,7 @@
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
 import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractSubmissions, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
 import { decideCollisionRefusal, describeCollisionRefusal } from "@/lib/grade/collisionRefusal";
+import { knownStudentsOption, KNOWN_STUDENTS_FIELD } from "@/lib/grade/knownStudents";
 import { runSubmittedCode, attachCodeRuns, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -737,7 +738,12 @@ export async function gradeAction(
   const runDeadlineMsRaw = formData.get("runDeadlineMs") as string | null;
   const parsedRunDeadlineMs = runDeadlineMsRaw ? Number.parseInt(runDeadlineMsRaw, 10) : NaN;
   const runDeadlineMs = Number.isFinite(parsedRunDeadlineMs) ? parsedRunDeadlineMs : undefined;
-  const gradingRunOptions: GradingRunOptions = runDeadlineMs !== undefined ? { deadlineMs: runDeadlineMs } : {};
+  // A45: course roster names for the zip collision corroboration (absent = A44 path-only).
+  const knownStudents = knownStudentsOption(formData.get(KNOWN_STUDENTS_FIELD) as string | null);
+  const gradingRunOptions: GradingRunOptions = {
+    ...(runDeadlineMs !== undefined ? { deadlineMs: runDeadlineMs } : {}),
+    ...knownStudents,
+  };
 
   try {
     await requireAppOwner();
@@ -861,7 +867,7 @@ export async function gradeAction(
     // Embedded Deterministic Engine path (provider toggle = "embedded"). Grades
     // in-process against a supplied rubric, or one generated from the instructions.
     if (provider === "embedded") {
-      const entries = await extractStudentEntries(await file.arrayBuffer());
+      const entries = await extractStudentEntries(await file.arrayBuffer(), knownStudents);
       if (entries.length === 0) {
         return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [] }, error: null };
       }
@@ -936,7 +942,7 @@ export async function gradeAction(
     const zipBuffer = await file.arrayBuffer();
     {
       const { submissions, zipParents } = await extractSubmissions(zipBuffer);
-      const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents), zipParents);
+      const collisionMessage = describeCollisionRefusal(decideCollisionRefusal(submissions, zipParents, knownStudents.knownStudents), zipParents);
       if (collisionMessage) {
         return { run: null, error: collisionMessage };
       }

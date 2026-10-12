@@ -27,6 +27,7 @@ import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import { VIDEO_BATCH_MESSAGE, assertNeverUploadKind } from "@/lib/grade/video-grading";
 import { extractStudentEntries, extractCanvasEntries } from "@/lib/grade/extraction";
+import { knownStudentsOption, KNOWN_STUDENTS_FIELD } from "@/lib/grade/knownStudents";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import { synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade/rubric";
 import { getSpeedGraderUrl } from "@/lib/canvas";
@@ -134,7 +135,10 @@ export async function prepareGradingRunAction(formData: FormData): Promise<Prepa
         // the whole-run path already pays for at engine.ts:390 - parity,
         // not a new cost - so the incremental route derives student names
         // the way the route beside it does.
-        entries = await extractStudentEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+        entries = await extractStudentEntries(await file.arrayBuffer(), {
+          inferFileNamesWith: provider,
+          ...knownStudentsOption(formData.get(KNOWN_STUDENTS_FIELD) as string | null),
+        });
       } else {
         return assertNeverUploadKind(uploadKind);
       }

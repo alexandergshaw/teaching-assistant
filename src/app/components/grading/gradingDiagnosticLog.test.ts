@@ -76,6 +76,29 @@ describe("recordGradingDiagnosticEntry / recordWholeRunSettled (call shape)", ()
     expect(entry.outcome).toBe("success");
   });
 
+  it("forwards cause, code and serverMs to the core, and only when supplied", () => {
+    recordGradingDiagnosticEntry({
+      at: "2026-10-08T10:00:01.000Z",
+      operation: "list_lms_courses",
+      outcome: "failure",
+      durationMs: 5,
+      error: "no response",
+      cause: "dns-unresolved",
+      code: "ENOTFOUND",
+      serverMs: 321,
+    });
+    recordGradingDiagnosticEntry({
+      at: "2026-10-08T10:00:02.000Z",
+      operation: "list_lms_courses",
+      outcome: "failure",
+      durationMs: 5,
+      error: "no response",
+    });
+    const slice = readSessionDiagnosticSurfaceEntries("grading").entries;
+    expect(slice[0]).toMatchObject({ cause: "dns-unresolved", code: "ENOTFOUND", serverMs: 321 });
+    for (const key of ["cause", "code", "serverMs"]) expect(Object.keys(slice[1])).not.toContain(key);
+  });
+
   it("recordWholeRunSettled records one entry on a started run and none otherwise", () => {
     expect(
       recordWholeRunSettled({ startedAtMs: null, settledAtMs: 10, state: okState(), at: "2026-10-08T10:00:02.000Z" })

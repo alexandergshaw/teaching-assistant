@@ -155,6 +155,28 @@ export interface SessionDiagnosticEntry {
   /** The dialed LMS host (host only, never a path or query). Owner config, not
    * student data. OPTIONAL and OMITTED when the caller supplied none. */
   host?: string;
+  /** Closed failure-cause token (for example "connect-timeout"). OPTIONAL and
+   * OMITTED when absent; stored only if it matches DIAGNOSTIC_CAUSE_TOKEN. */
+  cause?: string;
+  /** Allowlisted error-code token (for example "ABORT_ERR"). OPTIONAL, OMITTED
+   * when absent; stored only if it matches DIAGNOSTIC_CODE_TOKEN. */
+  code?: string;
+  /** Total server-side action time in milliseconds. OPTIONAL, OMITTED when absent. */
+  serverMs?: number;
+}
+
+// Closed-shape token rules for the fine-failure fields. LOCAL on purpose: this
+// module is browser-only and must not import server code. A token that does
+// not match is dropped, which is stricter than scrub-then-cap.
+const DIAGNOSTIC_CAUSE_TOKEN = /^[a-z0-9-]{1,40}$/;
+const DIAGNOSTIC_CODE_TOKEN = /^[A-Z][A-Z0-9_]{2,39}$/;
+
+function tokenIfValid(value: unknown, pattern: RegExp): string | undefined {
+  return typeof value === "string" && pattern.test(value) ? value : undefined;
+}
+
+function finiteMsIfValid(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +249,27 @@ export interface RecordSessionDiagnosticArgs {
   classificationStudentCount?: number;
   /** Optional dialed host (host only); scrubbed and capped like `error`. */
   host?: string;
+  /** Optional closed failure-cause token; dropped unless it is a plain token. */
+  cause?: string;
+  /** Optional allowlisted error-code token; dropped unless it is a plain token. */
+  code?: string;
+  /** Optional server-side action time in milliseconds. */
+  serverMs?: number;
+}
+
+function fineFailureFields(
+  cause: unknown,
+  code: unknown,
+  serverMs: unknown
+): { cause?: string; code?: string; serverMs?: number } {
+  const c = tokenIfValid(cause, DIAGNOSTIC_CAUSE_TOKEN);
+  const k = tokenIfValid(code, DIAGNOSTIC_CODE_TOKEN);
+  const ms = finiteMsIfValid(serverMs);
+  return {
+    ...(c !== undefined ? { cause: c } : {}),
+    ...(k !== undefined ? { code: k } : {}),
+    ...(ms !== undefined ? { serverMs: ms } : {}),
+  };
 }
 
 /** Append one entry to the session store. Side-effecting on purpose: this is
@@ -249,6 +292,7 @@ export function recordSessionDiagnosticEntry(args: RecordSessionDiagnosticArgs):
       ? { classificationStudentCount: args.classificationStudentCount }
       : {}),
     ...(args.host ? { host: sanitizeSessionDiagnosticError(args.host) } : {}),
+    ...fineFailureFields(args.cause, args.code, args.serverMs),
   };
   storedEntries.push(entry);
   while (storedEntries.length > MAX_SESSION_DIAGNOSTIC_LOG_ENTRIES) {
@@ -396,7 +440,7 @@ export function buildSessionDiagnosticLog(
 
 const RUN_CSV_HEADER = ["Field", "Value"];
 const COVERAGE_CSV_HEADER = ["Area", "Instrumented", "What is recorded"];
-const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)", "Students", "Host"];
+const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)", "Students", "Host", "Cause", "Code", "Server (ms)"];
 
 /** CSV export: a "Session" header block, then the COVERAGE block (what this
  * file does and does not claim), then one row per entry, oldest first - the
@@ -451,6 +495,9 @@ export function formatSessionDiagnosticLogCsv(log: SessionDiagnosticLog): string
         entry.durationMs === undefined ? "" : String(entry.durationMs),
         entry.classificationStudentCount === undefined ? "" : String(entry.classificationStudentCount),
         sanitizeSessionDiagnosticError(entry.host ?? ""),
+        entry.cause ?? "",
+        entry.code ?? "",
+        entry.serverMs === undefined ? "" : String(entry.serverMs),
       ])
     );
   }
@@ -543,6 +590,7 @@ function parseOneEntry(raw: unknown): SessionDiagnosticEntry | null {
       ? { classificationStudentCount: record.classificationStudentCount }
       : {}),
     ...(typeof record.host === "string" && record.host !== "" ? { host: record.host } : {}),
+    ...fineFailureFields(record.cause, record.code, record.serverMs),
   };
 }
 

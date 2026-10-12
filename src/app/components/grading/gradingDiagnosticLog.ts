@@ -77,6 +77,12 @@ export interface RecordGradingDiagnosticArgs {
   classificationStudentCount?: number;
   /** Dialed LMS host (host only, no path or query). */
   host?: string;
+  /** Closed failure-cause token; owner-only upstream, absent otherwise. */
+  cause?: string;
+  /** Allowlisted error-code token. */
+  code?: string;
+  /** Server-side action time in milliseconds. */
+  serverMs?: number;
 }
 
 /** Record one grading operation into the app-wide session log. Call it
@@ -94,6 +100,9 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     durationMs: args.durationMs,
     classificationStudentCount: args.classificationStudentCount,
     host: args.host,
+    cause: args.cause,
+    code: args.code,
+    serverMs: args.serverMs,
   });
 }
 

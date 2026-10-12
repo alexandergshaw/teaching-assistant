@@ -3,6 +3,7 @@
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
 import { getCourseName, listAnnouncements, createAnnouncement, createScheduledAnnouncementResilient, updateAnnouncementSchedule, getAnnouncementById, resolveAnnouncementImage, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
 import { resolveInstitution, resolveInstitutionByCode } from "@/lib/canvas-core";
+import { reportCanvasFailure, type CanvasFailureDetail } from "@/lib/canvas-failure-report";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireUser } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -74,35 +75,21 @@ import {
  */
 export async function listCoursesAction(
   acronym: string
-): Promise<{ courses: CanvasCourse[] } | { error: string; attemptedHost?: string }> {
+): Promise<
+  | { courses: CanvasCourse[] }
+  | { error: string; attemptedHost?: string; networkFailure?: CanvasFailureDetail; serverMs?: number }
+> {
+  const startedAtMs = Date.now();
+  let isOwner = false;
   try {
-    await requireUser();
+    const identity = await requireUser();
+    isOwner = identity.role === "owner";
     return { courses: await listCourses(acronym) };
   } catch (err) {
-    const base = err instanceof Error ? err.message : "Could not load courses.";
-    const host = await describeAttemptedCanvasHost(acronym);
     // Folded into the string too: the picker passes the error through verbatim,
-    // so naming the host here reaches the instructor with no UI change. The
-    // discrete attemptedHost stays for the diagnostic.
-    return { error: host ? `${base} (dialed ${host})` : base, attemptedHost: host };
-  }
-}
-
-/**
- * The host this institution is configured to dial, for a diagnostic message.
- *
- * Returns undefined rather than throwing for every failure mode, including the
- * one where there is no credential at all: this runs on an error path whose
- * job is to explain a failure, and a diagnostic helper that can fail the
- * request it is describing would be worse than no diagnostic.
- */
-async function describeAttemptedCanvasHost(acronym: string): Promise<string | undefined> {
-  try {
-    const { baseUrl } = await resolveInstitutionByCode(acronym);
-    const host = new URL(baseUrl).host;
-    return host || undefined;
-  } catch {
-    return undefined;
+    // so naming the host (and, for the owner only, the cause) here reaches the
+    // instructor with no UI change. The discrete fields stay for the diagnostic.
+    return reportCanvasFailure({ err, acronym, isOwner, startedAtMs, fallbackMessage: "Could not load courses." });
   }
 }
 

@@ -85,3 +85,37 @@ describe("recordChatSeamSettled (wrapper call shape)", () => {
     expect(readSessionDiagnosticSurfaceEntries("grading").entries).toHaveLength(0);
   });
 });
+
+describe("recordChatSeamSettled carries the fine cause (AC-14)", () => {
+  it("records cause, code and serverMs exactly, and omits them when none supplied", () => {
+    recordChatSeamSettled({
+      operation: "list_lms_courses",
+      startedAtMs: 0,
+      failureClass: "no response",
+      institution: "RIZE",
+      host: "rize.instructure.com",
+      cause: "connect-timeout",
+      code: "ABORT_ERR",
+      serverMs: 20100,
+    });
+    recordChatSeamSettled({
+      operation: "list_lms_courses",
+      startedAtMs: 0,
+      failureClass: "no response",
+      institution: "RIZE",
+    });
+    const entries = readSessionDiagnosticSurfaceEntries("grading").entries;
+    expect(entries[0]).toMatchObject({ cause: "connect-timeout", code: "ABORT_ERR", serverMs: 20100, error: "no response" });
+    for (const key of ["cause", "code", "serverMs"]) expect(Object.keys(entries[1])).not.toContain(key);
+  });
+
+  it("decide keeps the fine fields off a decision that has none", () => {
+    const d = decideChatSeamDiagnostic({
+      operation: "list_lms_courses",
+      startedAtMs: 0,
+      settledAtMs: 10,
+      failureClass: "no response",
+    });
+    expect(Object.keys(d ?? {})).not.toContain("cause");
+  });
+});

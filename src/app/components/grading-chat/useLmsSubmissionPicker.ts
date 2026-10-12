@@ -94,6 +94,9 @@ export function useLmsSubmissionPicker(): LmsPickerState {
         failureClass: "error" in r ? classifyChatSeamFailure(r.error) : null,
         institution: courseKey,
         host: "error" in r ? r.attemptedHost : undefined,
+        cause: "error" in r ? r.networkFailure?.cause : undefined,
+        code: "error" in r ? r.networkFailure?.code : undefined,
+        serverMs: "error" in r ? r.serverMs : undefined,
       });
       if (cancelled) return;
       if ("error" in r) setCourseResult({ key: courseKey, items: [], error: r.error });
@@ -117,6 +120,9 @@ export function useLmsSubmissionPicker(): LmsPickerState {
         failureClass: "error" in r ? classifyChatSeamFailure(r.error) : null,
         institution: sel.institution,
         host: "error" in r ? r.attemptedHost : undefined,
+        cause: "error" in r ? r.networkFailure?.cause : undefined,
+        code: "error" in r ? r.networkFailure?.code : undefined,
+        serverMs: "error" in r ? r.serverMs : undefined,
       });
       if (cancelled) return;
       if ("error" in r) setAssignmentResult({ key: assignmentKey, items: [], error: r.error });

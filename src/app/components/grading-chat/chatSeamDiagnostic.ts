@@ -57,6 +57,10 @@ export interface ChatSeamDecision {
   institution?: string;
   /** Dialed LMS host (host only), when the seam knows it. */
   host?: string;
+  /** Fine failure cause (closed token), when the seam knows it. */
+  cause?: string;
+  code?: string;
+  serverMs?: number;
 }
 
 /** PURE. `null` when no start was captured. `failureClass` null = success. */
@@ -67,12 +71,18 @@ export function decideChatSeamDiagnostic(args: {
   failureClass: ChatSeamFailureClass | null;
   institution?: string;
   host?: string;
+  cause?: string;
+  code?: string;
+  serverMs?: number;
 }): ChatSeamDecision | null {
   if (args.startedAtMs === null) return null;
   const durationMs = Math.max(0, Math.round(args.settledAtMs - args.startedAtMs));
   const where = {
     ...(args.institution ? { institution: args.institution } : {}),
     ...(args.host ? { host: args.host } : {}),
+    ...(args.cause ? { cause: args.cause } : {}),
+    ...(args.code ? { code: args.code } : {}),
+    ...(args.serverMs !== undefined ? { serverMs: args.serverMs } : {}),
   };
   if (args.failureClass) {
     return { operation: args.operation, outcome: "failure", durationMs, error: args.failureClass, ...where };
@@ -94,6 +104,9 @@ export function recordChatSeamSettled(args: {
   failureClass: ChatSeamFailureClass | null;
   institution?: string;
   host?: string;
+  cause?: string;
+  code?: string;
+  serverMs?: number;
 }): boolean {
   const decision = decideChatSeamDiagnostic({ ...args, settledAtMs: chatSeamNowMs() });
   if (!decision) return false;
@@ -105,6 +118,9 @@ export function recordChatSeamSettled(args: {
     error: decision.error,
     institution: decision.institution,
     host: decision.host,
+    cause: decision.cause,
+    code: decision.code,
+    serverMs: decision.serverMs,
   });
   return true;
 }

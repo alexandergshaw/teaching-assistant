@@ -45,3 +45,16 @@ describe("LMS picker list_lms_courses diagnostic wiring", () => {
     expect(hook).toMatch(/recordChatSeamSettled\(\{\s*operation: "list_lms_courses"/);
   });
 });
+
+describe("LMS picker passes the fine failure fields at both record sites (AC-15)", () => {
+  it("each site forwards cause, code and serverMs from the action result", () => {
+    for (const op of ["list_lms_courses", "list_lms_assignments"]) {
+      const at = hook.indexOf(`operation: "${op}"`);
+      const close = hook.indexOf("});", at);
+      const site = hook.slice(at, close);
+      expect(site).toMatch(/cause: "error" in r \? r\.networkFailure\?\.cause/);
+      expect(site).toMatch(/code: "error" in r \? r\.networkFailure\?\.code/);
+      expect(site).toMatch(/serverMs: "error" in r \? r\.serverMs/);
+    }
+  });
+});

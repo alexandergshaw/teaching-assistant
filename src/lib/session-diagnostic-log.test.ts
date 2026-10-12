@@ -608,8 +608,8 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
     expect(lines[headerIndex]).toContain("Duration (ms)");
     expect(lines[headerIndex]).toContain("Students");
-    expect(lines[headerIndex + 1].endsWith(",2360,,")).toBe(true);
-    expect(lines[headerIndex + 2].endsWith(",,,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",2360,,,,,")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",,,,,,")).toBe(true);
   });
 
   it("round-trips classificationStudentCount (JSON + CSV), omitting the key when absent", () => {
@@ -639,7 +639,7 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     expect("classificationStudentCount" in reparsed[1]).toBe(false);
     const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
-    expect(lines[headerIndex + 1].endsWith(",5,23,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",5,23,,,,")).toBe(true);
   });
 
   it("round-trips institution and host (JSON + CSV), omitting host when absent", () => {
@@ -672,8 +672,75 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
     expect(lines[headerIndex]).toContain("Host");
     expect(lines[headerIndex + 1]).toContain(",ACME,");
-    expect(lines[headerIndex + 1].endsWith(",,,acme.instructure.com")).toBe(true);
-    expect(lines[headerIndex + 2].endsWith(",,,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",,,acme.instructure.com,,,")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",,,,,,")).toBe(true);
+  });
+
+  it("records cause, code and serverMs; omits them when absent; drops hostile tokens (AC-14)", () => {
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:01.000Z",
+      surface: "grading",
+      operation: "list_lms_courses",
+      label: "List LMS courses",
+      outcome: "failure",
+      error: "no response",
+      host: "acme.instructure.com",
+      cause: "connect-timeout",
+      code: "ABORT_ERR",
+      serverMs: 20100,
+    });
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:02.000Z",
+      surface: "grading",
+      operation: "plain_op",
+      label: "Plain op",
+      outcome: "success",
+    });
+    recordSessionDiagnosticEntry({
+      at: "2026-09-07T10:00:03.000Z",
+      surface: "grading",
+      operation: "hostile_op",
+      label: "Hostile op",
+      outcome: "failure",
+      error: "x",
+      cause: "dns token=abc",
+      code: "ECONNREFUSED 10.0.0.1 token=abc",
+      serverMs: Number.NaN,
+    });
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries[0]).toMatchObject({ cause: "connect-timeout", code: "ABORT_ERR", serverMs: 20100 });
+    for (const key of ["cause", "code", "serverMs"]) {
+      expect(Object.keys(state.entries[1])).not.toContain(key);
+      expect(Object.keys(state.entries[2])).not.toContain(key);
+    }
+    const log = buildSessionDiagnosticLog(state, CONTEXT, "2026-09-07T12:00:00.000Z");
+    const reparsed = parseSessionDiagnosticLogEntries(JSON.parse(formatSessionDiagnosticLogJson(log)).entries);
+    expect(reparsed).toEqual([...state.entries]);
+    const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
+    const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
+    expect(lines[headerIndex].endsWith("Students,Host,Cause,Code,Server (ms)")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",acme.instructure.com,connect-timeout,ABORT_ERR,20100")).toBe(true);
+    expect(JSON.stringify(state.entries[2])).not.toMatch(/token=abc|10\.0\.0\.1/);
+  });
+
+  it("parses a frozen old export that has no cause, code or serverMs", () => {
+    const old = [
+      {
+        at: "2026-09-07T10:00:00.000Z",
+        surface: "grading",
+        operation: "list_lms_courses",
+        label: "List LMS courses",
+        institution: "ACME",
+        course: "",
+        outcome: "failure",
+        error: "no response",
+        durationMs: 36404,
+        host: "acme.instructure.com",
+      },
+    ];
+    const parsed = parseSessionDiagnosticLogEntries(old);
+    expect(parsed).toEqual(old);
+    expect(Object.keys(parsed[0])).not.toContain("cause");
   });
 
   it("drops a malformed entry rather than throwing", () => {

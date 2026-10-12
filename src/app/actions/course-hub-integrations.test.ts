@@ -114,6 +114,7 @@ describe("checkInstitutionsAction - DAT2 repoint", () => {
 
     expect(result).toEqual({
       statuses: [{ acronym: "ABC", canvasConfigured: true, llmConfigured: true }],
+      owner: true,
     });
   });
 
@@ -128,6 +129,7 @@ describe("checkInstitutionsAction - DAT2 repoint", () => {
 
     expect(result).toEqual({
       statuses: [{ acronym: "ABC", canvasConfigured: false, llmConfigured: false }],
+      owner: false,
     });
   });
 
@@ -142,6 +144,7 @@ describe("checkInstitutionsAction - DAT2 repoint", () => {
         { acronym: "XYZ", canvasConfigured: true, llmConfigured: false },
         { acronym: "ABC", canvasConfigured: false, llmConfigured: false },
       ],
+      owner: false,
     });
   });
 
@@ -153,7 +156,18 @@ describe("checkInstitutionsAction - DAT2 repoint", () => {
 
     expect(result).toEqual({
       statuses: [{ acronym: "XYZ", canvasConfigured: true, llmConfigured: false }],
+      owner: true,
     });
+  });
+
+  it("reports the owner flag additively: true for an owner, false for everyone else", async () => {
+    mockRequireUser.mockResolvedValue(OWNER);
+    const asOwner = await checkInstitutionsAction(["abc"]);
+    mockRequireUser.mockResolvedValue(MEMBER);
+    const asMember = await checkInstitutionsAction(["abc"]);
+
+    expect("owner" in asOwner && asOwner.owner).toBe(true);
+    expect("owner" in asMember && asMember.owner).toBe(false);
   });
 
   it("resolves the caller's own stored rows via listLmsCredentials(identity.id), never a different id", async () => {

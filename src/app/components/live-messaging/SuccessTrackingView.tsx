@@ -40,6 +40,23 @@ import styles from "./SuccessTracking.module.css";
 interface ConnectionCheck {
   key: string;
   map: InstitutionConnectionMap;
+  // The caller resolves as the workspace owner (checkInstitutionsAction's
+  // additive `owner` flag); null when the check errored, so no claim is made.
+  owner: boolean | null;
+}
+
+// Says WHY the switcher is empty instead of one generic line. Only reached
+// once the connection check has finished and no institution is connected.
+function emptyStateMessage(institutions: string[], owner: boolean | null): string {
+  const n = institutions.length;
+  if (n === 0) {
+    return "No institutions are registered yet. Add one in your account integrations to track students here.";
+  }
+  const registered = `${n} ${n === 1 ? "institution is" : "institutions are"} registered but none has a live Canvas connection.`;
+  if (owner === false) {
+    return `${registered} Your account is not resolving as the workspace owner, so institutions configured for the owner are hidden - sign in as the owner with a verified email.`;
+  }
+  return `${registered} Check that the Canvas credentials are configured (<CODE>_CANVAS_URL + <CODE>_CANVAS_API_TOKEN) or connect one in account integrations.`;
 }
 
 export default function SuccessTrackingView() {
@@ -58,13 +75,16 @@ export default function SuccessTrackingView() {
       await Promise.resolve();
       if (cancelled) return;
       let map: InstitutionConnectionMap;
+      let owner: boolean | null = null;
       try {
-        map = connectionMapFromCheck(await checkInstitutionsAction(instKey.split("|")));
+        const result = await checkInstitutionsAction(instKey.split("|"));
+        map = connectionMapFromCheck(result);
+        if ("owner" in result) owner = result.owner;
       } catch {
         map = {};
       }
       if (cancelled) return;
-      setCheck({ key: instKey, map });
+      setCheck({ key: instKey, map, owner });
     })();
     return () => {
       cancelled = true;
@@ -118,9 +138,9 @@ export default function SuccessTrackingView() {
           Checking your Canvas connections...
         </p>
       ) : null}
-      {checked && connected.length === 0 ? (
+      {(!instKey || checked) && connected.length === 0 ? (
         <div className={styles.noticeBanner} role="status">
-          No institution has a live Canvas connection yet. Connect one in your account integrations to see students here.
+          {emptyStateMessage(institutions, check ? check.owner : null)}
         </div>
       ) : null}
 

@@ -162,7 +162,10 @@ export async function listInstitutionFeedUrlsAction(acronym: string): Promise<
 export async function checkInstitutionsAction(
   acronyms: string[]
 ): Promise<
-  | { statuses: Array<{ acronym: string; canvasConfigured: boolean; llmConfigured: boolean }> }
+  | {
+      statuses: Array<{ acronym: string; canvasConfigured: boolean; llmConfigured: boolean }>;
+      owner: boolean;
+    }
   | { error: string }
 > {
   try {
@@ -181,7 +184,7 @@ export async function checkInstitutionsAction(
         llmConfigured: isOwner && !!process.env[`${code}_LLM_URL`] && !!process.env[`${code}_LLM_API`],
       };
     });
-    return { statuses };
+    return { statuses, owner: isOwner };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not check institutions." };
   }

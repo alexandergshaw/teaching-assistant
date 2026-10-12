@@ -153,6 +153,12 @@ export interface UseContinuousGradingRunResult {
    * files, student counts) accumulated across every storaged-zip submit in this
    * session; null until one completes, cleared by reset(). */
   readonly ingestLedger: IngestLedger | null;
+  /** Read-only presentation signal: student labels of rows queued or in flight
+   * (first-time grades, retries and regrades alike). Derived from pendingRef. */
+  readonly pendingStudents: ReadonlySet<string>;
+  /** Read-only presentation signal: student labels being graded right now (the
+   * active concurrency slots), in dispatch order. */
+  readonly inFlightStudents: readonly string[];
 }
 
 interface GradeRunItemResponse {
@@ -194,6 +200,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const takenLabelsRef = useRef<Set<string>>(new Set());
   const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
   const pendingRef = useRef<Set<number>>(new Set());
+  const inFlightIndexRef = useRef<Set<number>>(new Set());
   // ZIP-CLASS-VS-SINGLE: the latest zip ingest's classification (per-ingest;
   // a non-zip submit leaves it untouched). Stamped onto every rebuilt run.
   const classificationRef = useRef<SubmissionZipClassification | null>(null);
@@ -207,6 +214,25 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [unresolvedStudents, setUnresolvedStudents] = useState<ReadonlySet<string>>(new Set());
   const [ingestLedger, setIngestLedger] = useState<IngestLedger | null>(null);
+  const [pendingStudents, setPendingStudents] = useState<ReadonlySet<string>>(new Set());
+  const [inFlightStudents, setInFlightStudents] = useState<readonly string[]>([]);
+
+  // Presentation only: mirrors pendingRef / inFlightIndexRef as student labels.
+  const publishPending = () => {
+    const labelOf = (index: number) => retainedBodiesRef.current.get(index)?.entry.student;
+    const pending = new Set<string>();
+    for (const index of pendingRef.current) {
+      const label = labelOf(index);
+      if (label !== undefined) pending.add(label);
+    }
+    const active: string[] = [];
+    for (const index of inFlightIndexRef.current) {
+      const label = labelOf(index);
+      if (label !== undefined) active.push(label);
+    }
+    setPendingStudents(pending);
+    setInFlightStudents(active);
+  };
 
   const rebuildRun = () => {
     const header = headerRef.current;
@@ -245,6 +271,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const request = queueRef.current.shift()!;
       inFlightRef.current += 1;
       setInFlight(inFlightRef.current);
+      inFlightIndexRef.current.add(request.sourceIndex);
+      publishPending();
 
       const itemStartedAtMs = chatSeamNowMs();
       dispatchItem(request)
@@ -281,8 +309,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         })
         .finally(() => {
           pendingRef.current.delete(request.sourceIndex);
+          inFlightIndexRef.current.delete(request.sourceIndex);
           inFlightRef.current -= 1;
           setInFlight(inFlightRef.current);
+          publishPending();
           setCompletedCount(arrivedRef.current.length);
           rebuildRun();
           pump();
@@ -535,6 +565,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       queueRef.current.push(body);
     }
     setDispatchedCount(dispatchedCountRef.current);
+    publishPending();
     if (flaggedNow.length > 0) {
       setUnresolvedStudents((prev) => new Set([...prev, ...flaggedNow]));
     }
@@ -567,6 +598,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!arrived || !arrived.result.ungraded) return;
     pendingRef.current.add(sourceIndex);
     queueRef.current.push(body);
+    publishPending();
     pump();
   };
 
@@ -586,6 +618,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!body) return;
     pendingRef.current.add(sourceIndex);
     queueRef.current.push(body);
+    publishPending();
     pump();
   };
 
@@ -605,6 +638,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();
     pendingRef.current = new Set();
+    inFlightIndexRef.current = new Set();
     classificationRef.current = null;
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
@@ -624,6 +658,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setSessionError(null);
     setUnresolvedStudents(new Set());
     setIngestLedger(null);
+    setPendingStudents(new Set());
+    setInFlightStudents([]);
   };
 
   return {
@@ -648,5 +684,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     sessionError,
     unresolvedStudents,
     ingestLedger,
+    pendingStudents,
+    inFlightStudents,
   };
 }

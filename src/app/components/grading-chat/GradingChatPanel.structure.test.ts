@@ -222,7 +222,12 @@ describe("GradingChatPanel - regrade-after-batch: the chat mount opts in, the ot
 
   it("GradingResults renders the Regrade button only under an onRegrade guard", () => {
     const source = withoutLineComments(read(RESULTS));
-    expect(source).toMatch(/\{onRegrade\s*&&\s*\([\s\S]{0,400}handleRegradeRow\(result\.student\)[\s\S]{0,200}Regrade/);
+    expect(source).toMatch(/\{onRegrade\s*&&\s*\([\s\S]{0,400}<RegradeButton[\s\S]{0,200}handleRegradeRow\(result\.student\)/);
+    // The button itself shows a busy state and is disabled while the row is in flight.
+    const button = withoutLineComments(read("src/app/components/grading-results/RegradeButton.tsx"));
+    expect(button).toContain("disabled={busy}");
+    expect(button).toContain("Regrading...");
+    expect(source).toMatch(/busy=\{regradingStudents\?\.has\(result\.student\)/);
   });
 
   it("the Regrade handler clears edits[student] and the post status, then calls onRegrade", () => {
@@ -624,7 +629,8 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
     // behind the concurrency limit. The indicator must key on work outstanding.
     const source = withoutLineComments(read(PANEL));
     expect(source).toContain("driver.dispatchedCount - driver.completedCount");
-    expect(source).toMatch(/outstanding\s*>\s*0/);
+    expect(source).toMatch(/pendingCount:\s*Math\.max\(driver\.pendingStudents\.size/);
+    expect(source).toMatch(/regradingStudents=\{driver\.pendingStudents\}/);
     // and it must NOT regress to gating the block on inFlight
     expect(source).not.toMatch(/driver\.inFlight\s*>\s*0/);
   });

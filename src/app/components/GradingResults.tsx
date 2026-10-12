@@ -12,6 +12,7 @@ import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
 import { FilesCell } from "./grading-results/FilesCell";
+import { RegradeButton } from "./grading-results/RegradeButton";
 import { CopyIcon } from "./grading-results/icons";
 import { useResultsSort } from "./grading-results/useResultsSort";
 import { ResultsTableHeaderRow } from "./grading-results/ResultsTableHeaderRow";
@@ -186,6 +187,8 @@ export type GradingResultsProps = {
    * re-runs that row's grading in place. Only the chat grading mount passes it.
    * Receives the row's student (the driver's bijective key). */
   onRegrade?: (student: string) => void;
+  /** Students whose grading is queued or in flight; their Regrade button shows busy. */
+  regradingStudents?: ReadonlySet<string>;
   /** Opt-in, default off: students whose name was not found and who carry no
    * label; each such row shows the unresolved-name flag. Chat mount only. */
   unresolvedStudents?: ReadonlySet<string>;
@@ -223,6 +226,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   searchable,
   filterPlaceholder = "Search by student name or feedback",
   onRegrade,
+  regradingStudents,
   unresolvedStudents,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
@@ -745,13 +749,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     )}
                     {onRegrade && (
                       <div style={{ marginTop: "var(--space-1)" }}>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => handleRegradeRow(result.student)}
-                        >
-                          Regrade
-                        </Button>
+                        <RegradeButton busy={regradingStudents?.has(result.student) ?? false} onClick={() => handleRegradeRow(result.student)} />
                       </div>
                     )}
                     {status && status.status !== "idle" && (

@@ -24,7 +24,8 @@ import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGradingRun";
-import { buildLedgerView, describeBulkProgress, type LedgerView } from "./ingestLedger";
+import { buildLedgerView, type LedgerView } from "./ingestLedger";
+import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import {
   coerceFeedbackWordTarget,
@@ -136,39 +137,19 @@ function LedgerNotice({ view }: { view: LedgerView }) {
   );
 }
 
-// "Still grading" is driven by WORK OUTSTANDING (dispatched but not yet
-// arrived), NOT driver.inFlight (only the active concurrency slots). inFlight
-// drops to 0 in the gap between intake finishing and the first dispatch, and
-// whenever submissions are queued behind the concurrency limit - so keying on it
-// made the indicator vanish while grading was still going. outstanding stays > 0
-// from the moment an entry is queued until its result arrives.
-function GradingProgress(props: {
-  preparing: boolean;
-  zipPhase: "uploading" | "preparing" | null;
-  bulk: boolean;
-  outstanding: number;
-  dispatchedCount: number;
-  completedCount: number;
-}) {
-  const { preparing, zipPhase, bulk, outstanding, dispatchedCount, completedCount } = props;
-  if (!preparing && outstanding <= 0) return null;
-  const counts = { dispatchedCount, completedCount };
-  const bulkUpload = zipPhase !== null ? describeBulkProgress({ phase: zipPhase, ...counts }) : "";
-  const bulkGrading = bulk && outstanding > 0 ? describeBulkProgress({ phase: "grading", ...counts }) : "";
+// Live run status. "Still grading" is driven by rows PENDING (queued or in
+// flight, including retries and regrades), NOT driver.inFlight alone: inFlight
+// drops to 0 between intake finishing and the first dispatch and whenever work is
+// queued behind the concurrency limit. The run has no known total, so only honest
+// live counts are shown (see runStatus.ts).
+function GradingProgress({ status }: { status: RunStatus | null }) {
+  if (status === null) return null;
   return (
     <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
       <span className={styles.spinner} aria-hidden="true" />
       <div>
-        <p className={styles.loadingTitle}>
-          {bulkUpload !== "" ? bulkUpload : preparing && outstanding <= 0 ? "Reading your submission..." : "Grading in progress"}
-        </p>
-        {outstanding > 0 && (
-          <p className={styles.loadingText}>
-            {bulkGrading !== ""
-              ? bulkGrading
-              : `${outstanding} submission${outstanding === 1 ? "" : "s"} still grading (${completedCount} of ${dispatchedCount} done)`}
-          </p>
-        )}
+        <p className={styles.loadingTitle}>{status.title}</p>
+        {status.detail !== "" && <p className={styles.loadingText}>{status.detail}</p>}
       </div>
     </div>
   );
@@ -184,6 +165,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
+  const [intakeNote, setIntakeNote] = useState<string | null>(null);
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
@@ -272,7 +254,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     let canvasMeta: { instructions: string; rubric: string } | null = null;
     if (canvasUrl && scope) {
       const metaStartedAtMs = chatSeamNowMs();
-      const meta = await fetchCanvasMetaAction(canvasUrl.trim());
+      setIntakeNote("Fetching assignment details from Canvas...");
+      const meta = await fetchCanvasMetaAction(canvasUrl.trim()).finally(() => setIntakeNote(null));
       recordChatSeamSettled({
         operation: "fetch_canvas_meta",
         startedAtMs: metaStartedAtMs,
@@ -575,6 +558,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           onOpenPreview={onOpenPreview}
           searchable
           onRegrade={driver.regrade}
+          regradingStudents={driver.pendingStudents}
           unresolvedStudents={driver.unresolvedStudents}
         />
         </div>
@@ -590,12 +574,16 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         )}
         <LedgerNotice view={ledgerView} />
         <GradingProgress
-          preparing={preparing}
-          zipPhase={zipPhase}
-          bulk={driver.ingestLedger !== null}
-          outstanding={driver.dispatchedCount - driver.completedCount}
-          dispatchedCount={driver.dispatchedCount}
-          completedCount={driver.completedCount}
+          status={describeRunStatus({
+            preparing,
+            zipPhase,
+            headerState: driver.headerState,
+            intakeNote,
+            pendingCount: Math.max(driver.pendingStudents.size, driver.dispatchedCount - driver.completedCount),
+            inFlightStudents: driver.inFlightStudents,
+            inFlightCount: driver.inFlight,
+            completedCount: driver.completedCount,
+          })}
         />
 
         <ChatComposer

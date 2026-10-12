@@ -68,17 +68,17 @@ describe("describeBranchMergeNote", () => {
     expect(notes[0]).toBeNull();
     expect(new Set(notes.slice(1)).size).toBe(3);
   });
-  it("explicit target: frozen wording names the typed target", () => {
+  it("explicit target: frozen wording names the branch and never claims it was set", () => {
     expect(notes[1]).toBe(
-      'The work exists on the branch "feature-x", which was never merged into "main" (the target branch you set). Merging or re-pointing it to "main" would let it be graded.'
+      'The work exists on the branch "feature-x", which was never merged into the "main" branch. Merging or re-pointing it to "main" would let it be graded.'
     );
-    expect(notes[2]).toBe('No submission was found on "main" (the target branch you set) or on any other branch of this repository that was checked.');
+    expect(notes[2]).toBe('No submission was found on the "main" branch or on any other branch of this repository that was checked.');
     expect(notes[2]).not.toContain("feature-x");
     expect(notes[3]).toBe(
-      'Other branches of this repository could not be checked against "main" (the target branch you set) (a rate limit was hit), so it is possible the work exists there unseen.'
+      'Other branches of this repository could not be checked against the "main" branch (a rate limit was hit), so it is possible the work exists there unseen.'
     );
   });
-  it("no typed target (AC7): frozen wording names the DEFAULT branch and never claims a target was set", () => {
+  it("prefilled/default target: identical wording to the explicit case, never claims a target was set", () => {
     const noTarget = (status: BranchMergeCheck["status"]): BranchMergeCheck => ({
       status,
       targetBranch: "main",
@@ -87,13 +87,13 @@ describe("describeBranchMergeNote", () => {
       ...(status === "unknown" ? { undeterminedReason: "a rate limit was hit" } : {}),
     });
     expect(describeBranchMergeNote(noTarget("not-merged"))).toBe(
-      'The work exists on the branch "module-08", which was never merged into the default branch "main". Merging or re-pointing it to "main" would let it be graded.'
+      'The work exists on the branch "module-08", which was never merged into the "main" branch. Merging or re-pointing it to "main" would let it be graded.'
     );
     expect(describeBranchMergeNote(noTarget("no-submission"))).toBe(
-      'No submission was found on the default branch "main" or on any other branch of this repository that was checked.'
+      'No submission was found on the "main" branch or on any other branch of this repository that was checked.'
     );
     expect(describeBranchMergeNote(noTarget("unknown"))).toBe(
-      'Other branches of this repository could not be checked against the default branch "main" (a rate limit was hit), so it is possible the work exists there unseen.'
+      'Other branches of this repository could not be checked against the "main" branch (a rate limit was hit), so it is possible the work exists there unseen.'
     );
     for (const st of ["not-merged", "no-submission", "unknown"] as const) {
       expect(describeBranchMergeNote(noTarget(st))).not.toContain("you set");

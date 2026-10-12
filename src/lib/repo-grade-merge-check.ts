@@ -51,13 +51,11 @@ export function classifyBranchMergeCheck(args: {
   }
 }
 
-/** How the graded ref is named in a note: "the branch you set as the target"
- * only when the instructor really typed one, else "the default branch". */
+/** How the graded ref is named in a note. The field is prefilled with "main",
+ * so a note never claims the instructor set it: it just names the branch. */
 function describeGradedRef(check: BranchMergeCheck): string {
-  if (!check.targetBranch) return "the graded branch";
-  return check.targetWasExplicit
-    ? `"${check.targetBranch}" (the target branch you set)`
-    : `the default branch "${check.targetBranch}"`;
+  if (!check.targetBranch) return "the default branch";
+  return `the "${check.targetBranch}" branch`;
 }
 
 /** Non-accusatory instructor-visible note per state. "merged" adds none. The

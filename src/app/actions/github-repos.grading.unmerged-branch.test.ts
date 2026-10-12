@@ -108,7 +108,7 @@ describe("gradeRepoAction - G3: checking other branches for the same folder when
     // RULING 2: the purpose-built member, distinct from absent-everywhere.
     expect(first.determination).toBe("no-submission-unmerged-branch");
     expect(first.overallComment).toContain("feature-add-trip-math");
-    expect(first.overallComment).toContain('never merged into the default branch "main"');
+    expect(first.overallComment).toContain('never merged into the "main" branch');
     expect(first.overallComment.toLowerCase()).toContain("nothing was submitted");
     expect(result.branchMergeCheck).toEqual({
       status: "not-merged",
@@ -147,7 +147,7 @@ describe("gradeRepoAction - G3: checking other branches for the same folder when
     const first = result.run.results[0];
     expect(first.totalScore).toBe("0");
     expect(first.determination).toBe("no-submission");
-    expect(first.overallComment).toContain('No submission was found on the default branch "main" or on any other branch');
+    expect(first.overallComment).toContain('No submission was found on the "main" branch or on any other branch');
     expect(getRepoTreeWithMeta).not.toHaveBeenCalled();
     expect(result.branchMergeCheck?.status).toBe("no-submission");
   });

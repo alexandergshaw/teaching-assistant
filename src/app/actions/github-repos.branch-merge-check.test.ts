@@ -229,7 +229,7 @@ describe("gradeRepoAction - empty graded ref: not-merged vs no-submission vs unk
     expect(first.totalScore).toBe("0");
     expect(first.determination).toBe("no-submission-unmerged-branch");
     expect(first.overallComment).toContain('"feature-x"');
-    expect(first.overallComment).toContain('"main" (the target branch you set)');
+    expect(first.overallComment).toContain('the "main" branch');
     expect(gradeEntries).not.toHaveBeenCalled();
   });
 
@@ -279,7 +279,7 @@ describe("gradeRepoAction - empty graded ref: not-merged vs no-submission vs unk
     expectZeroRun(result);
     expect(result.branchMergeCheck).toEqual({ status: "not-merged", targetBranch: "main", targetWasExplicit: false, foundOnBranch: "feature-x" });
     expect(result.run.results[0].determination).toBe("no-submission-unmerged-branch");
-    expect(result.run.results[0].overallComment).toContain('never merged into the default branch "main"');
+    expect(result.run.results[0].overallComment).toContain('never merged into the "main" branch');
     expect(result.run.results[0].overallComment).not.toContain("you set");
   });
 
@@ -355,7 +355,7 @@ describe("gradeRepoAction - success-path not-merged folds a note into the REAL g
     expect(first.totalScore).toBe("8/10");
     expect(first.determination).toBeUndefined();
     expect(first.strengths).toBe("Good work.");
-    const note = 'The work exists on the branch "later-work", which was never merged into the default branch "main". Merging or re-pointing it to "main" would let it be graded.';
+    const note = 'The work exists on the branch "later-work", which was never merged into the "main" branch. Merging or re-pointing it to "main" would let it be graded.';
     expect(first.improvements).toBe(`Add docstrings. ${note}`);
     expect(first.overallComment).toBe(`Good work. Add docstrings. ${note} You are welcome to resubmit.`);
     expect(result.branchMergeCheck).toEqual({ status: "not-merged", targetBranch: "main", targetWasExplicit: false, foundOnBranch: "later-work" });

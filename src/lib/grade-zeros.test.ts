@@ -287,7 +287,7 @@ describe("isZeroableAssignment", () => {
 });
 
 describe("buildRepoNoSubmissionResult (frozen oracle)", () => {
-  const NOTE = 'The work exists on the branch "module-08", which was never merged into the default branch "main". Merging or re-pointing it to "main" would let it be graded.';
+  const NOTE = 'The work exists on the branch "module-08", which was never merged into the "main" branch. Merging or re-pointing it to "main" would let it be graded.';
   const r = buildRepoNoSubmissionResult({
     student: "org/info-1255-x",
     folder: "module_08",

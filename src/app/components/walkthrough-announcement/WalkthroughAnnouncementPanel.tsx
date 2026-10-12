@@ -709,8 +709,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       )}
       {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}
       {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
-        <p className={styles.fieldHint}>
-          Every draft slot already has a draft - add another slot, or use Regenerate on one.
+        <p className={controls.notice}>
+          Generate announcement is off because every draft slot already has a draft. To redo a draft, press Regenerate in the button row under it (Post to Canvas, Regenerate, Copy) - you will be asked to confirm before it is replaced. To write another, use Add another draft slot.
         </p>
       )}
 

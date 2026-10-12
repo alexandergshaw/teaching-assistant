@@ -108,8 +108,9 @@ import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
 import { discussionCheckpointsKey, resolveDiscussionDeadlinesForClientPost } from "./lmsGenerationDiscussion";
 import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 import type { ArtifactDownloadFormat } from "@/lib/lms-generation/artifact-download";
+import type { generateFromSelectionAction as generateFromSelectionServerAction } from "../../../actions/lms-generation";
+import { readActionRouteResponse } from "@/lib/action-route-response";
 import {
-  generateFromSelectionAction,
   listGeneratedArtifactVersionsAction,
   postGeneratedArtifactAction,
 } from "../../../actions/lms-generation";
@@ -197,6 +198,26 @@ import { useLmsGenerationDeckTemplates } from "./useLmsGenerationDeckTemplates";
 // (`): UseLmsGenerationReturn {`) still find it here, since the function
 // itself did not move.
 import type { GenerationPreviewState, UseLmsGenerationReturn } from "./lmsGenerationTypes";
+
+// G4 Wave 3a: the non-deck generation kinds go through a Route Handler that
+// declares a ceiling and races the work against an elapsed-aware budget, so a
+// slow model comes back as a worded { error } (504) instead of a raw
+// transport failure. Same signature and result shape as the Server Action it
+// wraps (the deck kind keeps its own route and never reaches this).
+const generateFromSelectionAction: typeof generateFromSelectionServerAction = async (...args) => {
+  try {
+    const res = await fetch("/api/lms-generation/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args }),
+    });
+    // A non-ok or non-JSON answer (for example a platform HTML 504) becomes a
+    // worded { error }, never a JSON parse error.
+    return await readActionRouteResponse<Awaited<ReturnType<typeof generateFromSelectionServerAction>>>(res);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate this content." };
+  }
+};
 
 // -- Re-exports (implementations moved to the sibling modules imported
 // above - see each one's own header comment and doc comments for the full

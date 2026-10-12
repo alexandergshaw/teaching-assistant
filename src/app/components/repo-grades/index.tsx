@@ -34,6 +34,7 @@ import {
   loadFolderSelection,
   loadRepoGradeCells,
   loadRepoGradesUiState,
+  DEFAULT_TARGET_BRANCH,
   loadTargetBranch,
   loadSelectedRepoIds,
   persistAssignmentMapping,
@@ -347,7 +348,7 @@ export default function RepoGradesTab() {
   const [folderDropNotice, setFolderDropNotice] = useState<string | null>(null);
   // Branch-merge check target (per course, ta-repo-grades-target-branch). Raw
   // text as typed; trimmed only at the grading call boundary below.
-  const [targetBranch, setTargetBranch] = useState<string>("");
+  const [targetBranch, setTargetBranch] = useState<string>(DEFAULT_TARGET_BRANCH);
   const folderCensus = scan ? buildFolderOptions(scan.repos) : { options: [], scannedRepos: 0, unknownRepos: 0 };
   const currentSelectedFolder = model ? resolveSelectedFolder(folderCensus.options, selectedFolder) : ALL_FOLDERS;
   // Keyed on the course AND the resolved folder set, so a narrower PREFIXED
@@ -817,7 +818,7 @@ export default function RepoGradesTab() {
               type="text"
               className={styles.headerInput}
               aria-label="Target branch (merged to)"
-              placeholder="Optional, e.g. main"
+              placeholder="Blank = each repo's default branch"
               value={targetBranch}
               onChange={(e) => {
                 setTargetBranch(e.target.value);

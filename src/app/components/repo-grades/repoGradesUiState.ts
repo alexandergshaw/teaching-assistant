@@ -460,15 +460,21 @@ export function persistFolderSelection(courseId: string, folder: string): void {
 // verbatim; trimming happens at the call boundary, not in storage.
 const TARGET_BRANCH_KEY = "ta-repo-grades-target-branch";
 
-/** Reads `courseId`'s persisted target branch - "" when never persisted or
- * when courseId is blank. */
+/** First-run value of the target-branch field. Display-only: never written on
+ * load. A persisted "" (the user deliberately cleared the field, meaning each
+ * repo's own default branch) is NOT replaced by this. */
+export const DEFAULT_TARGET_BRANCH = "main";
+
+/** Reads `courseId`'s persisted target branch. Returns DEFAULT_TARGET_BRANCH
+ * when nothing was stored (no window, blank courseId, absent key/course, or a
+ * read failure); a stored "" is returned as "". */
 export function loadTargetBranch(courseId: string): string {
-  if (typeof window === "undefined" || !courseId) return "";
+  if (typeof window === "undefined" || !courseId) return DEFAULT_TARGET_BRANCH;
   try {
     const byCourse = parseFolderByCourse(localStorage.getItem(TARGET_BRANCH_KEY));
-    return byCourse[courseId] ?? "";
+    return byCourse[courseId] ?? DEFAULT_TARGET_BRANCH;
   } catch {
-    return "";
+    return DEFAULT_TARGET_BRANCH;
   }
 }
 

@@ -7,6 +7,7 @@
 // typeof window/localStorage are both "undefined" under plain Node here).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_TARGET_BRANCH,
   decodeRepoGradeRubricChoice,
   defaultRepoGradeRubricChoice,
   encodeRepoGradeRubricChoice,
@@ -496,8 +497,38 @@ describe("loadAssignmentMapping / persistAssignmentMapping - AC5 items 25-26, ta
 });
 
 describe("loadTargetBranch / persistTargetBranch - branch-merge check AC-1", () => {
-  it("defaults to an empty string when nothing is stored", () => {
+  it("defaults to main on first run (nothing stored), and writes nothing on load", () => {
+    expect(loadTargetBranch("course-1")).toBe(DEFAULT_TARGET_BRANCH);
+    expect(loadTargetBranch("course-1")).toBe("main");
+    expect(fakeStorage.getItem("ta-repo-grades-target-branch")).toBeNull();
+  });
+
+  it("DEFAULT_TARGET_BRANCH is exactly main", () => {
+    expect(DEFAULT_TARGET_BRANCH).toBe("main");
+  });
+
+  it("a deliberately cleared field (persisted empty string) stays empty on reload - first-run, not hard, default", () => {
+    persistTargetBranch("course-1", "");
     expect(loadTargetBranch("course-1")).toBe("");
+    expect(JSON.parse(fakeStorage.getItem("ta-repo-grades-target-branch") as string)).toEqual({ "course-1": "" });
+  });
+
+  it("a clear in one course does not leak: the untouched course still defaults to main", () => {
+    persistTargetBranch("course-1", "");
+    expect(loadTargetBranch("course-1")).toBe("");
+    expect(loadTargetBranch("course-2")).toBe("main");
+  });
+
+  it("corrupt stored JSON is a read failure, not a deliberate clear: defaults to main", () => {
+    fakeStorage.setItem("ta-repo-grades-target-branch", "{not json");
+    expect(loadTargetBranch("course-1")).toBe("main");
+  });
+
+  it("a storage read that throws defaults to main", () => {
+    fakeStorage.getItem = () => {
+      throw new Error("read blocked (simulated)");
+    };
+    expect(loadTargetBranch("course-1")).toBe("main");
   });
 
   it("round-trips the raw value under ta-repo-grades-target-branch", () => {
@@ -511,21 +542,27 @@ describe("loadTargetBranch / persistTargetBranch - branch-merge check AC-1", () 
     persistTargetBranch("course-2", "release");
     expect(loadTargetBranch("course-1")).toBe("main");
     expect(loadTargetBranch("course-2")).toBe("release");
-    expect(loadTargetBranch("course-3")).toBe("");
+    expect(loadTargetBranch("course-3")).toBe("main");
   });
 
-  it("a blank courseId is a no-op on both sides", () => {
+  it("a blank courseId is a no-op on the write side and defaults to main on the read side", () => {
     persistTargetBranch("", "main");
     expect(fakeStorage.getItem("ta-repo-grades-target-branch")).toBeNull();
-    expect(loadTargetBranch("")).toBe("");
+    expect(loadTargetBranch("")).toBe("main");
   });
 
-  it("returns empty without window, and swallows a write failure", () => {
+  it("returns the main default without window, and swallows a write failure", () => {
     persistTargetBranch("course-1", "main");
     fakeStorage.throwOnSet = true;
     expect(() => persistTargetBranch("course-1", "x")).not.toThrow();
     delete (globalThis as { window?: unknown }).window;
-    expect(loadTargetBranch("course-1")).toBe("");
+    expect(loadTargetBranch("course-1")).toBe("main");
+  });
+
+  it("the call-boundary expression yields main on first run and undefined after a clear", () => {
+    expect(loadTargetBranch("course-1").trim() || undefined).toBe("main");
+    persistTargetBranch("course-1", "");
+    expect(loadTargetBranch("course-1").trim() || undefined).toBeUndefined();
   });
 });
 

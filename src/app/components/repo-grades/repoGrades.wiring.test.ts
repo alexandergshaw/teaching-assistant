@@ -878,6 +878,12 @@ describe("target-branch control wiring (branch-merge check AC-1 / AC-3)", () => 
     expect(indexSource).toContain("targetBranch: targetBranch.trim() || undefined");
   });
 
+  it("default: the state initializer is the first-run constant and the placeholder names the blank meaning", () => {
+    expect(indexSource).toMatch(/useState<string>\(DEFAULT_TARGET_BRANCH\)/);
+    expect(indexSource).not.toContain("Optional, e.g. main");
+    expect(indexSource).toContain("Blank = each repo's default branch");
+  });
+
   it("AC-3: the per-cell call site passes the target branch as gradeRepoAction's 5th argument", () => {
     const m = /gradeRepoAction\(\s*row\.repo,\s*instructions,\s*resolved\.text,\s*provider,\s*(\w+),/.exec(hookSource);
     expect(m).not.toBeNull();

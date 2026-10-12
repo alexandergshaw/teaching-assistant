@@ -259,7 +259,6 @@ const PINNED_UNGUARDED = [
   "reviseDocumentAction",
   "selectCourseTools",
   "selectRequiredTools",
-  "testGeminiAction",
   "unsplashConfiguredAction",
 ].sort();
 

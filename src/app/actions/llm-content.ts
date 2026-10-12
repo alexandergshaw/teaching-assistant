@@ -13,6 +13,7 @@ import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from ".
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
 import { courseKindContract, APPLIED_REAL_TOOL_RULE, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import {
   currentCourseWeek,
   courseProgressStatus,
@@ -656,6 +657,7 @@ export async function testGeminiAction(
   formData: FormData
 ): Promise<TestGeminiState> {
   try {
+    await requireAppOwner();
     const provider = normalizeProvider(formData.get("provider") as string | null);
 
     const file = formData.get("studentSubmissions") as File | null;

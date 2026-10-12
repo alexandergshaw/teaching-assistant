@@ -599,17 +599,6 @@ export function useRepoGradesGradingActions(
       // stay on screen. The clear below runs only once a run is attempted.
       return;
     }
-    // RG-GRADEALL-CONFIRM: every target costs one model call, so a stray click
-    // must not start the run. Mirrors handlePostColumn's unconditional confirm.
-    // Declining returns BEFORE the clear below - nothing ran, so the previous
-    // run's trends stay (ruling W3-4).
-    const usingSelection = resolveGradeScope(selected, bulkSelectionOnly).selectionOnly;
-    const gradeScopeSentence = usingSelection
-      ? ` This grades only your ${plan.targets.length} selected repo(s), not the whole column.`
-      : ` No repos are selected, so this grades the whole column (all ${plan.targets.length} repo(s)).`;
-    if (!window.confirm(`Grade ${plan.targets.length} repo(s) in ${folder}? Each repo spends one model call.${gradeScopeSentence}`)) {
-      return;
-    }
     // A16 wave 3: a run is about to be attempted, so its trends replace
     // whatever the previous run left on screen once this one finishes.
     setLastRunCohort(null);

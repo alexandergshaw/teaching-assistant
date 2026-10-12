@@ -1,5 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { canvasFetch, type CanvasFetchResult } from "./canvas-fetch";
+import { CanvasTransportError } from "./canvas-network-failure";
 
 // ============================================================================
 // The canvasFetch(...) -> Response/throw adapter.
@@ -134,7 +135,9 @@ export function canvasFetchResultToResponse(result: CanvasFetchResult): Response
 
   // result.kind === "unreachable": a fixed literal, never anything derived
   // from the underlying failure - see SEC4 note above.
-  throw new Error("Canvas did not respond.");
+  // The message stays the fixed literal; only the typed `failure` field
+  // carries the classified cause.
+  throw new CanvasTransportError("Canvas did not respond.", result.failure);
 }
 
 /** One bearer-carrying request through `canvasFetch`, converted to the

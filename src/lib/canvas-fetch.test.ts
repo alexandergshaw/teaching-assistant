@@ -158,7 +158,11 @@ describe("canvasFetch - the SSRF boundary (steps 1-2)", () => {
       { timeoutMs: 20 },
       credential
     );
-    expect(result).toEqual({ ok: false, kind: "unreachable" });
+    expect(result).toEqual({
+      ok: false,
+      kind: "unreachable",
+      failure: { phase: "dns", code: "ENODATA", host: "canvas.example.edu", failedAfterMs: expect.any(Number) },
+    });
   });
 });
 
@@ -372,7 +376,11 @@ describe("canvasFetch - the byte cap (step 5)", () => {
       { timeoutMs: 20 },
       credential
     );
-    expect(result).toEqual({ ok: false, kind: "unreachable" });
+    expect(result).toEqual({
+      ok: false,
+      kind: "unreachable",
+      failure: { phase: "body", code: "BYTE_CAP", host: "canvas.example.edu", failedAfterMs: expect.any(Number) },
+    });
     expect(destroyedReq?.destroyed).toBe(true);
   });
 });
@@ -383,7 +391,9 @@ describe("canvasFetch - SEC9/E-UX4: only the network-layer outcome is padded to 
   });
 
   it("pads an INSTANT DNS failure out to the full timeout before resolving unreachable", async () => {
-    lookupMock.mockRejectedValue(new Error("ENOTFOUND canvas.example.edu"));
+    lookupMock.mockRejectedValue(
+      Object.assign(new Error("getaddrinfo ENOTFOUND canvas.example.edu"), { code: "ENOTFOUND" })
+    );
 
     const resultPromise = canvasFetch(
       "https://canvas.example.edu/api/v1/users/self",
@@ -404,7 +414,11 @@ describe("canvasFetch - SEC9/E-UX4: only the network-layer outcome is padded to 
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(settled).toBe(true);
-    expect(await resultPromise).toEqual({ ok: false, kind: "unreachable" });
+    expect(await resultPromise).toEqual({
+      ok: false,
+      kind: "unreachable",
+      failure: { phase: "dns", code: "ENOTFOUND", name: "Error", host: "canvas.example.edu", failedAfterMs: 0 },
+    });
   });
 
   it("does NOT pad a host-not-allowed refusal - it is decided by our own code, not the network", async () => {
@@ -442,5 +456,143 @@ describe("canvasFetch - SEC9/E-UX4: only the network-layer outcome is padded to 
     // advancing the fake clock at all.
     await vi.advanceTimersByTimeAsync(0);
     expect(settled).toBe(true);
+  });
+});
+
+describe("canvasFetch - pinnedLookup answers in the shape the socket layer asks for (AC-8)", () => {
+  async function captureLookup(
+    addr: LookupAddress
+  ): Promise<LookupFunction> {
+    lookupMock.mockResolvedValue([addr]);
+    requestMock.mockImplementation(() => new FakeClientRequest() as unknown as ReturnType<typeof https.request>);
+    void canvasFetch("https://canvas.example.edu/api/v1/users/self", {}, credential);
+    await flushMicrotasks();
+    const options = requestMock.mock.calls[0][0] as https.RequestOptions;
+    return options.lookup as LookupFunction;
+  }
+
+  /** Calls the lookup and returns every raw callback argument, unmodified. */
+  function callLookup(lookup: LookupFunction, hostname: string, opts: object): Promise<unknown[]> {
+    return new Promise((resolve) => {
+      (lookup as unknown as (h: string, o: object, cb: (...args: unknown[]) => void) => void)(
+        hostname,
+        opts,
+        (...args: unknown[]) => resolve(args)
+      );
+    });
+  }
+
+  it("with { all: true } returns an ARRAY holding ONLY the one pinned address (SSRF pin preserved)", async () => {
+    const lookup = await captureLookup({ address: "93.184.216.34", family: 4 });
+    const args = await callLookup(lookup, "attacker-controlled-name.invalid", { all: true });
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBeNull();
+    const list = args[1] as LookupAddress[];
+    expect(Array.isArray(list)).toBe(true);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toEqual({ address: "93.184.216.34", family: 4 });
+    // Not a shape-only pin: the family must be a real IP family, never 0.
+    expect([4, 6]).toContain(list[0].family);
+    // No second resolution happened to produce that answer.
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("with { all: true } normalises the family exactly as the single form does (IPv6 stays 6)", async () => {
+    const lookup = await captureLookup({ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 });
+    const args = await callLookup(lookup, "x", { all: true });
+    expect(args[1]).toEqual([{ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 }]);
+  });
+
+  it("without all it keeps the single-address fallback triple", async () => {
+    const lookup = await captureLookup({ address: "93.184.216.34", family: 4 });
+    expect(await callLookup(lookup, "x", { family: 0 })).toEqual([null, "93.184.216.34", 4]);
+    expect(await callLookup(lookup, "x", { all: false })).toEqual([null, "93.184.216.34", 4]);
+    expect(await callLookup(lookup, "x", {})).toEqual([null, "93.184.216.34", 4]);
+  });
+});
+
+describe("canvasFetch - the failure facts carry the phase (AC-2, AC-3, AC-4)", () => {
+  class FakeSocket extends EventEmitter {
+    constructor(public connecting: boolean | undefined = true) {
+      super();
+    }
+  }
+
+  /** Scripts one request: emits the given socket events, then the error. */
+  async function failWith(
+    socketEvents: ("connect" | "secureConnect")[],
+    err: Error,
+    socketConnecting: boolean | undefined = true
+  ) {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    requestMock.mockImplementation(() => {
+      const req = new FakeClientRequest();
+      queueMicrotask(() => {
+        const socket = new FakeSocket(socketConnecting);
+        req.emit("socket", socket);
+        for (const ev of socketEvents) socket.emit(ev);
+        req.emit("error", err);
+      });
+      return req as unknown as ReturnType<typeof https.request>;
+    });
+    return canvasFetch("https://canvas.example.edu/api/v1/users/self", { timeoutMs: 20 }, credential);
+  }
+
+  const abort = () => Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR" });
+
+  it("ECONNREFUSED after only 'socket' is phase connect with the code kept", async () => {
+    const result = await failWith([], Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }));
+    expect(result).toMatchObject({ ok: false, kind: "unreachable", failure: { phase: "connect", code: "ECONNREFUSED" } });
+  });
+
+  it("the same AbortError lands in three different phases", async () => {
+    const connect = await failWith([], abort());
+    const tls = await failWith(["connect"], abort());
+    const request = await failWith(["connect", "secureConnect"], abort());
+    const phases = [connect, tls, request].map((r) => (r.ok === false && r.kind === "unreachable" ? r.failure?.phase : undefined));
+    expect(phases).toEqual(["connect", "tls", "request"]);
+  });
+
+  it("a certificate error after 'connect' is phase tls with the code token kept", async () => {
+    const result = await failWith(
+      ["connect"],
+      Object.assign(new Error("self signed"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" })
+    );
+    expect(result).toMatchObject({ failure: { phase: "tls", code: "DEPTH_ZERO_SELF_SIGNED_CERT" } });
+  });
+
+  it("a reused keep-alive socket (connecting === false) counts connect and TLS as already reached", async () => {
+    const result = await failWith([], abort(), false);
+    expect(result).toMatchObject({ failure: { phase: "request" } });
+  });
+
+  it("the facts never include the error message, a hostile code, or a URL", async () => {
+    const result = await failWith(
+      [],
+      Object.assign(new Error("boom 1234~abcdefghij ?access_token=secret"), {
+        code: "ECONNREFUSED 10.0.0.1 token=abc",
+      })
+    );
+    const json = JSON.stringify(result);
+    expect(json).not.toContain("1234~abcdefghij");
+    expect(json).not.toContain("access_token");
+    expect(json).not.toContain("10.0.0.1");
+    expect(result).toMatchObject({ failure: { phase: "connect" } });
+    expect((result as { failure: { code?: string } }).failure.code).toBeUndefined();
+  });
+
+  it("a stream error after the response head is phase body", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    requestMock.mockImplementation((_options, callback) => {
+      const req = new FakeClientRequest();
+      queueMicrotask(() => {
+        const res = new FakeIncomingMessage(200);
+        (callback as (res: unknown) => void)(res);
+        res.emit("error", Object.assign(new Error("closed"), { code: "ECONNRESET" }));
+      });
+      return req as unknown as ReturnType<typeof https.request>;
+    });
+    const result = await canvasFetch("https://canvas.example.edu/x", { timeoutMs: 20 }, credential);
+    expect(result).toMatchObject({ failure: { phase: "body", code: "ECONNRESET" } });
   });
 });

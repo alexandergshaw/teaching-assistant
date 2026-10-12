@@ -106,10 +106,17 @@
 
 import * as https from "node:https";
 import { promises as dnsPromises } from "node:dns";
+import type { LookupAddress } from "node:dns";
 import type { LookupFunction } from "node:net";
 import type { IncomingHttpHeaders } from "node:http";
 import { validateLmsBaseUrl } from "./lms-credential-rules";
 import { isSpecialPurposeAddress } from "./lms-address-rules";
+import {
+  factsFromError,
+  type CanvasFailurePhase,
+  type CanvasNetworkFacts,
+  type CanvasNetworkFailure,
+} from "./canvas-network-failure";
 
 // ============================================================================
 // Public shapes
@@ -151,7 +158,7 @@ export interface CanvasFetchInit {
 export type CanvasFetchResult =
   | { readonly ok: true; readonly status: number; readonly headers: IncomingHttpHeaders; readonly body: Buffer }
   | { readonly ok: false; readonly kind: "host-not-allowed"; readonly reason: string }
-  | { readonly ok: false; readonly kind: "unreachable" };
+  | { readonly ok: false; readonly kind: "unreachable"; readonly failure?: CanvasNetworkFailure };
 
 // ============================================================================
 // Tunables
@@ -261,8 +268,16 @@ async function dialHop(
     return { ok: false, kind: "host-not-allowed", reason: originCheck.reason };
   }
 
+  const startedAt = deadline - (init.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const failAt = (facts: CanvasNetworkFacts) =>
+    unreachableAtDeadline(deadline, {
+      ...facts,
+      failedAfterMs: Math.max(0, Date.now() - startedAt),
+      host: parsed.host,
+    });
+
   if (Date.now() >= deadline) {
-    return unreachableAtDeadline(deadline);
+    return failAt({ phase: "dns", name: "DeadlineExceeded" });
   }
 
   let addresses;
@@ -271,12 +286,13 @@ async function dialHop(
       dnsPromises.lookup(parsed.hostname, { all: true }),
       deadline
     );
-  } catch {
-    return unreachableAtDeadline(deadline);
+  } catch (err) {
+    return failAt(factsFromError(err, "dns"));
   }
 
   if (addresses.length === 0) {
-    return unreachableAtDeadline(deadline);
+    // An empty answer is the resolver saying there is no data for the name.
+    return failAt({ phase: "dns", code: "ENODATA" });
   }
 
   // SEC1: refuse the whole answer if ANY resolved address is special-purpose
@@ -297,7 +313,7 @@ async function dialHop(
 
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
-    return unreachableAtDeadline(deadline);
+    return failAt({ phase: "connect", name: "DeadlineExceeded" });
   }
 
   const pinned = addresses[0];
@@ -310,7 +326,7 @@ async function dialHop(
   );
 
   if (outcome.kind === "network-error") {
-    return unreachableAtDeadline(deadline);
+    return failAt(outcome.facts);
   }
 
   const location = outcome.headers.location;
@@ -340,13 +356,30 @@ async function dialHop(
  * answer differently on.
  */
 function pinnedLookup(address: string, family: number): LookupFunction {
-  return (_hostname, _options, callback) => {
-    process.nextTick(() => callback(null, address, family === 6 ? 6 : 4));
+  const pinnedFamily = family === 6 ? 6 : 4;
+  return (_hostname, options, callback) => {
+    process.nextTick(() => {
+      // Node 20+ enables autoSelectFamily by default, so the socket layer
+      // calls a custom lookup with `{ all: true }` and expects an ARRAY. The
+      // single-address form then fails with ERR_INVALID_IP_ADDRESS. Answer
+      // in the shape asked for, but ONLY ever with the one address already
+      // resolved and classified above: still no second getaddrinfo, so the
+      // SEC1 pin is unchanged.
+      if (options && options.all === true) {
+        const list: LookupAddress[] = [{ address, family: pinnedFamily }];
+        (callback as unknown as (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void)(
+          null,
+          list
+        );
+        return;
+      }
+      callback(null, address, pinnedFamily);
+    });
   };
 }
 
 type RequestOutcome =
-  | { readonly kind: "network-error" }
+  | { readonly kind: "network-error"; readonly facts: CanvasNetworkFacts }
   | { readonly kind: "response"; readonly status: number; readonly headers: IncomingHttpHeaders; readonly body: Buffer };
 
 /**
@@ -366,6 +399,10 @@ function performRequest(
 ): Promise<RequestOutcome> {
   return new Promise((resolve) => {
     let settled = false;
+    // The stage the exchange has reached; a failure's facts carry it. Node
+    // raises the same AbortError for a timeout at any stage, so this is the
+    // only thing that tells a connect timeout from a response timeout.
+    let phase: CanvasFailurePhase = "connect";
     const settle = (outcome: RequestOutcome) => {
       if (!settled) {
         settled = true;
@@ -403,6 +440,7 @@ function performRequest(
         signal: AbortSignal.timeout(Math.max(remainingMs, 0)),
       },
       (res) => {
+        phase = "body";
         let received = 0;
         const chunks: Buffer[] = [];
 
@@ -414,7 +452,7 @@ function performRequest(
           if (received > MAX_RESPONSE_BYTES) {
             res.destroy();
             req.destroy();
-            settle({ kind: "network-error" });
+            settle({ kind: "network-error", facts: { phase: "body", code: "BYTE_CAP" } });
             return;
           }
           chunks.push(chunk);
@@ -429,11 +467,31 @@ function performRequest(
           });
         });
 
-        res.on("error", () => settle({ kind: "network-error" }));
+        res.on("error", (err) => settle({ kind: "network-error", facts: factsFromError(err, phase) }));
       }
     );
 
-    req.on("error", () => settle({ kind: "network-error" }));
+    req.on("socket", (socket) => {
+      if (socket.connecting === false) {
+        // A reused keep-alive socket: connect and TLS were reached already.
+        if (phase === "connect" || phase === "tls") {
+          phase = "request";
+        }
+        return;
+      }
+      socket.once("connect", () => {
+        if (phase === "connect") {
+          phase = "tls";
+        }
+      });
+      socket.once("secureConnect", () => {
+        if (phase === "connect" || phase === "tls") {
+          phase = "request";
+        }
+      });
+    });
+
+    req.on("error", (err) => settle({ kind: "network-error", facts: factsFromError(err, phase) }));
 
     if (init.body) {
       req.end(init.body);
@@ -452,12 +510,15 @@ function performRequest(
  * HTTP exchange - see the module doc comment for why those two do not need
  * this.
  */
-async function unreachableAtDeadline(deadline: number): Promise<CanvasFetchResult> {
+async function unreachableAtDeadline(
+  deadline: number,
+  failure?: CanvasNetworkFailure
+): Promise<CanvasFetchResult> {
   const remaining = deadline - Date.now();
   if (remaining > 0) {
     await sleep(remaining);
   }
-  return { ok: false, kind: "unreachable" };
+  return failure ? { ok: false, kind: "unreachable", failure } : { ok: false, kind: "unreachable" };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -476,11 +537,11 @@ function sleep(ms: number): Promise<void> {
 async function raceAgainstDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
-    throw new Error("Deadline already passed.");
+    throw Object.assign(new Error("Deadline already passed."), { name: "DeadlineExceeded" });
   }
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error("Deadline exceeded.")), remaining);
+    timer = setTimeout(() => reject(Object.assign(new Error("Deadline exceeded."), { name: "DeadlineExceeded" })), remaining);
   });
   try {
     return await Promise.race([promise, timeout]);

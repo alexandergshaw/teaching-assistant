@@ -323,6 +323,12 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         )}
       </div>
 
+      {!trayActive && mode !== "record" && mode !== "lms" && (
+        <span className={styles.ghMeta}>
+          One submission can combine files, a link and typed text: fill in a part, click + Add part, then Grade submission.
+        </span>
+      )}
+
       {trayActive && (
         <div role="group" aria-label="Composite submission parts">
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>

@@ -29,6 +29,8 @@ interface KeyedResult<T> {
 
 export interface LmsPickerState {
   readonly institutions: string[];
+  /** Why the institution list is empty, when the server could say; null otherwise. */
+  readonly emptyReason: string | null;
   readonly institution: string;
   readonly courses: CanvasCourse[];
   readonly courseId: string;
@@ -46,7 +48,7 @@ export interface LmsPickerState {
 export function useLmsSubmissionPicker(): LmsPickerState {
   const [sel, setSel] = useState<LmsPickerSelection>(EMPTY_LMS_PICKER_SELECTION);
   const [restored, setRestored] = useState(false);
-  const [instResult, setInstResult] = useState<{ items: string[]; error: string | null } | null>(null);
+  const [instResult, setInstResult] = useState<{ items: string[]; error: string | null; emptyReason: string | null } | null>(null);
   const [courseResult, setCourseResult] = useState<KeyedResult<CanvasCourse> | null>(null);
   const [assignmentResult, setAssignmentResult] = useState<KeyedResult<CanvasAssignmentBrief> | null>(null);
 
@@ -71,8 +73,8 @@ export function useLmsSubmissionPicker(): LmsPickerState {
       // The action's result carries the list under acronyms, not institutions.
       const r = await listConfiguredInstitutionsAction();
       if (cancelled) return;
-      if ("error" in r) setInstResult({ items: [], error: r.error });
-      else setInstResult({ items: r.acronyms, error: null });
+      if ("error" in r) setInstResult({ items: [], error: r.error, emptyReason: null });
+      else setInstResult({ items: r.acronyms, error: null, emptyReason: r.emptyReason ?? null });
     })();
     return () => {
       cancelled = true;
@@ -140,6 +142,7 @@ export function useLmsSubmissionPicker(): LmsPickerState {
 
   return {
     institutions,
+    emptyReason: institutions.length === 0 ? (instResult?.emptyReason ?? null) : null,
     institution,
     courses,
     courseId,

@@ -213,7 +213,27 @@ describe("listConfiguredInstitutionsAction - DAT2 repoint", () => {
 
     const result = await listConfiguredInstitutionsAction();
 
-    expect(result).toEqual({ acronyms: [] });
+    expect(result).toMatchObject({ acronyms: [] });
+    expect(result).toHaveProperty("emptyReason", expect.stringContaining("not the workspace owner"));
+  });
+
+  it("an owner with nothing configured gets an empty list with the configuration reason", async () => {
+    mockRequireUser.mockResolvedValue(OWNER);
+    mockListLmsCredentials.mockResolvedValue([]);
+
+    const result = await listConfiguredInstitutionsAction();
+
+    expect(result).toHaveProperty("acronyms", []);
+    expect(result).toHaveProperty("emptyReason", expect.stringContaining("_CANVAS_API_TOKEN"));
+  });
+
+  it("emptyReason is absent when the list is non-empty", async () => {
+    mockRequireUser.mockResolvedValue(MEMBER);
+    mockListLmsCredentials.mockResolvedValue([credentialRow("XYZ")]);
+
+    const result = await listConfiguredInstitutionsAction();
+
+    expect(result).toEqual({ acronyms: ["XYZ"] });
   });
 
   it("maps a requireUser() rejection to { error }, unchanged by this wave", async () => {

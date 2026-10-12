@@ -17,6 +17,19 @@ function input(copy: (typeof COPIES)[number]["copy"], over: Partial<LmsFieldIndi
   return { globallyDisabled: false, parentSelected: true, loading: false, error: null, optionCount: 2, ...copy, ...over };
 }
 
+describe("lmsFieldIndication emptyReason", () => {
+  it("appends the reason only in the empty state", () => {
+    const reason = "Reason text.";
+    expect(lmsFieldIndication(input(LMS_INSTITUTION_COPY, { optionCount: 0, emptyReason: reason })).helperText).toBe(
+      "No connected institutions. Reason text."
+    );
+    expect(lmsFieldIndication(input(LMS_INSTITUTION_COPY, { optionCount: 2, emptyReason: reason })).helperText).toBe("");
+    expect(lmsFieldIndication(input(LMS_INSTITUTION_COPY, { optionCount: 0, emptyReason: null })).helperText).toBe(
+      "No connected institutions"
+    );
+  });
+});
+
 describe("lmsFieldIndication decision table", () => {
   for (const f of COPIES) {
     describe(f.name, () => {

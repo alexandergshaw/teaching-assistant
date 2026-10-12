@@ -71,6 +71,8 @@ export interface LmsFieldIndicationInput {
   readonly promptBeforeParent: string;
   readonly loadingText: string;
   readonly emptyOkText: string;
+  /** Server-supplied explanation shown after emptyOkText when the list is empty. */
+  readonly emptyReason?: string | null;
 }
 
 /** PURE. One field's disabled/helper/error state. Every branch except the last
@@ -81,7 +83,7 @@ export function lmsFieldIndication(i: LmsFieldIndicationInput): LmsFieldIndicati
   if (!i.parentSelected) return { disabled: true, error: false, helperText: i.promptBeforeParent };
   if (i.loading) return { disabled: true, error: false, helperText: i.loadingText };
   if (i.error) return { disabled: true, error: true, helperText: i.error };
-  if (i.optionCount === 0) return { disabled: true, error: false, helperText: i.emptyOkText };
+  if (i.optionCount === 0) return { disabled: true, error: false, helperText: i.emptyReason ? `${i.emptyOkText}. ${i.emptyReason}` : i.emptyOkText };
   return { disabled: false, error: false, helperText: "" };
 }
 

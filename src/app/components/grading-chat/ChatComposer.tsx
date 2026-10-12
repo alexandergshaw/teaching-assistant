@@ -463,6 +463,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           loading: lms.loading.institutions,
           error: lms.errors.institutions,
           optionCount: lms.institutions.length,
+          emptyReason: lms.emptyReason,
           ...LMS_INSTITUTION_COPY,
         });
         const courseInd = lmsFieldIndication({

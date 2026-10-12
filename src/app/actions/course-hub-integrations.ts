@@ -206,7 +206,7 @@ export async function checkInstitutionsAction(
  * configured institutions.
  */
 export async function listConfiguredInstitutionsAction(): Promise<
-  { acronyms: string[] } | { error: string }
+  { acronyms: string[]; emptyReason?: string } | { error: string }
 > {
   try {
     const identity = await requireUser();
@@ -233,7 +233,16 @@ export async function listConfiguredInstitutionsAction(): Promise<
     for (const cred of await listLmsCredentials(identity.id)) {
       acronyms.add(cred.institution);
     }
-    return { acronyms: [...acronyms].sort() };
+    const sorted = [...acronyms].sort();
+    if (sorted.length > 0) return { acronyms: sorted };
+    // Explain an empty list; the role gating above is unchanged.
+    return {
+      acronyms: sorted,
+      emptyReason:
+        identity.role !== "owner"
+          ? "This account is not the workspace owner, so only institutions you have personally connected appear here. Institutions configured for the owner (via environment credentials) require signing in as the owner with a verified email."
+          : "No Canvas institutions are configured. Set <CODE>_CANVAS_URL and <CODE>_CANVAS_API_TOKEN (for example MCC_CANVAS_URL and MCC_CANVAS_API_TOKEN), or a token for a built-in institution.",
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list institutions." };
   }

@@ -50,6 +50,7 @@ import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
 import { gradeFailureFromBody, postPrepareVideo, videoFailureOf, type PrepareVideoFn } from "./videoClient";
+import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
 import {
   mergeArrivedResults,
@@ -100,6 +101,9 @@ export interface UseContinuousGradingRunParams {
   /** Injected loose-video prepare (VIDEO-GRADING W4). Defaults to the real
    * never-throw POST /api/grade-submission-video. */
   readonly prepareVideo?: PrepareVideoFn;
+  /** Injected large-single-file prepare (LARGE-SINGLE-FILE W2). Defaults to the
+   * real never-throw POST /api/grade-submission-file. */
+  readonly prepareSingleFile?: PrepareSingleFileFn;
   /** The per-session entry ceiling (R4). Defaults to DEFAULT_MAX_ENTRIES. */
   readonly maxEntries?: number;
   /** Opt in to the did-right/did-wrong comment split on every grade request.
@@ -185,6 +189,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const dispatchItem = params.dispatchItem ?? postGradeRunItem;
   const ingestZip = params.ingestZip ?? ingestStoragedZip;
   const prepareVideo = params.prepareVideo ?? postPrepareVideo;
+  const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
   const assignmentInstructionsRef = useRef("");
@@ -430,6 +435,29 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         return { kind: "refused", reason: "The session was reset while the video was being prepared. Nothing was graded." };
       }
       entries = [prepared.entry];
+    } else if (input.kind === "storaged-file") {
+      // LARGE-SINGLE-FILE W2: a reset while the file is being prepared must not
+      // spend a grading call on a ghost run.
+      const sessionAtStart = sessionIdRef.current;
+      const prepareStartedAtMs = chatSeamNowMs();
+      let prepared: Awaited<ReturnType<PrepareSingleFileFn>>;
+      try {
+        prepared = await prepareSingleFile(input.storagePath, input.name, provider, input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS));
+      } catch {
+        // postPrepareSingleFile never throws; this guards an injected replacement.
+        prepared = { kind: "refused", reason: "This file could not be prepared." };
+      }
+      // Counts-only: a fixed failure class, never the reason text or file name.
+      recordChatSeamSettled({
+        operation: "prepare_submission",
+        startedAtMs: prepareStartedAtMs,
+        failureClass: prepared.kind === "refused" ? classifyChatSeamFailure(prepared.reason) : null,
+      });
+      if (prepared.kind === "refused") return { kind: "refused", reason: prepared.reason };
+      if (sessionIdRef.current !== sessionAtStart) {
+        return { kind: "refused", reason: "The session was reset while the file was being prepared. Nothing was graded." };
+      }
+      entries = [prepared.entry];
     } else if (input.kind === "text") {
       if (!input.content.trim()) {
         return { kind: "refused", reason: "This submission is empty." };
@@ -533,7 +561,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // Canvas assignment resolves to many, and one label must never collapse
     // distinct students. Blank/absent leaves the derived student untouched.
     const submitLabel =
-      (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video") && entries.length === 1
+      (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video" || input.kind === "storaged-file") &&
+      entries.length === 1
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 

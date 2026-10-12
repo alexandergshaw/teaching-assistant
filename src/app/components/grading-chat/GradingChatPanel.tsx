@@ -42,7 +42,14 @@ import { deriveChatScope, describeChatSetupOrigin, loadChatSetupMemory, saveChat
 import type { PreviewFile } from "../FilePreviewModal";
 import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
 import { preflightUploadFile } from "@/lib/grade/zip-upload-preflight";
-import { chooseZipTransport, deleteGradingZipBestEffort, uploadGradingZip } from "@/lib/grade/grading-zip-transport";
+import {
+  chooseSingleFileTransport,
+  chooseZipTransport,
+  deleteGradingZipBestEffort,
+  isZipFileName,
+  uploadGradingZip,
+} from "@/lib/grade/grading-zip-transport";
+import { submitStoragedFile } from "./singleFileClient";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { submitLooseVideo } from "./videoClient";
@@ -345,6 +352,23 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       setZipPhase(null);
     }
   };
+  // LARGE-SINGLE-FILE W2: a large office/text file goes to Storage, then the
+  // driver's storaged-file submit (the server extracts it to a text-only entry).
+  const submitStoragedSingleFile = async (file: File, label: string | undefined): Promise<SubmitOutcome> => {
+    setZipPhase("uploading");
+    try {
+      return await submitStoragedFile({
+        file,
+        label,
+        userId: user?.id ?? null,
+        storage: supabase.storage,
+        submit: driver.submit,
+        onUploaded: () => setZipPhase("preparing"),
+      });
+    } finally {
+      setZipPhase(null);
+    }
+  };
   const handleSubmitFiles = (files: File[], label?: string) => withPreparing(async () => {
     // A label names ONE student's ONE submission: forwarded only for a
     // single-file pick; a multi-file batch falls back to the filenames.
@@ -377,7 +401,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       // BULK-ZIP BW1: a zip over the body budget takes the Storage transport
       // (when the ingest exists) instead of being refused here; every other
       // file keeps the body pre-flight unchanged.
-      const transport = chooseZipTransport(file);
+      // LARGE-SINGLE-FILE W2: a non-zip office/text file over the body budget
+      // takes the single-file Storage lane; small files stay on the body path.
+      const isZip = isZipFileName(file.name);
+      const transport = isZip ? chooseZipTransport(file) : chooseSingleFileTransport(file);
       if (transport.kind === "refused") return { kind: "refused", reason: transport.message };
       const preflight = transport.kind === "storage" ? { ok: true as const } : preflightUploadFile(file, "This file");
       if (!preflight.ok) return { kind: "refused", reason: preflight.message };
@@ -387,7 +414,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         }
         began = true;
       }
-      if (transport.kind === "storage") return submitStoragedZip(file);
+      if (transport.kind === "storage") return isZip ? submitStoragedZip(file) : submitStoragedSingleFile(file, fileLabel);
       return driver.submit({ kind: "file", file, label: fileLabel });
     });
     const reasons: string[] = [];

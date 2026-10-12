@@ -38,7 +38,11 @@ export type ChatSubmissionInput =
   // `${userId}/grading-uploads/<uuid>.<ext>`. Carries only the path (a video can
   // never ride the request body); the driver's prepareVideo turns it into an
   // entry holding a `videoRef`, never rawBase64 (ops O-1).
-  | { readonly kind: "storaged-video"; readonly storagePath: string; readonly name: string; readonly label?: string };
+  | { readonly kind: "storaged-video"; readonly storagePath: string; readonly name: string; readonly label?: string }
+  // LARGE-SINGLE-FILE W2: one large office/text file already uploaded to private
+  // Storage under `${userId}/grading-uploads/<uuid>.<ext>`. Carries only the
+  // path; the driver's prepareSingleFile returns ONE text-only entry.
+  | { readonly kind: "storaged-file"; readonly storagePath: string; readonly name: string; readonly label?: string };
 
 /** One part of a composite submission. Each part resolves to EXACTLY ONE
  * entry (see extractSingleEntry); a part that would resolve to zero or many

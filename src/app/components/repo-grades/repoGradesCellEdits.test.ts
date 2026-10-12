@@ -252,3 +252,12 @@ describe("applyRepoGradeFeedbackFieldEdit - the ONE writer of `comment` once a c
     expect(edit).toEqual(before);
   });
 });
+
+describe("branch-merge fix: the cell carries the merge outcome (AC-F1)", () => {
+  it("an untouched cell has mergeStatus and mergeFoundOnBranch null", () => {
+    const d = defaultRepoGradeCellEdit();
+    expect(d.mergeStatus).toBeNull();
+    expect(d.mergeFoundOnBranch).toBeNull();
+  });
+});
+

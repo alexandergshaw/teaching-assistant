@@ -32,6 +32,8 @@ const FROZEN_PERSISTED_CELL_KEYS = [
   "generatedComment",
   "generatedScore",
   "improvements",
+  "mergeFoundOnBranch",
+  "mergeStatus",
   "postMessage",
   "postStatus",
   "resubmitNotice",
@@ -59,6 +61,8 @@ function fullEdit(): RepoGradeCellEdit {
       { name: "main.py", extension: "py", previewContent: "ZZMK_PREVIEW", previewTruncated: false, mimeType: "text/x-python" },
     ],
     submissionTruncated: true,
+    mergeStatus: "not-merged",
+    mergeFoundOnBranch: "feature-x",
     codeExecution: {
       language: "python",
       files: ["main.py"],
@@ -109,8 +113,8 @@ function editsOf(entries: Array<[string, string, Partial<RepoGradeCellEdit>]>): 
   return out;
 }
 
-describe("FR-1: the persisted cell is exactly the frozen 12 keys", () => {
-  it("enumerates exactly at + 11 kept fields", () => {
+describe("FR-1: the persisted cell is exactly the frozen 14 keys", () => {
+  it("enumerates exactly at + 13 kept fields", () => {
     expect(Object.keys(toPersisted(fullEdit(), "2026-10-04T00:00:00.000Z")).sort()).toEqual(FROZEN_PERSISTED_CELL_KEYS);
   });
 });
@@ -375,3 +379,35 @@ describe("restored-results banner copy", () => {
     expect(describeRestoredRepoGradeCells(editsOf([["a", "w", {}], ["a", "x", {}]]))).toContain("Restored 2 saved grading results");
   });
 });
+
+describe("branch-merge fix: mergeStatus / mergeFoundOnBranch persist tolerantly (AC-F4)", () => {
+  const AT = "2026-10-04T00:00:00.000Z";
+
+  it("round-trips a not-merged cell through toPersisted -> parseStoredCells -> restore", () => {
+    const storage = fakeStorage();
+    persistRepoGradeCellsTo(storage, KEY, "c1", editsOf([["org/r", "w1", fullEdit()]]), AT);
+    const restored = loadRepoGradeCellsFrom(storage, KEY, "c1");
+    expect(restored["org/r"]["w1"].mergeStatus).toBe("not-merged");
+    expect(restored["org/r"]["w1"].mergeFoundOnBranch).toBe("feature-x");
+  });
+
+  it("a LEGACY blob (no merge fields) yields a cell that is PRESENT with mergeStatus null - not a dropped cell", () => {
+    const legacy: Record<string, unknown> = { ...toPersisted(fullEdit(), AT) };
+    delete legacy.mergeStatus;
+    delete legacy.mergeFoundOnBranch;
+    const raw = JSON.stringify({ c1: { "org/r": { w1: legacy } } });
+    const parsed = parseStoredCells(raw);
+    expect(parsed["c1"]["org/r"]["w1"]).toBeDefined();
+    expect(parsed["c1"]["org/r"]["w1"].mergeStatus).toBeNull();
+    expect(parsed["c1"]["org/r"]["w1"].mergeFoundOnBranch).toBeNull();
+    expect(parsed["c1"]["org/r"]["w1"].score).toBe("18/20");
+  });
+
+  it("an invalid merge value degrades to null and keeps the cell", () => {
+    const bad: Record<string, unknown> = { ...toPersisted(fullEdit(), AT), mergeStatus: "bogus", mergeFoundOnBranch: 7 };
+    const parsed = parseStoredCells(JSON.stringify({ c1: { "org/r": { w1: bad } } }));
+    expect(parsed["c1"]["org/r"]["w1"].mergeStatus).toBeNull();
+    expect(parsed["c1"]["org/r"]["w1"].mergeFoundOnBranch).toBeNull();
+  });
+});
+

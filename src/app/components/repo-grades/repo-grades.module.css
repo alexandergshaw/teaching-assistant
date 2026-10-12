@@ -274,6 +274,22 @@
   color: var(--danger);
 }
 
+/* Per-cell "Not merged to target branch" badge: worded (never colour alone),
+   same warning surface as .bindingBadgeAmbiguous but kept a separate class so
+   the binding styles can change without touching the merge badge. */
+.mergeBadgeNotMerged {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-ink);
+}
+
 .candidateList {
   list-style: none;
   margin: 0;

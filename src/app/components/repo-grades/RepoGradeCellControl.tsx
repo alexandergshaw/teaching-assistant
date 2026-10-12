@@ -393,6 +393,14 @@ export default function RepoGradeCellControl({
           />
           {scorePercent && <span className={styles.scorePercent}>{scorePercent}</span>}
         </div>
+        {edit.mergeStatus === "not-merged" && (
+          <span
+            className={styles.mergeBadgeNotMerged}
+            title={edit.mergeFoundOnBranch ? `Folder work also exists on branch "${edit.mergeFoundOnBranch}"` : undefined}
+          >
+            Not merged to target branch
+          </span>
+        )}
         <RowFeedbackBoxes
           student={row.repo}
           edit={feedbackEdit}

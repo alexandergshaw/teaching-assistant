@@ -51,6 +51,7 @@ import type { CodeRunResult } from "@/lib/code-runner";
 // @/lib/supabase/server, so importing IT (never the @/lib/grade barrel
 // itself) is safe from here too.
 import { composeOverallCommentLocal, type FeedbackField } from "../grading-results/gradingResultsHelpers";
+import type { BranchMergeStatus } from "@/lib/repo-grade-merge-check";
 
 export interface RepoGradeCellEdit {
   /** Raw, editable score text - typed directly, or seeded by a grading call. */
@@ -151,6 +152,14 @@ export interface RepoGradeCellEdit {
    * the cell - an execution-influenced grade had nowhere on screen to be
    * explained. RepoGradeCellControl.tsx is what actually shows it. */
   codeExecution: CodeRunResult | null;
+  /** The typed merge-check status gradeRepoAction returned for this cell's last
+   * grade, or null when no target branch was set / not yet graded. Set ONLY by
+   * a grading call (both hooks), never by hand. Drives the per-cell "Not merged
+   * to target branch" badge. */
+  mergeStatus: BranchMergeStatus | null;
+  /** The other branch named when mergeStatus === "not-merged" (the badge's
+   * title), else null. */
+  mergeFoundOnBranch: string | null;
 }
 
 /** The state a cell that has never been touched (no grading call, no post
@@ -173,6 +182,8 @@ export function defaultRepoGradeCellEdit(): RepoGradeCellEdit {
     submittedFiles: [],
     submissionTruncated: false,
     codeExecution: null,
+    mergeStatus: null,
+    mergeFoundOnBranch: null,
   };
 }
 

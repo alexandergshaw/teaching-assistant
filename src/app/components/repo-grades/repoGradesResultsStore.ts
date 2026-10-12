@@ -7,13 +7,14 @@
 // back here would be a cycle).
 //
 // The persisted shape is a CONSTRUCTION, not a filter: toPersisted enumerates
-// exactly 12 fields (`at` plus 11 kept ones) and never spreads the source
+// exactly 14 fields (`at` plus 13 kept ones) and never spreads the source
 // edit, so `grading`, `gradeError`, `submittedFiles` and `codeExecution` -
 // the heavy / sensitive fields - are unrepresentable in storage. The blob is
 // swept on sign-out by client-state-sweep (the key is deliberately NOT on its
 // keep-list).
 
 import type { RubricAreaResult } from "@/lib/grade";
+import type { BranchMergeStatus } from "@/lib/repo-grade-merge-check";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import type { RepoGradePostStatus } from "./repoGradesRows";
 
@@ -26,6 +27,9 @@ export interface PersistedRepoGradeCell {
   generatedComment: string | null;
   generatedScore: string | null;
   improvements: string;
+  /** Tolerant on read: absent / invalid in a legacy blob -> null (cell kept). */
+  mergeFoundOnBranch: string | null;
+  mergeStatus: BranchMergeStatus | null;
   postMessage: string | null;
   postStatus: PersistedRepoGradePostStatus;
   resubmitNotice: string;
@@ -77,6 +81,8 @@ export function toPersisted(edit: RepoGradeCellEdit, at: string): PersistedRepoG
     generatedComment: edit.generatedComment,
     generatedScore: edit.generatedScore,
     improvements: edit.improvements,
+    mergeFoundOnBranch: edit.mergeFoundOnBranch,
+    mergeStatus: edit.mergeStatus,
     postMessage: interrupted ? RELOAD_INTERRUPTED_POST_MESSAGE : clipMessage(edit.postMessage),
     postStatus,
     resubmitNotice: edit.resubmitNotice,
@@ -97,6 +103,13 @@ function strOrNull(value: unknown): string | null | undefined {
 }
 
 const PERSISTED_STATUSES: readonly string[] = ["idle", "posted", "error", "skipped"];
+const MERGE_STATUSES: readonly string[] = ["merged", "not-merged", "no-submission", "unknown"];
+
+/** Tolerant: a legacy blob (field absent) or an unknown value yields null and
+ * NEVER rejects the cell - rejecting would drop every pre-existing saved grade. */
+function parseMergeStatus(value: unknown): BranchMergeStatus | null {
+  return typeof value === "string" && MERGE_STATUSES.includes(value) ? (value as BranchMergeStatus) : null;
+}
 
 /** Tolerant typed parse of ONE cell; null when any field is malformed. */
 function parseCell(value: unknown): PersistedRepoGradeCell | null {
@@ -132,6 +145,8 @@ function parseCell(value: unknown): PersistedRepoGradeCell | null {
     generatedComment,
     generatedScore,
     improvements,
+    mergeFoundOnBranch: typeof value.mergeFoundOnBranch === "string" ? value.mergeFoundOnBranch : null,
+    mergeStatus: parseMergeStatus(value.mergeStatus),
     postMessage,
     postStatus: status as PersistedRepoGradePostStatus,
     resubmitNotice,
@@ -197,6 +212,8 @@ export function restoreRepoGradeCells(
         rubricAreas: p.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: a.comment })),
         generatedScore: p.generatedScore,
         generatedComment: p.generatedComment,
+        mergeStatus: p.mergeStatus,
+        mergeFoundOnBranch: p.mergeFoundOnBranch,
         submissionTruncated: p.submissionTruncated,
       };
     }

@@ -894,3 +894,26 @@ describe("target-branch control wiring (branch-merge check AC-1 / AC-3)", () => 
     expect(hookSource).toMatch(/targetBranch,\s+onCellUpdate: handleBulkCellUpdate,/);
   });
 });
+
+describe("branch-merge fix: the typed outcome reaches the cell and renders as a badge (reachability pins)", () => {
+  const cellSource = readFileSync(CELL_CONTROL_PATH, "utf8");
+  const hookSource = readFileSync(HOOK_PATH, "utf8");
+  const bulkSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/useRepoGradesBulkGrade.ts"), "utf8");
+  const cssSource = readFileSync(join(process.cwd(), "src/app/components/repo-grades/repo-grades.module.css"), "utf8");
+  const READ = /mergeStatus:\s*result\.branchMergeCheck\?\.status \?\? null/g;
+
+  it("AC-F2: each hook writes result.branchMergeCheck into the cell on BOTH the no-submission and the success return", () => {
+    expect(hookSource.match(READ)?.length).toBe(2);
+    expect(bulkSource.match(READ)?.length).toBe(2);
+    expect(hookSource.match(/mergeFoundOnBranch:\s*result\.branchMergeCheck\?\.foundOnBranch \?\? null/g)?.length).toBe(2);
+    expect(bulkSource.match(/mergeFoundOnBranch:\s*result\.branchMergeCheck\?\.foundOnBranch \?\? null/g)?.length).toBe(2);
+  });
+
+  it("AC-F3: the cell control renders the badge gated on edit.mergeStatus === not-merged, naming the found-on branch in its title", () => {
+    expect(cellSource).toMatch(/edit\.mergeStatus === "not-merged" && \(\s*<span\s+className=\{styles\.mergeBadgeNotMerged\}/);
+    expect(cellSource).toContain("Not merged to target branch");
+    expect(cellSource).toContain("edit.mergeFoundOnBranch");
+    expect(cssSource).toContain(".mergeBadgeNotMerged {");
+  });
+});
+

@@ -294,7 +294,16 @@ export function useRepoGradesGradingActions(
     // cell returns to its untouched (not-yet-graded) state; the reason is
     // announced below (never a failure - nothing went wrong here).
     if ("noSubmission" in result) {
-      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: null }));
+      // The merge-check outcome is written here too, so a not-merged /
+      // no-submission outcome still shows its badge with no score.
+      setCellEdits((prev) =>
+        setRepoGradeCellEdit(prev, row.repo, column.folder, {
+          grading: false,
+          gradeError: null,
+          mergeStatus: result.branchMergeCheck?.status ?? null,
+          mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
+        })
+      );
       // S1: without this, the cell returns to byte-identical to its
       // pre-click state - a click that produces no visible change reads
       // as a no-op, not as "nothing was submitted". The bulk path already
@@ -318,6 +327,8 @@ export function useRepoGradesGradingActions(
       setRepoGradeCellEdit(prev, row.repo, column.folder, {
         grading: false,
         gradeError: outcome.status === "failed" ? outcome.detail : null,
+        mergeStatus: result.branchMergeCheck?.status ?? null,
+        mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
         score: outcome.score,
         // `comment` is set directly here, not through
         // applyRepoGradeFeedbackFieldEdit: `first.overallComment` is ALREADY

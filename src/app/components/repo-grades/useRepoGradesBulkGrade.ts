@@ -292,7 +292,12 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // the prologue tries the next target - which is correct here too:
       // there is nothing in this folder to generate a rubric from).
       if ("noSubmission" in result) {
-        onCellUpdate(target.repo, target.folder, { grading: false, gradeError: null });
+        onCellUpdate(target.repo, target.folder, {
+          grading: false,
+          gradeError: null,
+          mergeStatus: result.branchMergeCheck?.status ?? null,
+          mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
+        });
         outcomes.push({ repo: target.repo, folder: target.folder, status: "no-submission", score: "", detail: result.reason });
         return { rubricUsed: null };
       }
@@ -310,6 +315,8 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       onCellUpdate(target.repo, target.folder, {
         grading: false,
         gradeError: provisionalOutcome.status === "failed" ? provisionalOutcome.detail : null,
+        mergeStatus: result.branchMergeCheck?.status ?? null,
+        mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
         score,
         // See useRepoGradesGradingActions.ts's handleGradeCell for why
         // `comment` is set directly here rather than through

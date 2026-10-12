@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import styles from "../../page.module.css";
+import { isPlainLeftClick } from "./tab-link";
 
 export interface TabRailOption<T extends string> {
   id: T;
@@ -9,6 +10,9 @@ export interface TabRailOption<T extends string> {
   /** Optional attention count, badged exactly the way the top strip already
    *  badges its own. Omit (or pass 0) for an item with nothing to report. */
   count?: number;
+  /** Optional deep link (see tab-link.ts buildTabHref). When present the chip
+   *  renders as an anchor so ctrl/cmd/shift/middle click opens a new browser tab. */
+  href?: string;
 }
 
 /**
@@ -45,9 +49,10 @@ export function TabRail<T extends string>({
   value: T;
   onChange: (next: T) => void;
 }) {
-  const buttonRefs = useRef<Partial<Record<T, HTMLButtonElement | null>>>({});
+  // Widened from HTMLButtonElement: an option with an href renders an anchor.
+  const buttonRefs = useRef<Partial<Record<T, HTMLElement | null>>>({});
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     const index = options.findIndex((option) => option.id === value);
     if (index < 0 || options.length === 0) return;
     let next: T;
@@ -64,30 +69,63 @@ export function TabRail<T extends string>({
   return (
     <div className={styles.manualSubnav}>
       <div className={styles.lessonInnerTabs} role="tablist" aria-label={ariaLabel}>
-        {options.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            role="tab"
-            ref={(el) => {
-              buttonRefs.current[option.id] = el;
-            }}
-            aria-selected={option.id === value}
-            // Roving tabindex: exactly one chip is in the tab order, and the
-            // arrow keys move between the rest.
-            tabIndex={option.id === value ? 0 : -1}
-            className={`${styles.lessonInnerTab}${option.id === value ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => onChange(option.id)}
-            onKeyDown={handleKeyDown}
-          >
+        {options.map((option) => {
+          const className = `${styles.lessonInnerTab}${option.id === value ? ` ${styles.lessonInnerTabActive}` : ""}`;
+          const content = (
             <span className={styles.tabLabelWrap}>
               {option.label}
               {option.count !== undefined && option.count > 0 && (
                 <span className={styles.navBadge}>{option.count}</span>
               )}
             </span>
-          </button>
-        ))}
+          );
+          // With an href the chip is a real anchor: ctrl/cmd/shift/middle click
+          // opens that view in a new browser tab natively, while a plain left
+          // click is intercepted and switches in-app as before.
+          if (option.href !== undefined) {
+            return (
+              <a
+                key={option.id}
+                href={option.href}
+                role="tab"
+                ref={(el) => {
+                  buttonRefs.current[option.id] = el;
+                }}
+                aria-selected={option.id === value}
+                tabIndex={option.id === value ? 0 : -1}
+                className={className}
+                style={{ textDecoration: "none" }}
+                onClick={(e) => {
+                  if (!isPlainLeftClick(e)) return;
+                  e.preventDefault();
+                  onChange(option.id);
+                }}
+                onKeyDown={handleKeyDown}
+              >
+                {content}
+              </a>
+            );
+          }
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              ref={(el) => {
+                buttonRefs.current[option.id] = el;
+              }}
+              aria-selected={option.id === value}
+              // Roving tabindex: exactly one chip is in the tab order, and the
+              // arrow keys move between the rest.
+              tabIndex={option.id === value ? 0 : -1}
+              className={className}
+              onClick={() => onChange(option.id)}
+              onKeyDown={handleKeyDown}
+            >
+              {content}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

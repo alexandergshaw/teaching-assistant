@@ -12,6 +12,7 @@ import {
   type AutomateView,
 } from "./manual-rail";
 import styles from "../../page.module.css";
+import { isPlainLeftClick } from "../tabs/tab-link";
 import type { ContentView } from "../content-tab/constants";
 
 /**
@@ -44,6 +45,7 @@ export function ManualRail({
   announcementsView,
   automateView,
   onDestinationClick,
+  hrefFor,
 }: {
   manualView: ManualViewType;
   buildView: BuildViewType;
@@ -62,6 +64,9 @@ export function ManualRail({
   // "templates" via getActiveDestinationId's own default).
   automateView?: AutomateView;
   onDestinationClick: (destId: string) => void;
+  // Deep link for one destination, computed by the parent (only it can map a
+  // destination id to the nav-state patch). Omit for plain buttons.
+  hrefFor?: (destId: string) => string;
 }) {
   const activeId = getActiveDestinationId(manualView, buildView, contentView, gradingView, presentationsView, announcementsView, automateView);
   const innerDestinations = getInnerDestinations(manualView);
@@ -72,18 +77,44 @@ export function ManualRail({
   return (
     <div className={styles.manualSubnav}>
       <div className={styles.lessonInnerTabs} role="tablist" aria-label={getInnerNavAriaLabel(manualView) ?? undefined}>
-        {innerDestinations.map((dest) => (
-          <button
-            key={dest.id}
-            type="button"
-            role="tab"
-            aria-selected={dest.id === activeId}
-            className={`${styles.lessonInnerTab}${dest.id === activeId ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => onDestinationClick(dest.id)}
-          >
-            {dest.label}
-          </button>
-        ))}
+        {innerDestinations.map((dest) => {
+          const className = `${styles.lessonInnerTab}${dest.id === activeId ? ` ${styles.lessonInnerTabActive}` : ""}`;
+          const href = hrefFor?.(dest.id);
+          // With an href the destination is a real anchor: ctrl/cmd/shift/middle
+          // click opens it in a new browser tab, a plain left click switches
+          // in-app as before.
+          if (href !== undefined) {
+            return (
+              <a
+                key={dest.id}
+                href={href}
+                role="tab"
+                aria-selected={dest.id === activeId}
+                className={className}
+                style={{ textDecoration: "none" }}
+                onClick={(e) => {
+                  if (!isPlainLeftClick(e)) return;
+                  e.preventDefault();
+                  onDestinationClick(dest.id);
+                }}
+              >
+                {dest.label}
+              </a>
+            );
+          }
+          return (
+            <button
+              key={dest.id}
+              type="button"
+              role="tab"
+              aria-selected={dest.id === activeId}
+              className={className}
+              onClick={() => onDestinationClick(dest.id)}
+            >
+              {dest.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -44,6 +44,8 @@ import styles from "./page.module.css";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 import { TabRail } from "./components/tabs/TabRail";
+import { buildTabHref, isPlainLeftClick } from "./components/tabs/tab-link";
+import type { UrlNavState } from "./url-state";
 import {
   COURSES_RAIL_ITEMS,
   TOOLS_RAIL_ITEMS,
@@ -76,6 +78,26 @@ export default function Home() {
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
   const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
+
+  // The full URL-addressable nav state, used only to build each tab's deep-link
+  // href (tab-link.ts). Kept here, not in the nav hook, so that hook stays off
+  // its line ceiling.
+  const navState: UrlNavState = {
+    tab: activeTab,
+    coursesSection,
+    toolsSection,
+    librarySection,
+    manualView,
+    automateView,
+    buildView,
+    contentView,
+    gradingView,
+    presentationsView,
+    announcementsView,
+    tasksView,
+    kbInstitution: nav.kbInstitution,
+    kbPageId: nav.kbPageId,
+  };
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -384,7 +406,11 @@ export default function Home() {
   // it. The counts are the same two the top strip badges - shown again here
   // because the strip badge only says WHICH TAB has attention waiting, and the
   // rail is what says which item of it.
-  const coursesRailOptions = COURSES_RAIL_ITEMS.map((item) => ({ id: item.id, label: item.label }));
+  const coursesRailOptions = COURSES_RAIL_ITEMS.map((item) => ({
+    id: item.id,
+    label: item.label,
+    href: buildTabHref(navState, coursesStateFromRailItem(item.id, coursesSection, tasksView)),
+  }));
   // The Drafts chip inherits the unread badge that used to sit on the deleted
   // section switch's "Workflows" half, named through tab-rails' own builder so
   // this cannot drift from the id the rail actually renders.
@@ -400,6 +426,7 @@ export default function Home() {
     id: item.id,
     label: item.label,
     count: item.id === manualRailItemId("grading") ? draftsGradesCount : 0,
+    href: buildTabHref(navState, toolsStateFromRailItem(item.id, toolsSection, manualView)),
   }));
   // Library was already flat before D26 - its two halves have no sub-views to
   // pull up, so its rail is still exactly its two sections, unchanged in
@@ -408,6 +435,7 @@ export default function Home() {
     id,
     label: LIBRARY_SECTION_LABELS[id],
     count: id === "files" ? filesInbox : id === "drafts" ? draftsMessagesCount : 0,
+    href: buildTabHref(navState, { librarySection: id }),
   }));
 
   // Picking a rail item writes the param that ALREADY owned that view, plus
@@ -462,7 +490,12 @@ export default function Home() {
       >
         <Tabs
           value={activeTab}
-          onChange={(_, v: ActiveTab) => setActiveTab(v)}
+          // Guarded: MUI fires onChange alongside the Tab's onClick, so a
+          // ctrl/cmd/shift click would otherwise switch THIS tab as well as
+          // opening the new browser tab. The event is the click.
+          onChange={(e, v: ActiveTab) => {
+            if (isPlainLeftClick(e as unknown as React.MouseEvent)) setActiveTab(v);
+          }}
           sx={{
             position: "sticky",
             // Folds in the in-session banner's own actual rendered height
@@ -513,6 +546,11 @@ export default function Home() {
                 />
               }
               disableRipple
+              component="a"
+              href={buildTabHref(navState, { tab })}
+              onClick={(e: React.MouseEvent) => {
+                if (isPlainLeftClick(e)) e.preventDefault();
+              }}
             />
           ))}
         </Tabs>
@@ -592,6 +630,21 @@ export default function Home() {
                   presentationsView={presentationsView}
                   announcementsView={announcementsView}
                   automateView={automateView}
+                  hrefFor={(destId) =>
+                    buildTabHref(
+                      navState,
+                      resolveStateFromDestinationId(
+                        destId,
+                        manualView,
+                        buildView,
+                        contentView,
+                        gradingView,
+                        presentationsView,
+                        announcementsView,
+                        automateView
+                      )
+                    )
+                  }
                   onDestinationClick={(destId) => {
                     const resolved = resolveStateFromDestinationId(
                       destId,

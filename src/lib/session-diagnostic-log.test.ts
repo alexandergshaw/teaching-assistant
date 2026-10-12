@@ -608,8 +608,8 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
     expect(lines[headerIndex]).toContain("Duration (ms)");
     expect(lines[headerIndex]).toContain("Students");
-    expect(lines[headerIndex + 1].endsWith(",2360,,,,,")).toBe(true);
-    expect(lines[headerIndex + 2].endsWith(",,,,,,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",2360,,,,,,")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",,,,,,,")).toBe(true);
   });
 
   it("round-trips classificationStudentCount (JSON + CSV), omitting the key when absent", () => {
@@ -639,7 +639,7 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     expect("classificationStudentCount" in reparsed[1]).toBe(false);
     const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
-    expect(lines[headerIndex + 1].endsWith(",5,23,,,,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",5,23,,,,,")).toBe(true);
   });
 
   it("round-trips institution and host (JSON + CSV), omitting host when absent", () => {
@@ -672,8 +672,8 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
     expect(lines[headerIndex]).toContain("Host");
     expect(lines[headerIndex + 1]).toContain(",ACME,");
-    expect(lines[headerIndex + 1].endsWith(",,,acme.instructure.com,,,")).toBe(true);
-    expect(lines[headerIndex + 2].endsWith(",,,,,,")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",,,acme.instructure.com,,,,")).toBe(true);
+    expect(lines[headerIndex + 2].endsWith(",,,,,,,")).toBe(true);
   });
 
   it("records cause, code and serverMs; omits them when absent; drops hostile tokens (AC-14)", () => {
@@ -718,8 +718,8 @@ describe("sessionDiagnosticLog: the serialised form round-trips", () => {
     expect(reparsed).toEqual([...state.entries]);
     const lines = formatSessionDiagnosticLogCsv(log).split("\r\n");
     const headerIndex = lines.findIndex((l) => l.startsWith("At,"));
-    expect(lines[headerIndex].endsWith("Students,Host,Cause,Code,Server (ms)")).toBe(true);
-    expect(lines[headerIndex + 1].endsWith(",acme.instructure.com,connect-timeout,ABORT_ERR,20100")).toBe(true);
+    expect(lines[headerIndex].endsWith("Students,Host,Cause,Code,Server (ms),Detail")).toBe(true);
+    expect(lines[headerIndex + 1].endsWith(",acme.instructure.com,connect-timeout,ABORT_ERR,20100,")).toBe(true);
     expect(JSON.stringify(state.entries[2])).not.toMatch(/token=abc|10\.0\.0\.1/);
   });
 

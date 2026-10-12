@@ -163,13 +163,67 @@ export interface SessionDiagnosticEntry {
   code?: string;
   /** Total server-side action time in milliseconds. OPTIONAL, OMITTED when absent. */
   serverMs?: number;
+  /** Per-operation key/value bag (docs/chat-grading-detailed-diagnostics-scope.md
+   * 4.1). Keys and values are re-validated at the write path
+   * (sanitizeSessionDiagnosticDetail); the closed per-operation vocabulary is
+   * enforced by the typed builders, not here. OPTIONAL and OMITTED (never an
+   * explicit undefined, never empty) when absent. */
+  detail?: SessionDiagnosticDetail;
 }
+
+/** The stored shape of an entry's detail bag. */
+export type SessionDiagnosticDetail = Readonly<Record<string, number | boolean | string>>;
 
 // Closed-shape token rules for the fine-failure fields. LOCAL on purpose: this
 // module is browser-only and must not import server code. A token that does
 // not match is dropped, which is stricter than scrub-then-cap.
 const DIAGNOSTIC_CAUSE_TOKEN = /^[a-z0-9-]{1,40}$/;
 const DIAGNOSTIC_CODE_TOKEN = /^[A-Z][A-Z0-9_]{2,39}$/;
+
+const DETAIL_KEY = /^[a-z][A-Za-z0-9]{0,23}$/;
+const DETAIL_STRING = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const DETAIL_MAX_PAIRS = 40;
+const DETAIL_MAX_MAGNITUDE = 1e12;
+
+/** The generic backstop for an entry's detail bag: invalid pairs are dropped,
+ * numbers are rounded, at most 40 pairs are kept (sorted by key), and an empty
+ * result is undefined so the caller omits the key. It cannot tell a lowercase
+ * name from a token; that control is the typed builders' construction. */
+export function sanitizeSessionDiagnosticDetail(raw: unknown): SessionDiagnosticDetail | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const out: Record<string, number | boolean | string> = {};
+  let kept = 0;
+  for (const key of Object.keys(record).sort()) {
+    if (kept >= DETAIL_MAX_PAIRS) break;
+    if (!DETAIL_KEY.test(key)) continue;
+    const value = record[key];
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) continue;
+      const rounded = Math.round(value);
+      if (Math.abs(rounded) > DETAIL_MAX_MAGNITUDE) continue;
+      out[key] = rounded;
+    } else if (typeof value === "boolean") {
+      out[key] = value;
+    } else if (typeof value === "string" && DETAIL_STRING.test(value)) {
+      out[key] = value;
+    } else {
+      continue;
+    }
+    kept += 1;
+  }
+  return kept > 0 ? out : undefined;
+}
+
+/** The CSV cell for a detail bag: sorted `key=value` pairs joined by `;`. Always
+ * starts with a lowercase key letter, so it can never open with a formula prefix. */
+export function formatSessionDiagnosticDetailCell(detail: SessionDiagnosticDetail | undefined): string {
+  if (!detail) return "";
+  return Object.keys(detail)
+    .sort()
+    .map((key) => `${key}=${String(detail[key])}`)
+    .join(";");
+}
 
 function tokenIfValid(value: unknown, pattern: RegExp): string | undefined {
   return typeof value === "string" && pattern.test(value) ? value : undefined;
@@ -255,6 +309,13 @@ export interface RecordSessionDiagnosticArgs {
   code?: string;
   /** Optional server-side action time in milliseconds. */
   serverMs?: number;
+  /** Optional per-operation detail bag; re-validated, omitted when empty. */
+  detail?: Readonly<Record<string, number | boolean | string>>;
+}
+
+function detailField(detail: unknown): { detail?: SessionDiagnosticDetail } {
+  const d = sanitizeSessionDiagnosticDetail(detail);
+  return d !== undefined ? { detail: d } : {};
 }
 
 function fineFailureFields(
@@ -293,6 +354,7 @@ export function recordSessionDiagnosticEntry(args: RecordSessionDiagnosticArgs):
       : {}),
     ...(args.host ? { host: sanitizeSessionDiagnosticError(args.host) } : {}),
     ...fineFailureFields(args.cause, args.code, args.serverMs),
+    ...detailField(args.detail),
   };
   storedEntries.push(entry);
   while (storedEntries.length > MAX_SESSION_DIAGNOSTIC_LOG_ENTRIES) {
@@ -440,7 +502,7 @@ export function buildSessionDiagnosticLog(
 
 const RUN_CSV_HEADER = ["Field", "Value"];
 const COVERAGE_CSV_HEADER = ["Area", "Instrumented", "What is recorded"];
-const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)", "Students", "Host", "Cause", "Code", "Server (ms)"];
+const ENTRY_CSV_HEADER = ["At", "Area", "Operation", "Institution", "Course", "Outcome", "Error", "Duration (ms)", "Students", "Host", "Cause", "Code", "Server (ms)", "Detail"];
 
 /** CSV export: a "Session" header block, then the COVERAGE block (what this
  * file does and does not claim), then one row per entry, oldest first - the
@@ -498,6 +560,7 @@ export function formatSessionDiagnosticLogCsv(log: SessionDiagnosticLog): string
         entry.cause ?? "",
         entry.code ?? "",
         entry.serverMs === undefined ? "" : String(entry.serverMs),
+        formatSessionDiagnosticDetailCell(entry.detail),
       ])
     );
   }
@@ -591,6 +654,7 @@ function parseOneEntry(raw: unknown): SessionDiagnosticEntry | null {
       : {}),
     ...(typeof record.host === "string" && record.host !== "" ? { host: record.host } : {}),
     ...fineFailureFields(record.cause, record.code, record.serverMs),
+    ...detailField(record.detail),
   };
 }
 

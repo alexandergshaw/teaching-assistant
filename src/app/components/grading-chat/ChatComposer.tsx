@@ -134,6 +134,12 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
   const selectMode = (next: InputMode) => {
     setMode(next);
     persistInputMode(next);
+    // Selecting Record starts the capture directly. This MUST run here, inside
+    // the click gesture: getDisplayMedia needs a user gesture, and an effect
+    // watching `mode` would run after render and be blocked.
+    if (next === "record" && mode !== "record" && !disabled && !capture.recording && !capture.snapping && trayRoom >= 1) {
+      void capture.start(trayRoom).catch(() => {});
+    }
   };
 
   const handleSendText = () => {

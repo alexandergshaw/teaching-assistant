@@ -34,8 +34,10 @@ import { RESOURCE_BATCH_SIZE, type ReplyRow } from "./discussion-capture";
 // restated here - see that file's own comment on `CONCEPT_JOINER`.
 import { CONCEPT_JOINER } from "./discussion-serialization";
 import type { UseReplyRowsReturn } from "./useReplyRows";
-import { gatherReplyResourcesAction } from "@/app/actions/discussion-replies";
+import type { gatherReplyResourcesAction } from "@/app/actions/discussion-replies";
+
 import { getStoredProvider } from "@/lib/llm-provider";
+import { readActionRouteResponse } from "@/lib/action-route-response";
 import type { LlmProvider } from "@/lib/llm";
 import type { ResourceKind } from "@/lib/resource-kind";
 // The per-row targeted search (resource-controls feature: "each reply
@@ -52,6 +54,25 @@ import { deriveResourceConcept } from "@/lib/discussion-reply-prompt";
 // too, unchanged, so this hook's own test file's existing import path keeps
 // working.
 import { redactAuthorNameFromText } from "@/lib/discussion-reply-redact";
+
+// G4 Wave 2: resource search goes through a Route Handler that declares a
+// ceiling and races the work against an elapsed-aware budget, so a slow model
+// comes back as a worded { error } (504) instead of a raw transport failure.
+// Same signature and result shape as gatherReplyResourcesAction.
+const gatherViaRoute: typeof gatherReplyResourcesAction = async (...args) => {
+  try {
+    const res = await fetch("/api/discussion-replies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "gather", args }),
+    });
+    // A non-ok or non-JSON answer (for example a platform HTML 504) becomes a
+    // worded { error }, never a JSON parse error.
+    return await readActionRouteResponse<Awaited<ReturnType<typeof gatherReplyResourcesAction>>>(res);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not find resources for these replies." };
+  }
+};
 
 // F1 fix note: `isResourceBatchFresh` used to be defined and exported from
 // THIS file, with its own sabotage-checked test block - and nothing in
@@ -394,7 +415,7 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
 
         let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
         try {
-          result = await gatherReplyResourcesAction(posts, courseName, provider, resourceKinds, videoLengthPreference);
+          result = await gatherViaRoute(posts, courseName, provider, resourceKinds, videoLengthPreference);
         } catch (err) {
           result = { error: err instanceof Error ? err.message : "Could not find resources for these replies." };
         }
@@ -523,7 +544,7 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
 
       let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
       try {
-        result = await gatherReplyResourcesAction([{ id, text: query.text }], courseName, provider, resourceKinds, videoLengthPreference);
+        result = await gatherViaRoute([{ id, text: query.text }], courseName, provider, resourceKinds, videoLengthPreference);
       } catch (err) {
         result = { error: err instanceof Error ? err.message : "Could not find resources for this reply." };
       }

@@ -103,6 +103,26 @@ import {
   draftDiscussionRepliesAction,
 } from "@/app/actions/discussion-replies";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { readActionRouteResponse } from "@/lib/action-route-response";
+
+// G4 Wave 2: drafting goes through a Route Handler that declares a ceiling and
+// races the model against an elapsed-aware budget, so a slow model comes back
+// as a worded { error } (504) instead of a raw transport failure. Same
+// signature and result shape as draftDiscussionRepliesAction.
+const draftViaRoute: typeof draftDiscussionRepliesAction = async (...args) => {
+  try {
+    const res = await fetch("/api/discussion-replies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "draft", args }),
+    });
+    // A non-ok or non-JSON answer (for example a platform HTML 504) becomes a
+    // worded { error }, never a JSON parse error.
+    return await readActionRouteResponse<Awaited<ReturnType<typeof draftDiscussionRepliesAction>>>(res);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not draft replies." };
+  }
+};
 // "Activate this recording from the Knowledge base" - only the persisted-
 // label wording helper is needed here now; the one-shot TAKE and the
 // taken-vs-current DECISION (resolveStartKnowledgeContext) both moved into
@@ -551,7 +571,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         compositionRef,
         knowledgeContextRef,
         pushNotice,
-        draftAction: draftDiscussionRepliesAction,
+        draftAction: draftViaRoute,
         pushDraftEvent,
       }),
     [pushNotice, waitForWake, loopsActiveRef, loopEpochRef, knowledgeContextRef, pushDraftEvent]

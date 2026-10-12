@@ -824,3 +824,33 @@ describe("GradingChatPanel - recording split confirm surface (reachability)", ()
     expect(withoutLineComments(read("src/app/components/grading-chat/RecordingSplitConfirm.tsx"))).not.toContain("ta-");
   });
 });
+
+describe("GradingChatPanel - locked setup text stays copyable (read-only, not editable)", () => {
+  function lockedSlice(): string {
+    const source = withoutLineComments(read(PANEL));
+    const from = source.indexOf("chatStyles.setupSummary");
+    const to = source.indexOf("<div className={styles.ghActions}>", from);
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    return source.slice(from, to);
+  }
+
+  it("renders both locked fields read-only with no change path and no disabled", () => {
+    const slice = lockedSlice();
+    expect(slice).toContain("grading-chat-instructions-locked");
+    expect(slice).toContain("grading-chat-rubric-locked");
+    expect(slice.match(/readOnly: true/g)?.length).toBe(2);
+    expect(slice).not.toContain("onChange=");
+    expect(slice).not.toContain("disabled=");
+  });
+
+  it("binds each Copy button to its own value", () => {
+    const slice = lockedSlice();
+    expect(slice).toMatch(/onCopy\(\s*COPY_KEY_INSTRUCTIONS\s*,\s*instructions\s*\)/);
+    expect(slice).toMatch(/onCopy\(\s*COPY_KEY_RUBRIC\s*,\s*rubric\s*\)/);
+  });
+
+  it("wires the Copied affordance to copiedKey", () => {
+    expect(lockedSlice()).toContain("copiedKey ===");
+  });
+});

@@ -30,6 +30,7 @@ import { useContinuousGradingRun, type SubmitOutcome } from "./useContinuousGrad
 import { buildLedgerView, type LedgerView } from "./ingestLedger";
 import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import {
   coerceFeedbackWordTarget,
   FEEDBACK_WORD_TARGET_MAX,
@@ -76,6 +77,9 @@ export const CHAT_SESSION_NOT_SAVED_DISCLOSURE =
 // Grading harshness (docs/grading-chat-controls-scope.md item 3): persisted as
 // a UI preference, captured once at beginSession and frozen for the session.
 const HARSHNESS_STORAGE_KEY = "ta-grading-chat-harshness";
+// Keys for the shared copiedKey slot owned by page.tsx; not storage keys.
+const COPY_KEY_INSTRUCTIONS = "chat-setup-instructions";
+const COPY_KEY_RUBRIC = "chat-setup-rubric";
 
 function loadHarshness(): GradeHarshness {
   try {
@@ -607,7 +611,62 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           </div>
         </>
       ) : (
-        <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
+        <>
+          <p className={chatStyles.setupSummary}>Instructions and rubric are set for this session.</p>
+          {instructions.trim() !== "" && (
+            <div className={chatStyles.compactField}>
+              <label htmlFor="grading-chat-instructions-locked">Assignment instructions</label>
+              <TextField
+                id="grading-chat-instructions-locked"
+                multiline
+                minRows={2}
+                maxRows={6}
+                fullWidth
+                size="small"
+                value={instructions}
+                slotProps={{ input: { readOnly: true } }}
+              />
+              <Button
+                variant="text"
+                size="small"
+                aria-label="Copy assignment instructions"
+                onClick={() => void onCopy(COPY_KEY_INSTRUCTIONS, instructions)}
+              >
+                {copiedKey === COPY_KEY_INSTRUCTIONS ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          )}
+          {rubric.trim() !== "" && (
+            <div className={chatStyles.compactField}>
+              <label htmlFor="grading-chat-rubric-locked">Rubric</label>
+              <TextField
+                id="grading-chat-rubric-locked"
+                multiline
+                minRows={2}
+                maxRows={6}
+                fullWidth
+                size="small"
+                value={rubric}
+                slotProps={{ input: { readOnly: true } }}
+              />
+              <Button
+                variant="text"
+                size="small"
+                aria-label="Copy rubric"
+                onClick={() => void onCopy(COPY_KEY_RUBRIC, rubric)}
+              >
+                {copiedKey === COPY_KEY_RUBRIC ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          )}
+          <span role="status" aria-live="polite" style={visuallyHidden}>
+            {copiedKey === COPY_KEY_INSTRUCTIONS
+              ? "Copied assignment instructions"
+              : copiedKey === COPY_KEY_RUBRIC
+                ? "Copied rubric"
+                : ""}
+          </span>
+        </>
       )}
 
       <div className={styles.ghActions}>

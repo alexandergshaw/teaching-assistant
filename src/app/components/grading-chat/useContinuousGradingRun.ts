@@ -43,8 +43,11 @@ import type {
   SubmissionZipClassification,
 } from "@/lib/grade/types";
 import type { LlmProvider } from "@/lib/llm";
-import { chatSeamNowMs, classifyChatSeamFailure, recordChatSeamSettled } from "./chatSeamDiagnostic";
-import { recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
+import { chatSeamNowMs, classifyChatSeamFailure, decideChatSeamDiagnostic, recordChatSeamSettled, type ChatSeamFailureClass } from "./chatSeamDiagnostic";
+import { GRADING_DIAGNOSTIC_OPERATION_LABELS, recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
+import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
+import { buildGradeItemDetail, type ChatDetailBag, type GradeItemClientSignals, type GradeTrigger } from "./chatGradeDetail";
+import type { GradeFailureClass } from "@/lib/grade/grade-failure";
 import { RECORDING_SPLIT_ENABLED } from "@/lib/grade/constants";
 import type { RecordingSplit, RecordingWindow } from "@/lib/grade/recording-split";
 import { buildSplitEntries, classifyVideoEntry, videoRefOf, type PendingSplit } from "./recordingSplitDriver";
@@ -78,6 +81,69 @@ type ResolvedRunHeader = Extract<GradingRunHeader, { kind: "ok" }>;
 // way).
 const DEFAULT_MAX_ENTRIES = 40;
 
+/** Filled by the default dispatch with what the route said about one attempt:
+ * the HTTP status and the (untrusted, re-validated downstream) `diagnostic`. */
+export interface ItemDiagnosticSink {
+  httpStatus?: number;
+  diagnostic?: unknown;
+}
+
+/** One dispatch attempt as the run-diagnostics panel shows it. A hook-local run
+ * view model like `results` (scope F3), built by the same function that builds
+ * the exported log entry's `detail`. `label` is the student label and is for
+ * the page only; `rowLabel` ("Row N") is the form safe to copy. */
+export interface ItemDiagnostic {
+  readonly sourceIndex: number;
+  readonly rowLabel: string;
+  readonly label: string;
+  readonly outcome: "graded" | "failed";
+  readonly detail: ChatDetailBag;
+}
+
+const ITEM_DIAGNOSTIC_CAP = 200;
+
+/** Diagnostics must never change a grade (scope 4.6, AC-24): any throw in
+ * diagnostic code is swallowed here, never rethrown into the grade path. */
+function safeDiagnostic(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    // Deliberately empty.
+  }
+}
+
+/** Result-quality signals for one arrived row: counts, booleans and closed unions only. */
+function resultSignals(result: GradeResult, body: GradeRunItemRequestBody, expectedAreas: number): GradeItemClientSignals {
+  const files = body.entry.submittedFiles;
+  const base: GradeItemClientSignals = {
+    contentChars: body.entry.content.length,
+    files: files.length,
+    visualFiles: files.filter((f) => f.rawBase64 !== undefined).length,
+    video: files.some((f) => f.videoRef !== undefined),
+    windowed: body.gradeWindowSec !== undefined,
+    splitAsked: body.commentSplit === true,
+  };
+  if (result.ungraded) return base;
+  const run = result.codeExecution;
+  return {
+    ...base,
+    areas: result.rubricAreas.length,
+    ...(expectedAreas > 0 ? { areasExpected: expectedAreas } : {}),
+    scored: result.totalScore.trim() !== "",
+    hasPraise: result.strengths.trim() !== "",
+    hasAdvice: result.improvements.trim() !== "",
+    truncated: result.submissionTruncated === true,
+    link: result.linkFetch ?? "none",
+    code: run === undefined ? "none" : run.neededStdin ? "needs-input" : run.ran ? "ran" : "failed",
+  };
+}
+
+/** The class the CLIENT can assign when the server did not (builder lets a server class win). */
+function clientFailureClass(sink: ItemDiagnosticSink): GradeFailureClass {
+  if (sink.httpStatus === undefined) return "transport lost";
+  return sink.httpStatus === 400 || sink.httpStatus === 401 ? "request refused" : "unclassified";
+}
+
 export type HeaderState = "unset" | "resolving" | "ready" | "refused";
 
 export type SubmitOutcome =
@@ -93,7 +159,7 @@ export interface UseContinuousGradingRunParams {
   readonly provider: LlmProvider;
   /** Injected so the hook is driven by the no-render lifecycle harness with a
    * MOCKED seam. Defaults to the real /api/grade-run-item POST. */
-  readonly dispatchItem?: (request: GradeRunItemRequestBody) => Promise<GradeResult>;
+  readonly dispatchItem?: (request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink) => Promise<GradeResult>;
   /** Injected storaged-zip ingest (BULK-ZIP BW2). Defaults to the real
    * never-throw NDJSON client for POST /api/grade-submission-zip. */
   readonly ingestZip?: (
@@ -183,6 +249,10 @@ export interface UseContinuousGradingRunResult {
   readonly confirmRecordingSplit: () => SubmitOutcome;
   /** Grades the held recording as ONE submission (today's path). */
   readonly rejectRecordingSplit: () => SubmitOutcome;
+  /** One entry per dispatch attempt (newest last), bounded; cleared by reset().
+   * Hook-local, not read from the session log, so it is not subject to the
+   * log's entry cap. */
+  readonly diagnostics: readonly ItemDiagnostic[];
 }
 
 interface GradeRunItemResponse {
@@ -190,13 +260,17 @@ interface GradeRunItemResponse {
   result: GradeResult;
 }
 
-async function postGradeRunItem(request: GradeRunItemRequestBody): Promise<GradeResult> {
+async function postGradeRunItem(request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink): Promise<GradeResult> {
   const res = await fetch("/api/grade-run-item", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...request, entry: stripUnneededRawBase64(request.entry) }),
   });
-  const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string; videoFailure?: unknown };
+  const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string; videoFailure?: unknown; diagnostic?: unknown };
+  if (sink) {
+    sink.httpStatus = res.status;
+    sink.diagnostic = body.diagnostic;
+  }
   if (!res.ok || !body.result) {
     // A typed `videoFailure` rides the error so the driver records the class.
     throw gradeFailureFromBody(body);
@@ -235,6 +309,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // Multi-submission recordings held for confirm, oldest first (a batch of
   // videos can hold several). The state mirrors the head for the confirm card.
   const pendingSplitsRef = useRef<PendingSplit[]>([]);
+  // Per-row dispatch bookkeeping for the diagnostics: why the next dispatch
+  // happens (first / retry / regrade), when it was queued, attempts so far.
+  const dispatchMetaRef = useRef<Map<number, { trigger: GradeTrigger; queuedAtMs: number; attempts: number }>>(new Map());
 
   const [headerState, setHeaderState] = useState<HeaderState>("unset");
   const [results, setResults] = useState<readonly GradeResult[]>([]);
@@ -249,6 +326,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [inFlightStudents, setInFlightStudents] = useState<readonly string[]>([]);
   const [pendingSplit, setPendingSplit] = useState<PendingSplit | null>(null);
   const [classifyingRecording, setClassifyingRecording] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<readonly ItemDiagnostic[]>([]);
+
+  const markQueued = (sourceIndex: number, trigger: GradeTrigger) => {
+    const attempts = dispatchMetaRef.current.get(sourceIndex)?.attempts ?? 0;
+    dispatchMetaRef.current.set(sourceIndex, { trigger, queuedAtMs: chatSeamNowMs(), attempts });
+  };
 
   // Presentation only: mirrors pendingRef / inFlightIndexRef as student labels.
   const publishPending = () => {
@@ -299,6 +382,33 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     else arrivedRef.current.push(arrived);
   };
 
+  // Records one dispatch attempt: the log entry (the existing grade_item entry,
+  // now carrying `detail`; exactly one per dispatch) and the view-model row.
+  // Callers pass an already-built detail and wrap this in safeDiagnostic.
+  const recordItem = (request: GradeRunItemRequestBody, startedAtMs: number, failureClass: ChatSeamFailureClass | null, detail: ChatDetailBag) => {
+    const decision = decideChatSeamDiagnostic({ operation: "grade_item", startedAtMs, settledAtMs: chatSeamNowMs(), failureClass });
+    if (decision) {
+      recordSessionDiagnosticEntry({
+        at: new Date().toISOString(),
+        surface: "grading",
+        operation: decision.operation,
+        label: GRADING_DIAGNOSTIC_OPERATION_LABELS.grade_item,
+        outcome: decision.outcome,
+        durationMs: decision.durationMs,
+        error: decision.error,
+        detail,
+      });
+    }
+    const row: ItemDiagnostic = {
+      sourceIndex: request.sourceIndex,
+      rowLabel: "Row " + (request.sourceIndex + 1),
+      label: request.entry.student,
+      outcome: failureClass === null ? "graded" : "failed",
+      detail,
+    };
+    setDiagnostics((prev) => [...prev, row].slice(-ITEM_DIAGNOSTIC_CAP));
+  };
+
   const pump = () => {
     while (inFlightRef.current < INCREMENTAL_CONCURRENCY && queueRef.current.length > 0) {
       const request = queueRef.current.shift()!;
@@ -308,7 +418,23 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       publishPending();
 
       const itemStartedAtMs = chatSeamNowMs();
-      dispatchItem(request)
+      const sink: ItemDiagnosticSink = {};
+      const meta = dispatchMetaRef.current.get(request.sourceIndex);
+      const attempt = (meta?.attempts ?? 0) + 1;
+      const trigger = meta?.trigger ?? "first";
+      const waitMs = Math.max(0, itemStartedAtMs - (meta?.queuedAtMs ?? itemStartedAtMs));
+      dispatchMetaRef.current.set(request.sourceIndex, { trigger, queuedAtMs: meta?.queuedAtMs ?? itemStartedAtMs, attempts: attempt });
+      const attemptSignals = (): GradeItemClientSignals => ({
+        item: request.sourceIndex + 1,
+        attempt,
+        trigger,
+        waitMs,
+        inflight: inFlightRef.current,
+        queued: queueRef.current.length,
+        httpStatus: sink.httpStatus,
+        clientMs: chatSeamNowMs() - itemStartedAtMs,
+      });
+      dispatchItem(request, sink)
         .then((result) => {
           // Restore the FULL submittedFiles (the POST carried the stripped copy)
           // so the Files-UI download of non-visual files survives.
@@ -317,17 +443,21 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
             sourceIndex: request.sourceIndex,
             result: { ...result, submittedFiles: full.entry.submittedFiles },
           });
-          recordChatSeamSettled({
-            operation: "grade_item",
-            startedAtMs: itemStartedAtMs,
-            failureClass: result.ungraded ? "grade failed" : null,
+          // Everything below recordArrival is diagnostics only: a throw here would
+          // fall into .catch and OVERWRITE the graded row (last-wins by sourceIndex).
+          // The detail is produced INSIDE the guard, before it is handed on.
+          safeDiagnostic(() => {
+            const detail = buildGradeItemDetail(
+              { ...attemptSignals(), ...resultSignals(result, full, headerRef.current?.criteriaNames.length ?? 0) },
+              sink.diagnostic
+            );
+            recordItem(request, itemStartedAtMs, result.ungraded ? "grade failed" : null, detail);
           });
         })
         .catch((err) => {
-          recordChatSeamSettled({
-            operation: "grade_item",
-            startedAtMs: itemStartedAtMs,
-            failureClass: classifyChatSeamFailure(err) === "timed out" ? "timed out" : "grade failed",
+          safeDiagnostic(() => {
+            const detail = buildGradeItemDetail({ ...attemptSignals(), failure: clientFailureClass(sink) }, sink.diagnostic);
+            recordItem(request, itemStartedAtMs, classifyChatSeamFailure(err) === "timed out" ? "timed out" : "grade failed", detail);
           });
           // VIDEO-GRADING W4: the typed class (too large / unsupported format /
           // timed out / model rejected ...), recorded as its own entry.
@@ -393,6 +523,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       retainedBodiesRef.current.set(sourceIndex, body);
       pendingRef.current.add(sourceIndex);
       queueRef.current.push(body);
+      markQueued(sourceIndex, "first");
     });
     setDispatchedCount(dispatchedCountRef.current);
     publishPending();
@@ -737,6 +868,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!arrived || !arrived.result.ungraded) return;
     pendingRef.current.add(sourceIndex);
     queueRef.current.push(body);
+    markQueued(sourceIndex, "retry");
     publishPending();
     pump();
   };
@@ -757,6 +889,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!body) return;
     pendingRef.current.add(sourceIndex);
     queueRef.current.push(body);
+    markQueued(sourceIndex, "regrade");
     publishPending();
     pump();
   };
@@ -780,6 +913,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     inFlightIndexRef.current = new Set();
     classificationRef.current = null;
     pendingSplitsRef.current = [];
+    dispatchMetaRef.current = new Map();
     headerRef.current = null;
     assignmentInstructionsRef.current = "";
     harshnessRef.current = "balanced";
@@ -804,6 +938,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setInFlightStudents([]);
     setPendingSplit(null);
     setClassifyingRecording(false);
+    setDiagnostics([]);
   };
 
   return {
@@ -834,5 +969,6 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     classifyingRecording,
     confirmRecordingSplit,
     rejectRecordingSplit,
+    diagnostics,
   };
 }

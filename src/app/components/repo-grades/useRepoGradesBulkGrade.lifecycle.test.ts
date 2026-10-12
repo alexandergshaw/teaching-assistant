@@ -23,7 +23,7 @@
 // AGENTS memory). Fixtures are built the way repoGradesBulkGrade.test.ts's
 // own `cell`/`row` helpers build them (docs/a26-a27-scope.md section 8: rows
 // come from the emitted shape).
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const h0 = vi.hoisted(() => {
   const slots: Array<{ value: unknown }> = [];
@@ -208,8 +208,17 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
   let announceCalls: string[];
   let resolveRubricForColumnMock: ReturnType<typeof vi.fn>;
   let rubricDeferreds: Array<ReturnType<typeof deferred<ResolvedRubric>>>;
+  let confirmMock: ReturnType<typeof vi.fn>;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   beforeEach(() => {
+    // RG-GRADEALL-CONFIRM: handleGradeColumn now asks window.confirm first;
+    // node-env has no window, so stub it (accepting by default).
+    confirmMock = vi.fn(() => true);
+    vi.stubGlobal("window", { confirm: confirmMock });
     h0.reset();
     cellEditsState = {};
     announceCalls = [];
@@ -278,6 +287,28 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       resolveAll: () => pending.forEach((release) => release()),
     };
   }
+
+  it("RG-GRADEALL-CONFIRM: accepting the confirm names the count and folder and runs the grading", async () => {
+    const render1 = useTestRender();
+    const p1 = render1.handleGradeColumn("week-1");
+    await flushMicrotasks();
+    rubricDeferreds.forEach((d) => d.resolve(resolvedRubric()));
+    await p1;
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    const text = String(confirmMock.mock.calls[0][0]);
+    expect(text).toContain("repo(s) in week-1? Each repo spends one model call.");
+    expect(text).toContain("No repos are selected, so this grades the whole column");
+    expect(gradeRepoActionMock).toHaveBeenCalled();
+  });
+
+  it("RG-GRADEALL-CONFIRM: declining the confirm grades nothing and never fetches the rubric", async () => {
+    confirmMock.mockReturnValue(false);
+    const render1 = useTestRender();
+    await render1.handleGradeColumn("week-1");
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(resolveRubricForColumnMock).not.toHaveBeenCalled();
+    expect(gradeRepoActionMock).not.toHaveBeenCalled();
+  });
 
   it("A26: two clicks during a pending rubric fetch must not double every grading call", async () => {
     const grading = usePendingGradeCalls();

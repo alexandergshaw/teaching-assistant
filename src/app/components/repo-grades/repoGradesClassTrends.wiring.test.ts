@@ -305,16 +305,16 @@ function containsAwait(node: Node): boolean {
 describe("A-3: handleGradeColumn - one if, an attempt-time clear, an unconditional final set, no other exit", () => {
   const body = findFunctionBody(actionsHookFile, "handleGradeColumn")!;
   const stmts = directStmts(body);
-  it("exactly one IfStatement (the pre-existing empty-plan return), no setLastRunCohort in its then-block", () => {
-    expect(countIfStatements(body)).toBe(1);
+  it("exactly two IfStatements (the empty-plan return, then the RG-GRADEALL-CONFIRM decline return), no setLastRunCohort in the first's then-block", () => {
+    expect(countIfStatements(body)).toBe(2);
     const ifStmt = stmts.find(ts.isIfStatement)!;
     const thenStmts = ts.isBlock(ifStmt.thenStatement) ? [...ifStmt.thenStatement.statements] : [ifStmt.thenStatement];
     expect(setLastRunCohortCalls(thenStmts)).toHaveLength(0);
   });
-  it("no switch/loop/try/labelled statement, no throw, and exactly ONE return in the whole body", () => {
+  it("no switch/loop/try/labelled statement, no throw, and exactly TWO returns (empty plan, confirm declined - both before the clear)", () => {
     expect(countKinds(body, EXOTIC_EXIT_KINDS)).toBe(0);
     expect(countKinds(body, [ts.SyntaxKind.ThrowStatement])).toBe(0);
-    expect(countKinds(body, [ts.SyntaxKind.ReturnStatement])).toBe(1);
+    expect(countKinds(body, [ts.SyntaxKind.ReturnStatement])).toBe(2);
   });
   it("(a) exactly one setLastRunCohort(null), after the if and before the first await-containing statement", () => {
     const ifIndex = stmts.findIndex(ts.isIfStatement);

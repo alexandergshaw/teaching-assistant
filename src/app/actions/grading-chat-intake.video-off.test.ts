@@ -34,6 +34,7 @@ describe("resolveOnePart kind file - video (flag explicitly OFF)", () => {
     expect(outcome).toEqual({
       kind: "refused",
       reason: "This file type isn't supported for grading. Upload a text file, document, image, or a zip archive.",
+      refusalClass: "unsupported-type",
     });
     if (outcome.kind === "refused") expect(outcome.reason).not.toBe(VIDEO_PENDING_MESSAGE);
   });

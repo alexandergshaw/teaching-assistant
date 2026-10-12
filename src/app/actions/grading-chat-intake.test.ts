@@ -205,7 +205,7 @@ describe("prepareChatSubmissionAction - file", () => {
     expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("entries");
     mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/pdf")]));
     const refused = await prepareChatSubmissionAction(fileFormData(file));
-    expect(refused).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface." });
+    expect(refused).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface.", refusalClass: "entry-too-large" });
   });
 });
 
@@ -347,7 +347,7 @@ describe("prepareCompositeSubmissionAction", () => {
         { kind: "text", content: big },
       ])
     );
-    expect(outcome).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface." });
+    expect(outcome).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface.", refusalClass: "entry-too-large" });
   });
 
   it("refuses a bad part count", async () => {

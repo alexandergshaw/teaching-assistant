@@ -175,18 +175,18 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
   if (kind === "text") {
     const entry = buildTextEntry({ label: data.label, content: data.content }, Number.isFinite(data.ordinal) ? data.ordinal : 1);
     const oversized = firstOversizedEntryReason([entry]);
-    if (oversized) return { kind: "refused", reason: oversized };
+    if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
     return { kind: "entries", entries: [entry], pointsPossible: null };
   }
 
   if (kind === "file") {
     const file = data.file;
     if (!file || file.size === 0) {
-      return { kind: "refused", reason: "No file was attached." };
+      return { kind: "refused", reason: "No file was attached.", refusalClass: "no-file" };
     }
     const budgetCheck = checkFileWireBudget(file.size, "This file");
     if (!budgetCheck.ok) {
-      return { kind: "refused", reason: budgetCheck.error ?? "This file is too large to upload." };
+      return { kind: "refused", reason: budgetCheck.error ?? "This file is too large to upload.", refusalClass: "over-wire-budget" };
     }
 
     const uploadKind = classifyGradingUpload(file.name);
@@ -194,6 +194,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
       return {
         kind: "refused",
         reason: "This file type isn't supported for grading. Upload a text file, document, image, or a zip archive.",
+        refusalClass: "unsupported-type",
       };
     }
     if (uploadKind === "video") {
@@ -206,6 +207,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         kind: "refused",
         reason: sniff.ok ? VIDEO_PENDING_MESSAGE : VIDEO_UNSUPPORTED_FORMAT_MESSAGE,
         videoFailure: sniff.ok ? "not supported here" : "unsupported format",
+        refusalClass: sniff.ok ? "video-pending" : "video-bad-format",
       };
     }
 
@@ -215,7 +217,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
       if (uploadKind === "single") {
         const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider, data.labelled);
         if (!entry) {
-          return { kind: "refused", reason: "This file could not be read." };
+          return { kind: "refused", reason: "This file could not be read.", refusalClass: "unreadable-file" };
         }
         entries = [entry];
       } else if (uploadKind === "zip") {
@@ -230,34 +232,34 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         return assertNeverUploadKind(uploadKind);
       }
       const oversized = firstOversizedEntryReason(entries);
-      if (oversized) return { kind: "refused", reason: oversized };
+      if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
       return classification
         ? { kind: "entries", entries, pointsPossible: null, classification }
         : { kind: "entries", entries, pointsPossible: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not read this file.";
-      return { kind: "refused", reason: message };
+      return { kind: "refused", reason: message, refusalClass: "read-failed" };
     }
   }
 
   if (kind === "url") {
     const url = data.url;
     if (!url) {
-      return { kind: "refused", reason: "No URL was provided." };
+      return { kind: "refused", reason: "No URL was provided.", refusalClass: "no-url" };
     }
 
     if (detectCanvasUrlKind(url)) {
       try {
         const { entries, pointsPossible } = await extractCanvasEntries(url);
         if (entries.length === 0) {
-          return { kind: "refused", reason: "Nothing to grade was found at this Canvas URL." };
+          return { kind: "refused", reason: "Nothing to grade was found at this Canvas URL.", refusalClass: "canvas-empty" };
         }
         const oversized = firstOversizedEntryReason(entries);
-        if (oversized) return { kind: "refused", reason: oversized };
+        if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
         return { kind: "entries", entries, pointsPossible };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not read this Canvas URL.";
-        return { kind: "refused", reason: message };
+        return { kind: "refused", reason: message, refusalClass: "canvas-failed" };
       }
     }
 
@@ -265,38 +267,38 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
     if (!("error" in parsedGithub)) {
       const repoResult = await fetchGradableRepoContent(url);
       if ("error" in repoResult) {
-        return { kind: "refused", reason: `Could not read this GitHub repository: ${repoResult.error}.` };
+        return { kind: "refused", reason: `Could not read this GitHub repository: ${repoResult.error}.`, refusalClass: "github-unreadable" };
       }
       const entry = buildRepoUrlEntry(repoResult);
       const oversized = firstOversizedEntryReason([entry]);
-      if (oversized) return { kind: "refused", reason: oversized };
+      if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
       return { kind: "entries", entries: [entry], pointsPossible: null };
     }
 
     const driveTarget = parseGoogleDriveUrl(url);
     if (driveTarget) {
       if (driveTarget.kind === "folder") {
-        return { kind: "refused", reason: DRIVE_FOLDER_MESSAGE };
+        return { kind: "refused", reason: DRIVE_FOLDER_MESSAGE, refusalClass: "drive-folder" };
       }
       if (driveTarget.kind === "native-doc" && driveTarget.docType !== "document") {
-        return { kind: "refused", reason: DRIVE_SHEETS_SLIDES_MESSAGE };
+        return { kind: "refused", reason: DRIVE_SHEETS_SLIDES_MESSAGE, refusalClass: "drive-sheets-slides" };
       }
       try {
         const fetched = await fetchGoogleDriveFile(driveTarget);
-        if ("error" in fetched) return { kind: "refused", reason: fetched.error };
+        if ("error" in fetched) return { kind: "refused", reason: fetched.error, refusalClass: "drive-failed" };
 
         // From here a Drive file behaves exactly like a dropped file.
         const uploadKind = classifyGradingUpload(fetched.name);
         if (uploadKind === "unsupported") {
-          return { kind: "refused", reason: DRIVE_UNSUPPORTED_TYPE_MESSAGE };
+          return { kind: "refused", reason: DRIVE_UNSUPPORTED_TYPE_MESSAGE, refusalClass: "drive-unsupported-type" };
         }
         if (uploadKind === "video") {
-          return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here" };
+          return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here", refusalClass: "video-drive" };
         }
         let entries: StudentSubmissionEntry[];
         if (uploadKind === "single") {
           const entry = await buildSingleFileEntry(fetched.name, fetched.buffer, provider, data.labelled);
-          if (!entry) return { kind: "refused", reason: "This file could not be read." };
+          if (!entry) return { kind: "refused", reason: "This file could not be read.", refusalClass: "unreadable-file" };
           entries = [entry];
         } else if (uploadKind === "zip") {
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
@@ -307,21 +309,22 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           return assertNeverUploadKind(uploadKind);
         }
         const oversized = firstOversizedEntryReason(entries);
-        if (oversized) return { kind: "refused", reason: oversized };
+        if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
         return { kind: "entries", entries, pointsPossible: null };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not read this Google Drive link.";
-        return { kind: "refused", reason: message };
+        return { kind: "refused", reason: message, refusalClass: "drive-failed" };
       }
     }
 
     return {
       kind: "refused",
       reason: "This surface accepts Canvas assignment/discussion URLs, GitHub repo URLs, and Google Drive share links. Other web URLs are not supported yet.",
+      refusalClass: "url-unsupported",
     };
   }
 
-  return { kind: "refused", reason: "This submission could not be read." };
+  return { kind: "refused", reason: "This submission could not be read.", refusalClass: "unknown-kind" };
 }
 
 /**
@@ -340,7 +343,7 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
   const provider = normalizeProvider(formData.get("provider") as string | null);
   const partCount = Number(formData.get("partCount") ?? "0");
   if (!Number.isInteger(partCount) || partCount < 1 || partCount > MAX_COMPOSITE_PARTS) {
-    return { kind: "refused", reason: `A composite submission needs between 1 and ${MAX_COMPOSITE_PARTS} parts.` };
+    return { kind: "refused", reason: `A composite submission needs between 1 and ${MAX_COMPOSITE_PARTS} parts.`, refusalClass: "composite-parts" };
   }
 
   const entries: StudentSubmissionEntry[] = [];
@@ -356,13 +359,13 @@ export async function prepareCompositeSubmissionAction(formData: FormData): Prom
       labelled: true,
     });
     const got = extractSingleEntry(outcome, partLabel);
-    if (!got.ok) return { kind: "refused", reason: got.reason };
+    if (!got.ok) return got.refusalClass ? { kind: "refused", reason: got.reason, refusalClass: got.refusalClass } : { kind: "refused", reason: got.reason };
     entries.push(got.entry);
   }
 
   const merged = mergeCompositeEntries(entries, student);
   const oversized = firstOversizedEntryReason([merged]);
-  if (oversized) return { kind: "refused", reason: oversized };
+  if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
   return { kind: "entries", entries: [merged], pointsPossible: null };
 }
 

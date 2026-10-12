@@ -54,6 +54,7 @@ import {
   uploadGradingZip,
 } from "@/lib/grade/grading-zip-transport";
 import { submitStoragedFile } from "./singleFileClient";
+import { recordIntakeGate, safeIntake } from "./chatIntakeDiagnostic";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { submitLooseVideo } from "./videoClient";
@@ -472,7 +473,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     setZipPhase("uploading");
     try {
       const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
-      if (!uploaded.ok) return { kind: "refused", reason: uploaded.message };
+      if (!uploaded.ok) {
+        safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
+        return { kind: "refused", reason: uploaded.message };
+      }
       setZipPhase("preparing");
       try {
         const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
@@ -539,9 +543,15 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       // takes the single-file Storage lane; small files stay on the body path.
       const isZip = isZipFileName(file.name);
       const transport = isZip ? chooseZipTransport(file) : chooseSingleFileTransport(file);
-      if (transport.kind === "refused") return { kind: "refused", reason: transport.message };
+      if (transport.kind === "refused") {
+        safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "refused", rawReason: transport.message }));
+        return { kind: "refused", reason: transport.message };
+      }
       const preflight = transport.kind === "storage" ? { ok: true as const } : preflightUploadFile(file, "This file");
-      if (!preflight.ok) return { kind: "refused", reason: preflight.message };
+      if (!preflight.ok) {
+        safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "body", rawReason: preflight.message }));
+        return { kind: "refused", reason: preflight.message };
+      }
       if (!began) {
         if (!(await ensureSession())) {
           return { kind: "refused", reason: sessionRefusalRef.current };

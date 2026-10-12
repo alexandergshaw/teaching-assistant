@@ -21,6 +21,8 @@ export type GradingDiagnosticOperation =
   | "generate_rubric"
   | "prepare_submission"
   | "prepare_video"
+  | "admit_submissions"
+  | "resolve_recording_split"
   | "grade_whole_run"
   | "grade_item"
   | "grade_repo"
@@ -44,6 +46,8 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
   generate_rubric: "Generate rubric",
   prepare_submission: "Prepare submission",
   prepare_video: "Prepare video",
+  admit_submissions: "Admit submissions",
+  resolve_recording_split: "Resolve recording split",
   grade_whole_run: "Grade (whole run)",
   grade_item: "Grade submission",
   grade_repo: "Grade repository",

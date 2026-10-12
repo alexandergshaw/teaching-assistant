@@ -10,12 +10,16 @@
 // every pair again (sanitizeSessionDiagnosticDetail), but that regex cannot tell
 // a lowercase name from a token, so this construction is the real control.
 //
-// Imports are TYPE-ONLY plus the import-free failure leaf, so this module can
-// never reach browser-only or server-only state.
+// Imports are TYPE-ONLY plus the import-free failure leaf and the pure,
+// client-safe intake leaf (chatSubmissionIntake, for the closed refusal list),
+// so this module can never reach browser-only or server-only state.
 
 import type { GradeFailureClass } from "@/lib/grade/grade-failure";
 import { isGradeFailureClass } from "@/lib/grade/grade-failure";
 import { GRADE_ITEM_DIAGNOSTIC_KEYS } from "@/lib/grade/grade-item-diagnostic";
+import type { GradeResult } from "@/lib/grade/types";
+import type { GradeRunItemRequestBody } from "@/app/components/grading/incrementalRunPlan";
+import { isIntakeRefusalClass, type IntakeRefusalClass } from "./chatSubmissionIntake";
 
 export type ChatDetailBag = Record<string, number | boolean | string>;
 
@@ -225,6 +229,8 @@ export interface PrepareSubmissionSignals {
   skipped?: number;
   failedFiles?: number;
   markers?: number;
+  /** WE: the server's typed refusal class; dropped unless a member of the closed list. */
+  refusal?: IntakeRefusalClass;
 }
 
 const INPUT_KINDS: readonly string[] = ["text", "file", "url", "composite", "zip-storage", "file-storage", "video-storage"];
@@ -252,5 +258,100 @@ export function buildPrepareSubmissionDetail(s: PrepareSubmissionSignals): ChatD
   putCount(bag, "skipped", s.skipped);
   putCount(bag, "failedFiles", s.failedFiles);
   putCount(bag, "markers", s.markers);
+  if (s.refusal !== undefined && isIntakeRefusalClass(s.refusal)) bag.refusal = s.refusal;
   return bag;
+}
+
+export type AdmitReason = "cap-reached" | "cap-clipped" | "zip-skipped" | "none-found";
+const ADMIT_REASONS: readonly string[] = ["cap-reached", "cap-clipped", "zip-skipped", "none-found"];
+
+/** Signals for admit_submissions, recorded ONLY on a refusal or a clip. Counts and a closed reason. */
+export interface AdmitSubmissionsSignals {
+  requested?: number;
+  admitted?: number;
+  clipped?: number;
+  skipped?: number;
+  cap?: number;
+  reason?: AdmitReason;
+}
+
+export function buildAdmitSubmissionsDetail(s: AdmitSubmissionsSignals): ChatDetailBag {
+  const bag: ChatDetailBag = {};
+  putCount(bag, "requested", s.requested);
+  putCount(bag, "admitted", s.admitted);
+  putCount(bag, "clipped", s.clipped);
+  putCount(bag, "skipped", s.skipped);
+  putCount(bag, "cap", s.cap);
+  if (s.reason !== undefined && ADMIT_REASONS.includes(s.reason)) bag.reason = s.reason;
+  return bag;
+}
+
+export type SplitDecision = "confirm" | "reject";
+
+/** Signals for resolve_recording_split: the instructor's decision and the counts. */
+export interface ResolveRecordingSplitSignals {
+  decision?: SplitDecision;
+  segments?: number;
+  admitted?: number;
+  clipped?: number;
+}
+
+export function buildResolveRecordingSplitDetail(s: ResolveRecordingSplitSignals): ChatDetailBag {
+  const bag: ChatDetailBag = {};
+  if (s.decision === "confirm" || s.decision === "reject") bag.decision = s.decision;
+  putCount(bag, "segments", s.segments);
+  putCount(bag, "admitted", s.admitted);
+  putCount(bag, "clipped", s.clipped);
+  return bag;
+}
+
+/** Filled by the default dispatch with what the route said about one attempt:
+ * the HTTP status and the (untrusted, re-validated downstream) `diagnostic`. */
+export interface ItemDiagnosticSink {
+  httpStatus?: number;
+  diagnostic?: unknown;
+}
+
+/** One dispatch attempt as the run-diagnostics panel shows it. A hook-local run
+ * view model like `results` (scope F3), built by the same function that builds
+ * the exported log entry's `detail`. `label` is the student label and is for
+ * the page only; `rowLabel` ("Row N") is the form safe to copy. */
+export interface ItemDiagnostic {
+  readonly sourceIndex: number;
+  readonly rowLabel: string;
+  readonly label: string;
+  readonly outcome: "graded" | "failed";
+  readonly detail: ChatDetailBag;
+}
+
+/** Result-quality signals for one arrived row: counts, booleans and closed unions only. */
+export function resultSignals(result: GradeResult, body: GradeRunItemRequestBody, expectedAreas: number): GradeItemClientSignals {
+  const files = body.entry.submittedFiles;
+  const base: GradeItemClientSignals = {
+    contentChars: body.entry.content.length,
+    files: files.length,
+    visualFiles: files.filter((f) => f.rawBase64 !== undefined).length,
+    video: files.some((f) => f.videoRef !== undefined),
+    windowed: body.gradeWindowSec !== undefined,
+    splitAsked: body.commentSplit === true,
+  };
+  if (result.ungraded) return base;
+  const run = result.codeExecution;
+  return {
+    ...base,
+    areas: result.rubricAreas.length,
+    ...(expectedAreas > 0 ? { areasExpected: expectedAreas } : {}),
+    scored: result.totalScore.trim() !== "",
+    hasPraise: result.strengths.trim() !== "",
+    hasAdvice: result.improvements.trim() !== "",
+    truncated: result.submissionTruncated === true,
+    link: result.linkFetch ?? "none",
+    code: run === undefined ? "none" : run.neededStdin ? "needs-input" : run.ran ? "ran" : "failed",
+  };
+}
+
+/** The class the CLIENT can assign when the server did not (builder lets a server class win). */
+export function clientFailureClass(sink: ItemDiagnosticSink): GradeFailureClass {
+  if (sink.httpStatus === undefined) return "transport lost";
+  return sink.httpStatus === 400 || sink.httpStatus === 401 ? "request refused" : "unclassified";
 }

@@ -73,7 +73,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     const outcome = await prepareChatSubmissionAction(
       fileForm(new File([zipBytes as BlobPart], "fake.mp4", { type: "video/mp4" }))
     );
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_UNSUPPORTED_FORMAT_MESSAGE, videoFailure: "unsupported format" });
+    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_UNSUPPORTED_FORMAT_MESSAGE, videoFailure: "unsupported format", refusalClass: "video-bad-format" });
     expect(loadAsync).not.toHaveBeenCalled();
     expect(vi.mocked(ingestZipEntries)).not.toHaveBeenCalled();
     loadAsync.mockRestore();
@@ -102,7 +102,7 @@ describe("resolveOnePart kind file - video (flag ON)", () => {
     fd.set("kind", "url");
     fd.set("url", "https://drive.google.com/file/d/1AbC_dEf-123/view");
     const outcome = await prepareChatSubmissionAction(fd);
-    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here" });
+    expect(outcome).toEqual({ kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here", refusalClass: "video-drive" });
     expect(vi.mocked(extractStudentEntries)).not.toHaveBeenCalled();
   });
 });

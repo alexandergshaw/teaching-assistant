@@ -13,6 +13,8 @@ import { recordGradingDiagnosticEntry } from "@/app/components/grading/gradingDi
 export type ChatSeamOperation =
   | "resolve_header"
   | "prepare_submission"
+  | "admit_submissions"
+  | "resolve_recording_split"
   | "grade_item"
   | "fetch_canvas_meta"
   | "list_lms_assignments"

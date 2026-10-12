@@ -46,8 +46,7 @@ import type { LlmProvider } from "@/lib/llm";
 import { chatSeamNowMs, classifyChatSeamFailure, decideChatSeamDiagnostic, recordChatSeamSettled, type ChatSeamFailureClass } from "./chatSeamDiagnostic";
 import { GRADING_DIAGNOSTIC_OPERATION_LABELS, recordClassifySettled } from "@/app/components/grading/gradingDiagnosticLog";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
-import { buildGradeItemDetail, type ChatDetailBag, type GradeItemClientSignals, type GradeTrigger } from "./chatGradeDetail";
-import type { GradeFailureClass } from "@/lib/grade/grade-failure";
+import { buildGradeItemDetail, clientFailureClass, resultSignals, type ChatDetailBag, type GradeItemClientSignals, type GradeTrigger, type ItemDiagnostic, type ItemDiagnosticSink } from "./chatGradeDetail";
 import { RECORDING_SPLIT_ENABLED } from "@/lib/grade/constants";
 import type { RecordingSplit, RecordingWindow } from "@/lib/grade/recording-split";
 import { buildSplitEntries, classifyVideoEntry, videoRefOf, type PendingSplit } from "./recordingSplitDriver";
@@ -58,6 +57,7 @@ import { mergeIngestLedgers } from "./ingestLedger";
 import { gradeFailureFromBody, postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
+import { intakeExtBucket, intakeSignalsFor, ledgerSignals, recordAdmitAnomaly, recordPrepareDetail, recordSplitDecision } from "./chatIntakeDiagnostic";
 import {
   mergeArrivedResults,
   buildIncrementalRun,
@@ -81,24 +81,7 @@ type ResolvedRunHeader = Extract<GradingRunHeader, { kind: "ok" }>;
 // way).
 const DEFAULT_MAX_ENTRIES = 40;
 
-/** Filled by the default dispatch with what the route said about one attempt:
- * the HTTP status and the (untrusted, re-validated downstream) `diagnostic`. */
-export interface ItemDiagnosticSink {
-  httpStatus?: number;
-  diagnostic?: unknown;
-}
-
-/** One dispatch attempt as the run-diagnostics panel shows it. A hook-local run
- * view model like `results` (scope F3), built by the same function that builds
- * the exported log entry's `detail`. `label` is the student label and is for
- * the page only; `rowLabel` ("Row N") is the form safe to copy. */
-export interface ItemDiagnostic {
-  readonly sourceIndex: number;
-  readonly rowLabel: string;
-  readonly label: string;
-  readonly outcome: "graded" | "failed";
-  readonly detail: ChatDetailBag;
-}
+export type { ItemDiagnostic, ItemDiagnosticSink };
 
 const ITEM_DIAGNOSTIC_CAP = 200;
 
@@ -110,38 +93,6 @@ function safeDiagnostic(fn: () => void): void {
   } catch {
     // Deliberately empty.
   }
-}
-
-/** Result-quality signals for one arrived row: counts, booleans and closed unions only. */
-function resultSignals(result: GradeResult, body: GradeRunItemRequestBody, expectedAreas: number): GradeItemClientSignals {
-  const files = body.entry.submittedFiles;
-  const base: GradeItemClientSignals = {
-    contentChars: body.entry.content.length,
-    files: files.length,
-    visualFiles: files.filter((f) => f.rawBase64 !== undefined).length,
-    video: files.some((f) => f.videoRef !== undefined),
-    windowed: body.gradeWindowSec !== undefined,
-    splitAsked: body.commentSplit === true,
-  };
-  if (result.ungraded) return base;
-  const run = result.codeExecution;
-  return {
-    ...base,
-    areas: result.rubricAreas.length,
-    ...(expectedAreas > 0 ? { areasExpected: expectedAreas } : {}),
-    scored: result.totalScore.trim() !== "",
-    hasPraise: result.strengths.trim() !== "",
-    hasAdvice: result.improvements.trim() !== "",
-    truncated: result.submissionTruncated === true,
-    link: result.linkFetch ?? "none",
-    code: run === undefined ? "none" : run.neededStdin ? "needs-input" : run.ran ? "ran" : "failed",
-  };
-}
-
-/** The class the CLIENT can assign when the server did not (builder lets a server class win). */
-function clientFailureClass(sink: ItemDiagnosticSink): GradeFailureClass {
-  if (sink.httpStatus === undefined) return "transport lost";
-  return sink.httpStatus === 400 || sink.httpStatus === 401 ? "request refused" : "unclassified";
 }
 
 export type HeaderState = "unset" | "resolving" | "ready" | "refused";
@@ -596,6 +547,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       if (ingest.kind === "refused") {
         if (ingest.videoFailure) {
           recordVideoSettled({ startedAtMs: classifyStartedAtMs, settledAtMs: chatSeamNowMs(), failure: ingest.videoFailure });
+        } else {
+          // AC-14(a): a non-video ingest refusal used to record nothing.
+          const refusedReason = ingest.reason;
+          safeDiagnostic(() =>
+            recordPrepareDetail({ startedAtMs: classifyStartedAtMs, rawReason: refusedReason, signals: { inputKind: "zip-storage", stage: "prepare", transport: "storage" } })
+          );
         }
         return { kind: "refused", reason: ingest.reason };
       }
@@ -620,7 +577,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         classification: zipClassification,
         at: new Date().toISOString(),
       });
+      safeDiagnostic(() => recordPrepareDetail({ startedAtMs: classifyStartedAtMs, rawReason: null, signals: ledgerSignals(completedLedger) }));
       if (collected.length === 0 && ingestSkipped.length === 0) {
+        safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "refused", signals: { requested: 0, admitted: 0, cap: maxEntries, reason: "none-found" } }));
         return { kind: "refused", reason: `No student submissions were found in ${input.name}.` };
       }
       entries = collected;
@@ -686,11 +645,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         prepared = { kind: "refused", reason: "This file could not be prepared." };
       }
       // Counts-only: a fixed failure class, never the reason text or file name.
-      recordChatSeamSettled({
-        operation: "prepare_submission",
-        startedAtMs: prepareStartedAtMs,
-        failureClass: prepared.kind === "refused" ? classifyChatSeamFailure(prepared.reason) : null,
-      });
+      safeDiagnostic(() =>
+        recordPrepareDetail({
+          startedAtMs: prepareStartedAtMs,
+          rawReason: prepared.kind === "refused" ? prepared.reason : null,
+          signals: { inputKind: "file-storage", stage: "prepare", transport: "storage", ext: intakeExtBucket({ name: input.name }) },
+        })
+      );
       if (prepared.kind === "refused") return { kind: "refused", reason: prepared.reason };
       if (sessionIdRef.current !== sessionAtStart) {
         return { kind: "refused", reason: "The session was reset while the file was being prepared. Nothing was graded." };
@@ -758,11 +719,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         recordChatSeamSettled({ operation: "prepare_submission", startedAtMs: prepareStartedAtMs, failureClass: "interrupted" });
         throw err;
       }
-      recordChatSeamSettled({
-        operation: "prepare_submission",
-        startedAtMs: prepareStartedAtMs,
-        failureClass: outcome.kind === "refused" ? classifyChatSeamFailure(outcome.reason) : null,
-      });
+      safeDiagnostic(() =>
+        recordPrepareDetail({
+          startedAtMs: prepareStartedAtMs,
+          rawReason: outcome.kind === "refused" ? outcome.reason : null,
+          signals: intakeSignalsFor(input, outcome),
+        })
+      );
       if (outcome.kind === "refused") {
         return { kind: "refused", reason: outcome.reason };
       }
@@ -781,6 +744,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // the remainder, never the whole event.
     const available = maxEntries - dispatchedCountRef.current;
     if (available <= 0) {
+      safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "cap exceeded", signals: { requested: entries.length, admitted: 0, clipped: entries.length, cap: maxEntries, reason: "cap-reached" } }));
       return {
         kind: "refused",
         reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
@@ -807,6 +771,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     enqueueAdmitted(header, admitted, { pointsPossible, submitLabel });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
+      safeDiagnostic(() =>
+        recordAdmitAnomaly({
+          failureClass: null,
+          signals: { requested: entries.length, admitted: admitted.length, clipped: refusedCount, skipped: ingestSkipped.length, cap: maxEntries, reason: refusedCount > 0 ? "cap-clipped" : "zip-skipped" },
+        })
+      );
       const skipNote =
         ingestSkipped.length > 0
           ? ` Skipped: ${ingestSkipped.map((s) => `${s.student} (${s.reason})`).join("; ")}.`
@@ -835,6 +805,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!pending || !header) return { kind: "refused", reason: "There is no recording waiting to be graded." };
     const available = maxEntries - dispatchedCountRef.current;
     if (available <= 0) {
+      safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "cap exceeded", signals: { requested: split ? pending.segments.length : 1, admitted: 0, clipped: split ? pending.segments.length : 1, cap: maxEntries, reason: "cap-reached" } }));
       return {
         kind: "refused",
         reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
@@ -846,6 +817,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const admitted = built.entries.slice(0, available);
     enqueueAdmitted(header, admitted, { pointsPossible: null, submitLabel: split ? "" : pending.label, windows: built.windows });
     const refusedCount = built.entries.length - admitted.length;
+    safeDiagnostic(() =>
+      recordSplitDecision({ decision: split ? "confirm" : "reject", segments: pending.segments.length, admitted: admitted.length, clipped: refusedCount })
+    );
     if (refusedCount > 0) {
       return {
         kind: "partial",

@@ -53,6 +53,39 @@ export type CompositePartInput =
   | { readonly kind: "file"; readonly file: File }
   | { readonly kind: "url"; readonly url: string };
 
+/** The CLOSED set of intake refusal classes (CHAT-GRADING-DETAILED-DIAGNOSTICS
+ * WE). Typed at the server refusal site so the diagnostic log never parses the
+ * human-readable `reason`. Tokens only: never a name, path, URL or message. */
+export const INTAKE_REFUSAL_CLASSES = [
+  "no-file",
+  "over-wire-budget",
+  "unsupported-type",
+  "video-pending",
+  "video-bad-format",
+  "video-drive",
+  "unreadable-file",
+  "read-failed",
+  "entry-too-large",
+  "no-url",
+  "canvas-empty",
+  "canvas-failed",
+  "github-unreadable",
+  "drive-folder",
+  "drive-sheets-slides",
+  "drive-unsupported-type",
+  "drive-failed",
+  "url-unsupported",
+  "composite-parts",
+  "unknown-kind",
+] as const;
+
+export type IntakeRefusalClass = (typeof INTAKE_REFUSAL_CLASSES)[number];
+
+/** Membership check for an untrusted value (a closed-vocabulary guard). */
+export function isIntakeRefusalClass(value: unknown): value is IntakeRefusalClass {
+  return typeof value === "string" && (INTAKE_REFUSAL_CLASSES as readonly string[]).includes(value);
+}
+
 /**
  * What every submission kind resolves to: zero-or-more gradable entries, or a
  * NAMED refusal. `pointsPossible` is carried on the "entries" branch (wave
@@ -74,6 +107,8 @@ export type IntakeOutcome =
       readonly reason: string;
       /** VIDEO-GRADING W2: the TYPED video failure class (ops O-7); never parsed from `reason`. */
       readonly videoFailure?: VideoFailureClass;
+      /** WE: the TYPED refusal class (never parsed from `reason`); absent on an untyped refusal. */
+      readonly refusalClass?: IntakeRefusalClass;
     };
 
 /** Matches route.ts's MAX_STUDENT_CHARS (the wire-level bound every
@@ -150,8 +185,12 @@ export function mergeCompositeEntries(resolvedParts: readonly StudentSubmissionE
 export function extractSingleEntry(
   outcome: IntakeOutcome,
   partLabel: string
-): { readonly ok: true; readonly entry: StudentSubmissionEntry } | { readonly ok: false; readonly reason: string } {
-  if (outcome.kind === "refused") return { ok: false, reason: outcome.reason };
+): { readonly ok: true; readonly entry: StudentSubmissionEntry } | { readonly ok: false; readonly reason: string; readonly refusalClass?: IntakeRefusalClass } {
+  if (outcome.kind === "refused") {
+    return outcome.refusalClass !== undefined
+      ? { ok: false, reason: outcome.reason, refusalClass: outcome.refusalClass }
+      : { ok: false, reason: outcome.reason };
+  }
   if (outcome.entries.length === 0) return { ok: false, reason: `${partLabel} had nothing to grade.` };
   if (outcome.entries.length > 1) {
     return {

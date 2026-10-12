@@ -18,7 +18,7 @@ import { normalizeProvider } from "@/lib/llm";
 import { getGeminiInterRequestDelayMs } from "@/lib/gemini";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
-import { VIDEO_BATCH_MESSAGE } from "@/lib/grade/video-grading";
+import { VIDEO_BATCH_MESSAGE, assertNeverUploadKind } from "@/lib/grade/video-grading";
 import {
   estimateEntryWireBytes,
   ITEM_REQUEST_BYTE_BUDGET,
@@ -59,6 +59,8 @@ export async function gradingOneUploadAction(formData: FormData): Promise<OneUpl
   if (kind === "unsupported") {
     return { ok: false, reason: `${file.name} is not a supported submission file type.` };
   }
+  // Exhaustive: only "single" may continue; a new upload kind fails tsc here.
+  if (kind !== "single") return assertNeverUploadKind(kind);
 
   try {
     const entry = await buildSingleFileEntry(file.name, Buffer.from(await file.arrayBuffer()), provider);

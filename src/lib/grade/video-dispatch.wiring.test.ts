@@ -9,9 +9,10 @@ import { join } from "node:path";
 
 const SRC = join(process.cwd(), "src");
 
-/** The five dispatch sites (ops O-3): file -> number of classifyGradingUpload calls in it. */
+/** The six dispatch sites (ops O-3): file -> number of classifyGradingUpload calls in it. */
 const SITES: Record<string, number> = {
   "app/actions/grading-chat-intake.ts": 2,
+  "app/actions/grading-one-upload.ts": 1,
   "app/actions/grading-incremental.ts": 1,
   "app/actions/grading.ts": 1,
   "lib/grade/extraction.ts": 1,
@@ -30,7 +31,7 @@ function countMatches(text: string, pattern: RegExp): number {
 }
 
 describe("classifyGradingUpload dispatch sites (video)", () => {
-  it("no call site exists outside the five known ones (a sixth would be unhandled)", () => {
+  it("no call site exists outside the six known ones (a seventh would be unhandled)", () => {
     const files: string[] = [];
     walk(SRC, files);
     const callers = files

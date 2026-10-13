@@ -44,5 +44,11 @@ next-env.d.ts
 # scratch output from local audit tooling, never source
 .codex-tmp/
 
+# Durable local development-loop records and worker handoffs
+.agnostic-loop/
+
+# Machine-local agent permissions
+.claude/settings.local.json
+
 # Supabase CLI scratch (version check cache), never source
 supabase/.temp/

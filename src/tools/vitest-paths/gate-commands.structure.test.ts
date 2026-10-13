@@ -361,11 +361,12 @@ describe("Canary: the detector and every scope fire on known fixtures before the
   );
 
   it(
-    "S6's predicate fires on a fixture row whose verify is a two-path WRAPPER command (S6 is empty today - all real verify values are null)",
+    "S6 rejects a two-path wrapper fixture and permits a single-path wrapper fixture while the real backlog scan remains enforced",
     () => {
       const hits = anyMulti("npm run test:paths src/a.test.ts src/b.test.ts", VITEST_SCRIPTS);
       expect(hits.some((h) => h.family === "wrapper")).toBe(true);
-      expect(BACKLOG_ITEMS.every((item) => item.verify === null)).toBe(true);
+      const singlePath = anyMulti("npm.cmd run test:paths src/tools/agnostic-loop", VITEST_SCRIPTS);
+      expect(singlePath).toHaveLength(0);
     },
     30_000
   );

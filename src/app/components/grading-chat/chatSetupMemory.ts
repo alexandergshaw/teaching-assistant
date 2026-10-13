@@ -13,6 +13,7 @@ import {
   type LoadedRubricMemory,
 } from "@/lib/grade/rubric-memory";
 import { parseCanvasUrl } from "@/lib/canvas-url";
+import type { RubricStorageScope } from "@/lib/grade/rubric-origin-scope";
 
 export const CHAT_RUBRIC_MEMORY_KEY = "ta-grading-chat-rubric-memory";
 
@@ -30,7 +31,7 @@ export function saveChatSetupMemory(
   saveRubricMemory(CHAT_RUBRIC_MEMORY_KEY, scope, entry);
 }
 
-export function loadChatSetupMemory(scope: string): LoadedRubricMemory | null {
+export function loadChatSetupMemory(scope: RubricStorageScope): LoadedRubricMemory | null {
   return loadRubricMemory(CHAT_RUBRIC_MEMORY_KEY, scope);
 }
 

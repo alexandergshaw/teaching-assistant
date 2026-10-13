@@ -27,6 +27,23 @@ Two rules from it that apply to every agent, not just the orchestrator:
   about markup, focus, or keyboard behaviour.
 <!-- END:dev-loop-pointer -->
 
+<!-- BEGIN:agnostic-loop-entry -->
+# Provider-independent automatic loop
+
+`docs/AGNOSTIC_LOOP_USAGE.md` documents the local supervisor, fixed routing grant,
+CLI and MCP entry points. A main host with an authorized configured run can invoke
+`npm.cmd run loop -- drive --item <id> --state <store> --config <routing.json>
+--actor <owner>`; the runner selects roles and qualified models and enforces the
+durable handoffs. Do not manufacture provider access, install/authenticate tools
+or infer paid-dispatch consent from an unconfigured template.
+
+A worker receiving a scoped supervisor packet performs only its assigned role,
+paths and deliverables. It does not recursively drive the queue, create another
+orchestrator, alter the routing grant or claim owner authority. Report conflicts
+and unavailable instruments in its bounded result. This scoped-worker instruction
+applies equally to Codex, Claude Code, Gemini CLI and other adapters.
+<!-- END:agnostic-loop-entry -->
+
 <!-- BEGIN:leverage-question -->
 # Feature work asks one question
 

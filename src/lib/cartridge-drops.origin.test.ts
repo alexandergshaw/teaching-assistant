@@ -8,6 +8,7 @@ import path from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
 import { saveCartridgeDrop, listCartridgeDrops } from "./cartridge-drops";
+import { asRubricOriginScope } from "./grade/rubric-origin-scope";
 import { resolveRubricOriginScope, describeDropRubricOrigin } from "./grade/rubric-origin";
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "supabase/migrations");
@@ -178,12 +179,24 @@ function baseMeta(overrides: Partial<Parameters<typeof saveCartridgeDrop>[3]> = 
     pointsPossible: null as number | null,
     rubricText: "RUBRIC ONE",
     lms: "canvas" as const,
-    rubricOriginScope: "cartridge:CS101|HW1" as string | null,
+    rubricOriginScope: asRubricOriginScope("cartridge:CS101|HW1"),
     ...overrides,
   };
 }
 
 describe("R2: CartridgeDrop carries the origin, the mapper populates it, origin never contradicts presence", () => {
+  it("preserves nullable and exact attribution bytes through writer and database mapping", async () => {
+    for (const origin of [null, "", " ", "unknown:value", "upload:a.zip"]) {
+      const { client, inserts, echoedRows } = makeCapturingClient();
+      const drop = await saveCartridgeDrop(client, "u1", new File(["x"], "a.zip"), baseMeta({
+        rubricOriginScope: origin === null ? null : asRubricOriginScope(origin),
+      }));
+      expect(inserts[0][COL]).toBe(origin);
+      expect(drop.rubricOriginScope).toBe(origin);
+      expect((await listCartridgeDrops(makeListingClient(echoedRows[0]), "u1"))[0].rubricOriginScope).toBe(origin);
+    }
+  });
+
   it("R2a: every key in the captured insert payload is a real migration column", async () => {
     const { client, inserts } = makeCapturingClient();
     const file = new File([new Uint8Array(9)], "hw2.zip");
@@ -214,14 +227,14 @@ describe("R2: CartridgeDrop carries the origin, the mapper populates it, origin 
   it("R2c: the value the writer sent round-trips to the mapped object", async () => {
     const { client } = makeCapturingClient();
     const file = new File([new Uint8Array(9)], "hw2.zip");
-    const drop = await saveCartridgeDrop(client, "u1", file, baseMeta({ rubricOriginScope: "cartridge:CS101|HW1" }));
+    const drop = await saveCartridgeDrop(client, "u1", file, baseMeta({ rubricOriginScope: asRubricOriginScope("cartridge:CS101|HW1") }));
     expect(drop.rubricOriginScope).toBe("cartridge:CS101|HW1");
   });
 
   it("R2d: listCartridgeDrops maps it too, from a row whose keys came from the writer", async () => {
     const { client: writeClient, echoedRows } = makeCapturingClient();
     const file = new File([new Uint8Array(9)], "hw2.zip");
-    await saveCartridgeDrop(writeClient, "u1", file, baseMeta({ rubricOriginScope: "cartridge:CS101|HW1" }));
+    await saveCartridgeDrop(writeClient, "u1", file, baseMeta({ rubricOriginScope: asRubricOriginScope("cartridge:CS101|HW1") }));
 
     const listClient = makeListingClient(echoedRows[0]);
     const listed = await listCartridgeDrops(listClient, "u1");
@@ -240,7 +253,7 @@ describe("R2: CartridgeDrop carries the origin, the mapper populates it, origin 
   it("R2f discriminates: an origin written onto a rubric-less row violates the invariant", async () => {
     const { client, inserts } = makeCapturingClient();
     const file = new File([new Uint8Array(9)], "hw2.zip");
-    await saveCartridgeDrop(client, "u1", file, baseMeta({ rubricText: null, rubricOriginScope: "cartridge:CS101|HW1" }));
+    await saveCartridgeDrop(client, "u1", file, baseMeta({ rubricText: null, rubricOriginScope: asRubricOriginScope("cartridge:CS101|HW1") }));
     const payload = inserts[0];
     const ok = payload[COL] === null || (typeof payload.rubric_text === "string" && payload.rubric_text !== "");
     expect(ok).toBe(false);

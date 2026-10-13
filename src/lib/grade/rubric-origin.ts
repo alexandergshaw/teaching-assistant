@@ -14,6 +14,7 @@
  */
 
 import { describeRubricScope } from "./rubric-memory";
+import { asRubricOriginScope, type RubricOriginScope } from "./rubric-origin-scope";
 
 /** The frozen no-rubric sentence (RULING 113). A retrospective statement of
  *  fact, read later by an instructor who may never have turned auto-grading
@@ -47,20 +48,20 @@ export function resolveRubricOriginScope(input: {
   restored: { rubric: string; scope: string } | null;
   sniffedRubric: string | null;
   archiveName: string;
-}): string | null {
+}): RubricOriginScope | null {
   const { rubricText, currentScope, restored, sniffedRubric, archiveName } = input;
 
   if (!rubricText) return null;
 
   if (restored && restored.rubric === rubricText) {
-    return restored.scope;
+    return asRubricOriginScope(restored.scope);
   }
 
   if (sniffedRubric && sniffedRubric === rubricText) {
-    return `upload:${archiveName}`;
+    return asRubricOriginScope(`upload:${archiveName}`);
   }
 
-  return currentScope || null;
+  return currentScope ? asRubricOriginScope(currentScope) : null;
 }
 
 /**

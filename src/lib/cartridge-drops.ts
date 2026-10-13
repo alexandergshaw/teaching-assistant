@@ -3,6 +3,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+import { asRubricOriginScope, type RubricOriginScope } from "./grade/rubric-origin-scope";
 
 export const CARTRIDGE_DROP_UPLOADED_EVENT = "ta-cartridge-drop-uploaded";
 
@@ -25,7 +26,7 @@ export interface CartridgeDrop {
   // A40 DECISION 16: the scope (course/assignment pair, or upload) the
   // persisted rubric text actually came from - null when no rubric was
   // carried. Populated by mapCartridgeDrop from the new column below.
-  rubricOriginScope: string | null;
+  rubricOriginScope: RubricOriginScope | null;
   // RES-A39-3B: the instructor's real assignment description; null on drops
   // saved before the column existed (the step then falls back to two labels).
   assignmentDescription: string | null;
@@ -41,7 +42,7 @@ export async function saveCartridgeDrop(
     pointsPossible: number | null;
     rubricText: string | null;
     lms: "canvas" | "brightspace" | "blackboard" | "moodle";
-    rubricOriginScope: string | null;
+    rubricOriginScope: RubricOriginScope | null;
     // Optional: callers that carry no description leave the column null.
     assignmentDescription?: string | null;
   }
@@ -159,7 +160,7 @@ function mapCartridgeDrop(row: Database["public"]["Tables"]["cartridge_drops"]["
     sizeBytes: row.size_bytes,
     gradedAt: row.graded_at,
     createdAt: row.created_at,
-    rubricOriginScope: row.rubric_origin_scope,
+    rubricOriginScope: row.rubric_origin_scope === null ? null : asRubricOriginScope(row.rubric_origin_scope),
     assignmentDescription: row.assignment_description,
   };
 }

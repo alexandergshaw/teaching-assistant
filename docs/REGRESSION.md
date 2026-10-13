@@ -47729,3 +47729,40 @@ restructured and nothing withdrawn.
 | BL451-3 | Happy path on a real PowerPoint-authored template (notesSlides, charts, OLE, sections) | Repo owner supplies one `.pptx`; W2 verifier runs it | The probe fixture builder swapped for the real bytes; I-OPC over input and output | W2 verify |
 | BL451-4 | Live `deck_template_files` read / 3.5 MB template through the real Supabase path | Repo owner | One real upload + fill on production | Same owner walk as BL451-2 |
 | BL451-5 | Silent surplus-bullet drop (A2) and file-order mapping (E) are pre-existing defects surfaced here, not in any backlog row | Orchestrator files them | A backlog row each, or an explicit owner "won't fix"; instrument = rows A2 / E of this entry flipping | Orchestrator, at the W2 push reconciliation |
+
+## Provider-neutral local development loop (2026-10-13)
+
+This entry adds a local operator CLI baseline; existing application behavior is
+unchanged. `rg -n "agnostic-loop|provider-neutral|LLM_AGNOSTIC" docs/REGRESSION.md`
+returned no prior entry before this section was appended. No prior coverage was
+restructured or withdrawn.
+
+The public CLI accepts operator policy and durable JSON handoffs, records actual
+file imports and subprocess gates, and permits local delivery only after accepted
+criteria, design, plan, test design, implementation, independent verification and
+final regression reports. The file adapter records provider/model identities as
+operator attestations and does not require a vendor SDK or live credential.
+
+Working-tree instruments are `src/tools/agnostic-loop/conformance.test.ts` (actual
+CLI/process persistence and lifecycle cases), `mutation.test.ts` (isolated
+baseline/control/detectable defect/restoration), and the pure/IO module tests.
+The demo creates an isolated directory, retains all executable event/result
+fixtures and records delivery as local. Gates bind the actual whole candidate;
+source drift and unsupported worker authority cannot become accepted evidence.
+Cancellation fences publication while unknown operations retain resource locks.
+
+`npm run test:paths src/tools/agnostic-loop/mutation.test.ts` reported one passing
+test and exited zero. Both deliberately disabled invariants were detected for
+the intended reason; restored copies passed and shared production source hashes
+were unchanged. `docs/agnostic-loop-verification.md` records the subsequent
+integration command outcomes and verification boundaries.
+
+Automatic routing and subprocess dispatch are separately recorded in
+`docs/agnostic-dispatch-verification.md`: successful-path CLI/MCP evidence is
+distinct from the unresolved failed-gate repair/invalidation re-entry defects.
+Owner disposition on 2026-10-13 keeps generated automatic setup disabled by default
+and records failed-gate repair as unfinished; the initial review activity is closed.
+
+These instruments render no component, contact no live provider, and establish
+no malicious-process sandbox or reliable process-tree termination guarantee.
+Semantic criteria adequacy and true remote identity remain operator obligations.

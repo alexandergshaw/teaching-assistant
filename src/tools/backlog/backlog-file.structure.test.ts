@@ -145,6 +145,10 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // submission modes; driver override guarded to single-entry submissions so multi-student sources keep their names.
 // 146 -> 147: ZIP-UPLOAD-LAG filed 2026-10-08 (FIX-1 shipped) - a big zip was rejected by the upload size caps
 // before extraction with no client pre-flight (the "clocking"); FIX-1 adds a client size pre-flight + worded error.
+// 186 -> 187: automatic dispatch implementation row filed 2026-10-13.
+// Instrument: npm.cmd run test:paths src/tools/backlog/backlog-file.structure.test.ts
+// observed the added row against the prior frozen literal.
+// 187 -> 186: A40-D5 closed with the checked typed-origin boundary, 2026-10-13.
 const EXPECTED_ROW_COUNT = 186;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {

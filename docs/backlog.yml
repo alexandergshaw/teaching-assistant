@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'LLM-AGNOSTIC-AUTO-DISPATCH'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'loop-and-docs-maintenance'
+  title: 'Complete reliable failed-gate repair and outstanding conformance evidence before enabling automatic agnostic-loop dispatch.'
+  owns: ['src/tools/agnostic-loop/**', 'src/tools/backlog/backlog-file.structure.test.ts', 'src/tools/vitest-paths/gate-commands.structure.test.ts', 'docs/AGNOSTIC_LOOP_USAGE.md', 'docs/LLM_AGNOSTIC_DEV_LOOP.md', 'docs/agnostic-loop-*.md', 'docs/agnostic-dispatch-*.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  verify: null
+  blocked_by: []
+  instrument: 'Before assigning a closure command, commit a failing regression for invalidation followed by stage re-entry and a real verifier/regression gate failure followed by bounded same-activity repair. Require exact prior failure diagnostics in the repair packet, successful re-advancement, preserved review limits, restart behavior and an explanatory checkpoint when progress cannot continue. Close remaining negative conformance obligations in docs/agnostic-dispatch-verification.md against AD-1..AD-12. The existing passing-path suite alone cannot close this residual. Live provider transport evidence remains separate from fixture conformance and complete feature-loop verification.'
+  from: 'Owner request 2026-10-13 in this chat: implement automatic model selection and agent dispatch; propose a way first. Initial implementation and owner disposition are included in the commit retaining this repair residual.'
+  note: 'Owner: coordinator. Filed 2026-10-13; recommendation restatements: 1. OWNER DECISION 2026-10-13: Keep it disabled by default; record failed-gate repair as unfinished. This closes the initial implementation review activity as it stands; it does not authorize another revision/check round or an experimental release. The answer to the corrected question governs over the earlier question based on a stale unconditional-break finding. Automatic retry is present, but prior failed-execution diagnostics are missing from repair packets and deterministic stage-advance replay can stall after invalidation. This row now owns those unfinished repairs and the remaining conformance evidence; receiving owner is the coordinator and receiving step is a separately scoped repair activity before normal activation. The closure command remains unset until a regression that detects the known failure is in the repository. Routing, adapters, durable supervisor and CLI/MCP are retained with activation disabled by default. Measurements and limits are in docs/agnostic-dispatch-verification.md. Existing manual adapter remains usable. Codex native transport was smoke-tested separately; no complete live development loop or live Claude/Gemini verification is claimed.'
+  question: 'RESOLVED 2026-10-13: Keep automatic dispatch disabled by default and track failed-gate repair as unfinished. The corrected disposition supersedes the earlier failure-checkpoint option; no further owner answer is pending for this implementation activity.'
 - id: 'REPO-GRADES-NAMING-DEDUCTION-TOGGLE'
   state: 'verification'
   kind: 'feature'
@@ -1070,18 +1082,6 @@
   instrument: 'The two-upload browser walk - once with the rubric box empty, once with a rubric restored from a DIFFERENT assignment - then return to the panel and read the drop row, counting interactions against docs/a39-census.md path H. The zero-interaction guard in CartridgeDropPanel.reorder.test.ts is a SOURCE PROXY and is labelled as one: it cannot see legibility or whether the line sits below the fold.'
   from: 'docs/a40-disclosure-test-notes.md residual A40-D1, carried unverified through three artifacts; shipped 8708009 and 19cf77b.'
   note: 'THE LARGEST UNVERIFIED PREMISE IN A40, and it is owner-only because NOTHING RENDERS under this vitest. RULING 105 put the disclosure on the drop row rather than in the panel form area because the panel is unmounted in the same handler chain that fires the auto-grade - so a form-area disclosure would pass lint, tsc, the build, every test path and all five whole-tree walkers while the instructor never saw it. THAT UNMOUNT CHAIN IS ARGUED, NOT TRACED: docs/a40-check.md B3 asserts it, the test notes label it argued, the notes check read its endpoints without tracing it, and no agent has verified it. If the chain is wrong the placement may be wrong in either direction. This row also absorbs the pre-migration state - rubric text present with no recorded origin, which EVERY row that existed before 20261025000000 hits - because that state renders a THIRD sentence added by RULING 120 that no human has ever seen.'
-  question: null
-- id: 'A40-D5'
-  state: 'unscoped'
-  kind: 'chore'
-  area: 'grading-setup-interaction-cost'
-  title: 'The rubric origin column shares the upload: namespace with GradingTab''s rubric-memory storage keys'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: 'A guard asserting no reader of cartridge_drops.rubric_origin_scope passes it to loadRubricMemory or any rubric-memory reader. Today the column is write-then-render only, so such a guard CANNOT FAIL - which is why this is filed and not built.'
-  from: 'docs/a40-disclosure-test-notes.md residual A40-D5, round 2.'
-  note: 'LATENT, NOT LIVE, and filed before the harmful callsite exists rather than after. The origin column records scopes like upload:<archiveName>, and GradingTab.tsx (:232, :324) uses that same namespace for rubric-memory STORAGE keys. Nothing reads the column back into a loader today, so nothing breaks. If anything later feeds the column value into loadRubricMemory it will read GradingTab own namespace and SILENTLY RESTORE THE WRONG RUBRIC - the exact class of defect A40 exists to make visible. The honest reason this is a row and not a test: an instrument written now cannot fail, and this repo ruled twice on 2026-09-27 that an assertion which cannot fail is not an instrument. It becomes buildable the moment a reader exists.'
   question: null
 - id: 'A40-D6'
   state: 'verification'

@@ -33,6 +33,8 @@
  * label; no confirmation is added and none removed" (architecture 6.3).
  */
 
+import type { RubricStorageScope } from "./rubric-origin-scope";
+
 function readMap(storageKey: string): Record<string, RubricMemoryEntry> {
   if (typeof window === "undefined") return {};
   try {
@@ -110,7 +112,7 @@ export function saveRubricMemory(
  * ALWAYS returns null (see the module comment) - a caller that has not yet
  * acquired an identity to key on must not receive a restore.
  */
-export function loadRubricMemory(storageKey: string, scope: string): LoadedRubricMemory | null {
+export function loadRubricMemory(storageKey: string, scope: RubricStorageScope): LoadedRubricMemory | null {
   if (!scope) return null;
   const map = readMap(storageKey);
   const exact = map[scope];

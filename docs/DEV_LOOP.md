@@ -16,7 +16,8 @@ the orchestrator's output is the most expensive text in the system.
 | `docs/loop/traps-search.md` | Search and false absence |
 | `docs/loop/traps-orchestration.md` | Orchestration, spend, and the orchestrator's own rulings |
 | `docs/BACKLOG.md` | The queue: what is owed, by whom, and measured how. Read at step 0, appended at disposal, reconciled at the push |
-| `.claude/agents/` | Tier definitions. Tier lives here, never in a per-call override |
+| `.claude/agents/` | Claude seat contracts and frontmatter tiers |
+| `docs/loop/model-routing.md` | Prospective explicit Codex host model/effort policy and native qualification boundary |
 
 ---
 
@@ -37,8 +38,12 @@ routing one is the signal to spawn the seat.
 
 ## Tiers
 
-Set in `.claude/agents/`, not per call, so a per-call override cannot silently
-re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
+Claude seat contracts and frontmatter tiers are set in `.claude/agents/`.
+For NEW Codex host launches, the owner's cross-provider override requires explicit
+model/effort and fresh bounded context according to `model-routing.md`; inheritance
+does not establish compliance. That policy does not switch existing workers or
+modify accepted native routing grants. Historical Claude mapping, model IDs and
+prices remain in `this-repo.md` section 8. The table below describes Claude seats.
 
 | Agent | Model | Used for |
 |---|---|---|

@@ -281,6 +281,13 @@ State these rather than working around them:
 
 ## 8. Model tiers, mapped to this environment
 
+Cross-provider note, 2026-10-13: `model-routing.md` defines the prospective
+explicit Codex host mapping authorized by the owner for NEW launches. It overrides
+the historical per-call restriction for those launches, not Claude frontmatter
+or existing native fixed grants. Requested and observed model/effort remain
+separate; this documentation does not switch running agents. The observations
+and prices below are historical Claude evidence, not current Codex measurements.
+
 The Agent tool's `model` field accepts `opus`, `sonnet`, `haiku`, `fable`.
 Current IDs and first-party API rates, per the `claude-api` skill (re-read
 2026-09-27) - re-read that skill rather than quoting these from memory later:

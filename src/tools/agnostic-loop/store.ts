@@ -84,7 +84,7 @@ export class LoopStore {
     if (digest(await readFile(filename)) !== hash) throw new Error('Existing immutable blob corrupted');
     return { hash, path: filename };
   }
-  async context(state: LoopState): Promise<Context> {
+  private async observeArtifacts(state: LoopState): Promise<Context['artifacts']> {
     const artifacts: Context['artifacts'] = {};
     for (const [id, a] of Object.entries(state.artifacts)) {
       try {
@@ -92,13 +92,17 @@ export class LoopStore {
         if (hash === a.hash) artifacts[id] = { id: a.id, activity: a.activity, version: a.version, hash, path: a.path, author: a.author, inputs: a.inputs };
       } catch { /* Missing or unsafe mutable sources are unavailable observations. */ }
     }
+    return artifacts;
+  }
+  async context(state: LoopState): Promise<Context> {
+    const artifacts = await this.observeArtifacts(state);
     return { now: Date.now(), candidate: await captureCandidate(state.policy), artifacts, evidence: state.evidence };
   }
   async transact(event: Envelope, observations: Partial<Context> = {}): Promise<LoopState> {
     return this.locked(async () => {
       const state = await this.load();
-      const fresh = await this.context(state);
-      const context = { ...fresh, ...observations, artifacts: { ...fresh.artifacts } };
+      const artifacts = await this.observeArtifacts(state);
+      const context = { evidence: state.evidence, ...observations, artifacts: { ...artifacts } };
       // Supplied metadata never replaces locked observations of existing sources.
       for (const [id, artifact] of Object.entries(observations.artifacts ?? {})) {
         if (state.artifacts[id]) continue;
@@ -108,14 +112,14 @@ export class LoopStore {
         context.artifacts[id] = artifact;
       }
       // The caller cannot replace the candidate or clock captured under the lock.
-      context.now = Date.now(); context.candidate = await captureCandidate(state.policy);
+      const finalContext: Context = { ...context, now: Date.now(), candidate: await captureCandidate(state.policy) };
       // Never trust a caller's manual-mode claim or amend fixed native grants.
-      context.manualPolicyContinuation = false;
+      finalContext.manualPolicyContinuation = false;
       if (event.type === 'policy.continue') {
         await assertManualStore(this.directory);
-        context.manualPolicyContinuation = true;
+        finalContext.manualPolicyContinuation = true;
       }
-      const next = applyEvent(state, event, context);
+      const next = applyEvent(state, event, finalContext);
       if (next !== state) await this.save(next);
       return next;
     });

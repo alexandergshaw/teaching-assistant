@@ -1,12 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LoopStore } from './store';
 import type { Policy } from './types';
 import { digest } from './json';
+import { captureCandidate } from './candidate';
+vi.mock('./candidate', async importOriginal => {
+  const actual = await importOriginal<typeof import('./candidate')>();
+  return {...actual,captureCandidate:vi.fn(actual.captureCandidate)};
+});
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); vi.mocked(captureCandidate).mockClear(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(),'agnostic-store-')); roots.push(root);
   const workspace = path.join(root,'workspace'); await mkdir(workspace);
@@ -15,6 +20,40 @@ async function fixture() {
   await store.init(policy); return { root, store, policy };
 }
 describe('durable atomic store', () => {
+  it('captures the whole candidate once per transaction and still captures for public context', async () => {
+    const {store,policy} = await fixture();
+    await writeFile(path.join(policy.workspace,'source.txt'),'actual source');
+    const state = await store.load(); vi.mocked(captureCandidate).mockClear();
+    const observed = await store.context(state);
+    expect(captureCandidate).toHaveBeenCalledTimes(1);
+    expect(observed.candidate.files['source.txt']).toBe(digest('actual source'));
+    vi.mocked(captureCandidate).mockClear();
+    await store.transact({id:'pause',expectedRevision:0,actor:'owner',type:'run.pause',payload:{reason:'inspection'}});
+    expect(captureCandidate).toHaveBeenCalledTimes(1);
+  });
+  it('ignores caller candidate and clock while capturing after imported blob verification', async () => {
+    const {store,policy} = await fixture();
+    await writeFile(path.join(policy.workspace,'source.txt'),'before');
+    await store.transact({id:'item',expectedRevision:0,actor:'owner',type:'item.create',payload:{id:'item',objective:'Build',owner:'owner',affectedPaths:['output.txt'],dependencies:[],criteria:['works'],requiredArtifacts:{},requiredGates:[],triage:{}}});
+    await store.transact({id:'activity',expectedRevision:1,actor:'owner',type:'activity.create',payload:{id:'activity',item:'item',kind:'criteria',requirements:['works'],dependencies:[]}});
+    const prior = await store.context(await store.load());
+    await writeFile(path.join(policy.workspace,'import.txt'),'import');
+    const blob = await store.blob(Buffer.from('import'));
+    const verify = store.verifiedBlob.bind(store);
+    vi.spyOn(store,'verifiedBlob').mockImplementation(async (filename,hash) => {
+      const bytes = await verify(filename,hash);
+      await writeFile(path.join(policy.workspace,'source.txt'),'after-verification');
+      return bytes;
+    });
+    const worker = {instance:'author',context:'context',provider:'manual',model:'fixture',settings:{},tools:[]};
+    const artifact = {id:'observed',activity:'activity',version:1,hash:blob.hash,path:'import.txt',author:worker,inputs:[]};
+    vi.mocked(captureCandidate).mockClear();
+    const next = await store.transact({id:'start',expectedRevision:2,actor:'owner',type:'assignment.start',payload:{id:'author',item:'item',activity:'activity',role:'criteria',worker,inputs:{},writePaths:['output.txt'],affectedPaths:['output.txt'],resources:[],allowedActions:['write'],deadline:policy.deadline,deliverables:[]}}, {now:Number.MAX_SAFE_INTEGER,candidate:{...prior.candidate,policyHash:digest('forged policy'),digest:digest('forged candidate')},artifacts:{observed:artifact}});
+    expect(captureCandidate).toHaveBeenCalledTimes(1);
+    expect(next.assignments.author.baseline.files['source.txt']).toBe(digest('after-verification'));
+    expect(next.assignments.author.policyHash).toBe(prior.candidate.policyHash);
+    expect(next.assignments.author.baseline.digest).not.toBe(digest('forged candidate'));
+  });
   it('persists CAS winner and rejects loser with no extra event', async () => {
     const { store } = await fixture();
     const event = { id:'pause',expectedRevision:0,actor:'owner',type:'run.pause',payload:{reason:'inspection'} };

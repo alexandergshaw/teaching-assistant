@@ -53,10 +53,11 @@ export async function runGate(store: LoopStore, assignmentId: string, gateId: st
   const tracked = child!;
   const stop = (why: string) => { uncertain = true; reason = why; tracked.kill(); };
   const timer = setTimeout(() => stop('Command timeout; process descendants require reconciliation'), Math.max(1, started + timeout - Date.now()));
+  const hasAuthority = store.createAssignmentMonitor(assignmentId);
   let polling = false;
   const watcher = setInterval(async () => {
     if (polling) return; polling = true;
-    try { const state = await store.load(); if (state.assignments[assignmentId]?.status !== 'running') stop('Assignment cancelled; process descendants require reconciliation'); }
+    try { if (!await hasAuthority()) stop('Assignment cancelled; process descendants require reconciliation'); }
     catch { stop('Cannot establish current assignment authority'); }
     finally { polling = false; }
   }, 100);

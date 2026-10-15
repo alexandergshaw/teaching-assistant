@@ -15,13 +15,14 @@ export async function dispatch(args: string[]): Promise<unknown> {
   const positional: string[] = []; const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
-      if (!['--state', '--actor', '--workspace', '--policy', '--token', '--acknowledgement'].includes(args[i]) || flags[args[i]] !== undefined || !args[i+1] || args[i+1].startsWith('--')) throw new Error('Unknown, duplicate or missing CLI option');
+      if (!['--state', '--actor', '--workspace', '--policy', '--token', '--acknowledgement', '--output'].includes(args[i]) || flags[args[i]] !== undefined || !args[i+1] || args[i+1].startsWith('--')) throw new Error('Unknown, duplicate or missing CLI option');
       flags[args[i]] = args[++i];
     } else positional.push(args[i]);
   }
   const [command, ...parameters] = positional;
   const arity: Record<string, number> = { init: 0, status: 0, next: 0, apply: 1, import: 3, packet: 2, result: 1, run: 2, demo: 1, 'assemble-final': 2, 'recover-lock': 0, 'recover-operations': 0, 'reconcile-operation': 1 };
   if (!(command in arity) || parameters.length !== arity[command]) throw new Error('Usage: init|status|next|apply EVENT|import ASSIGNMENT ID FILE|packet ASSIGNMENT FILE|result FILE|run ASSIGNMENT GATE|assemble-final ASSIGNMENT RESIDUALS_JSON|demo DIRECTORY|recover-lock|recover-operations; options --state DIRECTORY --actor OPERATOR');
+  if (flags['--output'] !== undefined && (command !== 'status' || flags['--output'] !== 'summary')) throw new Error('Output requires status --output summary');
   if (command === 'demo') return (await import('./demo')).runDemo(parameters[0]);
   const store = new LoopStore(flags['--state'] ?? '.agnostic-loop');
   if (command === 'init') {
@@ -38,7 +39,17 @@ export async function dispatch(args: string[]): Promise<unknown> {
   // Snapshot assembly performs no live candidate capture, publication or acceptance.
   if (command === 'assemble-final') return buildManualFinalReport(state, parameters[0], JSON.parse(await readFile(parameters[1], 'utf8')) as Residual[]);
   const context = await store.context(state);
-  if (command === 'status') return { ...state, candidate: context.candidate, staleArtifacts: Object.keys(state.artifacts).filter(id => !context.artifacts[id]), scheduling: nextAssignments(state, context), limitations: ['Provider identity is operator-attested', 'No hostile-worker sandbox', 'Whole-candidate evidence only'] };
+  if (command === 'status') {
+    const status = { ...state, candidate: context.candidate, staleArtifacts: Object.keys(state.artifacts).filter(id => !context.artifacts[id]), scheduling: nextAssignments(state, context), limitations: ['Provider identity is operator-attested', 'No hostile-worker sandbox', 'Whole-candidate evidence only'] };
+    if (flags['--output'] === 'summary') return {
+      revision: state.revision, runStatus: state.runStatus,
+      items: Object.values(state.items).map(({ id, status, needs, escalation }) => ({ id, status, needs, escalation })),
+      assignments: Object.values(state.assignments).map(({ id, item, role, status, reconciled, reason }) => ({ id, item, role, status, reconciled, reason })),
+      operations: Object.values(state.operations).map(({ id, assignment, status, reconciled }) => ({ id, assignment, status, reconciled })),
+      candidate: context.candidate.digest, staleArtifacts: status.staleArtifacts, scheduling: status.scheduling, limitations: status.limitations,
+    };
+    return status;
+  }
   if (command === 'next') return nextAssignments(state, context);
   if (command === 'packet') return exportPacket(store, parameters[0], parameters[1]);
   const actor = flags['--actor']; if (!actor) throw new Error('Mutation requires explicit trusted operator --actor');

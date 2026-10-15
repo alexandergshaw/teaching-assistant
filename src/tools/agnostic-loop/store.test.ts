@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, stat, utimes, unlink, symlink, rename } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LoopStore } from './store';
+import { validateState } from './validation';
 import type { Policy } from './types';
 import { digest } from './json';
 import { captureCandidate } from './candidate';
 vi.mock('./candidate', async importOriginal => {
   const actual = await importOriginal<typeof import('./candidate')>();
   return {...actual,captureCandidate:vi.fn(actual.captureCandidate)};
+});
+vi.mock('./validation', async importOriginal => {
+  const actual = await importOriginal<typeof import('./validation')>();
+  return { ...actual, validateState: vi.fn(actual.validateState) };
 });
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); vi.mocked(captureCandidate).mockClear(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -81,4 +86,88 @@ describe('durable atomic store', () => {
     await expect(store.transact({id:'pause',expectedRevision:0,actor:'owner',type:'run.pause',payload:{reason:'inspection'}},{artifacts:{artifact}})).rejects.toThrow('changed before commit');
     expect((await store.load()).revision).toBe(0);
   });
+});
+
+async function monitorFixture(kind: 'artifact' | 'evidence' | 'report' = 'artifact') {
+  const f = await fixture(), state = await f.store.load();
+  const candidate = await captureCandidate(f.policy);
+  const worker = { instance:'worker',context:'fresh',provider:'manual',model:'fixture',settings:{},tools:[] };
+  state.policy.gates.test = { executable:process.execPath,args:[],resources:[] };
+  state.items.item = { id:'item',objective:'monitor',owner:'owner',affectedPaths:[],dependencies:[],criteria:['works'],requiredArtifacts:{},requiredGates:[],triage:{},status:'queued',needs:[],escalation:null };
+  state.activities.activity = { id:'activity',item:'item',kind:'verification',requirements:['works'],dependencies:[],status:'open',rounds:0,authors:[],reviews:[] };
+  state.assignments.assignment = { id:'assignment',item:'item',activity:'activity',role:'verifier',worker,inputs:{},writePaths:[],affectedPaths:[],resources:[],allowedActions:[],deadline:f.policy.deadline,deliverables:[],baseline:candidate,policyHash:candidate.policyHash,publicationToken:'token',status:'running',reconciled:false,reason:null };
+  const report = { candidate,worker,criteria:{works:[]},limitations:[] };
+  const bytes = Buffer.from(kind === 'report' ? JSON.stringify(report) : 'immutable monitor fixture');
+  const blob = await f.store.blob(bytes);
+  if (kind === 'evidence') state.evidence.evidence = { id:'evidence',assignment:'assignment',worker,gate:'test',candidate,executable:process.execPath,args:[],cwd:f.policy.workspace,started:1,finished:2,exitCode:0,outputHash:blob.hash,outputPath:blob.path,limitations:[],kind:'gate' };
+  else state.artifacts.artifact = { id:'artifact',activity:'activity',version:1,hash:blob.hash,path:'artifact.txt',author:worker,inputs:[],assignment:'assignment',acceptedHash:null,candidate };
+  if (kind === 'report') state.verificationReports.artifact = report;
+  await f.store.save(state);
+  const snapshot = await readFile(path.join(f.store.directory,'state.json'));
+  return { ...f, state, bytes, blob, snapshot, filename:path.join(f.store.directory,'state.json') };
+}
+function counters(store: LoopStore) {
+  vi.mocked(validateState).mockClear();
+  const references = vi.spyOn(store,'verifiedBlob');
+  return (v:number,r:number) => { expect(validateState).toHaveBeenCalledTimes(v); expect(references).toHaveBeenCalledTimes(r); };
+}
+describe('private assignment monitor', () => {
+  for (const kind of ['artifact','evidence'] as const) it(kind+' rechecks hit integrity and resets failed cache', async () => {
+    const f = await monitorFixture(kind), count = counters(f.store), poll = f.store.createAssignmentMonitor('assignment');
+    for (let r=1;r<=3;r++) { expect(await poll()).toBe(true); count(1,r); }
+    await writeFile(f.blob.path,'corrupted'); await expect(poll()).rejects.toThrow('integrity'); count(1,4);
+    await writeFile(f.blob.path,f.bytes); expect(await poll()).toBe(true); count(2,5);
+    expect(await poll()).toBe(true); count(2,6);
+  });
+  for (const failure of ['malformed','schema','missing','deleted','escaped','symlink'] as const) it(failure+' rejects after hit and restoration revalidates', async (context) => {
+    const f=await monitorFixture(), count=counters(f.store),poll=f.store.createAssignmentMonitor('assignment');
+    expect(await poll()).toBe(true); count(1,1);
+    const outside=path.join(f.root,'outside'); await writeFile(outside,f.bytes);
+    if(failure==='malformed')await writeFile(f.filename,'{');
+    if(failure==='schema')await writeFile(f.filename,'{}');
+    if(failure==='missing')await unlink(f.filename);
+    if(failure==='deleted')await unlink(f.blob.path);
+    if(failure==='escaped'||failure==='symlink'){
+      await rename(f.blob.path,f.blob.path+'.backup');
+      try { await symlink(failure==='escaped'?outside:f.blob.path+'.backup',f.blob.path,'file'); }
+      catch(error){if((error as NodeJS.ErrnoException).code==='EPERM'){await rename(f.blob.path+'.backup',f.blob.path);console.warn('Symlink instrument unavailable: EPERM');context.skip();return;}throw error;}
+    }
+    await expect(poll()).rejects.toThrow();
+    count(failure==='schema'?2:1,['deleted','escaped','symlink'].includes(failure)?2:1);
+    if(failure==='escaped'||failure==='symlink'){await unlink(f.blob.path);await rename(f.blob.path+'.backup',f.blob.path);}
+    if(failure==='deleted')await writeFile(f.blob.path,f.bytes);
+    await writeFile(f.filename,f.snapshot);expect(await poll()).toBe(true);
+    count(failure==='schema'?3:2,['deleted','escaped','symlink'].includes(failure)?3:2);
+  });
+  it('revalidates equal-length bytes despite restored mtime and returns false for absence',async()=>{
+    const f=await monitorFixture(), cancelled=structuredClone(f.state);cancelled.assignments.assignment.status='cancelled';
+    const original=JSON.stringify(f.state),changed=JSON.stringify(cancelled),length=Math.max(original.length,changed.length);
+    await writeFile(f.filename,original.padEnd(length));const times=await stat(f.filename),count=counters(f.store),poll=f.store.createAssignmentMonitor('assignment');
+    expect(await poll()).toBe(true);count(1,1);
+    await writeFile(f.filename,changed.padEnd(length));await utimes(f.filename,times.atime,times.mtime);
+    expect((await stat(f.filename)).size).toBe(length);expect(await poll()).toBe(false);count(2,2);
+    cancelled.artifacts={};cancelled.assignments={};await f.store.save(cancelled);expect(await poll()).toBe(false);count(3,2);
+  });
+  it('isolates monitors and uncached public results across store instances and directories',async()=>{
+    const f=await monitorFixture(),other=await monitorFixture(),count=counters(f.store),poll=f.store.createAssignmentMonitor('assignment');
+    expect(await poll()).toBe(true);count(1,1);
+    const loaded=await f.store.load();loaded.assignments.assignment.status='cancelled';await f.store.load();count(3,3);
+    expect(await poll()).toBe(true);count(3,4);
+    expect(await f.store.createAssignmentMonitor('assignment')()).toBe(true);count(4,5);
+    expect(await new LoopStore(f.store.directory).createAssignmentMonitor('assignment')()).toBe(true);
+    expect(await other.store.createAssignmentMonitor('assignment')()).toBe(true);expect(validateState).toHaveBeenCalledTimes(6);
+  });
+  it('checks canonical report binding on changed snapshots',async()=>{
+    const f=await monitorFixture('report'),count=counters(f.store),poll=f.store.createAssignmentMonitor('assignment');
+    expect(await poll()).toBe(true);count(1,2);
+    f.state.verificationReports.artifact.limitations.push('changed');await f.store.save(f.state);
+    await expect(poll()).rejects.toThrow('Report bytes');count(2,4);
+  });
+});
+
+it('rejects evidence outside immutable store containment',async()=>{
+ const f=await monitorFixture('evidence'),poll=f.store.createAssignmentMonitor('assignment');expect(await poll()).toBe(true);
+ const outside=path.join(f.root,'outside-evidence');await writeFile(outside,f.bytes);f.state.evidence.evidence.outputPath=outside;await f.store.save(f.state);
+ await expect(poll()).rejects.toThrow('escapes immutable store');
+ await writeFile(f.filename,f.snapshot);expect(await poll()).toBe(true);
 });

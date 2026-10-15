@@ -29,6 +29,14 @@ function listFiles(dir: string, include: RegExp, out: string[] = []): string[] {
   return out;
 }
 
+// This module only reads production sources. Preserve the complete ordered walk,
+// capturing raw UTF-8 text once for the two whole-src boundary scans below.
+const SOURCE_SNAPSHOT = Object.freeze(
+  listFiles(path.join(ROOT, "src"), /\.tsx?$/).map((file) =>
+    Object.freeze({ file, text: fs.readFileSync(file, "utf8") })
+  )
+);
+
 /** The walled set: the live-messaging action files and everything under lib/live-messaging. */
 function walledSet(): string[] {
   const actions = fs
@@ -86,8 +94,7 @@ describe("the walled set is non-vacuous", () => {
     ]);
     const walled = new Set(walledSet());
     const offenders: string[] = [];
-    for (const file of listFiles(path.join(ROOT, "src"), /\.tsx?$/)) {
-      const text = fs.readFileSync(file, "utf8");
+    for (const { file, text } of SOURCE_SNAPSHOT) {
       if (!/sendStudentConversation|sendLiveMessageAction/.test(text)) continue;
       if (walled.has(file) || allowedOutside.has(file)) continue;
       offenders.push(path.relative(ROOT, file));
@@ -232,9 +239,8 @@ describe("the send is reachable from the modal ONLY through the confirm (P19b)",
 
   it("startLiveMessageBatchAction is CALLED exactly once in the repo, inside confirmAndSend", () => {
     const callers: string[] = [];
-    for (const file of listFiles(path.join(ROOT, "src"), /\.tsx?$/)) {
+    for (const { file, text } of SOURCE_SNAPSHOT) {
       if (file === SEND_ACTION) continue;
-      const text = fs.readFileSync(file, "utf8");
       if (!text.includes("startLiveMessageBatchAction")) continue;
       callers.push(path.relative(ROOT, file));
     }

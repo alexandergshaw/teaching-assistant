@@ -65,6 +65,10 @@ export class LoopStore {
     let state: LoopState;
     try { state = validateState(JSON.parse(await readFile(path.join(this.directory, 'state.json'), 'utf8'))); }
     catch { throw new Error('Invalid or missing store snapshot; restore a verified snapshot before continuing'); }
+    await this.verifyReferences(state);
+    return state;
+  }
+  private async verifyReferences(state: LoopState): Promise<void> {
     for (const artifact of Object.values(state.artifacts)) {
       await this.verifiedBlob(path.join(this.directory, 'blobs', artifact.hash), artifact.hash);
     }
@@ -73,7 +77,23 @@ export class LoopStore {
       const artifact = state.artifacts[id];
       if (!artifact || canonical(JSON.parse((await this.verifiedBlob(path.join(this.directory, 'blobs', artifact.hash), artifact.hash)).toString('utf8'))) !== canonical(report)) throw new Error('Report bytes do not bind stored report');
     }
-    return state;
+  }
+  createAssignmentMonitor(assignmentId: string): () => Promise<boolean> {
+    let cached: { hash: string; state: LoopState } | undefined;
+    return async () => {
+      try {
+        let state: LoopState;
+        let hash: string;
+        try {
+          const bytes = await readFile(path.join(this.directory, 'state.json'));
+          hash = digest(bytes);
+          state = cached?.hash === hash ? cached.state : validateState(JSON.parse(bytes.toString('utf8')));
+        } catch { throw new Error('Invalid or missing store snapshot; restore a verified snapshot before continuing'); }
+        await this.verifyReferences(state);
+        cached = { hash, state };
+        return state.assignments[assignmentId]?.status === 'running';
+      } catch (error) { cached = undefined; throw error; }
+    };
   }
   async blob(bytes: Buffer): Promise<{ hash: string; path: string }> {
     const hash = digest(bytes);

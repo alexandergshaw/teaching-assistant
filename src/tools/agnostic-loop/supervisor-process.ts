@@ -27,6 +27,7 @@ export function redact(text:string,config:RoutingConfig):string {
   return result;
 }
 function monitor(child:ChildProcess,limit:number,timeout:number,store:LoopStore,assignment:string,config:RoutingConfig):Promise<CapturedProcess> {
+  const hasAuthority = store.createAssignmentMonitor(assignment);
   const started = Date.now(); let stdout = '', stderr = '', bytes = 0, uncertain = false, done = false;
   return new Promise(resolve=>{
     const stop = ()=>{ uncertain = true; child.kill(); };
@@ -40,7 +41,7 @@ function monitor(child:ChildProcess,limit:number,timeout:number,store:LoopStore,
     const timer = setTimeout(stop,timeout);
     const cutoff = setTimeout(()=>{stop();child.stdout?.destroy();child.stderr?.destroy();child.unref();finish(null,false);},timeout+1000);
     let reading = false;
-    const watcher = setInterval(async()=>{ if(reading||done)return;reading=true;try{const state=await store.load();if(state.assignments[assignment]?.status !== 'running')stop();}catch{stop();}finally{reading=false;}},100);
+    const watcher = setInterval(async()=>{ if(reading||done)return;reading=true;try{if(!await hasAuthority())stop();}catch{stop();}finally{reading=false;}},100);
   });
 }
 export async function launchTask(store:LoopStore,config:RoutingConfig,selection:BacklogSelection,task:TaskSpec):Promise<string> {

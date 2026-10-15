@@ -47767,6 +47767,38 @@ These instruments render no component, contact no live provider, and establish
 no malicious-process sandbox or reliable process-tree termination guarantee.
 Semantic criteria adequacy and true remote identity remain operator obligations.
 
+## Agnostic loop monitoring and compact status (2026-10-15)
+
+`LoopStore.createAssignmentMonitor` owns one private validated snapshot per
+monitor. Every poll rereads and hashes the snapshot bytes; changed bytes require
+full validation. Unchanged bytes still require all immutable artifact/evidence
+checks and canonical report binding. Any failure clears the cache and rejects;
+restoring identical bytes must validate again. Public `load()` remains uncached.
+The gate and provider watchers retain their polling guards, cancellation fences,
+deadlines and uncertain-operation reservations.
+
+`status --output summary` returns compact progress, blockers, assignment and
+operation state, candidate identity and limitations. Default legacy status keeps
+its complete existing shape; other output values and non-status use are refused.
+The native MCP response is unchanged. Serialized bytes are not token telemetry.
+
+Regression instruments are `store.test.ts`, `runner.test.ts`,
+`supervisor-lifecycle.test.ts` and `dispatch-entry.test.ts` under
+`src/tools/agnostic-loop/`, together with existing pause, mutation, conformance,
+MCP and manual-handoff controls. Exact counters detect skipped validation or
+integrity checks; real subprocess markers detect missed cancellation/integrity
+stops; exact response equality guards legacy compatibility. The frozen oracle
+and isolated designated mutations live in the local efficiency activity journal.
+One `npm.cmd run test:paths -- src` invocation with every required focused path
+also listed verifies the full union once and credits each named path separately.
+Keep docs, lint, typecheck and build-compile checks as separate instruments.
+
+Snapshot reading and hashing remain proportional to snapshot size, and each
+active monitor retains a validated object. These tests establish no live-provider
+quality, billing savings, hostile-descendant termination or browser behavior.
+Windows symlink creation can be unavailable; a skipped symlink probe is not
+proof of that filesystem case.
+
 ## Template tools as built (2026-10-15)
 
 This is an as-built record for PowerPoint Templates and Document Templates,

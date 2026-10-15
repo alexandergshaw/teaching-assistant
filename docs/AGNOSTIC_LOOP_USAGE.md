@@ -428,3 +428,7 @@ subprocesses and files. They do not establish worker semantic judgment, true
 provider identity, hostile-process isolation, reliable process-tree termination,
 live service behavior or rendered component behavior. No component is rendered
 by this repository's tests.
+
+Legacy status accepts `npm.cmd run loop -- status --state <store> --output summary` for routine host polling with validated progress, blockers, reconciliation reasons, operation uncertainty and candidate digest. It omits event history, manifests, artifacts, reports and output bodies. Omit `--output` for unchanged full status when auditing history and manifests. The option is rejected for other commands and does not change native dispatch CLI or MCP responses.
+
+Process authority watchers cache one privately validated snapshot per active monitor. Every poll still reads and hashes current snapshot bytes and verifies immutable blobs and report bindings; changed bytes revalidate, and failures discard the cache. Public store loads remain uncached. This removes repeated parsing/validation, while read/hash work remains linear in snapshot bytes. Compact output reduces serialized UTF-8 bytes; no provider-token or billing savings are measured.

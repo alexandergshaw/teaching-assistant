@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { policyTemplate, routingTemplate, repositoryPolicy } from './dispatch-example';
 import { loadDispatchSelection } from './dispatch-cli';
 import { LoopStore } from './store';
+import { nextAssignments } from './scheduler';
 import { supervisorFixture, cleanupSupervisorFixtures } from './supervisor-fixtures';
 
 const execute = promisify(execFile);
@@ -104,4 +105,35 @@ describe('automatic dispatch public entry', () => {
       }
     } finally { await cleanupSupervisorFixtures(); }
   }, 240000);
+});
+
+describe('validated legacy compact status',()=>{
+ it('preserves exact default status and projects only progress fields',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'compact-status-'));
+  try{
+   const workspace=path.join(root,'workspace');await mkdir(workspace);const store=new LoopStore(path.join(root,'state'));await store.init(policyTemplate(workspace,'owner',Date.now()));
+   const state=await store.load(),context=await store.context(state),worker={instance:'worker',context:'fresh',provider:'manual',model:'fixture',settings:{},tools:[]};
+   state.items.item={id:'item',objective:'mixed fixture',owner:'owner',affectedPaths:[],dependencies:[],criteria:['works'],requiredArtifacts:{},requiredGates:[],triage:{},status:'queued',needs:['owner prerequisite'],escalation:'inspect fixture'};
+   state.activities.activity={id:'activity',item:'item',kind:'criteria',requirements:['works'],dependencies:[],status:'open',rounds:0,authors:[],reviews:[]};
+   state.assignments.assignment={id:'assignment',item:'item',activity:'activity',role:'criteria',worker,inputs:{},writePaths:[],affectedPaths:[],resources:[],allowedActions:[],deadline:state.policy.deadline,deliverables:[],baseline:context.candidate,policyHash:context.candidate.policyHash,publicationToken:'token',status:'cancelled',reconciled:false,reason:'owner cancelled'};
+   state.operations.operation={id:'operation',assignment:'assignment',resource:'workspace',status:'unknown',publicationToken:'token',pid:null,reconciled:false};
+   await store.save(state);await store.transact({id:'pause',expectedRevision:0,actor:'owner',type:'run.pause',payload:{reason:'inspect'}});
+   const S=await store.load(),C=await store.context(S),expected={...S,candidate:C.candidate,staleArtifacts:Object.keys(S.artifacts).filter(id=>!C.artifacts[id]),scheduling:nextAssignments(S,C),limitations:['Provider identity is operator-attested','No hostile-worker sandbox','Whole-candidate evidence only']};
+   const oraclePath=path.join(root,'status-oracle.mjs'),runtime=path.dirname(args.at(-1)!);
+   await writeFile(oraclePath,`import {LoopStore} from ${JSON.stringify(pathToFileURL(path.join(runtime,'store.ts')).href)};import {nextAssignments} from ${JSON.stringify(pathToFileURL(path.join(runtime,'scheduler.ts')).href)};const store=new LoopStore(${JSON.stringify(store.directory)}),S=await store.load(),C=await store.context(S);console.log(JSON.stringify({...S,candidate:C.candidate,staleArtifacts:Object.keys(S.artifacts).filter(id=>!C.artifacts[id]),scheduling:nextAssignments(S,C),limitations:['Provider identity is operator-attested','No hostile-worker sandbox','Whole-candidate evidence only']}));`);
+   // Candidate tool identity includes execArgv, so compute the oracle under the identical CLI runtime flags.
+   const oracle=await execute(process.execPath,[...args.slice(0,-1),oraclePath],{timeout:30000,windowsHide:true});Object.assign(expected,JSON.parse(oracle.stdout));
+   const full=await cli(['status','--state',store.directory]) as {result:Record<string,unknown>};expect(full.result).toEqual(JSON.parse(JSON.stringify(expected)));
+   const compact=await cli(['status','--output','summary','--state',store.directory]) as {result:Record<string,unknown>};
+   expect(Object.keys(compact.result).sort()).toEqual(['revision','runStatus','items','assignments','operations','candidate','staleArtifacts','scheduling','limitations'].sort());
+   expect(compact.result).toEqual({revision:S.revision,runStatus:S.runStatus,items:[{id:'item',status:'queued',needs:['owner prerequisite'],escalation:'inspect fixture'}],assignments:[{id:'assignment',item:'item',role:'criteria',status:'cancelled',reconciled:false,reason:'owner cancelled'}],operations:[{id:'operation',assignment:'assignment',status:'unknown',reconciled:false}],candidate:expected.candidate.digest,staleArtifacts:expected.staleArtifacts,scheduling:expected.scheduling,limitations:expected.limitations});
+   const forbidden=new Set(['events','files','artifacts','verificationReports','finalReports','outputPath','policy']);
+   const inspect=(v:unknown)=>{if(v&&typeof v==='object')for(const [key,value]of Object.entries(v)){expect(forbidden.has(key),key).toBe(false);inspect(value);}};inspect(compact.result);
+   expect(Buffer.byteLength(JSON.stringify(compact.result))).toBeLessThan(Buffer.byteLength(JSON.stringify(full.result)));
+   const bytes=await readFile(path.join(store.directory,'state.json'));
+   for(const parameters of [['status','--output','full'],['next','--output','summary'],['status','--output'],['status','--output','summary','--output','summary']]){
+    await expect(cli([...parameters,'--state',store.directory])).rejects.toThrow();expect(await readFile(path.join(store.directory,'state.json'))).toEqual(bytes);
+   }
+  }finally{await rm(root,{recursive:true,force:true});}
+ },40000);
 });

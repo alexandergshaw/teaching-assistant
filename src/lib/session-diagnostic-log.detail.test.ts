@@ -159,3 +159,18 @@ describe("session log detail: enrich, do not multiply (AC-22)", () => {
     expect(s.droppedCount).toBe(3);
   });
 });
+
+describe("template diagnostic round trip", () => {
+  it("retains fixed codes and elapsed time in downloadable session JSON", () => {
+    for (const prefix of ["ppt_template_", "document_template_"]) {
+      recordSessionDiagnosticEntry({ at: "2026-10-15T10:00:00.000Z", surface: "templates", operation: prefix + "save",
+        outcome: "failure", durationMs: 12, error: "TEMPLATE_STORAGE", code: "TEMPLATE_STORAGE" });
+    }
+    const entries = parseSessionDiagnosticLogEntries(readSessionDiagnosticLogState().entries);
+    expect(entries.map(entry => [entry.surface, entry.operation, entry.outcome, entry.code, entry.durationMs])).toEqual([
+      ["templates", "ppt_template_save", "failure", "TEMPLATE_STORAGE", 12],
+      ["templates", "document_template_save", "failure", "TEMPLATE_STORAGE", 12],
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("source.pptx");
+  });
+});

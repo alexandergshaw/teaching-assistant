@@ -18,6 +18,8 @@ import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
 import PresentationsTab from "./components/presentations";
 import PipelineTab from "./components/presentations/pipeline/PipelineTab";
+import PowerPointTemplates from "./components/powerpoint-templates";
+import DocumentTemplates from "./components/document-templates";
 import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
@@ -732,7 +734,11 @@ export default function Home() {
 
                 {manualView === "presentations" && (
                   <TabShell>
-                    {presentationsView === "ppt-design" ? (
+                    {presentationsView === "ppt-templates" ? (
+                      <PowerPointTemplates onUseInSlideDeckCreation={() => setPresentationsView("slide-deck")} />
+                    ) : presentationsView === "document-templates" ? (
+                      <DocumentTemplates />
+                    ) : presentationsView === "ppt-design" ? (
                       <PowerPointDesignTab />
                     ) : presentationsView === "pipeline" ? (
                       <PipelineTab />

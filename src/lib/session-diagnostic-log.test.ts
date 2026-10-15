@@ -862,3 +862,13 @@ describe("sessionDiagnosticLog: nothing server-side may import this module", () 
     ).toEqual([]);
   });
 });
+
+describe("template tool coverage", () => {
+  it("declares both PowerPoint and document lifecycle outcomes with privacy boundaries", () => {
+    expect(SESSION_DIAGNOSTIC_SURFACE_LABELS.templates).toBe("Template tools");
+    const coverage = SESSION_DIAGNOSTIC_COVERAGE.find(row => row.surface === "templates");
+    expect(coverage?.covers).toMatch(/PowerPoint and document/);
+    expect(coverage?.covers).toMatch(/load, analyze, save, reuse and download/);
+    expect(coverage?.covers).toMatch(/no filenames, source text, model responses or replacement values/);
+  });
+});

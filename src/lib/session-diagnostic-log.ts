@@ -70,15 +70,16 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   "lms-content": "Course Content",
   diagnostics: "Diagnostics (Settings)",
   grading: "Grading",
   messaging: "Student Messaging",
+  templates: "Template tools",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -91,6 +92,7 @@ export interface SessionDiagnosticCoverageRow {
 /** Every instrumented surface, stated in the download. Typed as a full record
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
+  templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values.",
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",
   diagnostics:

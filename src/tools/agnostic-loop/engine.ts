@@ -1,5 +1,6 @@
 import type { Activity, Artifact, Assignment, Context, Decision, Envelope, Evidence, FinalReport, Item, ItemStatus, LoopState, Operation, VerificationReport, Worker } from './types';
 import { validateContext, validateEvent, validatePolicy, validateState } from './validation';
+import { continuePolicy } from './policy-continuation';
 
 export function createState(policy: unknown): LoopState {
   return { schemaVersion: 1, revision: 0, policy: validatePolicy(policy), runStatus: 'running', items: {}, activities: {}, assignments: {}, artifacts: {}, evidence: {}, decisions: {}, operations: {}, verificationReports: {}, finalReports: {}, events: [] };
@@ -88,6 +89,7 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
   requireThat(event.expectedRevision === s.revision,'revision conflict');
   requireThat(Number.isSafeInteger(c.now) && c.now >= 0,'context time invalid');
   switch (event.type) {
+    case 'policy.continue': continuePolicy(s,event,c); break;
     case 'item.create': {
       const item = p as unknown as Omit<Item,'status'|'needs'|'escalation'>; unique(s.items,item.id);
       requireThat(item.criteria.length > 0 && new Set(item.criteria).size === item.criteria.length,'unique nonempty criteria required');

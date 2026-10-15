@@ -255,6 +255,23 @@ An event envelope carries a unique request ID and the revision observed in
 Conflicting reuse of an ID or a stale revision is rejected. `--actor` is the
 trusted operator identity, not an authority claimed inside a worker packet.
 
+An explicitly authorized manual run may use owner-only `policy.continue` through
+the same `apply` CLI or `LoopStore.transact(event)`. Its payload is
+`{priorPolicyHash, deadline, maxExtensionMs, authorization, reason,
+gateArgumentCorrections: [{gate, index, previous, replacement}]}`. Bind
+`priorPolicyHash` to the exact current `status.candidate.policyHash`; use a unique
+durable owner authorization reference and the authorized window in milliseconds
+(for example, `2700000` for an authorized 45-minute verification window). Set an
+absolute future deadline within that window from application time and later than
+the prior deadline. Corrections bind exact existing argument positions and bytes.
+The store observes manual mode under its lock; caller observations cannot assert
+it. Either native dispatch marker rejects the operation, as do any retained
+assignment ownership or unterminated/unreconciled operations. The event preserves
+all statuses, review rounds, failures, consumed assignments and remaining budgets;
+the changed policy hash makes prior candidate evidence stale. It grants no native
+provider changes or acceptance. An identical event retry is idempotent; a fresh
+event cannot reuse a consumed authorization reference.
+
 ```json
 {
   "id": "create-transform",

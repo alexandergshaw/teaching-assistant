@@ -7,6 +7,7 @@ import { captureCandidate } from './candidate';
 import { canonical, digest } from './json';
 import { contained, safeFile } from './paths';
 import type { Context, Envelope, LoopState } from './types';
+import { assertManualStore } from './policy-continuation';
 
 export class LoopStore {
   readonly directory: string;
@@ -110,6 +111,12 @@ export class LoopStore {
       }
       // The caller cannot replace the candidate or clock captured under the lock.
       context.now = Date.now(); context.candidate = await captureCandidate(state.policy);
+      // Never trust a caller's manual-mode claim or amend fixed native grants.
+      context.manualPolicyContinuation = false;
+      if (event.type === 'policy.continue') {
+        await assertManualStore(this.directory);
+        context.manualPolicyContinuation = true;
+      }
       const next = applyEvent(state, event, context);
       if (next !== state) await this.save(next);
       return next;

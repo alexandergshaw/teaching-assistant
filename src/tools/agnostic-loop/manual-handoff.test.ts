@@ -54,6 +54,46 @@ describe('manual host delivery assertion', () => {
     expect(assessManualHandoff(state, ['done', 'feature']).complete).toBe(false);
     expect(assessManualHandoff(state, ['done']).complete).toBe(true);
   });
+  it('reports expired pending delivery without recommending blind admission, renewal or gate reruns', () => {
+    const state = fixture(); state.policy.deadline = 100; state.items.feature.status = 'verified';
+    assignment(state, 'finished');
+    for (const id of ['verification','whole-change-review']) {
+      state.activities[id] = {id,item:'feature',kind:id,requirements:['works'],dependencies:[],status:'accepted',rounds:0,authors:[],reviews:[]};
+      state.artifacts[id] = {id,activity:id,assignment:'author',version:1,hash:'a'.repeat(64),acceptedHash:'a'.repeat(64),path:`${id}.json`,author:state.assignments.author.worker,inputs:[],candidate:state.assignments.author.baseline};
+    }
+    const before = structuredClone(state);
+    const report = assessManualHandoff(state, ['feature'], 101);
+    expect(report).toMatchObject({ complete:false, deadlineExpired:true, items:[{ status:'verified', pending:true, handoffState:'pending-expired', retainedAssignments:[], outstandingOperations:[] }] });
+    expect(report.items[0].action).toContain('Preserve accepted evidence and history');
+    expect(report.items[0].action).toContain('terminating owner disposition or explicit authorization');
+    expect(report.items[0].action).toContain('changes the policy hash and stales prior gate evidence');
+    expect(report.items[0].action).toContain('do not renew the policy or rerun gates without explicit authorization');
+    expect(report.items[0].action).not.toContain('Continue independent role admission');
+    expect(state).toEqual(before);
+  });
+  it('keeps live pending guidance through the exact deadline boundary', () => {
+    const state = fixture(); state.policy.deadline = 100;
+    for (const now of [99,100]) {
+      const report = assessManualHandoff(state, ['feature'], now);
+      expect(report).toMatchObject({complete:false,deadlineExpired:false,items:[{handoffState:'pending'}]});
+      expect(report.items[0].action).toContain('Continue independent role admission');
+    }
+  });
+  it('keeps completed local delivery complete after the deadline expires', () => {
+    const state = fixture(); state.policy.deadline = 100; state.items.feature.status = 'shipped';
+    expect(assessManualHandoff(state, ['feature'], 101)).toMatchObject({complete:true,deadlineExpired:true,items:[{pending:false,handoffState:'complete',action:'Local delivery recorded'}]});
+  });
+  it('prioritizes unresolved operation cleanup over expiry and retains worker ownership', () => {
+    const state = fixture(); state.policy.deadline = 100; assignment(state);
+    state.operations.op = {id:'op',assignment:'author',resource:'tree',status:'unknown',publicationToken:'token',pid:null,reconciled:false};
+    const report = assessManualHandoff(state, ['feature'], 101);
+    expect(report.items[0]).toMatchObject({handoffState:'pending-expired',retainedAssignments:[{id:'author',status:'running'}],outstandingOperations:[{id:'op',status:'unknown'}]});
+    expect(report.items[0].action).toBe('Observe termination and reconcile uncertainty before any retry; do not remove locks');
+    delete state.operations.op;
+    const retained = assessManualHandoff(state, ['feature'], 101).items[0];
+    expect(retained.action).toContain('resolve any retained host-worker ownership');
+    expect(retained.action).not.toContain('then admit');
+  });
   it('public executable fails closed and leaves state bytes unchanged', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'manual-handoff-cli-')); temporary.push(directory);
     const filename = path.join(directory, 'state.json'); const state = fixture();

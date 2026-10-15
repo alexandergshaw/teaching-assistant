@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'DOCUMENT-TEMPLATE-ABSTRACTION'
+  state: 'unscoped'
+  kind: 'feature'
+  area: 'presentations-authoring'
+  title: 'Upload a document or PDF and have the app/LLM abstract it into a reusable template in a new sub-tab beside PowerPoint Templates.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Planned acceptance: a dedicated sibling sub-tab accepts a document or PDF; the app/LLM produces a reusable template based on that source. Working interpretation: retain the source structure and reusable formatting while replacing instance-specific content with meaningful placeholders, and let the user inspect the result. Scope must define supported document formats, template representation and reuse, fidelity expectations, and observable extraction failures. Automated abstraction checks and a rendered document/PDF fidelity walk remain to be designed and executed; no current verification is claimed.'
+  from: 'Owner request in this chat, 2026-10-15: add a tool beside the PowerPoint template tab that accepts an uploaded doc or PDF and abstracts it into a template of itself. Filed by the commit adding this row.'
+  note: 'Owner: coordinator. Document Templates is a working label for a new Presentations sub-tab sibling to PPT-TEMPLATE-SLIDE-LIBRARY. Reuse-survey existing document/PDF ingestion, document template storage/filling and navigation before scoping implementation. Placeholder abstraction is the coordinator reading of the request, not a separate owner ruling. Existing template obligations remain intact. Scope/write ownership and closure instruments are pending; this filing does not implement the feature.'
+  question: null
 - id: 'PPT-TEMPLATE-SLIDE-LIBRARY'
   state: 'unscoped'
   kind: 'feature'

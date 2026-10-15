@@ -153,8 +153,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 187 -> 188: measured agnostic-loop delay controls filed, 2026-10-13.
 // 188 -> 191: Tier-3 tab waves 2-4 filed 2026-10-15 from scope section 10 R3.
 // 191 -> 192: owner-requested PowerPoint template slide library filed 2026-10-15.
+// 192 -> 193: owner-requested document/PDF template abstraction filed 2026-10-15.
 // Instrument: node counts /^- id:/gm in docs/backlog.yml; backlog-file test parses it.
-const EXPECTED_ROW_COUNT = 192;
+const EXPECTED_ROW_COUNT = 193;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

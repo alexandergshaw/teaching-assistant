@@ -154,8 +154,9 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // 188 -> 191: Tier-3 tab waves 2-4 filed 2026-10-15 from scope section 10 R3.
 // 191 -> 192: owner-requested PowerPoint template slide library filed 2026-10-15.
 // 192 -> 193: owner-requested document/PDF template abstraction filed 2026-10-15.
+// 193 -> 194: owner-requested Courses column drag reordering filed 2026-10-15.
 // Instrument: node counts /^- id:/gm in docs/backlog.yml; backlog-file test parses it.
-const EXPECTED_ROW_COUNT = 193;
+const EXPECTED_ROW_COUNT = 194;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'COURSES-COLUMN-REORDER'
+  state: 'unscoped'
+  kind: 'feature'
+  area: 'rich-text-copy-fidelity'
+  title: 'Drag Courses table column headers to rearrange the column order.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Planned acceptance: dragging a column header to a new position changes the matching header and cell order together without altering course data or breaking sorting, column search, visibility or row actions. Scope must define persistence of the chosen order and an accessible keyboard alternative. Pure ordering/persistence regressions and a rendered drag-and-drop/keyboard walk remain to be designed and executed; no current verification is claimed.'
+  from: 'Owner request in this chat, 2026-10-15: be able to drag and rearrange the order of columns in the Courses table. Filed by the commit adding this row.'
+  note: 'Owner: coordinator. Reuse-survey the existing Courses table column IDs, visibility/order preferences and header interactions before scoping implementation. Coordinate the shared CoursesTable surface with COURSES-COLUMN-SEARCH, COURSES-TABLE-SPEED and COURSE-TABLE-EMAIL-COPY; preserve their outstanding verification. Scope/write ownership and closure instruments are pending. This filing does not implement the feature.'
+  question: null
 - id: 'DOCUMENT-TEMPLATE-ABSTRACTION'
   state: 'unscoped'
   kind: 'feature'

@@ -70,9 +70,9 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates" | "courses";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates", "courses"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   "lms-content": "Course Content",
@@ -80,6 +80,7 @@ export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosti
   grading: "Grading",
   messaging: "Student Messaging",
   templates: "Template tools",
+  courses: "Courses column preferences",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -92,6 +93,7 @@ export interface SessionDiagnosticCoverageRow {
 /** Every instrumented surface, stated in the download. Typed as a full record
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
+  courses: "Courses column-order preference load/save outcomes and elapsed time only; fixed storage error codes, no course/student values or search text. Other Courses operations and browser-wide storage denial are not covered.",
   templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values.",
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",

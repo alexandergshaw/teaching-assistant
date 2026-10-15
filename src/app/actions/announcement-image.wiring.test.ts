@@ -23,6 +23,11 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ");
 }
 
+interface SourceFile {
+  readonly file: string;
+  readonly stripped: string;
+}
+
 interface Occurrence {
   readonly file: string;
   readonly precedingContext: string;
@@ -36,20 +41,19 @@ interface Occurrence {
  * docs/g5-test-notes.md section 7. */
 function partition(
   identifier: string,
-  files: readonly string[]
-): { declaration: Occurrence[]; bounded: Occurrence[]; other: Occurrence[] } {
+  files: readonly SourceFile[]
+): { readonly declaration: readonly Occurrence[]; readonly bounded: readonly Occurrence[]; readonly other: readonly Occurrence[] } {
   const idPattern = new RegExp(`(?<![A-Za-z0-9_$])${identifier}\\(`, "g");
   const declaration: Occurrence[] = [];
   const bounded: Occurrence[] = [];
   const other: Occurrence[] = [];
 
-  for (const file of files) {
-    const stripped = stripComments(readFileSync(file, "utf8"));
+  for (const { file, stripped } of files) {
     let match: RegExpExecArray | null;
     idPattern.lastIndex = 0;
     while ((match = idPattern.exec(stripped)) !== null) {
       const before = collapseWhitespace(stripped.slice(0, match.index));
-      const occurrence: Occurrence = { file, precedingContext: before.slice(-80) };
+      const occurrence: Occurrence = Object.freeze({ file, precedingContext: before.slice(-80) });
       if (before.endsWith("function ")) {
         declaration.push(occurrence);
       } else if (before.endsWith("raceWithTimeout(")) {
@@ -60,7 +64,11 @@ function partition(
     }
   }
 
-  return { declaration, bounded, other };
+  return Object.freeze({
+    declaration: Object.freeze(declaration),
+    bounded: Object.freeze(bounded),
+    other: Object.freeze(other),
+  });
 }
 
 function describeOther(occurrences: readonly Occurrence[]): string[] {
@@ -68,6 +76,17 @@ function describeOther(occurrences: readonly Occurrence[]): string[] {
 }
 
 const ALL_FILES = walkFiles(SRC_ROOT, isNonTestSourceFile);
+// These tests only read sources. Capture every walked file once per module run;
+// all assertions inspect the same immutable bytes, with the original tokenizer.
+const SOURCE_SNAPSHOT: readonly SourceFile[] = Object.freeze(ALL_FILES.map((file) =>
+  Object.freeze({ file, stripped: stripComments(readFileSync(file, "utf8")) })
+));
+const PARTITION = partition("generateGeminiImage", SOURCE_SNAPSHOT);
+const ALIAS_PATTERN = /import\s*\{[^}]*\bgenerateGeminiImage\s+as\s+/;
+
+function findAliases(files: readonly SourceFile[]): string[] {
+  return files.filter(({ stripped }) => ALIAS_PATTERN.test(stripped)).map(({ file }) => file);
+}
 
 describe("W-3: the walk over src/ is not narrowed", () => {
   it("walks more than 1200 non-test .ts/.tsx files under src/", () => {
@@ -81,29 +100,26 @@ describe("W-3: the walk over src/ is not narrowed", () => {
   });
 
   it("generateGeminiImage has exactly one declaration (src/lib/llm.ts)", () => {
-    const { declaration } = partition("generateGeminiImage", ALL_FILES);
+    const { declaration } = PARTITION;
     expect(declaration.length).toBe(1);
   });
 });
 
 describe("W-1: every generateGeminiImage( call site is either the declaration or raceWithTimeout(-bounded", () => {
-  const { other } = partition("generateGeminiImage", ALL_FILES);
+  const { other } = PARTITION;
 
   it("the other bucket is empty", () => {
     expect(describeOther(other)).toEqual([]);
   });
 
   it("no non-test file aliases the generateGeminiImage import (import { generateGeminiImage as x })", () => {
-    const aliasPattern = /import\s*\{[^}]*\bgenerateGeminiImage\s+as\s+/;
-    const offenders = ALL_FILES.filter((f) => aliasPattern.test(stripComments(readFileSync(f, "utf8"))));
+    const offenders = findAliases(SOURCE_SNAPSHOT);
     expect(offenders).toEqual([]);
   });
 });
 
 describe("W-2 inner: the wait passed to raceWithTimeout is a variable, not an inline numeric literal", () => {
-  const source = stripComments(
-    readFileSync(path.join(SRC_ROOT, "app/actions/announcement-image.ts"), "utf8")
-  );
+  const source = SOURCE_SNAPSHOT.find(({ file }) => file === path.join(SRC_ROOT, "app/actions/announcement-image.ts"))!.stripped;
 
   it("the inner call site wraps generateGeminiImage( in raceWithTimeout(", () => {
     expect(source).toMatch(/raceWithTimeout\(\s*generateGeminiImage\(/);
@@ -154,3 +170,22 @@ function partitionSourceOnly(
   }
   return { declaration, bounded, other };
 }
+
+describe("complete source snapshot scan controls", () => {
+  it.each([
+    { name: "extra declaration", source: "function generateGeminiImage(prompt) {}\nfunction generateGeminiImage(prompt) {}", expected: [2, 0, 0, 0] },
+    { name: "unbounded call", source: "generateGeminiImage(prompt);", expected: [0, 0, 1, 0] },
+    { name: "bounded call", source: "raceWithTimeout(generateGeminiImage(prompt), waitMs);", expected: [0, 1, 0, 0] },
+    { name: "alias", source: 'import { generateGeminiImage as image } from "./image";', expected: [0, 0, 0, 1] },
+    { name: "comment only", source: '// generateGeminiImage(prompt);\n/* import { generateGeminiImage as image } from "./image"; */', expected: [0, 0, 0, 0] },
+    { name: "block fragment call", source: "generate/* removed */GeminiImage(prompt);", expected: [0, 0, 1, 0] },
+    { name: "block fragment alias", source: 'import { generate/* removed */GeminiImage as image } from "./image";', expected: [0, 0, 0, 1] },
+  ])("$name", ({ source, expected }) => {
+    const snapshot = Object.freeze([Object.freeze({ file: "fixture.ts", stripped: stripComments(source) })]);
+    const { declaration, bounded, other } = partition("generateGeminiImage", snapshot);
+    expect([declaration.length, bounded.length, other.length, findAliases(snapshot).length]).toEqual(expected);
+    for (const occurrence of [...declaration, ...bounded, ...other]) {
+      expect(occurrence.file).toBe("fixture.ts");
+    }
+  });
+});

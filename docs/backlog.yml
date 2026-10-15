@@ -5,16 +5,16 @@
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
 - id: 'COURSES-COLUMN-REORDER'
-  state: 'unscoped'
-  kind: 'feature'
+  state: 'verification'
+  kind: 'chore'
   area: 'rich-text-copy-fidelity'
-  title: 'Drag Courses table column headers to rearrange the column order.'
-  owns: []
+  title: 'Verify Courses column dragging, keyboard movement, saved order and cancellation in an authenticated browser.'
+  owns: ['src/app/components/courses/CoursesTable.tsx', 'src/app/components/courses/useCourseColumnReorder.ts', 'src/app/components/courses/CourseColumnReorder.module.css', 'src/app/components/courses/column-reorder.wiring.test.ts', 'src/lib/courses-column-reorder.ts', 'src/lib/courses-column-reorder.test.ts']
   verify: null
   blocked_by: []
-  instrument: 'Planned acceptance: dragging a column header to a new position changes the matching header and cell order together without altering course data or breaking sorting, column search, visibility or row actions. Scope must define persistence of the chosen order and an accessible keyboard alternative. Pure ordering/persistence regressions and a rendered drag-and-drop/keyboard walk remain to be designed and executed; no current verification is claimed.'
+  instrument: 'Coordinator/browser operator: use an authenticated Courses view with distinct row values; drag both directions and across horizontal scroll, press Escape during a drag then release, exercise pointercancel/outside release and touch/pen, Alt+Left/Right with focus and screen-reader announcements, existing menu moves, hide/reveal/reload, and order-key-only storage failures while other keys remain available. Check sticky headers/Name, sort/search, copy, inline edits and row actions. Step: before declaring rendered interaction/accessibility verified. Closure: record browser/device, actions and actual observations with failures retained.'
   from: 'Owner request in this chat, 2026-10-15: be able to drag and rearrange the order of columns in the Courses table. Filed by the commit adding this row.'
-  note: 'Owner: coordinator. Reuse-survey the existing Courses table column IDs, visibility/order preferences and header interactions before scoping implementation. Coordinate the shared CoursesTable surface with COURSES-COLUMN-SEARCH, COURSES-TABLE-SPEED and COURSE-TABLE-EMAIL-COPY; preserve their outstanding verification. Scope/write ownership and closure instruments are pending. This filing does not implement the feature.'
+  note: 'Built under docs/courses-column-reorder-scope.md CR1-CR8. Implementation review round 1 found focused-handle Escape propagation; round 2 fixed that route. Independent verification subsequently found the related Tab-to-CellMenu route, so the original acceptance was invalidated without resetting either round. On 2026-10-15 the owner selected the exact capture-phase listener and matching cleanup correction, cross-control regression, fresh verification and publication. That bounded correction was applied and independently checked as transcription of the terminating decision. Pure order/persistence tests, an actual-hook handler model and source guards are local instruments; no component is rendered and they do not discharge this browser residual. The actual frozen-candidate gate results, prior failure, owner decision and final handoff receipts are retained in .agnostic-loop/courses-column-reorder-20261015 and summarized by the discharging commit. Browser-wide localStorage denial remains pre-existing and out of scope because parent/sort/visibility reads can fail before the order hook mounts. Preserve COURSES-COLUMN-SEARCH, COURSES-TABLE-SPEED and COURSE-TABLE-EMAIL-COPY verification obligations. Verification preserves an initial full-suite failure: the unrelated untracked supervisor-repair draft exposed the existing unfinished LLM-AGNOSTIC-AUTO-DISPATCH re-entry defect, alongside two tracked-test timeouts. The two untracked drafts are hash-preserved outside src only while the exact committed-plus-owned delivery candidate runs the same required gates, then restored after publication. No tracked test or gate is excluded or weakened; the prior failures remain in the durable run.'
   question: null
 - id: 'DOCUMENT-TEMPLATE-ABSTRACTION'
   state: 'verification'

@@ -47837,3 +47837,57 @@ immutability; owner/live-provider operator must assess classification and
 abstraction quality on instructor files. A real PowerPoint/Word/PDF comparison
 walk remains necessary for output appearance and supported-file fidelity. No live
 DB, applied migration, live provider quality or rendered UI success is claimed.
+
+## Courses column dragging (2026-10-15)
+
+Source contract: `docs/courses-column-reorder-scope.md` CR1-CR8. Optional header
+handles reorder presentation IDs only; Name stays first/frozen and Actions last.
+Headers and `CourseRow` share `orderedVisibleColumns`, including loading cells.
+Dropping right places the source after its target, dropping left before it;
+hidden IDs remain in the complete order and retain relative order. For the
+hidden-gap fixture `[email, institution, modality, startDate]` with institution
+hidden, email onto startDate produces `[institution, modality, startDate, email]`
+and startDate onto email produces `[startDate, email, institution, modality]`.
+Existing menu arrows and Alt+Left/Right use the established visible-step helper.
+Course objects/row IDs, sort/search, visibility, copy and inline edit wiring are
+preserved. Dedicated handle events do not bubble into sort or cell menu controls.
+
+Pointer source uses capture/ownership, an 8 CSS-pixel horizontal threshold,
+actual table-scoped hit-testing on release, and cancellation for Escape,
+pointercancel, lost capture, outside/fixed-header release and unmount. Hover
+only updates an insertion indicator. Horizontal edge scrolling uses an animation
+frame loop canceled with the gesture; it never changes page vertical scroll.
+Keyboard movement restores that column handle's focus and updates a permanently
+mounted polite status region. Indicators and confirmation have no animation.
+
+One commit boundary writes the existing versioned `ta-courses-column-order` key
+outside React updater callbacks. No-op/cancel does not save. An order-key-only
+read failure uses the existing parser default; a write failure retains the new
+in-memory order and visibly states that reload persistence failed. The session
+diagnostic `courses` surface records only preference load/save attempts, outcome,
+elapsed time and the fixed `COURSES_COLUMN_ORDER_STORAGE` failure code. It never
+records course/student values, search text, storage bytes or exception messages.
+Other storage keys and preference scope remain unchanged. Browser-wide storage
+denial can fail earlier parent/sort/visibility initialization and is outside this
+contract; no mounting recovery or diagnostic coverage for that case is claimed.
+
+Focused instrument:
+
+```text
+npm.cmd run test:paths -- src/lib/courses-column-reorder.test.ts src/app/components/courses/column-reorder.wiring.test.ts src/lib/courses-table-helpers.test.ts src/lib/courses-table-search.test.ts src/lib/cell-copy.test.ts src/lib/cell-copy.gaps.test.ts src/app/components/courses/CoursesTable.gate.test.ts src/app/components/courses/useCoursesData.wiring.test.ts src/app/components/courses/emailCopyButton.wiring.test.ts src/app/components/courses/page-module-css-classes.test.ts src/app/components/courses/page-module-css-orphan-classes.test.ts src/lib/session-diagnostic-log.test.ts src/lib/session-diagnostic-log.detail.test.ts src/file-size-ceiling.structure.test.ts
+```
+
+Pure tests exercise fixed expected order arrays, default/migrated/current-version
+reload, complete-ID preservation, no-op writes and key-specific storage failures.
+Source guards pin shared header/body IDs with a negative original-array control,
+handle isolation, pointer cancellation, keyboard/menu persistence and diagnostic
+wiring. No component is rendered by these tests; their success cannot verify
+actual pointer capture, touch, focus, screen-reader announcements or sticky layout.
+Remaining owner: coordinator/browser operator. Instrument: authenticated Courses
+with distinct row values; drag both directions/across horizontal scroll, cancel
+and outside release, touch/pen, keyboard/menu movement, hide/reveal/reload,
+key-specific failure injection with other keys available, and sort/search/copy/
+inline edits/actions before and after. Step: before declaring rendered interaction
+and accessibility verified. Closure: retain actual browser/device observations and
+any failures. Required composed typecheck/regression/build evidence is owned by
+the independent coordinator/verifier, not established by this source entry.

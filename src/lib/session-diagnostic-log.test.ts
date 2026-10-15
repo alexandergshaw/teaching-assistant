@@ -409,6 +409,14 @@ describe("sessionDiagnosticLog: an empty log and a log that never recorded read 
 });
 
 describe("sessionDiagnosticLog: coverage is declared, so silence is readable", () => {
+  it("limits Courses coverage to column-order preference attempts", () => {
+    expect(SESSION_DIAGNOSTIC_SURFACE_LABELS.courses).toBe("Courses column preferences");
+    const coverage = SESSION_DIAGNOSTIC_COVERAGE.find(row => row.surface === "courses")?.covers;
+    expect(coverage).toContain("column-order preference load/save");
+    expect(coverage).toContain("elapsed time only");
+    expect(coverage).toContain("no course/student values or search text");
+    expect(coverage).toContain("Other Courses operations and browser-wide storage denial are not covered");
+  });
   it("declares a non-trivial list of covered and uncovered areas, rather than an empty one", () => {
     // Pinned as ABSOLUTE numbers, not against the constants themselves: a
     // loop over SESSION_DIAGNOSTIC_NOT_COVERED asserting each of its members

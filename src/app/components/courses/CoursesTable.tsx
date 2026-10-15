@@ -26,11 +26,8 @@ import {
   ALL_COLUMN_IDS,
   COLUMN_MIN_WIDTHS,
   DEFAULT_SORT,
-  moveColumnInOrder,
-  parseColumnOrder,
   parseColumnSet,
   parseSortState,
-  serializeColumnOrder,
   serializeColumnSet,
   sortCourses,
   type ColumnId,
@@ -49,10 +46,11 @@ import CourseRow from "./CourseRow";
 import CellMenu, { type CellMenuItem } from "./CellMenu";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
+import { useCourseColumnReorder } from "./useCourseColumnReorder";
+import reorderStyles from "./CourseColumnReorder.module.css";
 
 const SORT_KEY = "ta-courses-sort";
 const COLUMNS_KEY = "ta-courses-columns";
-const COLUMN_ORDER_KEY = "ta-courses-column-order";
 
 // F3/AC27-AC28: the state behind the copy-to-other-cells confirm dialog and
 // its result/Undo summary. copyRequest holds the SOURCE course/column while
@@ -236,9 +234,8 @@ export default function CoursesTable({
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() =>
     typeof window === "undefined" ? [...ALL_COLUMN_IDS] : parseColumnSet(localStorage.getItem(COLUMNS_KEY))
   );
-  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() =>
-    typeof window === "undefined" ? [...ALL_COLUMN_IDS] : parseColumnOrder(localStorage.getItem(COLUMN_ORDER_KEY))
-  );
+  const { columnOrder, moveColumn, message:columnOrderMessage, instructionsId:columnOrderInstructionsId,
+    tableRef:courseTableRef, scrollRef:courseScrollRef, dropSide, handleProps } = useCourseColumnReorder(visibleColumns);
   const [columnsMenuAnchor, setColumnsMenuAnchor] = useState<HTMLElement | null>(null);
 
   // Brings the highlighted row into view. The row is inside .scroller, which
@@ -269,14 +266,6 @@ export default function CoursesTable({
   // The single ordered list the header AND every row render from, so a header
   // and its cells can never fall out of alignment.
   const orderedVisibleColumns = columnOrder.filter((id) => visibleColumns.includes(id));
-
-  const moveColumn = (id: ColumnId, direction: "up" | "down") => {
-    setColumnOrder((prev) => {
-      const next = moveColumnInOrder(prev, visibleColumns, id, direction);
-      localStorage.setItem(COLUMN_ORDER_KEY, serializeColumnOrder(next));
-      return next;
-    });
-  };
 
   const applySort = (field: SortField) => {
     setSort((prev) => {
@@ -593,6 +582,11 @@ export default function CoursesTable({
         </Menu>
       </div>
 
+      <span id={columnOrderInstructionsId} className={reorderStyles.instructions}>
+        Drag a column handle to another optional header, or use Alt+Left and Alt+Right to move one visible position.
+      </span>
+      <p className={reorderStyles.status} role="status" aria-live="polite" aria-atomic="true">{columnOrderMessage}</p>
+
       {/* A5: permanently mounted (never conditional) so a screen reader
           registers the region before the first mutation and actually
           announces it, matching the pre-existing .focusAnnouncement idiom
@@ -716,8 +710,8 @@ export default function CoursesTable({
       )}
 
       {!loading && courses.length > 0 && (
-        <div className={tableStyles.scroller}>
-          <table className={tableStyles.table}>
+        <div className={tableStyles.scroller} ref={courseScrollRef}>
+          <table className={tableStyles.table} ref={courseTableRef}>
             <thead>
               <tr>
                 {/* F4/AC35-AC36: the header hamburger sits alongside the sort
@@ -734,7 +728,8 @@ export default function CoursesTable({
                   </span>
                 </th>
                 {orderedVisibleColumns.map((id) => (
-                  <th key={id} className={tableStyles.sortableHeader} onClick={() => applySort(id)} style={{ minWidth: COLUMN_MIN_WIDTHS[id] }}>
+                  <th key={id} data-course-column={id} data-drop-side={dropSide(id)} className={`${tableStyles.sortableHeader} ${reorderStyles.header}`} onClick={() => applySort(id)} style={{ minWidth: COLUMN_MIN_WIDTHS[id] }}>
+                    <button type="button" className={reorderStyles.handle} {...handleProps(id)}><span aria-hidden="true">&#8942;</span></button>
                     <span className={tableStyles.headerLabel}>
                       {CELL_COLUMN_LABELS[id]}{sortIndicator(id)}
                     </span>

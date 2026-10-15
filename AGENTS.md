@@ -37,6 +37,16 @@ CLI and MCP entry points. A main host with an authorized configured run can invo
 durable handoffs. Do not manufacture provider access, install/authenticate tools
 or infer paid-dispatch consent from an unconfigured template.
 
+In a host-owned manual run, keep the active implementation task alive through
+completion waits, actual output/result imports, assignment finish, independent
+next-role admission and required gates. A status reply or interrupt does not end
+that task; return to handling completions. A running worker is not a successful
+exit. Before ending the active implementation turn or claiming delivery, run the
+explicit requested-item completion guard documented under "Manual adapter" in
+`docs/AGNOSTIC_LOOP_USAGE.md` (`src/tools/agnostic-loop/manual-handoff.ts`).
+Pending/unproven results are not delivery. This is an invoked operator control,
+not an automatically installed Codex Stop hook or a durable chat wakeup.
+
 A worker receiving a scoped supervisor packet performs only its assigned role,
 paths and deliverables. It does not recursively drive the queue, create another
 orchestrator, alter the routing grant or claim owner authority. Report conflicts

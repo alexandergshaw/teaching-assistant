@@ -84,6 +84,19 @@ that way and it is auditable. Record nothing and it is a hole.
 
 ## Never stall
 
+**A launched worker is not a completed implementation request.** In the manual
+agnostic adapter, the host owns completion waits, actual output/result imports,
+assignment finish and independent next-role admission until local delivery.
+The 2026-10-15 template runs exported implementation packets and then had no
+completion supervisor; reports existed while the host had ended its turn.
+Answer an interrupt and return to that chain in the same active turn. A dispatch
+marker can pass while this handoff remains unconsumed. Use the explicit manual
+delivery assertion and exact saved launcher recipe in
+`docs/AGNOSTIC_LOOP_USAGE.md`; its exit code is evidence only when invoked, not
+an automatic host wakeup. If no wait/resume capability exists, report the missing
+capability and outstanding handoff instead of promising background delivery.
+Evidence and limits: `docs/agnostic-manual-handoff-rca.md`.
+
 **While `docs/BACKLOG.md` has ANY item in it, do not end a turn without work
 already started on the next item.** This is the single most repeated correction
 in this project's history, and the owner restated it in the strong form on

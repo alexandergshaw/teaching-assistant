@@ -136,6 +136,53 @@ terminal nor an MCP connection cannot dispatch; an open chat is not a supervisor
 
 ## Manual adapter and offline demonstration
 
+Manual mode makes the active host responsible for the entire handoff chain.
+Exporting a packet, launching a worker, or seeing its report does not deliver the
+requested implementation. The file adapter has no host-agent completion callback
+and cannot resume a chat after its turn ends. Do not describe a bootstrap script
+that exports a packet and exits as a running supervisor.
+
+For an authorized implementation request, keep the host's implementation turn
+active: use its completion-wait tool, inspect the actual owned files, import the
+worker's actual output, consume its result with the packet's identity/token,
+finish the assignment, and admit the independent next role. Continue the checked
+workflow and required gates through local delivery. A status question or other
+interrupt changes the foreground; answer it and return to the active chain.
+Worker completion is a handoff to the host, never permission to end the chain.
+Preserve fresh checker contexts, truthful requested/observed model identity and
+the substantive two-round cap. Do not manufacture acceptance from worker prose.
+
+At manual-run admission, retain the exact executable, argument array (including
+the loader URL spelling), working directory and names of policy-observed
+environment variables in the host's durable handoff record. Keep secret values
+out of that record. Reuse that launch recipe after an interrupt: reconstructing
+an equivalent loader URL can change the pinned tool hash. A stale tool/environment
+error requires diagnosis of the admitted recipe; it is not permission to weaken
+the engine's freshness checks or refresh a provider grant.
+
+Before ending the active implementation turn or claiming delivery, assert every
+requested item explicitly, separately for each store:
+
+```powershell
+node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/manual-handoff.ts C:/absolute/store ITEM_ID
+```
+
+The read-only guard verifies the stored snapshot and immutable blobs without a
+whole-candidate scan. Exit `2` means delivery is pending and lists retained work;
+exit `1` means the assertion is unproven (including missing/invalid state or an
+unknown item). Only exit `0` attests that every named item has a recorded `shipped`
+status and no retained assignment, uncertain operation or recorded outstanding
+need. It does not independently re-verify the candidate or authorize delivery.
+Run normal gates and engine transitions first. Include all requested item IDs;
+passing for a subset does not complete the request.
+
+This command is an operator preflight, not an automatically installed Stop hook
+or a scheduler. The existing backlog dispatch-marker Stop hook cannot prove a
+worker result was consumed, and its presence does not establish coverage in a
+different host. If the host cannot wait or durably resume, state that limitation
+and the exact outstanding handoff; do not promise unattended continuation. A
+reminder does not import results, admit an independent checker or repair this gap.
+
 ```powershell
 npm.cmd run loop -- demo <empty-directory>
 npm.cmd run loop -- status --state <empty-directory>/.agnostic-loop

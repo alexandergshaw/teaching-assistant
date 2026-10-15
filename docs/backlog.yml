@@ -4,17 +4,53 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'PPT-TEMPLATE-SLIDE-LIBRARY'
+  state: 'unscoped'
+  kind: 'feature'
+  area: 'presentations-authoring'
+  title: 'Upload a PowerPoint, mark it as a template, and extract its slide types into a new Presentations sub-tab alongside Slide Deck Creation and Slide Deck Pipeline.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Planned acceptance: the new sibling sub-tab contains the upload and template-designation controls; the app/LLM identifies the uploaded deck''s versions of slide types such as title slides and section dividers, and displays the extracted examples on that sub-tab. Scope must define detectable classification/extraction behavior and preserve the connection to the source deck. Automated extraction/mapping checks and a browser/PowerPoint visual-fidelity walk remain to be designed and executed; no current verification is claimed.'
+  from: 'Owner requests in this chat, 2026-10-15: upload a PowerPoint as a template, pull out its different slide types, then place the template maker/extractor on a new sibling sub-tab rather than the slide-deck creation page.'
+  note: 'Owner: coordinator. New capability beyond the existing PPT-TEMPLATE-UPLOAD-PLACE and PRESENTATIONS-TEMPLATE work, whose verification obligations remain intact. Reuse-survey existing template upload/storage, OOXML extraction and Presentations navigation before scoping implementation. The owner specified a dedicated sibling sub-tab for this tool; PowerPoint Templates is a working label, not a fixed owner-selected name. Scope/write ownership and closure instruments are pending. No feature implementation is claimed by this filing.'
+  question: null
+- id: 'LLM-AGNOSTIC-DELAY-CONTROLS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'loop-and-docs-maintenance'
+  title: 'Let independently checked ready waves implement before unrelated preparation; bound preparation and complete gate evidence without repeated aggregate timeouts.'
+  owns: ['src/tools/agnostic-loop/dispatch-types.ts', 'src/tools/agnostic-loop/routing-validation.ts', 'src/tools/agnostic-loop/workflow.ts', 'src/tools/agnostic-loop/next-actions.ts', 'src/tools/agnostic-loop/readiness*.ts', 'src/tools/agnostic-loop/supervisor.ts', 'src/tools/agnostic-loop/dispatch-store.ts', 'src/tools/agnostic-loop/runner.ts', 'src/tools/agnostic-loop/progress*.ts', 'src/tools/agnostic-loop/gate-composition*.ts', 'src/tools/agnostic-loop/types.ts', 'src/tools/agnostic-loop/validation.ts', 'src/tools/agnostic-loop/engine.ts', 'src/tools/agnostic-loop/gate-diagnostics.ts', 'src/tools/agnostic-loop/gate-diagnostics.test.ts', 'src/tools/agnostic-loop/workflow.gate-composition.test.ts', 'src/tools/agnostic-loop/supervisor-repair-mutation.test.ts', 'docs/agnostic-loop-delay-rca.md', 'docs/agnostic-loop-gate-composition-brief.md']
+  verify: null
+  blocked_by: []
+  instrument: 'Small real child proves a checked ready wave writes source before unrelated preparation; direct scheduler cases reject unmet requirements and preserve final obligations and legacy behavior. Restarted preparation accounting preserves budgets and reservations. The exact gate-composition source/test paths follow docs/agnostic-loop-gate-composition-brief.md section "Exact proposed write set and detecting tests"; coordinate shared workflow.ts ownership. Explicit gate shards retain every required predicate and reject missing, failed or stale candidate evidence; no timeout is accepted as success.'
+  from: 'Owner RCA and fix instruction 2026-10-13; independently checked first readiness brief in docs/agnostic-loop-delay-rca.md.'
+  note: 'Owner: coordinator. Filed 2026-10-13; recommendation restatements: 0. First readiness implementation dispatched in isolated continuous-repair-build checkout using checked brief, without restarting preparation. Preparation accounting and gate composition remain owned follow-on obligations, not prerequisites to this first code slice. Preserve failed broad gates, fixed grants, two-round source budgets and default-disabled activation. No commit touching these owns yet; the next implementation commit must include this work.'
+  question: null
+- id: 'LLM-AGNOSTIC-CONTINUOUS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'Make continuous backlog intake, safe remote synchronization and verified commit/push a repo-owned LLM-agnostic loop feature, independent of app automation.'
+  owns: ['src/tools/agnostic-loop/continuous*.ts', 'src/tools/agnostic-loop/queue*.ts', 'src/tools/agnostic-loop/git-publication*.ts', 'src/tools/agnostic-loop/dispatch-cli.ts', 'src/tools/agnostic-loop/mcp.ts', 'src/tools/agnostic-loop/cli.ts', 'src/tools/agnostic-loop/dispatch-types.ts', 'src/tools/agnostic-loop/next-actions.ts', 'src/tools/agnostic-loop/workflow.ts', 'src/tools/agnostic-loop/supervisor.ts', 'src/tools/agnostic-loop/supervisor-process.ts', 'src/tools/agnostic-loop/supervisor-inbox.ts', 'src/tools/agnostic-loop/routing-validation.ts', 'src/tools/agnostic-loop/supervisor-repair*.ts', 'docs/agnostic-continuous-*.md', 'docs/AGNOSTIC_LOOP_USAGE.md']
+  verify: null
+  blocked_by: []
+  instrument: 'Real offline subprocess workers and local bare Git remotes must demonstrate two independently checked items delivered and pushed without per-item prompting, later queue content discovered while idle, durable restart without duplicate jobs/commits, blocked-item skipping, preserved global/role/review budgets, explicit candidate-bound gates before commit, scoped staging with unrelated dirty files preserved, safe fetch/fast-forward only while quiescent, non-fast-forward refusal, and uncertain Git/network operations reconciled from observed outcomes rather than retried blindly. CLI/status/control/MCP expose the same repo-owned controller. A generic fixed worker proves control flow; no fixture establishes live model judgment or every provider.'
+  from: 'Owner instruction 2026-10-13 in this chat: continuous pulling and pushing without prompting needs to be a feature of the agnostic loop. Initial loop implementation is 05b7fe6e.'
+  note: 'Owner: coordinator. This is a separate feature activity with initial scope/criteria/design/checks before code. The app heartbeat is observation only and cannot implement the feature. Preserve repository default-disabled templates and explicit fixed provider/write/Git grants. The prior repair run was paused at an admission boundary; its admitted criteria worker finished and no launch remains outstanding, so the new feature run can own the canonical workspace. Include failed-gate repair prerequisites in bounded implementation if needed for genuine end-to-end progression; do not silently declare LLM-AGNOSTIC-AUTO-DISPATCH closed or bypass its remaining evidence. No deployment, real student messages, force-push, broad staging, hidden budget renewal or invented acceptance is authorized.'
+  question: null
 - id: 'LLM-AGNOSTIC-AUTO-DISPATCH'
   state: 'actionable'
   kind: 'bug'
   area: 'loop-and-docs-maintenance'
   title: 'Complete reliable failed-gate repair and outstanding conformance evidence before enabling automatic agnostic-loop dispatch.'
-  owns: ['src/tools/agnostic-loop/**', 'src/tools/backlog/backlog-file.structure.test.ts', 'src/tools/vitest-paths/gate-commands.structure.test.ts', 'docs/AGNOSTIC_LOOP_USAGE.md', 'docs/LLM_AGNOSTIC_DEV_LOOP.md', 'docs/agnostic-loop-*.md', 'docs/agnostic-dispatch-*.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  owns: ['src/tools/agnostic-loop/next-actions.ts', 'src/tools/agnostic-loop/supervisor.ts', 'src/tools/agnostic-loop/supervisor-inbox.ts', 'src/tools/agnostic-loop/supervisor-process.ts', 'src/tools/agnostic-loop/workflow.ts', 'src/tools/agnostic-loop/engine.ts', 'src/tools/agnostic-loop/runner.ts', 'src/tools/agnostic-loop/dispatch-store.ts', 'src/tools/agnostic-loop/dispatch-types.ts', 'src/tools/agnostic-loop/supervisor-repair.test.ts', 'src/tools/agnostic-loop/supervisor-repair-fixtures.ts', 'src/tools/agnostic-loop/supervisor-repair-mutation.test.ts', 'src/tools/agnostic-loop/supervisor-repair-mutation-fixtures.ts', 'src/tools/agnostic-loop/conformance.test.ts', 'src/tools/agnostic-loop/supervisor.test.ts', 'src/tools/agnostic-loop/supervisor-lifecycle.test.ts', 'src/tools/agnostic-loop/supervisor-admission.test.ts', 'src/tools/agnostic-loop/supervisor-mutation.test.ts', 'src/tools/agnostic-loop/supervisor-pause.test.ts', 'src/tools/backlog/backlog-file.structure.test.ts', 'src/tools/vitest-paths/gate-commands.structure.test.ts', 'docs/AGNOSTIC_LOOP_USAGE.md', 'docs/LLM_AGNOSTIC_DEV_LOOP.md', 'docs/agnostic-loop-*.md', 'docs/agnostic-dispatch-*.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
   verify: null
   blocked_by: []
   instrument: 'Before assigning a closure command, commit a failing regression for invalidation followed by stage re-entry and a real verifier/regression gate failure followed by bounded same-activity repair. Require exact prior failure diagnostics in the repair packet, successful re-advancement, preserved review limits, restart behavior and an explanatory checkpoint when progress cannot continue. Close remaining negative conformance obligations in docs/agnostic-dispatch-verification.md against AD-1..AD-12. The existing passing-path suite alone cannot close this residual. Live provider transport evidence remains separate from fixture conformance and complete feature-loop verification.'
   from: 'Owner request 2026-10-13 in this chat: implement automatic model selection and agent dispatch; propose a way first. Initial implementation and owner disposition are included in the commit retaining this repair residual.'
-  note: 'Owner: coordinator. Filed 2026-10-13; recommendation restatements: 1. OWNER DECISION 2026-10-13: Keep it disabled by default; record failed-gate repair as unfinished. This closes the initial implementation review activity as it stands; it does not authorize another revision/check round or an experimental release. The answer to the corrected question governs over the earlier question based on a stale unconditional-break finding. Automatic retry is present, but prior failed-execution diagnostics are missing from repair packets and deterministic stage-advance replay can stall after invalidation. This row now owns those unfinished repairs and the remaining conformance evidence; receiving owner is the coordinator and receiving step is a separately scoped repair activity before normal activation. The closure command remains unset until a regression that detects the known failure is in the repository. Routing, adapters, durable supervisor and CLI/MCP are retained with activation disabled by default. Measurements and limits are in docs/agnostic-dispatch-verification.md. Existing manual adapter remains usable. Codex native transport was smoke-tested separately; no complete live development loop or live Claude/Gemini verification is claimed.'
+  note: 'Owner: coordinator. Filed 2026-10-13; recommendation restatements: 1. OWNER DECISION 2026-10-13: Keep it disabled by default; record failed-gate repair as unfinished. This closes the initial implementation review activity as it stands; it does not authorize another revision/check round or an experimental release. The answer to the corrected question governs over the earlier question based on a stale unconditional-break finding. Automatic retry is present, but prior failed-execution diagnostics are missing from repair packets and deterministic stage-advance replay can stall after invalidation. This row now owns those unfinished repairs and the remaining conformance evidence; receiving owner is the coordinator and receiving step is a separately scoped repair activity before normal activation. The closure command remains unset until a regression that detects the known failure is in the repository. Routing, adapters, durable supervisor and CLI/MCP are retained with activation disabled by default. Measurements and limits are in docs/agnostic-dispatch-verification.md. The failed-gate regression contract is docs/agnostic-dispatch-repair-test-design.md; runtime owns are bounded to that inspected repair seam and conformance instruments; any additional negative-conformance file needs explicit rescoping before edits; historical adoption does not certify its unexecuted gates. Existing manual adapter remains usable. Codex native transport was smoke-tested separately; no complete live development loop or live Claude/Gemini verification is claimed.'
   question: 'RESOLVED 2026-10-13: Keep automatic dispatch disabled by default and track failed-gate repair as unfinished. The corrected disposition supersedes the earlier failure-checkpoint option; no further owner answer is pending for this implementation activity.'
 - id: 'REPO-GRADES-NAMING-DEDUCTION-TOGGLE'
   state: 'verification'
@@ -2237,3 +2273,42 @@
   from: 'G4 scope (RULING 75 stated limit) + the W1 oracle OR-1 residual.'
   note: 'Deliberately deferred by the G4 scope as a separate, larger item: threading a real AbortSignal through callLlm is a repo-wide signature change across 136 sites. The current bound is sufficient for G4 own harm (the caller returns a worded error before the platform kill; the process is reclaimed at the ceiling regardless) and is NOT sufficient against abandoned in-flight work / quota burn. Needs owner steer: is the quota saved worth the repo-wide seam change?'
   question: 'Is true cancellation of abandoned raced LLM work (threading an AbortSignal through callLlm, a 136-site seam) worth the quota savings, or is bounding caller patience (current state) acceptable?'
+
+- id: 'TABS-CTRL-RECORDING'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'Complete Tier-3 Wave 2: open the clicked Recording sub-view in a new browser tab.'
+  owns: ['src/app/components/recording/rec-views.ts', 'src/app/url-state.ts', 'src/app/components/home/useAppNavigation.ts', 'src/app/components/RecordingTab.tsx', 'src/app/url-state.rec-view.test.ts']
+  verify: 'npm.cmd run test:paths src/app/url-state.rec-view.test.ts src/app/url-state.test.ts src/app/components/recording/recording-split.structure.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param recView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
+  from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
+  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. Run recording-split.structure.test.ts and all RecordingTab source readers enumerated in scope section 8, after confirming their current exact paths. Measure RecordingTab/useAppNavigation ceilings; extract within wave if needed. Filing does not implement or close this feature.'
+  question: null
+
+- id: 'TABS-CTRL-VERSION-CONTROL'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'Complete Tier-3 Wave 3: open Version Control and Org Management sub-views in a new browser tab.'
+  owns: ['src/app/url-state.ts', 'src/app/components/home/useAppNavigation.ts', 'src/app/components/VersionControlTab.tsx', 'src/app/components/OrgManagementPanel.tsx', 'src/app/url-state.vc-views.test.ts']
+  verify: 'npm.cmd run test:paths src/app/url-state.vc-views.test.ts src/app/url-state.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param vcSubTab + vcOrgView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
+  from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
+  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. Preserve ta-vc-subtab and ta-vc-org-view. Scope names no dedicated structural gate; rerun caller/source-reader census before build. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  question: null
+
+- id: 'TABS-CTRL-FILES'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'Complete Tier-3 Wave 4: open the clicked Files Library/Submissions view in a new browser tab.'
+  owns: ['src/app/url-state.ts', 'src/app/components/home/useAppNavigation.ts', 'src/app/components/FilesTab.tsx', 'src/app/url-state.files-view.test.ts']
+  verify: 'npm.cmd run test:paths src/app/url-state.files-view.test.ts src/app/url-state.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param filesView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
+  from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
+  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. R5 key confirmed by reading FilesTab.tsx:85-92: ta-files-view. Confirm again before build. Scope names no dedicated structural gate; rerun caller/source-reader census. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  question: null

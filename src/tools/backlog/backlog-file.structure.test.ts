@@ -149,7 +149,12 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // Instrument: npm.cmd run test:paths src/tools/backlog/backlog-file.structure.test.ts
 // observed the added row against the prior frozen literal.
 // 187 -> 186: A40-D5 closed with the checked typed-origin boundary, 2026-10-13.
-const EXPECTED_ROW_COUNT = 186;
+// 186 -> 187: repo-owned continuous-loop feature filed, 2026-10-13.
+// 187 -> 188: measured agnostic-loop delay controls filed, 2026-10-13.
+// 188 -> 191: Tier-3 tab waves 2-4 filed 2026-10-15 from scope section 10 R3.
+// 191 -> 192: owner-requested PowerPoint template slide library filed 2026-10-15.
+// Instrument: node counts /^- id:/gm in docs/backlog.yml; backlog-file test parses it.
+const EXPECTED_ROW_COUNT = 192;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

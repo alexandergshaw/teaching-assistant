@@ -32,7 +32,7 @@ export const nextActions: NextActionsFunction = (state,journal,context) => {
     if(a && Object.keys(journal.jobs).length >= context.config.budget.maxJobs)return terminal('blocked','Dispatch job budget exhausted');
     return [{kind:a ? 'dispatch' : 'create-activity',key:actionKey(task,context.config),task}];
   };
-  const advance = (status:string,kinds:string[]):NextAction[] => [{kind:'advance',key:actionKey({item:item.id,status,kinds},context.config),item:item.id,status,artifacts:kinds.map(k => accepted(k)!.id),evidence:Object.values(state.evidence).filter(e => e.exitCode === 0 && e.candidate.digest === context.candidate.digest).map(e => e.id)}];
+  const advance = (status:string,kinds:string[]):NextAction[] => [{kind:'advance',key:actionKey({item:item.id,status,kinds,revision:state.revision},context.config),item:item.id,status,artifacts:kinds.map(k => accepted(k)!.id),evidence:Object.values(state.evidence).filter(e => e.exitCode === 0 && e.candidate.digest === context.candidate.digest).map(e => e.id)}];
   if (item.status === 'queued') return activity('scope') ?? advance('scoped',['scope']);
   if (item.status === 'scoped') {
     const next = activity('criteria'); if (next) return next;

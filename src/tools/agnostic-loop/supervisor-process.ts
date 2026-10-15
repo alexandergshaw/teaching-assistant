@@ -7,17 +7,19 @@ import { equal, currentArtifact, requireThat } from './engine';
 import { buildInvocation, normalizeResult, outcomeSchema, probeProvider } from './providers';
 import { routeModel } from './routing';
 import { loadJournal, saveJournal, atomicJson, configHash } from './dispatch-store';
-import { acceptedBodies, actionKey } from './workflow';
+import { acceptedBodies, actionKey, failedGateForRepair } from './workflow';
 import { nextActions } from './next-actions';
 import { commitEvent } from './supervisor-inbox';
 import { runGate } from './runner';
 import { safeFile } from './paths';
 import type { LoopStore } from './store';
 import type { CapturedProcess, LaunchRecord, BacklogSelection, RoutingConfig, TaskSpec, NormalizedResult } from './dispatch-types';
-import type { Artifact, Candidate, Operation } from './types';
+import type { Artifact, Candidate, LoopState, Operation } from './types';
+import type { DispatchJournal } from './dispatch-types';
 
 class RetryableExecution extends Error {}
 class PausedAdmission extends RetryableExecution {}
+class FailedGateExecution extends RetryableExecution {}
 const artifactMetadata=(artifact:Artifact):Artifact=>({id:artifact.id,activity:artifact.activity,version:artifact.version,hash:artifact.hash,path:artifact.path,author:artifact.author,inputs:artifact.inputs});
 const candidateBinding=(candidate:Candidate,paths:string[]):Candidate=>({...candidate,files:Object.fromEntries(paths.filter(p=>candidate.files[p]!==undefined).map(p=>[p,candidate.files[p]]))});
 
@@ -25,6 +27,14 @@ export function redact(text:string,config:RoutingConfig):string {
   let result = text;
   for (const key of new Set(config.providers.flatMap(p => p.environmentKeys))) { if(['PATH','HOME','USERPROFILE','TEMP','TMP','SYSTEMROOT','COMSPEC','NODE_ENV','LANG','LOCALAPPDATA','APPDATA'].includes(key.toUpperCase()))continue; const value = process.env[key]; if (value) { const escaped=JSON.stringify(value).slice(1,-1),doubleEscaped=JSON.stringify(escaped).slice(1,-1); for(const representation of [...new Set([value,escaped,doubleEscaped])].sort((a,b)=>b.length-a.length))result=result.split(representation).join('[redacted]'); } }
   return result;
+}
+async function priorFailureDiagnostics(store:LoopStore,state:LoopState,journal:DispatchJournal,task:TaskSpec,config:RoutingConfig) {
+  const evidence=failedGateForRepair(state,journal,task);
+  if(!evidence)return [];
+  const output=redact((await store.verifiedBlob(evidence.outputPath,evidence.outputHash)).toString('utf8'),config);
+  const bytes=Buffer.from(output,'utf8');let end=Math.min(bytes.length,32768);
+  while(end<bytes.length&&(bytes[end]&0xc0)===0x80)end--;
+  return [{evidenceId:evidence.id,gate:evidence.gate,assignment:evidence.assignment,exitCode:evidence.exitCode,candidateDigest:evidence.candidate.digest,outputHash:evidence.outputHash,excerpt:bytes.subarray(0,end).toString('utf8'),truncated:bytes.length>end,limitation:bytes.length>end?'Prior failed-gate output truncated to 32768 UTF-8 bytes':'Verified prior failed-gate output'}];
 }
 function monitor(child:ChildProcess,limit:number,timeout:number,store:LoopStore,assignment:string,config:RoutingConfig):Promise<CapturedProcess> {
   const hasAuthority = store.createAssignmentMonitor(assignment);
@@ -55,7 +65,8 @@ export async function launchTask(store:LoopStore,config:RoutingConfig,selection:
     const authors = state.activities[task.activity].authors;
     for(const provider of config.providers.filter(p=>p.enabled))journal.probes[provider.id]=await probeProvider(provider);
     const inputContents=await Promise.all(Object.keys(task.acceptedInputs).map(async input=>({artifact:artifactMetadata(state.artifacts[input]),content:(await store.verifiedBlob(path.join(store.directory,'blobs',state.artifacts[input].hash),state.artifacts[input].hash)).toString('utf8')})));
-    const estimatedInputTokens=Buffer.byteLength(canonical({task,item:state.items[task.item],activity:state.activities[task.activity],inputs:inputContents,candidate:candidateBinding(context.candidate,task.affectedPaths),grant:config.grant}), 'utf8')*2+4096;
+    const priorFailures=await priorFailureDiagnostics(store,state,journal,task,config);
+    const estimatedInputTokens=Buffer.byteLength(canonical({task,item:state.items[task.item],activity:state.activities[task.activity],inputs:inputContents,priorFailures,candidate:candidateBinding(context.candidate,task.affectedPaths),grant:config.grant}), 'utf8')*2+4096;
     const routed = routeModel(config,Object.values(journal.probes),journal,{role:task.role,profile:config.roleProfiles[task.role],estimatedInputTokens,reservedOutputTokens:4000,requireWrites:task.writePaths.some(p => !p.startsWith(`${config.grant.artifactDirectory}/`)),authors,now:Date.now()});
     if (!routed.choice) { journal.checkpoints[selection.id] = `No qualified target: ${canonical(routed.rejected)}`; await saveJournal(store,journal); throw new Error(journal.checkpoints[selection.id]); }
     const route = routed.choice;
@@ -69,7 +80,7 @@ export async function launchTask(store:LoopStore,config:RoutingConfig,selection:
     await saveJournal(store,journal);
   });
   try {
-    if(!task.kind.startsWith('implementation-wave:'))for (const gate of task.gateNames) { const evidence = await runGate(store,assignmentId,gate,config.grant.owner); if(evidence.exitCode!==0)throw new RetryableExecution(`Gate ${gate} failed; preserve activity rounds during repair`); }
+    if(!task.kind.startsWith('implementation-wave:'))for (const gate of task.gateNames) { const evidence = await runGate(store,assignmentId,gate,config.grant.owner); if(evidence.exitCode===null)throw new Error(`Gate ${gate} has unknown exit; owner reconciliation required`); if(evidence.exitCode!==0)throw new FailedGateExecution(`Gate ${gate} failed; preserve activity rounds during repair`); }
     let completion!:Promise<CapturedProcess>;
     await store.locked(async()=>{
       let state=await store.load();const journal=await loadJournal(store,config);job=journal.jobs[id];const context=await store.context(state);
@@ -84,7 +95,8 @@ export async function launchTask(store:LoopStore,config:RoutingConfig,selection:
       const reviewTarget=target?{artifact:artifactMetadata(target),content:(await store.verifiedBlob(path.join(store.directory,'blobs',target.hash),target.hash)).toString('utf8')}:null;
       const boundedCandidate=candidateBinding(context.candidate,state.items[task.item].affectedPaths);
       const boundedAssignment={...state.assignments[assignmentId],baseline:candidateBinding(state.assignments[assignmentId].baseline,task.affectedPaths)};
-      const packet={schemaVersion:1,job:id,assignment:boundedAssignment,task,item:state.items[task.item],activity:state.activities[task.activity],reviewTarget,grant:config.grant,inputs:Object.keys(task.acceptedInputs).map(input=>({artifact:artifactMetadata(state.artifacts[input]),content:''})),candidate:boundedCandidate,evidence:Object.values(state.evidence).filter(e=>e.assignment===assignmentId).map(e=>({...e,candidate:candidateBinding(e.candidate,state.items[task.item].affectedPaths)})),decisions:Object.values(state.decisions).filter(d=>d.activity===task.activity),budget:config.budget,limitations:['Cooperative worker; no OS sandbox; recursive delegation unsupported','Candidate file manifest is limited to relevant paths; full manifest remains controller-owned','Context admission uses serialized UTF-8 byte upper bounds plus fixed protocol/output allowances, not provider token telemetry']};
+      const priorFailures=await priorFailureDiagnostics(store,state,journal,task,config);
+      const packet={schemaVersion:1,job:id,assignment:boundedAssignment,task,item:state.items[task.item],activity:state.activities[task.activity],reviewTarget,grant:config.grant,inputs:Object.keys(task.acceptedInputs).map(input=>({artifact:artifactMetadata(state.artifacts[input]),content:''})),candidate:boundedCandidate,evidence:Object.values(state.evidence).filter(e=>e.assignment===assignmentId).map(e=>({...e,candidate:candidateBinding(e.candidate,state.items[task.item].affectedPaths)})),priorFailures,decisions:Object.values(state.decisions).filter(d=>d.activity===task.activity),budget:config.budget,limitations:['Cooperative worker; no OS sandbox; recursive delegation unsupported','Candidate file manifest is limited to relevant paths; full manifest remains controller-owned','Context admission uses serialized UTF-8 byte upper bounds plus fixed protocol/output allowances, not provider token telemetry']};
       for(const input of packet.inputs)input.content=(await store.verifiedBlob(path.join(store.directory,'blobs',input.artifact.hash),input.artifact.hash)).toString('utf8');
       job.packetHash=digest(canonical(packet));await atomicJson(packetPath,packet);
       const nativePath=path.join(store.directory,'dispatch-native',`${id}.json`);await mkdir(path.dirname(nativePath),{recursive:true});
@@ -130,7 +142,7 @@ export async function launchTask(store:LoopStore,config:RoutingConfig,selection:
       }
       await saveJournal(store,journal);
     });
-    if(task.kind.startsWith('implementation-wave:'))for(const gate of task.gateNames){const evidence=await runGate(store,assignmentId,gate,config.grant.owner);if(evidence.exitCode!==0)throw new RetryableExecution(`Gate ${gate} failed after implementation; repair same activity without resetting reviews`);}
+    if(task.kind.startsWith('implementation-wave:'))for(const gate of task.gateNames){const evidence=await runGate(store,assignmentId,gate,config.grant.owner);if(evidence.exitCode===null)throw new Error(`Gate ${gate} has unknown exit; owner reconciliation required`);if(evidence.exitCode!==0)throw new FailedGateExecution(`Gate ${gate} failed after implementation; repair same activity without resetting reviews`);}
     if(task.kind.startsWith('implementation-wave:')&&task.gateNames.length)await store.locked(async()=>{const journal=await loadJournal(store,config);if(journal.jobs[id].status==='running')journal.jobs[id].status='terminated';await saveJournal(store,journal);});
     return id;
   } catch(error) {
@@ -145,7 +157,7 @@ export async function launchTask(store:LoopStore,config:RoutingConfig,selection:
           if(changed.every(p=>task.writePaths.includes(p))&&context.candidate.environmentHash===failed.candidate.environmentHash&&context.candidate.toolHash===failed.candidate.toolHash){
             state=await commitEvent(store,state,`${id}:retry-reconcile`,'assignment.reconcile',{assignment:assignmentId,resolution:'Observed command termination; owned-path diff checked; retry keeps activity/review budget'});
             let canRepair=true;
-            if(!(error instanceof PausedAdmission)&&(task.kind==='verification'||task.kind==='final-report')){
+            if(error instanceof FailedGateExecution&&(task.kind==='verification'||task.kind==='final-report')){
               const waves=Object.values(state.artifacts).filter(a=>state.activities[a.activity].item===task.item&&state.activities[a.activity].kind.startsWith('implementation-wave:')&&a.acceptedHash===a.hash);
               canRepair=waves.length>0;
               for(const wave of waves)state=await commitEvent(store,state,`${id}:gate-invalidate:${wave.id}`,'artifact.invalidate',{artifact:wave.id,reason:'Current execution gate failed; conservatively repair checked implementation inputs without resetting substantive budgets'});

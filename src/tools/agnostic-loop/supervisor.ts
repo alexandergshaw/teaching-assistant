@@ -70,7 +70,7 @@ export const importInbox:ImportInboxFunction = async(store,raw,job)=>{
 export const drive:DriveFunction = async(store,raw,input,options={})=>{
   const config=validateRoutingConfig(raw),selection=validateBacklogSelection(input);await verifySelection(selection);await loadJournal(store,config);
   const limit=options.maxSteps??1000;requireThat(Number.isSafeInteger(limit)&&limit>=0&&limit<=10000,'maxSteps must be an integer between zero and 10000');
-  let steps=0;
+  let steps=0,unchanged=false;
   while(steps<limit){
     const status=await statusFor(store,config,selection),action=status.actions[0];
     if(!action||['blocked','owner-needed','complete'].includes(action.kind))break;
@@ -93,7 +93,19 @@ export const drive:DriveFunction = async(store,raw,input,options={})=>{
         delete journal.checkpoints[selection.id];await saveJournal(store,journal);
       });
       steps++;
-    }catch(error){let retryable=false;await store.locked(async()=>{const journal=await loadJournal(store,config);retryable=journal.checkpoints[selection.id]?.startsWith('retryable-execution:')??false;if(!retryable)journal.checkpoints[selection.id]=redact(error instanceof Error?error.message:'Drive checkpoint',config);await saveJournal(store,journal);});if(retryable){steps++;continue;}break;}
+      const after=await statusFor(store,config,selection);
+      if(after.revision===status.revision&&canonical(after.actions)===canonical(status.actions)){unchanged=true;break;}
+    }catch(error){let retryable=false;await store.locked(async()=>{const journal=await loadJournal(store,config);retryable=journal.revision>status.journalRevision&&(journal.checkpoints[selection.id]?.startsWith('retryable-execution:')??false);if(!retryable)journal.checkpoints[selection.id]=redact(error instanceof Error?error.message:'Drive checkpoint',config);await saveJournal(store,journal);});if(retryable){steps++;continue;}break;}
   }
+  if(limit>0)await store.locked(async()=>{
+    const state=await store.load(),journal=await loadJournal(store,config),context=await store.context(state);
+    const action=nextActions(state,journal,{candidate:context.candidate,now:context.now,selection,config,acceptedBodies:await acceptedBodies(store,state)})[0];
+    if(action?.kind==='complete')return;
+    const stage=state.items[selection.id]?.status??'uncreated';
+    const reason=action&&(action.kind==='blocked'||action.kind==='owner-needed')?`${action.kind}: ${action.reasons.join('; ')}`:unchanged?'unchanged progress':steps>=limit?`step limit ${limit} exhausted`:null;
+    if(!reason)return;
+    const existing=journal.checkpoints[selection.id];
+    if(!existing||existing.startsWith('Dispatch stopped:')){journal.checkpoints[selection.id]=redact(`Dispatch stopped: stage=${stage}; action=${action?.kind??'none'}; ${reason}`,config);await saveJournal(store,journal);}
+  });
   return {steps,status:await statusFor(store,config,selection)};
 };

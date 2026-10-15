@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { canonical, digest } from './json';
 import { safePath, requireThat } from './engine';
-import type { AcceptedBody, ActionContext, BacklogSelection, DispatchRole, PlanProposal, RoutingConfig, TaskSpec } from './dispatch-types';
-import type { LoopState } from './types';
+import type { AcceptedBody, ActionContext, BacklogSelection, DispatchJournal, DispatchRole, PlanProposal, RoutingConfig, TaskSpec } from './dispatch-types';
+import type { Evidence, LoopState } from './types';
 import type { LoopStore } from './store';
 import { validateScopeProposal, validateCriteriaProposal, validatePlanProposal } from './routing-validation';
 
@@ -62,3 +62,37 @@ export async function verifySelection(selection:BacklogSelection):Promise<void> 
   requireThat(digest(await readFile(selection.sourcePath)) === selection.sourceHash,'selection source changed');
 }
 export function actionKey(value:unknown,config:RoutingConfig):string { return digest(canonical({value,configHash:digest(canonical(config))})); }
+
+export function failedGateForRepair(state:LoopState,journal:DispatchJournal,task:TaskSpec):Evidence|null {
+  if(task.purpose!=='repair')return null;
+  const events=state.events;
+  const invalidation=events.findLast(e=>e.type==='artifact.invalidate'&&state.artifacts[e.payload.artifact as string]?.activity===task.activity);
+  const publication=events.findLastIndex(e=>e.type==='artifact.submit'&&state.assignments[e.payload.assignment as string]?.activity===task.activity);
+  const boundary=Math.max(publication,invalidation?events.indexOf(invalidation):-1);
+  let anchor: DispatchJournal['jobs'][string] | undefined;
+  if(invalidation&&events.indexOf(invalidation)>publication){
+    const artifact=state.artifacts[invalidation.payload.artifact as string];
+    anchor=Object.values(journal.jobs).find(j=>j.item===task.item&&invalidation.id===`${j.id}:gate-invalidate:${artifact.id}`&&j.inputHashes[artifact.id]===artifact.hash);
+    requireThat(anchor||!invalidation.id.endsWith(`:gate-invalidate:${artifact.id}`),'Known gate repair lacks causally bound failed job');
+  }
+  // A submit or explicit invalidation ends older causality. Later writer failures
+  // remain relevant even when the original gate-invalidation anchor still exists.
+  const jobs=Object.values(journal.jobs).filter(j=>j.item===task.item&&(j.id===anchor?.id||(j.task.activity===task.activity&&['author','repair'].includes(j.task.purpose)&&events.findIndex(e=>e.id===j.publicationToken)>boundary)));
+  const recorded=events.flatMap((event,index)=>event.type==='evidence.record'?[{evidence:event.payload.evidence as Evidence,index}]:[]);
+  const evidenceById=new Map(recorded.map(r=>[r.evidence.id,r]));
+  for(const evidence of Object.values(state.evidence))if(!evidenceById.has(evidence.id))evidenceById.set(evidence.id,{evidence,index:-1});
+  const failures=[...evidenceById.values()].flatMap(record=>{
+    const evidence=record.evidence,job=jobs.find(j=>j.assignment===evidence.assignment);
+    return job&&evidence.kind==='gate'&&Number.isInteger(evidence.exitCode)&&evidence.exitCode!==0&&job.task.gateNames.includes(evidence.gate)?[{...record,job}]:[];
+  }).sort((a,b)=>b.index-a.index||b.evidence.finished-a.evidence.finished);
+  const selected=failures[0];
+  if(!selected&&!anchor)return null;
+  requireThat(selected,'Known gate repair lacks failed gate evidence');
+  const {evidence,job:failed}=selected;
+  const assignment=state.assignments[failed.assignment],operations=Object.values(state.operations).filter(o=>o.assignment===failed.assignment);
+  requireThat(failed.status==='rejected'&&assignment?.item===task.item&&assignment.reconciled&&operations.length>0&&operations.every(o=>o.status==='terminated'&&o.reconciled),'Failed gate repair requires known terminated and reconciled operations');
+  const started=events.findIndex(e=>e.id===failed.publicationToken);
+  requireThat(started>=0&&selected.index>started,'Failed gate evidence lacks recorded provenance');
+  requireThat(!state.evidence[evidence.id]||canonical(state.evidence[evidence.id])===canonical(evidence),'Failed gate evidence differs from preserved history');
+  return evidence;
+}

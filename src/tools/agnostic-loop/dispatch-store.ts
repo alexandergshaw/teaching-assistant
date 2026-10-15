@@ -1,5 +1,6 @@
-import { mkdir, open, readFile, rename } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { atomicFile } from './atomic-file';
 import { randomUUID } from 'node:crypto';
 import { canonical, digest } from './json';
 import { validateJournal, validateRoutingConfig } from './routing';
@@ -9,8 +10,7 @@ import type { LoopStore } from './store';
 export function configHash(config:RoutingConfig):string { return digest(canonical(config)); }
 export async function atomicJson(filename:string,value:unknown):Promise<void> {
   await mkdir(path.dirname(filename),{recursive:true}); const temporary = `${filename}.${randomUUID()}.tmp`;
-  const file = await open(temporary,'wx'); try { await file.writeFile(JSON.stringify(value,null,2)); await file.sync(); } finally { await file.close(); }
-  await rename(temporary,filename);
+  await atomicFile(temporary,filename,JSON.stringify(value,null,2));
 }
 export async function loadJournal(store:LoopStore,config:RoutingConfig):Promise<DispatchJournal> {
   const stored = validateRoutingConfig(JSON.parse(await readFile(path.join(store.directory,'dispatch-config.json'),'utf8')));

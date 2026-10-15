@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, unlink, lstat, realpath } from 'node:fs/promises';
+import { atomicFile } from './atomic-file';
+import { mkdir, open, readFile, unlink, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { validateState } from './validation';
 import { applyEvent, createState } from './engine';
@@ -36,10 +37,7 @@ export class LoopStore {
   }
   async save(state: LoopState): Promise<void> {
     const filename = path.join(this.directory, `state.${randomUUID()}.tmp`);
-    const handle = await open(filename, 'wx');
-    try { await handle.writeFile(JSON.stringify(state, null, 2)); await handle.sync(); }
-    finally { await handle.close(); }
-    await rename(filename, path.join(this.directory, 'state.json'));
+    await atomicFile(filename, path.join(this.directory, 'state.json'), JSON.stringify(state, null, 2));
   }
   async init(policy: unknown): Promise<LoopState> {
     return this.locked(async () => {

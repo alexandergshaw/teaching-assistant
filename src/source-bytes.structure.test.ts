@@ -46,7 +46,7 @@ vi.setConfig({ testTimeout: 30_000 });
  */
 
 const ROOT = process.cwd();
-const SKIP_DIRS = new Set([".git", "node_modules", ".next", ".claude", "coverage", "dist", ".vercel"]);
+const SKIP_DIRS = new Set([".git", "node_modules", ".next", ".claude", ".agnostic-loop", "coverage", "dist", ".vercel"]);
 const TEXT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".md", ".json", ".sql", ".yml", ".yaml"];
 
 /** TAB, LF and CR are the only control characters legitimately in source. */

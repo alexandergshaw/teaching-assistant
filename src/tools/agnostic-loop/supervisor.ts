@@ -74,12 +74,13 @@ export const drive:DriveFunction = async(store,raw,input,options={})=>{
   while(steps<limit){
     const status=await statusFor(store,config,selection),action=status.actions[0];
     if(!action||['blocked','owner-needed','complete'].includes(action.kind))break;
+    let progressed=true;
     try{
       if(action.kind==='dispatch')await launchTask(store,config,selection,action.task);
       else if(action.kind==='import-inbox')await importInbox(store,config,action.job);
       else if(action.kind==='gate')throw new Error('Standalone gate action requires the durable verifier assignment');
       else await store.locked(async()=>{
-        let state=await store.load();const journal=await loadJournal(store,config),context=await store.context(state),bodies=await acceptedBodies(store,state);
+        let state=await store.load();const revision=state.revision,journal=await loadJournal(store,config),context=await store.context(state),bodies=await acceptedBodies(store,state);
         const current=nextActions(state,journal,{candidate:context.candidate,now:context.now,selection,config,acceptedBodies:bodies});requireThat(current.some(a=>canonical(a)===canonical(action)),'Workflow action changed before commit');
         if(action.kind==='bootstrap'){
           const requirements=selection.requirements.length?selection.requirements:[`${selection.id}:requested-outcome`];
@@ -90,11 +91,11 @@ export const drive:DriveFunction = async(store,raw,input,options={})=>{
           const observed:Context={...context,configuration:{configHash:configHash(config),grant:config.grant,scope:{artifact:scope.id,hash:scope.hash,proposal:scope.kind==='scope'?scope.value:undefined!},criteria:{artifact:criteria.id,hash:criteria.hash,proposal:criteria.kind==='criteria'?criteria.value:undefined!}}};
           state=await commitEvent(store,state,`dispatch:${action.key}`,'item.configure',{item:action.item,scopeArtifact:action.scopeArtifact,criteriaArtifact:action.criteriaArtifact},observed);
         }else if(action.kind==='advance')state=await commitEvent(store,state,`dispatch:${action.key}`,'item.advance',{item:action.item,status:action.status,artifacts:action.artifacts,evidence:action.evidence});
+        progressed=state.revision!==revision;
         delete journal.checkpoints[selection.id];await saveJournal(store,journal);
       });
       steps++;
-      const after=await statusFor(store,config,selection);
-      if(after.revision===status.revision&&canonical(after.actions)===canonical(status.actions)){unchanged=true;break;}
+      if(!progressed){unchanged=true;break;}
     }catch(error){let retryable=false;await store.locked(async()=>{const journal=await loadJournal(store,config);retryable=journal.revision>status.journalRevision&&(journal.checkpoints[selection.id]?.startsWith('retryable-execution:')??false);if(!retryable)journal.checkpoints[selection.id]=redact(error instanceof Error?error.message:'Drive checkpoint',config);await saveJournal(store,journal);});if(retryable){steps++;continue;}break;}
   }
   if(limit>0)await store.locked(async()=>{

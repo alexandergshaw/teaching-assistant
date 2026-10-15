@@ -152,6 +152,29 @@ Worker completion is a handoff to the host, never permission to end the chain.
 Preserve fresh checker contexts, truthful requested/observed model identity and
 the substantive two-round cap. Do not manufacture acceptance from worker prose.
 
+For an already admitted, unexpired finalizer, `assemble-final ASSIGNMENT
+RESIDUALS_JSON --state STORE` assembles the six-field local final report from
+the recorded snapshot and an explicit JSON array of residuals (`[]` when none).
+It reads immutable store blobs but does not capture the live workspace, write a
+report, publish an artifact or accept delivery. Snapshot consistency supplies no
+live source or environment freshness. Normal observed import, engine validation
+and an independent final check remain required; this command does not renew an
+expired run or replace a finalizer admission.
+
+The executable prints the normal `{ok,result}` envelope. Extract only `result`
+to a path already granted to that finalizer; do not import the envelope:
+
+```powershell
+$taskAssembly = node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/cli.ts assemble-final FINALIZER_ID C:/absolute/residuals.json --state C:/absolute/store | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or !$taskAssembly.ok) { throw 'Final report assembly failed' }
+$taskAssignedReportPath = 'C:/absolute/workspace/artifacts/assigned-final-report.json'
+[IO.File]::WriteAllText($taskAssignedReportPath, ($taskAssembly.result | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+```
+
+That explicit extraction is a separate host write within the admitted assignment.
+Continue with normal `import`, `final.record`, assignment completion and the
+independent review; assembly alone changes none of their prerequisites.
+
 At manual-run admission, retain the exact executable, argument array (including
 the loader URL spelling), working directory and names of policy-observed
 environment variables in the host's durable handoff record. Keep secret values

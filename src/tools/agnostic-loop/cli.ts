@@ -7,6 +7,8 @@ import { nextAssignments } from './scheduler';
 import { importArtifact, observeEvent } from './observed';
 import { exportPacket, importResult } from './adapter';
 import { reconcileOperation, recoverOperations, runGate } from './runner';
+import { buildManualFinalReport } from './manual-final-report';
+import type { Residual } from './types';
 
 export async function dispatch(args: string[]): Promise<unknown> {
   if (['dispatch', 'drive', 'doctor', 'explain', 'mcp'].includes(args[0])) return (await import('./dispatch-cli')).dispatchAutomatic(args);
@@ -18,8 +20,8 @@ export async function dispatch(args: string[]): Promise<unknown> {
     } else positional.push(args[i]);
   }
   const [command, ...parameters] = positional;
-  const arity: Record<string, number> = { init: 0, status: 0, next: 0, apply: 1, import: 3, packet: 2, result: 1, run: 2, demo: 1, 'recover-lock': 0, 'recover-operations': 0, 'reconcile-operation': 1 };
-  if (!(command in arity) || parameters.length !== arity[command]) throw new Error('Usage: init|status|next|apply EVENT|import ASSIGNMENT ID FILE|packet ASSIGNMENT FILE|result FILE|run ASSIGNMENT GATE|demo DIRECTORY|recover-lock|recover-operations; options --state DIRECTORY --actor OPERATOR');
+  const arity: Record<string, number> = { init: 0, status: 0, next: 0, apply: 1, import: 3, packet: 2, result: 1, run: 2, demo: 1, 'assemble-final': 2, 'recover-lock': 0, 'recover-operations': 0, 'reconcile-operation': 1 };
+  if (!(command in arity) || parameters.length !== arity[command]) throw new Error('Usage: init|status|next|apply EVENT|import ASSIGNMENT ID FILE|packet ASSIGNMENT FILE|result FILE|run ASSIGNMENT GATE|assemble-final ASSIGNMENT RESIDUALS_JSON|demo DIRECTORY|recover-lock|recover-operations; options --state DIRECTORY --actor OPERATOR');
   if (command === 'demo') return (await import('./demo')).runDemo(parameters[0]);
   const store = new LoopStore(flags['--state'] ?? '.agnostic-loop');
   if (command === 'init') {
@@ -32,7 +34,10 @@ export async function dispatch(args: string[]): Promise<unknown> {
     if (!flags['--token'] || !flags['--acknowledgement'] || !flags['--actor']) throw new Error('Recovery requires --actor, --token and --acknowledgement');
     await store.recoverLock(flags['--token'], flags['--acknowledgement']); return { recovered: true };
   }
-  const state = await store.load(); const context = await store.context(state);
+  const state = await store.load();
+  // Snapshot assembly performs no live candidate capture, publication or acceptance.
+  if (command === 'assemble-final') return buildManualFinalReport(state, parameters[0], JSON.parse(await readFile(parameters[1], 'utf8')) as Residual[]);
+  const context = await store.context(state);
   if (command === 'status') return { ...state, candidate: context.candidate, staleArtifacts: Object.keys(state.artifacts).filter(id => !context.artifacts[id]), scheduling: nextAssignments(state, context), limitations: ['Provider identity is operator-attested', 'No hostile-worker sandbox', 'Whole-candidate evidence only'] };
   if (command === 'next') return nextAssignments(state, context);
   if (command === 'packet') return exportPacket(store, parameters[0], parameters[1]);

@@ -225,6 +225,18 @@ export default function UploadedSlideEditor() {
   const selectedObject = selected?.objects?.find((object) => object.id === selectedObjectId);
   function saveObjectEdit(object: UploadedSlideObject) {
     if (!workingBase64 || hasUnsavedEdits) return;
+    if (object.kind === "smartart" && object.smartArtNodes?.length) {
+      const operations: Extract<SlideObjectOperation, { kind: "smartart" }>[] = object.smartArtNodes.flatMap((node) => {
+        const text = objectEdit[`smartart:${node.id}`];
+        return text !== undefined && text !== node.text ? [{ objectId: object.id, kind: "smartart" as const, action: "setNodeText" as const, nodeId: node.id, text }] : [];
+      });
+      if (!operations.length || operations.some((operation) => !operation.text.trim() || operation.text.length > 2_000 || operation.text.includes("\r"))) {
+        setError("Enter changed, nonempty SmartArt leaf text of at most 2,000 characters per node.");
+        return;
+      }
+      void apply(selectedNumber, [], "edit", operations);
+      return;
+    }
     if (object.kind === "chart" && object.chartData) {
       const categories = (objectEdit.chartCategories ?? object.chartData.categories.join("\n")).split("\n").map((value) => value.trim());
       const rawValues = (objectEdit.chartValues ?? object.chartData.values.join("\n")).split("\n").map((value) => value.trim());
@@ -314,6 +326,11 @@ export default function UploadedSlideEditor() {
                 {selectedObject.kind === "picture" && <Button component="label" variant="outlined" disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Replace picture from PNG or JPEG<input hidden type="file" accept="image/png,image/jpeg" onChange={(event) => { void replacePicture(event.target.files?.[0]); event.currentTarget.value = ""; }} /></Button>}
                 <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Save object changes</Button>
               </div>}
+              {selectedObject?.editable && selectedObject.kind === "smartart" && selectedObject.smartArtNodes && <div className={styles.objectEditor}>
+                <Typography variant="subtitle1">Edit SmartArt leaf text</Typography>
+                {selectedObject.smartArtNodes.map((node, index) => <TextField key={node.id} fullWidth label={`Leaf ${index + 1}`} value={objectEdit[`smartart:${node.id}`] ?? node.text} onChange={(event) => setObjectEdit((current) => ({ ...current, [`smartart:${node.id}`]: event.target.value }))} disabled={busy !== null || candidate !== null} />)}
+                <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || !selectedObject.smartArtNodes.some((node) => objectEdit[`smartart:${node.id}`] !== undefined && objectEdit[`smartart:${node.id}`] !== node.text)}>Save SmartArt leaf text</Button>
+              </div>}
               {selectedObject?.editable && selectedObject.kind === "chart" && selectedObject.chartData && <div className={styles.objectEditor}>
                 <Typography variant="subtitle1">Edit chart data</Typography>
                 <TextField fullWidth label="Series name" value={objectEdit.chartSeriesName ?? selectedObject.chartData.seriesName} onChange={(event) => setObjectEdit((current) => ({ ...current, chartSeriesName: event.target.value }))} disabled={busy !== null || candidate !== null} />
@@ -324,7 +341,7 @@ export default function UploadedSlideEditor() {
             </Paper>
             {!selected?.paragraphs.some((paragraph) => paragraph.editable !== false) && !selected?.objects?.some((object) => object.editable) && !selected?.notes?.editable ? <Alert severity="info">This slide has no supported editable objects. You can inspect retained objects above and export the deck unchanged.</Alert> : (
               <>
-                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Unsupported charts, SmartArt, and groups cannot be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
+                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Unsupported charts, SmartArt structures, and groups cannot be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
                 {selected.paragraphs.some((paragraph) => paragraph.editable !== false) && <>
                   <div className={styles.paragraphs}>
                     {selected.paragraphs.map((paragraph, index) => paragraph.editable === false ? <Alert key={paragraph.id} severity="info"><strong>Paragraph {index + 1} is read-only.</strong> Its PowerPoint structure is outside the safe text-editing subset: {paragraph.text}</Alert> : <TextField key={paragraph.id} fullWidth multiline minRows={index === 0 ? 2 : 3} label={`Text paragraph ${index + 1}`} value={edits[paragraph.id] ?? paragraph.text} onChange={(event) => setEdits((current) => ({ ...current, [paragraph.id]: event.target.value }))} disabled={busy !== null || candidate !== null} />)}
@@ -346,9 +363,10 @@ export default function UploadedSlideEditor() {
                 {candidate.paragraphs.map((paragraph, index) => <div key={paragraph.id} className={styles.candidateParagraph}><strong>Paragraph {index + 1}</strong><p>Before: {selected?.paragraphs.find((item) => item.id === paragraph.id)?.text ?? ""}</p><p>Proposed: {paragraph.text}</p></div>)}
                 {candidate.operations.map((candidateOperation, index) => {
                   const object = selected?.objects?.find((item) => item.id === candidateOperation.objectId);
-                  const before = object ? candidateOperation.kind === "chart" ? object.chartData : candidateOperation.action === "setGeometry" ? object.geometry : candidateOperation.action === "setFill" ? object.fill : object.altText : undefined;
-                  const after = candidateOperation.kind === "chart" ? candidateOperation.data : candidateOperation.action === "setGeometry" ? candidateOperation.geometry : candidateOperation.action === "setFill" ? candidateOperation.fill : candidateOperation.altText;
-                  return <div key={`${candidateOperation.objectId}-${index}`} className={styles.candidateParagraph}><strong>{object?.name ?? candidateOperation.kind}</strong><p>Before: {JSON.stringify(before)}</p><p>Proposed: {JSON.stringify(after)}</p></div>;
+                  const smartArtNode = candidateOperation.kind === "smartart" ? object?.smartArtNodes?.find((node) => node.id === candidateOperation.nodeId) : undefined;
+                  const before = candidateOperation.kind === "smartart" ? smartArtNode?.text : object ? candidateOperation.kind === "chart" ? object.chartData : candidateOperation.action === "setGeometry" ? object.geometry : candidateOperation.action === "setFill" ? object.fill : object.altText : undefined;
+                  const after = candidateOperation.kind === "smartart" ? candidateOperation.text : candidateOperation.kind === "chart" ? candidateOperation.data : candidateOperation.action === "setGeometry" ? candidateOperation.geometry : candidateOperation.action === "setFill" ? candidateOperation.fill : candidateOperation.altText;
+                  return <div key={`${candidateOperation.objectId}-${index}`} className={styles.candidateParagraph}><strong>{object?.name ?? candidateOperation.kind}{smartArtNode ? ` · ${smartArtNode.id}` : ""}</strong><p>Before: {JSON.stringify(before)}</p><p>Proposed: {JSON.stringify(after)}</p></div>;
                 })}
                 {candidate.notes.map((note) => <div key={note.id} className={styles.candidateParagraph}><strong>Speaker notes</strong><p>Before: {selected?.notes?.text ?? ""}</p><p>Proposed: {note.text}</p></div>)}
                 <div className={styles.actions}><Button variant="contained" onClick={() => void apply(candidate.slideNumber, candidate.paragraphs, "accept", candidate.operations, candidate.sourceDigest, candidate.notes)} disabled={busy !== null}>Accept candidate</Button><Button onClick={discardCandidate} disabled={busy !== null}>Discard</Button></div>

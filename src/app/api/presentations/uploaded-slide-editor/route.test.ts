@@ -121,6 +121,32 @@ describe("POST /api/presentations/uploaded-slide-editor", () => {
     expect((await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Change chart" }))).status).toBe(502);
   });
 
+  it("offers only the selected SmartArt leaf nodes to regeneration and accepts typed leaf edits", async () => {
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "Hierarchy", paragraphs: [], objects: [
+        { id: "package:s1:o5:smartart", kind: "smartart", name: "Hierarchy", editable: true, text: "", smartArtNodes: [{ id: "leaf-a", text: "First" }, { id: "leaf-b", text: "Second" }] },
+      ] },
+      { number: 2, title: "Other slide", paragraphs: [{ id: "s1_p0", text: "private other slide" }] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [{ objectId: "package:s1:o5:smartart", kind: "smartart", action: "setNodeText", nodeId: "leaf-a", text: "Updated" }] }) } as never);
+    const response = await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Clarify the hierarchy" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ operations: [{ kind: "smartart", action: "setNodeText", nodeId: "leaf-a", text: "Updated" }] });
+    const promptPart = vi.mocked(callLlm).mock.calls[0]?.[0].contents?.[0]?.parts?.[0];
+    const prompt = promptPart && "text" in promptPart ? promptPart.text : "";
+    expect(prompt).toContain("leaf-a");
+    expect(prompt).toContain("First");
+    expect(prompt).not.toContain("private other slide");
+
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "Hierarchy", paragraphs: [], objects: [
+        { id: "package:s1:o5:smartart", kind: "smartart", name: "Hierarchy", editable: true, text: "", smartArtNodes: [{ id: "leaf-a", text: "First" }] },
+      ] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [{ objectId: "package:s1:o5:smartart", kind: "smartart", action: "setNodeText", nodeId: "parent", text: "Retargeted parent" }] }) } as never);
+    expect((await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Change the parent" }))).status).toBe(502);
+  });
+
   it("rejects a stale candidate before applying any package change", async () => {
     const response = await POST(request({ op: "apply", base64: "AA==", slideNumber: 1, replacements: [{ id: "s0_p0", text: "stale" }], expectedDigest: "0".repeat(64) }));
     expect(response.status).toBe(409);

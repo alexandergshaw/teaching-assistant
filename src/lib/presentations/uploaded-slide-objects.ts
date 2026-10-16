@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import { assertContainerWithinCaps, createZipBudget, readOfficeMember, ZipCapError } from "@/lib/zip-caps";
 import { applyUploadedSlideChartOperation, inspectUploadedSlideChart, type ChartOperation, type UploadedSlideChartData } from "@/lib/presentations/uploaded-slide-charts";
+import { applyUploadedSlideSmartArtOperations, inspectUploadedSlideSmartArt, type SmartArtNodeTextOperation, type UploadedSlideSmartArtNode } from "@/lib/presentations/uploaded-slide-smartart";
 
 const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -26,6 +27,7 @@ export interface UploadedSlideObject {
   fill?: { color: string; transparency: number };
   altText?: string;
   chartData?: UploadedSlideChartData;
+  smartArtNodes?: UploadedSlideSmartArtNode[];
 }
 export interface SlidePackageContext {
   slideNumber: number;
@@ -38,7 +40,8 @@ export type SlideObjectOperation =
   | { objectId: string; kind: "shape"; action: "setFill"; fill: { color: string; transparency: number } }
   | { objectId: string; kind: "picture"; action: "setGeometry"; geometry: SlideGeometry }
   | { objectId: string; kind: "picture"; action: "setAltText"; altText: string }
-  | ChartOperation;
+  | ChartOperation
+  | SmartArtNodeTextOperation;
 
 export class SlideObjectError extends Error {
   constructor(readonly code: "invalid_package" | "invalid_slide" | "invalid_operation" | "unsupported_object" | "invalid_relationship") {
@@ -158,6 +161,7 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
       let editable = false;
       let reason: string | undefined;
       let chartData: UploadedSlideChartData | undefined;
+      let smartArtNodes: UploadedSlideSmartArtNode[] | undefined;
       if (kind === "shape") {
         const properties = first(node, P, "spPr");
         const safeGeometry = Boolean(properties && first(properties, A, "xfrm") && first(properties, A, "prstGeom") && !first(properties, A, "custGeom") && !first(properties, A, "effectLst") && !first(properties, A, "effectDag"));
@@ -179,7 +183,12 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
         reason = inspected.reason;
         chartData = inspected.data;
       }
-      else if (kind === "smartart") { editable = false; reason = "SmartArt is retained; its diagram relationships are read-only in this editor."; }
+      else if (kind === "smartart") {
+        const inspected = await inspectUploadedSlideSmartArt(bytes, slide.id, props.id);
+        smartArtNodes = inspected?.nodes;
+        editable = Boolean(smartArtNodes?.length);
+        if (!editable) reason = "SmartArt is retained; its diagram relationships or hierarchy are outside the supported simple leaf-text edit set.";
+      }
       else if (kind === "connector" || kind === "unknown") { editable = false; reason = "This PowerPoint object is retained but its structure is outside the supported edit set."; }
       const transformNode = kind === "shape" || kind === "picture" ? node : undefined;
       const name = props.name.slice(0, 120);
@@ -189,6 +198,7 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
         ...(kind === "shape" ? { fill: readFill(node) } : {}),
         ...(kind === "picture" ? { altText: props.altText.slice(0, 500) } : {}),
         ...(chartData ? { chartData } : {}),
+        ...(smartArtNodes ? { smartArtNodes } : {}),
       });
     }
     let layout: SlidePackageContext["layout"] = null;
@@ -279,6 +289,7 @@ export async function applySlideObjectOperations(bytes: Buffer, slideNumber: num
     const allowedObjects = new Map(originalContext.objects.filter((object) => object.editable).map((object) => [object.id, object]));
     const packageKey = identityPackageKey ?? createHash("sha256").update(bytes).digest("hex").slice(0, 20);
     const chartOperations: ChartOperation[] = [];
+    const smartArtOperations: SmartArtNodeTextOperation[] = [];
     const nativeOperations: unknown[] = [];
     for (const raw of input) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new SlideObjectError("invalid_operation");
@@ -287,6 +298,7 @@ export async function applySlideObjectOperations(bytes: Buffer, slideNumber: num
       const authorized = allowedObjects.get(operation.objectId);
       if (!authorized || authorized.kind !== operation.kind) throw new SlideObjectError("invalid_operation");
       if (operation.kind === "chart" && operation.action === "setData" && Object.keys(operation).sort().join(",") === "action,data,kind,objectId") chartOperations.push(operation as unknown as ChartOperation);
+      else if (operation.kind === "smartart" && operation.action === "setNodeText" && Object.keys(operation).sort().join(",") === "action,kind,nodeId,objectId,text") smartArtOperations.push(operation as unknown as SmartArtNodeTextOperation);
       else if (operation.kind !== "chart") nativeOperations.push(raw);
       else throw new SlideObjectError("invalid_operation");
     }
@@ -304,6 +316,11 @@ export async function applySlideObjectOperations(bytes: Buffer, slideNumber: num
       const chartResult = await applyUploadedSlideChartOperation(workingBytes, currentSlide.id, slideNumber, packageKey, operation);
       workingBytes = chartResult.bytes;
       chartResult.changedMembers.forEach((member) => changedMembers.add(member));
+    }
+    if (smartArtOperations.length > 0) {
+      const smartArtResult = await applyUploadedSlideSmartArtOperations(workingBytes, currentSlide.id, slideNumber, packageKey, smartArtOperations);
+      workingBytes = smartArtResult.bytes;
+      smartArtResult.changedMembers.forEach((member) => changedMembers.add(member));
     }
     return { bytes: workingBytes, context: await inspectSlideObjects(workingBytes, slideNumber), changedMembers: [...changedMembers] };
   } catch (error) {

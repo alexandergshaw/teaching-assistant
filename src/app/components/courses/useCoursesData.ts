@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   listCourseHubAction,
   listCourseHubLightAction,
@@ -55,6 +55,7 @@ export interface UseCoursesDataReturn {
 }
 
 let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; templates: SyllabusTemplateMeta[]; orgs: string[] } | null = null;
+let hubCacheGeneration = 0;
 
 // OWNERSHIP - this module-scope cache survives a client-side sign-out the
 // same way run-form-options-cache.ts's own Map and useCourseTasksData.ts's
@@ -69,6 +70,7 @@ let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; templates: 
 // render body.
 registerOwnerScopedCache(() => {
   hubCache = null;
+  hubCacheGeneration++;
 });
 
 export function useCoursesData(): UseCoursesDataReturn {
@@ -84,6 +86,7 @@ export function useCoursesData(): UseCoursesDataReturn {
   const [lmsErrorByCourse, setLmsErrorByCourse] = useState<Record<string, string>>({});
   const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const setCoursesWithCache = useCallback((u: Course[] | ((prev: Course[]) => Course[])): void => {
     setCourses((prev) => {
@@ -118,20 +121,72 @@ export function useCoursesData(): UseCoursesDataReturn {
   }, []);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const loadSequence = ++loadSequenceRef.current;
+    const cacheGeneration = hubCacheGeneration;
+    const isCurrentLoad = () => loadSequence === loadSequenceRef.current && cacheGeneration === hubCacheGeneration;
     if (opts?.silent) setRefreshing(true);
     else setState("loading");
     // A silent reload already has rows on screen, so it fetches full rows in
     // one step (a light replace would blank the heavy cells). Only the
     // initial, non-silent load paints from the light rows first.
     const twoPhase = !opts?.silent;
+    if (twoPhase) {
+      // These lookups are needed to label some cells and populate later forms,
+      // but they must not hold the first cold table paint. In particular, the
+      // org lookup can make several sequential GitHub requests. Start the
+      // supporting work beside the light course query and publish its rows as
+      // soon as that query returns.
+      const auxiliaryPromise = Promise.all([
+        listFinalizedSyllabiAction(),
+        listMyOrgsAction(),
+        listSyllabusTemplatesAction(),
+      ]);
+      const c = await listCourseHubLightAction();
+      if (!isCurrentLoad()) return;
+      if ("error" in c) {
+        setRefreshing(false);
+        setState("error");
+        setError(c.error);
+        return;
+      }
+
+      // Show course rows before waiting for auxiliary metadata or full rows.
+      // Row actions stay inert until the complete records are merged below.
+      setHeavyReady(false);
+      setCourses(c.courses);
+      setState("idle");
+      setRefreshing(false);
+      const fullPromise = listCourseHubAction();
+
+      const [s, o, t] = await auxiliaryPromise;
+      if (!isCurrentLoad()) return;
+      const syllabi = "error" in s ? [] : s.syllabi;
+      const orgs = "error" in o ? [] : o.orgs;
+      const templates = "error" in t ? [] : t.templates;
+      setSyllabi(syllabi);
+      setOrgs(orgs);
+      setTemplates(templates);
+
+      const full = await fullPromise;
+      if (!isCurrentLoad()) return;
+      if ("error" in full) {
+        setError(`Could not load the full course details: ${full.error} Use Refresh to retry.`);
+        return;
+      }
+      const merged = mergeHydratedCourses(c.courses, full.courses);
+      hubCache = { courses: merged, syllabi, orgs, templates };
+      setCoursesWithCache(merged);
+      setHeavyReady(true);
+      return;
+    }
+
     const [c, s, o, t] = await Promise.all([
-      twoPhase ? listCourseHubLightAction() : listCourseHubAction(),
+      listCourseHubAction(),
       listFinalizedSyllabiAction(),
       listMyOrgsAction(),
       listSyllabusTemplatesAction(),
     ]);
-    // Queued after the four above, so it never delays the first paint.
-    const fullPromise = twoPhase ? listCourseHubAction() : null;
+    if (!isCurrentLoad()) return;
     if ("error" in c) {
       setRefreshing(false);
       if (!opts?.silent) {
@@ -146,37 +201,14 @@ export function useCoursesData(): UseCoursesDataReturn {
       orgs: "error" in o ? [] : o.orgs,
       templates: "error" in t ? [] : t.templates,
     };
-    if (!twoPhase) {
-      hubCache = next;
-      setCoursesWithCache(next.courses);
-      setSyllabisWithCache(next.syllabi);
-      setOrgsWithCache(next.orgs);
-      setTemplatesWithCache(next.templates);
-      setHeavyReady(true);
-      setState("idle");
-      setRefreshing(false);
-      return;
-    }
-    // Phase 1: paint from the light rows. hubCache is NOT written yet - a
-    // remount mid-window must not treat placeholder rows as complete.
-    setHeavyReady(false);
+    hubCache = next;
     setCoursesWithCache(next.courses);
     setSyllabisWithCache(next.syllabi);
     setOrgsWithCache(next.orgs);
     setTemplatesWithCache(next.templates);
+    setHeavyReady(true);
     setState("idle");
     setRefreshing(false);
-    // Phase 2: fetch the full rows in the background and merge by id.
-    const full = await fullPromise;
-    if (full === null) return;
-    if ("error" in full) {
-      setError(`Could not load the full course details: ${full.error} Use Refresh to retry.`);
-      return;
-    }
-    const merged = mergeHydratedCourses(next.courses, full.courses);
-    hubCache = { ...next, courses: merged };
-    setCoursesWithCache(merged);
-    setHeavyReady(true);
   }, [setCoursesWithCache, setSyllabisWithCache, setOrgsWithCache, setTemplatesWithCache]);
 
   const reloadSyllabi = useCallback(async () => {

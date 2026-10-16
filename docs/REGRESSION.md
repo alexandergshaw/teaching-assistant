@@ -47766,3 +47766,74 @@ and records failed-gate repair as unfinished; the initial review activity is clo
 These instruments render no component, contact no live provider, and establish
 no malicious-process sandbox or reliable process-tree termination guarantee.
 Semantic criteria adequacy and true remote identity remain operator obligations.
+
+## Template tools as built (2026-10-15)
+
+This is an as-built record for PowerPoint Templates and Document Templates,
+not a before-change measurement. Entry 451 remains the historical baseline for
+the existing positional PowerPoint fill engine; this addition neither rewrites
+its observations nor claims that its proposed slide-cloning wave shipped.
+
+Presentations now mounts the sibling `ppt-templates` and `document-templates`
+views (`manual/manual-rail.ts`, `page.tsx`). In
+`src/app/components/powerpoint-templates/`, explicit upload confirmation precedes
+analysis. The library shows source slide identity and extracted text in
+presentation relationship order, editable roles and absent roles. Mixed decks
+retain textless slides as `other`; entirely textless decks are refused. These
+are text examples, without thumbnails or visual classification. The actions
+and `src/lib/powerpoint-template-library/` persist the original source reference
+and corrected classification, re-read both on reopen, and download the original
+PPTX or manifest. Reuse writes the existing `ta-ppt-template-file-id` selection
+synchronously before navigating to Slide Deck Creation; storage failure prevents
+navigation. Reuse selects the original for existing positional fill, retaining
+its fit/refusal limits; it does not synthesize new layouts or clone slides.
+
+In `src/app/components/document-templates/`, DOCX or text-bearing PDF receives an
+explicit abstraction proposal. Review shows retained source text and replacement
+placeholders in source order; proposal JSON is editable and revalidated on save
+or preview. `document-template-files.ts` and `src/lib/document-templates/` store
+the original separately from the definition and derived DOCX. Reopen reads the
+persisted identity; unfilled and filled DOCX downloads rebuild from that source.
+Filling substitutes validated field values literally and deterministically,
+without another model call. Supported DOCX filling retains unaffected paragraphs
+and package members. PDF conversion creates editable text-based DOCX: page layout,
+images and forms are not retained. No-text PDFs refuse; encrypted/unreadable
+refusal code is present, without a claimed encrypted-file runtime measurement.
+Unsupported Word fields/content controls/tracked changes and malformed XML refuse;
+this is not arbitrary OOXML conformance or editor-fidelity proof. Failed save
+retains the proposal; reviewed-proposal download uses a separate validated preview,
+while ordinary saved downloads continue to use the saved definition.
+
+The advantage beyond a chat is persisted original plus classification/correction
+and later reuse for PowerPoint, and retained document text plus validated,
+deterministic model-free fill for documents. Authenticated actions scope reads and
+writes by the server-derived user; source ownership/immutability, bounded parsing
+and proposal validation are code guarantees. Migration SQL adds owner RLS,
+PowerPoint owner/source linkage and document source immutability. Template session
+diagnostics report operation, outcome, duration and stable failure code without
+source text, filenames, replacement values or model responses. These are source
+and fixture claims, not live database or provider results.
+
+Independent implementation acceptance is recorded as `clean` in each
+`C:/Users/alexa/.codex/worktrees/{powerpoint-template-library,document-template-abstraction}/teaching-assistant/.agnostic-loop/template-tools-20261015/implementation-check-2.json`.
+The PowerPoint report's `commands` and document report's `evidence.suiteCommand`
+record successful independent executions of these commands, respectively; this
+documentation author did not rerun them:
+
+```text
+npm.cmd run test:paths -- src/lib/powerpoint-template-library/inventory.test.ts src/app/actions/powerpoint-template-library.test.ts src/file-size-ceiling.structure.test.ts
+npm.cmd run test:paths -- src/lib/document-templates/extract.test.ts src/lib/document-templates/abstract.test.ts src/lib/document-templates/fill.test.ts src/lib/document-templates/store.test.ts src/app/actions/document-template-files.test.ts src/app/components/document-templates/panel-logic.test.ts src/app/components/document-templates/wiring.test.ts src/file-size-ceiling.structure.test.ts src/app/actions/action-guard-coverage.test.ts src/app/actions/wholesale-auth-mock-population.structure.test.ts src/lib/use-server-exports.test.ts
+```
+
+Action fixtures cover save/discard/reopen, corrected classifications, original
+bytes and model-free document reuse; document fixtures also exercise the installed
+PDF parser. The bounded reviews do not establish composed-tree gate success;
+those outcomes belong to the coordinator's integration evidence. No components
+are rendered by these tests. Before runtime rollout is complete, owner/browser
+operator must exercise history/reload, keyboard/focus/live regions, stale requests,
+review edits and downloads in an authenticated browser; owner/database operator
+must apply the migrations and probe cross-account access, source linkage and
+immutability; owner/live-provider operator must assess classification and
+abstraction quality on instructor files. A real PowerPoint/Word/PDF comparison
+walk remains necessary for output appearance and supported-file fidelity. No live
+DB, applied migration, live provider quality or rendered UI success is claimed.

@@ -1,0 +1,412 @@
+.page {
+  display: grid;
+  gap: var(--space-6);
+  width: 100%;
+}
+
+.workspace,
+.documentWorkspace {
+  display: grid;
+  align-items: start;
+  gap: var(--space-4);
+}
+
+.workspace {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.documentWorkspace {
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr);
+}
+
+.workflowColumn,
+.libraryColumn {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.panel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4);
+  color: var(--text-primary);
+  background: var(--card-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
+.panelDescription,
+.helperText {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+.subheading {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
+.formStack {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  line-height: var(--line-snug);
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-md);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 400;
+  background: var(--field-background);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+}
+
+.input[type="file"] {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.input:disabled,
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.libraryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.checkField {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-snug);
+}
+
+.checkField input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  min-height: var(--control-height-md);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  line-height: var(--line-snug);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.primaryButton {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.secondaryButton {
+  color: var(--text-primary);
+  background: var(--field-background);
+  border: 1px solid var(--field-border);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.libraryList,
+.paragraphList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.libraryList li {
+  min-width: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.libraryButton {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-height-lg);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-1);
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+  font-size: var(--font-size-md);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.libraryButton span {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.libraryButton:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.emptyState {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+  text-align: center;
+  background: var(--surface-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.reviewPanel {
+  grid-column: 1 / -1;
+}
+
+.roleSummary {
+  flex: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.slideGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--space-3);
+}
+
+.slideCard,
+.paragraphCard {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--surface-subtle);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+}
+
+.slideHeading {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.slideHeading h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
+.slideHeading small {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.slideText {
+  min-height: 96px;
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card-background);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+}
+
+.notice {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
+  background: var(--surface-subtle);
+  border-left: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+}
+
+.selectedFile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.selectedFile p {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+
+.paragraphReview {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.paragraphLabel {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: var(--line-snug);
+  overflow-wrap: anywhere;
+}
+
+.paragraphText,
+.originalText p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.originalText {
+  padding-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  border-top: 1px solid var(--border-soft);
+}
+
+.originalText summary {
+  width: fit-content;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.originalText p {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: var(--card-background);
+  border-radius: var(--radius-xs);
+}
+
+.proposalInput {
+  min-height: 256px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
+  resize: vertical;
+}
+
+.error,
+.status {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-md);
+  line-height: var(--line-snug);
+  border-radius: var(--radius-sm);
+}
+
+.status {
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--danger-ink);
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
+}
+
+@media (max-width: 760px) {
+  .workspace,
+  .documentWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviewPanel {
+    grid-column: auto;
+  }
+
+  .panelHeader {
+    flex-direction: column;
+  }
+
+  .roleSummary {
+    align-self: flex-start;
+  }
+}

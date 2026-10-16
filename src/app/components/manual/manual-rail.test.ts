@@ -455,8 +455,8 @@ describe("presentations subtab", () => {
   it("has a non-null inner-nav destinations list containing Slide Deck Creation and, since PRES-2 S6.7, Slide Deck Pipeline (AC-2 / RES-S6-A)", () => {
     const inner = getInnerDestinations("presentations");
     expect(inner).not.toBeNull();
-    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck", "presentations-pipeline", "presentations-ppt-design", "presentations-ppt-templates", "presentations-document-templates"]);
-    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation", "Slide Deck Pipeline", "PowerPoint Design", "PowerPoint Templates", "Document Templates"]);
+    expect(inner?.map((d) => d.id)).toEqual(["presentations-slide-deck", "presentations-pipeline", "presentations-ppt-design", "presentations-ppt-templates", "presentations-document-templates", "presentations-ppt-editor"]);
+    expect(inner?.map((d) => d.label)).toEqual(["Slide Deck Creation", "Slide Deck Pipeline", "PowerPoint Design", "PowerPoint Templates", "Document Templates", "PowerPoint Editor"]);
   });
 
   it("PRES-2 S6.7: the pipeline child is reachable from its destination id and reports itself as active via presentationsView", () => {

@@ -54,7 +54,7 @@ export type GradingView = "repos" | "drafts" | "chat";
 // surface (`presentations-pipeline`). Same shape as GradingView above.
 // "ppt-design" (PPT-DESIGN-INTO-PRESENTATIONS): PowerPoint Design, re-parented
 // from a top-level Tools chip into a third Presentations tab.
-export type PresentationsView = "slide-deck" | "pipeline" | "ppt-design" | "ppt-templates" | "document-templates";
+export type PresentationsView = "slide-deck" | "pipeline" | "ppt-design" | "ppt-templates" | "document-templates" | "ppt-editor";
 
 const PRESENTATIONS_VIEW_PRESENCE: Record<PresentationsView, true> = {
   "slide-deck": true,
@@ -62,6 +62,7 @@ const PRESENTATIONS_VIEW_PRESENCE: Record<PresentationsView, true> = {
   "ppt-design": true,
   "ppt-templates": true,
   "document-templates": true,
+  "ppt-editor": true,
 };
 export const PRESENTATIONS_VIEWS: readonly PresentationsView[] = Object.keys(
   PRESENTATIONS_VIEW_PRESENCE
@@ -196,6 +197,7 @@ export const destinations: DestinationGroup[] = [
       { id: "presentations-ppt-design", label: "PowerPoint Design", description: "Create presentation slides" },
       { id: "presentations-ppt-templates", label: "PowerPoint Templates", description: "Classify and reuse source PowerPoint slides" },
       { id: "presentations-document-templates", label: "Document Templates", description: "Abstract and fill reusable document fields" },
+      { id: "presentations-ppt-editor", label: "PowerPoint Editor", description: "Edit uploaded slides and regenerate them with AI" },
     ],
   },
   {
@@ -453,6 +455,7 @@ export function resolveStateFromDestinationId(
     if (id === "presentations-ppt-design") return "ppt-design";
     if (id === "presentations-ppt-templates") return "ppt-templates";
     if (id === "presentations-document-templates") return "document-templates";
+    if (id === "presentations-ppt-editor") return "ppt-editor";
     // Retired top-level id: the surface moved, so it resolves to its new tab.
     if (legacyPptDesignView(id)) return "ppt-design";
     return currentPresentationsView;

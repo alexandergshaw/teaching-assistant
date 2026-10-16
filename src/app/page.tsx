@@ -20,6 +20,7 @@ import PresentationsTab from "./components/presentations";
 import PipelineTab from "./components/presentations/pipeline/PipelineTab";
 import PowerPointTemplates from "./components/powerpoint-templates";
 import DocumentTemplates from "./components/document-templates";
+import UploadedSlideEditor from "./components/presentations/UploadedSlideEditor";
 import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
 import CourseIntelTab from "./components/course-intel";
@@ -738,6 +739,8 @@ export default function Home() {
                       <PowerPointTemplates onUseInSlideDeckCreation={() => setPresentationsView("slide-deck")} />
                     ) : presentationsView === "document-templates" ? (
                       <DocumentTemplates />
+                    ) : presentationsView === "ppt-editor" ? (
+                      <UploadedSlideEditor />
                     ) : presentationsView === "ppt-design" ? (
                       <PowerPointDesignTab />
                     ) : presentationsView === "pipeline" ? (

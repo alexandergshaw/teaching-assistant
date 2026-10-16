@@ -70,9 +70,9 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates" | "presentations";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates", "presentations"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
   "lms-content": "Course Content",
@@ -80,6 +80,7 @@ export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosti
   grading: "Grading",
   messaging: "Student Messaging",
   templates: "Template tools",
+  presentations: "Presentations",
 };
 
 export interface SessionDiagnosticCoverageRow {
@@ -93,6 +94,7 @@ export interface SessionDiagnosticCoverageRow {
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
   templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values.",
+  presentations: "Uploaded PowerPoint slide-editor upload, edit, regeneration, candidate, and export operation outcomes with safe failure categories; no filenames, prompts, slide text, model responses, or file bytes.",
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",
   diagnostics:
@@ -124,7 +126,7 @@ export const SESSION_DIAGNOSTIC_NOT_COVERED: readonly string[] = [
 // Entries
 // ---------------------------------------------------------------------------
 
-export type SessionDiagnosticOutcome = "success" | "failure";
+export type SessionDiagnosticOutcome = "success" | "failure" | "discarded";
 
 /** One attempted operation. Every field is a plain string and always present
  * (mirrors ContentDiagnosticLogEntry's own reasoning) so the CSV writer can
@@ -435,7 +437,7 @@ export function summarizeSessionDiagnosticLog(state: SessionDiagnosticLogState):
   for (const surface of SURFACES) bySurface[surface] = 0;
   for (const entry of state.entries) {
     if (entry.outcome === "success") succeeded += 1;
-    else failed += 1;
+    if (entry.outcome === "failure") failed += 1;
     bySurface[entry.surface] = (bySurface[entry.surface] ?? 0) + 1;
   }
   return { total: state.entries.length, succeeded, failed, droppedCount: state.droppedCount, bySurface };
@@ -622,7 +624,7 @@ function isSurface(value: unknown): value is SessionDiagnosticSurface {
 }
 
 function isOutcome(value: unknown): value is SessionDiagnosticOutcome {
-  return value === "success" || value === "failure";
+  return value === "success" || value === "failure" || value === "discarded";
 }
 
 function parseOneEntry(raw: unknown): SessionDiagnosticEntry | null {

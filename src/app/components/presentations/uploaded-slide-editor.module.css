@@ -1,0 +1,28 @@
+.panel { display: grid; gap: 1.25rem; min-width: 0; }
+.uploadCard { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem; }
+.message { margin: 0; }
+.busy { display: flex; align-items: center; gap: 0.65rem; color: var(--mui-palette-text-secondary); }
+.workspace { display: grid; grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 2fr); align-items: start; gap: 1rem; min-width: 0; }
+.slideList, .editor { min-width: 0; padding: 1rem; }
+.slideList { position: sticky; top: 1rem; max-height: 70vh; overflow: auto; }
+.slideButtons { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
+.slideButtons button { justify-content: flex-start; min-width: 0; text-align: left; text-transform: none; }
+.slideButtonText { display: grid; gap: 0.2rem; min-width: 0; }
+.slideButtonText span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+.editor { display: grid; gap: 1rem; }
+.editorHeader { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.paragraphs { display: grid; gap: 0.85rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.regeneration, .candidate { display: grid; gap: 0.75rem; padding: 1rem; }
+.candidate { border-color: var(--mui-palette-primary-main); }
+.candidateParagraph { padding-top: 0.5rem; border-top: 1px solid var(--mui-palette-divider); }
+.candidateParagraph p { margin: 0.4rem 0 0; white-space: pre-wrap; }
+.objectInventory, .objectEditor { display: grid; gap: 0.75rem; margin-top: 1rem; padding: 1rem; }
+.objectButtons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.objectEditor { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: start; border: 1px solid var(--mui-palette-divider); border-radius: 8px; }
+
+@media (max-width: 760px) {
+  .uploadCard, .editorHeader { align-items: stretch; flex-direction: column; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .slideList { position: static; max-height: 15rem; }
+}

@@ -199,7 +199,9 @@ export function contentDiagnosticLogView(): ContentDiagnosticLogState {
       operation: entry.operation,
       institution: entry.institution,
       course: entry.course,
-      outcome: entry.outcome,
+      // The content-only view has no discard operation; project the broader
+      // session vocabulary back to its two-outcome local contract.
+      outcome: entry.outcome === "failure" ? "failure" : "success",
       error: entry.error,
     });
   }

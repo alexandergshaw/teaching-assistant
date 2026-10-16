@@ -136,8 +136,8 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
           <div><h2 id="ppt-template-heading" className={styles.panelTitle}>Add a presentation</h2><p className={styles.panelDescription}>Upload a deck, then classify the extracted slides.</p></div>
         </header>
         <div className={styles.formStack}>
-          <label className={styles.field}>Template name<input className={styles.input} value={name} maxLength={160} disabled={busy} onChange={event => setName(event.target.value)} /></label>
-          <label className={styles.field}>PowerPoint source (.pptx)<input className={styles.input} type="file" accept=".pptx" disabled={busy} onChange={event => {
+          <label className={styles.field}>Template name<input className={styles.input} value={name} maxLength={160} disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onChange={event => setName(event.target.value)} /></label>
+          <label className={styles.field}>PowerPoint source (.pptx)<input className={styles.input} type="file" accept=".pptx" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onChange={event => {
             generation.current++; setFile(event.target.files?.[0] ?? null); setConfirmed(false); setSourceId(""); setSavedId(null);
             setDefinition(null); setError(null); setStatus("");
             if (event.target.files?.[0]) setName(event.target.files[0].name.replace(/\.pptx$/i, "").slice(0, 160));
@@ -154,7 +154,7 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
       <section className={styles.panel} aria-labelledby="ppt-library-heading">
         <header className={styles.panelHeader}>
           <div><h2 id="ppt-library-heading" className={styles.panelTitle}>Saved libraries</h2><p className={styles.panelDescription}>Reopen a deck’s saved slide classifications.</p></div>
-          <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void handleOperation("load", async current => {
+          <button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void handleOperation("load", async current => {
             const started = templateOperationStartedAt();
             const result = requireSuccess(await listPowerPointTemplateLibrariesAction());
             diagnostic("load", started);
@@ -163,7 +163,7 @@ export default function PowerPointTemplates({ onUseInSlideDeckCreation }: { onUs
         </header>
         {!libraries.length && <p className={styles.emptyState}>No saved libraries loaded.</p>}
         {!!libraries.length && <ul className={styles.libraryList}>{libraries.map(library => <li key={library.id}>
-          <button className={styles.libraryButton} type="button" disabled={busy} onClick={() => void open(library.id)}>{library.name}<span>Open</span></button>
+          <button className={styles.libraryButton} type="button" disabled={busy} aria-describedby={busy ? "ppt-template-status" : undefined} onClick={() => void open(library.id)}>{library.name}<span>Open</span></button>
         </li>)}</ul>}
       </section>
 

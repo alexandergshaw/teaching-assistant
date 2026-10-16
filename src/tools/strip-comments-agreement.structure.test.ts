@@ -457,6 +457,8 @@ const ALL_DEFINED: readonly string[] = [...SAFE_FILES, ...MODE2_BLIND_FILES, ...
 const EXCLUSIONS: Readonly<Record<string, string>> = {
   "src/app/actions/announcement-image.wiring.test.ts":
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/document-templates/wiring.test.ts":
+    "imports stripComments from @/app/components/ui/modalAdoptionSourceScan to remove JSX comment decoys from busy-control source assertions - not a duplicated definition",
   "src/app/components/courses/page-module-css-classes.test.ts":
     "A42: its stripSourceComments now delegates to stripComments (imported aliased as tokenizerStripComments) from the shared module @/app/components/ui/modalAdoptionSourceScan - it never defined a function literally named stripComments, so this is a bare code mention, not a duplicated definition",
   "src/app/components/courses/page-module-css-orphan-classes.test.ts":
@@ -485,6 +487,8 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionScan - not a duplicated definition",
   "src/app/components/recording/announcementImagePipeline.wiring.test.ts":
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
+  "src/app/components/powerpoint-templates/wiring.test.ts":
+    "imports stripComments from @/app/components/ui/modalAdoptionSourceScan to remove JSX comment decoys from busy-control source assertions - not a duplicated definition",
   "src/app/components/recording/avatar-script.test.ts":
     "prose comment referencing a stripComments helper elsewhere - no code use",
   "src/app/components/ui/modalAdoption.wiring.test.ts":

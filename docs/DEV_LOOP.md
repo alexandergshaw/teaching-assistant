@@ -204,6 +204,29 @@ mutates each unit and proves the test can fail.
 **Regression**, batched per group: one pass per backlog group, its own push,
 never per feature and never several groups rolled together.
 
+## Delivery target and release state
+
+Before publishing a chunk, record its requested destination ref (for example,
+`main`) in the activity. A commit or push to a topic branch is not integration
+and must never be reported as though it reached the requested destination.
+“Commit and push” alone authorizes publishing the current branch; it does not
+silently change the target to `main`.
+
+When the owner requests a destination branch, promote only the reviewed,
+in-scope commits to that ref using ordinary fast-forward, merge, or cherry-pick
+operations. Check the destination's current remote head first, resolve any
+movement without force-pushing, and run the relevant gates on the exact
+promoted candidate. After publishing, fetch the destination and verify that
+the candidate is an ancestor of the remote destination (for example, with
+`git merge-base --is-ancestor <candidate> <remote>/<branch>`). Record the
+verified commit and ref in the activity report.
+
+Report these states separately: **committed locally**, **pushed to a topic
+branch**, **integrated on the requested branch**, and **deployed/live**. A
+successful push proves only the ref that received it. Integration does not
+prove deployment, and deployment does not prove the feature is exposed in the
+app. Never claim a later state without its own evidence.
+
 **Root-cause analysis** for anything that failed, then fix and re-run until
 clean.
 

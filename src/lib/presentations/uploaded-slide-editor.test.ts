@@ -19,12 +19,17 @@ async function fixture(slideXmls = [slide("First slide"), slide("Second slide")]
   zip.file("[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>`);
   zip.file("ppt/presentation.xml", `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${order.map((number, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 1}"/>`).join("")}</p:sldIdLst></p:presentation>`);
   zip.file("ppt/_rels/presentation.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${order.map((number, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${number}.xml"/>`).join("")}</Relationships>`);
-  slideXmls.forEach((xml, index) => zip.file(`ppt/slides/slide${index + 1}.xml`, xml));
-  zip.file("ppt/slides/_rels/slide2.xml.rels", "<Relationships><Relationship Id=\"rId1\" Target=\"../media/image2.png\"/></Relationships>");
+  slideXmls.forEach((xml, index) => {
+    const slideNumber = index + 1;
+    zip.file(`ppt/slides/slide${slideNumber}.xml`, xml);
+    zip.file(`ppt/slides/_rels/slide${slideNumber}.xml.rels`, `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdLayout" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>${slideNumber === 2 ? "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/image2.png\"/>" : ""}</Relationships>`);
+  });
   zip.file("ppt/notesSlides/notesSlide2.xml", "<notes>speaker notes</notes>");
   zip.file("ppt/media/image2.png", Buffer.from([0, 1, 2, 3]));
-  zip.file("ppt/slideMasters/slideMaster1.xml", "<master>master data</master>");
-  zip.file("ppt/slideLayouts/slideLayout1.xml", "<layout>layout data</layout>");
+  zip.file("ppt/slideMasters/slideMaster1.xml", `<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rIdLayout1"/></p:sldLayoutIdLst><p:cSld/></p:sldMaster>`);
+  zip.file("ppt/slideMasters/_rels/slideMaster1.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rIdLayout1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/></Relationships>");
+  zip.file("ppt/slideLayouts/slideLayout1.xml", "<p:sldLayout xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld name=\"Blank\"/></p:sldLayout>");
+  zip.file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rIdMaster\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"../slideMasters/slideMaster1.xml\"/></Relationships>");
   zip.file("ppt/theme/theme1.xml", "<theme>theme data</theme>");
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }

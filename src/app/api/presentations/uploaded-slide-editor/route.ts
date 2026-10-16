@@ -13,6 +13,12 @@ import {
   type UploadedSlideParagraph,
 } from "@/lib/presentations/uploaded-slide-editor";
 import type { SlideGeometry, SlideObjectOperation, UploadedSlideObject } from "@/lib/presentations/uploaded-slide-objects";
+import { inspectUploadedSlideLayouts } from "@/lib/presentations/uploaded-slide-layouts";
+import { replaceUploadedSlidePicture, SlidePictureReplacementError } from "@/lib/presentations/uploaded-slide-picture-replacement";
+import { switchSlideLayout, SlideLayoutSwitchError } from "@/lib/presentations/slide-layout-switch";
+import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
+import { isUploadedSlideEditorRequestWithinBudget } from "@/lib/presentations/uploaded-slide-editor-transport";
+import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -89,12 +95,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "You must be signed in to edit a presentation." }, { status: 401 });
   }
 
-  let body: unknown;
+  let rawBody: string;
   try {
-    body = await request.json();
+    rawBody = await request.text();
   } catch {
     return NextResponse.json({ error: "Could not read the request." }, { status: 400 });
   }
+  if (!isUploadedSlideEditorRequestWithinBudget(Buffer.byteLength(rawBody, "utf8"))) {
+    return NextResponse.json({ error: `This request exceeds the ${Math.round(UPLOAD_WIRE_BUDGET_BYTES / (1024 * 1024) * 10) / 10} MB editor request limit.` }, { status: 413 });
+  }
+  let body: unknown;
+  try { body = JSON.parse(rawBody); }
+  catch { return NextResponse.json({ error: "Could not read the request." }, { status: 400 }); }
   if (!isRecord(body) || typeof body.op !== "string") {
     return NextResponse.json({ error: "Choose a valid slide-editor operation." }, { status: 400 });
   }
@@ -130,8 +142,37 @@ export async function POST(request: NextRequest) {
 
   try {
     const bytes = decodeUploadedPptx(body.base64);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const requireCurrentDigest = () => typeof body.expectedDigest === "string" && /^[a-f0-9]{64}$/.test(body.expectedDigest) && body.expectedDigest === digest;
     if (body.op === "inspect") {
       return NextResponse.json({ slides: await inspectUploadedPptx(bytes) });
+    }
+    if (body.op === "layouts") {
+      if (typeof body.slideNumber !== "number" || !Number.isInteger(body.slideNumber)) return NextResponse.json({ error: "Select a valid slide." }, { status: 400 });
+      return NextResponse.json({ layouts: await inspectUploadedSlideLayouts(bytes, body.slideNumber) });
+    }
+    if (body.op === "layoutPreview" || body.op === "applyLayout") {
+      if (!requireCurrentDigest()) return NextResponse.json({ error: "This layout choice belongs to an earlier version of the deck. Review it again." }, { status: 409 });
+      if (typeof body.slideNumber !== "number" || !Number.isInteger(body.slideNumber) || typeof body.targetLayoutMember !== "string") return NextResponse.json({ error: "Select a valid slide layout." }, { status: 400 });
+      const inventory = await inspectUploadedSlideLayouts(bytes, body.slideNumber);
+      if (!inventory.layouts.some((layout) => layout.member === body.targetLayoutMember)) return NextResponse.json({ error: "That layout is no longer available in this deck." }, { status: 409 });
+      const switched = await switchSlideLayout(bytes, body.slideNumber, body.targetLayoutMember);
+      if (body.op === "layoutPreview") return NextResponse.json({
+        packageDigest: digest,
+        slideNumber: switched.slideNumber,
+        layoutName: inventory.layouts.find((layout) => layout.member === body.targetLayoutMember)?.name,
+        relationship: switched.relationship,
+        placeholders: switched.placeholders,
+      });
+      if (switched.bytes.toString("base64").length > UPLOAD_WIRE_BUDGET_BYTES) return NextResponse.json({ error: "The updated PowerPoint exceeds the file limit." }, { status: 422 });
+      const slide = (await inventorySlides(switched.bytes))[body.slideNumber - 1];
+      return NextResponse.json({ base64: switched.bytes.toString("base64"), slides: await inspectUploadedPptx(switched.bytes), changedMembers: slide ? [slide.id.replace(/^ppt\/slides\//, "ppt/slides/_rels/") + ".rels"] : [] });
+    }
+    if (body.op === "replacePicture") {
+      if (typeof body.slideNumber !== "number" || !Number.isInteger(body.slideNumber) || typeof body.objectId !== "string") return NextResponse.json({ error: "Select a picture on a valid slide." }, { status: 400 });
+      const replaced = await replaceUploadedSlidePicture(bytes, body.slideNumber, body.objectId, body.mimeType, body.imageBase64);
+      if (replaced.bytes.toString("base64").length > UPLOAD_WIRE_BUDGET_BYTES) return NextResponse.json({ error: "The updated PowerPoint exceeds the file limit." }, { status: 422 });
+      return NextResponse.json({ base64: replaced.bytes.toString("base64"), slides: await inspectUploadedPptx(replaced.bytes), changedMembers: replaced.changedMembers });
     }
     if (body.op === "apply") {
       if (typeof body.slideNumber !== "number" || !Number.isInteger(body.slideNumber)) {
@@ -145,6 +186,8 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: "Choose a valid slide-editor operation." }, { status: 400 });
   } catch (error) {
+    if (error instanceof SlidePictureReplacementError) return NextResponse.json({ error: error.message === "invalid_image" ? "Choose a valid PNG or JPEG image." : "That picture cannot be replaced safely in this PowerPoint." }, { status: 422 });
+    if (error instanceof SlideLayoutSwitchError) return NextResponse.json({ error: error.code === "placeholder_mismatch" ? "That layout does not support the placeholders already used on this slide." : "That layout cannot be applied safely to this slide." }, { status: 422 });
     if (error instanceof TemplateError && error.code === "PPT_LIMIT") {
       return NextResponse.json({ error: "This PowerPoint exceeds the editor's 80-slide, 24,000-character, or package limit." }, { status: 422 });
     }

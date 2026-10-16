@@ -1,16 +1,18 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Alert, Button, CircularProgress, Paper, TextField, Typography } from "@mui/material";
+import { Alert, Button, CircularProgress, MenuItem, Paper, TextField, Typography } from "@mui/material";
 import TabHeader from "../TabHeader";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import type { UploadedSlide, UploadedSlideParagraph } from "@/lib/presentations/uploaded-slide-editor";
 import type { SlideGeometry, SlideObjectOperation, UploadedSlideObject } from "@/lib/presentations/uploaded-slide-objects";
+import { serializeUploadedSlideEditorRequest } from "@/lib/presentations/uploaded-slide-editor-transport";
 import styles from "./uploaded-slide-editor.module.css";
 
-type Operation = "upload" | "edit" | "regenerate" | "accept" | "discard" | "export";
+type Operation = "upload" | "edit" | "regenerate" | "accept" | "discard" | "export" | "layout_preview" | "layout_apply" | "picture_replace";
 type Candidate = { slideNumber: number; paragraphs: UploadedSlideParagraph[]; operations: SlideObjectOperation[]; sourceDigest: string };
+type LayoutCandidate = { slideNumber: number; packageDigest: string; targetLayoutMember: string; layoutName: string; relationship: { id: string; before: string; after: string }; placeholders: { slide: Array<{ type: string; index: string }>; beforeLayout: Array<{ type: string; index: string }>; afterLayout: Array<{ type: string; index: string }>; added: Array<{ type: string; index: string }>; removed: Array<{ type: string; index: string }> } };
 
 function record(operation: Operation, outcome: "success" | "failure" | "discarded", error?: string) {
   recordSessionDiagnosticEntry({
@@ -40,10 +42,11 @@ function decodeBase64(base64: string): ArrayBuffer {
 }
 
 async function postEditor(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const serialized = serializeUploadedSlideEditorRequest(body);
   const response = await fetch("/api/presentations/uploaded-slide-editor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: serialized,
   });
   const result: unknown = await response.json().catch(() => undefined);
   if (!response.ok || !result || typeof result !== "object") {
@@ -66,6 +69,8 @@ export default function UploadedSlideEditor() {
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState("");
   const [objectEdit, setObjectEdit] = useState<Record<string, string>>({});
+  const [targetLayoutMember, setTargetLayoutMember] = useState("");
+  const [layoutCandidate, setLayoutCandidate] = useState<LayoutCandidate | null>(null);
   const [busy, setBusy] = useState<Operation | null>(null);
   const [error, setError] = useState("");
   const selected = slides[selectedNumber - 1];
@@ -99,6 +104,7 @@ export default function UploadedSlideEditor() {
       setFileName(file.name);
       setSelectedNumber(1);
       setCandidate(null);
+      setLayoutCandidate(null);
       record("upload", "success");
     } catch (cause) {
       const message = cause instanceof Error && cause.message !== "file_read" ? cause.message : "Could not read that PowerPoint. Select it again.";
@@ -158,6 +164,44 @@ export default function UploadedSlideEditor() {
     record("discard", "discarded");
   }
 
+  async function previewLayout() {
+    if (!selected?.availableLayouts || !targetLayoutMember || !workingBase64 || hasUnsavedEdits || candidate) return;
+    setBusy("layout_preview"); setError("");
+    try {
+      const result = await postEditor({ op: "layoutPreview", base64: workingBase64, slideNumber: selectedNumber, targetLayoutMember, expectedDigest: selected.availableLayouts.packageDigest });
+      if (!result.relationship || !result.placeholders || typeof result.layoutName !== "string") throw new Error("The layout comparison could not be read.");
+      setLayoutCandidate({ slideNumber: selectedNumber, packageDigest: selected.availableLayouts.packageDigest, targetLayoutMember, layoutName: result.layoutName, relationship: result.relationship as LayoutCandidate["relationship"], placeholders: result.placeholders as LayoutCandidate["placeholders"] });
+      record("layout_preview", "success");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "The layout could not be compared."); setLayoutCandidate(null); record("layout_preview", "failure", "layout_preview_failed"); }
+    finally { setBusy(null); }
+  }
+
+  async function acceptLayout() {
+    if (!layoutCandidate || !workingBase64 || layoutCandidate.slideNumber !== selectedNumber) return;
+    setBusy("layout_apply"); setError("");
+    try {
+      const result = await postEditor({ op: "applyLayout", base64: workingBase64, slideNumber: layoutCandidate.slideNumber, targetLayoutMember: layoutCandidate.targetLayoutMember, expectedDigest: layoutCandidate.packageDigest });
+      if (typeof result.base64 !== "string" || !Array.isArray(result.slides)) throw new Error("The layout update could not be returned.");
+      setWorkingBase64(result.base64); setSlides(result.slides as UploadedSlide[]); setLayoutCandidate(null); setTargetLayoutMember("");
+      record("layout_apply", "success");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "The layout could not be applied."); record("layout_apply", "failure", "layout_apply_failed"); }
+    finally { setBusy(null); }
+  }
+
+  async function replacePicture(file?: File) {
+    if (!file || !selectedObject || selectedObject.kind !== "picture" || !workingBase64 || hasUnsavedEdits) return;
+    if (file.type !== "image/png" && file.type !== "image/jpeg") { setError("Choose a PNG or JPEG image."); return; }
+    setBusy("picture_replace"); setError("");
+    try {
+      const imageBase64 = await readFileAsBase64(file);
+      const result = await postEditor({ op: "replacePicture", base64: workingBase64, slideNumber: selectedNumber, objectId: selectedObject.id, mimeType: file.type, imageBase64 });
+      if (typeof result.base64 !== "string" || !Array.isArray(result.slides)) throw new Error("The replacement image could not be applied.");
+      setWorkingBase64(result.base64); setSlides(result.slides as UploadedSlide[]); setSelectedObjectId("");
+      record("picture_replace", "success");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "The picture could not be replaced safely."); record("picture_replace", "failure", "picture_replace_failed"); }
+    finally { setBusy(null); }
+  }
+
   function exportDeck() {
     if (!workingBase64 || dirty || candidate) return;
     try {
@@ -209,7 +253,7 @@ export default function UploadedSlideEditor() {
             <Typography variant="subtitle1">{fileName}</Typography>
             <div className={styles.slideButtons} role="group" aria-label="Choose a slide">
               {slides.map((slide) => (
-                <Button key={slide.number} variant={slide.number === selectedNumber ? "contained" : "text"} onClick={() => { setSelectedNumber(slide.number); setError(""); }} disabled={busy !== null || candidate !== null} aria-pressed={slide.number === selectedNumber}>
+                <Button key={slide.number} variant={slide.number === selectedNumber ? "contained" : "text"} onClick={() => { setSelectedNumber(slide.number); setError(""); setLayoutCandidate(null); }} disabled={busy !== null || candidate !== null || layoutCandidate !== null} aria-pressed={slide.number === selectedNumber}>
                   <span className={styles.slideButtonText}><strong>Slide {slide.number}</strong><span>{slide.title}</span></span>
                 </Button>
               ))}
@@ -220,7 +264,21 @@ export default function UploadedSlideEditor() {
                 <div className={styles.editorHeader}><div><Typography variant="h5">Slide {selectedNumber}</Typography><Typography color="text.secondary">Edit supported native objects. The exported deck retains its PowerPoint structure.</Typography></div><Button onClick={exportDeck} variant="outlined" disabled={!workingBase64 || hasUnsavedEdits || candidate !== null || busy !== null}>Download edited deck</Button></div>
             <Paper variant="outlined" className={styles.objectInventory} aria-label="Slide object inventory">
               <Typography variant="h6">Slide objects</Typography>
-              <Typography color="text.secondary">Layout: {selected?.layout?.name ?? "Not identified"}. Layout editing is not available yet. Notes: {selected?.notes ? "present (read-only)" : "none found"}.</Typography>
+              <Typography color="text.secondary">Layout: {selected?.layout?.name ?? "Not identified"}. Notes: {selected?.notes ? "present (read-only)" : "none found"}.</Typography>
+              {selected?.availableLayouts && <div className={styles.objectEditor}>
+                <Typography variant="subtitle1">Change this slide&apos;s layout</Typography>
+                <TextField select fullWidth label="Existing layout" value={targetLayoutMember} onChange={(event) => setTargetLayoutMember(event.target.value)} disabled={busy !== null || candidate !== null || layoutCandidate !== null || hasUnsavedEdits}>
+                  {selected.availableLayouts.layouts.filter((layout) => layout.member !== selected.availableLayouts?.currentLayoutMember).map((layout) => <MenuItem key={layout.member} value={layout.member}>{layout.name}</MenuItem>)}
+                </TextField>
+                <Button variant="outlined" onClick={() => void previewLayout()} disabled={!targetLayoutMember || busy !== null || candidate !== null || layoutCandidate !== null || hasUnsavedEdits}>Compare layout change</Button>
+              </div>}
+              {layoutCandidate && <Paper variant="outlined" className={styles.candidate}>
+                <Typography variant="subtitle1">Layout change review for slide {layoutCandidate.slideNumber}</Typography>
+                <Typography>Before relationship: {layoutCandidate.relationship.before}</Typography><Typography>After relationship: {layoutCandidate.relationship.after} ({layoutCandidate.layoutName})</Typography>
+                <Typography>Slide placeholders: {JSON.stringify(layoutCandidate.placeholders.slide)}</Typography><Typography>Removed layout placeholders: {JSON.stringify(layoutCandidate.placeholders.removed)}</Typography><Typography>Added layout placeholders: {JSON.stringify(layoutCandidate.placeholders.added)}</Typography>
+                <Alert severity="info">This structural check does not render the slide. Export and inspect it in PowerPoint to verify appearance.</Alert>
+                <div className={styles.actions}><Button variant="contained" onClick={() => void acceptLayout()} disabled={busy !== null || layoutCandidate.packageDigest !== selected?.availableLayouts?.packageDigest}>Accept layout change</Button><Button onClick={() => setLayoutCandidate(null)} disabled={busy !== null}>Discard</Button></div>
+              </Paper>}
               {selected?.notes && <Typography color="text.secondary">Notes: {selected.notes.text || "No readable notes text."}</Typography>}
               <div className={styles.objectButtons} role="list" aria-label="Objects on this slide">
                 {(selected?.objects ?? []).map((object) => <Button key={object.id} role="listitem" variant={selectedObjectId === object.id ? "contained" : "outlined"} onClick={() => { setSelectedObjectId(object.id); setObjectEdit({}); }} disabled={busy !== null || candidate !== null}>
@@ -233,6 +291,7 @@ export default function UploadedSlideEditor() {
                 {(["x", "y", "width", "height", "rotation"] as const).map((key) => <TextField key={key} type="number" label={key} value={objectEdit[key] ?? selectedObject.geometry?.[key] ?? ""} onChange={(event) => setObjectEdit((current) => ({ ...current, [key]: event.target.value }))} disabled={busy !== null || candidate !== null} />)}
                 {selectedObject.kind === "shape" && <><TextField label="Solid fill color (hex)" value={objectEdit.fillColor ?? selectedObject.fill?.color ?? ""} onChange={(event) => setObjectEdit((current) => ({ ...current, fillColor: event.target.value }))} disabled={busy !== null || candidate !== null} /><TextField type="number" label="Fill transparency (%)" value={objectEdit.fillTransparency ?? selectedObject.fill?.transparency ?? 0} onChange={(event) => setObjectEdit((current) => ({ ...current, fillTransparency: event.target.value }))} disabled={busy !== null || candidate !== null} /></>}
                 {selectedObject.kind === "picture" && <TextField fullWidth label="Alternative text" value={objectEdit.altText ?? selectedObject.altText ?? ""} onChange={(event) => setObjectEdit((current) => ({ ...current, altText: event.target.value }))} disabled={busy !== null || candidate !== null} />}
+                {selectedObject.kind === "picture" && <Button component="label" variant="outlined" disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Replace picture from PNG or JPEG<input hidden type="file" accept="image/png,image/jpeg" onChange={(event) => { void replacePicture(event.target.files?.[0]); event.currentTarget.value = ""; }} /></Button>}
                 <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Save object changes</Button>
               </div>}
             </Paper>

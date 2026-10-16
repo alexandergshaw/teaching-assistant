@@ -120,9 +120,9 @@ function shapeProps(node: XmlElement): { id: string; name: string; altText: stri
 }
 function layoutName(doc: XmlDocument): string { return first(doc, P, "cSld")?.getAttribute("name") ?? "Unnamed layout"; }
 
-export async function inspectSlideObjects(bytes: Buffer, slideNumber: number): Promise<SlidePackageContext> {
+export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, knownSlides?: Array<{ id: string }>): Promise<SlidePackageContext> {
   try {
-    const slides = await inventorySlides(bytes);
+    const slides = knownSlides ?? await inventorySlides(bytes);
     const slide = slides[slideNumber - 1];
     if (!slide) throw new SlideObjectError("invalid_slide");
     const zip = await JSZip.loadAsync(bytes);

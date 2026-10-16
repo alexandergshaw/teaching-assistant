@@ -12,10 +12,11 @@ import type { NextRequest } from "next/server";
 import { requireUser } from "@/lib/supabase/auth";
 import { callLlm } from "@/lib/llm";
 import { inspectUploadedPptx } from "@/lib/presentations/uploaded-slide-editor";
+import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { POST } from "./route";
 
 function request(body: unknown): NextRequest {
-  return { json: async () => body } as unknown as NextRequest;
+  return { text: async () => typeof body === "string" ? body : JSON.stringify(body) } as unknown as NextRequest;
 }
 
 beforeEach(() => {
@@ -32,6 +33,12 @@ describe("POST /api/presentations/uploaded-slide-editor", () => {
     vi.mocked(requireUser).mockRejectedValueOnce(new Error("not signed in"));
     const response = await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Rewrite it" }));
     expect(response.status).toBe(401);
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it("refuses request bodies over the combined wire budget before parsing or dispatch", async () => {
+    const response = await POST(request(`{"x":"${"a".repeat(UPLOAD_WIRE_BUDGET_BYTES)}"}`));
+    expect(response.status).toBe(413);
     expect(callLlm).not.toHaveBeenCalled();
   });
 

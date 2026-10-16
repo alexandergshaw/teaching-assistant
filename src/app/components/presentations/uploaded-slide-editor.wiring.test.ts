@@ -36,9 +36,20 @@ describe("uploaded slide editor wiring", () => {
     expect(panel).not.toContain("paragraph.text });");
   });
 
-  it("allows object-only slides to request regeneration and does not imply layout editing shipped", () => {
+  it("allows object-only regeneration and gates layout replacement on an explicit package-bound review", () => {
     expect(panel).toContain("selected?.paragraphs.some((paragraph) => paragraph.editable !== false) || selected?.objects?.some((object) => object.editable)");
-    expect(panel).toContain("Layout editing is not available yet.");
+    expect(panel).toContain('op: "layoutPreview"');
+    expect(panel).toContain('op: "applyLayout"');
+    expect(panel).toContain("Accept layout change");
+    expect(panel).toContain("packageDigest");
+    expect(panel).toContain("Replace picture from PNG or JPEG");
+    expect(panel).toContain('record("layout_preview", "success")');
+    expect(panel).toContain('record("layout_apply", "failure", "layout_apply_failed")');
+    expect(panel).toContain('record("picture_replace", "success")');
+    expect(panel).toContain('operation: `uploaded_slide_${operation}`');
+    expect(panel).toContain('surface: "presentations"');
+    expect(route).toContain("switchSlideLayout(bytes, body.slideNumber, body.targetLayoutMember)");
+    expect(route).toContain("replaceUploadedSlidePicture(bytes, body.slideNumber, body.objectId, body.mimeType, body.imageBase64)");
     expect(panel).not.toContain("available in the separate layout control");
   });
 });

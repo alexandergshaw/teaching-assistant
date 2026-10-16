@@ -6,6 +6,7 @@ import JSZip from "jszip";
 import { assertContainerWithinCaps, createZipBudget, readOfficeMember, ZipCapError } from "@/lib/zip-caps";
 import { checkWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { applySlideObjectOperations, inspectSlideObjects, type SlidePackageContext } from "@/lib/presentations/uploaded-slide-objects";
+import { inspectUploadedSlideLayoutSet, type UploadedSlideLayouts } from "@/lib/presentations/uploaded-slide-layouts";
 
 export interface UploadedSlideParagraph {
   id: string;
@@ -20,6 +21,7 @@ export interface UploadedSlide {
   objects?: SlidePackageContext["objects"];
   layout?: SlidePackageContext["layout"];
   notes?: SlidePackageContext["notes"];
+  availableLayouts?: UploadedSlideLayouts;
 }
 
 export class UploadedSlideEditorError extends Error {
@@ -90,9 +92,11 @@ export async function inspectUploadedPptx(bytes: Buffer): Promise<UploadedSlide[
         paragraphs: slideParagraphs,
       };
     });
+    const layoutInventory = await inspectUploadedSlideLayoutSet(bytes, slideMembers);
     return await Promise.all(slides.map(async (slide) => {
-      const context = await inspectSlideObjects(bytes, slide.number);
-      return { ...slide, objects: context.objects, layout: context.layout, notes: context.notes };
+      const context = await inspectSlideObjects(bytes, slide.number, slideMembers);
+      const availableLayouts = layoutInventory[slide.number - 1];
+      return { ...slide, objects: context.objects, layout: context.layout, notes: context.notes, availableLayouts };
     }));
   } catch (error) {
     if (error instanceof UploadedSlideEditorError) throw error;

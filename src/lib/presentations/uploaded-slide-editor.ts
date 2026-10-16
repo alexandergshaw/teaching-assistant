@@ -7,6 +7,7 @@ import { assertContainerWithinCaps, createZipBudget, readOfficeMember, ZipCapErr
 import { checkWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { applySlideObjectOperations, inspectSlideObjects, type SlidePackageContext } from "@/lib/presentations/uploaded-slide-objects";
 import { inspectUploadedSlideLayoutSet, type UploadedSlideLayouts } from "@/lib/presentations/uploaded-slide-layouts";
+import { applyUploadedSlideNotes, inspectUploadedSlideNotesSet, type UploadedSlideNotes } from "@/lib/presentations/uploaded-slide-notes";
 
 export interface UploadedSlideParagraph {
   id: string;
@@ -20,7 +21,7 @@ export interface UploadedSlide {
   paragraphs: UploadedSlideParagraph[];
   objects?: SlidePackageContext["objects"];
   layout?: SlidePackageContext["layout"];
-  notes?: SlidePackageContext["notes"];
+  notes?: UploadedSlideNotes | null;
   availableLayouts?: UploadedSlideLayouts;
 }
 
@@ -93,10 +94,11 @@ export async function inspectUploadedPptx(bytes: Buffer): Promise<UploadedSlide[
       };
     });
     const layoutInventory = await inspectUploadedSlideLayoutSet(bytes, slideMembers);
+    const noteInventory = await inspectUploadedSlideNotesSet(bytes, slideMembers);
     return await Promise.all(slides.map(async (slide) => {
       const context = await inspectSlideObjects(bytes, slide.number, slideMembers);
       const availableLayouts = layoutInventory[slide.number - 1];
-      return { ...slide, objects: context.objects, layout: context.layout, notes: context.notes, availableLayouts };
+      return { ...slide, objects: context.objects, layout: context.layout, notes: noteInventory[slide.number - 1], availableLayouts };
     }));
   } catch (error) {
     if (error instanceof UploadedSlideEditorError) throw error;
@@ -139,9 +141,10 @@ export async function applyUploadedSlideEdits(
   bytes: Buffer,
   slideNumber: number,
   replacements: unknown,
-  operations: unknown
+  operations: unknown,
+  notes?: unknown
 ): Promise<{ bytes: Buffer; slides: UploadedSlide[]; changedMembers: string[] }> {
-  if ((!Array.isArray(replacements) || replacements.length === 0) && (!Array.isArray(operations) || operations.length === 0)) {
+  if ((!Array.isArray(replacements) || replacements.length === 0) && (!Array.isArray(operations) || operations.length === 0) && notes === undefined) {
     throw new UploadedSlideEditorError("slide_text");
   }
   let updated = bytes;
@@ -157,6 +160,11 @@ export async function applyUploadedSlideEdits(
     const sourceSlides = await inventorySlides(bytes);
     const target = sourceSlides[slideNumber - 1];
     if (target) changed.add(target.id);
+  }
+  if (notes !== undefined) {
+    const notesResult = await applyUploadedSlideNotes(updated, slideNumber, notes);
+    updated = notesResult.bytes;
+    notesResult.changedMembers.forEach((member) => changed.add(member));
   }
   if (updated.toString("base64").length > UPLOAD_WIRE_BUDGET_BYTES) throw new UploadedSlideEditorError("file_size");
   return { bytes: updated, slides: await inspectUploadedPptx(updated), changedMembers: [...changed] };

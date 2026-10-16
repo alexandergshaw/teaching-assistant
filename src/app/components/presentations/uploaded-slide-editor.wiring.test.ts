@@ -22,10 +22,16 @@ describe("uploaded slide editor wiring", () => {
     expect(panel).toContain('op: "regenerate", base64: workingBase64, slideNumber: selectedNumber, instruction');
     expect(route).toContain("await requireUser()");
     expect(route).toContain("const slides = await inspectUploadedPptx(source)");
-    expect(route).toContain("regenerationPrompt(paragraphs, objects, body.instruction.trim())");
+    expect(route).toContain("regenerationPrompt(paragraphs, objects, notes, body.instruction.trim())");
     expect(route).toContain("applyUploadedSlideEdits");
     expect(panel).toContain("Slide objects");
     expect(panel).toContain("Save object changes");
+    expect(panel).toContain("Save speaker notes");
+    expect(panel).toContain("Speaker notes");
+    expect(panel).toContain("candidate.notes.map");
+    expect(panel).toContain("notesDraft[selected.number]");
+    expect(route).toContain("applyUploadedSlideEdits(bytes, body.slideNumber, body.replacements, body.operations, Array.isArray(body.notes) ? body.notes[0] : undefined)");
+    expect(route).toContain("Selected slide editable speaker notes");
     expect(route).not.toContain("recordSessionDiagnosticEntry");
   });
 
@@ -34,6 +40,7 @@ describe("uploaded slide editor wiring", () => {
     expect(panel).toContain("Discard");
     expect(panel).toContain('surface: "presentations"');
     expect(panel).not.toContain("paragraph.text });");
+    expect(panel).not.toContain("notesDraft[selected.number] });");
   });
 
   it("allows object-only regeneration and gates layout replacement on an explicit package-bound review", () => {

@@ -11,7 +11,7 @@ import { serializeUploadedSlideEditorRequest } from "@/lib/presentations/uploade
 import styles from "./uploaded-slide-editor.module.css";
 
 type Operation = "upload" | "edit" | "regenerate" | "accept" | "discard" | "export" | "layout_preview" | "layout_apply" | "picture_replace";
-type Candidate = { slideNumber: number; paragraphs: UploadedSlideParagraph[]; operations: SlideObjectOperation[]; sourceDigest: string };
+type Candidate = { slideNumber: number; paragraphs: UploadedSlideParagraph[]; operations: SlideObjectOperation[]; notes: Array<{ id: string; text: string }>; sourceDigest: string };
 type LayoutCandidate = { slideNumber: number; packageDigest: string; targetLayoutMember: string; layoutName: string; relationship: { id: string; before: string; after: string }; placeholders: { slide: Array<{ type: string; index: string }>; beforeLayout: Array<{ type: string; index: string }>; afterLayout: Array<{ type: string; index: string }>; added: Array<{ type: string; index: string }>; removed: Array<{ type: string; index: string }> } };
 
 function record(operation: Operation, outcome: "success" | "failure" | "discarded", error?: string) {
@@ -71,11 +71,13 @@ export default function UploadedSlideEditor() {
   const [objectEdit, setObjectEdit] = useState<Record<string, string>>({});
   const [targetLayoutMember, setTargetLayoutMember] = useState("");
   const [layoutCandidate, setLayoutCandidate] = useState<LayoutCandidate | null>(null);
+  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Operation | null>(null);
   const [error, setError] = useState("");
   const selected = slides[selectedNumber - 1];
   const dirty = useMemo(() => Boolean(selected?.paragraphs.some((paragraph) => paragraph.editable !== false && edits[paragraph.id] !== paragraph.text)), [selected, edits]);
-  const hasUnsavedEdits = useMemo(() => slides.some((slide) => slide.paragraphs.some((paragraph) => paragraph.editable !== false && edits[paragraph.id] !== paragraph.text)), [slides, edits]);
+  const hasUnsavedEdits = useMemo(() => slides.some((slide) => slide.paragraphs.some((paragraph) => paragraph.editable !== false && edits[paragraph.id] !== paragraph.text) || (slide.notes?.editable && notesDraft[slide.number] !== undefined && notesDraft[slide.number] !== slide.notes.text)), [slides, edits, notesDraft]);
+  const hasOtherPendingEdits = useMemo(() => slides.some((slide) => slide.paragraphs.some((paragraph) => paragraph.editable !== false && edits[paragraph.id] !== paragraph.text) || (slide.number !== selectedNumber && slide.notes?.editable && notesDraft[slide.number] !== undefined && notesDraft[slide.number] !== slide.notes.text)), [slides, edits, notesDraft, selectedNumber]);
 
   async function upload(file?: File) {
     if (!file) return;
@@ -101,6 +103,7 @@ export default function UploadedSlideEditor() {
       setWorkingBase64(base64);
       setSlides(nextSlides);
       setEdits(initialEdits);
+      setNotesDraft(Object.fromEntries(nextSlides.flatMap((slide) => slide.notes ? [[slide.number, slide.notes.text]] : [])));
       setFileName(file.name);
       setSelectedNumber(1);
       setCandidate(null);
@@ -116,17 +119,18 @@ export default function UploadedSlideEditor() {
     }
   }
 
-  async function apply(slideNumber: number, paragraphs: UploadedSlideParagraph[], operation: "edit" | "accept", operations: SlideObjectOperation[] = [], expectedDigest?: string) {
+  async function apply(slideNumber: number, paragraphs: UploadedSlideParagraph[], operation: "edit" | "accept", operations: SlideObjectOperation[] = [], expectedDigest?: string, notes: Array<{ id: string; text: string }> = []) {
     if (!workingBase64) return;
     setBusy(operation);
     setError("");
     try {
-      const result = await postEditor({ op: "apply", base64: workingBase64, slideNumber, replacements: paragraphs, operations, ...(expectedDigest ? { expectedDigest } : {}) });
+      const result = await postEditor({ op: "apply", base64: workingBase64, slideNumber, replacements: paragraphs, operations, ...(notes.length ? { notes, expectedDigest } : expectedDigest ? { expectedDigest } : {}) });
       if (typeof result.base64 !== "string" || !Array.isArray(result.slides)) throw new Error("The updated PowerPoint could not be returned.");
       const nextSlides = result.slides as UploadedSlide[];
       setWorkingBase64(result.base64);
       setSlides(nextSlides);
       setEdits(Object.fromEntries(nextSlides.flatMap((slide) => slide.paragraphs.map((paragraph) => [paragraph.id, paragraph.text]))));
+      setNotesDraft(Object.fromEntries(nextSlides.flatMap((slide) => slide.notes ? [[slide.number, slide.notes.text]] : [])));
       setCandidate(null);
       setSelectedObjectId("");
       setObjectEdit({});
@@ -141,14 +145,14 @@ export default function UploadedSlideEditor() {
   }
 
   async function regenerate() {
-    const hasEditableContent = Boolean(selected?.paragraphs.some((paragraph) => paragraph.editable !== false) || selected?.objects?.some((object) => object.editable));
+    const hasEditableContent = Boolean(selected?.paragraphs.some((paragraph) => paragraph.editable !== false) || selected?.objects?.some((object) => object.editable) || selected?.notes?.editable);
     if (!selected || !hasEditableContent || !instruction.trim() || hasUnsavedEdits) return;
     setBusy("regenerate");
     setError("");
     try {
       const result = await postEditor({ op: "regenerate", base64: workingBase64, slideNumber: selectedNumber, instruction });
-      if (!Array.isArray(result.paragraphs) || !Array.isArray(result.operations) || typeof result.sourceDigest !== "string") throw new Error("The AI returned an unusable slide.");
-      setCandidate({ slideNumber: selectedNumber, paragraphs: result.paragraphs as UploadedSlideParagraph[], operations: result.operations as SlideObjectOperation[], sourceDigest: result.sourceDigest });
+      if (!Array.isArray(result.paragraphs) || !Array.isArray(result.operations) || !Array.isArray(result.notes) || typeof result.sourceDigest !== "string") throw new Error("The AI returned an unusable slide.");
+      setCandidate({ slideNumber: selectedNumber, paragraphs: result.paragraphs as UploadedSlideParagraph[], operations: result.operations as SlideObjectOperation[], notes: result.notes as Array<{ id: string; text: string }>, sourceDigest: result.sourceDigest });
       record("regenerate", "success");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The AI could not regenerate this slide.";
@@ -264,7 +268,7 @@ export default function UploadedSlideEditor() {
                 <div className={styles.editorHeader}><div><Typography variant="h5">Slide {selectedNumber}</Typography><Typography color="text.secondary">Edit supported native objects. The exported deck retains its PowerPoint structure.</Typography></div><Button onClick={exportDeck} variant="outlined" disabled={!workingBase64 || hasUnsavedEdits || candidate !== null || busy !== null}>Download edited deck</Button></div>
             <Paper variant="outlined" className={styles.objectInventory} aria-label="Slide object inventory">
               <Typography variant="h6">Slide objects</Typography>
-              <Typography color="text.secondary">Layout: {selected?.layout?.name ?? "Not identified"}. Notes: {selected?.notes ? "present (read-only)" : "none found"}.</Typography>
+              <Typography color="text.secondary">Layout: {selected?.layout?.name ?? "Not identified"}. Notes: {selected?.notes ? selected.notes.editable ? "present (editable)" : `present (read-only: ${selected.notes.reason ?? "unsupported notes structure"})` : "none found"}.</Typography>
               {selected?.availableLayouts && <div className={styles.objectEditor}>
                 <Typography variant="subtitle1">Change this slide&apos;s layout</Typography>
                 <TextField select fullWidth label="Existing layout" value={targetLayoutMember} onChange={(event) => setTargetLayoutMember(event.target.value)} disabled={busy !== null || candidate !== null || layoutCandidate !== null || hasUnsavedEdits}>
@@ -279,7 +283,11 @@ export default function UploadedSlideEditor() {
                 <Alert severity="info">This structural check does not render the slide. Export and inspect it in PowerPoint to verify appearance.</Alert>
                 <div className={styles.actions}><Button variant="contained" onClick={() => void acceptLayout()} disabled={busy !== null || layoutCandidate.packageDigest !== selected?.availableLayouts?.packageDigest}>Accept layout change</Button><Button onClick={() => setLayoutCandidate(null)} disabled={busy !== null}>Discard</Button></div>
               </Paper>}
-              {selected?.notes && <Typography color="text.secondary">Notes: {selected.notes.text || "No readable notes text."}</Typography>}
+              {selected?.notes && <div className={styles.objectEditor}>
+                <Typography variant="subtitle1">Speaker notes</Typography>
+                <TextField fullWidth multiline minRows={3} label="Notes for this slide" value={notesDraft[selected.number] ?? selected.notes.text} onChange={(event) => setNotesDraft((current) => ({ ...current, [selected.number]: event.target.value }))} disabled={!selected.notes.editable || busy !== null || candidate !== null || layoutCandidate !== null} />
+                {selected.notes.editable && <Button variant="contained" onClick={() => void apply(selected.number, [], "edit", [], selected.availableLayouts?.packageDigest, [{ id: selected.notes!.id, text: notesDraft[selected.number] ?? selected.notes!.text }])} disabled={busy !== null || candidate !== null || layoutCandidate !== null || !selected.availableLayouts || hasOtherPendingEdits || notesDraft[selected.number] === undefined || notesDraft[selected.number] === selected.notes.text}>Save speaker notes</Button>}
+              </div>}
               <div className={styles.objectButtons} role="list" aria-label="Objects on this slide">
                 {(selected?.objects ?? []).map((object) => <Button key={object.id} role="listitem" variant={selectedObjectId === object.id ? "contained" : "outlined"} onClick={() => { setSelectedObjectId(object.id); setObjectEdit({}); }} disabled={busy !== null || candidate !== null}>
                   {object.kind}: {object.name}{object.editable ? " (editable)" : " (read-only)"}
@@ -295,9 +303,9 @@ export default function UploadedSlideEditor() {
                 <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Save object changes</Button>
               </div>}
             </Paper>
-            {!selected?.paragraphs.some((paragraph) => paragraph.editable !== false) && !selected?.objects?.some((object) => object.editable) ? <Alert severity="info">This slide has no supported editable objects. You can inspect retained objects above and export the deck unchanged.</Alert> : (
+            {!selected?.paragraphs.some((paragraph) => paragraph.editable !== false) && !selected?.objects?.some((object) => object.editable) && !selected?.notes?.editable ? <Alert severity="info">This slide has no supported editable objects. You can inspect retained objects above and export the deck unchanged.</Alert> : (
               <>
-                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Charts, SmartArt, groups, and notes are identified where possible but cannot yet be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
+                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Charts, SmartArt, and groups cannot yet be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
                 {selected.paragraphs.some((paragraph) => paragraph.editable !== false) && <>
                   <div className={styles.paragraphs}>
                     {selected.paragraphs.map((paragraph, index) => paragraph.editable === false ? <Alert key={paragraph.id} severity="info"><strong>Paragraph {index + 1} is read-only.</strong> Its PowerPoint structure is outside the safe text-editing subset: {paragraph.text}</Alert> : <TextField key={paragraph.id} fullWidth multiline minRows={index === 0 ? 2 : 3} label={`Text paragraph ${index + 1}`} value={edits[paragraph.id] ?? paragraph.text} onChange={(event) => setEdits((current) => ({ ...current, [paragraph.id]: event.target.value }))} disabled={busy !== null || candidate !== null} />)}
@@ -323,7 +331,8 @@ export default function UploadedSlideEditor() {
                   const after = candidateOperation.action === "setGeometry" ? candidateOperation.geometry : candidateOperation.action === "setFill" ? candidateOperation.fill : candidateOperation.altText;
                   return <div key={`${candidateOperation.objectId}-${index}`} className={styles.candidateParagraph}><strong>{object?.name ?? candidateOperation.kind}</strong><p>Before: {JSON.stringify(before)}</p><p>Proposed: {JSON.stringify(after)}</p></div>;
                 })}
-                <div className={styles.actions}><Button variant="contained" onClick={() => void apply(candidate.slideNumber, candidate.paragraphs, "accept", candidate.operations, candidate.sourceDigest)} disabled={busy !== null}>Accept candidate</Button><Button onClick={discardCandidate} disabled={busy !== null}>Discard</Button></div>
+                {candidate.notes.map((note) => <div key={note.id} className={styles.candidateParagraph}><strong>Speaker notes</strong><p>Before: {selected?.notes?.text ?? ""}</p><p>Proposed: {note.text}</p></div>)}
+                <div className={styles.actions}><Button variant="contained" onClick={() => void apply(candidate.slideNumber, candidate.paragraphs, "accept", candidate.operations, candidate.sourceDigest, candidate.notes)} disabled={busy !== null}>Accept candidate</Button><Button onClick={discardCandidate} disabled={busy !== null}>Discard</Button></div>
               </Paper>
             )}
           </Paper>

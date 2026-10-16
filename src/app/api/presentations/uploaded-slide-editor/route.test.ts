@@ -106,4 +106,32 @@ describe("POST /api/presentations/uploaded-slide-editor", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: expect.stringContaining("earlier version") });
   });
+
+  it("exposes only the selected slide's notes to regeneration and validates the returned notes identity", async () => {
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "First slide", paragraphs: [], notes: { member: "ppt/notesSlides/notesSlide1.xml", id: "s1:notes:first", text: "first notes", editable: true }, objects: [] },
+      { number: 2, title: "Second slide", paragraphs: [], notes: { member: "ppt/notesSlides/notesSlide2.xml", id: "s2:notes:second", text: "other secret notes", editable: true }, objects: [] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [], notes: [{ id: "s1:notes:first", text: "revised notes" }] }) } as never);
+    const response = await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Clarify the speaker notes" }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.notes).toEqual([{ id: "s1:notes:first", text: "revised notes" }]);
+    const promptPart = vi.mocked(callLlm).mock.calls[0]?.[0].contents?.[0]?.parts?.[0];
+    const prompt = promptPart && "text" in promptPart ? promptPart.text : "";
+    expect(prompt).toContain("first notes");
+    expect(prompt).not.toContain("other secret notes");
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "First slide", paragraphs: [], notes: { member: "ppt/notesSlides/notesSlide1.xml", id: "s1:notes:first", text: "first notes", editable: true }, objects: [] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [], notes: [{ id: "other-slide", text: "retargeted" }] }) } as never);
+    const invalid = await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Rewrite notes" }));
+    expect(invalid.status).toBe(502);
+  });
+
+  it("rejects a stale note apply before changing the package", async () => {
+    const response = await POST(request({ op: "apply", base64: "AA==", slideNumber: 1, replacements: [], operations: [], notes: [{ id: "s1:notes:one", text: "stale" }], expectedDigest: "0".repeat(64) }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("earlier version") });
+  });
 });

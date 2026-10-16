@@ -58,6 +58,30 @@ thrown away three.
 
 ---
 
+## Release-state claims
+
+**Do not infer that a feature is visible in the app from source code, a feature
+branch, or a successful migration workflow.** In the 2026-10-16 template-tools
+incident, the code existed on a pushed feature branch and the database
+migrations later landed on `main`; I told the owner where to find the tools
+without checking whether the app deployment contained that code or served it
+on the domain they were using. Their screenshot showed only the existing
+PowerPoint Design tab.
+
+Before saying a feature is live, verify and record that its exact commit is on
+the production branch and is the commit served by a `READY` deployment for the
+intended domain. Before naming its route or navigation location, also open that
+deployed app and verify the relevant route or nav item is exposed. A READY
+deployment and matching domain do not prove that the UI exposes the feature. If
+browser or authenticated access is unavailable, state that UI visibility and
+location are unverified; do not name a location as though you confirmed it. A
+migration workflow proves only the database step; it does not prove that
+application code was merged, built, deployed, or exposed in the UI. Keep these
+states separate in reports: **implemented** (code on a branch), **migrated**
+(database migration applied), and **live** (the exact production commit is
+served by a READY deployment on the intended domain, with relevant UI exposure
+verified). If any evidence is missing, state which release stage is unverified.
+
 ## Spend
 
 **Repeated rounds at one step mean a shape change or an owner scope question -

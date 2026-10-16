@@ -28,6 +28,8 @@ import {
   normalizePresentationsView,
   normalizeAnnouncementsView,
   resolveFilesView,
+  DEFAULT_REC_VIEW,
+  resolveRecView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -38,6 +40,7 @@ import {
   resolveDraftsLibraryPointer,
   resolveAutomatePointer,
 } from "../../url-state";
+import type { RecView } from "../recording/rec-views";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 import { isLegacyWorkflowsDrafts } from "../../../lib/workflows-drafts-library-migration";
@@ -89,6 +92,7 @@ const COURSES_SECTION_KEY = "ta-courses-section";
 const TOOLS_SECTION_KEY = "ta-tools-section";
 const LIBRARY_SECTION_KEY = "ta-library-section";
 const FILES_VIEW_KEY = "ta-files-view";
+const REC_VIEW_KEY = "ta-rec-view";
 
 /**
  * Resolves the whole starting location once, from the URL when it names a
@@ -589,6 +593,13 @@ export function useAppNavigation() {
     }
     return normalizeAnnouncementsView(localStorage.getItem(ANNOUNCEMENTS_VIEW_KEY));
   });
+  const [recView, setRecView] = useState<RecView>(() => {
+    if (typeof window === "undefined") return DEFAULT_REC_VIEW;
+    const { params, urlHasTab, destination } = readNavSource();
+    const urlNamesRecView =
+      urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "recording";
+    return resolveRecView(urlNamesRecView ? params.get("recView") : null, urlNamesRecView, localStorage.getItem(REC_VIEW_KEY));
+  });
   // Files > Library's own Library/Submissions selector. The URL wins only
   // when it names this exact branch; other Library sections and tabs leave
   // the remembered Files choice intact.
@@ -711,6 +722,10 @@ export function useAppNavigation() {
   }, [announcementsView]);
 
   useEffect(() => {
+    localStorage.setItem(REC_VIEW_KEY, recView);
+  }, [recView]);
+
+  useEffect(() => {
     localStorage.setItem(COURSES_SECTION_KEY, coursesSection);
   }, [coursesSection]);
 
@@ -790,6 +805,7 @@ export function useAppNavigation() {
       gradingView,
       presentationsView,
       announcementsView,
+      recView,
       tasksView,
       kbInstitution,
       kbPageId,
@@ -829,6 +845,7 @@ export function useAppNavigation() {
     gradingView,
     presentationsView,
     announcementsView,
+    recView,
     tasksView,
     kbInstitution,
     kbPageId,
@@ -900,6 +917,7 @@ export function useAppNavigation() {
           // ANNOUNCEMENTS-TAB A-W1: two inner destinations (post, walkthrough),
           // restored the same way presentationsView is above.
           if (parsed.manualView === "announcements") setAnnouncementsView(parsed.announcementsView);
+          if (parsed.manualView === "recording") setRecView(parsed.recView ?? DEFAULT_REC_VIEW);
           // WORKFLOWS-COLLAPSE W2: the Automate container's three inner views,
           // restored the same way presentationsView is above.
           if (parsed.manualView === "artifact-design") setAutomateView(parsed.automateView);
@@ -947,6 +965,8 @@ export function useAppNavigation() {
     setPresentationsView,
     announcementsView,
     setAnnouncementsView,
+    recView,
+    setRecView,
     automateView,
     setAutomateView,
     tasksView,

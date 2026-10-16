@@ -17,6 +17,8 @@ import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { countLines } from "../../../lib/count-lines";
+import { REC_VIEW_ORDER } from "../recording/rec-views";
+import { normalizeRecView } from "../../url-state";
 
 // L15: this file walks a real directory tree / reads many real files.
 // vitest's 5000ms default testTimeout treats that as slow-but-fine when
@@ -30,6 +32,7 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
 const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+const NAV_HOOK_SOURCE = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/home/useAppNavigation.ts"), "utf-8");
 
 const MESSAGE_REPLIES_DIR = path.resolve(process.cwd(), "src/app/components/message-replies");
 
@@ -58,26 +61,18 @@ describe('"messages" is wired into BOTH the recView union AND the SEPARATE resto
     // the literal `"record" | "discussions" | "speed"`, which section 3/M1
     // requires to keep matching so module-deck-capture.structure.test.ts's
     // own identical anchor stays valid too.
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).toMatch(/"messages"/);
+    expect(REC_VIEW_ORDER).toContain("messages");
+    expect(recordingTabSource).toContain("REC_VIEW_ORDER.map((key)");
   });
 
   it('"messages" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
-    expect(guardBlock).toMatch(/v === "messages"/);
+    expect(normalizeRecView("messages")).toBe("messages");
+    expect(NAV_HOOK_SOURCE).toContain("resolveRecView(");
+    expect(NAV_HOOK_SOURCE).toContain('localStorage.getItem(REC_VIEW_KEY)');
   });
 
   it("the inner-view tab strip includes a messages entry, directly after the discussions entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(recordingTabSource).toMatch(
-      /\["discussions",\s*"[^"]+"\],\s*\["messages",\s*"[^"]+"\]/
-    );
+    expect(REC_VIEW_ORDER.indexOf("messages")).toBe(REC_VIEW_ORDER.indexOf("discussions") + 1);
   });
 });
 

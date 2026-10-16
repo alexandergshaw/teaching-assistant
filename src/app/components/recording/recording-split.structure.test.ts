@@ -141,11 +141,12 @@ describe("recording-split structure", () => {
     // TOOLS-IA-REORG W2: the "announcement" tab was RE-PARENTED to Tools >
     // Announcements > From a recording (nine -> eight).
     it("should render exactly eight inner-view tabs", () => {
-      const stripLine = recordingTabContent
-        .split("\n")
-        .find((line: string) => line.includes('["record", "Record"]'));
-      expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
-      const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
+      const views = fs.readFileSync(
+        path.resolve(process.cwd(), "src/app/components/recording/rec-views.ts"),
+        "utf-8"
+      );
+      const entries = views.match(/^  "[a-z]+",$/gm) ?? [];
+      expect(recordingTabContent).toContain("REC_VIEW_ORDER.map((key)");
       expect(entries).toHaveLength(8);
     });
 
@@ -164,6 +165,10 @@ describe("recording-split structure", () => {
       path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx"),
       "utf-8"
     );
+    const navContent = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/components/home/useAppNavigation.ts"),
+      "utf-8"
+    );
 
     // The restored-view read (the localStorage-backed useState initializer
     // near the top of the file) is a chained equality that falls back to
@@ -174,20 +179,23 @@ describe("recording-split structure", () => {
     // whole file, so this cannot be satisfied by the value appearing
     // anywhere else in the source (e.g. only in the strip above).
     it("should accept every non-default recView value in the restored-view equality chain, including messages", () => {
-      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
-      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
-      const guard = guardMatch![0];
+      const views = fs.readFileSync(
+        path.resolve(process.cwd(), "src/app/components/recording/rec-views.ts"),
+        "utf-8"
+      );
+      const urlState = fs.readFileSync(path.resolve(process.cwd(), "src/app/url-state.ts"), "utf-8");
       for (const value of ["discussions", "speed", "captions", "slides", "avatar", "messages"]) {
-        expect(guard, `expected the restore guard to accept "${value}"`).toContain(`v === "${value}"`);
+        expect(views, `expected the canonical view list to include "${value}"`).toContain(`"${value}"`);
+        expect(urlState).toContain(`isRecView(value)`);
       }
+      expect(navContent).toContain('localStorage.getItem(REC_VIEW_KEY)');
+      expect(navContent).toContain('localStorage.setItem(REC_VIEW_KEY, recView)');
     });
 
     // TOOLS-IA-REORG W2 (R-b1): "announcement" left recView; a chain that
     // re-accepted it would strand/duplicate the re-parented front door.
     it("should NOT accept announcement in the restore guard - it moved to Tools > Announcements", () => {
-      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
-      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
-      expect(guardMatch![0]).not.toContain('v === "announcement"');
+      expect(recordingTabContent).not.toContain('"announcement",');
     });
 
     // GRAD-SUBTAB wave 2: "grading"/"snapgrade" moved out of recView entirely
@@ -195,20 +203,23 @@ describe("recording-split structure", () => {
     // this tab's restore guard) - a regression that widened this chain back
     // to accept them would be a silent sign the panels moved back in.
     it("should NOT accept grading or snapgrade in the restore guard - both moved to Tools > Grading", () => {
-      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
-      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
-      const guard = guardMatch![0];
-      expect(guard).not.toContain('v === "grading"');
-      expect(guard).not.toContain('v === "snapgrade"');
+      const views = fs.readFileSync(
+        path.resolve(process.cwd(), "src/app/components/recording/rec-views.ts"),
+        "utf-8"
+      );
+      expect(views).not.toContain('"grading"');
+      expect(views).not.toContain('"snapgrade"');
     });
 
     // ANNOUNCEMENTS-TAB A-W2 (REQ-7): the walkthrough-announcement capture panel
     // moved to the Announcements tab, so "walkannounce" left recView. A chain
     // that re-accepted it would be a silent sign the panel moved back in.
     it("should NOT accept walkannounce in the restore guard - it moved to Tools > Announcements", () => {
-      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
-      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
-      expect(guardMatch![0]).not.toContain('v === "walkannounce"');
+      const views = fs.readFileSync(
+        path.resolve(process.cwd(), "src/app/components/recording/rec-views.ts"),
+        "utf-8"
+      );
+      expect(views).not.toContain('"walkannounce"');
     });
   });
 

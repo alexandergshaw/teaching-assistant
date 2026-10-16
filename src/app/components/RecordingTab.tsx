@@ -37,12 +37,29 @@ import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import { openAnnouncementsTab } from "@/lib/announcements-nav";
 import type { Take } from "./recording/types";
+import { REC_VIEW_ORDER, type RecView } from "./recording/rec-views";
+import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import type { UrlNavState } from "../url-state";
 
 export type { Take } from "./recording/types";
+
+const REC_VIEW_LABELS: Record<RecView, string> = {
+  record: "Record",
+  discussions: "Discussion replies",
+  messages: "Message replies",
+  moduledeck: "Module walkthrough deck",
+  speed: "Change speed",
+  captions: "Caption a video",
+  slides: "Narrate a deck",
+  avatar: "Avatar",
+};
 
 export default function RecordingTab({
   active = true,
   announcementsActive = false,
+  navState,
+  recView: storedRecView,
+  setRecView,
 }: {
   active?: boolean;
   /** TOOLS-IA-REORG W2: true while Tools > Announcements > From a recording is
@@ -50,6 +67,9 @@ export default function RecordingTab({
    * needs this tab's recorder, takes list and library, so the SAME always-mounted
    * instance serves it: the strip is hidden and only the record stage shows. */
   announcementsActive?: boolean;
+  navState: UrlNavState;
+  recView: RecView;
+  setRecView: (view: RecView) => void;
 }) {
   const { supabase, user } = useSupabase();
 
@@ -65,26 +85,6 @@ export default function RecordingTab({
   // GradingRecordingPanel and SnapshotGradingPanel are now always-mounted
   // siblings of this tab, reached through Tools > Grading's own inner nav
   // (gradingView), not through recView.
-  const [storedRecView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "moduledeck" | "messages"
-  >(() => {
-    if (typeof window === "undefined") return "record";
-    const v = localStorage.getItem("ta-rec-view");
-    return v === "discussions" ||
-      v === "speed" ||
-      v === "captions" ||
-      v === "slides" ||
-      v === "avatar" ||
-      v === "moduledeck" ||
-      v === "messages"
-      ? v
-      : "record";
-  });
-
-  useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", storedRecView);
-  }, [storedRecView]);
-
   // The view every panel below is keyed on. Announcements > From a recording
   // overrides the strip's selection WITHOUT touching or persisting it, so the
   // user's real Recording sub-view survives a visit to Announcements.
@@ -95,10 +95,9 @@ export default function RecordingTab({
   // whole app session (see the always-mounted wrapper in page.tsx), so a
   // mount-only effect reading a one-shot payload would only ever observe the
   // FIRST launch of a session - see src/lib/recording-launch.ts's own header
-  // comment for the full account. Registering this listener once (empty
-  // deps) is still correct: it is the CALLBACK, not the effect body, that
-  // must re-run per launch, and a live `window.addEventListener` does
-  // exactly that - every openRecordingTool() dispatch, first or fifth,
+  // comment for the full account. The setter is a stable React state setter;
+  // listing it keeps the callback current without changing event behavior.
+  // A live `window.addEventListener` still handles every dispatch - first or fifth,
   // reaches this handler and switches recView. Re-parses `e.detail`
   // defensively (matching AiChatFab's own re-parse of the sibling
   // "open-ai-chat" event) rather than trusting the dispatcher, since a raw
@@ -121,7 +120,7 @@ export default function RecordingTab({
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, []);
+  }, [setRecView]);
 
   const [error, setError] = useState<string | null>(null);
   const [hasStream, setHasStream] = useState(false);
@@ -607,13 +606,13 @@ export default function RecordingTab({
           under Tools > Announcements and reuses the record wrapper below
           (the strip is hidden while that is showing). */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools" style={announcementsActive ? { display: "none" } : undefined}>
-        {([["record", "Record"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={recView === key}
+        {REC_VIEW_ORDER.map((key) => (
+          <a key={key} href={buildTabHref(navState, { tab: "manual", toolsSection: "manual", manualView: "recording", recView: key })} role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={`rec-panel-${key}`}
             tabIndex={recView === key ? 0 : -1}
             onKeyDown={(e) => {
-              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLAnchorElement>('[role="tab"]') ?? []);
               const idx = tabs.indexOf(e.currentTarget);
               if (idx === -1) return;
               let nextIdx: number;
@@ -627,9 +626,13 @@ export default function RecordingTab({
               tabs[nextIdx].click();
             }}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setRecView(key)}>
-            <span className={styles.tabLabelWrap}>{label}</span>
-          </button>
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setRecView(key);
+            }}>
+            <span className={styles.tabLabelWrap}>{REC_VIEW_LABELS[key]}</span>
+          </a>
         ))}
       </div>
 

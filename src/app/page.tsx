@@ -79,7 +79,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, filesView, setFilesView, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, filesView, setFilesView, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView, recView } = nav;
 
   // The full URL-addressable nav state, used only to build each tab's deep-link
   // href (tab-link.ts). Kept here, not in the nav hook, so that hook stays off
@@ -98,6 +98,7 @@ export default function Home() {
     presentationsView,
     announcementsView,
     tasksView,
+    recView,
     kbInstitution: nav.kbInstitution,
     kbPageId: nav.kbPageId,
   };
@@ -809,6 +810,9 @@ export default function Home() {
           <RecordingTab
             active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"}
             announcementsActive={announcementsRecordingShown}
+            navState={navState}
+            recView={nav.recView}
+            setRecView={nav.setRecView}
           />
         </div>
 

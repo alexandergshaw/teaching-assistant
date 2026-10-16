@@ -33,6 +33,7 @@
 // listener.
 
 import { isManualViewType, type ManualViewType, type BuildViewType } from "./components/manual/manual-rail";
+import { isRecView, type RecView } from "./components/recording/rec-views";
 import {
   LMS_VIEWS,
   isGradingView,
@@ -189,6 +190,20 @@ export function resolveFilesView(
   return normalizeFilesView(urlNamesFilesView ? rawUrlView : storedView);
 }
 
+export function normalizeRecView(value: string | null): RecView {
+  return isRecView(value) ? value : "record";
+}
+
+export const DEFAULT_REC_VIEW = normalizeRecView(null);
+
+export function resolveRecView(
+  rawUrlView: string | null,
+  urlNamesRecView: boolean,
+  storedView: string | null
+): RecView {
+  return normalizeRecView(urlNamesRecView ? rawUrlView : storedView);
+}
+
 // Derived from the rail's own ordered list rather than restated: a Tasks
 // sub-view added there is accepted by the URL automatically.
 const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(TASKS_VIEW_ORDER);
@@ -328,6 +343,7 @@ const GRADING_VIEW_PARAM = "gradingView";
 const PRESENTATIONS_VIEW_PARAM = "presentationsView";
 const ANNOUNCEMENTS_VIEW_PARAM = "announcementsView";
 const FILES_VIEW_PARAM = "filesView";
+const REC_VIEW_PARAM = "recView";
 // RETIRED (GRAD-SUBTAB wave 3, DECISION 19 E-full): never emitted by
 // buildUrlSearch and no longer a field on UrlNavState - kept only so
 // parseUrlState can still read the raw legacy value, to detect the
@@ -347,6 +363,7 @@ export interface UrlNavState {
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
   filesView?: FilesView;
+  recView?: RecView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -500,6 +517,7 @@ export function parseUrlState(search: string): UrlNavState {
         ? rawLibrarySection
         : destination.librarySection,
     ...(params.has(FILES_VIEW_PARAM) ? { filesView: normalizeFilesView(params.get(FILES_VIEW_PARAM)) } : {}),
+    ...(params.has(REC_VIEW_PARAM) ? { recView: normalizeRecView(params.get(REC_VIEW_PARAM)) } : {}),
     manualView: gradingPointer
       ? gradingPointer.manualView
       : automatePointer
@@ -569,6 +587,9 @@ export function buildUrlSearch(state: UrlNavState): string {
       }
       if (state.manualView === "artifact-design" && state.automateView !== DEFAULT_AUTOMATE_VIEW) {
         params.set(AUTOMATE_VIEW_PARAM, state.automateView);
+      }
+      if (state.manualView === "recording" && state.recView && state.recView !== DEFAULT_REC_VIEW) {
+        params.set(REC_VIEW_PARAM, state.recView);
       }
     }
   }

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { REC_VIEW_ORDER } from "../recording/rec-views";
+import { normalizeRecView } from "../../url-state";
 
 import * as fs from "fs";
 import * as path from "path";
@@ -57,6 +59,7 @@ describe("stripComments handles CRLF line endings (BLOCKER B canary)", () => {
 
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
 const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+const NAV_HOOK_SOURCE = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/home/useAppNavigation.ts"), "utf-8");
 
 const PAGE_PATH = path.resolve(process.cwd(), "src/app/page.tsx");
 const pageSource = fs.readFileSync(PAGE_PATH, "utf-8");
@@ -89,19 +92,10 @@ describe("SnapshotGradingPanel is no longer mounted by page.tsx (nav-only remova
 // GRADING_VIEWS guard) - not duplicated here.
 describe('"snapgrade" is fully retired from RecordingTab (recView union, restore guard, and the strip)', () => {
   it('"snapgrade" is NOT in the recView union, NOT in the SEPARATE restore guard\'s v === chain, and NOT in the strip', () => {
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).not.toMatch(/"snapgrade"/);
-
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    expect(recordingTabSource.slice(guardStart, guardEnd)).not.toMatch(/v === "snapgrade"/);
-
-    expect(recordingTabSource).not.toMatch(/\["snapgrade",\s*"[^"]+"\]/);
+    expect(REC_VIEW_ORDER).not.toContain("snapgrade");
+    expect(normalizeRecView("snapgrade")).toBe("record");
+    expect(NAV_HOOK_SOURCE).toContain("resolveRecView(");
+    expect(recordingTabSource).toContain("REC_VIEW_ORDER.map((key)");
   });
 });
 

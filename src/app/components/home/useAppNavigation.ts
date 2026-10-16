@@ -15,6 +15,7 @@ import {
   type CoursesSection,
   type ToolsSection,
   type LibrarySection,
+  type FilesView,
   type TasksView,
   isCoursesSection,
   isToolsSection,
@@ -27,6 +28,9 @@ import {
   normalizePresentationsView,
   normalizeAnnouncementsView,
   normalizeTasksView,
+  parseFilesView,
+  resolveFilesViewFromUrl,
+  FILES_VIEW_CHANGE_EVENT,
   normalizeKbInstitution,
   normalizeKbPageId,
   parseUrlState,
@@ -86,6 +90,7 @@ const TASKS_VIEW_KEY = "ta-tasks-view";
 const COURSES_SECTION_KEY = "ta-courses-section";
 const TOOLS_SECTION_KEY = "ta-tools-section";
 const LIBRARY_SECTION_KEY = "ta-library-section";
+const FILES_VIEW_KEY = "ta-files-view";
 
 /**
  * Resolves the whole starting location once, from the URL when it names a
@@ -279,6 +284,10 @@ export function useAppNavigation() {
     if (destination.librarySection !== DEFAULT_DESTINATION.librarySection) return destination.librarySection;
     const saved = localStorage.getItem(LIBRARY_SECTION_KEY);
     return isLibrarySection(saved) ? saved : destination.librarySection;
+  });
+  const [filesView, setFilesView] = useState<FilesView>(() => {
+    if (typeof window === "undefined") return "library";
+    return resolveFilesViewFromUrl(window.location.search, localStorage.getItem(FILES_VIEW_KEY));
   });
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -705,6 +714,19 @@ export function useAppNavigation() {
     localStorage.setItem(LIBRARY_SECTION_KEY, librarySection);
   }, [librarySection]);
 
+  useEffect(() => {
+    localStorage.setItem(FILES_VIEW_KEY, filesView);
+  }, [filesView]);
+
+  useEffect(() => {
+    const onFilesViewChange = (event: Event) => {
+      const view = (event as CustomEvent<unknown>).detail;
+      if (view === "library" || view === "submissions") setFilesView(view);
+    };
+    window.addEventListener(FILES_VIEW_CHANGE_EVENT, onFilesViewChange);
+    return () => window.removeEventListener(FILES_VIEW_CHANGE_EVENT, onFilesViewChange);
+  }, []);
+
   // lastKnownSearchRef tracks the query string the browser is currently at,
   // as best we know it. It is updated both when we push/replace it
   // ourselves and when a popstate event tells us the browser already moved
@@ -761,6 +783,7 @@ export function useAppNavigation() {
       coursesSection,
       toolsSection,
       librarySection,
+      filesView,
       manualView,
       automateView,
       buildView,
@@ -799,6 +822,7 @@ export function useAppNavigation() {
     coursesSection,
     toolsSection,
     librarySection,
+    filesView,
     manualView,
     automateView,
     buildView,
@@ -847,7 +871,8 @@ export function useAppNavigation() {
       // Record the URL this restore lands on BEFORE the state updates below
       // trigger the sync effect above, so that effect sees its target
       // already matches and skips pushing another entry.
-      lastKnownSearchRef.current = buildUrlSearch(parsed);
+      const restoredFilesView = parseFilesView(window.location.search);
+      lastKnownSearchRef.current = buildUrlSearch({ ...parsed, filesView: restoredFilesView });
       setActiveTab(parsed.tab);
       // Only apply a sub-view when its parent is the one actually being
       // restored to - a manualView/automateView/buildView/contentView value
@@ -884,6 +909,7 @@ export function useAppNavigation() {
       }
       if (parsed.tab === "files") {
         setLibrarySection(parsed.librarySection);
+        if (parsed.librarySection === "files") setFilesView(restoredFilesView);
         if (parsed.librarySection === "knowledge") {
           // A null URL institution (no institutions registered at push-time)
           // means "let the hook keep resolving its own fallback" rather than

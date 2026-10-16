@@ -44,6 +44,15 @@ import { filterAndSortFiles, type FilesFilterKind } from "./files/filter-sort";
 import { classifyUploadFile } from "./files/upload-classify";
 import { readDuration } from "./files/read-duration";
 import { addFileToModule } from "./files/add-to-module";
+import { isPlainLeftClick } from "./tabs/tab-link";
+import {
+  buildUrlSearch,
+  FILES_VIEW_CHANGE_EVENT,
+  parseFilesView,
+  parseUrlState,
+  resolveFilesViewFromUrl,
+} from "../url-state";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
   const { supabase, user } = useSupabase();
@@ -84,12 +93,34 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
   // Files view (Library or Submissions) - persisted
   const [filesView, setFilesViewState] = useState<"library" | "submissions">(() => {
     if (typeof window === "undefined") return "library";
-    return localStorage.getItem("ta-files-view") === "submissions" ? "submissions" : "library";
+    return resolveFilesViewFromUrl(window.location.search, localStorage.getItem("ta-files-view"));
   });
   const setFilesView = (v: "library" | "submissions") => {
     setFilesViewState(v);
-    if (typeof window !== "undefined") localStorage.setItem("ta-files-view", v);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ta-files-view", v);
+      window.dispatchEvent(new CustomEvent(FILES_VIEW_CHANGE_EVENT, { detail: v }));
+    }
   };
+  const filesViewHref = (view: "library" | "submissions") =>
+    "/" +
+    buildUrlSearch({
+      ...parseUrlState(typeof window === "undefined" ? "" : window.location.search),
+      tab: "files",
+      librarySection: "files",
+      filesView: view,
+    });
+
+  useEffect(() => {
+    const onPopState = () => {
+      const location = parseUrlState(window.location.search);
+      if (location.tab === "files" && location.librarySection === "files") {
+        setFilesViewState(parseFilesView(window.location.search));
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   // Delete confirmation state
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -715,24 +746,32 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         tabIndex={-1}
       >
         <div className={styles.lessonInnerTabs} role="tablist" aria-label="Files">
-          <button
-            type="button"
+          <a
+            href={filesViewHref("library")}
             role="tab"
             aria-selected={filesView === "library"}
             className={`${styles.lessonInnerTab}${filesView === "library" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setFilesView("library")}
+            onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setFilesView("library");
+            }}
           >
             Library
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href={filesViewHref("submissions")}
             role="tab"
             aria-selected={filesView === "submissions"}
             className={`${styles.lessonInnerTab}${filesView === "submissions" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setFilesView("submissions")}
+            onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setFilesView("submissions");
+            }}
           >
             Submissions
-          </button>
+          </a>
         </div>
       </div>
 

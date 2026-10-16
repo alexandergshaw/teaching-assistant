@@ -316,8 +316,34 @@ const ANNOUNCEMENTS_VIEW_PARAM = "announcementsView";
 // "drafts-view:grades" retired pointer below.
 const DRAFTS_VIEW_PARAM = "draftsView";
 const TASKS_VIEW_PARAM = "tasksView";
+const FILES_VIEW_PARAM = "filesView";
 const KB_INSTITUTION_PARAM = "kbInstitution";
 const KB_PAGE_PARAM = "kbPage";
+
+export type FilesView = "library" | "submissions";
+export const FILES_VIEW_CHANGE_EVENT = "ta-files-view-change";
+
+export function normalizeFilesView(value: string | null): FilesView {
+  return value === "submissions" ? "submissions" : "library";
+}
+
+export function parseFilesView(search: string): FilesView {
+  return normalizeFilesView(new URLSearchParams(search).get(FILES_VIEW_PARAM));
+}
+
+export function resolveFilesViewFromUrl(search: string, saved: string | null): FilesView {
+  const params = new URLSearchParams(search);
+  const rawTab = params.get(TAB_PARAM);
+  if (rawTab !== null) {
+    const destination = resolveTabDestination(rawTab);
+    const rawLibrarySection = params.get(LIBRARY_SECTION_PARAM);
+    const librarySection = isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection;
+    if (destination.tab === "files" && librarySection === "files") {
+      return normalizeFilesView(params.get(FILES_VIEW_PARAM));
+    }
+  }
+  return normalizeFilesView(saved);
+}
 
 export interface UrlNavState {
   tab: ActiveTab;
@@ -328,6 +354,7 @@ export interface UrlNavState {
   coursesSection: CoursesSection;
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
+  filesView?: FilesView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -466,7 +493,11 @@ export function parseUrlState(search: string): UrlNavState {
     destination.tab === "manual" && !draftsToLibrary
       ? resolveAutomatePointer(rawManualView, rawContentView, rawToolsSection, rawTab, rawWorkflowsView, rawDraftsView)
       : undefined;
+  const filesView = params.has(FILES_VIEW_PARAM)
+    ? { filesView: normalizeFilesView(params.get(FILES_VIEW_PARAM)) }
+    : {};
   return {
+    ...filesView,
     tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
     // "manual" is the only live Tools section (W2): a legacy "workflows"
@@ -556,6 +587,9 @@ export function buildUrlSearch(state: UrlNavState): string {
   if (state.tab === "files") {
     if (state.librarySection !== DEFAULT_LIBRARY_SECTION) {
       params.set(LIBRARY_SECTION_PARAM, state.librarySection);
+    }
+    if (state.librarySection === "files" && state.filesView === "submissions") {
+      params.set(FILES_VIEW_PARAM, state.filesView);
     }
     // AC2: kbPageId is meaningless (and ambiguous - the same id can exist
     // under a different institution) without an institution alongside it, so

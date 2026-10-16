@@ -3,6 +3,7 @@ import { fillOfficeTemplate, type OfficeTemplateReplacement } from "@/lib/decks/
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import { TemplateError } from "@/lib/powerpoint-template-library/types";
 import JSZip from "jszip";
+import { createHash } from "node:crypto";
 import { assertContainerWithinCaps, createZipBudget, readOfficeMember, ZipCapError } from "@/lib/zip-caps";
 import { checkWireBudget, UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { applySlideObjectOperations, inspectSlideObjects, type SlidePackageContext } from "@/lib/presentations/uploaded-slide-objects";
@@ -149,11 +150,6 @@ export async function applyUploadedSlideEdits(
   }
   let updated = bytes;
   const changed = new Set<string>();
-  if (Array.isArray(operations) && operations.length > 0) {
-    const objectResult = await applySlideObjectOperations(updated, slideNumber, operations);
-    updated = objectResult.bytes;
-    objectResult.changedMembers.forEach((member) => changed.add(member));
-  }
   if (Array.isArray(replacements) && replacements.length > 0) {
     const textResult = await applyUploadedSlideReplacements(updated, slideNumber, replacements);
     updated = textResult.bytes;
@@ -165,6 +161,13 @@ export async function applyUploadedSlideEdits(
     const notesResult = await applyUploadedSlideNotes(updated, slideNumber, notes);
     updated = notesResult.bytes;
     notesResult.changedMembers.forEach((member) => changed.add(member));
+  }
+  if (Array.isArray(operations) && operations.length > 0) {
+    const originalContext = await inspectSlideObjects(bytes, slideNumber);
+    const sourceIdentity = createHash("sha256").update(bytes).digest("hex").slice(0, 20);
+    const objectResult = await applySlideObjectOperations(updated, slideNumber, operations, sourceIdentity, originalContext);
+    updated = objectResult.bytes;
+    objectResult.changedMembers.forEach((member) => changed.add(member));
   }
   if (updated.toString("base64").length > UPLOAD_WIRE_BUDGET_BYTES) throw new UploadedSlideEditorError("file_size");
   return { bytes: updated, slides: await inspectUploadedPptx(updated), changedMembers: [...changed] };

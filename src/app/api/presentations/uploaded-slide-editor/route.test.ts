@@ -101,6 +101,26 @@ describe("POST /api/presentations/uploaded-slide-editor", () => {
     expect(response.status).toBe(502);
   });
 
+  it("accepts chart data candidates only for editable charts with a fixed category count", async () => {
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "Enrollment", paragraphs: [], objects: [
+        { id: "package:s1:o4:chart", kind: "chart", name: "Enrollment", editable: true, text: "", chartData: { seriesName: "Students", categories: ["Alpha", "Beta"], values: [2, 3] } },
+      ] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [{ objectId: "package:s1:o4:chart", kind: "chart", action: "setData", data: { seriesName: "Enrollment", categories: ["Freshman", "Senior"], values: [12, 18] } }] }) } as never);
+    const response = await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Update the enrollment figures" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ operations: [{ kind: "chart", action: "setData", data: { categories: ["Freshman", "Senior"], values: [12, 18] } }] });
+
+    vi.mocked(inspectUploadedPptx).mockResolvedValueOnce([
+      { number: 1, title: "Enrollment", paragraphs: [], objects: [
+        { id: "package:s1:o4:chart", kind: "chart", name: "Enrollment", editable: true, text: "", chartData: { seriesName: "Students", categories: ["Alpha", "Beta"], values: [2, 3] } },
+      ] },
+    ] as never);
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: JSON.stringify({ paragraphs: [], operations: [{ objectId: "package:s1:o4:chart", kind: "chart", action: "setData", data: { seriesName: "Enrollment", categories: ["Only one"], values: [12] } }] }) } as never);
+    expect((await POST(request({ op: "regenerate", base64: "AA==", slideNumber: 1, instruction: "Change chart" }))).status).toBe(502);
+  });
+
   it("rejects a stale candidate before applying any package change", async () => {
     const response = await POST(request({ op: "apply", base64: "AA==", slideNumber: 1, replacements: [{ id: "s0_p0", text: "stale" }], expectedDigest: "0".repeat(64) }));
     expect(response.status).toBe(409);

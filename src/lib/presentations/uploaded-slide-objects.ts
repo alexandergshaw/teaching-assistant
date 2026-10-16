@@ -4,6 +4,7 @@ import { DOMParser, XMLSerializer, type Document as XmlDocument, type Element as
 import JSZip from "jszip";
 import { inventorySlides } from "@/lib/powerpoint-template-library/inventory";
 import { assertContainerWithinCaps, createZipBudget, readOfficeMember, ZipCapError } from "@/lib/zip-caps";
+import { applyUploadedSlideChartOperation, inspectUploadedSlideChart, type ChartOperation, type UploadedSlideChartData } from "@/lib/presentations/uploaded-slide-charts";
 
 const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -24,6 +25,7 @@ export interface UploadedSlideObject {
   geometry?: SlideGeometry;
   fill?: { color: string; transparency: number };
   altText?: string;
+  chartData?: UploadedSlideChartData;
 }
 export interface SlidePackageContext {
   slideNumber: number;
@@ -35,7 +37,8 @@ export type SlideObjectOperation =
   | { objectId: string; kind: "shape"; action: "setGeometry"; geometry: SlideGeometry }
   | { objectId: string; kind: "shape"; action: "setFill"; fill: { color: string; transparency: number } }
   | { objectId: string; kind: "picture"; action: "setGeometry"; geometry: SlideGeometry }
-  | { objectId: string; kind: "picture"; action: "setAltText"; altText: string };
+  | { objectId: string; kind: "picture"; action: "setAltText"; altText: string }
+  | ChartOperation;
 
 export class SlideObjectError extends Error {
   constructor(readonly code: "invalid_package" | "invalid_slide" | "invalid_operation" | "unsupported_object" | "invalid_relationship") {
@@ -154,6 +157,7 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
       const objectId = `${packageKey}:s${slideNumber}:o${props.id}:${kind}`;
       let editable = false;
       let reason: string | undefined;
+      let chartData: UploadedSlideChartData | undefined;
       if (kind === "shape") {
         const properties = first(node, P, "spPr");
         const safeGeometry = Boolean(properties && first(properties, A, "xfrm") && first(properties, A, "prstGeom") && !first(properties, A, "custGeom") && !first(properties, A, "effectLst") && !first(properties, A, "effectDag"));
@@ -167,7 +171,14 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
         if (!editable) reason = "The picture has an external, unresolved, or unsupported image relationship and is read-only.";
       }
       else if (kind === "group") { reason = "Grouped objects are kept together and are read-only."; }
-      else if (kind === "chart") { editable = false; reason = "Charts are retained; this chart data format is not supported for safe editing yet."; }
+      else if (kind === "chart") {
+        const chartRef = first(node, C, "chart");
+        const chartRelId = chartRef?.getAttributeNS(R, "id") ?? "";
+        const inspected = await inspectUploadedSlideChart(bytes, slide.id, chartRelId);
+        editable = Boolean(inspected.data);
+        reason = inspected.reason;
+        chartData = inspected.data;
+      }
       else if (kind === "smartart") { editable = false; reason = "SmartArt is retained; its diagram relationships are read-only in this editor."; }
       else if (kind === "connector" || kind === "unknown") { editable = false; reason = "This PowerPoint object is retained but its structure is outside the supported edit set."; }
       const transformNode = kind === "shape" || kind === "picture" ? node : undefined;
@@ -177,6 +188,7 @@ export async function inspectSlideObjects(bytes: Buffer, slideNumber: number, kn
         ...(transformNode && geometry(transformNode) ? { geometry: geometry(transformNode) } : {}),
         ...(kind === "shape" ? { fill: readFill(node) } : {}),
         ...(kind === "picture" ? { altText: props.altText.slice(0, 500) } : {}),
+        ...(chartData ? { chartData } : {}),
       });
     }
     let layout: SlidePackageContext["layout"] = null;
@@ -257,15 +269,55 @@ function setFill(doc: XmlDocument, node: XmlElement, fill: unknown): void {
   else spPr.appendChild(solid);
 }
 
-export async function applySlideObjectOperations(bytes: Buffer, slideNumber: number, input: unknown): Promise<{ bytes: Buffer; context: SlidePackageContext; changedMembers: string[] }> {
+export async function applySlideObjectOperations(bytes: Buffer, slideNumber: number, input: unknown, identityPackageKey?: string, sourceContext?: SlidePackageContext): Promise<{ bytes: Buffer; context: SlidePackageContext; changedMembers: string[] }> {
   try {
     if (!Array.isArray(input) || input.length === 0 || input.length > 40) throw new SlideObjectError("invalid_operation");
     const slides = await inventorySlides(bytes);
     const slide = slides[slideNumber - 1];
     if (!slide) throw new SlideObjectError("invalid_slide");
-    const originalContext = await inspectSlideObjects(bytes, slideNumber);
+    const originalContext = sourceContext ?? await inspectSlideObjects(bytes, slideNumber);
     const allowedObjects = new Map(originalContext.objects.filter((object) => object.editable).map((object) => [object.id, object]));
-    const packageKey = createHash("sha256").update(bytes).digest("hex").slice(0, 20);
+    const packageKey = identityPackageKey ?? createHash("sha256").update(bytes).digest("hex").slice(0, 20);
+    const chartOperations: ChartOperation[] = [];
+    const nativeOperations: unknown[] = [];
+    for (const raw of input) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new SlideObjectError("invalid_operation");
+      const operation = raw as Record<string, unknown>;
+      if (typeof operation.objectId !== "string" || typeof operation.kind !== "string" || typeof operation.action !== "string") throw new SlideObjectError("invalid_operation");
+      const authorized = allowedObjects.get(operation.objectId);
+      if (!authorized || authorized.kind !== operation.kind) throw new SlideObjectError("invalid_operation");
+      if (operation.kind === "chart" && operation.action === "setData" && Object.keys(operation).sort().join(",") === "action,data,kind,objectId") chartOperations.push(operation as unknown as ChartOperation);
+      else if (operation.kind !== "chart") nativeOperations.push(raw);
+      else throw new SlideObjectError("invalid_operation");
+    }
+    let workingBytes = bytes;
+    const changedMembers = new Set<string>();
+    if (nativeOperations.length > 0) {
+      const nativeResult = await applyNativeSlideObjectOperations(workingBytes, slideNumber, nativeOperations, originalContext, packageKey);
+      workingBytes = nativeResult.bytes;
+      nativeResult.changedMembers.forEach((member) => changedMembers.add(member));
+    }
+    const currentSlides = await inventorySlides(workingBytes);
+    const currentSlide = currentSlides[slideNumber - 1];
+    if (!currentSlide) throw new SlideObjectError("invalid_slide");
+    for (const operation of chartOperations) {
+      const chartResult = await applyUploadedSlideChartOperation(workingBytes, currentSlide.id, slideNumber, packageKey, operation);
+      workingBytes = chartResult.bytes;
+      chartResult.changedMembers.forEach((member) => changedMembers.add(member));
+    }
+    return { bytes: workingBytes, context: await inspectSlideObjects(workingBytes, slideNumber), changedMembers: [...changedMembers] };
+  } catch (error) {
+    if (error instanceof SlideObjectError) throw error;
+    if (error instanceof ZipCapError) throw new SlideObjectError("invalid_package");
+    throw new SlideObjectError("invalid_package");
+  }
+}
+
+async function applyNativeSlideObjectOperations(bytes: Buffer, slideNumber: number, input: unknown[], originalContext: SlidePackageContext, packageKey: string): Promise<{ bytes: Buffer; context: SlidePackageContext; changedMembers: string[] }> {
+  try {
+    const allowedObjects = new Map(originalContext.objects.filter((object) => object.editable).map((object) => [object.id, object]));
+    const slide = (await inventorySlides(bytes))[slideNumber - 1];
+    if (!slide) throw new SlideObjectError("invalid_slide");
     const zip = await JSZip.loadAsync(bytes);
     assertContainerWithinCaps(zip, "office-file");
     const budget = createZipBudget();

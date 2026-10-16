@@ -224,7 +224,19 @@ export default function UploadedSlideEditor() {
 
   const selectedObject = selected?.objects?.find((object) => object.id === selectedObjectId);
   function saveObjectEdit(object: UploadedSlideObject) {
-    if (!object.geometry || !workingBase64 || hasUnsavedEdits) return;
+    if (!workingBase64 || hasUnsavedEdits) return;
+    if (object.kind === "chart" && object.chartData) {
+      const categories = (objectEdit.chartCategories ?? object.chartData.categories.join("\n")).split("\n").map((value) => value.trim());
+      const rawValues = (objectEdit.chartValues ?? object.chartData.values.join("\n")).split("\n").map((value) => value.trim());
+      const values = rawValues.map(Number);
+      if (!objectEdit.chartSeriesName?.trim() && objectEdit.chartSeriesName !== undefined || categories.length !== object.chartData.categories.length || values.length !== object.chartData.values.length || rawValues.some((value) => !value) || values.some((value) => !Number.isFinite(value)) || categories.some((value) => !value)) {
+        setError("Keep the chart's existing number of nonempty categories and enter one finite number for each category.");
+        return;
+      }
+      void apply(selectedNumber, [], "edit", [{ objectId: object.id, kind: "chart", action: "setData", data: { seriesName: objectEdit.chartSeriesName ?? object.chartData.seriesName, categories, values } }]);
+      return;
+    }
+    if (!object.geometry) return;
     const geometry: SlideGeometry = {
       x: Number(objectEdit.x ?? object.geometry.x), y: Number(objectEdit.y ?? object.geometry.y),
       width: Number(objectEdit.width ?? object.geometry.width), height: Number(objectEdit.height ?? object.geometry.height),
@@ -302,10 +314,17 @@ export default function UploadedSlideEditor() {
                 {selectedObject.kind === "picture" && <Button component="label" variant="outlined" disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Replace picture from PNG or JPEG<input hidden type="file" accept="image/png,image/jpeg" onChange={(event) => { void replacePicture(event.target.files?.[0]); event.currentTarget.value = ""; }} /></Button>}
                 <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Save object changes</Button>
               </div>}
+              {selectedObject?.editable && selectedObject.kind === "chart" && selectedObject.chartData && <div className={styles.objectEditor}>
+                <Typography variant="subtitle1">Edit chart data</Typography>
+                <TextField fullWidth label="Series name" value={objectEdit.chartSeriesName ?? selectedObject.chartData.seriesName} onChange={(event) => setObjectEdit((current) => ({ ...current, chartSeriesName: event.target.value }))} disabled={busy !== null || candidate !== null} />
+                <TextField fullWidth multiline minRows={Math.min(8, selectedObject.chartData.categories.length)} label="Category labels (one per line)" value={objectEdit.chartCategories ?? selectedObject.chartData.categories.join("\n")} onChange={(event) => setObjectEdit((current) => ({ ...current, chartCategories: event.target.value }))} disabled={busy !== null || candidate !== null} />
+                <TextField fullWidth multiline minRows={Math.min(8, selectedObject.chartData.values.length)} label="Numeric values (one per line)" value={objectEdit.chartValues ?? selectedObject.chartData.values.join("\n")} onChange={(event) => setObjectEdit((current) => ({ ...current, chartValues: event.target.value }))} disabled={busy !== null || candidate !== null} />
+                <Button variant="contained" onClick={() => saveObjectEdit(selectedObject)} disabled={busy !== null || candidate !== null || hasUnsavedEdits}>Save chart data</Button>
+              </div>}
             </Paper>
             {!selected?.paragraphs.some((paragraph) => paragraph.editable !== false) && !selected?.objects?.some((object) => object.editable) && !selected?.notes?.editable ? <Alert severity="info">This slide has no supported editable objects. You can inspect retained objects above and export the deck unchanged.</Alert> : (
               <>
-                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Charts, SmartArt, and groups cannot yet be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
+                <Alert severity="info">Unsupported objects remain in the deck and are read-only. Unsupported charts, SmartArt, and groups cannot be edited here. Saving text in a paragraph with mixed inline formatting may flatten that paragraph&apos;s formatting.</Alert>
                 {selected.paragraphs.some((paragraph) => paragraph.editable !== false) && <>
                   <div className={styles.paragraphs}>
                     {selected.paragraphs.map((paragraph, index) => paragraph.editable === false ? <Alert key={paragraph.id} severity="info"><strong>Paragraph {index + 1} is read-only.</strong> Its PowerPoint structure is outside the safe text-editing subset: {paragraph.text}</Alert> : <TextField key={paragraph.id} fullWidth multiline minRows={index === 0 ? 2 : 3} label={`Text paragraph ${index + 1}`} value={edits[paragraph.id] ?? paragraph.text} onChange={(event) => setEdits((current) => ({ ...current, [paragraph.id]: event.target.value }))} disabled={busy !== null || candidate !== null} />)}
@@ -327,8 +346,8 @@ export default function UploadedSlideEditor() {
                 {candidate.paragraphs.map((paragraph, index) => <div key={paragraph.id} className={styles.candidateParagraph}><strong>Paragraph {index + 1}</strong><p>Before: {selected?.paragraphs.find((item) => item.id === paragraph.id)?.text ?? ""}</p><p>Proposed: {paragraph.text}</p></div>)}
                 {candidate.operations.map((candidateOperation, index) => {
                   const object = selected?.objects?.find((item) => item.id === candidateOperation.objectId);
-                  const before = object ? candidateOperation.action === "setGeometry" ? object.geometry : candidateOperation.action === "setFill" ? object.fill : object.altText : undefined;
-                  const after = candidateOperation.action === "setGeometry" ? candidateOperation.geometry : candidateOperation.action === "setFill" ? candidateOperation.fill : candidateOperation.altText;
+                  const before = object ? candidateOperation.kind === "chart" ? object.chartData : candidateOperation.action === "setGeometry" ? object.geometry : candidateOperation.action === "setFill" ? object.fill : object.altText : undefined;
+                  const after = candidateOperation.kind === "chart" ? candidateOperation.data : candidateOperation.action === "setGeometry" ? candidateOperation.geometry : candidateOperation.action === "setFill" ? candidateOperation.fill : candidateOperation.altText;
                   return <div key={`${candidateOperation.objectId}-${index}`} className={styles.candidateParagraph}><strong>{object?.name ?? candidateOperation.kind}</strong><p>Before: {JSON.stringify(before)}</p><p>Proposed: {JSON.stringify(after)}</p></div>;
                 })}
                 {candidate.notes.map((note) => <div key={note.id} className={styles.candidateParagraph}><strong>Speaker notes</strong><p>Before: {selected?.notes?.text ?? ""}</p><p>Proposed: {note.text}</p></div>)}

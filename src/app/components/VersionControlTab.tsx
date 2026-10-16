@@ -14,8 +14,10 @@ import Typeahead from "./ui/Typeahead";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
 import styles from "../page.module.css";
+import type { UrlNavState } from "../url-state";
+import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import type { VcOrgView, VcSubTab } from "./version-control/vc-views";
 
-const VC_SUBTAB_KEY = "ta-vc-subtab";
 const VC_ORG_KEY = "ta-vc-org";
 
 /**
@@ -23,7 +25,15 @@ const VC_ORG_KEY = "ta-vc-org";
  * paste a list of students, and generate one repo per student from the template
  * (the GitHub Classroom distribution pattern).
  */
-export default function VersionControlTab() {
+interface VersionControlTabProps {
+  navState: UrlNavState;
+  vcSubTab: VcSubTab;
+  setVcSubTab: (view: VcSubTab) => void;
+  vcOrgView: VcOrgView;
+  setVcOrgView: (view: VcOrgView) => void;
+}
+
+export default function VersionControlTab({ navState, vcSubTab, setVcSubTab, vcOrgView, setVcOrgView }: VersionControlTabProps) {
   const { total: vcAttention } = useVcCounts();
   const [orgs, setOrgs] = useState<string[]>([]);
   const [orgsState, setOrgsState] = useState<"loading" | "ready" | "unconfigured">("loading");
@@ -31,18 +41,6 @@ export default function VersionControlTab() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [orgReposNonce, setOrgReposNonce] = useState(0);
   const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
-  const [subTab, setSubTab] = useState<"orgs" | "repos" | "bulk">(() => {
-    if (typeof window === "undefined") return "orgs";
-    const stored = localStorage.getItem(VC_SUBTAB_KEY);
-    if (stored === "repos" || stored === "bulk") return stored;
-    return "orgs";
-  });
-
-
-  useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem(VC_SUBTAB_KEY, subTab);
-  }, [subTab]);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem(VC_ORG_KEY, selectedOrg);
@@ -54,10 +52,10 @@ export default function VersionControlTab() {
     const h = takeCourseHandoff("version-control");
     if (!h) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setSubTab("repos");
+    setVcSubTab("repos");
     if (h.githubOrg) setSelectedOrg(h.githubOrg);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, []);
+  }, [setVcSubTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,39 +117,51 @@ export default function VersionControlTab() {
   return (
     <div className={styles.form}>
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: "var(--space-1)" }}>
-        <button
-          type="button"
+        <a
+          href={buildTabHref(navState, { tab: "manual", toolsSection: "manual", manualView: "version-control", vcSubTab: "orgs" })}
           role="tab"
-          aria-selected={subTab === "orgs"}
-          className={`${styles.lessonInnerTab}${subTab === "orgs" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("orgs")}
+          aria-selected={vcSubTab === "orgs"}
+          className={`${styles.lessonInnerTab}${vcSubTab === "orgs" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={(event) => {
+            if (!isPlainLeftClick(event)) return;
+            event.preventDefault();
+            setVcSubTab("orgs");
+          }}
         >
           <span className={styles.tabLabelWrap}>Orgs</span>
-        </button>
-        <button
-          type="button"
+        </a>
+        <a
+          href={buildTabHref(navState, { tab: "manual", toolsSection: "manual", manualView: "version-control", vcSubTab: "repos" })}
           role="tab"
-          aria-selected={subTab === "repos"}
-          className={`${styles.lessonInnerTab}${subTab === "repos" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("repos")}
+          aria-selected={vcSubTab === "repos"}
+          className={`${styles.lessonInnerTab}${vcSubTab === "repos" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={(event) => {
+            if (!isPlainLeftClick(event)) return;
+            event.preventDefault();
+            setVcSubTab("repos");
+          }}
         >
           <span className={styles.tabLabelWrap}>
             Repos
             {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
           </span>
-        </button>
-        <button
-          type="button"
+        </a>
+        <a
+          href={buildTabHref(navState, { tab: "manual", toolsSection: "manual", manualView: "version-control", vcSubTab: "bulk" })}
           role="tab"
-          aria-selected={subTab === "bulk"}
-          className={`${styles.lessonInnerTab}${subTab === "bulk" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("bulk")}
+          aria-selected={vcSubTab === "bulk"}
+          className={`${styles.lessonInnerTab}${vcSubTab === "bulk" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={(event) => {
+            if (!isPlainLeftClick(event)) return;
+            event.preventDefault();
+            setVcSubTab("bulk");
+          }}
         >
           <span className={styles.tabLabelWrap}>Bulk actions</span>
-        </button>
+        </a>
       </div>
 
-      {subTab === "orgs" && (
+      {vcSubTab === "orgs" && (
         <>
           <div className={styles.field}>
             <label>Organization</label>
@@ -171,17 +181,17 @@ export default function VersionControlTab() {
               Student repo assignment moved to the Workflows tab - run the &quot;Student Repo Assignment&quot; workflow.
             </p>
           </div>
-          {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} />}
+          {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} navState={navState} vcOrgView={vcOrgView} setVcOrgView={setVcOrgView} />}
         </>
       )}
 
-      {subTab === "repos" && <RepoDetail />}
+      {vcSubTab === "repos" && <RepoDetail />}
 
       {/* Keep BulkRepoActionsPanel mounted to preserve state across tab switches */}
-      <div style={{ display: subTab === "bulk" ? undefined : "none" }}>
+      <div style={{ display: vcSubTab === "bulk" ? undefined : "none" }}>
         {/* Bulk actions must offer every repo the token can see - personal and
         collaborator repos included - not just the selected org + templates. */}
-        <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} active={subTab === "bulk"} />
+        <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} active={vcSubTab === "bulk"} />
       </div>
     </div>
   );

@@ -34,6 +34,7 @@
 
 import { isManualViewType, type ManualViewType, type BuildViewType } from "./components/manual/manual-rail";
 import { isRecView, type RecView } from "./components/recording/rec-views";
+import { isVcOrgView, isVcSubTab, type VcOrgView, type VcSubTab } from "./components/version-control/vc-views";
 import {
   LMS_VIEWS,
   isGradingView,
@@ -204,6 +205,22 @@ export function resolveRecView(
   return normalizeRecView(urlNamesRecView ? rawUrlView : storedView);
 }
 
+export function normalizeVcSubTab(value: string | null): VcSubTab {
+  return isVcSubTab(value) ? value : "orgs";
+}
+
+export function resolveVcSubTab(rawUrlView: string | null, urlNamesVcView: boolean, storedView: string | null): VcSubTab {
+  return normalizeVcSubTab(urlNamesVcView ? rawUrlView : storedView);
+}
+
+export function normalizeVcOrgView(value: string | null): VcOrgView {
+  return isVcOrgView(value) ? value : "students";
+}
+
+export function resolveVcOrgView(rawUrlView: string | null, urlNamesVcView: boolean, storedView: string | null): VcOrgView {
+  return normalizeVcOrgView(urlNamesVcView ? rawUrlView : storedView);
+}
+
 // Derived from the rail's own ordered list rather than restated: a Tasks
 // sub-view added there is accepted by the URL automatically.
 const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(TASKS_VIEW_ORDER);
@@ -344,6 +361,8 @@ const PRESENTATIONS_VIEW_PARAM = "presentationsView";
 const ANNOUNCEMENTS_VIEW_PARAM = "announcementsView";
 const FILES_VIEW_PARAM = "filesView";
 const REC_VIEW_PARAM = "recView";
+const VC_SUBTAB_PARAM = "vcSubTab";
+const VC_ORG_VIEW_PARAM = "vcOrgView";
 // RETIRED (GRAD-SUBTAB wave 3, DECISION 19 E-full): never emitted by
 // buildUrlSearch and no longer a field on UrlNavState - kept only so
 // parseUrlState can still read the raw legacy value, to detect the
@@ -364,6 +383,8 @@ export interface UrlNavState {
   librarySection: LibrarySection;
   filesView?: FilesView;
   recView?: RecView;
+  vcSubTab?: VcSubTab;
+  vcOrgView?: VcOrgView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -518,6 +539,8 @@ export function parseUrlState(search: string): UrlNavState {
         : destination.librarySection,
     ...(params.has(FILES_VIEW_PARAM) ? { filesView: normalizeFilesView(params.get(FILES_VIEW_PARAM)) } : {}),
     ...(params.has(REC_VIEW_PARAM) ? { recView: normalizeRecView(params.get(REC_VIEW_PARAM)) } : {}),
+    ...(params.has(VC_SUBTAB_PARAM) ? { vcSubTab: normalizeVcSubTab(params.get(VC_SUBTAB_PARAM)) } : {}),
+    ...(params.has(VC_ORG_VIEW_PARAM) ? { vcOrgView: normalizeVcOrgView(params.get(VC_ORG_VIEW_PARAM)) } : {}),
     manualView: gradingPointer
       ? gradingPointer.manualView
       : automatePointer
@@ -590,6 +613,12 @@ export function buildUrlSearch(state: UrlNavState): string {
       }
       if (state.manualView === "recording" && state.recView && state.recView !== DEFAULT_REC_VIEW) {
         params.set(REC_VIEW_PARAM, state.recView);
+      }
+      if (state.manualView === "version-control") {
+        if (state.vcSubTab && state.vcSubTab !== "orgs") params.set(VC_SUBTAB_PARAM, state.vcSubTab);
+        if (state.vcSubTab === "orgs" && state.vcOrgView && state.vcOrgView !== "students") {
+          params.set(VC_ORG_VIEW_PARAM, state.vcOrgView);
+        }
       }
     }
   }

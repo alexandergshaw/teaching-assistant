@@ -21,6 +21,9 @@ import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
+import type { UrlNavState } from "../url-state";
+import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
+import type { VcOrgView } from "./version-control/vc-views";
 
 type OrgMember = { login: string; role: "admin" | "member" };
 type RepoCollaborator = { login: string; permission: "pull" | "triage" | "push" | "maintain" | "admin" };
@@ -68,18 +71,12 @@ interface OrgManagementPanelProps {
   org: string;
   repos: GithubRepo[];
   onReposChanged?: () => void;
+  navState: UrlNavState;
+  vcOrgView: VcOrgView;
+  setVcOrgView: (view: VcOrgView) => void;
 }
 
-export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgManagementPanelProps) {
-  const [orgView, setOrgView] = useState<"students" | "management">(() => {
-    if (typeof window === "undefined") return "students";
-    const v = localStorage.getItem("ta-vc-org-view");
-    return v === "students" || v === "management" ? v : "students";
-  });
-
-  useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("ta-vc-org-view", orgView);
-  }, [orgView]);
+export default function OrgManagementPanel({ org, repos, onReposChanged, navState, vcOrgView, setVcOrgView }: OrgManagementPanelProps) {
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [membersState, setMembersState] = useState<"loading" | "ready" | "error">("loading");
@@ -338,15 +335,25 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
 
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
         {([["students", "Student management"], ["management", "Org management"]] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={orgView === key}
-            className={`${styles.lessonInnerTab}${orgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setOrgView(key)}>
+          <a key={key} href={buildTabHref(navState, {
+              tab: "manual",
+              toolsSection: "manual",
+              manualView: "version-control",
+              vcSubTab: "orgs",
+              vcOrgView: key,
+            })} role="tab" aria-selected={vcOrgView === key}
+            className={`${styles.lessonInnerTab}${vcOrgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setVcOrgView(key);
+            }}>
             <span className={styles.tabLabelWrap}>{label}</span>
-          </button>
+          </a>
         ))}
       </div>
 
-      <div style={{ display: orgView === "students" ? undefined : "none" }}>
+      <div style={{ display: vcOrgView === "students" ? undefined : "none" }}>
         <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Members</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
@@ -487,7 +494,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
       </details>
       </div>
 
-      <div style={{ display: orgView === "management" ? undefined : "none" }}>
+      <div style={{ display: vcOrgView === "management" ? undefined : "none" }}>
         <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Create pull request</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>

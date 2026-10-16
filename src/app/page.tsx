@@ -99,6 +99,8 @@ export default function Home() {
     announcementsView,
     tasksView,
     recView,
+    vcSubTab: nav.vcSubTab,
+    vcOrgView: nav.vcOrgView,
     kbInstitution: nav.kbInstitution,
     kbPageId: nav.kbPageId,
   };
@@ -706,7 +708,7 @@ export default function Home() {
 
                 {manualView === "version-control" && (
                   <TabShell>
-                    <VersionControlTab />
+                    <VersionControlTab navState={navState} vcSubTab={nav.vcSubTab} setVcSubTab={nav.setVcSubTab} vcOrgView={nav.vcOrgView} setVcOrgView={nav.setVcOrgView} />
                   </TabShell>
                 )}
 

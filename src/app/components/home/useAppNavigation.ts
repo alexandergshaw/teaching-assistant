@@ -41,6 +41,7 @@ import {
   resolveAutomatePointer,
 } from "../../url-state";
 import type { RecView } from "../recording/rec-views";
+import { useVersionControlNavigation } from "./useVersionControlNavigation";
 import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 import { isLegacyWorkflowsDrafts } from "../../../lib/workflows-drafts-library-migration";
@@ -614,6 +615,7 @@ export function useAppNavigation() {
       localStorage.getItem(FILES_VIEW_KEY)
     );
   });
+  const { vcSubTab, setVcSubTab, vcOrgView, setVcOrgView } = useVersionControlNavigation();
   // Knowledge's institution + selected page (AC1-AC3): unlike every other
   // sub-view above, the institution is not a fixed enum - it is dynamic,
   // per-user data (registered institution acronyms) resolved by
@@ -806,6 +808,8 @@ export function useAppNavigation() {
       presentationsView,
       announcementsView,
       recView,
+      vcSubTab,
+      vcOrgView,
       tasksView,
       kbInstitution,
       kbPageId,
@@ -846,6 +850,8 @@ export function useAppNavigation() {
     presentationsView,
     announcementsView,
     recView,
+    vcSubTab,
+    vcOrgView,
     tasksView,
     kbInstitution,
     kbPageId,
@@ -918,6 +924,10 @@ export function useAppNavigation() {
           // restored the same way presentationsView is above.
           if (parsed.manualView === "announcements") setAnnouncementsView(parsed.announcementsView);
           if (parsed.manualView === "recording") setRecView(parsed.recView ?? DEFAULT_REC_VIEW);
+          if (parsed.manualView === "version-control") {
+            setVcSubTab(parsed.vcSubTab ?? "orgs");
+            if ((parsed.vcSubTab ?? "orgs") === "orgs") setVcOrgView(parsed.vcOrgView ?? "students");
+          }
           // WORKFLOWS-COLLAPSE W2: the Automate container's three inner views,
           // restored the same way presentationsView is above.
           if (parsed.manualView === "artifact-design") setAutomateView(parsed.automateView);
@@ -940,7 +950,7 @@ export function useAppNavigation() {
     // setKbInstitution is memoized by useKbInstitutionSelection, so listing it
     // keeps this effect mount-only in practice while satisfying the lint rule -
     // which is why it no longer needs a ref of its own.
-  }, [setKbInstitution]);
+  }, [setKbInstitution, setVcSubTab, setVcOrgView]);
 
   return {
     activeTab,
@@ -967,6 +977,10 @@ export function useAppNavigation() {
     setAnnouncementsView,
     recView,
     setRecView,
+    vcSubTab,
+    setVcSubTab,
+    vcOrgView,
+    setVcOrgView,
     automateView,
     setAutomateView,
     tasksView,

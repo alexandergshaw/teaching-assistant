@@ -70,30 +70,24 @@
 // will go red for that reason, and correcting EXPECTED_TA_KEYS at that point
 // is the intended response, not evidence the canary is wrong.
 //
-// MEASURED WITH (paste of the actual command and its output, from this
-// directory, non-recursive, non-test .ts/.tsx files only):
+// MEASURED WITH (PowerShell, from the repository root; non-recursive,
+// non-test top-level .ts/.tsx files only):
 //
-//   node -e '
-//   const fs = require("fs"); const path = require("path");
-//   const dir = "src/app/components";
-//   const files = fs.readdirSync(dir).filter(f =>
-//     /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts") &&
-//     fs.statSync(path.join(dir,f)).isFile());
-//   const combined = files.map(f =>
-//     fs.readFileSync(path.join(dir,f),"utf8")).join("\n");
-//   const re = /(?<![a-zA-Z0-9_])ta-[a-z0-9-]*[a-z0-9]/g;
-//   const found = new Set(); let m;
-//   while((m = re.exec(combined))) found.add(m[0]);
-//   console.log(files.length, found.size);
-//   '
+//   $files = Get-ChildItem src/app/components -File | Where-Object { $_.Extension -in '.ts','.tsx' -and $_.Name -notlike '*.test.ts' }
+//   $source = ($files | ForEach-Object { Get-Content -Raw $_.FullName }) -join "`n"
+//   $keys = [regex]::Matches($source, '(?<![a-zA-Z0-9_])ta-[a-z0-9-]*[a-z0-9]') | ForEach-Object { $_.Value } | Sort-Object -Unique
+//   "files=$($files.Count) keys=$($keys.Count)"
 //
-// Output: 85 non-test files, 85 distinct keys. (The quoted-only baseline
-// over the same 83 files gives 75 - confirming RULING 110's "floor" claim by
-// direct comparison; the 6-key difference is ta-vc-copy-name, ta-vc-copy-msg,
-// ta-workflow-values, ta-tasks (all four real template-literal prefixes) plus
-// ta-spin (a CSS animation name, not a storage key, matched incidentally -
-// also left in per the comment-inclusion policy above) plus ta--prefixed
-// (the prose false positive described above).
+// Output: 85 non-test files, 83 distinct keys. The two former top-level key
+// mentions (`ta-vc-subtab` and `ta-vc-org-view`) moved into the nested
+// useVersionControlNavigation.ts leaf, outside this deliberately non-recursive
+// population; the persisted strings themselves remain unchanged.
+// (The quoted-only baseline over the same 85 files gives 76, confirming
+// RULING 110's "floor" claim by direct comparison. The seven additional
+// matches are ta--prefixed, ta-rec-view, ta-spin, ta-tasks,
+// ta-vc-copy-msg, ta-vc-copy-name, and ta-workflow-values. Several are
+// template-literal prefixes; ta-spin and ta--prefixed are documented false
+// positives retained by the comment-included scan policy above.)
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
@@ -125,7 +119,7 @@ function collectTaKeys(source: string): string[] {
   return Array.from(found).sort();
 }
 
-// Frozen at 87 keys (85 measured by the command in the header comment above,
+// Frozen at 85 keys (83 measured by the command in the header comment above,
 // plus ta-grading-one-upload, N15a Wave 1, plus ta-grade-zip-course, A45 W3).
 // Sorted; do not reorder by hand - EXPECTED_TA_KEYS.sort() below is the
 // actual comparison basis, this literal ordering is only for a readable
@@ -204,9 +198,7 @@ const EXPECTED_TA_KEYS = [
   "ta-vc-copy-visibility",
   "ta-vc-copy-workflows",
   "ta-vc-org",
-  "ta-vc-org-view",
   "ta-vc-repo",
-  "ta-vc-subtab",
   "ta-workflow-values",
   "ta-workflows",
   "ta-workflows-automation-open",

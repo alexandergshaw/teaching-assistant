@@ -24,6 +24,7 @@ import { listCourseContentAction, sampleInUseAction } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
+import type { FilesView } from "../url-state";
 import { FileList } from "./files/FileList";
 import type { FileRowSharedProps } from "./files/FileRow";
 import { FilterToolbar } from "./files/FilterToolbar";
@@ -44,8 +45,19 @@ import { filterAndSortFiles, type FilesFilterKind } from "./files/filter-sort";
 import { classifyUploadFile } from "./files/upload-classify";
 import { readDuration } from "./files/read-duration";
 import { addFileToModule } from "./files/add-to-module";
+import { isPlainLeftClick } from "./tabs/tab-link";
 
-export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
+export default function FilesTab({
+  filesView,
+  setFilesView,
+  filesViewHrefs,
+  onOpenWorkflow,
+}: {
+  filesView: FilesView;
+  setFilesView: (view: FilesView) => void;
+  filesViewHrefs: Record<FilesView, string>;
+  onOpenWorkflow?: (workflowId: string) => void;
+}) {
   const { supabase, user } = useSupabase();
   const { active: activeInstitution } = useInstitutionSelection();
 
@@ -80,16 +92,6 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     const stored = localStorage.getItem("ta-files-group");
     return (stored as "flat" | "grouped" | null) ?? "grouped";
   });
-
-  // Files view (Library or Submissions) - persisted
-  const [filesView, setFilesViewState] = useState<"library" | "submissions">(() => {
-    if (typeof window === "undefined") return "library";
-    return localStorage.getItem("ta-files-view") === "submissions" ? "submissions" : "library";
-  });
-  const setFilesView = (v: "library" | "submissions") => {
-    setFilesViewState(v);
-    if (typeof window !== "undefined") localStorage.setItem("ta-files-view", v);
-  };
 
   // Delete confirmation state
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -715,24 +717,32 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         tabIndex={-1}
       >
         <div className={styles.lessonInnerTabs} role="tablist" aria-label="Files">
-          <button
-            type="button"
+          <a
+            href={filesViewHrefs.library}
             role="tab"
             aria-selected={filesView === "library"}
             className={`${styles.lessonInnerTab}${filesView === "library" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setFilesView("library")}
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setFilesView("library");
+            }}
           >
             Library
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href={filesViewHrefs.submissions}
             role="tab"
             aria-selected={filesView === "submissions"}
             className={`${styles.lessonInnerTab}${filesView === "submissions" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setFilesView("submissions")}
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setFilesView("submissions");
+            }}
           >
             Submissions
-          </button>
+          </a>
         </div>
       </div>
 

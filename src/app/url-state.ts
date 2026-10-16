@@ -172,6 +172,23 @@ export function normalizeLibrarySection(value: string | null): LibrarySection {
   return isLibrarySection(value) ? value : DEFAULT_LIBRARY_SECTION;
 }
 
+export type FilesView = "library" | "submissions";
+
+export function normalizeFilesView(value: string | null): FilesView {
+  return value === "submissions" ? "submissions" : "library";
+}
+
+// A URL only overrides the remembered Files view when it explicitly names the
+// Files subsection. A link to another Library section must not erase the
+// user's last Files choice when they return to it.
+export function resolveFilesView(
+  rawUrlView: string | null,
+  urlNamesFilesView: boolean,
+  storedView: string | null
+): FilesView {
+  return normalizeFilesView(urlNamesFilesView ? rawUrlView : storedView);
+}
+
 // Derived from the rail's own ordered list rather than restated: a Tasks
 // sub-view added there is accepted by the URL automatically.
 const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(TASKS_VIEW_ORDER);
@@ -310,6 +327,7 @@ const CONTENT_VIEW_PARAM = "contentView";
 const GRADING_VIEW_PARAM = "gradingView";
 const PRESENTATIONS_VIEW_PARAM = "presentationsView";
 const ANNOUNCEMENTS_VIEW_PARAM = "announcementsView";
+const FILES_VIEW_PARAM = "filesView";
 // RETIRED (GRAD-SUBTAB wave 3, DECISION 19 E-full): never emitted by
 // buildUrlSearch and no longer a field on UrlNavState - kept only so
 // parseUrlState can still read the raw legacy value, to detect the
@@ -328,6 +346,7 @@ export interface UrlNavState {
   coursesSection: CoursesSection;
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
+  filesView?: FilesView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -480,6 +499,7 @@ export function parseUrlState(search: string): UrlNavState {
       : isLibrarySection(rawLibrarySection)
         ? rawLibrarySection
         : destination.librarySection,
+    ...(params.has(FILES_VIEW_PARAM) ? { filesView: normalizeFilesView(params.get(FILES_VIEW_PARAM)) } : {}),
     manualView: gradingPointer
       ? gradingPointer.manualView
       : automatePointer
@@ -565,6 +585,9 @@ export function buildUrlSearch(state: UrlNavState): string {
     if (state.librarySection === "knowledge" && state.kbInstitution) {
       params.set(KB_INSTITUTION_PARAM, state.kbInstitution);
       if (state.kbPageId) params.set(KB_PAGE_PARAM, state.kbPageId);
+    }
+    if (state.librarySection === "files" && state.filesView === "submissions") {
+      params.set(FILES_VIEW_PARAM, state.filesView);
     }
   }
 

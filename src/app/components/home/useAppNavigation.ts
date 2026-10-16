@@ -15,6 +15,7 @@ import {
   type CoursesSection,
   type ToolsSection,
   type LibrarySection,
+  type FilesView,
   type TasksView,
   isCoursesSection,
   isToolsSection,
@@ -26,6 +27,7 @@ import {
   normalizeGradingView,
   normalizePresentationsView,
   normalizeAnnouncementsView,
+  resolveFilesView,
   normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -86,6 +88,7 @@ const TASKS_VIEW_KEY = "ta-tasks-view";
 const COURSES_SECTION_KEY = "ta-courses-section";
 const TOOLS_SECTION_KEY = "ta-tools-section";
 const LIBRARY_SECTION_KEY = "ta-library-section";
+const FILES_VIEW_KEY = "ta-files-view";
 
 /**
  * Resolves the whole starting location once, from the URL when it names a
@@ -586,6 +589,20 @@ export function useAppNavigation() {
     }
     return normalizeAnnouncementsView(localStorage.getItem(ANNOUNCEMENTS_VIEW_KEY));
   });
+  // Files > Library's own Library/Submissions selector. The URL wins only
+  // when it names this exact branch; other Library sections and tabs leave
+  // the remembered Files choice intact.
+  const [filesView, setFilesView] = useState<FilesView>(() => {
+    if (typeof window === "undefined") return "library";
+    const { params, urlHasTab, destination } = readNavSource();
+    const urlNamesFilesView =
+      urlHasTab && destination.tab === "files" && librarySection === "files";
+    return resolveFilesView(
+      urlNamesFilesView ? params.get("filesView") : null,
+      urlNamesFilesView,
+      localStorage.getItem(FILES_VIEW_KEY)
+    );
+  });
   // Knowledge's institution + selected page (AC1-AC3): unlike every other
   // sub-view above, the institution is not a fixed enum - it is dynamic,
   // per-user data (registered institution acronyms) resolved by
@@ -705,6 +722,10 @@ export function useAppNavigation() {
     localStorage.setItem(LIBRARY_SECTION_KEY, librarySection);
   }, [librarySection]);
 
+  useEffect(() => {
+    localStorage.setItem(FILES_VIEW_KEY, filesView);
+  }, [filesView]);
+
   // lastKnownSearchRef tracks the query string the browser is currently at,
   // as best we know it. It is updated both when we push/replace it
   // ourselves and when a popstate event tells us the browser already moved
@@ -761,6 +782,7 @@ export function useAppNavigation() {
       coursesSection,
       toolsSection,
       librarySection,
+      filesView,
       manualView,
       automateView,
       buildView,
@@ -799,6 +821,7 @@ export function useAppNavigation() {
     coursesSection,
     toolsSection,
     librarySection,
+    filesView,
     manualView,
     automateView,
     buildView,
@@ -884,6 +907,7 @@ export function useAppNavigation() {
       }
       if (parsed.tab === "files") {
         setLibrarySection(parsed.librarySection);
+        if (parsed.librarySection === "files") setFilesView(parsed.filesView ?? "library");
         if (parsed.librarySection === "knowledge") {
           // A null URL institution (no institutions registered at push-time)
           // means "let the hook keep resolving its own fallback" rather than
@@ -909,6 +933,8 @@ export function useAppNavigation() {
     setToolsSection,
     librarySection,
     setLibrarySection,
+    filesView,
+    setFilesView,
     manualView,
     setManualView,
     buildView,

@@ -79,7 +79,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, filesView, setFilesView, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
 
   // The full URL-addressable nav state, used only to build each tab's deep-link
   // href (tab-link.ts). Kept here, not in the nav hook, so that hook stays off
@@ -89,6 +89,7 @@ export default function Home() {
     coursesSection,
     toolsSection,
     librarySection,
+    filesView,
     manualView,
     automateView,
     buildView,
@@ -864,7 +865,17 @@ export default function Home() {
               onChange={setLibrarySection}
             />
 
-            {librarySection === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
+            {librarySection === "files" && (
+              <FilesTab
+                filesView={filesView}
+                setFilesView={setFilesView}
+                filesViewHrefs={{
+                  library: buildTabHref(navState, { librarySection: "files", filesView: "library" }),
+                  submissions: buildTabHref(navState, { librarySection: "files", filesView: "submissions" }),
+                }}
+                onOpenWorkflow={openWorkflow}
+              />
+            )}
 
             {librarySection === "drafts" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
 

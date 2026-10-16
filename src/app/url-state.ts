@@ -317,8 +317,52 @@ const ANNOUNCEMENTS_VIEW_PARAM = "announcementsView";
 const DRAFTS_VIEW_PARAM = "draftsView";
 const TASKS_VIEW_PARAM = "tasksView";
 const FILES_VIEW_PARAM = "filesView";
+const VC_SUBTAB_PARAM = "vcSubTab";
+const VC_ORG_VIEW_PARAM = "vcOrgView";
 const KB_INSTITUTION_PARAM = "kbInstitution";
 const KB_PAGE_PARAM = "kbPage";
+
+export type VcSubTab = "orgs" | "repos" | "bulk";
+export type VcOrgView = "students" | "management";
+export const URL_STATE_SYNC_EVENT = "ta-url-state-sync";
+
+export function normalizeVcSubTab(value: string | null | undefined): VcSubTab {
+  return value === "repos" || value === "bulk" ? value : "orgs";
+}
+
+export function normalizeVcOrgView(value: string | null | undefined): VcOrgView {
+  return value === "management" ? "management" : "students";
+}
+
+function isVersionControlLocation(search: string): boolean {
+  const params = new URLSearchParams(search);
+  if (!params.has(TAB_PARAM)) return false;
+  const destination = resolveTabDestination(params.get(TAB_PARAM));
+  return destination.tab === "manual" && normalizeManualView(params.get(MANUAL_VIEW_PARAM)) === "version-control";
+}
+
+export function resolveInitialVcSubTab(search: string, saved: string | null): VcSubTab {
+  if (isVersionControlLocation(search)) return normalizeVcSubTab(new URLSearchParams(search).get(VC_SUBTAB_PARAM));
+  return normalizeVcSubTab(saved);
+}
+
+export function resolveInitialVcOrgView(search: string, saved: string | null): VcOrgView {
+  const params = new URLSearchParams(search);
+  if (isVersionControlLocation(search) && normalizeVcSubTab(params.get(VC_SUBTAB_PARAM)) === "orgs") {
+    return normalizeVcOrgView(params.get(VC_ORG_VIEW_PARAM));
+  }
+  return normalizeVcOrgView(saved);
+}
+
+export function buildVcHref(
+  search: string,
+  patch: { vcSubTab?: VcSubTab; vcOrgView?: VcOrgView },
+  savedOrgView: string | null = null
+): string {
+  const current = parseUrlState(search);
+  const vcOrgView = patch.vcOrgView ?? current.vcOrgView ?? normalizeVcOrgView(savedOrgView);
+  return `/${buildUrlSearch({ ...current, tab: "manual", toolsSection: "manual", manualView: "version-control", vcOrgView, ...patch })}`;
+}
 
 export type FilesView = "library" | "submissions";
 export const FILES_VIEW_CHANGE_EVENT = "ta-files-view-change";
@@ -355,6 +399,8 @@ export interface UrlNavState {
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
   filesView?: FilesView;
+  vcSubTab?: VcSubTab;
+  vcOrgView?: VcOrgView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -496,8 +542,12 @@ export function parseUrlState(search: string): UrlNavState {
   const filesView = params.has(FILES_VIEW_PARAM)
     ? { filesView: normalizeFilesView(params.get(FILES_VIEW_PARAM)) }
     : {};
+  const vcSubTab = params.has(VC_SUBTAB_PARAM) ? { vcSubTab: normalizeVcSubTab(params.get(VC_SUBTAB_PARAM)) } : {};
+  const vcOrgView = params.has(VC_ORG_VIEW_PARAM) ? { vcOrgView: normalizeVcOrgView(params.get(VC_ORG_VIEW_PARAM)) } : {};
   return {
     ...filesView,
+    ...vcSubTab,
+    ...vcOrgView,
     tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
     // "manual" is the only live Tools section (W2): a legacy "workflows"
@@ -580,6 +630,14 @@ export function buildUrlSearch(state: UrlNavState): string {
       }
       if (state.manualView === "artifact-design" && state.automateView !== DEFAULT_AUTOMATE_VIEW) {
         params.set(AUTOMATE_VIEW_PARAM, state.automateView);
+      }
+      if (state.manualView === "version-control") {
+        const vcSubTab = normalizeVcSubTab(state.vcSubTab);
+        if (vcSubTab !== "orgs") params.set(VC_SUBTAB_PARAM, vcSubTab);
+        if (vcSubTab === "orgs") {
+          const vcOrgView = normalizeVcOrgView(state.vcOrgView);
+          if (vcOrgView !== "students") params.set(VC_ORG_VIEW_PARAM, vcOrgView);
+        }
       }
     }
   }

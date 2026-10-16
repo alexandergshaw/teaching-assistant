@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   listOrgMembersAction,
   inviteOrgMemberAction,
@@ -21,6 +21,8 @@ import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
+import { isPlainLeftClick } from "./tabs/tab-link";
+import { buildVcHref, normalizeVcOrgView, parseUrlState, resolveInitialVcOrgView, URL_STATE_SYNC_EVENT, type VcOrgView } from "../url-state";
 
 type OrgMember = { login: string; role: "admin" | "member" };
 type RepoCollaborator = { login: string; permission: "pull" | "triage" | "push" | "maintain" | "admin" };
@@ -71,15 +73,52 @@ interface OrgManagementPanelProps {
 }
 
 export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgManagementPanelProps) {
-  const [orgView, setOrgView] = useState<"students" | "management">(() => {
-    if (typeof window === "undefined") return "students";
-    const v = localStorage.getItem("ta-vc-org-view");
-    return v === "students" || v === "management" ? v : "students";
-  });
+  const [orgView, setOrgView] = useState<VcOrgView>(() =>
+    typeof window === "undefined" ? "students" : resolveInitialVcOrgView(window.location.search, localStorage.getItem("ta-vc-org-view"))
+  );
+
+  const selectOrgView = (next: VcOrgView) => {
+    const href = buildVcHref(window.location.search, { vcSubTab: "orgs", vcOrgView: next });
+    window.history.pushState(null, "", href);
+    setOrgView(next);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  const handleOrgViewClick = (next: VcOrgView) => (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!isPlainLeftClick(event)) return;
+    event.preventDefault();
+    selectOrgView(next);
+  };
+  const handleOrgViewKeyDown = (next: VcOrgView) => (event: KeyboardEvent<HTMLAnchorElement>) => {
+    if (event.key !== " ") return;
+    event.preventDefault();
+    selectOrgView(next);
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("ta-vc-org-view", orgView);
   }, [orgView]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const parsed = parseUrlState(window.location.search);
+      if (parsed.manualView === "version-control" && (parsed.vcSubTab ?? "orgs") === "orgs") {
+        setOrgView(normalizeVcOrgView(parsed.vcOrgView));
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener(URL_STATE_SYNC_EVENT, onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener(URL_STATE_SYNC_EVENT, onPopState);
+    };
+  }, []);
+
+  const hrefForOrgView = (view: VcOrgView) =>
+    buildVcHref(
+      typeof window === "undefined" ? "" : window.location.search,
+      { vcSubTab: "orgs", vcOrgView: view },
+      typeof window === "undefined" ? null : localStorage.getItem("ta-vc-org-view")
+    );
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [membersState, setMembersState] = useState<"loading" | "ready" | "error">("loading");
@@ -338,11 +377,17 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
 
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
         {([["students", "Student management"], ["management", "Org management"]] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={orgView === key}
+          <a
+            key={key}
+            href={hrefForOrgView(key)}
+            role="tab"
+            aria-selected={orgView === key}
             className={`${styles.lessonInnerTab}${orgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setOrgView(key)}>
+            onClick={handleOrgViewClick(key)}
+            onKeyDown={handleOrgViewKeyDown(key)}
+          >
             <span className={styles.tabLabelWrap}>{label}</span>
-          </button>
+          </a>
         ))}
       </div>
 

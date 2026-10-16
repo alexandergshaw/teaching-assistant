@@ -2324,16 +2324,16 @@
   question: null
 
 - id: 'TABS-CTRL-VERSION-CONTROL'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'loop-and-docs-maintenance'
   title: 'Complete Tier-3 Wave 3: open Version Control and Org Management sub-views in a new browser tab.'
   owns: ['src/app/url-state.ts', 'src/app/components/home/useAppNavigation.ts', 'src/app/components/VersionControlTab.tsx', 'src/app/components/OrgManagementPanel.tsx', 'src/app/url-state.vc-views.test.ts']
-  verify: 'npm.cmd run test:paths src/app/url-state.vc-views.test.ts src/app/url-state.test.ts src/file-size-ceiling.structure.test.ts'
+  verify: 'npm.cmd run test:paths -- src/app/url-state.vc-views.test.ts src/app/url-state.test.ts src/app/components/tabs/tab-link.test.ts src/file-size-ceiling.structure.test.ts'
   blocked_by: []
   instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param vcSubTab + vcOrgView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
-  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. Preserve ta-vc-subtab and ta-vc-org-view. Scope names no dedicated structural gate; rerun caller/source-reader census before build. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  note: 'Implemented on the primary feature branch. Independent review accepted: explicit URL state overrides saved state, omitted VC views preserve legacy defaults, nested organization selection is scoped to the Orgs subtab, and navigation uses native anchors with history restore. Focused tests pass 111 assertions across 3 files; the expanded 4-file gate, source-byte gate, TypeScript, targeted ESLint, and diff check pass. Browser modified-click, focus/keyboard, and history behavior remain owner verification because Vitest renders no components.'
   question: null
 
 - id: 'TABS-CTRL-FILES'

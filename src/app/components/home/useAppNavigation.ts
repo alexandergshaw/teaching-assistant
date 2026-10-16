@@ -16,6 +16,8 @@ import {
   type ToolsSection,
   type LibrarySection,
   type FilesView,
+  type VcSubTab,
+  type VcOrgView,
   type TasksView,
   isCoursesSection,
   isToolsSection,
@@ -30,6 +32,9 @@ import {
   normalizeTasksView,
   parseFilesView,
   resolveFilesViewFromUrl,
+  resolveInitialVcSubTab,
+  resolveInitialVcOrgView,
+  URL_STATE_SYNC_EVENT,
   FILES_VIEW_CHANGE_EVENT,
   normalizeKbInstitution,
   normalizeKbPageId,
@@ -91,6 +96,8 @@ const COURSES_SECTION_KEY = "ta-courses-section";
 const TOOLS_SECTION_KEY = "ta-tools-section";
 const LIBRARY_SECTION_KEY = "ta-library-section";
 const FILES_VIEW_KEY = "ta-files-view";
+const VC_SUBTAB_KEY = "ta-vc-subtab";
+const VC_ORG_VIEW_KEY = "ta-vc-org-view";
 
 /**
  * Resolves the whole starting location once, from the URL when it names a
@@ -289,6 +296,12 @@ export function useAppNavigation() {
     if (typeof window === "undefined") return "library";
     return resolveFilesViewFromUrl(window.location.search, localStorage.getItem(FILES_VIEW_KEY));
   });
+  const [vcSubTab, setVcSubTab] = useState<VcSubTab>(() =>
+    typeof window === "undefined" ? "orgs" : resolveInitialVcSubTab(window.location.search, localStorage.getItem(VC_SUBTAB_KEY))
+  );
+  const [vcOrgView, setVcOrgView] = useState<VcOrgView>(() =>
+    typeof window === "undefined" ? "students" : resolveInitialVcOrgView(window.location.search, localStorage.getItem(VC_ORG_VIEW_KEY))
+  );
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
     // A user who was viewing Version Control (inside the old Integrations, tracked
@@ -719,6 +732,11 @@ export function useAppNavigation() {
   }, [filesView]);
 
   useEffect(() => {
+    localStorage.setItem(VC_SUBTAB_KEY, vcSubTab);
+    localStorage.setItem(VC_ORG_VIEW_KEY, vcOrgView);
+  }, [vcSubTab, vcOrgView]);
+
+  useEffect(() => {
     const onFilesViewChange = (event: Event) => {
       const view = (event as CustomEvent<unknown>).detail;
       if (view === "library" || view === "submissions") setFilesView(view);
@@ -784,6 +802,8 @@ export function useAppNavigation() {
       toolsSection,
       librarySection,
       filesView,
+      vcSubTab,
+      vcOrgView,
       manualView,
       automateView,
       buildView,
@@ -804,6 +824,7 @@ export function useAppNavigation() {
       // canonical string - a bare "/" load, and a legacy "?tab=tasks" one.
       if (target !== window.location.search) {
         window.history.replaceState(null, "", target);
+        window.dispatchEvent(new Event(URL_STATE_SYNC_EVENT));
       }
       lastKnownSearchRef.current = target;
       return;
@@ -817,12 +838,15 @@ export function useAppNavigation() {
 
     window.history.pushState(null, "", target);
     lastKnownSearchRef.current = target;
+    window.dispatchEvent(new Event(URL_STATE_SYNC_EVENT));
   }, [
     activeTab,
     coursesSection,
     toolsSection,
     librarySection,
     filesView,
+    vcSubTab,
+    vcOrgView,
     manualView,
     automateView,
     buildView,
@@ -918,6 +942,10 @@ export function useAppNavigation() {
           setKbPageId(parsed.kbPageId);
         }
       }
+      if (parsed.manualView === "version-control") {
+        setVcSubTab(parsed.vcSubTab ?? "orgs");
+        if ((parsed.vcSubTab ?? "orgs") === "orgs") setVcOrgView(parsed.vcOrgView ?? "students");
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -951,6 +979,10 @@ export function useAppNavigation() {
     setAutomateView,
     tasksView,
     setTasksView,
+    vcSubTab,
+    setVcSubTab,
+    vcOrgView,
+    setVcOrgView,
     focusCourseId,
     setFocusCourseId,
     kbInstitutions,

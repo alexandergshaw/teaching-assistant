@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   listMyOrgsAction,
   listOrgReposAction,
@@ -13,6 +13,8 @@ import BulkRepoActionsPanel from "./BulkRepoActionsPanel";
 import Typeahead from "./ui/Typeahead";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
+import { isPlainLeftClick } from "./tabs/tab-link";
+import { buildVcHref, parseUrlState, resolveInitialVcSubTab, URL_STATE_SYNC_EVENT, type VcSubTab } from "../url-state";
 import styles from "../page.module.css";
 
 const VC_SUBTAB_KEY = "ta-vc-subtab";
@@ -31,12 +33,46 @@ export default function VersionControlTab() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [orgReposNonce, setOrgReposNonce] = useState(0);
   const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
-  const [subTab, setSubTab] = useState<"orgs" | "repos" | "bulk">(() => {
-    if (typeof window === "undefined") return "orgs";
-    const stored = localStorage.getItem(VC_SUBTAB_KEY);
-    if (stored === "repos" || stored === "bulk") return stored;
-    return "orgs";
-  });
+  const [subTab, setSubTab] = useState<VcSubTab>(() =>
+    typeof window === "undefined" ? "orgs" : resolveInitialVcSubTab(window.location.search, localStorage.getItem(VC_SUBTAB_KEY))
+  );
+
+  const selectSubTab = (next: VcSubTab) => {
+    const href = buildVcHref(window.location.search, { vcSubTab: next }, localStorage.getItem("ta-vc-org-view"));
+    window.history.pushState(null, "", href);
+    setSubTab(next);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  const handleSubTabClick = (next: VcSubTab) => (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!isPlainLeftClick(event)) return;
+    event.preventDefault();
+    selectSubTab(next);
+  };
+  const handleSubTabKeyDown = (next: VcSubTab) => (event: KeyboardEvent<HTMLAnchorElement>) => {
+    if (event.key !== " ") return;
+    event.preventDefault();
+    selectSubTab(next);
+  };
+
+  useEffect(() => {
+    const onPopState = () => {
+      const parsed = parseUrlState(window.location.search);
+      if (parsed.manualView === "version-control") setSubTab(parsed.vcSubTab ?? "orgs");
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener(URL_STATE_SYNC_EVENT, onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener(URL_STATE_SYNC_EVENT, onPopState);
+    };
+  }, []);
+
+  const hrefForSubTab = (view: VcSubTab) =>
+    buildVcHref(
+      typeof window === "undefined" ? "" : window.location.search,
+      { vcSubTab: view },
+      typeof window === "undefined" ? null : localStorage.getItem("ta-vc-org-view")
+    );
 
 
   useEffect(() => {
@@ -54,7 +90,7 @@ export default function VersionControlTab() {
     const h = takeCourseHandoff("version-control");
     if (!h) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setSubTab("repos");
+    selectSubTab("repos");
     if (h.githubOrg) setSelectedOrg(h.githubOrg);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
@@ -119,36 +155,39 @@ export default function VersionControlTab() {
   return (
     <div className={styles.form}>
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: "var(--space-1)" }}>
-        <button
-          type="button"
+        <a
+          href={hrefForSubTab("orgs")}
           role="tab"
           aria-selected={subTab === "orgs"}
           className={`${styles.lessonInnerTab}${subTab === "orgs" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("orgs")}
+          onClick={handleSubTabClick("orgs")}
+          onKeyDown={handleSubTabKeyDown("orgs")}
         >
           <span className={styles.tabLabelWrap}>Orgs</span>
-        </button>
-        <button
-          type="button"
+        </a>
+        <a
+          href={hrefForSubTab("repos")}
           role="tab"
           aria-selected={subTab === "repos"}
           className={`${styles.lessonInnerTab}${subTab === "repos" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("repos")}
+          onClick={handleSubTabClick("repos")}
+          onKeyDown={handleSubTabKeyDown("repos")}
         >
           <span className={styles.tabLabelWrap}>
             Repos
             {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
           </span>
-        </button>
-        <button
-          type="button"
+        </a>
+        <a
+          href={hrefForSubTab("bulk")}
           role="tab"
           aria-selected={subTab === "bulk"}
           className={`${styles.lessonInnerTab}${subTab === "bulk" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setSubTab("bulk")}
+          onClick={handleSubTabClick("bulk")}
+          onKeyDown={handleSubTabKeyDown("bulk")}
         >
           <span className={styles.tabLabelWrap}>Bulk actions</span>
-        </button>
+        </a>
       </div>
 
       {subTab === "orgs" && (

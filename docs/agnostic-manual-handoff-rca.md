@@ -128,3 +128,40 @@ grant, timer, provider dispatch or acceptance record is changed here. Fresh
 independent review of this artifact is the coordinator's next admission. It
 shares the existing substantive two-round cap; a clean result ends the chain.
 These Node tests render no application component and prove no browser behavior.
+
+## Codex collaboration recurrence: 2026-10-16
+
+After the supported chart-editing chunk was pushed as `d501fb4c`, the coordinator
+launched the SmartArt implementer and ended its response while that worker was
+still running. On the next owner turn, the worker was still running and the owner
+described the loop as stopped. This episode is reported from the coordinator's
+host-session observation; no worker-death, lost-output, or exact elapsed-time
+claim is inferred from it.
+
+The immediate cause was a mistaken completion test: the coordinator treated a
+dispatched/running subagent as enough to satisfy the top-level progress
+condition. It returned before waiting for the result, consuming the changed
+files, independently reviewing them, running required gates, publishing an
+authorized chunk, or dispatching the next backlog item. The worker had not
+finished; the host had ended its turn. This is a recurrence of the 2026-10-15
+manual handoff failure at the policy level, but the mechanism differs: that
+episode involved exported file-adapter packets without a completion supervisor;
+this one involved an ordinary Codex `collaboration` subagent. No manual packet
+completion guard or automatic app resume is claimed for the latter.
+
+The operational control is a mandatory host-side pre-final checklist for every
+user-requested implementation delegated through `collaboration`: receive and
+consume the worker's actual result for the item being reported; inspect its
+owned diff; complete fresh independent review and required gates; make the
+authorized scoped commit/push; then start the next backlog item before
+finalizing. That separate next item may remain active. The requested item may
+remain in flight only when the user explicitly requested asynchronous handoff
+and configured durable automation truly owns its continuation. This checklist
+is stated in `AGENTS.md` and `docs/loop/traps-orchestration.md`.
+
+The enforcement limit is explicit: repository instructions can prescribe this
+host behavior but cannot programmatically intercept Codex's final-response
+action. This is a mandatory pre-final operating checklist, not an installed
+Stop hook, completion callback, or durable wakeup. A repository-owned durable
+controller remains separate backlog work and is required for unattended
+continuation; an ordinary app subagent does not provide it.

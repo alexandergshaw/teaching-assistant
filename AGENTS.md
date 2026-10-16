@@ -47,6 +47,23 @@ explicit requested-item completion guard documented under "Manual adapter" in
 Pending/unproven results are not delivery. This is an invoked operator control,
 not an automatically installed Codex Stop hook or a durable chat wakeup.
 
+For a user-requested implementation delegated through Codex `collaboration`
+subagents, dispatch is also not completion. The top-level owner must wait for
+the worker result for that item, inspect and consume it, complete independent
+review and required gates, make the authorized scoped commit/push, and start the
+next backlog item before sending the final response. An active ordinary app
+subagent does not own durable continuation for the item being reported. A final
+response may leave a different, independently started next backlog item active;
+it may not leave the requested item unfinished merely because its worker is
+still running. Only an explicitly requested asynchronous handoff may leave the
+requested item in flight, and only when configured durable automation actually
+owns continuation. Before finalizing, apply this checklist even if a worker was
+dispatched: result received and consumed for the item being reported;
+independent review and gates complete; authorized delivery complete; next
+backlog work started or every remaining item is already escalated/closed.
+This is a host operating rule, not a programmatically enforced Codex final-action
+hook; durable continuation is a separate repository feature.
+
 A worker receiving a scoped supervisor packet performs only its assigned role,
 paths and deliverables. It does not recursively drive the queue, create another
 orchestrator, alter the routing grant or claim owner authority. Report conflicts

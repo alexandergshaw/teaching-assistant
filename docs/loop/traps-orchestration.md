@@ -97,6 +97,21 @@ an automatic host wakeup. If no wait/resume capability exists, report the missin
 capability and outstanding handoff instead of promising background delivery.
 Evidence and limits: `docs/agnostic-manual-handoff-rca.md`.
 
+**Codex collaboration subagents have the same host-side completion obligation,**
+but this is distinct from the manual packet adapter. For a user-requested
+implementation, launching or observing an ordinary app subagent still leaves
+the top-level owner responsible for waiting, consuming its result, inspecting
+the changed paths, obtaining fresh independent review, running required gates,
+and completing the authorized scoped commit/push for the item being reported.
+Start the next backlog item before the final response; that separate item may
+remain active. A worker still running on the reported item is not a result and
+does not transfer ownership of its completion. Only an explicitly requested
+asynchronous handoff backed by configured durable automation may leave that
+same item in flight. The pre-final checklist is mandatory host practice;
+repository prose cannot intercept or block Codex's final-response action.
+Durable controller support is separate backlog work. The 2026-10-16 recurrence
+and evidence boundary are recorded in `docs/agnostic-manual-handoff-rca.md`.
+
 **While `docs/BACKLOG.md` has ANY item in it, do not end a turn without work
 already started on the next item.** This is the single most repeated correction
 in this project's history, and the owner restated it in the strong form on

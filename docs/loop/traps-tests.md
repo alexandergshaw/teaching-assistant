@@ -71,6 +71,16 @@ rendered by any test in this repo. Every UI and accessibility claim is a reading
 claim, and the loop must say so rather than letting a passing suite imply
 otherwise.
 
+**Source checks cannot verify visual layout.** Typechecks, source assertions,
+and passing component-wiring tests do not show what the user sees; this repo's
+vitest suite does not render components. For a visual, layout, or responsive
+change, capture rendered screenshots of each affected candidate surface at a
+named viewport, theme, and state, and tie the evidence to the exact commit under
+review. Source tests cannot satisfy this visual check. If the browser, required
+authentication, or service is unavailable, record the missing evidence as a
+residual with an owner, the instrument needed, and the next step. Never claim
+visual verification without rendered evidence.
+
 **A constant back-imported from a parent module creates a cycle that silently
 yields `undefined`.** Splitting a file and reaching back up for a shared
 constant type-checks, passes tsc, and produces `undefined` at runtime. Push the

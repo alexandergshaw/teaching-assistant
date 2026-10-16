@@ -32,6 +32,7 @@ import SourcesEditor from "./SourcesEditor";
 import DeckTemplatePicker from "./DeckTemplatePicker";
 import { useSelectedDeckTemplateFileId } from "../ppt-design/hooks";
 import ArtifactCard, { type ArtifactCardState } from "./ArtifactCard";
+import styles from "./presentations.module.css";
 
 const GENERATE_URL = "/api/presentations/generate";
 
@@ -142,7 +143,7 @@ export default function PresentationsTab() {
   const kinds = selectedKinds(selection);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+    <div className={styles.panel}>
       <TabHeader
         eyebrow="Presentations"
         title="Slide Deck Creation"
@@ -158,12 +159,19 @@ export default function PresentationsTab() {
 
       <DeckTemplatePicker selectedId={templateFileId} onSelectId={setTemplateFileId} />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <strong>Generate</strong>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-4)" }}>
+      <section className={`${styles.section} ${styles.outputsSection}`} aria-labelledby="presentation-outputs-title">
+        <div className={styles.sectionHeading}>
+          <span className={styles.stepNumber} aria-hidden="true">03</span>
+          <div>
+            <h2 id="presentation-outputs-title" className={styles.sectionTitle}>Choose deliverables</h2>
+            <p className={styles.sectionDescription}>Select the materials to prepare for this presentation.</p>
+          </div>
+        </div>
+        <div className={styles.choices}>
           {(["outline", "activities", "deck"] as ContentArtifactKind[]).map((kind) => (
             <FormControlLabel
               key={kind}
+              className={`${styles.choice} ${selection[kind] ? styles.choiceSelected : ""}`}
               control={
                 <Checkbox
                   checked={selection[kind]}
@@ -174,12 +182,21 @@ export default function PresentationsTab() {
             />
           ))}
           <FormControlLabel
+            className={`${styles.choice} ${styles.reviewChoice} ${selection.review ? styles.choiceSelected : ""}`}
             control={<Checkbox checked={selection.review} onChange={() => toggleSelection("review")} />}
             label="Include AI critique for each artifact"
           />
         </div>
-        <div>
+        <div className={styles.generateRow}>
+          <p className={styles.generateHint}>
+            {generating
+              ? "Your selected materials are being prepared."
+              : kinds.length === 0
+                ? "Choose at least one deliverable to enable generation."
+                : `${kinds.length} ${kinds.length === 1 ? "deliverable" : "deliverables"} selected.`}
+          </p>
           <Button
+            className={styles.generateButton}
             variant="contained"
             onClick={handleGenerate}
             disabled={generating || kinds.length === 0}
@@ -188,21 +205,30 @@ export default function PresentationsTab() {
             {generating ? "Generating..." : "Generate"}
           </Button>
         </div>
-      </div>
+      </section>
 
       {kinds.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-          {kinds.map((kind) => (
-            <ArtifactCard
-              key={kind}
-              kind={kind}
-              state={artifactStates[kind] ?? { phase: "idle" }}
-              onRegenerate={() => handleRegenerateClick(kind)}
-              regenerating={artifactStates[kind]?.phase === "loading"}
-              templateFileId={templateFileId}
-            />
-          ))}
-        </div>
+        <section className={styles.resultsSection} aria-labelledby="presentation-results-title">
+          <div className={styles.sectionHeading}>
+            <span className={styles.stepNumber} aria-hidden="true">04</span>
+            <div>
+              <h2 id="presentation-results-title" className={styles.sectionTitle}>Review your materials</h2>
+              <p className={styles.sectionDescription}>Each result can be retried or regenerated with your context.</p>
+            </div>
+          </div>
+          <div className={styles.resultsList}>
+            {kinds.map((kind) => (
+              <ArtifactCard
+                key={kind}
+                kind={kind}
+                state={artifactStates[kind] ?? { phase: "idle" }}
+                onRegenerate={() => handleRegenerateClick(kind)}
+                regenerating={artifactStates[kind]?.phase === "loading"}
+                templateFileId={templateFileId}
+              />
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );

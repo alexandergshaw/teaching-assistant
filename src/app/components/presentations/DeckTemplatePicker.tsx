@@ -16,6 +16,7 @@ import {
 } from "@/app/actions/deck-template-files";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { keepTemplateIdIfPresent } from "./panel-logic";
+import styles from "./presentations.module.css";
 
 const PPTX_ACCEPT =
   ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -105,19 +106,26 @@ export default function DeckTemplatePicker({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-      <strong>PowerPoint template (.pptx)</strong>
-      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>
-        Optional. Upload an existing .pptx to use as the template: the generated deck is written into its
+    <section className={`${styles.section} ${styles.templateSection}`} aria-labelledby="presentation-template-title">
+      <div className={styles.sectionHeading}>
+        <span className={styles.stepNumber} aria-hidden="true">02</span>
+        <div>
+          <h2 id="presentation-template-title" className={styles.sectionTitle}>Choose an optional template</h2>
+          <p className={styles.sectionDescription}>PowerPoint template (.pptx)</p>
+        </div>
+        <span className={styles.optionalTag}>Optional</span>
+      </div>
+      <div className={styles.templateExplanation}>
+        Upload an existing .pptx to use as the template: the generated deck is written into its
         slides and design. This is the template, not source material. The template needs at least as many
         slides as the deck.
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
+      <div className={styles.templateControls}>
         <input
           ref={fileInputRef}
           type="file"
           accept={PPTX_ACCEPT}
-          style={{ display: "none" }}
+          className={styles.hiddenFileInput}
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) void handleFile(file);
@@ -125,6 +133,7 @@ export default function DeckTemplatePicker({
           }}
         />
         <Button
+          className={styles.secondaryAction}
           variant="outlined"
           size="small"
           disabled={busy}
@@ -135,6 +144,7 @@ export default function DeckTemplatePicker({
         </Button>
         {templates.length > 0 && (
           <select
+            className={styles.templateSelect}
             aria-label="Choose an uploaded template"
             value={selectedId}
             onChange={(e) => onSelectId(e.target.value)}
@@ -154,18 +164,10 @@ export default function DeckTemplatePicker({
         )}
       </div>
       {error && (
-        <div
-          style={{
-            padding: "var(--space-3)",
-            backgroundColor: "var(--danger-surface)",
-            borderRadius: "var(--radius-xs)",
-            fontSize: "var(--font-size-sm)",
-            color: "var(--danger)",
-          }}
-        >
+        <div className={styles.templateError} role="alert">
           {error}
         </div>
       )}
-    </div>
+    </section>
   );
 }

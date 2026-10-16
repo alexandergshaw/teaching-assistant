@@ -15,6 +15,7 @@ import {
   deckDownloadFilename,
 } from "./panel-logic";
 import SlideDeckPreview from "./SlideDeckPreview";
+import styles from "./presentations.module.css";
 
 export type ArtifactCardState =
   | { phase: "idle" }
@@ -35,20 +36,18 @@ export default function ArtifactCard({
   regenerating: boolean;
   templateFileId?: string;
 }) {
+  const phaseClass = {
+    idle: styles.artifactIdle,
+    loading: styles.artifactLoading,
+    ok: styles.artifactOk,
+    error: styles.artifactErrorState,
+  }[state.phase];
+
   return (
-    <div
-      style={{
-        border: "1px solid var(--card-border, rgba(0,0,0,0.1))",
-        borderRadius: "var(--radius-md)",
-        padding: "var(--space-4)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-3)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h4 style={{ margin: 0, fontSize: "var(--font-size-lg)" }}>{KIND_LABELS[kind]}</h4>
-        {state.phase === "loading" && <CircularProgress size={18} />}
+    <article className={`${styles.artifactCard} ${phaseClass}`} aria-busy={state.phase === "loading"}>
+      <div className={styles.artifactHeading}>
+        <h3 className={styles.artifactTitle}>{KIND_LABELS[kind]}</h3>
+        {state.phase === "loading" && <CircularProgress size={18} aria-label={`Generating ${KIND_LABELS[kind]}`} />}
       </div>
 
       {state.phase === "idle" && (
@@ -56,15 +55,8 @@ export default function ArtifactCard({
       )}
 
       {state.phase === "error" && (
-        <div
-          style={{
-            padding: "var(--space-3)",
-            backgroundColor: "var(--danger-surface)",
-            borderRadius: "var(--radius-xs)",
-            color: "var(--danger)",
-          }}
-        >
-          <p style={{ margin: 0 }}>{state.message}</p>
+        <div className={styles.artifactError} role="alert">
+          <p className={styles.artifactMessage}>{state.message}</p>
           {state.retryable && (
             <Button
               variant="outlined"
@@ -88,7 +80,7 @@ export default function ArtifactCard({
           templateFileId={templateFileId}
         />
       )}
-    </div>
+    </article>
   );
 }
 
@@ -106,7 +98,7 @@ function ArtifactContent({
   templateFileId: string;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+    <div className={styles.artifactContent}>
       {artifact.kind === "outline" && (
         <pre
           style={{
@@ -136,44 +128,21 @@ function ArtifactContent({
       )}
 
       {artifact.critique && (
-        <div
-          style={{
-            padding: "var(--space-3)",
-            backgroundColor: "rgba(0,0,0,0.03)",
-            borderRadius: "var(--radius-xs)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "var(--font-size-xs)",
-              fontWeight: 600,
-              marginBottom: "var(--space-1)",
-              textTransform: "uppercase",
-              color: "var(--text-secondary)",
-            }}
-          >
-            Critique
-          </div>
+        <div className={styles.critiqueCard}>
+          <div className={styles.critiqueLabel}>Critique</div>
           <p style={{ margin: 0, fontSize: "var(--font-size-sm)" }}>{artifact.critique.text}</p>
         </div>
       )}
 
       {!artifact.critique && reviewSkipped && (
-        <div
-          style={{
-            padding: "var(--space-3)",
-            backgroundColor: "var(--warning-surface, rgba(0,0,0,0.03))",
-            borderRadius: "var(--radius-xs)",
-            color: "var(--text-secondary)",
-          }}
-        >
+        <div className={styles.reviewNotice} role="status">
           <p style={{ margin: 0, fontSize: "var(--font-size-sm)" }}>
             AI critique unavailable - generation ran out of time. Regenerate to retry.
           </p>
         </div>
       )}
 
-      <div>
+      <div className={styles.artifactActions}>
         <Button
           variant="outlined"
           size="small"
@@ -238,8 +207,8 @@ function DeckArtifact({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div className={styles.deckArtifact}>
+      <div className={styles.deckArtifactHeading}>
         <strong>{deck.presentationTitle}</strong>
         <Button
           variant="contained"
@@ -251,7 +220,7 @@ function DeckArtifact({
           {downloading ? "Preparing..." : "Download .pptx"}
         </Button>
       </div>
-      {downloadError && <p style={{ color: "var(--danger)", margin: 0 }}>{downloadError}</p>}
+      {downloadError && <p className={styles.downloadError} role="alert">{downloadError}</p>}
       <SlideDeckPreview slides={deck.slides} />
     </div>
   );

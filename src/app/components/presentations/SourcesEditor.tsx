@@ -14,6 +14,7 @@ import { Button, IconButton, TextField, Typography } from "@mui/material";
 import type { PresentationSource } from "@/lib/presentations/types";
 import { extractDeckSourceFileAction } from "@/app/actions/deck-source";
 import { appendExtractedSourceNamed } from "./panel-logic";
+import styles from "./presentations.module.css";
 
 interface PendingUpload {
   id: string;
@@ -115,8 +116,16 @@ export default function SourcesEditor({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+    <section className={`${styles.section} ${styles.sourceSection}`} aria-labelledby="presentation-sources-title">
+      <div className={styles.sectionHeading}>
+        <span className={styles.stepNumber} aria-hidden="true">01</span>
+        <div>
+          <h2 id="presentation-sources-title" className={styles.sectionTitle}>Add context and sources</h2>
+          <p className={styles.sectionDescription}>Describe the lesson, then add files or pasted material to shape the deck.</p>
+        </div>
+      </div>
       <TextField
+        className={styles.contextField}
         label="Context"
         placeholder="Describe the lecture/module this presentation covers"
         value={text}
@@ -146,17 +155,7 @@ export default function SourcesEditor({
             void handleFiles(e.dataTransfer.files);
           }
         }}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "var(--space-1)",
-          padding: "var(--space-4)",
-          border: "1px dashed var(--card-border, rgba(0,0,0,0.25))",
-          borderRadius: "var(--radius-xs)",
-          textAlign: "center",
-          cursor: "pointer",
-        }}
+        className={styles.dropTarget}
       >
         <Typography variant="body2">Drag and drop files here, or click to browse</Typography>
         <Typography variant="caption" color="text.secondary">
@@ -179,17 +178,16 @@ export default function SourcesEditor({
       </div>
 
       {uploads.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+        <div className={styles.sourceList}>
           {uploads.map((u) => (
-            <div
-              key={u.id}
-              style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}
-            >
+            <div key={u.id} className={u.phase === "error" ? styles.uploadError : styles.uploadProgress}>
               {u.phase === "extracting" ? (
-                <Typography variant="body2">{u.name}: extracting...</Typography>
+                <Typography variant="body2" role="status" aria-live="polite">
+                  {u.name}: extracting...
+                </Typography>
               ) : (
                 <>
-                  <Typography variant="body2" color="error">
+                  <Typography variant="body2" color="error" role="alert">
                     {u.name}: {u.message ?? "Could not extract that file."}
                   </Typography>
                   <IconButton
@@ -206,21 +204,12 @@ export default function SourcesEditor({
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <div className={styles.sourceList}>
         {sources.map((source, idx) => (
-          <div
-            key={idx}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-2)",
-              padding: "var(--space-3)",
-              border: "1px solid var(--card-border, rgba(0,0,0,0.1))",
-              borderRadius: "var(--radius-xs)",
-            }}
-          >
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <div key={idx} className={styles.sourceCard}>
+            <div className={styles.sourceNameRow}>
               <TextField
+                className={styles.sourceNameField}
                 label="Source name"
                 value={source.name}
                 onChange={(e) => updateSource(idx, { name: e.target.value })}
@@ -236,6 +225,7 @@ export default function SourcesEditor({
               </IconButton>
             </div>
             <TextField
+              className={styles.sourceTextField}
               label="Pasted text"
               value={source.text}
               onChange={(e) => updateSource(idx, { text: e.target.value })}
@@ -246,10 +236,10 @@ export default function SourcesEditor({
             />
           </div>
         ))}
-        <Button variant="outlined" size="small" onClick={addSource} sx={{ textTransform: "none", alignSelf: "start" }}>
+        <Button className={styles.addSourceButton} variant="outlined" size="small" onClick={addSource} sx={{ textTransform: "none", alignSelf: "start" }}>
           Add pasted source
         </Button>
       </div>
-    </div>
+    </section>
   );
 }

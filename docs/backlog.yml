@@ -40,6 +40,18 @@
   from: 'Owner requests in this chat, 2026-10-15: upload a PowerPoint as a template, pull out its different slide types, then place the template maker/extractor on a new sibling sub-tab rather than the slide-deck creation page.'
   note: 'Local implementation and independent source checks are complete; the corrected manual verification report is independently accepted. Current candidate-bound required gates and the shared identical-source full src gate passed; npm.cmd run build compiled and passed TypeScript, then failed prerender for missing Supabase configuration. Examples are source text, not thumbnails; mixed textless slides are retained as other, while entirely textless decks are refused. No rendered UI, live database/provider, migration application or PowerPoint fidelity success is claimed. PPT-TEMPLATE-UPLOAD-PLACE and PRESENTATIONS-TEMPLATE obligations remain open.'
   question: null
+- id: 'SLIDE-DECK-CREATION-VISUAL-REFRESH'
+  state: 'verification'
+  kind: 'chore'
+  area: 'presentations-authoring'
+  title: 'Give the Slide Deck Creation sub-tab a clear, responsive visual hierarchy.'
+  owns: ['src/app/components/presentations/index.tsx', 'src/app/components/presentations/SourcesEditor.tsx', 'src/app/components/presentations/DeckTemplatePicker.tsx', 'src/app/components/presentations/ArtifactCard.tsx', 'src/app/components/presentations/SlideDeckPreview.tsx', 'src/app/components/presentations/presentations.module.css', 'docs/slide-deck-creation-visual-criteria.md']
+  verify: 'npm.cmd run test:paths -- src/app/components/presentations/panel-logic.test.ts src/app/components/presentations/template-picker.wiring.test.ts src/file-size-ceiling.structure.test.ts src/source-bytes.structure.test.ts'
+  blocked_by: []
+  instrument: 'Implementer and independent verifier: compare the exact changed UI diff against docs/slide-deck-creation-visual-criteria.md; preserve the current context/source intake, optional template, output selection, generation, artifact review/retry and download behavior. Run the exact test:paths command above plus npx.cmd tsc --noEmit --incremental false and targeted ESLint on the owned TSX files. These tests do not render React. Owner/browser verifier: inspect the authenticated, configured app at 320px, 768px, and 1280px widths in light and dark themes; record actual overflow, hierarchy, focus and keyboard behavior. Any unexpected behavior change, horizontal overflow, clipped/overlapping control or missing keyboard focus fails the corresponding check. Do not claim visual acceptance from source checks alone.'
+  from: 'Owner request in this chat, 2026-10-16: the Slide Deck Creation sub-tab could use a visual overhaul. Filed by the commit adding this row.'
+  note: 'Implementation and independent review are complete; round 1 findings were resolved and round 2 found 0 blockers or majors. The nearby ppt-design/GeneratePanel.tsx outlined Card pattern and app theme tokens are reused. Focused test:paths passed 58 tests across 4 files; npx.cmd tsc --noEmit --incremental false passed; targeted ESLint exited 0 with 4 warnings in unchanged context/useCallback lines; backlog generated check passed. UI tests do not render components: authenticated browser evidence at 320/768/1280px in light/dark, including appearance, overflow, focus and keyboard behavior, is required before the visual row can close.'
+  question: null
 - id: 'TEMPLATE-TOOLS-VISUAL-REFRESH'
   state: 'verification'
   kind: 'chore'

@@ -9,6 +9,7 @@
 
 import { Card, CardContent } from "@mui/material";
 import type { PptxSlide } from "@/lib/pptx";
+import styles from "./presentations.module.css";
 
 export default function SlideDeckPreview({
   slides,
@@ -18,35 +19,22 @@ export default function SlideDeckPreview({
   startNumber?: number;
 }) {
   if (slides.length === 0) {
-    return <p style={{ color: "var(--text-secondary)" }}>This deck has no slides yet.</p>;
+    return <p className={styles.emptyPreview}>This deck has no slides yet.</p>;
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+    <div className={styles.slidePreviewList}>
       {slides.map((slide, idx) => (
-        <Card key={idx} variant="outlined">
-          <CardContent>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "start",
-                marginBottom: "var(--space-2)",
-              }}
-            >
-              <h5 style={{ margin: 0, fontSize: "var(--font-size-md)", fontWeight: 600 }}>
+        <Card className={styles.slidePreviewCard} key={idx} variant="outlined">
+          <CardContent className={styles.slidePreviewContent}>
+            <div className={styles.slidePreviewHeading}>
+              <h4 className={styles.slideTitle}>
                 {(startNumber ?? 1) + idx}. {slide.title}
-              </h5>
+              </h4>
             </div>
 
             {slide.bullets.length > 0 && (
-              <ul
-                style={{
-                  margin: "var(--space-2) 0",
-                  paddingLeft: "var(--space-6)",
-                  fontSize: "var(--font-size-md)",
-                }}
-              >
+              <ul className={styles.slideBullets}>
                 {slide.bullets.map((bullet, i) => (
                   <li key={i}>{bullet}</li>
                 ))}
@@ -54,45 +42,20 @@ export default function SlideDeckPreview({
             )}
 
             {slide.code && (
-              <div
-                style={{
-                  marginTop: "var(--space-3)",
-                  padding: "var(--space-3)",
-                  backgroundColor: "rgba(0,0,0,0.05)",
-                  borderRadius: "var(--radius-xs)",
-                  fontFamily: "monospace",
-                  fontSize: "var(--font-size-sm)",
-                  overflow: "auto",
-                  maxHeight: "150px",
-                  color: "var(--text-secondary)",
-                }}
-              >
+              <div className={styles.slideCode}>
                 {slide.codeLanguage && (
-                  <div
-                    style={{
-                      fontSize: "var(--font-size-xs)",
-                      fontWeight: 500,
-                      marginBottom: "var(--space-1)",
-                    }}
-                  >
+                  <div className={styles.slideCodeLanguage}>
                     {slide.codeLanguage.toUpperCase()}
                   </div>
                 )}
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                <pre className={styles.slideCodeText}>
                   {slide.code}
                 </pre>
               </div>
             )}
 
             {slide.notes && (
-              <p
-                style={{
-                  marginTop: "var(--space-3)",
-                  fontSize: "var(--font-size-sm)",
-                  color: "var(--text-secondary)",
-                  fontStyle: "italic",
-                }}
-              >
+              <p className={styles.slideNotes}>
                 Speaker notes: {slide.notes}
               </p>
             )}

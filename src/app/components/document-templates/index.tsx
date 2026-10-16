@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { abstractDocumentTemplateAction, downloadDocumentTemplateAction, getDocumentTemplateAction, listDocumentTemplatesAction, saveDocumentTemplateAction } from "@/app/actions/document-template-files";
 import { PDF_DISCLOSURE, type DocumentDefinition, type DocumentTemplateMeta, type DocumentTemplateReview, type DocumentReviewParagraph, type DocumentUpload } from "@/lib/document-templates/types";
 import { createDocumentRequestGate, documentOperation, downloadDocument, previewReviewedDocument, readDocumentFile, reviewDocumentProposal } from "./panel-logic";
+import TabHeader from "../TabHeader";
+import styles from "../template-tools.module.css";
 
 type Props = { onUseInSlideDeckCreation?: () => void };
 type OpenTemplate = DocumentTemplateReview;
-const button = "rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50";
-const input = "w-full rounded border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:bg-slate-900 dark:text-slate-100";
 export default function DocumentTemplates(props: Props) {
   void props;
   const [templates, setTemplates] = useState<DocumentTemplateMeta[]>([]);
@@ -87,19 +87,61 @@ export default function DocumentTemplates(props: Props) {
     });
   }
   const mergedReview = reviewDocumentProposal(review, proposal);
-  return <section className="space-y-6 p-4" aria-labelledby="document-templates-heading">
-    <header><h2 id="document-templates-heading" className="text-xl font-semibold">Document Templates</h2><p className="mt-2 text-sm">Upload a document, abstract its variable details into fields, review and save it, then fill it again without another model call.</p></header>
-    <p className="text-sm text-slate-600 dark:text-slate-300">{PDF_DISCLOSURE}</p>
-    <label className="block">Source document (DOCX or text-based PDF)<input className="mt-2 block" type="file" accept=".docx,.pdf" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void choose(file); event.target.value = ""; }} /></label>
-    {upload && <div className="space-y-2"><p>Selected: {upload.fileName}</p><button className={button} disabled={busy} onClick={() => void run(async (token) => {
-      const result = await documentOperation("analyze", () => abstractDocumentTemplateAction(upload));
-      if (!gate.current.current(token)) return;
-      if ("error" in result) setError(result.error); else { setReview(result.proposal.review); setDefinition(result.proposal.definition); setProposal(JSON.stringify(result.proposal.definition, null, 2)); setStatus("Review the proposed fields and complete paragraph replacements before saving."); }
-    })}>Abstract document</button></div>}
-    {proposal && <div className="space-y-3"><h3 className="font-semibold">Review reusable template</h3><label className="block">Template name<input className={input} maxLength={180} value={name} disabled={busy} onChange={(e) => setName(e.target.value)} /></label><p className="text-sm">Edit field labels, keys and complete replacement paragraphs below. Keep paragraph IDs unchanged. Omitted paragraphs remain untouched. Use {'{{field_key}}'} for declared fields. Save validates your edits.</p><div><h4 className="font-semibold">Document text and placeholders</h4><p className="text-sm">Preview of current edits in source order. Save and proposal downloads validate edits.</p><ol className="space-y-3">{mergedReview.map((paragraph) => <li key={paragraph.id} className="rounded border border-slate-200 p-3"><p className="text-xs">{paragraph.id}: {paragraph.replaced ? "Proposed replacement" : "Retained text"}</p><p className="whitespace-pre-wrap">{paragraph.templateText}</p>{paragraph.replaced && <details><summary>Original paragraph</summary><p className="whitespace-pre-wrap">{paragraph.sourceText}</p></details>}</li>)}</ol></div><label className="block">Template proposal (JSON)<textarea className={`${input} min-h-64 font-mono text-sm`} value={proposal} disabled={busy} onChange={(e) => setProposal(e.target.value)} /></label><div className="flex flex-wrap gap-2"><button className={button} disabled={busy || !name.trim()} onClick={() => void save()}>Save template</button><button className={button} disabled={busy} onClick={() => void downloadReviewed()}>Download reviewed proposal DOCX</button></div></div>}
-    {opened && definition && <div className="space-y-3"><h3 className="font-semibold">Fill saved template: {opened.name}</h3><p className="text-sm">Downloads use the saved definition. Save any proposal edits first.</p>{definition.fields.map((field) => <label className="block" key={field.key}>{field.label}<input className={input} maxLength={4000} value={values[field.key] ?? ""} disabled={busy} onChange={(e) => setValues((prior) => ({ ...prior, [field.key]: e.target.value }))} /></label>)}<div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void download("original")}>Download original</button><button className={button} disabled={busy} onClick={() => void download("template")}>Download unfilled DOCX</button><button className={button} disabled={busy} onClick={() => void download("filled")}>Download filled DOCX</button></div></div>}
-    <div className="space-y-2"><h3 className="font-semibold">Saved document templates</h3><button className={button} disabled={busy} onClick={() => void run(async (token) => { const result = await documentOperation("load", listDocumentTemplatesAction); if (!gate.current.current(token)) return; if ("error" in result) setError(result.error); else setTemplates(result.templates); })}>Refresh library</button>{templates.length === 0 && <p className="text-sm">No document templates loaded. Upload and abstract a document to create one.</p>}<ul className="space-y-2">{templates.map((t) => <li key={t.id}><button className={button} disabled={busy} onClick={() => void open(t.id)}>{t.name} ({t.sourceKind.toUpperCase()})</button></li>)}</ul></div>
-    {error && <p role="alert" className="text-red-700 dark:text-red-300">{error}</p>}<p role="status" aria-live="polite">{busy ? "Working..." : status}</p>
-  </section>;
+  return <div className={styles.page}>
+    <TabHeader eyebrow="Presentations" title="Document Templates" subtitle="Upload a document, abstract its variable details into fields, review and save it, then fill it again without another model call." />
+    <div className={styles.documentWorkspace}>
+      <div className={styles.workflowColumn}>
+        <section className={styles.panel} aria-labelledby="document-source-heading">
+          <header className={styles.panelHeader}><div><h2 id="document-source-heading" className={styles.panelTitle}>Create from a document</h2><p className={styles.panelDescription}>Upload a source, then abstract reusable fields from its content.</p></div></header>
+          <p className={styles.notice}>{PDF_DISCLOSURE}</p>
+          <div className={styles.formStack}>
+            <label className={styles.field}>Source document (DOCX or text-based PDF)<input className={styles.input} type="file" accept=".docx,.pdf" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onChange={(event) => { const file = event.target.files?.[0]; if (file) void choose(file); event.target.value = ""; }} /></label>
+            {upload && <div className={styles.selectedFile}><p>Selected: {upload.fileName}</p><button className={proposal ? styles.secondaryButton : styles.primaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void run(async (token) => {
+              const result = await documentOperation("analyze", () => abstractDocumentTemplateAction(upload));
+              if (!gate.current.current(token)) return;
+              if ("error" in result) setError(result.error); else { setReview(result.proposal.review); setDefinition(result.proposal.definition); setProposal(JSON.stringify(result.proposal.definition, null, 2)); setStatus("Review the proposed fields and complete paragraph replacements before saving."); }
+            })}>Abstract document</button></div>}
+          </div>
+        </section>
+
+        {proposal && <section className={styles.panel} aria-labelledby="document-review-heading">
+          <header className={styles.panelHeader}><div><h2 id="document-review-heading" className={styles.panelTitle}>Review reusable template</h2><p className={styles.panelDescription}>Adjust the proposed fields and paragraph replacements before saving.</p></div></header>
+          <div className={styles.formStack}>
+            <label className={styles.field}>Template name<input className={styles.input} maxLength={180} value={name} disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onChange={(e) => setName(e.target.value)} /></label>
+            <p className={styles.helperText}>Edit field labels, keys and complete replacement paragraphs below. Keep paragraph IDs unchanged. Omitted paragraphs remain untouched. Use {'{{field_key}}'} for declared fields. Save validates your edits.</p>
+            <section className={styles.paragraphReview} aria-labelledby="document-paragraphs-heading">
+              <header className={styles.panelHeader}><div><h3 id="document-paragraphs-heading" className={styles.subheading}>Document text and placeholders</h3><p className={styles.helperText}>Preview of current edits in source order. Save and proposal downloads validate edits.</p></div></header>
+              <ol className={styles.paragraphList}>{mergedReview.map((paragraph) => <li key={paragraph.id} className={styles.paragraphCard}>
+                <p className={styles.paragraphLabel}>{paragraph.id}: {paragraph.replaced ? "Proposed replacement" : "Retained text"}</p>
+                <p className={styles.paragraphText}>{paragraph.templateText}</p>
+                {paragraph.replaced && <details className={styles.originalText}><summary>Original paragraph</summary><p>{paragraph.sourceText}</p></details>}
+              </li>)}</ol>
+            </section>
+            <label className={styles.field}>Template proposal (JSON)<textarea className={`${styles.input} ${styles.proposalInput}`} value={proposal} disabled={busy} onChange={(e) => setProposal(e.target.value)} /></label>
+            <div className={styles.actionRow}><button className={styles.primaryButton} type="button" disabled={busy || !name.trim()} aria-describedby={busy ? "document-template-status" : !name.trim() ? "document-save-reason" : undefined} onClick={() => void save()}>Save template</button><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : "document-download-note"} onClick={() => void downloadReviewed()}>Download reviewed proposal DOCX</button></div>
+            <p id="document-download-note" className={styles.helperText}>Save stores this template in your library. Download reviewed proposal creates a DOCX preview without saving it.</p>
+            {!name.trim() && <p id="document-save-reason" className={styles.helperText}>Enter a template name before saving.</p>}
+          </div>
+        </section>}
+
+        {opened && definition && <section className={styles.panel} aria-labelledby="document-fill-heading">
+          <header className={styles.panelHeader}><div><h2 id="document-fill-heading" className={styles.panelTitle}>Fill saved template: {opened.name}</h2><p className={styles.panelDescription}>Downloads use the saved definition. Save any proposal edits first.</p></div></header>
+          <div className={styles.formStack}>{definition.fields.map((field) => <label className={styles.field} key={field.key}>{field.label}<input className={styles.input} maxLength={4000} value={values[field.key] ?? ""} disabled={busy} onChange={(e) => setValues((prior) => ({ ...prior, [field.key]: e.target.value }))} /></label>)}
+            <div className={styles.actionRow}><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void download("original")}>Download original</button><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void download("template")}>Download unfilled DOCX</button><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void download("filled")}>Download filled DOCX</button></div>
+          </div>
+        </section>}
+      </div>
+
+      <aside className={styles.libraryColumn}>
+        <section className={`${styles.panel} ${styles.libraryPanel}`} aria-labelledby="document-library-heading">
+          <header className={styles.panelHeader}><div><h2 id="document-library-heading" className={styles.panelTitle}>Saved document templates</h2><p className={styles.panelDescription}>Open a saved template to fill it again.</p></div><button className={styles.secondaryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void run(async (token) => { const result = await documentOperation("load", listDocumentTemplatesAction); if (!gate.current.current(token)) return; if ("error" in result) setError(result.error); else setTemplates(result.templates); })}>Refresh library</button></header>
+          {templates.length === 0 && <p className={styles.emptyState}>No document templates loaded. Upload and abstract a document to create one.</p>}
+          {!!templates.length && <ul className={styles.libraryList}>{templates.map((t) => <li key={t.id}><button className={styles.libraryButton} type="button" disabled={busy} aria-describedby={busy ? "document-template-status" : undefined} onClick={() => void open(t.id)}>{t.name}<span>{t.sourceKind.toUpperCase()}</span></button></li>)}</ul>}
+        </section>
+      </aside>
+    </div>
+    {error && <p role="alert" className={styles.error}>{error}</p>}
+    <p id="document-template-status" className={styles.status} role="status" aria-live="polite">{busy ? "Working..." : status}</p>
+  </div>;
 }
 

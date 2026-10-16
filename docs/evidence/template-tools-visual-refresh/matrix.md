@@ -6,7 +6,7 @@ The local dev server starts from the release worktree, but the app stops before 
 
 Owner: app owner. Instrument: authenticated browser session against the reviewed build with a configured Supabase project and reachable template backing service. Next step: load each tool state below, capture the named screenshot at the stated viewport/theme, inspect scroll width/geometry/focus, and record computed contrast pairs and keyboard operation. Do not close `TEMPLATE-TOOLS-VISUAL-REFRESH` until this matrix is replaced with measured evidence.
 
-Candidate: release worktree based on `018c0a4e59557cb9e48369524e759cc42dc176c2`; visual changes are uncommitted at matrix creation. Record the exact reviewed UI commit in this section after the owner disposition and publication.
+Candidate reviewed and pushed: `4fa01e2e87b2c0638ee58ef9eb3368feff307f09` (`feat: refresh template tools layout`). Screenshots, geometry, contrast, and keyboard evidence remain unverified as recorded below.
 
 | Tool | State | Viewport | Theme | Screenshot | Geometry/overflow | Contrast pairs | Keyboard | Residual |
 |---|---|---:|---|---|---|---|---|---|

@@ -173,6 +173,33 @@ exit `1` means the assertion is unproven (including missing/invalid state or an
 unknown item). Only exit `0` attests that every named item has a recorded `shipped`
 status and no retained assignment, uncertain operation or recorded outstanding
 need. It does not independently re-verify the candidate or authorize delivery.
+
+When the request also requires publication to GitHub `main`, run the separate
+read-only main-delivery proof after the manual handoff assertion. Prepare the
+evidence JSON from the item's admitted baseline and accepted final candidate:
+
+```json
+[{"item":{"id":"item-id","affectedPaths":["src/feature.ts"]},"baselineFiles":{"src/feature.ts":"<sha256>"},"finalFiles":{"src/feature.ts":"<sha256>"}}]
+```
+
+Each snapshot maps repository-relative file paths to their SHA-256 byte digest;
+an empty final map under an owned directory records deletions against the
+baseline. Run the proof against the exact workspace and remote:
+
+```powershell
+node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/main-delivery.ts C:/absolute/evidence.json C:/absolute/repository origin/main
+```
+
+Exit `1` means Git/worktree evidence is invalid, stale, or unproven. Exit `2`
+means the evidence is valid but the reviewed candidate has not reached remote
+`main`; a feature branch push alone is therefore incomplete. Exit `0` means the
+clean worktree, pinned candidate commit, and pinned live remote `main` contain
+the same owned files, bytes, and Git modes. The proof rejects ignored and
+untracked extras inside owned paths and index `assume-unchanged` or
+`skip-worktree` flags. It reads blobs by immutable object ID and rechecks `HEAD`
+and remote `main` before returning. It never fetches, commits, merges, or pushes.
+This local Git proof does not replace independent review or required product
+gates, and a host must not claim successful delivery until it passes.
 Run normal gates and engine transitions first. Include all requested item IDs;
 passing for a subset does not complete the request.
 

@@ -15,8 +15,11 @@ export class MainDeliveryEvidenceError extends Error {
   constructor(message: string) { super(message); this.name = 'MainDeliveryEvidenceError'; }
 }
 
+// Owned documentation can exceed spawnSync's default output buffer. Keep a
+// finite per-stream allowance; checkedGit rejects overflow errors before using bytes.
+const GIT_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const runGit: GitRunner = (args, cwd) => {
-  const result = spawnSync('git', args, { cwd, windowsHide: true, encoding: 'buffer' });
+  const result = spawnSync('git', args, { cwd, windowsHide: true, encoding: 'buffer', maxBuffer: GIT_OUTPUT_LIMIT_BYTES });
   return { status: result.status, stdout: result.stdout ?? Buffer.alloc(0), stderr: result.stderr ?? Buffer.alloc(0), ...(result.error ? { error: result.error } : {}) };
 };
 const asText = (value: string | Buffer) => typeof value === 'string' ? value : value.toString('utf8');

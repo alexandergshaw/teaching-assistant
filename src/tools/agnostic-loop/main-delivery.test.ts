@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { digest } from './json';
-import { assessMainDelivery } from './main-delivery';
+import { assessMainDelivery, MainDeliveryEvidenceError } from './main-delivery';
 import type { Item } from './types';
 
 const temporary: string[] = [];
@@ -15,16 +15,16 @@ function git(cwd: string, ...args: string[]): Buffer {
   if (result.status !== 0) throw new Error(`${args.join(' ')} failed: ${result.stderr.toString()}`);
   return result.stdout;
 }
-async function fixture() {
+async function fixture(file = 'src/feature.ts', before = Buffer.from('before'), final = Buffer.from('final')) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'main-delivery-')); temporary.push(base);
   const bare = path.join(base, 'remote.git'); const source = path.join(base, 'source'); const work = path.join(base, 'work');
   await mkdir(source); git(source, 'init', '--initial-branch=main'); git(source, 'config', 'user.name', 'Test'); git(source, 'config', 'user.email', 'test@example.invalid');
-  await mkdir(path.join(source, 'src')); await writeFile(path.join(source, 'src', 'feature.ts'), 'before');
-  git(source, 'add', 'src/feature.ts'); git(source, 'commit', '-m', 'baseline');
+  await mkdir(path.dirname(path.join(source, file)), { recursive: true }); await writeFile(path.join(source, file), before);
+  git(source, 'add', file); git(source, 'commit', '-m', 'baseline');
   git(base, 'init', '--bare', '--initial-branch=main', bare); git(source, 'remote', 'add', 'origin', bare); git(source, 'push', '-u', 'origin', 'main');
   git(base, 'clone', bare, work); git(work, 'config', 'user.name', 'Test'); git(work, 'config', 'user.email', 'test@example.invalid');
-  await writeFile(path.join(work, 'src', 'feature.ts'), 'final'); git(work, 'add', 'src/feature.ts'); git(work, 'commit', '-m', 'feature candidate');
-  return { base, bare, work, before: digest(Buffer.from('before')), final: digest(Buffer.from('final')) };
+  await writeFile(path.join(work, file), final); git(work, 'add', file); git(work, 'commit', '-m', 'feature candidate');
+  return { base, bare, work, before: digest(before), final: digest(final) };
 }
 
 describe('main delivery guard', () => {
@@ -39,6 +39,27 @@ describe('main delivery guard', () => {
     const report = await assessMainDelivery([{ item, baselineFiles: { 'src/feature.ts': f.before }, finalFiles: { 'src/feature.ts': f.final } }], f.work, 'origin/main');
     expect(report.complete).toBe(true);
   });
+
+  it.each(['src/feature.ts', 'docs/backlog.yml'])('compares all bytes of a large owned %s blob against remote main', async file => {
+    // Binary bytes also guard against decoding or truncating the blob before hashing.
+    const before = Buffer.alloc(2 * 1024 * 1024, 0xa5);
+    const final = Buffer.from(before); final[final.length - 1] = 0xa6;
+    const f = await fixture(file, before, final);
+    const evidence = [{ item: { ...item, affectedPaths: [file] }, baselineFiles: { [file]: f.before }, finalFiles: { [file]: f.final } }];
+    const mismatch = await assessMainDelivery(evidence, f.work, 'origin/main');
+    expect(mismatch).toMatchObject({ complete: false, candidateFiles: [file], mismatches: [file] });
+    git(f.work, 'push', 'origin', 'HEAD:main');
+    const delivered = await assessMainDelivery(evidence, f.work, 'origin/main');
+    expect(delivered).toMatchObject({ complete: true, candidateFiles: [file], mismatches: [] });
+  }, 30000);
+
+  it('fails closed when a pinned owned blob exceeds the bounded Git output allowance', async () => {
+    const file = 'docs/backlog.yml';
+    const f = await fixture(file, Buffer.from('before'), Buffer.alloc(16 * 1024 * 1024 + 1, 0xa5));
+    git(f.work, 'push', 'origin', 'HEAD:main');
+    const evidence = [{ item: { ...item, affectedPaths: [file] }, baselineFiles: { [file]: f.before }, finalFiles: { [file]: f.final } }];
+    await expect(assessMainDelivery(evidence, f.work, 'origin/main')).rejects.toThrow(MainDeliveryEvidenceError);
+  }, 30000);
 
   it('rejects a dirty worktree, including ignored and untracked files under an owned directory', async () => {
     const f = await fixture(); await writeFile(path.join(f.work, 'src', 'extra.ts'), 'extra');

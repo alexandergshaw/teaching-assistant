@@ -2,8 +2,8 @@
 
 Observed 2026-10-17. Destination requested by the owner: `main`. This record
 separates implementation gates, a synthetic private-repository experiment and the
-production browser walk. It does not establish integration on `main` or production
-exposure; those require their own delivery evidence.
+production browser walk. Reviewed source is integrated on `main` and its production
+deployment is ready. The authenticated production workflow still awaits sign-in.
 
 ## Implemented contract
 
@@ -181,8 +181,6 @@ into the frozen source branch.
   Vercel environment tool, so the operator credential is not production-token
   proof. Check focus, keyboard use, disclosure, reload recovery and changed-deck
   warnings in the browser.
-- Delivery owner: record the reviewed commit, integration on requested
-  `main` and successful deployment separately. The source default remains off.
 
 ## Production configuration
 
@@ -192,10 +190,43 @@ The owner-authorized production flag was saved successfully with:
 vercel.cmd env add PRESENTATION_COPILOT_TASKS_ENABLED production --value true --no-sensitive --yes --project prj_YBBKRoqM8boCsbBDGaAUX60gv0yz --scope team_FKpR3juJEstRHMFvlNSCmbPc
 ```
 
-Vercel reported `Added Config Production`. This config applies to a subsequent
-successful deployment; it does not alter the existing deployment. Source dispatch
-still defaults off when the variable is absent. Saving the flag does not prove
-that production credentials or the signed-in app flow work.
+Vercel reported `Added Config Production`. The flag was saved before the ready
+production build recorded below. Source dispatch still defaults off when the
+variable is absent. Configuration and deployment do not prove production token
+access or the signed-in app flow.
 
-Corrected synthetic live continuation passed. Production credentials and
-production exposure still require their own observations.
+## Main delivery and production deployment
+
+Reviewed source commit `777bd7a67b1b8ca4e5e71a8276885ee9fcbdaa15` was pushed to
+`origin/main`. The read-only `src/tools/agnostic-loop/main-delivery.ts` check,
+using `.agnostic-loop/pipeline-delivery-evidence.json`, workspace `.` and target
+`origin/main`, returned `complete: true` and `mismatches: []`. Its evidence covered
+24 owned paths and compared committed file bytes and modes. This confirms the
+reviewed source delivery at that commit; this document receives a later evidence
+transcription commit.
+
+The production inspect command exited 0 and reported READY:
+
+```powershell
+vercel.cmd inspect teaching-assistant-im92a64bb-alexandergshaws-projects.vercel.app --scope team_FKpR3juJEstRHMFvlNSCmbPc --wait --timeout 3m
+```
+
+Deployment ID: `dpl_6yGCTd2jkMJZGvUC1XJDvVoAeYr9`. A read-only
+`GET /v4/aliases/teaching-assistant-pi.vercel.app` returned that same deployment;
+the project production target was READY and its aliases included
+[teaching-assistant-pi.vercel.app](https://teaching-assistant-pi.vercel.app).
+
+The collaboration host delivery checklist is fulfilled, backed by independent
+live proof and the main-delivery check. The explicit engine assertion was also
+attempted:
+
+```powershell
+node.exe --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/manual-handoff.ts .agnostic-loop/pipeline-copilot-live-store PRESENTATION-PIPELINE-COPILOT-REPO
+```
+
+It exited 1 with `Manual handoff unproven`: the supervisor store is absent for
+this collaboration item. The engine assertion is unavailable; it is not a failed
+worker result or failed source delivery, and no engine state was manufactured.
+The production browser remains anonymous: no signed-in
+owner publication, actual production task, keyboard/focus walk or downloaded PPTX
+usability has been proved. Those are the remaining owner sign-in checks above.

@@ -2360,3 +2360,15 @@
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
   note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. R5 key confirmed by reading FilesTab.tsx:85-92: ta-files-view. Confirm again before build. Scope names no dedicated structural gate; rerun caller/source-reader census. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
   question: null
+- id: 'PRESENTATION-PIPELINE-COPILOT-REPO'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'presentations-authoring'
+  title: 'Create a private GitHub repository from the current Slide Deck Pipeline presentation and run Copilot tasks against that snapshot.'
+  owns: ['src/app/components/presentations/pipeline/PipelineTab.tsx', 'src/app/components/presentations/pipeline/PipelineRepositoryPanel.tsx', 'src/app/actions/presentation-repository.ts', 'src/lib/presentations/repository-snapshot.ts', 'src/lib/presentations/repository-publish.ts', 'src/lib/presentations/repository-renderer.ts', 'docs/presentation-pipeline-repository-usage.md']
+  verify: 'npm.cmd run test:paths -- src/app/components/presentations/pipeline/repository-confirmation.test.ts src/app/actions/presentation-repository.test.ts src/lib/presentations/repository-publish.test.ts src/lib/presentations/repository-snapshot.test.ts; npx.cmd tsc --noEmit --incremental false --pretty false'
+  blocked_by: []
+  instrument: 'Private publication and repository viewing are implemented and independently checked. Finish initial and follow-up Copilot task dispatch from the frozen snapshot, keeping dispatch unavailable until an owner-enabled integration proves the worker base commit, package hashes and PR ancestry. Preserve exact snapshot confirmation, private owner auth, bounded binary files, restart-safe content-free retry identity and privacy-safe diagnostics. Template-backed publishing also stays unavailable until authorized assets can be reproduced.'
+  from: 'Owner request 2026-10-17: add a Slide Deck Pipeline control to send the current presentation to GitHub Copilot, view its repository, and reprompt Copilot to regenerate with context.'
+  note: 'Partial implementation is in the 2026-10-17 release candidate: private own-layout snapshot publication, frozen renderer, verified commit receipt, repository link and explicit unavailable initial/follow-up controls. Remaining work: implement the documented Agent Tasks adapter and prove immutable snapshot binding before enabling either task. Live GitHub permissions, Copilot task behavior, template package reproduction and owner browser/PPTX verification remain open.'
+  question: null

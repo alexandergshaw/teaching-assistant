@@ -296,6 +296,9 @@ const GITHUB_FILES = new Set([
   "actions/github-repos.ts",
   "actions/github-student-repos.ts",
   "actions/github.ts",
+  // Owner-private deck publication uses the shared GitHub token; real-guard tests
+  // in presentation-repository.test.ts reject non-owner calls before egress.
+  "actions/presentation-repository.ts",
   "actions/grading-inbox.ts",
   // RULING 108: prepareGradingRunAction reaches lib/github via
   // extractCanvasEntries -> lib/grade/extraction.ts -> repo-content.ts's

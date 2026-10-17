@@ -77,6 +77,7 @@ import SlideRegenView from "./SlideRegenView";
 import PipelineTemplatePicker from "./PipelineTemplatePicker";
 import { chooseRawTemplate, pipelineTemplateFailureCategory, resolveTemplateForDownload, type PipelineLibraryActions, type PipelineTemplateChoice, type PipelineTemplateFailureCategory } from "./template-choice";
 import { PipelineSlideEditor } from "./pipeline-slide-editor";
+import PipelineRepositoryPanel from "./PipelineRepositoryPanel";
 import { isObjectiveRevisionCurrent, makeObjectiveDraft, objectiveGenerationResult, recordPipelineDiagnostic, selectedObjectiveTexts, validateHomework, type ObjectiveDraft } from "./pipeline-objectives";
 
 const PIPELINE_URL = "/api/presentations/pipeline";
@@ -710,6 +711,15 @@ export default function PipelineTab() {
               {downloadError && <Alert severity="error">{downloadError}</Alert>}
 
               <SlideDeckPreview slides={pipelineState.deck.artifact?.slides ?? []} />
+              <PipelineRepositoryPanel
+                input={pipelineState.deck.status === "done" && pipelineState.deck.artifact ? {
+                  deck: pipelineState.deck.artifact,
+                  context: { text: contextText, sources: pipelineState.sources.artifact ?? [], objectives: appliedObjectives },
+                  includeContext: false,
+                  templateSelected: templateChoice.kind !== "own",
+                } : null}
+                disabled={busy || downloading || templateResolutionPending}
+              />
 
               {pipelineState.deck.status === "done" && (
                 <>

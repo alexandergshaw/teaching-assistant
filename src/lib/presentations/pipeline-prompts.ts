@@ -68,7 +68,10 @@ import type { PptxSlide } from "@/lib/pptx";
 /** The single place pasted text and file-source text are joined into one block, mirroring prompts.ts's private helper of the same name. */
 function contextToPromptText(context: PresentationContext): string {
   const sourceBlocks = context.sources.map((source) => `Source "${source.name}":\n${source.text}`).join("\n\n");
-  const parts = [context.text.trim(), sourceBlocks.trim()].filter((part) => part.length > 0);
+  const objectiveBlock = context.objectives?.length
+    ? `Applied student learning objectives (guide generation; do not claim mastery):\n${context.objectives.map((objective) => `- ${objective}`).join("\n")}`
+    : "";
+  const parts = [context.text.trim(), sourceBlocks.trim(), objectiveBlock].filter((part) => part.length > 0);
   return parts.join("\n\n");
 }
 
@@ -88,7 +91,39 @@ function sliceJsonObject(text: string): string | null {
 // ---------------------------------------------------------------------------
 
 export function buildPipelineOutlinePrompt(request: Extract<PipelineRequest, { op: "outline" }>): string {
-  return buildOutlinePrompt(request.context);
+  const prompt = buildOutlinePrompt(request.context);
+  return request.context.objectives?.length
+    ? `${prompt}\n\nStudent learning objectives to address:\n${request.context.objectives.map((objective) => `- ${objective}`).join("\n")}\nThese objectives guide the lesson; do not claim that students have mastered them.`
+    : prompt;
+}
+
+const OBJECTIVE_LIMIT = 12;
+const OBJECTIVE_TEXT_LIMIT = 240;
+
+export function buildObjectivesPrompt(homework: string): string {
+  return [
+    "Read the instructor's homework and suggest 2 to 8 concise, observable student learning objectives grounded in it.",
+    'Return only JSON with this shape: {"objectives":["..."]}.',
+    "Each objective must describe an action a student can demonstrate. Do not claim students already achieved it.",
+    "Keep each objective under 240 characters and return no more than 12.",
+    "Homework:",
+    homework,
+  ].join("\n");
+}
+
+export function parseObjectivesResponse(text: string): string[] | null {
+  const jsonText = sliceJsonObject(text);
+  if (!jsonText) return null;
+  try {
+    const parsed: unknown = JSON.parse(jsonText);
+    if (typeof parsed !== "object" || parsed === null || !Array.isArray((parsed as { objectives?: unknown }).objectives)) return null;
+    const raw = (parsed as { objectives: unknown[] }).objectives;
+    if (raw.length === 0 || raw.length > OBJECTIVE_LIMIT || raw.some((value) => typeof value !== "string" || !value.trim() || value.length > OBJECTIVE_TEXT_LIMIT)) return null;
+    const objectives = raw.map((value) => (value as string).trim());
+    return new Set(objectives.map((value) => value.toLocaleLowerCase())).size === objectives.length ? objectives : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Never throws: a blank/empty reply returns null rather than an empty-markdown OutlineContent. */

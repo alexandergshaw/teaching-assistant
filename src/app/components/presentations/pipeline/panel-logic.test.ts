@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyRegenDecision,
   buildPipelineRequest,
+  editPipelineSlide,
+  invalidateObjectiveDependents,
   deckFingerprint,
   extractRegenCandidate,
   isPipelineComplete,
@@ -172,6 +174,58 @@ describe("buildPipelineRequest", () => {
     // outline is still idle/null - the plan op REQUIRES it.
     const state = createInitialPipelineState();
     expect(() => buildPipelineRequest("plan", state, "ctx")).toThrow(/outline/);
+  });
+
+  it("propagates applied objectives through outline, plan, deck and run-to-end requests", () => {
+    const objectives = ["Distinguish a claim from supporting evidence"];
+    const outlineState = withStages({ sources: stage("done", makeSources()) });
+    const outline = buildPipelineRequest("outline", outlineState, "context", { objectives });
+    expect(outline).toMatchObject({ op: "outline", context: { objectives } });
+    const state = withStages({ sources: stage("done", makeSources()), outline: stage("done", makeOutline()), frame: stage("done", makeFrame()), plan: stage("done", makePlan()) });
+    expect(buildPipelineRequest("plan", state, "context", { objectives })).toMatchObject({ context: { objectives } });
+    expect(buildPipelineRequest("deck", state, "context", { objectives })).toMatchObject({ context: { objectives } });
+  });
+
+  it("builds an objectives generation request from homework", () => {
+    const request = buildPipelineRequest("objectives", createInitialPipelineState(), "", { homework: "Compare two primary sources." });
+    expect(request).toEqual({ op: "objectives", homework: "Compare two primary sources." });
+  });
+});
+
+describe("pipeline edits", () => {
+  it("invalidates objective dependents while retaining artifacts and independent activities/frame", () => {
+    const state = withStages({
+      outline: stage("done", makeOutline()), activities: stage("done", makeActivities()), frame: stage("done", makeFrame()), plan: stage("done", makePlan()),
+      deck: stage("done", makeDeck("Deck", [makeSlide("One")])), standard: stage("done", { standardVersion: "v1", violations: [] }),
+    });
+    const next = invalidateObjectiveDependents(state);
+    expect(next.outline.status).toBe("stale"); expect(next.plan.status).toBe("stale"); expect(next.deck.status).toBe("stale");
+    expect(next.activities.status).toBe("done"); expect(next.frame.status).toBe("done");
+    expect(next.deck.artifact).toEqual(state.deck.artifact);
+  });
+
+  it("edits only the selected slide and invalidates downstream reviews on changed save", () => {
+    const original = { title: "One", bullets: ["a"], notes: "note", code: "x", codeLanguage: "ts" };
+    const state = withStages({
+      outline: stage("done", makeOutline()), frame: stage("done", makeFrame()), plan: stage("done", makePlan()),
+      deck: stage("done", makeDeck("Keep deck identity", [original, makeSlide("Two")])),
+      standard: stage("done", { standardVersion: "v1", violations: [] }), reviewInfoFlow: stage("done", makeChecklistResult()), reviewVisual: stage("done", makeChecklistResult()), polish: stage("done", { deck: { presentationTitle: "Deck", slides: [] }, changes: [] }),
+    });
+    const result = editPipelineSlide(state, 0, { title: "Updated", bulletsText: "b\nc", notes: "new note" });
+    expect(result.changed).toBe(true);
+    expect(result.state.deck.artifact?.presentationTitle).toBe("Keep deck identity");
+    expect(result.state.deck.artifact?.slides[0]).toEqual({ ...original, title: "Updated", bullets: ["b", "c"], notes: "new note" });
+    expect(result.state.deck.artifact?.slides[1]).toEqual(makeSlide("Two"));
+    expect(result.state.outline.status).toBe("done"); expect(result.state.frame.status).toBe("done"); expect(result.state.plan.status).toBe("done");
+    expect(result.state.standard.status).toBe("stale"); expect(result.state.reviewVisual.status).toBe("stale"); expect(result.state.polish.status).toBe("stale");
+    expect(editPipelineSlide(result.state, 0, { title: "Updated", bulletsText: "b\nc", notes: "new note" }).changed).toBe(false);
+    expect(editPipelineSlide(state, 0, { title: "", bulletsText: "", notes: "" }).error).toBeTruthy();
+  });
+
+  it("rejects a regeneration candidate if its selected slide changed after generation", () => {
+    const baseline = makeSlide("Before");
+    const state = withStages({ deck: stage("done", makeDeck("Deck", [makeSlide("Changed")])) });
+    expect(applyRegenDecision(state, makeSlide("Candidate"), 0, "accept", baseline)).toBe(state);
   });
 });
 

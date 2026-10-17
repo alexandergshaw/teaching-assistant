@@ -33,6 +33,7 @@ import {
 } from "@/lib/presentations/pipeline";
 import type { DeckContent, PresentationContext } from "@/lib/presentations/types";
 import type { PptxSlide } from "@/lib/pptx";
+import { SLIDE_TITLE_MAX_CHARS } from "@/lib/slide-prompt";
 
 // Re-exported so a consumer of this module (PipelineTab.tsx, S6.7) can apply a
 // direct user edit to a stage's artifact (e.g. the Frame editor, or a
@@ -40,6 +41,47 @@ import type { PptxSlide } from "@/lib/pptx";
 // builders and reducer below, without a second import from
 // `@/lib/presentations/pipeline` just for this one function.
 export { applyStageEdit };
+
+/** Applying or clearing objectives invalidates only the stages they guide. */
+export function countObjectiveDependents(state: PipelineState): number {
+  return (["outline", "plan", "deck", "standard", "reviewInfoFlow", "reviewVisual", "polish"] as const)
+    .filter((stage) => state[stage].artifact !== null && state[stage].status !== "stale").length;
+}
+
+export function countDeckDependents(state: PipelineState): number {
+  return (["standard", "reviewInfoFlow", "reviewVisual", "polish"] as const)
+    .filter((stage) => state[stage].artifact !== null && state[stage].status !== "stale").length;
+}
+
+export function invalidateObjectiveDependents(state: PipelineState): PipelineState {
+  let next = state;
+  for (const stage of ["outline", "plan", "deck", "standard", "reviewInfoFlow", "reviewVisual", "polish"] as const) {
+    if (next[stage].artifact !== null) next = { ...next, [stage]: { ...next[stage], status: "stale" } };
+  }
+  return next;
+}
+
+export interface DirectSlideEdit { title: string; bulletsText: string; notes: string; }
+
+/** Apply a validated text edit to exactly one slide, retaining all other slide fields and stages. */
+export function editPipelineSlide(state: PipelineState, slideIndex: number, edit: DirectSlideEdit): { state: PipelineState; changed: boolean; error?: string; invalidated: number } {
+  const deck = state.deck.artifact;
+  if (!deck || !Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= deck.slides.length) return { state, changed: false, error: "Select a slide in the generated deck.", invalidated: 0 };
+  const bullets = edit.bulletsText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!edit.title.trim() || edit.title.trim().length > SLIDE_TITLE_MAX_CHARS || bullets.length > 8 || bullets.some((bullet) => bullet.length > 500) || edit.notes.length > 6000) {
+    return { state, changed: false, error: `Add a title up to ${SLIDE_TITLE_MAX_CHARS} characters, no more than 8 bullets (500 characters each), and notes up to 6,000 characters.`, invalidated: 0 };
+  }
+  const original = deck.slides[slideIndex];
+  const replacement = { ...original, title: edit.title.trim(), bullets, ...(edit.notes === "" && original.notes === undefined ? {} : { notes: edit.notes }) };
+  if (JSON.stringify(original) === JSON.stringify(replacement)) return { state, changed: false, invalidated: 0 };
+  const next = applyStageEdit(state, "deck", { ...deck, slides: deck.slides.map((slide, index) => index === slideIndex ? replacement : slide) });
+  return { state: next, changed: true, invalidated: countDeckDependents(state) };
+}
+
+/** A slide draft may only be saved against the exact immutable snapshot it was opened from. */
+export function isCurrentSlideDraft(sourceDeck: DeckContent | null, sourceSlide: PptxSlide | undefined, currentDeck: DeckContent | null, currentSlide: PptxSlide | undefined): boolean {
+  return sourceDeck !== null && sourceDeck === currentDeck && sourceSlide !== undefined && sourceSlide === currentSlide;
+}
 
 // ---------------------------------------------------------------------------
 // 1. Op -> stage mapping (the ONE place a PipelineOp's success maps onto a
@@ -50,7 +92,7 @@ export { applyStageEdit };
 //    deck artifact rather than looked up here.
 // ---------------------------------------------------------------------------
 
-const OP_TO_STAGE: Record<Exclude<PipelineOp, "regen-slide">, StageId> = {
+const OP_TO_STAGE: Record<Exclude<PipelineOp, "regen-slide" | "objectives">, StageId> = {
   outline: "outline",
   "frame-suggest": "frame",
   plan: "plan",
@@ -61,7 +103,7 @@ const OP_TO_STAGE: Record<Exclude<PipelineOp, "regen-slide">, StageId> = {
 };
 
 function stageForOp(op: PipelineOp): StageId {
-  return op === "regen-slide" ? "deck" : OP_TO_STAGE[op];
+  return op === "regen-slide" ? "deck" : op === "objectives" ? "sources" : OP_TO_STAGE[op];
 }
 
 // ---------------------------------------------------------------------------
@@ -79,8 +121,8 @@ function stageForOp(op: PipelineOp): StageId {
  * set has no `text` field), so it is threaded through here as a plain
  * argument rather than read off `state`.
  */
-function buildContext(state: PipelineState, contextText: string): PresentationContext {
-  return { text: contextText, sources: state.sources.artifact ?? [] };
+function buildContext(state: PipelineState, contextText: string, objectives?: string[]): PresentationContext {
+  return { text: contextText, sources: state.sources.artifact ?? [], ...(objectives?.length ? { objectives } : {}) };
 }
 
 /**
@@ -104,8 +146,10 @@ function requireArtifact<K extends StageId>(
 
 /** Extra, non-state inputs `regen-slide` needs (which slide, and the edit instruction). */
 export interface RegenSlideExtras {
-  slideIndex: number;
-  instruction: string;
+  slideIndex?: number;
+  instruction?: string;
+  objectives?: string[];
+  homework?: string;
 }
 
 export function buildPipelineRequest(
@@ -115,23 +159,25 @@ export function buildPipelineRequest(
   regenExtras?: RegenSlideExtras
 ): PipelineRequest {
   switch (op) {
+    case "objectives":
+      return { op, homework: regenExtras?.homework ?? "" };
     case "outline":
-      return { op, context: buildContext(state, contextText) };
+      return { op, context: buildContext(state, contextText, regenExtras?.objectives) };
     case "frame-suggest":
-      return { op, context: buildContext(state, contextText) };
+      return { op, context: buildContext(state, contextText, regenExtras?.objectives) };
     case "activities":
-      return { op, context: buildContext(state, contextText) };
+      return { op, context: buildContext(state, contextText, regenExtras?.objectives) };
     case "plan":
       return {
         op,
-        context: buildContext(state, contextText),
+        context: buildContext(state, contextText, regenExtras?.objectives),
         outline: requireArtifact(state, "outline"),
         frame: state.frame.artifact,
       };
     case "deck":
       return {
         op,
-        context: buildContext(state, contextText),
+        context: buildContext(state, contextText, regenExtras?.objectives),
         frame: state.frame.artifact,
         plan: requireArtifact(state, "plan"),
       };
@@ -140,12 +186,12 @@ export function buildPipelineRequest(
     case "review-visual":
       return { op, deck: requireArtifact(state, "deck") };
     case "regen-slide": {
-      if (!regenExtras) {
+      if (regenExtras?.slideIndex === undefined || regenExtras.instruction === undefined) {
         throw new Error("buildPipelineRequest: \"regen-slide\" requires slideIndex and instruction");
       }
       return {
         op,
-        context: buildContext(state, contextText),
+        context: buildContext(state, contextText, regenExtras?.objectives),
         frame: state.frame.artifact,
         plan: requireArtifact(state, "plan"),
         deck: requireArtifact(state, "deck"),
@@ -182,6 +228,8 @@ function isMatchingOkBody(op: PipelineOp, body: unknown): body is PipelineSucces
       return isRecord(body.deck);
     case "activities":
       return isRecord(body.activities);
+    case "objectives":
+      return Array.isArray(body.objectives);
     case "review-infoflow":
       return isRecord(body.result);
     case "review-visual":
@@ -254,11 +302,13 @@ export function applyRegenDecision(
   state: PipelineState,
   candidate: PptxSlide,
   slideIndex: number,
-  action: "accept" | "discard"
+  action: "accept" | "discard",
+  expectedSlide?: PptxSlide
 ): PipelineState {
   if (action === "discard") return state;
   const deck = state.deck.artifact;
   if (!deck) return state;
+  if (expectedSlide && JSON.stringify(deck.slides[slideIndex]) !== JSON.stringify(expectedSlide)) return state;
   return applyStageEdit(state, "deck", mergeRegeneratedSlide(deck, slideIndex, candidate));
 }
 
@@ -286,6 +336,8 @@ export function reducePipelineResponse(
         return applyStageEdit(state, "deck", body.deck);
       case "activities":
         return applyStageEdit(state, "activities", body.activities);
+      case "objectives":
+        return state;
       case "review-infoflow":
         return applyStageEdit(state, "reviewInfoFlow", body.result);
       case "review-visual":

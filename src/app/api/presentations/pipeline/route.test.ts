@@ -72,6 +72,22 @@ beforeEach(() => {
 });
 
 describe("POST /api/presentations/pipeline", () => {
+  it("generates a bounded objective list from homework through the route", async () => {
+    mockUser();
+    mockLlmText('{"objectives":["Compare two sources using evidence"]}');
+    const res = await POST(makeReq({ op: "objectives", homework: "Compare the assigned sources." }));
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual({ op: "objectives", status: "ok", objectives: ["Compare two sources using evidence"] });
+  });
+
+  it("refuses blank or over-limit homework and unusable objective output", async () => {
+    mockUser();
+    expect((await POST(makeReq({ op: "objectives", homework: "  " }))).status).toBe(400);
+    expect((await POST(makeReq({ op: "objectives", homework: "x".repeat(20_001) }))).status).toBe(400);
+    mockLlmText('{"objectives":[]}');
+    expect((await POST(makeReq({ op: "objectives", homework: "Homework" }))).status).toBe(502);
+  });
+
   it("returns 401 when requireUser yields no signed-in user, before any callLlm call", async () => {
     vi.mocked(requireUser).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
 
@@ -248,7 +264,6 @@ describe("POST /api/presentations/pipeline", () => {
     // withDeadline behaves as passthrough (beforeEach default) - no timeout.
 
     const res = await POST(makeReq({ op: "outline", context: CONTEXT }));
-    const body = await readJson(res);
 
     expect(res.status).toBe(200);
   });

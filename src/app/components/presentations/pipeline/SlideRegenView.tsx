@@ -13,13 +13,14 @@
 // downloaded .pptx. OWNER-VERIFICATION: nothing renders under vitest; the
 // grid, the before/after pair and the reload behaviour are owner-walks.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, CardActionArea, CardContent, TextField, Typography } from "@mui/material";
 import SlideDeckPreview from "../SlideDeckPreview";
 import { usePersistedJSON } from "../hooks";
 import type { PipelineState } from "@/lib/presentations/pipeline";
 import type { PptxSlide } from "@/lib/pptx";
-import { applyRegenDecision, buildPipelineRequest, extractRegenCandidate } from "./panel-logic";
+import { applyRegenDecision, buildPipelineRequest, countDeckDependents, extractRegenCandidate } from "./panel-logic";
+import { recordPipelineDiagnostic } from "./pipeline-objectives";
 
 const PIPELINE_URL = "/api/presentations/pipeline";
 const REGEN_SLIDE_INDEX_KEY = "ta-pres-regen-slide-index";
@@ -33,22 +34,28 @@ interface SlideRegenViewProps {
   pipelineState: PipelineState;
   setPipelineState: SetPipelineState;
   contextText: string;
+  appliedObjectives: string[];
   onBack: () => void;
 }
 
-export default function SlideRegenView({ pipelineState, setPipelineState, contextText, onBack }: SlideRegenViewProps) {
+export default function SlideRegenView({ pipelineState, setPipelineState, contextText, appliedObjectives, onBack }: SlideRegenViewProps) {
   const slides = pipelineState.deck.artifact?.slides ?? [];
   const [storedIndex, setSelectedIndex] = usePersistedJSON<number>(REGEN_SLIDE_INDEX_KEY, 0);
   const [instruction, setInstruction] = usePersistedJSON<string>(REGEN_INSTRUCTION_KEY, "");
   const [candidate, setCandidate] = useState<PptxSlide | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const latestState = useRef(pipelineState);
+  useEffect(() => { latestState.current = pipelineState; }, [pipelineState]);
+  const requestId = useRef(0);
+  const candidateBase = useRef<PptxSlide | null>(null);
 
   // The persisted index can outlive the deck it pointed into; clamp for use.
   const selectedIndex = slides.length === 0 ? 0 : Math.min(Math.max(Number(storedIndex) || 0, 0), slides.length - 1);
   const current = slides[selectedIndex] ?? null;
 
   function selectSlide(index: number) {
+    requestId.current += 1;
     setSelectedIndex(index);
     setCandidate(null);
     setError(null);
@@ -59,10 +66,15 @@ export default function SlideRegenView({ pipelineState, setPipelineState, contex
     setBusy(true);
     setError(null);
     setCandidate(null);
+    candidateBase.current = null;
+    const currentRequest = ++requestId.current;
+    const startingSlide = current;
+    const started = Date.now();
     try {
       const request = buildPipelineRequest("regen-slide", pipelineState, contextText, {
         slideIndex: selectedIndex,
         instruction,
+        objectives: appliedObjectives,
       });
       const res = await fetch(PIPELINE_URL, {
         method: "POST",
@@ -71,13 +83,19 @@ export default function SlideRegenView({ pipelineState, setPipelineState, contex
       });
       const body: unknown = await res.json().catch(() => undefined);
       const next = extractRegenCandidate(res.status, body);
-      if (next) {
+      const currentDeck = latestState.current.deck.artifact;
+      const stillCurrent = currentRequest === requestId.current && currentDeck?.slides[selectedIndex] === startingSlide;
+      if (next && stillCurrent) {
         setCandidate(next);
+        candidateBase.current = startingSlide;
+        recordPipelineDiagnostic("pipeline_slide_regeneration", "success", Date.now() - started, 1);
       } else {
         setError("The slide could not be regenerated. Your deck was not changed.");
+        recordPipelineDiagnostic("pipeline_slide_regeneration", "failure", Date.now() - started, 0, 0, stillCurrent ? "MODEL_RESPONSE" : "STALE");
       }
     } catch {
       setError("The slide could not be regenerated. Your deck was not changed.");
+      recordPipelineDiagnostic("pipeline_slide_regeneration", "failure", Date.now() - started, 0, 0, "NETWORK");
     } finally {
       setBusy(false);
     }
@@ -85,15 +103,27 @@ export default function SlideRegenView({ pipelineState, setPipelineState, contex
 
   function handleAccept() {
     if (!candidate) return;
-    setPipelineState((prev) => applyRegenDecision(prev, candidate, selectedIndex, "accept"));
+    const expected = candidateBase.current;
+    if (!expected || pipelineState.deck.artifact?.slides[selectedIndex] !== expected) {
+      setError("This candidate is out of date because the slide changed. Generate it again.");
+      setCandidate(null);
+      candidateBase.current = null;
+      recordPipelineDiagnostic("pipeline_slide_candidate_accept", "failure", 0, 0, 0, "STALE");
+      return;
+    }
+    setPipelineState((prev) => applyRegenDecision(prev, candidate, selectedIndex, "accept", expected));
+    recordPipelineDiagnostic("pipeline_slide_candidate_accept", "success", 0, 1, countDeckDependents(pipelineState));
     setCandidate(null);
+    candidateBase.current = null;
     setInstruction("");
   }
 
   function handleDiscard() {
     if (!candidate) return;
     setPipelineState((prev) => applyRegenDecision(prev, candidate, selectedIndex, "discard"));
+    recordPipelineDiagnostic("pipeline_slide_candidate_discard", "success", 0, 1);
     setCandidate(null);
+    candidateBase.current = null;
   }
 
   return (
@@ -106,7 +136,7 @@ export default function SlideRegenView({ pipelineState, setPipelineState, contex
             Every other slide is left as it is.
           </Typography>
         </div>
-        <Button variant="outlined" onClick={onBack} sx={{ textTransform: "none", flexShrink: 0 }}>
+        <Button variant="outlined" onClick={() => { requestId.current += 1; onBack(); }} sx={{ textTransform: "none", flexShrink: 0 }}>
           Back to pipeline
         </Button>
       </div>

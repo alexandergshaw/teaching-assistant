@@ -19,6 +19,7 @@ import {
   buildPipelineActivitiesPrompt,
   buildPipelineDeckPrompt,
   buildPipelineOutlinePrompt,
+  buildObjectivesPrompt,
   buildPlanPrompt,
   buildRegenSlidePrompt,
   buildReviewInfoFlowPrompt,
@@ -27,6 +28,7 @@ import {
   parseDeckResponse,
   parseFrame,
   parseOutlineResponse,
+  parseObjectivesResponse,
   parsePlan,
   parseRegenSlideResponse,
   parseReviewInfoFlowResponse,
@@ -124,6 +126,7 @@ function isPresentationContext(value: unknown): value is PresentationContext {
   if (!isRecord(value)) return false;
   if (typeof value.text !== "string") return false;
   if (!Array.isArray(value.sources) || !value.sources.every(isPresentationSource)) return false;
+  if (value.objectives !== undefined && (!Array.isArray(value.objectives) || value.objectives.length > 12 || !value.objectives.every((objective) => typeof objective === "string" && objective.trim().length > 0 && objective.length <= 240))) return false;
   return true;
 }
 
@@ -186,6 +189,10 @@ function parsePipelineRequest(body: unknown): PipelineRequest | null {
     case "activities": {
       if (!isPresentationContext(body.context)) return null;
       return { op, context: body.context };
+    }
+    case "objectives": {
+      if (typeof body.homework !== "string" || !body.homework.trim() || body.homework.length > 20000) return null;
+      return { op, homework: body.homework };
     }
     case "plan": {
       if (!isPresentationContext(body.context)) return null;
@@ -279,6 +286,8 @@ function buildPromptForOp(request: PipelineRequest): string {
   switch (request.op) {
     case "outline":
       return buildPipelineOutlinePrompt(request);
+    case "objectives":
+      return buildObjectivesPrompt(request.homework);
     case "frame-suggest":
       return buildFrameSuggestPrompt(request);
     case "plan":
@@ -311,6 +320,11 @@ function respondForOp(request: PipelineRequest, text: string): NextResponse {
       const outline: OutlineContent | null = parseOutlineResponse(text);
       if (!outline) return refused("The AI did not produce a usable outline.");
       return ok({ op, status: "ok", outline });
+    }
+    case "objectives": {
+      const objectives = parseObjectivesResponse(text);
+      if (!objectives) return refused("The AI did not produce a usable objective checklist.");
+      return ok({ op, status: "ok", objectives });
     }
     case "frame-suggest": {
       const frame: PinnedFrame | null = parseFrame(text);

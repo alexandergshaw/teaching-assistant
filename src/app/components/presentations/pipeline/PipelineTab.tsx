@@ -717,6 +717,7 @@ export default function PipelineTab() {
                   context: { text: contextText, sources: pipelineState.sources.artifact ?? [], objectives: appliedObjectives },
                   includeContext: false,
                   templateSelected: templateChoice.kind !== "own",
+                  templateChoice,
                 } : null}
                 disabled={busy || downloading || templateResolutionPending}
               />

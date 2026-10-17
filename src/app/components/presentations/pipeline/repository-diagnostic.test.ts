@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { recordCopilotTask, recordRepositoryPublication } from "./repository-diagnostic";
+import { measureCopilotTaskRefresh, recordCopilotTask, recordRepositoryPublication } from "./repository-diagnostic";
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState, buildSessionDiagnosticLog, formatSessionDiagnosticLogCsv, formatSessionDiagnosticLogJson } from "@/lib/session-diagnostic-log";
 
 describe("repository publication diagnostics", () => {
@@ -29,6 +29,9 @@ describe("repository publication diagnostics", () => {
     expect(panel).toContain("onClick={() => void startCopilot(\"followup\")}");
     expect(panel).toContain("!copilotEnabled");
     expect(panel).toContain("startPresentationCopilotTaskAction");
+    expect(panel).toContain("measureCopilotTaskRefresh(() => refreshPresentationCopilotTaskAction(");
+    expect(panel).toContain("copilotTaskState(latestTask?.state)");
+    expect(panel).toContain("copilotTaskState(previousTask.state).running");
     expect(panel).not.toContain("createCopilotTaskAction");
   });
 
@@ -42,5 +45,33 @@ describe("repository publication diagnostics", () => {
       expect(output).toContain("Submit Copilot presentation task");
       for (const forbidden of ["Make a course website", "teacher/deck-project", "private-context", "Bearer secret"]) expect(output).not.toContain(forbidden);
     }
+  });
+
+  it.each(["success", "returned-error", "thrown-error"])("records the actual refresh %s with fixed metadata and redacts JSON/CSV exports", async mode => {
+    resetSessionDiagnosticLogForTests("2026-10-17T00:00:00Z");
+    const sensitive = "private-task-id https://github.com/teacher/deck-project/tasks/private-task-id Make a course website Bearer secret";
+    const result = mode === "success" ? { task: { id: sensitive, url: sensitive, state: "completed", prompt: sensitive } } : { error: sensitive };
+    const error = new Error(sensitive);
+    let clock = 100;
+    const read = () => mode === "thrown-error" ? Promise.reject(error) : Promise.resolve(result);
+    const measured = measureCopilotTaskRefresh(read, undefined, () => { const value = clock; clock += 25; return value; });
+    if (mode === "thrown-error") await expect(measured).rejects.toBe(error);
+    else await expect(measured).resolves.toBe(result);
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries).toHaveLength(1);
+    expect(state.entries[0]).toMatchObject({ operation: "pipeline_copilot_task_refresh", label: "Refresh Copilot task status", durationMs: 25, outcome: mode === "success" ? "success" : "failure", code: mode === "success" ? "REFRESHED" : "FAILED", institution: "", course: "" });
+    const log = buildSessionDiagnosticLog(state, { currentInstitution: "", currentCourse: "", currentPage: "/account/diagnostics", browser: "test" }, "2026-10-17T00:00:00Z");
+    for (const output of [formatSessionDiagnosticLogCsv(log), formatSessionDiagnosticLogJson(log)]) {
+      expect(output).toContain("Refresh Copilot task status");
+      for (const forbidden of ["private-task-id", "https://github.com", "teacher/deck-project", "Make a course website", "Bearer secret"]) expect(output).not.toContain(forbidden);
+    }
+  });
+
+  it("preserves refresh results and thrown failures when the diagnostic sink fails", async () => {
+    const result = { task: { state: "completed" } };
+    const writer = () => { throw new Error("sink"); };
+    await expect(measureCopilotTaskRefresh(async () => result, writer)).resolves.toBe(result);
+    const error = new Error("remote failure");
+    await expect(measureCopilotTaskRefresh(async () => { throw error; }, writer)).rejects.toBe(error);
   });
 });

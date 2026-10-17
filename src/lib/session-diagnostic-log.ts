@@ -92,7 +92,7 @@ export interface SessionDiagnosticCoverageRow {
 /** Every instrumented surface, stated in the download. Typed as a full record
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
-  templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values. Private Pipeline snapshot publication records a terminal verified/refused/uncertain outcome, total elapsed time and bounded slide/byte counts (not individual GitHub upload phase timings); no repository URLs/names or credentials. Template-backed repository publication and immutable-base Copilot dispatch are unavailable.",
+  templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values. Private Pipeline snapshot publication records a terminal verified/refused/uncertain outcome, total elapsed time and bounded slide/byte counts (not individual GitHub upload phase timings); no repository URLs/names or credentials. Template-backed publication includes the disclosed original and shared title/bullet fill. Copilot task dispatch requires explicit server configuration and remains default-off pending live verification; task submission and status refresh record outcomes without task content.",
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",
   diagnostics:

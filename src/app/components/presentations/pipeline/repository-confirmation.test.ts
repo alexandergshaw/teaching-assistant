@@ -12,6 +12,7 @@ describe("exact snapshot confirmation and privacy-safe recovery", () => {
       { ...captured, snapshotKey: JSON.stringify({ deck: "private slide text", context: "edited", objectives: ["A"] }) },
       { ...captured, snapshotKey: JSON.stringify({ deck: "private slide text", context: "private context", objectives: ["B"] }) },
       { ...captured, name: "other-repository" },
+      { ...captured, snapshotKey: JSON.stringify({ deck: "private slide text", templateChoice: { kind: "raw", sourceFileId: "changed-template" } }) },
     ]) {
       expect(finishPackageReview(captured, current, "owner", hash)).toBeNull();
       expect(reviewIsCurrent(review, current)).toBe(false);

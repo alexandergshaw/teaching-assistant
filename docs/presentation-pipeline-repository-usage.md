@@ -3,103 +3,135 @@
 ## App leverage and removal criterion
 
 This claims INTEGRATION and GUARANTEED leverage: the app publishes one frozen
-deck/PPTX/renderer package, verifies its immutable commit, binds confirmation to
-the exact reviewed snapshot and records a content-free reconciliation intent
-before egress. A chat operator otherwise transfers those files manually and
-remembers which deck was confirmed or whether a lost response created a repo.
-The falsifiable removal criterion is to remove review-fingerprint matching or
-move intent persistence after the remote request in an isolated mutation:
-`repository-confirmation.test.ts` must fail its changed-deck/late-result or
-persist-before-egress assertion respectively. Removing PPTX byte integrity must
-also fail the exact uploaded-byte assertion in `repository-publish.test.ts`.
-Passing source wiring alone does not establish this advantage.
+deck/PPTX/renderer package, verifies its commit, binds confirmation to the exact
+reviewed snapshot and records a content-free reconciliation intent before egress.
+A chat operator otherwise transfers those files manually and remembers which deck
+was confirmed or whether a lost response created a repository. The removal
+criterion is to remove review-fingerprint matching or move intent persistence
+after egress in an isolated mutation: `repository-confirmation.test.ts` must fail
+its changed-deck/late-result or persist-before-egress assertion. Removing PPTX
+byte integrity must fail the uploaded-byte assertion in
+`repository-publish.test.ts`. Source wiring alone does not establish this claim.
 
-## Operation
+## Publish and render
 
-In Slide Deck Pipeline, generate a current deck and choose own layout. Open the
-deck stage's Private deck repository panel, enter a new private repository name,
-review the configured GitHub account and package, then confirm publication.
-Publication requires workspace-owner access and the server's existing GitHub
-token with private repository create/content access. It never starts Copilot.
+In Slide Deck Pipeline, generate a current deck and choose generated deck design,
+an uploaded template, or a saved library. Open the deck stage's **Private deck
+repository** panel, enter a new private repository name, review the GitHub account
+and package, then confirm publication. This requires app-owner access and the
+server's existing `GITHUB_TOKEN` with private repository create/content access.
+Publication does not start Copilot.
 
-The package includes the committed deck JSON and PPTX, applied objectives,
-manifest with SHA-256 file hashes, signed publication seal and frozen own-layout
-renderer. Notes/code/graphics are part of the deck. Optional context and extracted
-source text are excluded unless explicitly selected and displayed for review.
-The original context is not stored in the receipt; only its fingerprint is kept.
-Unsaved editor drafts and regeneration candidates are excluded.
+The package contains committed deck JSON and PPTX, applied objectives, a manifest
+with SHA-256 file hashes, a signed publication seal and a frozen renderer. Unsaved
+editor drafts and regeneration candidates are excluded. Optional context and
+extracted source text are excluded unless explicitly selected and displayed for
+review. The browser receipt retains their fingerprint rather than their text.
 
-Clone the private repository with your existing GitHub access, install Node.js 22,
-then run `npm install` and `npm run render`. The frozen renderer and pinned
-`pptxgenjs` version build `regenerated.pptx` from `deck.json` without app keys.
-ZIP timestamps may differ. Inspect slide content rather than comparing whole ZIP
-bytes across render runs. Keep the generated commit reference to identify the
-verified snapshot; default-branch changes do not change that reference.
+Template publication uses the same authenticated raw-source/library resolution
+and title/bullet paragraph fill as **Download .pptx**. Review binds the original
+bytes to the snapshot; confirmation reloads the source and refuses changed
+originals or snapshots before GitHub egress. Changing the template, deck,
+objectives, optional context or repository name invalidates review.
 
-An uncertain receipt is not success. Retry the same name with the unchanged deck
-to reconcile; the server only resumes a private repo bearing the authenticated
-owner/snapshot marker. It never overwrites an unrelated or public repository.
-Uploads land as one candidate tree/commit and a non-forced branch update. Receipt
-recovery requires the same owner account and server signing token. If either
-changes, retain the repository link and ask the owner to reconcile manually.
-Do not create another repository merely because a response was lost.
+The complete original is included as `template/original.pptx`, disclosing its
+original notes, hidden or unused slides, themes, layouts, images and embedded
+assets to the private repository. Original notes/assets/layouts remain intact.
+Generated notes, code and graphics remain in `deck.json`; they are not inserted
+into template slides. Review this disclosure before confirming. Invalid PPTX,
+excess slides/bullets and filled decks exceeding the download response limit are
+refused. There is no generated-layout fallback.
 
-Before any publication request, browser storage must retain login, repository
-name and snapshot fingerprint only. Storage refusal prevents that request. After
-reload, review the account to recover the pending name, select that name for
-reconciliation, and review again. Only an exactly matching recomputed snapshot
-can reconcile; changed deck/context/objectives make the intent stale. Starting a
-new publication requires its own explicit action and leaves any prior remote
-repository intact. Account review is invalidated immediately by input changes;
-a late account-review response cannot confirm newer content.
+Clone with your existing GitHub access, install Node.js 22, then run `npm install`
+and `npm run render`. This produces `regenerated.pptx` from `deck.json` without app
+keys. The package pins `pptxgenjs` for generated design or `jszip` for template
+fill. Template rendering reapplies the fill to the included original. ZIP
+metadata can vary: compare uncompressed parts or slide content rather than whole
+ZIP bytes. Preserve the verified commit reference when the default branch moves.
 
-Initial and follow-up task submission now use GitHub's Agent Tasks REST API when
-the owner explicitly enables the server flag `PRESENTATION_COPILOT_TASKS_ENABLED=true`.
-It is off by default. The action reauthenticates the app owner, validates the
-signed private snapshot manifest and every package blob, and requests the
-immutable snapshot commit as `base_ref`. A follow-up requires merged changes on
-the default branch and requests that exact current commit as its base. Every task
-has its own explicit button click, saved content-free receipt, and GitHub task
-link. Tasks request a pull request and never merge or import generated output.
-An uncertain response blocks automatic retry until the owner checks GitHub.
+An uncertain publication receipt is not success. Retry the same name and unchanged
+snapshot to reconcile. The server only resumes a private repository bearing its
+authenticated owner/snapshot marker; unrelated or public repositories are refused.
+Uploads form one candidate tree/commit and use a non-forced branch update.
+Recovery requires the same owner account and signing token. If either changes,
+retain the repository link for manual reconciliation. Do not create a second
+repository merely because a response was lost.
 
-The task endpoint is in public preview; GitHub documents Copilot Business or
-Enterprise availability and a user token with repository `Agent tasks` read/write
-permission. The repository's existing `GITHUB_TOKEN` may not have that grant.
-Most importantly, `base_ref` being sent as a commit SHA does not prove which
-commit the Copilot worker actually checked out. Keep the flag off until an
-owner-enabled live test verifies the returned task session base commit, output
-package hashes, and PR ancestry while moving the default branch. See [GitHub's
-Agent Tasks REST documentation](https://docs.github.com/en/rest/agent-tasks/agent-tasks?apiVersion=2022-11-28).
+Before egress, browser storage must save the account, repository name and snapshot
+fingerprint. Storage refusal prevents submission. After reload, review the account,
+select the pending name and review again. A changed snapshot makes the intent
+stale. Explicitly starting a new publication leaves the prior repository intact.
+A late account-review response cannot confirm newer content.
 
-Template-backed publication is unavailable: this delivery does not yet package
-the original authorized template asset and a reproducible template renderer.
-Normal Pipeline template downloads remain unchanged. Initial and follow-up Copilot
-forms are separate and visibly unavailable: neither issue text nor the currently
-documented base-ref parameter proves an immutable worker checkout. No GitHub
-task, PR, merge or Pipeline import is automatically initiated.
+## Copilot generation and continuation
 
-Residuals with instruments and receiving steps:
+Task dispatch requires explicit server configuration
+`PRESENTATION_COPILOT_TASKS_ENABLED=true` and a configured GitHub token. The flag
+is off by default in source. The production config was saved as `true`; it takes
+effect on a subsequent successful deployment, and the signed-in production flow
+still needs verification. Each initial or follow-up submission
+requires its own button click and saved content-free intent/receipt. Publishing
+alone authorizes neither task submission nor merge.
 
-- GitHub integration owner: before enabling either Copilot form, establish a
-  supported immutable-base contract, then run a test-account dispatch while
-  moving the default branch. Verify actual worker base commit, package hashes,
-  renderer output and resulting PR ancestry at integration Verify. Until then,
-  task status is not started and PR status is none reported.
-- Template integration implementer: package an authorized original asset and
-  reproducible fill renderer, prove fit-refusal and notes/layout preservation,
-  then enable template publication in a separately reviewed implementation.
-- Diagnostics implementer: current publication instrumentation is one terminal
-  total-duration record with bounded slide/byte counts and fixed outcome code;
-  individual create/upload/verification timings are not yet separate records.
-  Instrument those phases with success/returned-failure/transport outcomes and
-  paired JSON/CSV privacy tests before claiming phase-level diagnostics coverage.
-- Owner browser verifier: at final Verify, check account review and keyboard
-  navigation, current-versus-published warning, reload recovery, private GitHub
-  access, downloaded PPTX usability and a retry after an interrupted upload in a
-  disposable private test repo. No live mutation was performed by local tests.
+The action reauthenticates the app owner, verifies the signed private snapshot
+manifest and every package blob, then creates or checks
+`presentation-snapshot-<verified-commit>`. That dedicated source branch must point
+exactly at the verified commit. A conflicting branch is refused; the app never
+moves it. The task's `base_ref` is this branch. Live probing rejected a raw SHA
+base, so sending a commit SHA is not the adapter's contract.
 
-Tests render no components. Local tests exercise owner refusal before egress,
-private create/reconcile, exact binary blob encoding, signed manifest/file
-verification, independent renderer subprocess and source wiring. They do not
-establish live GitHub/Copilot behavior or browser focus and download receipt.
+Open the returned GitHub task link and use **Refresh task status** to read current
+state. Actual returned `/tasks/<id>` URLs are supported. Refresh verifies the
+snapshot, source branch and session binding without dispatching another task;
+it remains available when dispatch is disabled. A failed task that never started
+a session can report failure but cannot supply a continuation branch.
+
+After the prior task is completed or idle, enter a follow-up prompt and choose
+**Submit follow-up regeneration task**. The server refreshes the prior task,
+checks that its generated branch descends from the snapshot, and submits the
+same frozen `base_ref` with that prior `head_ref`. Its continuation instructions
+identify the prior task, branch and observed commit, require implementing the
+owner request even without PR review comments, and preserve the current project
+while updating its existing PR. No merge is required. Complete
+follow-ups before merging. Copilot's PR targets the dedicated source branch; to
+integrate the reviewed result into the repository default branch, change the PR
+base in GitHub rather than merging into or otherwise moving the frozen source
+branch. The app neither merges nor imports generated output.
+
+If submission is uncertain, inspect GitHub task history before explicitly clearing
+the pending intent. The app does not automatically retry a potentially accepted
+task. A returned queued/in-progress state is not proof of finished output,
+checkout commit, package hashes or PR ancestry.
+
+GitHub's [June 4, 2026 changelog](https://github.blog/changelog/2026-06-04-agent-tasks-rest-api-now-available-for-copilot-pro-pro-and-max/)
+extends the public-preview Agent Tasks REST API to Copilot Pro, Pro+ and Max;
+the older Business/Enterprise-only wording in the REST documentation is stale.
+The changelog lists classic/fine-grained personal access tokens and OAuth tokens.
+This does not establish entitlement for every token: verify the actual account,
+repository access and required Agent tasks permissions. The server's existing
+`GITHUB_TOKEN` may lack them. See also the [Agent Tasks REST reference](https://docs.github.com/en/rest/agent-tasks/agent-tasks?apiVersion=2022-11-28).
+
+## Evidence and remaining checks
+
+[Live verification](pipeline-copilot-live-verification.md) separates local gates,
+synthetic private-repository observations and the authenticated production browser
+walk. Template publication, the initial Copilot source-tree proof and corrected
+continuation all passed in the synthetic private-repository experiment. The first
+follow-up attempt completed without a revision; that failure and the successful
+corrected envelope are both recorded. Production exposure and credentials still
+require the production checks recorded there.
+
+Diagnostics record terminal publication outcome, total duration and bounded
+slide/byte counts; task submission records outcome, duration, kind and bounded
+prompt length; refresh records its read outcome/duration. Individual GitHub
+create/upload/verification phase timings remain uninstrumented. No content,
+repository names/URLs or credentials belong in those records.
+
+Tests render no components. They cover owner refusal before egress, private
+create/reconciliation, binary upload encoding, signed package verification,
+standalone renderer subprocesses, shared-source template parity, ownership,
+changed-original refusal, fit refusal and preservation of original parts. They do
+not prove browser focus, keyboard behavior, a usable PowerPoint download, live
+Copilot completion or production credentials. The owner browser walk must cover
+those behaviors, reload recovery, current-versus-published warnings and interrupted
+publication recovery in a disposable private repository.

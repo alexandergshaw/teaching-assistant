@@ -1,5 +1,5 @@
 export interface ReviewScope { snapshotKey: string; name: string }
-export interface PackageReview extends ReviewScope { login: string; fingerprint: string }
+export interface PackageReview extends ReviewScope { login: string; fingerprint: string; snapshotId?: string; templateDigest?: string | null }
 export interface ReconciliationIntent { login: string; name: string; fingerprint: string }
 
 /** snapshotKey is transient exact serialized input, never persisted. */

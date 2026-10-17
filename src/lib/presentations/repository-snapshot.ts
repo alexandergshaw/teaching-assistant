@@ -3,14 +3,18 @@ import JSZip from "jszip";
 import type { DeckContent } from "./types";
 import { serializeDeckToPptx } from "./deck-file";
 import { repositoryRendererFiles } from "./repository-renderer";
+import { repositoryTemplateRendererFiles } from "./repository-template-renderer";
+import { renderRepositoryTemplate } from "./repository-template";
+import type { PipelineTemplateChoice } from "@/app/components/presentations/pipeline/template-choice";
 
 export const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
-export const COPILOT_SNAPSHOT_UNAVAILABLE = "Copilot generation is unavailable: the installed adapter cannot prove that the worker checks out this immutable snapshot. Publication does not start a task. Owner verification of the worker base commit and resulting PR is required before enabling dispatch.";
+export const COPILOT_SNAPSHOT_UNAVAILABLE = "Copilot generation is disabled for this deployment. An owner must configure the verified GitHub integration and explicitly enable task dispatch. Publishing a snapshot does not start a task.";
 export interface SnapshotInput {
   deck: DeckContent;
   context: { text: string; sources: { name: string; text: string }[]; objectives: string[] };
   includeContext: boolean;
   templateSelected: boolean;
+  templateChoice?: PipelineTemplateChoice;
 }
 export interface SnapshotFile { path: string; bytes: Buffer }
 export interface DeckSnapshot { id: string; files: SnapshotFile[]; slides: number; bytes: number }
@@ -27,8 +31,12 @@ function strings(value: unknown, max: number): value is string[] {
 
 /** Reject malformed or excessive action input before rendering or network access. */
 export function validateSnapshotInput(value: unknown): asserts value is SnapshotInput {
-  if (!object(value) || value.templateSelected !== false || typeof value.includeContext !== "boolean") throw new Error("TEMPLATE_OR_INPUT");
-  if (Object.keys(value).some(key => !["deck", "context", "includeContext", "templateSelected"].includes(key))) throw new Error("INVALID_INPUT");
+  if (!object(value) || typeof value.templateSelected !== "boolean" || typeof value.includeContext !== "boolean") throw new Error("TEMPLATE_OR_INPUT");
+  if (Object.keys(value).some(key => !["deck", "context", "includeContext", "templateSelected", "templateChoice"].includes(key))) throw new Error("INVALID_INPUT");
+  const choice = value.templateChoice;
+  if (value.templateSelected) {
+    if (!object(choice) || !["raw", "library"].includes(String(choice.kind)) || typeof choice.sourceFileId !== "string" || !/^[a-f0-9-]{36}$/i.test(choice.sourceFileId) || typeof choice.name !== "string" || choice.name.length > 500 || (choice.kind === "library" && (typeof choice.libraryId !== "string" || !/^[a-f0-9-]{36}$/i.test(choice.libraryId)))) throw new Error("TEMPLATE_OR_INPUT");
+  } else if (choice !== undefined && (!object(choice) || choice.kind !== "own")) throw new Error("TEMPLATE_OR_INPUT");
   const deck = value.deck;
   if (!object(deck) || typeof deck.presentationTitle !== "string" || !deck.presentationTitle.trim() || deck.presentationTitle.length > 500 || !Array.isArray(deck.slides) || !deck.slides.length || deck.slides.length > 100) throw new Error("INVALID_DECK");
   if (Object.keys(deck).some(key => !["presentationTitle", "slides"].includes(key))) throw new Error("INVALID_DECK");
@@ -51,30 +59,32 @@ function validGraphic(value: unknown): boolean {
   return false;
 }
 
-export function snapshotIdentity(input: SnapshotInput): string {
-  return digest(JSON.stringify({ version: 1, deck: input.deck, context: exportContext(input), renderer: repositoryRendererFiles }));
+export function snapshotIdentity(input: SnapshotInput, original?: Buffer): string {
+  return digest(JSON.stringify({ version: 1, deck: input.deck, context: exportContext(input), template: original ? { choice: input.templateChoice, sha256: digest(original) } : null, renderer: original ? repositoryTemplateRendererFiles : repositoryRendererFiles }));
 }
 function exportContext(input: SnapshotInput) {
   return { objectives: input.context.objectives, optionalContext: input.includeContext ? { text: input.context.text, sources: input.context.sources } : null, optionalContextOmitted: !input.includeContext };
 }
 
-export async function buildDeckSnapshot(input: unknown): Promise<DeckSnapshot> {
+export async function buildDeckSnapshot(input: unknown, original?: Buffer): Promise<DeckSnapshot> {
   validateSnapshotInput(input);
-  const id = snapshotIdentity(input);
-  const pptx = Buffer.from(await serializeDeckToPptx(input.deck));
+  if (input.templateSelected !== !!original) throw new Error("TEMPLATE_OR_INPUT");
+  const id = snapshotIdentity(input, original);
+  const pptx = original ? await renderRepositoryTemplate(original, input.deck) : Buffer.from(await serializeDeckToPptx(input.deck));
   const zip = await JSZip.loadAsync(pptx);
   if (!zip.file("[Content_Types].xml") || !zip.file("ppt/presentation.xml")) throw new Error("INVALID_PPTX");
   const contents: Record<string, string | Buffer> = {
     "deck.pptx": pptx,
     "deck.json": JSON.stringify(input.deck, null, 2),
     "context.json": JSON.stringify(exportContext(input), null, 2),
-    ...repositoryRendererFiles,
-    "package.json": JSON.stringify({ private: true, type: "module", scripts: { render: "node render.mjs" }, dependencies: { pptxgenjs: "4.0.1" } }, null, 2),
-    "render.mjs": 'import { readFile, writeFile } from "node:fs/promises";\nimport { buildSlidesPptx } from "./renderer/pptx.mjs";\nconst deck = JSON.parse(await readFile("deck.json", "utf8"));\nawait writeFile("regenerated.pptx", Buffer.from(await buildSlidesPptx(deck)));\n',
-    "README.md": `# Deck snapshot\n\nSnapshot: ${id}\n\nInstall Node.js 22 and run npm install, then npm run render. This builds regenerated.pptx from deck.json with the app's frozen own-layout renderer. Optional context is explicitly declared in context.json. Review any Copilot output before use. No task is dispatched by publishing. No credentials are required to render. ZIP metadata may differ between builds; verify slide content, not ZIP byte identity.\n`,
+    ...(original ? repositoryTemplateRendererFiles : repositoryRendererFiles),
+    ...(original ? { "template/original.pptx": original } : {}),
+    "package.json": JSON.stringify({ private: true, type: "module", scripts: { render: "node render.mjs" }, dependencies: original ? { jszip: "3.10.1" } : { pptxgenjs: "4.0.1" } }, null, 2),
+    "render.mjs": original ? 'import { readFile, writeFile } from "node:fs/promises";\nimport { renderRepositoryTemplate } from "./renderer/presentations/repository-template.mjs";\nconst deck = JSON.parse(await readFile("deck.json", "utf8"));\nawait writeFile("regenerated.pptx", await renderRepositoryTemplate(await readFile("template/original.pptx"), deck));\n' : 'import { readFile, writeFile } from "node:fs/promises";\nimport { buildSlidesPptx } from "./renderer/pptx.mjs";\nconst deck = JSON.parse(await readFile("deck.json", "utf8"));\nawait writeFile("regenerated.pptx", Buffer.from(await buildSlidesPptx(deck)));\n',
+    "README.md": `# Deck snapshot\n\nSnapshot: ${id}\n\nInstall Node.js 22 and run npm install, then npm run render. This builds regenerated.pptx from deck.json with ${original ? "the app's frozen template paragraph fill, identical to Pipeline download. Original template notes, themes, layouts and all assets (including unused slides and embedded files) are included in template/original.pptx. Only generated titles/bullets are filled; generated notes, code and graphics remain in deck.json and are not added to template slides" : "the app's frozen own-layout renderer"}. Optional context is explicitly declared in context.json. Review any Copilot output before use. No task is dispatched by publishing. No credentials are required to render. ZIP metadata may differ between builds; verify slide content, not ZIP byte identity.\n`,
   };
   const files = Object.entries(contents).map(([path, content]) => ({ path, bytes: Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8") }));
-  const manifest = { version: 1, snapshot: id, rendering: "own-layout", template: null, files: files.map(f => ({ path: f.path, bytes: f.bytes.length, sha256: digest(f.bytes) })) };
+  const manifest = { version: 1, snapshot: id, rendering: original ? "template" : "own-layout", template: original ? { sha256: digest(original), path: "template/original.pptx" } : null, files: files.map(f => ({ path: f.path, bytes: f.bytes.length, sha256: digest(f.bytes) })) };
   files.push({ path: "manifest.json", bytes: Buffer.from(JSON.stringify(manifest, null, 2)) });
   const bytes = files.reduce((sum, f) => sum + f.bytes.length, 0);
   if (bytes > MAX_SNAPSHOT_BYTES) throw new Error("SNAPSHOT_TOO_LARGE");

@@ -564,9 +564,11 @@ describe("PipelineTab template wiring (PPT-TEMPLATE-UPLOAD-PLACE W3, source-text
   const hooks = readFileSync(join(__dirname, "../../ppt-design/hooks.ts"), "utf8");
 
   it("mounts the shared picker bound to the shared selection hook", () => {
-    expect(src).toContain("<DeckTemplatePicker");
+    expect(src).toContain("<PipelineTemplatePicker");
+    expect(src).toContain("effectiveChoice={templateChoice}");
     expect(src).toContain("useSelectedDeckTemplateFileId()");
-    expect(src).toContain("selectedId={templateFileId}");
+    expect(src).toContain("rawTemplateFileId={templateFileId}");
+    expect(src).toContain("onRawTemplateFileIdChange={setTemplateFileId}");
   });
 
   it("introduces no new ta- template key (shared ta-ppt-template-file-id only)", () => {
@@ -589,12 +591,12 @@ describe("PipelineTab template wiring (PPT-TEMPLATE-UPLOAD-PLACE W3, source-text
   });
 
   it("gates the completion auto-download on the own plan and lists templateFileId in its deps", () => {
-    const effect = src.slice(src.indexOf("if (chooseDeckDownloadPlan(templateFileId) !== "+JSON.stringify("own")));
-    const gate = effect.indexOf('chooseDeckDownloadPlan(templateFileId) !== "own"');
+    const effect = src.slice(src.indexOf("if (templateChoice.kind !== \"own\")"));
+    const gate = effect.indexOf('templateChoice.kind !== "own"');
     const decision = effect.indexOf("shouldAutoDownloadDeck(");
     expect(gate).toBeGreaterThan(-1);
     expect(decision).toBeGreaterThan(gate);
-    expect(effect).toMatch(/\[pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateFileId\]/);
+    expect(effect).toMatch(/\[pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice\]/);
   });
 
   it("never auto-downloads with a template id (auto call passes the empty id)", () => {

@@ -39,6 +39,7 @@ export interface PresentationSource {
 export interface PresentationContext {
   text: string;
   sources: PresentationSource[];
+  objectives?: string[];
 }
 
 export interface OutlineContent {

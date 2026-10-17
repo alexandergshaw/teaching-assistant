@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildObjectivesPrompt,
   buildFrameSuggestPrompt,
   buildPipelineActivitiesPrompt,
   buildPipelineDeckPrompt,
@@ -12,6 +13,7 @@ import {
   parseDeckResponse,
   parseFrame,
   parseOutlineResponse,
+  parseObjectivesResponse,
   parsePlan,
   parseRegenSlideResponse,
   parseReviewInfoFlowResponse,
@@ -85,6 +87,15 @@ describe("outline", () => {
     expect(() => parseOutlineResponse("")).not.toThrow();
     expect(parseOutlineResponse("")).toBeNull();
   });
+
+  it("carries applied objectives into the outline prompt and accepts only a bounded usable list", () => {
+    const request: Extract<PipelineRequest, { op: "outline" }> = { op: "outline", context: { ...makeContext(), objectives: ["Classify a source claim"] } };
+    expect(buildPipelineOutlinePrompt(request)).toContain("Classify a source claim");
+    expect(parseObjectivesResponse('{"objectives":["Classify a source claim"]}')).toEqual(["Classify a source claim"]);
+    expect(parseObjectivesResponse('{"objectives":[]}')).toBeNull();
+    expect(parseObjectivesResponse(JSON.stringify({ objectives: ["x".repeat(241)] }))).toBeNull();
+    expect(buildObjectivesPrompt("Compare two primary sources.")).toContain("Compare two primary sources.");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -95,7 +106,7 @@ describe("frame-suggest", () => {
   it("builds a prompt that includes the material and the JSON shape fields", () => {
     const request: Extract<PipelineRequest, { op: "frame-suggest" }> = {
       op: "frame-suggest",
-      context: makeContext(),
+      context: { ...makeContext(), objectives: ["Classify a primary source"] },
     };
     const prompt = buildFrameSuggestPrompt(request);
     expect(prompt).toContain(makeContext().text);
@@ -138,7 +149,7 @@ describe("plan", () => {
   it("builds a prompt that includes the frame fold lines and the outline, frame before outline", () => {
     const request: Extract<PipelineRequest, { op: "plan" }> = {
       op: "plan",
-      context: makeContext(),
+      context: { ...makeContext(), objectives: ["Classify a primary source"] },
       outline: { markdown: "# My Outline" },
       frame: makeFrame(),
     };
@@ -146,13 +157,14 @@ describe("plan", () => {
     expect(prompt).toContain("Request Lifecycle");
     expect(prompt).toContain("Weather API");
     expect(prompt).toContain("# My Outline");
+    expect(prompt).toContain("Classify a primary source");
     expect(prompt.indexOf("Request Lifecycle")).toBeLessThan(prompt.indexOf("# My Outline"));
   });
 
   it("omits the frame fold lines entirely when frame is null", () => {
     const request: Extract<PipelineRequest, { op: "plan" }> = {
       op: "plan",
-      context: makeContext(),
+      context: { ...makeContext(), objectives: ["Classify a primary source"] },
       outline: { markdown: "# My Outline" },
       frame: null,
     };
@@ -203,7 +215,7 @@ describe("deck", () => {
   it("folds the structure contract, the frame fold lines, and the deck shape, and the plan's dominant claims", () => {
     const request: Extract<PipelineRequest, { op: "deck" }> = {
       op: "deck",
-      context: makeContext(),
+      context: { ...makeContext(), objectives: ["Classify a primary source"] },
       frame: makeFrame(),
       plan: makePlan(),
     };
@@ -223,6 +235,7 @@ describe("deck", () => {
     expect(prompt).toContain("A bad route returns a 404.");
     // material
     expect(prompt).toContain(makeContext().text);
+    expect(prompt).toContain("Classify a primary source");
 
     // ordering: structure contract before frame, frame before plan claims, plan claims before material
     const structureIdx = prompt.indexOf("Each slide must have a");

@@ -58,6 +58,8 @@ import {
 import {
   applyStageEdit,
   buildPipelineRequest,
+  countObjectiveDependents,
+  invalidateObjectiveDependents,
   reducePipelineResponse,
   runToEnd,
   shouldAutoDownloadDeck,
@@ -74,6 +76,8 @@ import ReviewFindings from "./ReviewFindings";
 import SlideRegenView from "./SlideRegenView";
 import PipelineTemplatePicker from "./PipelineTemplatePicker";
 import { chooseRawTemplate, pipelineTemplateFailureCategory, resolveTemplateForDownload, type PipelineLibraryActions, type PipelineTemplateChoice, type PipelineTemplateFailureCategory } from "./template-choice";
+import { PipelineSlideEditor } from "./pipeline-slide-editor";
+import { isObjectiveRevisionCurrent, makeObjectiveDraft, objectiveGenerationResult, recordPipelineDiagnostic, selectedObjectiveTexts, validateHomework, type ObjectiveDraft } from "./pipeline-objectives";
 
 const PIPELINE_URL = "/api/presentations/pipeline";
 const PIPELINE_STATE_KEY = "ta-pres-pipeline-state";
@@ -141,7 +145,7 @@ function recordTemplateDownload(kind: PipelineTemplateChoice["kind"], phase: "re
 // this is the caller deciding HOW to run a stage, not reducing its response).
 // "sources"/"standard"/"polish" are deliberately absent - they are dispatched
 // by their own mechanism, never through this table (I1).
-const STAGE_TO_OP: Partial<Record<StageId, Exclude<PipelineOp, "regen-slide">>> = {
+const STAGE_TO_OP: Partial<Record<StageId, Exclude<PipelineOp, "regen-slide" | "objectives">>> = {
   outline: "outline",
   frame: "frame-suggest",
   activities: "activities",
@@ -152,11 +156,12 @@ const STAGE_TO_OP: Partial<Record<StageId, Exclude<PipelineOp, "regen-slide">>> 
 };
 
 async function callPipelineRoute(
-  op: Exclude<PipelineOp, "regen-slide">,
+  op: Exclude<PipelineOp, "regen-slide" | "objectives">,
   state: PipelineState,
-  contextText: string
+  contextText: string,
+  objectives: string[]
 ): Promise<PipelineState> {
-  const request = buildPipelineRequest(op, state, contextText);
+  const request = buildPipelineRequest(op, state, contextText, { objectives });
   const res = await fetch(PIPELINE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -189,9 +194,10 @@ async function runReviewStage(
   stage: "reviewInfoFlow" | "reviewVisual",
   op: Extract<PipelineOp, "review-infoflow" | "review-visual">,
   state: PipelineState,
-  contextText: string
+  contextText: string,
+  objectives: string[]
 ): Promise<PipelineState> {
-  const next = await callPipelineRoute(op, state, contextText);
+  const next = await callPipelineRoute(op, state, contextText, objectives);
   if (next[stage].status !== "done") return next;
   const llmResult = next[stage].artifact;
   if (!llmResult) return next;
@@ -200,7 +206,7 @@ async function runReviewStage(
 }
 
 /** Runs one stage against `state`, returning the next state. "sources" is a no-op here (user-commit gate). */
-async function runStage(stage: StageId, state: PipelineState, contextText: string): Promise<PipelineState> {
+async function runStage(stage: StageId, state: PipelineState, contextText: string, objectives: string[]): Promise<PipelineState> {
   if (stage === "sources") return state;
   if (stage === "standard") {
     const deck = state.deck.artifact;
@@ -212,11 +218,11 @@ async function runStage(stage: StageId, state: PipelineState, contextText: strin
     if (!deck) return state;
     return applyStageEdit(state, "polish", polishDeck(deck));
   }
-  if (stage === "reviewInfoFlow") return runReviewStage(stage, "review-infoflow", state, contextText);
-  if (stage === "reviewVisual") return runReviewStage(stage, "review-visual", state, contextText);
+  if (stage === "reviewInfoFlow") return runReviewStage(stage, "review-infoflow", state, contextText, objectives);
+  if (stage === "reviewVisual") return runReviewStage(stage, "review-visual", state, contextText, objectives);
   const op = STAGE_TO_OP[stage];
   if (!op) return state;
-  return callPipelineRoute(op, state, contextText);
+  return callPipelineRoute(op, state, contextText, objectives);
 }
 
 export default function PipelineTab() {
@@ -225,6 +231,14 @@ export default function PipelineTab() {
     createInitialPipelineState()
   );
   const [contextText, setContextText] = usePersistedJSON<string>(PIPELINE_CONTEXT_KEY, "");
+  const [homework, setHomework] = usePersistedJSON<string>("ta-pres-pipeline-homework", "");
+  const homeworkRef = useRef(homework);
+  const [generatedForHomework, setGeneratedForHomework] = usePersistedJSON<string>("ta-pres-pipeline-objectives-homework", "");
+  const [objectiveDrafts, setObjectiveDrafts] = usePersistedJSON<ObjectiveDraft[]>("ta-pres-pipeline-objective-drafts", []);
+  const [appliedObjectives, setAppliedObjectives] = usePersistedJSON<string[]>("ta-pres-pipeline-applied-objectives", []);
+  const objectiveRevision = useRef(0);
+  const [objectiveBusy, setObjectiveBusy] = useState(false);
+  const [objectiveError, setObjectiveError] = useState("");
   const [sourcesDraft, setSourcesDraft] = usePersistedJSON<PresentationSource[]>(PIPELINE_SOURCES_KEY, []);
   const [activeStage, setActiveStage] = useState<StageId>("sources");
   const [runningStage, setRunningStage] = useState<StageId | null>(null);
@@ -263,9 +277,10 @@ export default function PipelineTab() {
   async function runOneStage(stage: StageId) {
     setRegenOpen(false); // a stale open flag must not re-open the sub-view later
     setRunningStage(stage);
+    const objectiveRevisionAtStart = objectiveRevision.current;
     try {
-      const next = await runStage(stage, pipelineState, contextText);
-      setPipelineState(next);
+      const next = await runStage(stage, pipelineState, contextText, appliedObjectives);
+      if (isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) setPipelineState(next);
     } finally {
       setRunningStage(null);
     }
@@ -274,6 +289,7 @@ export default function PipelineTab() {
   async function handleRunToEnd() {
     setRegenOpen(false);
     setRunningToEnd(true);
+    const objectiveRevisionAtStart = objectiveRevision.current;
     try {
       let current = pipelineState;
       // Bounded by the stage count - the invalidation graph is a DAG
@@ -289,7 +305,8 @@ export default function PipelineTab() {
         if (runnable.length === 0) break;
         for (const stage of runnable) {
           setRunningStage(stage);
-          current = await runStage(stage, current, contextText);
+          current = await runStage(stage, current, contextText, appliedObjectives);
+          if (!isObjectiveRevisionCurrent(objectiveRevisionAtStart, objectiveRevision.current)) return;
           setPipelineState(current);
           if (current[stage].status === "error") {
             return; // stop the fan-out on a failure (finally below still fires)
@@ -300,6 +317,55 @@ export default function PipelineTab() {
       setRunningStage(null);
       setRunningToEnd(false);
     }
+  }
+
+  async function handleGenerateObjectives() {
+    const validation = validateHomework(homework);
+    if (validation) { setObjectiveError(validation); recordPipelineDiagnostic("pipeline_objective_generation", "failure", 0, 0, 0, "INVALID_INPUT"); return; }
+    setObjectiveBusy(true);
+    setObjectiveError("");
+    const sourceAtStart = homework;
+    const started = Date.now();
+    try {
+      const request = buildPipelineRequest("objectives", pipelineState, contextText, { homework: sourceAtStart });
+      const response = await fetch(PIPELINE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+      const body: unknown = await response.json().catch(() => undefined);
+      const raw = typeof body === "object" && body !== null ? body as { status?: unknown; op?: unknown; objectives?: unknown } : null;
+      const objectives = response.status === 200 && raw?.status === "ok" && raw.op === "objectives" && Array.isArray(raw.objectives) && raw.objectives.every((value) => typeof value === "string") ? raw.objectives as string[] : null;
+      const result = objectiveGenerationResult(sourceAtStart, homeworkRef.current, objectives);
+      if (result.kind === "success") {
+        setObjectiveDrafts(makeObjectiveDraft(result.objectives));
+        setGeneratedForHomework(sourceAtStart);
+        recordPipelineDiagnostic("pipeline_objective_generation", "success", Date.now() - started, result.objectives.length);
+      } else {
+        const stale = result.kind === "stale";
+        setObjectiveError(stale ? "Homework changed while objectives were generating. Generate again for the current homework." : "Could not generate a usable objective checklist. Your previous checklist and homework are unchanged; retry.");
+        recordPipelineDiagnostic("pipeline_objective_generation", "failure", Date.now() - started, 0, 0, stale ? "STALE" : "MODEL_RESPONSE");
+      }
+    } catch {
+      setObjectiveError("Could not generate a usable objective checklist. Your previous checklist and homework are unchanged; retry.");
+      recordPipelineDiagnostic("pipeline_objective_generation", "failure", Date.now() - started, 0, 0, "NETWORK");
+    } finally { setObjectiveBusy(false); }
+  }
+
+  function applyObjectives() {
+    const selected = selectedObjectiveTexts(objectiveDrafts);
+    if (!selected.length) { setObjectiveError("Select or edit at least one objective before applying."); return; }
+    const unchanged = JSON.stringify(selected) === JSON.stringify(appliedObjectives);
+    if (!unchanged) objectiveRevision.current += 1;
+    setAppliedObjectives(selected);
+    const invalidated = unchanged ? 0 : countObjectiveDependents(pipelineState);
+    if (!unchanged) setPipelineState((previous) => invalidateObjectiveDependents(previous));
+    setObjectiveError("");
+    recordPipelineDiagnostic("pipeline_objectives_apply", "success", 0, selected.length, invalidated);
+  }
+
+  function clearObjectives() {
+    const invalidated = appliedObjectives.length ? countObjectiveDependents(pipelineState) : 0;
+    if (appliedObjectives.length) objectiveRevision.current += 1;
+    if (appliedObjectives.length) setPipelineState((previous) => invalidateObjectiveDependents(previous));
+    setAppliedObjectives([]);
+    recordPipelineDiagnostic("pipeline_objectives_clear", "success", 0, 0, invalidated);
   }
 
   function commitSources() {
@@ -406,6 +472,7 @@ export default function PipelineTab() {
         pipelineState={pipelineState}
         setPipelineState={setPipelineState}
         contextText={contextText}
+        appliedObjectives={appliedObjectives}
         onBack={() => setRegenOpen(false)}
       />
     );
@@ -441,6 +508,24 @@ export default function PipelineTab() {
                 sources={sourcesDraft}
                 onSourcesChange={setSourcesDraft}
               />
+              <Divider />
+              <Typography variant="subtitle1">Student learning objectives</Typography>
+              <Typography variant="body2" color="text.secondary">Paste homework separately. Generated objectives are suggestions to guide lesson creation, not proof students have mastered them.</Typography>
+              <TextField label="Paste homework" multiline minRows={5} value={homework} onChange={(event) => { homeworkRef.current = event.target.value; setHomework(event.target.value); }} error={homework.length > 20_000} helperText={homework.length > 20_000 ? "Homework must be 20,000 characters or fewer." : `${homework.length}/20,000`} />
+              <Button variant="outlined" onClick={handleGenerateObjectives} disabled={objectiveBusy || !homework.trim() || homework.length > 20_000} sx={{ textTransform: "none", alignSelf: "start" }}>{objectiveBusy ? "Generating objectives..." : "Generate objective suggestions"}</Button>
+              {generatedForHomework && generatedForHomework !== homework && <Alert severity="warning">Homework changed. These suggestions are outdated; regenerate them. Applied objectives remain active until you replace or clear them.</Alert>}
+              {objectiveError && <Alert severity="error">{objectiveError}</Alert>}
+              {objectiveDrafts.length > 0 && <>
+                <Typography variant="caption" color="text.secondary">Generated suggestions. Select and edit the objectives to apply.</Typography>
+                {objectiveDrafts.map((draft, index) => <div key={draft.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                  <input aria-label={`Use objective ${index + 1}`} type="checkbox" checked={draft.selected} onChange={(event) => setObjectiveDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, selected: event.target.checked } : item))} />
+                  <TextField fullWidth size="small" label={`Objective ${index + 1}`} value={draft.text} onChange={(event) => setObjectiveDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} />
+                  <Button onClick={() => setObjectiveDrafts((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button>
+                </div>)}
+                <Button variant="contained" onClick={applyObjectives} disabled={objectiveBusy || busy} sx={{ alignSelf: "start" }}>Apply selected</Button>
+              </>}
+              {appliedObjectives.length > 0 && <Button variant="outlined" onClick={clearObjectives} disabled={objectiveBusy || busy} sx={{ alignSelf: "start" }}>Clear applied objectives</Button>}
+              {appliedObjectives.length > 0 && <Alert severity="success">Applied objectives ({appliedObjectives.length}): {appliedObjectives.join("; ")}</Alert>}
               <Button
                 variant="contained"
                 onClick={commitSources}
@@ -590,6 +675,8 @@ export default function PipelineTab() {
 
           {activeStage === "deck" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <PipelineSlideEditor state={pipelineState} setState={setPipelineState} templateSelected={templateChoice.kind !== "own"} disabled={busy || downloading} onSaved={(invalidated) => recordPipelineDiagnostic("pipeline_slide_save", "success", 0, 1, invalidated)} />
+              <Divider />
               <PipelineTemplatePicker
                 effectiveChoice={templateChoice}
                 rawTemplateFileId={templateFileId}

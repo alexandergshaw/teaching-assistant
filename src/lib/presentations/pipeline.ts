@@ -269,6 +269,7 @@ export type PipelineOp =
   | "plan"
   | "deck"
   | "activities"
+  | "objectives"
   | "review-infoflow"
   | "review-visual"
   | "regen-slide";
@@ -293,6 +294,7 @@ interface PipelineRequestPayload {
   plan: { context: PresentationContext; outline: OutlineContent; frame: PinnedFrame | null };
   deck: { context: PresentationContext; frame: PinnedFrame | null; plan: SlidePlan };
   activities: { context: PresentationContext };
+  objectives: { homework: string };
   "review-infoflow": { deck: DeckContent };
   "review-visual": { deck: DeckContent };
   "regen-slide": {
@@ -317,6 +319,7 @@ interface PipelineSuccessPayload {
   plan: { plan: SlidePlan };
   deck: { deck: DeckContent };
   activities: { activities: ActivitiesContent };
+  objectives: { objectives: string[] };
   "review-infoflow": { result: ChecklistResult };
   "review-visual": { result: ChecklistResult };
   "regen-slide": { slides: PptxSlide[] };

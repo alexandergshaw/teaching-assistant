@@ -36,16 +36,17 @@
 // and whether the model stays on-Frame / the review findings are genuinely
 // adversarial. See docs/pres-2-s6-plan.md section 8 / RES-S6-B/C/F.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Card, CardContent, Divider, MenuItem, TextField, Typography } from "@mui/material";
 import TabHeader from "../../TabHeader";
 import SourcesEditor from "../SourcesEditor";
 import SlideDeckPreview from "../SlideDeckPreview";
 import { usePersistedJSON } from "../hooks";
 import { base64ToArrayBuffer, chooseDeckDownloadPlan, deckDownloadFilename } from "../panel-logic";
-import DeckTemplatePicker from "../DeckTemplatePicker";
 import { useSelectedDeckTemplateFileId } from "../../ppt-design/hooks";
 import { fillDeckTemplateFileAction } from "@/app/actions/deck-template-files";
+import { getPowerPointTemplateLibraryAction, reusePowerPointTemplateLibraryAction } from "@/app/actions/powerpoint-template-library";
+import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import type { DeckContent, PresentationSource } from "@/lib/presentations/types";
 import {
   ALL_STAGE_IDS,
@@ -71,6 +72,8 @@ import PipelineStepper, { STAGE_LABELS } from "./PipelineStepper";
 import FrameEditor from "./FrameEditor";
 import ReviewFindings from "./ReviewFindings";
 import SlideRegenView from "./SlideRegenView";
+import PipelineTemplatePicker from "./PipelineTemplatePicker";
+import { chooseRawTemplate, pipelineTemplateFailureCategory, resolveTemplateForDownload, type PipelineLibraryActions, type PipelineTemplateChoice, type PipelineTemplateFailureCategory } from "./template-choice";
 
 const PIPELINE_URL = "/api/presentations/pipeline";
 const PIPELINE_STATE_KEY = "ta-pres-pipeline-state";
@@ -114,6 +117,23 @@ async function downloadDeckPptx(deck: DeckContent, templateFileId: string): Prom
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
   return null;
+}
+
+const pipelineLibraryActions: PipelineLibraryActions = {
+  getLibrary: getPowerPointTemplateLibraryAction,
+  reuseLibrary: reusePowerPointTemplateLibraryAction,
+};
+
+function recordTemplateDownload(kind: PipelineTemplateChoice["kind"], phase: "resolve" | "fill", started: number, code?: PipelineTemplateFailureCategory | "PPT_DOWNLOAD_ERROR") {
+  if (kind === "own") return;
+  recordSessionDiagnosticEntry({
+    at: new Date().toISOString(), surface: "templates",
+    operation: `pipeline_template_${kind}_${phase}`,
+    label: kind === "library" ? "Saved PowerPoint library download" : "Uploaded PowerPoint download",
+    institution: "", course: "", outcome: code ? "failure" : "success",
+    durationMs: Math.max(0, Date.now() - started),
+    ...(code ? { error: code, code } : {}),
+  });
 }
 
 // The route-op each auto-runnable stage maps to (S6.6's inverse table,
@@ -214,8 +234,12 @@ export default function PipelineTab() {
   const [askOutcome, setAskOutcome] = useState<{ severity: "warning" | "error"; text: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [templateResolutionPending, setTemplateResolutionPending] = useState(false);
   const [autoDlFingerprint, setAutoDlFingerprint] = usePersistedJSON<string>(PIPELINE_AUTODL_FINGERPRINT_KEY, "");
   const [templateFileId, setTemplateFileId] = useSelectedDeckTemplateFileId();
+  const [templateChoice, setTemplateChoice] = useState<PipelineTemplateChoice>(() => chooseRawTemplate(templateFileId, "Uploaded PowerPoint"));
+  const templateChoiceRef = useRef(templateChoice);
+  const templateChoiceGeneration = useRef(0);
   const [regenOpen, setRegenOpen] = usePersistedJSON<boolean>(PIPELINE_REGEN_OPEN_KEY, false);
   // Hydration guard: the persisted open flag must not choose the first paint.
   // false on the server / first render, true once mounted on the client.
@@ -228,13 +252,13 @@ export default function PipelineTab() {
   // templated download is a server action that can refuse (slide-count), so it
   // is never auto-fired; the user downloads manually.
   useEffect(() => {
-    if (chooseDeckDownloadPlan(templateFileId) !== "own") return;
+    if (templateChoice.kind !== "own") return;
     const decision = shouldAutoDownloadDeck(pipelineState, autoDlFingerprint);
     const deck = pipelineState.deck.artifact;
     if (!decision.download || decision.fingerprint === null || !deck) return;
     setAutoDlFingerprint(decision.fingerprint);
     downloadDeckPptx(deck, "").catch(() => setDownloadError("Could not build the .pptx"));
-  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateFileId]);
+  }, [pipelineState, autoDlFingerprint, setAutoDlFingerprint, templateChoice]);
 
   async function runOneStage(stage: StageId) {
     setRegenOpen(false); // a stale open flag must not re-open the sub-view later
@@ -315,12 +339,35 @@ export default function PipelineTab() {
   async function handleDownload() {
     const deck = pipelineState.deck.artifact;
     if (!deck) return;
+    if (templateResolutionPending) {
+      setDownloadError("Wait for the template selection to finish before downloading.");
+      return;
+    }
     setDownloading(true);
     setDownloadError(null);
+    const selectionGeneration = templateChoiceGeneration.current;
+    const choiceAtStart = templateChoiceRef.current;
+    const started = Date.now();
+    let phase: "resolve" | "fill" = "resolve";
     try {
-      const refusal = await downloadDeckPptx(deck, templateFileId);
+      const resolution = await resolveTemplateForDownload(choiceAtStart, pipelineLibraryActions);
+      if (templateChoiceGeneration.current !== selectionGeneration) {
+        recordTemplateDownload(choiceAtStart.kind, phase, started, "PPT_SELECTION");
+        setDownloadError("The template selection changed while preparing the download. Choose the effective template again and retry.");
+        return;
+      }
+      if ("error" in resolution) {
+        recordTemplateDownload(choiceAtStart.kind, phase, started, pipelineTemplateFailureCategory(resolution.error.error, resolution.error.code, phase));
+        setDownloadError(resolution.error.error);
+        return;
+      }
+      recordTemplateDownload(choiceAtStart.kind, phase, started);
+      phase = "fill";
+      const refusal = await downloadDeckPptx(deck, resolution.source.sourceFileId);
+      recordTemplateDownload(choiceAtStart.kind, phase, started, refusal === null ? undefined : pipelineTemplateFailureCategory(refusal));
       if (refusal !== null) setDownloadError(refusal);
     } catch {
+      recordTemplateDownload(choiceAtStart.kind, phase, started, "PPT_DOWNLOAD_ERROR");
       setDownloadError("Could not build the .pptx");
     } finally {
       setDownloading(false);
@@ -543,8 +590,19 @@ export default function PipelineTab() {
 
           {activeStage === "deck" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-              <DeckTemplatePicker selectedId={templateFileId} onSelectId={setTemplateFileId} />
-              {chooseDeckDownloadPlan(templateFileId) === "template" && (
+              <PipelineTemplatePicker
+                effectiveChoice={templateChoice}
+                rawTemplateFileId={templateFileId}
+                onRawTemplateFileIdChange={setTemplateFileId}
+                onChoiceChange={(choice) => {
+                  templateChoiceRef.current = choice;
+                  templateChoiceGeneration.current += 1;
+                  setTemplateChoice(choice);
+                }}
+                onResolutionPendingChange={setTemplateResolutionPending}
+                disabled={downloading}
+              />
+              {templateChoice.kind !== "own" && (
                 <Alert severity="info" variant="outlined">
                   A template is selected, so the deck is not downloaded automatically. Use Download .pptx to apply it.
                 </Alert>
@@ -556,7 +614,7 @@ export default function PipelineTab() {
                 <Button
                   variant="outlined"
                   onClick={handleDownload}
-                  disabled={downloading || !pipelineState.deck.artifact}
+                  disabled={downloading || templateResolutionPending || !pipelineState.deck.artifact}
                   sx={{ textTransform: "none" }}
                 >
                   {downloading ? "Preparing .pptx..." : "Download .pptx"}

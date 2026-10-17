@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canReconcile, finishPackageReview, persistThenPublish, readReconciliationIntent, reviewIsCurrent } from "./repository-confirmation";
+import { canReconcile, finishPackageReview, persistThenPublish, readReconciliationIntent, reviewIsCurrent, runSingleFlight } from "./repository-confirmation";
 
 describe("exact snapshot confirmation and privacy-safe recovery", () => {
   const captured = { snapshotKey: JSON.stringify({ deck: "private slide text", context: "private context", objectives: ["A"] }), name: "private-deck" };
@@ -35,5 +35,19 @@ describe("exact snapshot confirmation and privacy-safe recovery", () => {
     let sent = false;
     await expect(persistThenPublish(intent, () => { throw new Error("storage denied"); }, async () => { sent = true; })).rejects.toThrow("storage denied");
     expect(sent).toBe(false);
+  });
+
+  it("rejects overlapping submissions before the first operation can finish", async () => {
+    const lock = { current: false };
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    const first = runSingleFlight(lock, async () => { calls++; await held; });
+    const second = await runSingleFlight(lock, async () => { calls++; });
+    expect(second).toBe(false);
+    expect(calls).toBe(1);
+    release();
+    await expect(first).resolves.toBe(true);
+    expect(lock.current).toBe(false);
   });
 });

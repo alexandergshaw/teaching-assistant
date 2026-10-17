@@ -24,3 +24,15 @@ export async function persistThenPublish<T>(intent: ReconciliationIntent, persis
   persist(JSON.stringify({ login: intent.login, name: intent.name, fingerprint: intent.fingerprint }));
   return send();
 }
+
+/** Acquire a synchronous single-flight lock before invoking work that may await. */
+export async function runSingleFlight(lock: { current: boolean }, operation: () => Promise<unknown>): Promise<boolean> {
+  if (lock.current) return false;
+  lock.current = true;
+  try {
+    await operation();
+    return true;
+  } finally {
+    lock.current = false;
+  }
+}

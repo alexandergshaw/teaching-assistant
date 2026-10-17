@@ -53,6 +53,25 @@ new publication requires its own explicit action and leaves any prior remote
 repository intact. Account review is invalidated immediately by input changes;
 a late account-review response cannot confirm newer content.
 
+Initial and follow-up task submission now use GitHub's Agent Tasks REST API when
+the owner explicitly enables the server flag `PRESENTATION_COPILOT_TASKS_ENABLED=true`.
+It is off by default. The action reauthenticates the app owner, validates the
+signed private snapshot manifest and every package blob, and requests the
+immutable snapshot commit as `base_ref`. A follow-up requires merged changes on
+the default branch and requests that exact current commit as its base. Every task
+has its own explicit button click, saved content-free receipt, and GitHub task
+link. Tasks request a pull request and never merge or import generated output.
+An uncertain response blocks automatic retry until the owner checks GitHub.
+
+The task endpoint is in public preview; GitHub documents Copilot Business or
+Enterprise availability and a user token with repository `Agent tasks` read/write
+permission. The repository's existing `GITHUB_TOKEN` may not have that grant.
+Most importantly, `base_ref` being sent as a commit SHA does not prove which
+commit the Copilot worker actually checked out. Keep the flag off until an
+owner-enabled live test verifies the returned task session base commit, output
+package hashes, and PR ancestry while moving the default branch. See [GitHub's
+Agent Tasks REST documentation](https://docs.github.com/en/rest/agent-tasks/agent-tasks?apiVersion=2022-11-28).
+
 Template-backed publication is unavailable: this delivery does not yet package
 the original authorized template asset and a reproducible template renderer.
 Normal Pipeline template downloads remain unchanged. Initial and follow-up Copilot

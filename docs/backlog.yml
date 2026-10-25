@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'CHAT-GRADING-NEW-SESSION-VISIBILITY'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Keep the New session control always visible in the chat grading window.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Planned acceptance: the New session control remains visible and reachable without scrolling through the conversation or results, including empty, populated, grading-in-progress and error states and narrow viewports. Preserve existing session reset, in-flight work protection and any confirmation before discarding work. If starting a session is temporarily unavailable, keep the control visible and explain why. Verify in a rendered browser with scrolling, keyboard and responsive checks; source-only tests do not establish visibility.'
+  from: 'Owner request in this chat, 2026-10-25: the option to start a new session on the chat grading window should always be visible.'
+  note: 'Owner: coordinator. Reuse the existing GradingChatPanel New session action; scope persistent header or sticky placement and its relationship to the existing composer before implementation. This row records the request; no implementation or browser verification is claimed.'
+  question: null
 - id: 'COURSES-COLUMN-REORDER'
   state: 'unscoped'
   kind: 'feature'

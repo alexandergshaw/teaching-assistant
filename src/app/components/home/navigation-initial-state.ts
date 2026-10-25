@@ -1,5 +1,5 @@
 import { isManualViewType, type ManualViewType, type AutomateView } from "../manual/manual-rail";
-import { normalizeManualView, resolveGradingPointer, resolveTabDestination, isRecordingUrl } from "../../url-state";
+import { normalizeManualView, resolveGradingPointer, resolveTabDestination, isRecordingUrl, isVersionControlUrl } from "../../url-state";
 import { legacyPptDesignView } from "@/lib/ppt-view-migration";
 
 const TOOLS_SECTION_KEY = "ta-tools-section";
@@ -13,6 +13,7 @@ export function initializeManualView(
   readLegacyAutomateView: () => AutomateView | null,
 ): ManualViewType {
   if (isRecordingUrl(search)) return "recording";
+  if (isVersionControlUrl(search)) return "version-control";
   // A user who was viewing Version Control (inside the old Integrations, tracked
   // by "ta-content-view") lands on the new standalone Version Control subtab; reset the
   // LMS content view so ContentTab does not open on a now-removed VC subtab.

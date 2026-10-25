@@ -92,6 +92,8 @@ export default function Home() {
     librarySection,
     manualView,
     recView: nav.recView,
+    vcSubTab: nav.vcSubTab,
+    vcOrgView: nav.vcOrgView,
     automateView,
     buildView,
     contentView,
@@ -707,7 +709,7 @@ export default function Home() {
 
                 {manualView === "version-control" && (
                   <TabShell>
-                    <VersionControlTab />
+                    <VersionControlTab vcOrgView={nav.vcOrgView} />
                   </TabShell>
                 )}
 

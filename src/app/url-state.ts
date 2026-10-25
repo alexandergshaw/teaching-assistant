@@ -1,3 +1,4 @@
+import { isVcSubTab, isVcOrgView, type VcSubTab, type VcOrgView } from "./components/vc-views";
 import { isRecView, type RecView } from "./components/recording/rec-views";
 // Pure helpers mapping the app's full tab/sub-tab nesting to and from the
 // URL's query string, so the browser's Back/Forward buttons can move between
@@ -357,6 +358,8 @@ export interface UrlNavState {
   librarySection: LibrarySection;
   filesView?: FilesView;
   recView?: RecView;
+  vcSubTab?: VcSubTab;
+  vcOrgView?: VcOrgView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -500,6 +503,8 @@ export function parseUrlState(search: string): UrlNavState {
     : {};
   return {
     ...filesView,
+    ...(params.has("vcSubTab") ? { vcSubTab: normalizeVcSubTab(params.get("vcSubTab")) } : {}),
+    ...(params.has("vcOrgView") ? { vcOrgView: normalizeVcOrgView(params.get("vcOrgView")) } : {}),
     ...(params.has("recView") ? { recView: normalizeRecView(params.get("recView")) } : {}),
     tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
@@ -572,6 +577,10 @@ export function buildUrlSearch(state: UrlNavState): string {
       if (state.manualView === "content" && state.contentView !== DEFAULT_CONTENT_VIEW) {
         params.set(CONTENT_VIEW_PARAM, state.contentView);
       }
+      if (state.manualView === "version-control") {
+        if (normalizeVcSubTab(state.vcSubTab) !== "orgs") params.set("vcSubTab", normalizeVcSubTab(state.vcSubTab));
+        if (normalizeVcSubTab(state.vcSubTab) === "orgs" && normalizeVcOrgView(state.vcOrgView) !== "students") params.set("vcOrgView", normalizeVcOrgView(state.vcOrgView));
+      }
       if (state.manualView === "recording" && normalizeRecView(state.recView) !== DEFAULT_REC_VIEW) {
         params.set("recView", normalizeRecView(state.recView));
       }
@@ -623,4 +632,19 @@ export function isRecordingUrl(search: string): boolean {
 }
 export function resolveRecViewFromUrl(search: string, saved: unknown): RecView {
   return isRecordingUrl(search) ? normalizeRecView(parseUrlState(search).recView) : normalizeRecView(saved);
+}
+
+export function normalizeVcSubTab(value: unknown): VcSubTab { return isVcSubTab(value) ? value : "orgs"; }
+export function normalizeVcOrgView(value: unknown): VcOrgView { return isVcOrgView(value) ? value : "students"; }
+export function isVersionControlUrl(search: string): boolean {
+  if (!new URLSearchParams(search).has("tab")) return false;
+  const location = parseUrlState(search);
+  return location.tab === "manual" && location.toolsSection === "manual" && location.manualView === "version-control";
+}
+export function resolveVcSubTabFromUrl(search: string, saved: unknown): VcSubTab {
+  return isVersionControlUrl(search) ? normalizeVcSubTab(parseUrlState(search).vcSubTab) : normalizeVcSubTab(saved);
+}
+export function resolveVcOrgViewFromUrl(search: string, saved: unknown): VcOrgView {
+  const parsed = parseUrlState(search);
+  return isVersionControlUrl(search) && normalizeVcSubTab(parsed.vcSubTab) === "orgs" ? normalizeVcOrgView(parsed.vcOrgView) : normalizeVcOrgView(saved);
 }

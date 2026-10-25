@@ -461,6 +461,7 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   "src/app/components/message-replies/message-replies.structure.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
   "src/app/url-state.files-view.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
   "src/app/components/home/useAppNavigation.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/url-state.vc-views.test.ts": "Imports the shared tokenizer for navigation subjects; no duplicate tokenizer definition",
   "src/app/url-state.rec-view.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
   "src/app/components/home/navigation-initial-state.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
 

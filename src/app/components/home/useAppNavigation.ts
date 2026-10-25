@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type VcSubTab, type VcOrgView, isVcSubTab, isVcOrgView, VC_SUB_TAB_CHANGE_EVENT, VC_ORG_VIEW_CHANGE_EVENT } from "../vc-views";
+import { resolveVcSubTabFromUrl, resolveVcOrgViewFromUrl, normalizeVcSubTab, normalizeVcOrgView } from "../../url-state";
 import { initializeManualView } from "./navigation-initial-state";
 import { isRecView, type RecView } from "../recording/rec-views";
 import { REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl } from "../../url-state";
@@ -293,6 +295,14 @@ export function useAppNavigation() {
   const [recView, setRecView] = useState<RecView>(() => {
     if (typeof window === "undefined") return "record";
     return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));
+  });
+  const [vcSubTab, setVcSubTab] = useState<VcSubTab>(() => {
+    if (typeof window === "undefined") return "orgs";
+    return resolveVcSubTabFromUrl(window.location.search, localStorage.getItem("ta-vc-subtab"));
+  });
+  const [vcOrgView, setVcOrgView] = useState<VcOrgView>(() => {
+    if (typeof window === "undefined") return "students";
+    return resolveVcOrgViewFromUrl(window.location.search, localStorage.getItem("ta-vc-org-view"));
   });
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -648,6 +658,25 @@ export function useAppNavigation() {
     return () => window.removeEventListener(REC_VIEW_CHANGE_EVENT, onRecViewChange);
   }, []);
 
+  useEffect(() => { localStorage.setItem("ta-vc-subtab", vcSubTab); }, [vcSubTab]);
+  useEffect(() => { localStorage.setItem("ta-vc-org-view", vcOrgView); }, [vcOrgView]);
+  useEffect(() => {
+    const onVcSubTabChange = (event: Event) => {
+      const view = (event as CustomEvent<unknown>).detail;
+      if (isVcSubTab(view)) setVcSubTab(view);
+    };
+    const onVcOrgViewChange = (event: Event) => {
+      const view = (event as CustomEvent<unknown>).detail;
+      if (isVcOrgView(view)) setVcOrgView(view);
+    };
+    window.addEventListener(VC_SUB_TAB_CHANGE_EVENT, onVcSubTabChange);
+    window.addEventListener(VC_ORG_VIEW_CHANGE_EVENT, onVcOrgViewChange);
+    return () => {
+      window.removeEventListener(VC_SUB_TAB_CHANGE_EVENT, onVcSubTabChange);
+      window.removeEventListener(VC_ORG_VIEW_CHANGE_EVENT, onVcOrgViewChange);
+    };
+  }, []);
+
   // lastKnownSearchRef tracks the query string the browser is currently at,
   // as best we know it. It is updated both when we push/replace it
   // ourselves and when a popstate event tells us the browser already moved
@@ -706,6 +735,8 @@ export function useAppNavigation() {
       librarySection,
       filesView,
       recView,
+      vcSubTab,
+      vcOrgView,
       manualView,
       automateView,
       buildView,
@@ -746,6 +777,8 @@ export function useAppNavigation() {
     librarySection,
     filesView,
     recView,
+    vcSubTab,
+    vcOrgView,
     manualView,
     automateView,
     buildView,
@@ -816,6 +849,10 @@ export function useAppNavigation() {
         if (parsed.toolsSection === "manual") {
           setManualView(parsed.manualView);
           if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
+          if (parsed.manualView === "version-control") {
+            setVcSubTab(normalizeVcSubTab(parsed.vcSubTab));
+            if (normalizeVcSubTab(parsed.vcSubTab) === "orgs") setVcOrgView(normalizeVcOrgView(parsed.vcOrgView));
+          }
           if (parsed.manualView === "recording") setRecView(normalizeRecView(parsed.recView));
           if (parsed.manualView === "content") setContentView(parsed.contentView);
           if (parsed.manualView === "grading") setGradingView(parsed.gradingView);
@@ -873,6 +910,8 @@ export function useAppNavigation() {
     manualView,
     setManualView,
     recView,
+    vcSubTab,
+    vcOrgView,
     buildView,
     setBuildView,
     contentView,

@@ -206,7 +206,7 @@ describe("Recording history restores", () => {
     const sync = between(nav.slice(syncStart), "useEffect(", "}, [") + "}";
     const syncExpression = sync.slice("useEffect(".length);
     const isFirstUrlSyncRef = { current: false };
-    const runSync = () => execute(syncExpression, { ...state, activeTab: state.tab, window: win, buildUrlSearch, lastKnownSearchRef, isFirstUrlSyncRef })();
+    const runSync = () => execute(syncExpression, { vcSubTab: "orgs", vcOrgView: "students", ...state, activeTab: state.tab, window: win, buildUrlSearch, lastKnownSearchRef, isFirstUrlSyncRef })();
     for (const [search, view] of [["?tab=manual&manualView=recording&recView=messages", "messages"], ["?tab=manual&manualView=recording", "record"], ["?tab=courses&recView=avatar", "record"], ["?tab=manual&manualView=recording&recView=moduledeck", "moduledeck"], ["?tab=files&filesView=submissions", "moduledeck"]]) {
       win.location.search = search; restore(); componentRestore();
       expect(mirror).toEqual({ nav: view, component: view });

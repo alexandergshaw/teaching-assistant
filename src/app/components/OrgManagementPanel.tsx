@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   listOrgMembersAction,
   inviteOrgMemberAction,
@@ -20,6 +20,9 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import { type VcOrgView, VC_ORG_VIEW_CHANGE_EVENT, VC_ORG_VIEWS } from "./vc-views";
+import { resolveVcOrgViewFromUrl, isVersionControlUrl, normalizeVcSubTab, normalizeVcOrgView, parseUrlState } from "../url-state";
+import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
 import styles from "../page.module.css";
 
 type OrgMember = { login: string; role: "admin" | "member" };
@@ -71,15 +74,31 @@ interface OrgManagementPanelProps {
 }
 
 export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgManagementPanelProps) {
-  const [orgView, setOrgView] = useState<"students" | "management">(() => {
+  const [orgView, setViewState] = useState<VcOrgView>(() => {
     if (typeof window === "undefined") return "students";
-    const v = localStorage.getItem("ta-vc-org-view");
-    return v === "students" || v === "management" ? v : "students";
+    return resolveVcOrgViewFromUrl(window.location.search, localStorage.getItem("ta-vc-org-view"));
   });
-
+  const setOrgView = useCallback((view: VcOrgView) => {
+    setViewState(view);
+    localStorage.setItem("ta-vc-org-view", view);
+    window.dispatchEvent(new CustomEvent(VC_ORG_VIEW_CHANGE_EVENT, { detail: view }));
+  }, []);
   useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("ta-vc-org-view", orgView);
-  }, [orgView]);
+    const onPopState = () => {
+      if (!isVersionControlUrl(window.location.search)) return;
+      const parsed = parseUrlState(window.location.search);
+      if (normalizeVcSubTab(parsed.vcSubTab) !== "orgs") return;
+      const view = normalizeVcOrgView(parsed.vcOrgView);
+      setViewState(view);
+      localStorage.setItem("ta-vc-org-view", view);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  const viewHref = (view: VcOrgView) => buildTabHref(parseUrlState(typeof window === "undefined" ? "" : window.location.search), {
+    tab: "manual", toolsSection: "manual", manualView: "version-control",
+    vcSubTab: "orgs", vcOrgView: view,
+  });
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [membersState, setMembersState] = useState<"loading" | "ready" | "error">("loading");
@@ -337,12 +356,17 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
       <h3 style={{ margin: "0 0 var(--space-1)" }}>Manage {org}</h3>
 
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
-        {([["students", "Student management"], ["management", "Org management"]] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={orgView === key}
+        {VC_ORG_VIEWS.map(([key, label]) => (
+          <a key={key} href={viewHref(key)} role="tab" aria-selected={orgView === key}
             className={`${styles.lessonInnerTab}${orgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setOrgView(key)}>
+            onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setOrgView(key);
+            }}>
             <span className={styles.tabLabelWrap}>{label}</span>
-          </button>
+          </a>
         ))}
       </div>
 

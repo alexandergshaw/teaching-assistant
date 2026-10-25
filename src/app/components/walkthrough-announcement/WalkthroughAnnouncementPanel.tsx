@@ -25,15 +25,16 @@
 // postWalkthroughAnnouncementAction, which converts it via markdownToHtml
 // (never textToHtml) at the moment of posting - see that action's own doc
 // comment.
-// P11: the pasted exemplar's RAW TEXT never leaves this component - only
-// its derived outline (deriveAnnouncementOutline, a pure client-safe leaf)
-// reaches draftWalkthroughAnnouncementAction.
+// P11: library bodies stay in persistence; only acknowledged format outlines
+// reach the announcement draft adapter.
 // P15: a disclosure sits in the settings block, before the capture controls -
 // frames are sent to a third-party AI provider, and a single shared window
 // is safer than a whole screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { raceWithTimeout } from "@/lib/bounded-race";
+import { useAnnouncementLibrary } from "./useAnnouncementLibrary";
+import AnnouncementLibrary from "./AnnouncementLibrary";
+import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
 import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -52,14 +53,9 @@ import { extractModuleContentAction } from "@/app/actions/module-content-extract
 import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "../module-deck-capture/module-extraction-prompt";
 import { reduceCaptureToMaterials } from "../module-deck-capture/module-blocks";
 import { deriveWalkthroughPageCoverage, renderWalkthroughCoverageBlock } from "./walkthrough-announcement-coverage";
-import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import { WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP } from "@/lib/walkthrough-announcement-prompt";
 import { WALKTHROUGH_SCRIPT_MATERIALS_CAP } from "@/lib/walkthrough-script-prompt";
 import {
-  getMostRecentAnnouncementExemplarAction,
-  listAnnouncementExemplarsAction,
-  saveAnnouncementExemplarAction,
-  deleteAnnouncementExemplarAction,
   draftWalkthroughVideoScriptAction,
 } from "@/app/actions/walkthrough-announcement";
 import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from "./useAnnouncementDraftSlots";
@@ -68,25 +64,13 @@ import { useWalkthroughAutoDraft } from "./useWalkthroughAutoDraft";
 import { useWalkthroughGenerationAdapters } from "./useWalkthroughGenerationAdapters";
 import { isRunComplete, shouldWarnBeforeUnload } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
-import AnnouncementCourseFieldset, {
-  type AnnouncementExemplarSummary,
-} from "./AnnouncementCourseFieldset";
+import AnnouncementCourseFieldset from "./AnnouncementCourseFieldset";
 import {
-  EXEMPLAR_FETCH_TIMEOUT_MS,
   MAX_ANNOUNCEMENT_BATCH_SIZE,
-  type SavedFormatsState,
   type TemplateCandidate,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
 
-
-// AnnouncementExemplarSummary/WtaCourseOption now live in
-// AnnouncementCourseFieldset.tsx (backlog 4.1's extraction) and are imported
-// above - still deliberately SEPARATE declarations from the (unexported,
-// since a "use server" file may export only async functions) shape
-// walkthrough-announcement.ts's own actions return, mirroring how
-// AnnCourseOption (useTakeAnnouncement.ts) is its own local type rather than
-// an import of CourseHub.
 
 interface Notice {
   id: string;
@@ -128,181 +112,24 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     selectedCourse,
   } = useWalkthroughSetup(active);
 
-  // --- Exemplar (AC1, AC2, decision P3: Supabase, not localStorage) -------
+  // The autosaved library is the single source of reusable announcement formats.
 
-  const [exemplarText, setExemplarText] = useState("");
-  const [exemplarLabel, setExemplarLabel] = useState("");
-  const [savingExemplar, setSavingExemplar] = useState(false);
-  const [exemplarSaved, setExemplarSaved] = useState(false);
-  const [exemplarError, setExemplarError] = useState<string | null>(null);
-
-  const [mostRecentExemplar, setMostRecentExemplar] = useState<AnnouncementExemplarSummary | null>(null);
-  const [savedExemplars, setSavedExemplars] = useState<AnnouncementExemplarSummary[] | null>(null);
-  // G1: replaces the old savedExemplarsLoading/savedExemplarsFailed booleans
-  // (announcement-draft-slots.ts's own SavedFormatsState doc comment). Starts
-  // "loaded" to preserve today's behaviour exactly (both booleans used to
-  // start false) - "loaded with a null list and no course chosen" is an
-  // imprecise pre-existing representation of that idle state, left as-is
-  // this wave.
-  const [savedFormatsState, setSavedFormatsState] = useState<SavedFormatsState>("loaded");
-  const [showExemplarPicker, setShowExemplarPicker] = useState(false);
-  const [removeArmedId, setRemoveArmedId] = useState<string | null>(null);
-
-  // AC1's default (most recent) AND (G2: every slot's dropdown needs the
-  // full list up front) the full saved list, fetched eagerly together,
-  // cancellation-guarded.
-  // Shared between this effect and loadSavedExemplars below - both fetch the
-  // same saved-exemplar list, and either can be in flight when the other
-  // starts (a course switch while the picker's own retry is in flight, or
-  // vice versa). One counter, bumped at the start of EITHER fetch, is what
-  // lets a stale resolution recognize itself as stale no matter which of the
-  // two started it (AccessibilityProvider.tsx's scanRunId/aborted idiom).
-  const savedListRunId = useRef(0);
-
-  useEffect(() => {
-    const runId = ++savedListRunId.current;
-    const stale = () => savedListRunId.current !== runId;
-    // setState-in-effect idiom (see AGENTS.md/CLAUDE.md guidance and this
-    // repo's own useCourseIntel.ts precedent): every setState below is
-    // reached only after an await, never synchronously from the effect
-    // body - eslint's react-hooks/set-state-in-effect rejects the latter.
-    void (async () => {
-      await Promise.resolve();
-      if (stale()) return;
-      setMostRecentExemplar(null);
-      setSavedExemplars(null);
-      setSavedFormatsState("loaded");
-      setShowExemplarPicker(false);
-      if (!courseId) return;
-      setSavedFormatsState("loading");
-      // Bounded per G1: a hung fetch must not leave the picker waiting
-      // forever. Promise.race cannot cancel either promise below - only the
-      // caller's own wait - so a timeout here does not stop the request.
-      const outcome = await raceWithTimeout(
-        Promise.all([getMostRecentAnnouncementExemplarAction(courseId), listAnnouncementExemplarsAction(courseId)]),
-        EXEMPLAR_FETCH_TIMEOUT_MS
-      );
-      // Sequence-token guard, not the old local `cancelled` flag: a newer
-      // fetch (this effect re-running on another course switch, or the
-      // picker's own loadSavedExemplars) may already have written a fresher
-      // list by the time this one resolves. The concrete failure this
-      // closes: this fetch hangs, the instructor opens the picker and its
-      // own fetch resolves first, then saves a new exemplar (prepended onto
-      // that fresher list) - if this stale fetch were still allowed to
-      // write afterward, it would overwrite that list with its own
-      // pre-save snapshot and the new exemplar would silently vanish.
-      if (stale()) return;
-      if (outcome.kind === "timedout") {
-        setSavedFormatsState("timedout");
-        return;
-      }
-      if (outcome.kind === "failed") {
-        setExemplarError(outcome.error instanceof Error ? outcome.error.message : "Could not load your saved formats.");
-        setSavedFormatsState("failed");
-        return;
-      }
-      const [mostRecentResult, listResult] = outcome.value;
-      if ("error" in mostRecentResult) {
-        setExemplarError(mostRecentResult.error);
-      } else {
-        setMostRecentExemplar(mostRecentResult.exemplar);
-      }
-      if ("error" in listResult) {
-        setExemplarError(listResult.error);
-        setSavedFormatsState("failed");
-      } else {
-        setExemplarError(null);
-        setSavedExemplars(listResult.exemplars);
-        setSavedFormatsState("loaded");
-      }
-    })();
-    // Bump on unmount too. The counter alone only marks a run stale when
-    // ANOTHER fetch starts, so without this an in-flight fetch resolving
-    // after unmount would still run its setState calls - which the previous
-    // `cancelled` flag's cleanup did guard against. Bumping here restores
-    // that guard: React runs this cleanup before the next invocation, and
-    // that invocation captures its own id afterwards, so the extra bump
-    // never strands a live run.
-    return () => {
-      savedListRunId.current += 1;
-    };
-  }, [courseId]);
-
-  const loadSavedExemplars = useCallback(async () => {
-    if (!courseId) return;
-    const runId = ++savedListRunId.current;
-    const stale = () => savedListRunId.current !== runId;
-    setSavedFormatsState("loading");
-    const outcome = await raceWithTimeout(listAnnouncementExemplarsAction(courseId), EXEMPLAR_FETCH_TIMEOUT_MS);
-    // Same sequence-token guard as the mount effect above, and the same
-    // reason: this call and that effect share one counter, so whichever
-    // started later wins and an earlier, now-stale resolution never
-    // overwrites it.
-    if (stale()) return;
-    if (outcome.kind === "timedout") {
-      setSavedFormatsState("timedout");
-      return;
-    }
-    if (outcome.kind === "failed") {
-      setExemplarError(outcome.error instanceof Error ? outcome.error.message : "Could not load your saved formats.");
-      setSavedFormatsState("failed");
-      return;
-    }
-    const result = outcome.value;
-    if ("error" in result) {
-      setExemplarError(result.error);
-      setSavedFormatsState("failed");
-      return;
-    }
-    setExemplarError(null);
-    setSavedExemplars(result.exemplars);
-    setSavedFormatsState("loaded");
-  }, [courseId]);
-
-  const handleToggleExemplarPicker = useCallback(() => {
-    setShowExemplarPicker((prev) => {
-      const next = !prev;
-      // State-aware, not "list is null": in the timed-out state
-      // savedExemplars is ALSO still null, so gating on nullness alone would
-      // spawn a fresh fetch on every picker open with no limit. Start one
-      // only when nothing is already in flight and the list is not already
-      // resolved - failed/timedout are exactly the states worth retrying.
-      if (next && savedFormatsState !== "loading" && savedFormatsState !== "loaded") void loadSavedExemplars();
-      return next;
-    });
-  }, [savedFormatsState, loadSavedExemplars]);
-
-  const handleSaveExemplar = useCallback(async () => {
-    if (!courseId || !exemplarText.trim()) return;
-    setSavingExemplar(true);
-    setExemplarError(null);
-    setExemplarSaved(false);
-    const result = await saveAnnouncementExemplarAction(courseId, exemplarText, exemplarLabel.trim() || undefined);
-    setSavingExemplar(false);
-    if ("error" in result) {
-      setExemplarError(result.error);
-      return;
-    }
-    setSavedExemplars((prev) => (prev ? [result.exemplar, ...prev] : prev));
-    if (savedExemplars === null) {
-      // The list was never loaded (or is failed/timedout), so the prepend
-      // above was a no-op - the new exemplar would otherwise never appear in
-      // the picker. Fabricating a one-element list here would falsely claim
-      // this is the ONLY saved format rather than an unknown-sized list, so
-      // start a fresh bounded load instead and let it fetch the real thing.
-      void loadSavedExemplars();
-    }
-    setMostRecentExemplar(result.exemplar);
-    setExemplarLabel("");
-    setExemplarSaved(true);
-  }, [courseId, exemplarText, exemplarLabel, savedExemplars, loadSavedExemplars]);
-
-  // P11/AC2: the outline a "pasted"/"default" choice reads (resolveLive
-  // below) - per-slot precedence lives in resolveChoice, not here.
-  const pastedOutline = useMemo(
-    () => (exemplarText.trim() ? deriveAnnouncementOutline(exemplarText) : null),
-    [exemplarText]
-  );
+  const libraryAdapters = useMemo(() => ({
+    list: (id: string) => listAnnouncementLibraryAction(id),
+    save: (input: Parameters<typeof saveAnnouncementLibraryEntryAction>[0]) => saveAnnouncementLibraryEntryAction(input),
+    remove: (id: string, entryId: string) => deleteAnnouncementLibraryEntryAction(id, entryId),
+  }), []);
+  const library = useAnnouncementLibrary(courseId, libraryAdapters);
+  const savedFormatsState = library.enabled ? library.state.load : "loaded";
+  const savedExemplars = useMemo(() => library.state.cards.flatMap(card => card.acknowledged ? [card.acknowledged] : [])
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [library.state.cards]);
+  const mostRecentExemplar = savedExemplars[0] ?? null;
+  const loadSavedExemplars = useCallback(() => library.controller.load(), [library.controller]);
+  const changeCourse = useCallback((next: string) => {
+    if (next === courseId) return;
+    if (library.controller.dirty() && !window.confirm("Unsaved announcements will be discarded. Change course?")) return;
+    setCourseId(next);
+  }, [courseId, library.controller, setCourseId]);
 
   // --- Notices --------------------------------------------------------------
 
@@ -414,7 +241,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   // the course-change effect above.
   const optionSource: TemplateOptionSource = useMemo(
     () => ({
-      hasPastedText: Boolean(exemplarText.trim()),
+      hasPastedText: false,
       mostRecent: mostRecentExemplar
         ? {
             id: mostRecentExemplar.id,
@@ -427,7 +254,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       ),
       savedState: savedFormatsState,
     }),
-    [exemplarText, mostRecentExemplar, savedExemplars, savedFormatsState]
+    [mostRecentExemplar, savedExemplars, savedFormatsState]
   );
 
   const buildRequest = useCallback((): AnnouncementDraftRequestContext => {
@@ -446,8 +273,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   }, [selectedCourse, moduleLabel, notesText, provider, emojiOn, researchOn]);
 
   const resolveLive = useCallback(
-    () => ({ pastedOutline, mostRecent: optionSource.mostRecent }),
-    [pastedOutline, optionSource.mostRecent]
+    () => ({ pastedOutline: null, mostRecent: optionSource.mostRecent, saved: optionSource.saved, blocked: library.controller.blocked }),
+    [optionSource.mostRecent, optionSource.saved, library.controller]
   );
 
   // Research / draft / post adapters (the literal server-action calls) live in
@@ -475,17 +302,29 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     postSignatureFor,
   } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
 
+  const previousLibraryScope = useRef(library.scopeKey);
+  useEffect(() => {
+    if (previousLibraryScope.current === library.scopeKey) return;
+    previousLibraryScope.current = library.scopeKey;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      for (const slot of slots) chooseTemplate(slot.id, { kind: "default" });
+    });
+    return () => { cancelled = true; };
+  }, [library.scopeKey, slots, chooseTemplate]);
+
   // WA-DRAFT-LOSS: warn on a full page unload while a capture, a draft, or an
   // unposted drafted slot would be lost. Declared after `slots` on purpose.
   useEffect(() => {
-    if (!shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
+    if (!library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [capturing, pendingFrames, slots]);
+  }, [capturing, pendingFrames, slots, library.controller, library.state]);
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 
@@ -528,26 +367,6 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       }
     })();
   }, [capturing, start, stop, slots, reset]);
-
-  const handleRemoveExemplar = useCallback(
-    async (id: string) => {
-      const result = await deleteAnnouncementExemplarAction(id);
-      if ("error" in result) {
-        setExemplarError(result.error);
-        return;
-      }
-      setSavedExemplars((prev) => (prev ?? []).filter((e) => e.id !== id));
-      setMostRecentExemplar((prev) => (prev?.id === id ? null : prev));
-      setRemoveArmedId(null);
-      // Reconcile any slot pointing at the deleted exemplar back to default.
-      for (const slot of slots) {
-        if (slot.choice.kind === "saved" && slot.choice.exemplarId === id) {
-          chooseTemplate(slot.id, { kind: "default" });
-        }
-      }
-    },
-    [slots, chooseTemplate]
-  );
 
   const handleGenerateScript = useCallback(async () => {
     setScriptGenerating(true);
@@ -602,47 +421,17 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       )}
 
       {/* AC1/AC3: course, module and notes, then the draft format and options,
-          all persisted where the standing rule requires it (course/module/
-          notes/emoji/resources/auto-draft under ta- keys; the exemplar itself
-          in Supabase, per decision P3, never localStorage). Extracted to
+          persisted under ta- keys. Reusable examples live in the library below. Extracted to
           AnnouncementCourseFieldset.tsx (backlog 4.1); it collapses to a
           one-line summary once a run is underway. The run bar is NOT a child
           of it - it is the sticky bottom dock at the end of this panel. */}
       <AnnouncementCourseFieldset
         courses={courses}
         courseId={courseId}
-        onCourseIdChange={setCourseId}
+        onCourseIdChange={changeCourse}
         coursesError={coursesError}
         moduleLabel={moduleLabel}
         onModuleLabelChange={setModuleLabel}
-        exemplarText={exemplarText}
-        onExemplarTextChange={setExemplarText}
-        exemplarLabel={exemplarLabel}
-        onExemplarLabelChange={setExemplarLabel}
-        savingExemplar={savingExemplar}
-        onSaveExemplar={() => void handleSaveExemplar()}
-        exemplarSaved={exemplarSaved}
-        exemplarError={exemplarError}
-        showExemplarPicker={showExemplarPicker}
-        onToggleExemplarPicker={handleToggleExemplarPicker}
-        savedFormatsState={savedFormatsState}
-        savedExemplars={savedExemplars}
-        canAddSlotFromExemplar={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE}
-        onAddSlotFromExemplar={(ex) =>
-          addSlot(
-            {
-              kind: "saved",
-              exemplarId: ex.id,
-              label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
-              outline: ex.outline,
-            },
-            "beginning-of-week"
-          )
-        }
-        removeArmedId={removeArmedId}
-        onArmRemoveExemplar={(id) => setRemoveArmedId(id)}
-        onConfirmRemoveExemplar={(id) => void handleRemoveExemplar(id)}
-        onCancelRemoveExemplar={() => setRemoveArmedId(null)}
         notesText={notesText}
         maxNotesChars={MAX_NOTES_CHARS}
         onNotesTextChange={setNotesText}
@@ -656,6 +445,10 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         onExpand={() => setManuallyExpanded(true)}
         capturing={capturing}
       />
+
+      <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
+        canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
+        onRemoved={id => { for (const slot of slots) if (slot.choice.kind === "saved" && slot.choice.exemplarId === id) chooseTemplate(slot.id, { kind: "default" }); }} />
 
       <p className={styles.fieldHint}>
         A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any

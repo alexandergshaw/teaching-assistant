@@ -341,6 +341,8 @@ export function optionsForSlot(slot: DraftSlot, src: TemplateOptionSource): read
 export interface LiveDefaults {
   readonly pastedOutline: AnnouncementOutline | null;
   readonly mostRecent: TemplateCandidate | null;
+  readonly saved?: readonly TemplateCandidate[];
+  readonly blocked?: (id: string) => boolean;
 }
 
 /** Precedence for a "default" choice: pasted text wins, then the course's
@@ -349,7 +351,9 @@ export interface LiveDefaults {
 export function resolveChoice(
   choice: TemplateChoice,
   live: LiveDefaults
-): { readonly template: ResolvedTemplate; readonly outline: AnnouncementOutline } {
+): { readonly template: ResolvedTemplate; readonly outline: AnnouncementOutline; readonly error?: string } {
+  const selectedId = choice.kind === "saved" ? choice.exemplarId : choice.kind === "default" && !live.pastedOutline ? live.mostRecent?.id : null;
+  if (selectedId && live.blocked?.(selectedId)) return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE, error: "Save or retry the selected announcement in the library before drafting." };
   if (choice.kind === "default") {
     if (live.pastedOutline) return { template: { kind: "pasted" }, outline: live.pastedOutline };
     if (live.mostRecent) {
@@ -364,7 +368,8 @@ export function resolveChoice(
     return { template: { kind: "pasted" }, outline: live.pastedOutline ?? EMPTY_ANNOUNCEMENT_OUTLINE };
   }
   if (choice.kind === "saved") {
-    return { template: { kind: "saved", exemplarId: choice.exemplarId, label: choice.label }, outline: choice.outline };
+    const latest = live.saved?.find(entry => entry.id === choice.exemplarId);
+    return { template: { kind: "saved", exemplarId: choice.exemplarId, label: latest?.label ?? choice.label }, outline: latest?.outline ?? choice.outline };
   }
   return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE };
 }

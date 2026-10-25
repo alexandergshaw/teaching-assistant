@@ -338,25 +338,12 @@ describe("G1: both saved-exemplar fetch sites are bounded with raceWithTimeout",
     "utf-8"
   );
 
-  it("imports raceWithTimeout from the shared bounded-race leaf", () => {
-    expect(panelSource).toMatch(/import\s*\{\s*raceWithTimeout\s*\}\s*from\s*"@\/lib\/bounded-race"/);
-  });
-
-  it("the mount effect's Promise.all(...) is passed to raceWithTimeout, not awaited directly", () => {
-    expect(panelSource).toMatch(/raceWithTimeout\(\s*Promise\.all\(/);
-  });
-
-  it("loadSavedExemplars's own single fetch is also passed to raceWithTimeout", () => {
-    const start = panelSource.indexOf("const loadSavedExemplars = useCallback");
-    expect(start, "expected to find loadSavedExemplars's own definition").toBeGreaterThan(-1);
-    const end = panelSource.indexOf("}, [courseId]);", start);
-    const body = panelSource.slice(start, end);
-    expect(body).toMatch(/raceWithTimeout\(\s*listAnnouncementExemplarsAction\(courseId\)/);
-  });
-
-  it("raceWithTimeout is bounded by the shared EXEMPLAR_FETCH_TIMEOUT_MS constant at both call sites, not a locally re-declared number", () => {
-    const occurrences = panelSource.match(/raceWithTimeout\([^;]*?EXEMPLAR_FETCH_TIMEOUT_MS/g) ?? [];
-    expect(occurrences.length).toBe(2);
+  const controllerSource = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "announcement-library-controller.ts"), "utf-8");
+  it("panel delegates listing to the bounded library controller", () => {
+    expect(panelSource).toContain("useAnnouncementLibrary(courseId, libraryAdapters)");
+    expect(panelSource).toContain("listAnnouncementLibraryAction(id)");
+    expect(controllerSource).toContain('load: "timedout"');
+    expect(controllerSource).toContain("EXEMPLAR_FETCH_TIMEOUT_MS");
   });
 });
 
@@ -387,14 +374,18 @@ describe("G1: every saved-formats render site derives its prose from savedFormat
     expect(nearby).toMatch(/"timedout"/);
   });
 
-  it("AnnouncementCourseFieldset.tsx imports savedFormatsStatusText and calls it", () => {
-    expect(fieldsetSource).toMatch(/import\s*\{[^}]*savedFormatsStatusText[^}]*\}\s*from\s*"\.\/announcement-draft-slots"/);
-    expect(fieldsetSource).toMatch(/savedFormatsStatusText\(/);
+  it("the library distinguishes loading, empty, failed and timed-out results and offers Retry", () => {
+    const librarySource = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementLibrary.tsx"), "utf-8");
+    for (const state of ["loading", "loaded", "failed", "timedout"]) {
+      expect(librarySource).toContain(`state.load === "${state}"`);
+    }
+    expect(librarySource).toContain("state.cards.length === 0");
+    expect(librarySource).toMatch(/state.load === "failed" \|\| state.load === "timedout"/);
+    expect(librarySource).toContain("controller.load()");
   });
 
-  it("AnnouncementCourseFieldset.tsx no longer reads a savedExemplarsLoading boolean prop - it takes the full SavedFormatsState", () => {
-    expect(fieldsetSource).not.toMatch(/savedExemplarsLoading/);
-    expect(fieldsetSource).toMatch(/savedFormatsState/);
+  it("the setup fieldset has no second saved-formats browser or loading state", () => {
+    expect(fieldsetSource).not.toMatch(/savedExemplarsLoading|savedFormatsState|showExemplarPicker/);
   });
 });
 
@@ -440,8 +431,8 @@ describe("G1: the old savedExemplarsLoading/savedExemplarsFailed booleans are go
     expect(panelSource).not.toMatch(/\[savedExemplarsFailed,/);
   });
 
-  it("savedFormatsState is declared via useState<SavedFormatsState>", () => {
-    expect(panelSource).toMatch(/useState<SavedFormatsState>\("loaded"\)/);
+  it("savedFormatsState follows the library controller load state", () => {
+    expect(panelSource).toContain('const savedFormatsState = library.enabled ? library.state.load : "loaded"');
   });
 });
 
@@ -695,11 +686,10 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
   const setup = stripComments(read("useWalkthroughSetup.ts"));
 
   describe("W3-R1: capture controls and Start precede the format/options controls", () => {
-    it("fieldset: Course comes before the paste box, Save for reuse and the three toggles", () => {
+    it("fieldset: Course and notes come before the three draft toggles", () => {
       const anchors = [
         'label="Course"',
-        'label="Paste a previous announcement to match its format (optional)"',
-        "Save for reuse",
+        'label={`Notes for this walkthrough',
         "Use emojis in the draft",
         "Research and cite relevant resource links",
         "Draft automatically when capture stops",
@@ -963,9 +953,14 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
   });
 
   describe("W3-R10: guard counts unchanged", () => {
-    it("AnnouncementDraftSlot.tsx renders exactly two ConfirmArmButtons (Post, Regenerate); the fieldset exactly one", () => {
+    it("Post and Regenerate retain confirmation, and library removal is explicitly confirmed", () => {
       expect((slot.match(/<ConfirmArmButtons\b/g) ?? []).length).toBe(2);
-      expect((fieldset.match(/<ConfirmArmButtons\b/g) ?? []).length).toBe(1);
+      expect((fieldset.match(/<ConfirmArmButtons\b/g) ?? []).length).toBe(0);
+      const library = stripComments(read("AnnouncementLibrary.tsx"));
+      expect(library).toContain("armed === card.id");
+      expect(library).toContain("Confirm remove announcement");
+      expect(library).toContain("onClick={() => void remove(card.id)}");
+      expect(library).toContain("onClick={() => setArmed(card.id)}");
     });
     it("Start carries no disabled attribute", () => {
       const startOpen = panel.lastIndexOf("<Button", panel.indexOf("Start capture"));

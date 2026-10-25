@@ -219,6 +219,17 @@ export function postSignatureFor(slot: DraftSlot): string | null {
   ]);
 }
 
+/** Executable production dispatch seam: only outlines reach the drafting adapter. */
+export async function dispatchResolvedAnnouncementDraft(
+  ctx: AnnouncementDraftDispatchContext,
+  resolved: ReturnType<typeof resolveChoice>,
+  draftOne: (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>
+) {
+  if (resolved.error) return { error: resolved.error };
+  const result = await draftOne(ctx, resolved.outline);
+  return "error" in result ? result : { ...result, builtFrom: resolved.template, timing: ctx.timing };
+}
+
 export function useAnnouncementDraftSlots(args: {
   readonly buildRequest: () => AnnouncementDraftRequestContext;
   readonly resolveLive: () => LiveDefaults;
@@ -299,28 +310,14 @@ export function useAnnouncementDraftSlots(args: {
   const [researching, setResearching] = useState(false);
 
   const runDraft = useCallback(
-    (slotId: string, resolved: { template: ResolvedTemplate; outline: AnnouncementOutline }, ctx: AnnouncementDraftDispatchContext) => {
-      const onResult = (result: { title: string; message: string; researchNotice: ResearchNotice } | { error: string }) => {
-        if ("error" in result) {
-          dispatch({ type: "result", id: slotId, result: { error: result.error } });
-          return;
-        }
-        dispatch({
-          type: "result",
-          id: slotId,
-          result: {
-            title: result.title,
-            message: result.message,
-            researchNotice: result.researchNotice,
-            builtFrom: resolved.template,
-            timing: ctx.timing,
-          },
-        });
+    (slotId: string, resolved: { template: ResolvedTemplate; outline: AnnouncementOutline; error?: string }, ctx: AnnouncementDraftDispatchContext) => {
+      const onResult = (result: Awaited<ReturnType<typeof dispatchResolvedAnnouncementDraft>>) => {
+        dispatch({ type: "result", id: slotId, result });
       };
       const onRejected = () => {
         dispatch({ type: "result", id: slotId, result: { error: "Could not reach the server - nothing was drafted." } });
       };
-      return argsRef.current.draftOne(ctx, resolved.outline).then(onResult, onRejected);
+      return dispatchResolvedAnnouncementDraft(ctx, resolved, argsRef.current.draftOne).then(onResult, onRejected);
     },
     []
   );

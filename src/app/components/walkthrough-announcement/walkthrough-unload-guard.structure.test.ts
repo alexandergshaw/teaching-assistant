@@ -36,7 +36,7 @@ describe("WA-DRAFT-LOSS: beforeunload wiring", () => {
   it("A4: the cleanup is returned and the dependency array lists everything the predicate reads", () => {
     const eff = effectContaining('addEventListener("beforeunload"');
     expect(eff).toMatch(/return \(\) => window\.removeEventListener\("beforeunload"/);
-    expect(eff).toMatch(/\}, \[capturing, pendingFrames, slots\]\);$/);
+    expect(eff).toMatch(/\}, \[capturing, pendingFrames, slots, library.controller, library.state\]\);$/);
   });
   it("A3: the effect sits below the slots declaration", () => {
     expect(src.indexOf("useAnnouncementDraftSlots({")).toBeLessThan(src.indexOf('addEventListener("beforeunload"'));

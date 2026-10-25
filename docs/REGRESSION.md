@@ -47856,3 +47856,15 @@ The service-only RPC migration must apply through the normal GitHub migration ac
 before live editing is verified. These tests render no component; production browser
 autosave, reload, labeled draft choices and navigation evidence are recorded in the
 backlog delivery note separately from source and controller checks.
+
+The focused smooth-flow correction removes the competing manual paste/save/browse
+controls. The original summary type remains exported for the Canvas composer.
+One always-visible autosaved library supplies all draft choices. The departure
+correction restores captured source router state together with its URL, retains
+same-page query/hash navigation, and leaves disposal to the component lifecycle.
+An executable oracle uses installed Next history functions; it does not render a
+component. The source barrier can truncate unused Forward history. Independent
+`npm.cmd run test:paths` sets passed 12 files/258 tests and 6 files/181 tests;
+coordinator `npx.cmd tsc --noEmit --incremental false --pretty false` passed.
+`npm.cmd run build` compiled and finished TypeScript, then hit the documented
+missing-Supabase-settings prerender failure. Production checks remain distinct.

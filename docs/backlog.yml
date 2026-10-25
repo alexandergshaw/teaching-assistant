@@ -2349,7 +2349,7 @@
   question: null
 
 - id: 'TABS-CTRL-FILES'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'loop-and-docs-maintenance'
   title: 'Complete Tier-3 Wave 4: open the clicked Files Library/Submissions view in a new browser tab.'
@@ -2358,7 +2358,7 @@
   blocked_by: []
   instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param filesView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
-  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. R5 key confirmed by reading FilesTab.tsx:85-92: ta-files-view. Confirm again before build. Scope names no dedicated structural gate; rerun caller/source-reader census. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  note: 'Owner: coordinator. Accepted implementation and independent final delivery audit SHIP, four scoped source paths; publication pending. npm.cmd run test:paths src/app/url-state.files-view.test.ts src/app/url-state.test.ts src/file-size-ceiling.structure.test.ts passed3files/105tests; scoped npm.cmd run lint with the four owned paths passed. TypeScript and production compile passed, local prerender requires Supabase settings. Independent proof audit accepted retrospective baseline-red/current-green: identical12test instrument failed all12 against exact archived e7d0a2ff production blobs and passed all12 against current candidates. This does not claim historical test-first execution. Browser obligations remain: modifier-click destination/source stability, URL versus conflicting storage, history, Enter/Space/focus and cross-window storage. Owner instrument is authenticated browser walk; no component renders in tests. Files changes are separate from Institutions loading delivery.'
   question: null
 - id: 'PRESENTATION-PIPELINE-COPILOT-REPO'
   state: 'verification'
@@ -2395,5 +2395,5 @@
   blocked_by: []
   instrument: 'Authenticated production browser: cold-load shell, tab re-entry, refresh, retry and validation feedback. Deferred loader tests: timeout, late responses, deduplication, cached empty/populated state and account isolation. Tests do not render components.'
   from: 'Owner 2026-10-25: Institutions loading needs an overhaul for responsiveness; it failed; test the actual app.'
-  note: 'Owner: coordinator. Reproduced bare loading state in authenticated production. Independent round-1 source checker SHIP. Exact verify command passed9files/79tests; TypeScript and scoped lint passed. Read/auth deadline12seconds, immediate table shell, account-scoped memory cache, retained refresh rows, forced post-write reload, invalidated retired requests and sign-out eviction. Server authorization unchanged. Production invalid empty-profile submit returned actionable acronym validation and re-enabled controls without persisting data. Original unexpected backend failure not reproduced; no backend-cause fix claimed. Valid saved-profile/custom-column browser lifecycle awaits explicit synthetic-record permission. Current delivery and deployed browser checks pending.'
+  note: 'Owner: coordinator. Round1 independently SHIP and delivered e7d0a2ff to main; main-delivery guard complete:true for8ownedpaths and Vercel dpl_B7crdkV3r4tNMq5VQDWH7CxNrh5h READY. npm.cmd run test:paths exact verify passed9files/79tests; TypeScript/scoped lint/compile passed. Real authenticated browser confirms initial heading/table shell,12second timeout/retry, successful retry to known-empty table and cached re-entry during refresh. Initial read timed out behind startup POST server actions; installed Next docs explicitly confirm client Server Actions execute sequentially. Faster authenticated private/no-store GET candidate passes independent12file/90test set and compile, but round2 found proxy-login redirect classification retains cached rows on access denial; unpublished pending terminating owner disposition. No database outage or valid saved-profile browser lifecycle claimed; synthetic-write permission pending. Screenshot capture unavailable.'
   question: null

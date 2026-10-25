@@ -15,7 +15,7 @@ describe("announcement library production wiring", () => {
   it("always renders library outside collapsed setup and includes dirty edits in unload and course-switch guards", () => {
     const panel = source("WalkthroughAnnouncementPanel.tsx");
     expect(panel).toContain("<AnnouncementLibrary key={library.scopeKey}");
-    expect(panel).toMatch(/<AnnouncementCourseFieldset[\s\S]*?collapsed=\{setupCollapsed\}[\s\S]*?\/>;?\s*<AnnouncementLibrary/);
+    expect(panel).toMatch(/<AnnouncementCourseFieldset[\s\S]*?collapsed=\{setupCollapsed\}[\s\S]*?\/>[\s\S]*?<details>[\s\S]*?<AnnouncementLibrary/);
     expect(panel).toContain("!library.controller.dirty() && !shouldWarnBeforeUnload");
     expect(panel).toContain("library.controller.dirty() && !window.confirm");
   });
@@ -28,9 +28,9 @@ describe("announcement library production wiring", () => {
     expect(hook).toContain('removeEventListener("click", navigation.click, true)');
   });
   it("wires live saved outlines and dirty guards into the actual generation dispatch", () => {
-    const panel = source("WalkthroughAnnouncementPanel.tsx"), draft = source("useAnnouncementDraftSlots.ts");
-    expect(panel).toContain("saved: optionSource.saved, blocked: library.controller.blocked");
-    expect(draft).toContain("dispatchResolvedAnnouncementDraft(ctx, resolved, argsRef.current.draftOne)");
+    const panel = source("WalkthroughAnnouncementPanel.tsx"), draft = source("pair-dispatch.ts");
+    expect(panel).toContain("saved: optionSource.saved, savedState: savedFormatsState, blocked: library.controller.blocked");
+    expect(draft).toContain("dispatchResolvedAnnouncementDraft({ ...ctx, timing: slot.timing, researchOutcome, revision }, resolved, api.draftOne)");
     expect(draft).toContain("if (resolved.error)");
   });
   it("keeps accessible row controls, explicit deletion confirmation, import and add/remove focus paths", () => {

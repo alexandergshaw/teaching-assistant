@@ -67,6 +67,7 @@ describe("deriveAnnouncementOutline - realistic multi-section exemplar", () => {
           heading: "Due Dates",
           break: "heading",
           listKind: "unordered",
+          listItemRange: [1, 3], checklist: false,
           sentenceRange: [1, 3],
         },
         {
@@ -74,6 +75,7 @@ describe("deriveAnnouncementOutline - realistic multi-section exemplar", () => {
           heading: "What To Do This Week",
           break: "heading",
           listKind: "ordered",
+          listItemRange: [2, 4], checklist: false,
           sentenceRange: [2, 4],
         },
         {
@@ -193,11 +195,11 @@ describe("deriveAnnouncementOutline - list kind", () => {
     expect(outline.sections[1].listKind).toBe("ordered");
   });
 
-  it("does not call a single bulleted sentence a list", () => {
+  it("preserves a single bulleted item as a list", () => {
     const text = ["Notes", "", "- This is one aside, not a list of several items."].join("\n");
     const outline = deriveAnnouncementOutline(text);
     expect(outline.sections).toHaveLength(1);
-    expect(outline.sections[0].listKind).toBeNull();
+    expect(outline.sections[0].listKind).toBe("unordered");
   });
 });
 

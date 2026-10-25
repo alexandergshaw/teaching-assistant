@@ -1,23 +1,10 @@
 "use client";
 
-// The stateful orchestration half of the multi-draft-slot seam (docs/announcement-from-walkthrough-acceptance-criteria.md
-// section 5b). Owns the reducer, the id counter, the async fan-out and
-// Copy's payload construction. Imports NO server action - the panel injects
-// `draftOne`, `postDraft`, `fetchResources` and `researchFingerprint`, so
-// every literal server-action call stays in
-// WalkthroughAnnouncementPanel.tsx (blocker 5's requirement, re-armed by
-// walkthrough-announcement.structure.test.ts's own pin).
-//
-// G3 (docs/BACKLOG.md 4.1's sibling chunk): once-per-Generate resource
-// research (Ruling 9), never inside buildRequest (which stays synchronous -
-// Ruling 4's own finding). `generate` awaits research BEFORE dispatching
-// `generate-started` (Ruling 24) and re-reads target ids AFTER that await,
-// since an effect may have changed the slot set during the wait. A second
-// Generate click while research is in flight REUSES the same in-flight
-// promise rather than starting a second research call or silently doing
-// nothing (Ruling 34) - Generate itself stays enabled throughout.
+// The existing slot reducer remains the single draft store. pair-dispatch owns
+// synchronous call reservations and finalized snapshots; this hook binds it to
+// React state, clipboard, scheduling and explicit posting confirmations.
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useReducer, useRef, useState, useLayoutEffect } from "react";
 import { markdownToHtml } from "@/lib/markdown";
 import { writeClipboardText } from "../ui/clipboard";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
@@ -26,14 +13,12 @@ import {
   FIRST_SLOT_ID,
   emptySlotIds,
   makeSlot,
-  resolveChoice,
   mayCommitPost,
   slotsReducer,
   type AnnouncementTiming,
   type DraftSlot,
   type LiveDefaults,
   type ResearchNotice,
-  type ResolvedTemplate,
   type ResourceOutcome,
   type TemplateChoice,
 } from "./announcement-draft-slots";
@@ -43,6 +28,7 @@ import { resolveScheduledVisibility } from "./scheduled-visibility";
  * draft EXCEPT the research result, which cannot exist until after an await
  * buildRequest itself cannot perform (Ruling 4/9). */
 export interface AnnouncementDraftRequestContext {
+  readonly sourceKind?: "live" | "upload";
   readonly courseLabel: string;
   readonly moduleLabel: string | null;
   readonly materialsText: string;
@@ -68,6 +54,7 @@ export interface AnnouncementDraftDispatchContext extends AnnouncementDraftReque
    * no `timing` on AnnouncementDraftRequestContext above; it is per-slot,
    * read from `slot.timing` at each dispatch site, never from `ctx`. */
   readonly timing: AnnouncementTiming;
+  readonly revision?: { readonly editedDraft: { readonly title: string; readonly message: string }; readonly revisionNote: string };
 }
 
 /** Local mirror of markdown.ts's own `escapeHtml` (markdown.ts:28-29) - not
@@ -219,18 +206,12 @@ export function postSignatureFor(slot: DraftSlot): string | null {
   ]);
 }
 
-/** Executable production dispatch seam: only outlines reach the drafting adapter. */
-export async function dispatchResolvedAnnouncementDraft(
-  ctx: AnnouncementDraftDispatchContext,
-  resolved: ReturnType<typeof resolveChoice>,
-  draftOne: (ctx: AnnouncementDraftDispatchContext, outline: AnnouncementOutline) => Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }>
-) {
-  if (resolved.error) return { error: resolved.error };
-  const result = await draftOne(ctx, resolved.outline);
-  return "error" in result ? result : { ...result, builtFrom: resolved.template, timing: ctx.timing };
-}
+export { dispatchResolvedAnnouncementDraft } from "./pair-dispatch";
+import { createPairDraftRunner } from "./pair-dispatch";
 
 export function useAnnouncementDraftSlots(args: {
+  readonly scopeKey?: string;
+  readonly mayGenerate?: () => boolean;
   readonly buildRequest: () => AnnouncementDraftRequestContext;
   readonly resolveLive: () => LiveDefaults;
   readonly draftOne: (
@@ -272,156 +253,59 @@ export function useAnnouncementDraftSlots(args: {
    * needing to import it. */
   readonly researchFingerprint: (ctx: AnnouncementDraftRequestContext) => string;
 }) {
-  const [slots, dispatch] = useReducer(slotsReducer, FIRST_SLOT_ID, initialSlotsFromId);
-
-  // Two latest-refs, not one - `slots` is reducer state and is read by every
-  // callback below via `slotsRef.current`, never via the `slots` closure
-  // variable, so an empty dependency array stays truthful. Safe because
-  // React flushes pending passive effects before the next discrete input
-  // event; NOT safe against two Generate clicks landing inside the same
-  // event-processing tick (residual R8 - the reducer's own guards keep
-  // STATE correct even then, but do not stop duplicate in-flight calls).
+  const [slots, reactDispatch] = useReducer(slotsReducer, FIRST_SLOT_ID, initialSlotsFromId);
   const argsRef = useRef(args);
   const slotsRef = useRef(slots);
-  useEffect(() => {
-    argsRef.current = args;
-    slotsRef.current = slots;
-  });
-
-  const nextIdRef = useRef(2);
-
-  // G3 Ruling 17: the last research result, keyed by the fingerprint it was
-  // computed from - `regenerate` reuses it ONLY when the fingerprint still
-  // matches every input the result depended on, never unconditionally.
-  const researchCacheRef = useRef<{ fingerprint: string; outcome: ResourceOutcome } | null>(null);
-  // G3 Ruling 34: a REAL shared in-flight promise, not a boolean - a second
-  // Generate click while a research call for the SAME fingerprint is still
-  // outstanding awaits this same promise rather than starting a second
-  // fetchResources call or doing nothing at all (a suppressing boolean would
-  // leave the second click doing nothing, indistinguishable from a broken
-  // button - the exact complaint this chunk opened with).
-  const researchInFlightRef = useRef<{ fingerprint: string; promise: Promise<ResourceOutcome> } | null>(null);
-  // Counts concurrent in-flight fetches (a second click with a DIFFERENT
-  // fingerprint - e.g. the course changed mid-wait - starts its own fetch
-  // rather than reusing the first's, per Ruling 17) so the status line does
-  // not clear while a differently-fingerprinted research call is still
-  // running.
-  const researchInFlightCountRef = useRef(0);
   const [researching, setResearching] = useState(false);
-
-  const runDraft = useCallback(
-    (slotId: string, resolved: { template: ResolvedTemplate; outline: AnnouncementOutline; error?: string }, ctx: AnnouncementDraftDispatchContext) => {
-      const onResult = (result: Awaited<ReturnType<typeof dispatchResolvedAnnouncementDraft>>) => {
-        dispatch({ type: "result", id: slotId, result });
-      };
-      const onRejected = () => {
-        dispatch({ type: "result", id: slotId, result: { error: "Could not reach the server - nothing was drafted." } });
-      };
-      return dispatchResolvedAnnouncementDraft(ctx, resolved, argsRef.current.draftOne).then(onResult, onRejected);
-    },
-    []
-  );
+  const dispatch = useCallback((action: Parameters<typeof slotsReducer>[1]) => {
+    slotsRef.current = slotsReducer(slotsRef.current, action);
+    reactDispatch(action);
+  }, []);
+  useLayoutEffect(() => { argsRef.current = args; });
+  const runnerRef = useRef<ReturnType<typeof createPairDraftRunner> | null>(null);
+  useLayoutEffect(() => {
+    runnerRef.current = createPairDraftRunner(() => slotsRef.current, dispatch, () => argsRef.current, setResearching);
+    return () => runnerRef.current?.invalidate();
+  }, [dispatch]);
+  const nextIdRef = useRef(3);
 
   const addSlot = useCallback((choice: TemplateChoice, timing: AnnouncementTiming) => {
     const id = `wta-slot-${nextIdRef.current}`;
     nextIdRef.current += 1;
     dispatch({ type: "add", id, choice, timing });
-  }, []);
+  }, [dispatch]);
 
-  // New run (SMOOTH-WALKTHROUGH F4): back to one empty slot AND the id counter
-  // back to 2, so ids stay in step with the reducer's FIRST_SLOT_ID start.
+  // A new run preserves explicit pair selections; a scope change clears them
+  // before that scope's saved preferences load. Optional slots are per run.
   const reset = useCallback(() => {
-    nextIdRef.current = 2;
+    const choices = slotsRef.current.slice(0, 2).map(slot => slot.choice);
+    runnerRef.current?.invalidate();
+    nextIdRef.current = 3;
     dispatch({ type: "reset" });
-  }, []);
+    dispatch({ type: "choose", id: FIRST_SLOT_ID, choice: choices[0] ?? { kind: "unresolved" } });
+    dispatch({ type: "add", id: "wta-slot-2", choice: choices[1] ?? { kind: "unresolved" }, timing: "midweek" });
+  }, [dispatch]);
+  useLayoutEffect(() => {
+    reset();
+    dispatch({ type: "choose", id: FIRST_SLOT_ID, choice: { kind: "unresolved" } });
+    dispatch({ type: "choose", id: "wta-slot-2", choice: { kind: "unresolved" } });
+  }, [args.scopeKey, reset, dispatch]);
 
-  const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), []);
-  const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), []);
-  const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), []);
-  const setScheduledAt = useCallback((id: string, raw: string) => dispatch({ type: "set-scheduled-at", id, raw }), []);
+  const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), [dispatch]);
+  const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), [dispatch]);
+  const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), [dispatch]);
+  const setScheduledAt = useCallback((id: string, raw: string) => dispatch({ type: "set-scheduled-at", id, raw }), [dispatch]);
   const editSlot = useCallback(
-    (id: string, field: "title" | "message", value: string) => dispatch({ type: "edit", id, field, value }),
-    []
+    (id: string, field: "title" | "message" | "revisionNote", value: string) => dispatch({ type: "edit", id, field, value }),
+    [dispatch]
   );
 
-  const generate = useCallback(async () => {
-    const idsBeforeResearch = emptySlotIds(slotsRef.current);
-    if (idsBeforeResearch.length === 0) return;
+  const generate = useCallback(() => runnerRef.current!.generate(), []);
+  const regenerate = useCallback((id: string) => { void runnerRef.current!.regenerate(id); }, []);
+  const retry = useCallback((id: string) => { void runnerRef.current!.retry(id); }, []);
 
-    const ctx = argsRef.current.buildRequest();
-    const fingerprint = argsRef.current.researchFingerprint(ctx);
-    const cached = researchCacheRef.current;
-
-    const cachedOutcome = cachedResearchFor(cached, fingerprint);
-    let outcome: ResourceOutcome;
-    if (cachedOutcome) {
-      outcome = cachedOutcome;
-    } else if (!ctx.researchOn) {
-      outcome = { kind: "off" };
-    } else {
-      const existing = researchInFlightRef.current;
-      let promise: Promise<ResourceOutcome>;
-      if (shouldReuseInFlightResearch(existing, fingerprint) && existing) {
-        // G3 Ruling 34: reuse the SAME in-flight promise - do not start a
-        // second fetchResources call for a research request already
-        // outstanding for these exact inputs.
-        promise = existing.promise;
-      } else {
-        researchInFlightCountRef.current += 1;
-        setResearching(true);
-        promise = argsRef.current
-          .fetchResources(ctx)
-          .catch((): ResourceOutcome => ({ kind: "failed", reason: "Could not reach the server." }))
-          .finally(() => {
-            if (researchInFlightRef.current?.promise === promise) researchInFlightRef.current = null;
-            researchInFlightCountRef.current = Math.max(0, researchInFlightCountRef.current - 1);
-            if (researchInFlightCountRef.current === 0) setResearching(false);
-          });
-        researchInFlightRef.current = { fingerprint, promise };
-      }
-      outcome = await promise;
-    }
-    researchCacheRef.current = { fingerprint, outcome };
-
-    // Re-read AFTER the only await point above - a slot removed or filled
-    // during the research wait (by another in-flight generate(), or by the
-    // user) must not be handed a stale target list (Ruling 24).
-    const ids = emptySlotIds(slotsRef.current);
-    if (ids.length === 0) return;
-
-    dispatch({ type: "generate-started", ids });
-    const live = argsRef.current.resolveLive();
-    for (const id of ids) {
-      const slot = slotsRef.current.find((s) => s.id === id);
-      if (!slot) continue;
-      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome, timing: slot.timing });
-    }
-  }, [runDraft]);
-
-  const regenerate = useCallback(
-    (id: string) => {
-      const slot = slotsRef.current.find((s) => s.id === id);
-      if (!slot) return;
-      dispatch({ type: "regenerate-started", id });
-      const ctx = argsRef.current.buildRequest();
-      const live = argsRef.current.resolveLive();
-
-      // G3 Ruling 17: consult researchOn on EVERY call, and never pair a new
-      // course/module/materials context with a previous context's cached
-      // research result - resolveRegenerateResearchOutcome requires an exact
-      // fingerprint match, or falls back to "off" rather than re-researching
-      // inline (Res-r3-1, owner: repo owner - regenerate never awaits a
-      // fresh research call itself).
-      const fingerprint = argsRef.current.researchFingerprint(ctx);
-      const outcome = resolveRegenerateResearchOutcome(ctx.researchOn, researchCacheRef.current, fingerprint);
-
-      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome, timing: slot.timing });
-    },
-    [runDraft]
-  );
-
-  const armRegenerate = useCallback((id: string) => dispatch({ type: "arm-regenerate", id }), []);
-  const cancelRegenerate = useCallback((id: string) => dispatch({ type: "cancel-regenerate", id }), []);
+  const armRegenerate = useCallback((id: string) => dispatch({ type: "arm-regenerate", id }), [dispatch]);
+  const cancelRegenerate = useCallback((id: string) => dispatch({ type: "cancel-regenerate", id }), [dispatch]);
 
   const commitPost = useCallback(
     (id: string) => {
@@ -466,7 +350,7 @@ export function useAnnouncementDraftSlots(args: {
           })
       );
     },
-    []
+    [dispatch]
   );
 
   const armPost = useCallback(
@@ -483,10 +367,10 @@ export function useAnnouncementDraftSlots(args: {
       }
       dispatch({ type: "arm-post", id, signature });
     },
-    [commitPost]
+    [commitPost, dispatch]
   );
 
-  const cancelPost = useCallback((id: string) => dispatch({ type: "cancel-post", id }), []);
+  const cancelPost = useCallback((id: string) => dispatch({ type: "cancel-post", id }), [dispatch]);
 
   const copySlot = useCallback((id: string) => {
     const slot = slotsRef.current.find((s) => s.id === id);
@@ -510,7 +394,7 @@ export function useAnnouncementDraftSlots(args: {
           error: "Could not copy - your browser blocked clipboard access. Copy the text manually instead.",
         })
     );
-  }, []);
+  }, [dispatch]);
 
   const readyToDraftCount = emptySlotIds(slots).length;
 
@@ -527,6 +411,7 @@ export function useAnnouncementDraftSlots(args: {
     editSlot,
     generate,
     regenerate,
+    retry,
     copySlot,
     armPost,
     cancelPost,
@@ -537,5 +422,5 @@ export function useAnnouncementDraftSlots(args: {
 }
 
 function initialSlotsFromId(id: string): readonly DraftSlot[] {
-  return [makeSlot(id, { kind: "default" }, "beginning-of-week")];
+  return [makeSlot(id, { kind: "unresolved" }, "beginning-of-week"), makeSlot("wta-slot-2", { kind: "unresolved" }, "midweek")];
 }

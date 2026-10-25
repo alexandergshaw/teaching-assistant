@@ -196,6 +196,8 @@ function AnnouncementsPanel() {
 
   const liveDefaults: LiveDefaults = {
     pastedOutline: null,
+    saved: savedExemplars.map(entry => ({ id: entry.id, label: entry.label || "Saved format", outline: entry.outline })),
+    savedState: savedFormatsState,
     mostRecent: mostRecentExemplar
       ? { id: mostRecentExemplar.id, label: mostRecentExemplar.label || "Most recent", outline: mostRecentExemplar.outline }
       : null,
@@ -217,7 +219,13 @@ function AnnouncementsPanel() {
       receipt,
       error: null,
     };
-    const request = buildPromptDraftRequest(uiState);
+    let request;
+    try { request = buildPromptDraftRequest(uiState); }
+    catch (error) {
+      setDrafting(false);
+      setPostNote({ kind: "error", text: error instanceof Error ? error.message : "Choose an available saved format before drafting." });
+      return;
+    }
     const result = await draftPromptAnnouncementAction(request);
     const next = applyPromptDraftResult(uiState, result);
     setDrafting(false);

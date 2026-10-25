@@ -149,10 +149,10 @@ describe("resolveChoice - Set C", () => {
     expect(r.outline).toEqual(EMPTY_ANNOUNCEMENT_OUTLINE);
   });
 
-  it("saved choice resolves to its own carried outline, never touching the live list", () => {
-    const r = resolveChoice({ kind: "saved", exemplarId: "e9", label: "Old", outline: OUTLINE_B }, { pastedOutline: OUTLINE_A, mostRecent: null });
-    expect(r.template).toEqual({ kind: "saved", exemplarId: "e9", label: "Old" });
-    expect(r.outline).toBe(OUTLINE_B);
+  it("a missing saved choice blocks instead of using its carried outline", () => {
+    const result = resolveChoice({ kind: "saved", exemplarId: "e9", label: "Old", outline: OUTLINE_A }, { pastedOutline: null, mostRecent: null, saved: [], blocked: () => false });
+    expect(result.error).toContain("unavailable");
+    expect(result.outline).toEqual(EMPTY_ANNOUNCEMENT_OUTLINE);
   });
 
   it("none choice resolves to none with the empty outline", () => {
@@ -833,6 +833,7 @@ describe("reset action (SMOOTH-WALKTHROUGH W1-4)", () => {
         choice: { kind: "default" },
         timing: "beginning-of-week",
         scheduledAt: "",
+      revisionNote: "",
         draft: { phase: "empty", error: null },
         postArmedFor: null,
         regenerateArmed: false,

@@ -231,52 +231,61 @@ export async function seekVideoTo(video: HTMLVideoElement, timeSec: number, time
   });
 }
 
-export async function ensureFiniteDuration(video: HTMLVideoElement): Promise<number> {
+export async function ensureFiniteDuration(video: HTMLVideoElement, signal?: AbortSignal): Promise<number> {
+  const cancelled = () => new DOMException("Video duration reading was cancelled.", "AbortError");
+  if (signal?.aborted) throw cancelled();
   if (typeof video.duration === "number" && video.duration > 0 && isFinite(video.duration)) {
     return video.duration;
   }
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("Could not determine the video duration."));
-    }, 10000);
-
+    let finished = false;
+    let rewinding = false;
+    let measuredDuration = 0;
+    let rewindTimeout: ReturnType<typeof setTimeout> | undefined;
+    const timeout = setTimeout(() => fail(new Error("Could not determine the video duration.")), 10000);
     const cleanup = () => {
       clearTimeout(timeout);
+      if (rewindTimeout !== undefined) clearTimeout(rewindTimeout);
       video.removeEventListener("durationchange", onDurationChange);
       video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("seeked", onRewound);
+      video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
     };
-
+    const fail = (error: Error) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = () => fail(new Error("Could not determine the video duration."));
+    const onAbort = () => fail(cancelled());
+    const onRewound = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      resolve(measuredDuration);
+    };
     const onDurationChange = () => {
-      if (typeof video.duration === "number" && video.duration > 0 && isFinite(video.duration)) {
-        cleanup();
-        finalizeDuration();
-      }
-    };
-
-    const onSeeked = () => {
-      if (typeof video.duration === "number" && video.duration > 0 && isFinite(video.duration)) {
-        cleanup();
-        finalizeDuration();
-      }
-    };
-
-    const finalizeDuration = async () => {
-      video.currentTime = 0;
+      if (finished || rewinding || !Number.isFinite(video.duration) || video.duration <= 0) return;
+      measuredDuration = video.duration;
+      rewinding = true;
+      video.removeEventListener("durationchange", onDurationChange);
+      video.removeEventListener("seeked", onSeeked);
+      video.addEventListener("seeked", onRewound);
+      // Preserve the existing best-effort rewind, with an owned listener/timer.
+      rewindTimeout = setTimeout(onRewound, 100);
       try {
-        await new Promise<void>((res) => {
-          video.addEventListener("seeked", () => res(), { once: true });
-          setTimeout(() => res(), 100);
-        });
-      } catch {
-        // Best effort
-      }
-      resolve(video.duration);
+        video.currentTime = 0;
+      } catch { fail(new Error("Could not seek this video.")); }
     };
-
+    const onSeeked = onDurationChange;
     video.addEventListener("durationchange", onDurationChange);
     video.addEventListener("seeked", onSeeked);
-    video.currentTime = Number.MAX_SAFE_INTEGER;
+    video.addEventListener("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try { video.currentTime = Number.MAX_SAFE_INTEGER; }
+    catch { fail(new Error("Could not seek this video.")); }
   });
 }

@@ -104,14 +104,14 @@ describe("directory-wide ta- key ordinal canary (this directory has no canary an
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly six distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources, ta-rec-wta-autodraft)", () => {
+  it("finds exactly seven distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources, ta-rec-wta-autodraft)", () => {
     // G3 Ruling 4/G: bumped from 3 to 5 in the same change that added the
     // emoji and resource-research toggles - the canary this comment sits
     // next to is the only gate in this repo that can see a persisted key
     // added anywhere in this directory. SMOOTH-WALKTHROUGH W3 (R-F1-TOGGLE):
     // bumped from 5 to 6 in the same commit that added the persisted
     // auto-draft toggle.
-    expect(distinctKeys.size).toBe(6);
+    expect([...distinctKeys].sort()).toEqual(["ta-rec-wta-autodraft", "ta-rec-wta-course", "ta-rec-wta-emoji", "ta-rec-wta-module", "ta-rec-wta-notes", "ta-rec-wta-resources", "ta-walkthrough-pair-v"].sort());
   });
 
   it("the exemplar's raw text is NOT among the persisted keys (decision P3: Supabase, not localStorage)", () => {
@@ -404,19 +404,12 @@ describe("G1 task 8 canary: :830's Retry wiring is keyed to failed OR timedout, 
   });
 });
 
-describe("G1: Generate's disable gate is keyed only to the loading state, so a timed-out fetch re-enables it", () => {
-  const panelSource = fs.readFileSync(
-    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
-    "utf-8"
-  );
-
-  it("Generate's disabled expression checks savedFormatsState === \"loading\", not \"failed\" or \"timedout\"", () => {
-    const start = panelSource.indexOf("disabled={");
-    const idx = panelSource.indexOf('savedFormatsState === "loading"');
-    expect(idx, "expected to find Generate's own loading check").toBeGreaterThan(start);
-    const nearby = panelSource.slice(idx - 200, idx + 50);
-    expect(nearby).not.toMatch(/savedFormatsState === "failed"/);
-    expect(nearby).not.toMatch(/savedFormatsState === "timedout"/);
+describe("pair Generate admits a clean sibling while selected unavailable formats block at dispatch", () => {
+  it("does not globally disable the pair for library availability", () => {
+    const source = stripComments(fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"), "utf8"));
+    const generate = source.slice(source.indexOf('loading={anyDrafting}'), source.indexOf('onClick={() => void generate()}'));
+    expect(generate).toContain("readyToDraftCount === 0");
+    expect(generate).not.toContain("savedFormatsState");
   });
 });
 
@@ -632,7 +625,7 @@ describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-ru
   describe("D: fresh-run reset is gated by isRunComplete in handleStartStop", () => {
     const hssBlock = sliceBetween(
       "const handleStartStop = useCallback",
-      "}, [capturing, start, stop, slots, reset]);"
+      "}, [capturing, extracting, pendingFrames, start, stop, slots, reset, inputKind, upload.busy, pushNotice]);"
     );
 
     it("D1: reset(), batchBlocksRef clear and setLegibleBlockCount(0) all live INSIDE if (isRunComplete(slots))", () => {
@@ -759,8 +752,8 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
       expect(barOpen).toBeGreaterThan(-1);
       expect(barClose).toBeGreaterThan(startTextIdx);
     });
-    it("Generate announcement and Generate video script both sit inside the wrapper that holds Start", () => {
-      expect(barSlice).toContain("Generate announcement");
+    it("Generate both and Generate video script both sit inside the wrapper that holds Start", () => {
+      expect(barSlice).toContain("Generate both");
       expect(barSlice).toContain("Generate video script");
     });
     it("the bar holds no Post control (the sticky bar must stay non-destructive)", () => {
@@ -962,11 +955,11 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
       expect(library).toContain("onClick={() => void remove(card.id)}");
       expect(library).toContain("onClick={() => setArmed(card.id)}");
     });
-    it("Start carries no disabled attribute", () => {
+    it("Start prevents switching an uploaded input without explicit reset", () => {
       const startOpen = panel.lastIndexOf("<Button", panel.indexOf("Start capture"));
       const tag = panel.slice(startOpen, panel.indexOf(">", startOpen));
       expect(tag).toContain("handleStartStop");
-      expect(tag).not.toMatch(/\bdisabled\b/);
+      expect(tag).toContain('disabled={upload.busy || inputKind === "upload"}');
     });
   });
 });

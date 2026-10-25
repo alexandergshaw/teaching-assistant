@@ -46,6 +46,8 @@ export interface OutlineSection {
    * range describes the shape without pretending to a precision that reading
    * one example cannot support. */
   sentenceRange: readonly [number, number];
+  listItemRange?: readonly [number, number];
+  checklist?: boolean;
 }
 
 /** The structural outline of one pasted announcement. */

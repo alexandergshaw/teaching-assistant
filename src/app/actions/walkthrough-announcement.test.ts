@@ -97,6 +97,19 @@ const NO_RESEARCH = { kind: "off" as const };
 const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
 
 describe("draftWalkthroughAnnouncementAction", () => {
+  it("the actual provider request excludes old body and factual headings and bounds target revision context", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: '{"title":"Current","message":"Current"}' } as never);
+    const old = "## OLD_HEADING_ASSIGNMENT\nOLD_BODY_FACT.\n\nComplete\n\n- OLD_ITEM one\n- OLD_ITEM two";
+    await draftWalkthroughAnnouncementAction({ courseLabel: "Course", moduleLabel: null,
+      materialsText: "CURRENT_FACT due Thursday", outline: deriveAnnouncementOutline(old), coverageBlock: "", notes: "",
+      emojiPolicy: "forbidden", timing: "midweek", researchedResources: [], researchOutcome: NO_RESEARCH,
+      revision: { editedDraft: { title: "EDITED_TARGET", message: "TARGET_BODY" }, revisionNote: "REVISION_NOTE" + "x".repeat(2200) } });
+    const text = (vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0] as { text: string }).text;
+    for (const sentinel of ["OLD_HEADING_ASSIGNMENT", "OLD_BODY_FACT", "OLD_ITEM"]) expect(text).not.toContain(sentinel);
+    for (const expected of ["CURRENT_FACT", "Complete", "an unordered list", "EDITED_TARGET", "TARGET_BODY", "REVISION_NOTE", "MIDWEEK CHECK-IN"]) expect(text).toContain(expected);
+    expect(text).not.toContain("x".repeat(2001));
+    expect(createAnnouncementFromMarkdown).not.toHaveBeenCalled();
+  });
   it("drafts successfully, threading a real prompt and an OUTLINE-SIZED token budget (P7: never the fixed 1024 draftAnnouncementAction uses)", async () => {
     vi.mocked(callLlm).mockResolvedValue({
       ok: true,

@@ -58,6 +58,7 @@ export const FIRST_SLOT_ID = "wta-slot-1";
  * resolve time (pasted text, else the course's most recent saved
  * exemplar, else none) - see resolveChoice below. */
 export type TemplateChoice =
+  | { readonly kind: "unresolved" }
   | { readonly kind: "default" }
   | { readonly kind: "pasted" }
   | { readonly kind: "saved"; readonly exemplarId: string; readonly label: string; readonly outline: AnnouncementOutline }
@@ -121,6 +122,7 @@ export interface DraftSlot {
    * across sessions, not a one-shot publication instant. Defaults to "" on
    * every new slot, same as `postArmedFor` and friends below. */
   readonly scheduledAt: string;
+  readonly revisionNote: string;
   readonly draft: SlotDraft;
   readonly postArmedFor: string | null;
   readonly regenerateArmed: boolean;
@@ -300,7 +302,9 @@ export function receiptLabel(t: ResolvedTemplate): string {
  * function never disables drafting on an unavailable choice.
  */
 export function optionsForSlot(slot: DraftSlot, src: TemplateOptionSource): readonly TemplateOption[] {
-  const options: TemplateOption[] = [
+  const options: TemplateOption[] = slot.id === "wta-slot-1" || slot.id === "wta-slot-2" ? [
+    { id: "unresolved", label: "Choose a saved example or no format", choice: { kind: "unresolved" }, unavailable: false },
+  ] : [
     { id: "default", label: defaultOptionLabel(src), choice: { kind: "default" }, unavailable: false },
   ];
   if (src.hasPastedText) {
@@ -342,6 +346,7 @@ export interface LiveDefaults {
   readonly pastedOutline: AnnouncementOutline | null;
   readonly mostRecent: TemplateCandidate | null;
   readonly saved?: readonly TemplateCandidate[];
+  readonly savedState?: SavedFormatsState;
   readonly blocked?: (id: string) => boolean;
 }
 
@@ -352,6 +357,7 @@ export function resolveChoice(
   choice: TemplateChoice,
   live: LiveDefaults
 ): { readonly template: ResolvedTemplate; readonly outline: AnnouncementOutline; readonly error?: string } {
+  if (choice.kind === "unresolved") return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE, error: "Choose a saved example or explicitly choose No format to match for this draft." };
   const selectedId = choice.kind === "saved" ? choice.exemplarId : choice.kind === "default" && !live.pastedOutline ? live.mostRecent?.id : null;
   if (selectedId && live.blocked?.(selectedId)) return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE, error: "Save or retry the selected announcement in the library before drafting." };
   if (choice.kind === "default") {
@@ -369,7 +375,8 @@ export function resolveChoice(
   }
   if (choice.kind === "saved") {
     const latest = live.saved?.find(entry => entry.id === choice.exemplarId);
-    return { template: { kind: "saved", exemplarId: choice.exemplarId, label: latest?.label ?? choice.label }, outline: latest?.outline ?? choice.outline };
+    if (!latest || (live.savedState && live.savedState !== "loaded")) return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE, error: "The selected saved example is unavailable. Reload the library or choose another format." };
+    return { template: { kind: "saved", exemplarId: latest.id, label: latest.label }, outline: latest.outline };
   }
   return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE };
 }
@@ -380,6 +387,7 @@ export function makeSlot(id: string, choice: TemplateChoice, timing: Announcemen
     choice,
     timing,
     scheduledAt: "",
+    revisionNote: "",
     draft: { phase: "empty", error: null },
     postArmedFor: null,
     regenerateArmed: false,
@@ -414,7 +422,7 @@ export type SlotsAction =
   | { type: "choose"; id: string; choice: TemplateChoice }
   | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
   | { type: "set-scheduled-at"; id: string; raw: string }
-  | { type: "edit"; id: string; field: "title" | "message"; value: string }
+  | { type: "edit"; id: string; field: "title" | "message" | "revisionNote"; value: string }
   | { type: "generate-started"; ids: readonly string[] }
   | { type: "regenerate-started"; id: string }
   | { type: "result"; id: string; result: Drafted | { error: string } }
@@ -470,6 +478,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     }
     case "edit": {
       return updateSlot(state, action.id, (slot) => {
+        if (action.field === "revisionNote") return { ...slot, revisionNote: action.value.slice(0, 2000), regenerateArmed: false };
         if (slot.draft.phase !== "drafted") return slot;
         const draft = { ...slot.draft.draft, [action.field]: action.value };
         return {

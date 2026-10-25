@@ -140,6 +140,12 @@ function buildBlocks(text: string): string[][] {
       }
       continue;
     }
+    // Markdown headings and transitions between prose and lists are structural
+    // breaks even when the pasted text has no blank lines.
+    if (current.length && (MARKDOWN_HEADING_RE.test(line) || MARKDOWN_HEADING_RE.test(current[0]) || isListLine(line) != isListLine(current[current.length - 1]))) {
+      blocks.push(current);
+      current = [];
+    }
     current.push(line);
   }
   if (current.length > 0) blocks.push(current);
@@ -249,7 +255,7 @@ interface BlockAnalysis {
 function analyzeBlock(block: string[]): BlockAnalysis {
   const listLineCount = block.filter(isListLine).length;
   const listKind: OutlineListKind =
-    block.length >= 2 && listLineCount === block.length
+    block.length >= 1 && listLineCount === block.length
       ? ORDERED_LIST_RE.test(block[0])
         ? "ordered"
         : "unordered"
@@ -307,6 +313,7 @@ export function deriveAnnouncementOutline(text: string): AnnouncementOutline {
       break: headingText !== null ? "heading" : "paragraph-break",
       listKind,
       sentenceRange,
+      ...(listKind ? { listItemRange: [Math.max(1, bodyBlock.length - 1), bodyBlock.length + 1] as const, checklist: bodyBlock.some(line => /^[-*]\s+\[[ xX]\]/.test(line)) } : {}),
     };
     sections.push(section);
 

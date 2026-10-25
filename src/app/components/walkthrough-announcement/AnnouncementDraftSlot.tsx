@@ -32,6 +32,7 @@ import {
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
+import { pairRole } from "./pair-preferences";
 import { resolveScheduledVisibility } from "./scheduled-visibility";
 
 const TIMING_OPTIONS: readonly { readonly value: AnnouncementTiming; readonly label: string }[] = [
@@ -62,13 +63,14 @@ export interface AnnouncementDraftSlotProps {
   readonly onChooseTemplate: (id: string, choice: TemplateChoice) => void;
   readonly onChooseTiming: (id: string, timing: AnnouncementTiming) => void;
   readonly onSetScheduledAt: (id: string, raw: string) => void;
-  readonly onEdit: (id: string, field: "title" | "message", value: string) => void;
+  readonly onEdit: (id: string, field: "title" | "message" | "revisionNote", value: string) => void;
   readonly onRegenerateArm: (id: string) => void;
   readonly onRegenerateConfirm: (id: string) => void;
   readonly onRegenerateCancel: (id: string) => void;
   readonly onPostArm: (id: string) => void;
   readonly onPostCancel: (id: string) => void;
   readonly onCopy: (id: string) => void;
+  readonly onRetry: (id: string) => void;
   readonly onRemove: (id: string) => void;
 }
 
@@ -91,6 +93,7 @@ export default function AnnouncementDraftSlot({
   onPostCancel,
   onCopy,
   onRemove,
+  onRetry,
 }: AnnouncementDraftSlotProps) {
   const options = optionsForSlot(slot, optionSource);
   const selectedOption = options.find((o) => o.id === choiceId(slot.choice)) ?? options[0];
@@ -127,7 +130,7 @@ export default function AnnouncementDraftSlot({
 
   return (
     <fieldset ref={rootRef} className={controls.section}>
-      <legend className={controls.sectionLegend}>Draft {ordinal}</legend>
+      <legend className={controls.sectionLegend}>{pairRole(slot.id) === "weekly" ? "Weekly overview" : pairRole(slot.id) === "midweek" ? "Midweek reminder" : `Draft ${ordinal}`}</legend>
 
       <div className={styles.adaptRow}>
         <TextField
@@ -153,6 +156,7 @@ export default function AnnouncementDraftSlot({
           size="small"
           label="Written for"
           className={controls.fieldMd}
+          disabled={pairRole(slot.id) !== null}
           value={slot.timing}
           onChange={(e) => onChooseTiming(slot.id, e.target.value as AnnouncementTiming)}
         >
@@ -194,6 +198,7 @@ export default function AnnouncementDraftSlot({
       {slot.draft.phase !== "drafting" && slot.draft.error && (
         <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
           {slot.draft.error}
+          {phase === "empty" && <Button size="small" onClick={() => onRetry(slot.id)}>Retry this draft</Button>}
         </div>
       )}
 
@@ -266,6 +271,9 @@ export default function AnnouncementDraftSlot({
             </div>
           )}
 
+          <TextField size="small" label="Revision note (only this draft)" value={slot.revisionNote}
+            onChange={e => onEdit(slot.id, "revisionNote", e.target.value)} multiline minRows={2} fullWidth
+            slotProps={{ htmlInput: { maxLength: 2000 } }} helperText="Optional. Regenerate uses this note and your edited draft; the sibling is unchanged." />
           <div className={`${styles.ghActions} ${controls.runRow}`}>
             <ConfirmArmButtons
               armed={postArmed}
@@ -354,7 +362,7 @@ export default function AnnouncementDraftSlot({
           )}
           {slot.regenerateArmed && (
             <p id={`wta-regenerate-consequence-${slot.id}`} className={styles.fieldHint}>
-              Regenerating replaces this draft&apos;s hand-edited text - anything typed above will be lost.
+              Confirming replaces only this draft using its edited text and revision note. The other draft stays unchanged. A failed request keeps your edits and note.
             </p>
           )}
           {!courseName && <p className={styles.fieldHint}>Choose a course above to post.</p>}

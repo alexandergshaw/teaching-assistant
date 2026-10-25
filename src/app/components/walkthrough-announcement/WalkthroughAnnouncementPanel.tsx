@@ -14,7 +14,7 @@
 // point and a second screen-share grant; an instructor cannot get a deck
 // and an announcement from one recording.
 //
-// P5: TWO ALWAYS-VISIBLE BUTTONS ("Generate announcement" / "Generate video
+// P5: TWO ALWAYS-VISIBLE BUTTONS ("Generate both" / "Generate video
 // script"), never a mode toggle - a single persisted choice could be stale
 // from a previous session and silently produce the wrong artifact.
 // P6: the two outputs are fully independent state (announcement*/script*
@@ -31,7 +31,12 @@
 // frames are sent to a third-party AI provider, and a single shared window
 // is safer than a whole screen.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
+import { usePairPreferences } from "./usePairPreferences";
+import { useWalkthroughVideoUpload } from "./useWalkthroughVideoUpload";
+import { VIDEO_MAX_BYTES, VIDEO_MAX_SECONDS, VIDEO_MAX_FRAMES } from "./walkthrough-video-limits";
+import { uploadedVideoMaterialText, type VideoReadResult } from "./walkthrough-video-run";
+import type { LlmProvider } from "@/lib/llm";
 import { useAnnouncementLibrary } from "./useAnnouncementLibrary";
 import AnnouncementLibrary from "./AnnouncementLibrary";
 import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
@@ -120,6 +125,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     remove: (id: string, entryId: string) => deleteAnnouncementLibraryEntryAction(id, entryId),
   }), []);
   const library = useAnnouncementLibrary(courseId, libraryAdapters);
+  const upload = useWalkthroughVideoUpload(library.scopeKey);
+  const [framesOnly, setFramesOnly] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<{ file: File; scope: string } | null>(null);
+  const [inputKind, setInputKind] = useState<"live" | "upload" | null>(null);
+  const uploadSnapshot = useRef<{ provider: LlmProvider; narration: string; coverage: string } | null>(null);
   const savedFormatsState = library.enabled ? library.state.load : "loaded";
   const savedExemplars = useMemo(() => library.state.cards.flatMap(card => card.acknowledged ? [card.acknowledged] : [])
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [library.state.cards]);
@@ -143,12 +153,14 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
 
   // --- Extraction / accumulation state (shared seam: reduceCaptureToMaterials) --
 
+  const extractionEpoch = useRef(0);
   const batchBlocksRef = useRef<ExtractedBlock[][]>([]);
   const [legibleBlockCount, setLegibleBlockCount] = useState(0);
   const [extracting, setExtracting] = useState(false);
   const batchInFlightRef = useRef(false);
 
   const runExtraction = useCallback(async () => {
+    const epoch = extractionEpoch.current;
     const frames = takeFrameBatch(MODULE_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET);
     if (frames.length === 0) return;
     // Set synchronously, BEFORE the await below: between the take (which can
@@ -157,6 +169,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     // this ref so it cannot fire into that window with partial material.
     batchInFlightRef.current = true;
     await Promise.resolve();
+    if (epoch !== extractionEpoch.current) return;
     setExtracting(true);
 
     try {
@@ -174,6 +187,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         provider
       );
 
+      if (epoch !== extractionEpoch.current) return;
       if ("error" in result) {
         pushNotice("danger", result.error);
         return;
@@ -189,8 +203,10 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       batchBlocksRef.current = [...batchBlocksRef.current, result.blocks];
       setLegibleBlockCount((prev) => prev + result.blocks.length);
     } finally {
-      batchInFlightRef.current = false;
-      setExtracting(false);
+      if (epoch === extractionEpoch.current) {
+        batchInFlightRef.current = false;
+        setExtracting(false);
+      }
     }
   }, [takeFrameBatch, moduleLabel, notesText, provider, pushNotice]);
 
@@ -222,7 +238,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const [probeOpen, setProbeOpen] = useState(false);
   const probeButtonRef = useRef<HTMLButtonElement>(null);
 
-  const hasMaterial = legibleBlockCount > 0;
+  const hasMaterial = legibleBlockCount > 0 || (upload.result?.status === "ready" && !!upload.result.narration);
   // WALKTHROUGH-MIMIC-CHAT (M1): derived, never persisted (no ta- key).
   const [manuallyExpanded, setManuallyExpanded] = useState(false);
   const setupCollapsed = isSetupCollapsed({ capturing, hasMaterial, manuallyExpanded });
@@ -258,23 +274,25 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   );
 
   const buildRequest = useCallback((): AnnouncementDraftRequestContext => {
-    const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP);
-    const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks));
+    const narration = uploadSnapshot.current?.narration ?? "";
+    const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP - narration.length - 2);
+    const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks)) + (uploadSnapshot.current?.coverage ?? "");
     return {
       courseLabel: selectedCourse?.name ?? "",
       moduleLabel: moduleLabel.trim() || null,
-      materialsText: reduction.text,
+      materialsText: uploadedVideoMaterialText(batchBlocksRef.current, narration, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP),
       coverageBlock,
       notes: notesText,
-      provider,
+      provider: uploadSnapshot.current?.provider ?? provider,
+      sourceKind: uploadSnapshot.current ? "upload" : "live",
       emojiOn,
       researchOn,
     };
   }, [selectedCourse, moduleLabel, notesText, provider, emojiOn, researchOn]);
 
   const resolveLive = useCallback(
-    () => ({ pastedOutline: null, mostRecent: optionSource.mostRecent, saved: optionSource.saved, blocked: library.controller.blocked }),
-    [optionSource.mostRecent, optionSource.saved, library.controller]
+    () => ({ pastedOutline: null, mostRecent: optionSource.mostRecent, saved: optionSource.saved, savedState: savedFormatsState, blocked: library.controller.blocked }),
+    [optionSource.mostRecent, optionSource.saved, savedFormatsState, library.controller]
   );
 
   // Research / draft / post adapters (the literal server-action calls) live in
@@ -294,37 +312,39 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     editSlot,
     generate,
     regenerate,
+    retry,
     copySlot,
     armPost,
     cancelPost,
     armRegenerate,
     cancelRegenerate,
     postSignatureFor,
-  } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
+  } = useAnnouncementDraftSlots({ scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" });
 
-  const previousLibraryScope = useRef(library.scopeKey);
-  useEffect(() => {
-    if (previousLibraryScope.current === library.scopeKey) return;
-    previousLibraryScope.current = library.scopeKey;
+  const pairPreferences = usePairPreferences(library.scopeKey, library.enabled, chooseTemplate);
+  useLayoutEffect(() => {
+    extractionEpoch.current += 1;
+    batchBlocksRef.current = [];
+    uploadSnapshot.current = null;
+    batchInFlightRef.current = false;
+    stop();
+    while (takeFrameBatch(MODULE_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET).length) { /* Discard the previous course's queued frames. */ }
     let cancelled = false;
-    void Promise.resolve().then(() => {
-      if (cancelled) return;
-      for (const slot of slots) chooseTemplate(slot.id, { kind: "default" });
-    });
-    return () => { cancelled = true; };
-  }, [library.scopeKey, slots, chooseTemplate]);
+    void Promise.resolve().then(() => { if (!cancelled) { setLegibleBlockCount(0); setExtracting(false); setScriptText(""); setScriptGenerating(false); setInputKind(null); setSelectedVideo(null); } });
+    return () => { cancelled = true; extractionEpoch.current += 1; };
+  }, [library.scopeKey, stop, takeFrameBatch]);
 
   // WA-DRAFT-LOSS: warn on a full page unload while a capture, a draft, or an
   // unposted drafted slot would be lost. Declared after `slots` on purpose.
   useEffect(() => {
-    if (!library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
+    if (!upload.busy && !library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [capturing, pendingFrames, slots, library.controller, library.state]);
+  }, [capturing, pendingFrames, slots, library.controller, library.state, upload.busy]);
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 
@@ -352,6 +372,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       stop();
       return;
     }
+    if (extracting || pendingFrames > 0 || batchInFlightRef.current) return;
+    if (inputKind === "upload" || upload.busy) { pushNotice("info", "Choose New walkthrough before switching from an uploaded video to live capture."); return; }
+    setInputKind("live");
     setStartError(null);
     setAutoDrafted(false);
     if (isRunComplete(slots)) {
@@ -366,29 +389,49 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         setStartError(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     })();
-  }, [capturing, start, stop, slots, reset]);
+  }, [capturing, extracting, pendingFrames, start, stop, slots, reset, inputKind, upload.busy, pushNotice]);
+
+  const publishUpload = (value: VideoReadResult, pinnedProvider: LlmProvider) => {
+    batchBlocksRef.current = value.blocks;
+    uploadSnapshot.current = { provider: pinnedProvider, narration: value.narration,
+      coverage: `\nUploaded video: sampled ${value.sampled}/${value.planned} frames across ${Math.round(value.duration)} seconds, about ${value.interval.toFixed(1)} seconds apart. ${value.gaps} sampling gaps; ${value.failedBatches} failed batches; ${value.illegible} unreadable blocks. Visual coverage is sampled, not complete. Narration: ${value.audio}.` };
+    setLegibleBlockCount(value.blocks.reduce((sum, batch) => sum + batch.length, 0));
+  };
+  const handleUpload = async (file: File) => {
+    if (capturing || extracting || pendingFrames || batchInFlightRef.current || hasMaterial || upload.result?.blocks.some(batch => batch.length) || slots.some(slot => slot.draft.phase !== "empty") || inputKind === "live") {
+      pushNotice("info", "Choose New walkthrough before replacing existing input or drafts."); return;
+    }
+    const pinnedProvider = provider;
+    setInputKind("upload"); setAutoDrafted(false);
+    const value = await upload.start({ blob: file, provider: pinnedProvider, moduleLabel, notes: notesText, framesOnly });
+    if (value?.status === "ready") publishUpload(value, pinnedProvider);
+    else if (value?.status === "needs-visible-only") uploadSnapshot.current = { provider: pinnedProvider, narration: "", coverage: "" };
+  };
 
   const handleGenerateScript = useCallback(async () => {
+    if (capturing || extracting || pendingFrames > 0 || batchInFlightRef.current || upload.busy || upload.result?.status === "needs-visible-only" || !hasMaterial) return;
     setScriptGenerating(true);
+    const epoch = extractionEpoch.current;
     setScriptError(null);
     try {
-      const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_SCRIPT_MATERIALS_CAP);
+      const narration = uploadSnapshot.current?.narration ?? "";
       const result = await draftWalkthroughVideoScriptAction({
         courseName: selectedCourse?.name ?? "",
         moduleLabel: moduleLabel.trim(),
-        materialsText: reduction.text,
+        materialsText: uploadedVideoMaterialText(batchBlocksRef.current, narration, WALKTHROUGH_SCRIPT_MATERIALS_CAP),
         notes: notesText,
-        provider,
+        provider: uploadSnapshot.current?.provider ?? provider,
       });
+      if (epoch !== extractionEpoch.current) return;
       if ("error" in result) {
         setScriptError(result.error);
         return;
       }
       setScriptText(result.script);
     } finally {
-      setScriptGenerating(false);
+      if (epoch === extractionEpoch.current) setScriptGenerating(false);
     }
-  }, [selectedCourse, moduleLabel, notesText, provider]);
+  }, [selectedCourse, moduleLabel, notesText, provider, capturing, extracting, pendingFrames, upload.busy, upload.result?.status, hasMaterial]);
 
   return (
     <div className={`${styles.card} ${styles.form}`}>
@@ -446,9 +489,50 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         capturing={capturing}
       />
 
-      <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
-        canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
-        onRemoved={id => { for (const slot of slots) if (slot.choice.kind === "saved" && slot.choice.exemplarId === id) chooseTemplate(slot.id, { kind: "default" }); }} />
+      {pairPreferences.notice && <p role="status">{pairPreferences.notice}</p>}
+      <details>
+        <summary>Manage saved examples ({savedExemplars.length}) - {savedFormatsState}{library.controller.dirty() || library.state.cards.some(card => card.error) ? "; unsaved edits or errors - open to save or retry" : ""}</summary>
+        <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
+          canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
+          onRemoved={() => { /* Keep selections visible; unavailable IDs block generation. */ }} />
+      </details>
+
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Upload a walkthrough video</legend>
+        <p className={styles.fieldHint}>
+          MP4 or WebM, up to {VIDEO_MAX_BYTES / (1024 * 1024)} MiB and {VIDEO_MAX_SECONDS / 60} minutes.
+          Read narration and visible pages by default; preparing narration may take the video&apos;s playback time.
+          The video stays local. Up to {VIDEO_MAX_FRAMES} sampled page images and bounded audio chunks go to your selected AI provider.
+          Sampling can miss pages between frames. Nothing is posted to Canvas.
+        </p>
+        <label><input type="checkbox" checked={framesOnly} disabled={upload.busy}
+          onChange={event => setFramesOnly(event.target.checked)} /> Read visible pages only (skip narration)</label>
+        <label>Choose MP4 or WebM<input type="file" accept="video/mp4,video/webm" disabled={!library.enabled || capturing || extracting || pendingFrames > 0 || hasMaterial || upload.result?.blocks.some(batch => batch.length) || anyDrafting || researching || scriptGenerating || inputKind === "live"}
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) { upload.cancel(); setSelectedVideo({ file, scope: library.scopeKey }); } }} /></label>
+        <Button size="small" variant="outlined" disabled={!selectedVideo || selectedVideo.scope !== library.scopeKey || !library.enabled || upload.busy || capturing || extracting || pendingFrames > 0 || hasMaterial || !!upload.result?.blocks.some(batch => batch.length) || anyDrafting || researching || scriptGenerating || inputKind === "live"}
+          onClick={() => { if (selectedVideo?.scope === library.scopeKey) void handleUpload(selectedVideo.file); }}>Read uploaded video</Button>
+        {upload.busy && <div role="status" aria-live="polite">
+          {upload.progress?.stage.replace(/-/g, " ") ?? "Checking video"}: {upload.progress?.completed ?? 0} / {upload.progress?.total ?? 1}.
+          <Button size="small" onClick={() => { upload.cancel(); pushNotice("info", "Video reading cancelled. Late provider results will be discarded. Choose another video or New walkthrough."); }}>Cancel video reading</Button>
+        </div>}
+        {upload.result && <div role="status" aria-live="polite">
+          <p>{upload.result.status === "ready" ? "Video reading finished. Review the sampled coverage before drafting." : upload.result.status === "needs-visible-only" ? "Narration could not be completed. Your successful visible pages are available below." : upload.result.status === "cancelled" ? "Video reading was cancelled; no material was kept." : upload.result.code === "unsupported-media" ? "Choose a supported MP4 or WebM video." : upload.result.code === "file-size" ? "The video is empty or exceeds the displayed file size limit." : upload.result.code === "duration-limit" ? "The video exceeds the displayed duration limit." : ["metadata-timeout", "unknown-duration"].includes(upload.result.code) ? "The video length could not be read safely. Try another MP4 or WebM export." : upload.result.code === "no-readable-content" ? "No readable page content or narration was found. Try a clearer video." : "The browser could not read this video. Try another MP4 or WebM export."}
+            {" "}{upload.result.sampled} / {upload.result.planned} sampled frames, about {upload.result.interval.toFixed(1)} seconds apart;
+            {" "}{upload.result.gaps} sampling gaps, {upload.result.illegible} unreadable blocks, {upload.result.failedBatches} failed batches, {upload.result.emptyBatches} confirmed empty batches.
+            {" "}{upload.result.blocks.reduce((sum, batch) => sum + batch.length, 0)} content blocks extracted. Narration: {upload.result.audio}.
+            This is sampled visual coverage, not a complete account of the video.</p>
+          {upload.result.audio === "silence" && <p>No speech text was returned by the complete narration pass; this does not establish that the video has no audio track.</p>}
+          {upload.result.status === "needs-visible-only" && <>
+            <p>Narration could not be completed. No partial transcript was kept. Choose visible pages only to draft from the successful visual results, or start a new walkthrough to try again.</p>
+            <Button disabled={!upload.result.blocks.some(batch => batch.length)} onClick={() => {
+              const value = upload.result;
+              if (!value || value.status !== "needs-visible-only" || !uploadSnapshot.current) return;
+              publishUpload({ ...value, status: "ready", narration: "" }, uploadSnapshot.current.provider);
+              upload.visibleOnly();
+            }}>Use visible pages only</Button>
+          </>}
+        </div>}
+      </fieldset>
 
       <p className={styles.fieldHint}>
         A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
@@ -495,15 +579,16 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           Researching resources for this module…
         </p>
       )}
+      {!capturing && (extracting || pendingFrames > 0) && <p role="status">Finishing reading captured pages before drafting or starting a new walkthrough.</p>}
       {autoDrafted && (
         <p role="status" aria-live="polite" className={styles.fieldHint}>
           Drafting automatically from this capture. Nothing is posted until you confirm.
         </p>
       )}
-      {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}
+      {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough, or read an uploaded video first - no finalized material is ready yet.</p>}
       {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
         <p className={controls.notice}>
-          Generate announcement is off because every draft slot already has a draft. To redo a draft, press Regenerate in the button row under it (Post to Canvas, Regenerate, Copy) - you will be asked to confirm before it is replaced. To write another, use Add another draft slot.
+          Generate both is off because every draft slot already has a draft. To redo a draft, press Regenerate in the button row under it (Post to Canvas, Regenerate, Copy) - you will be asked to confirm before it is replaced. To write another, use Add another draft slot.
         </p>
       )}
 
@@ -526,8 +611,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             }
             postArmed={isConfirmArmed(slot.postArmedFor, postSignatureFor(slot) ?? "")}
             courseName={selectedCourse?.name ?? null}
-            canRemove={slots.length > 1}
-            onChooseTemplate={chooseTemplate}
+            canRemove={index > 1}
+            onChooseTemplate={pairPreferences.choose}
             onChooseTiming={chooseTiming}
             onSetScheduledAt={setScheduledAt}
             onEdit={editSlot}
@@ -537,6 +622,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             onPostArm={armPost}
             onPostCancel={cancelPost}
             onCopy={copySlot}
+            onRetry={retry}
             onRemove={removeSlot}
           />
         ))}
@@ -599,7 +685,15 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           sticky run bar (P5: two always-visible Generate buttons, never a
           mode toggle). The bar holds no Post or other irreversible control. */}
       <div className={`${styles.ghActions} ${runBar.runBarDock}`}>
-        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" onClick={handleStartStop}>
+        <Button size="small" variant="outlined" disabled={capturing || extracting || pendingFrames > 0} onClick={() => {
+          if (capturing || extracting || pendingFrames > 0 || batchInFlightRef.current) return;
+          if ((hasMaterial || upload.busy || upload.result || slots.some(slot => slot.draft.phase !== "empty")) && !window.confirm("Start a new walkthrough? This cancels video reading and clears captured material and drafts; saved examples stay available.")) return;
+          extractionEpoch.current += 1;
+          batchBlocksRef.current = [];
+          upload.reset(); uploadSnapshot.current = null; setInputKind(null); setSelectedVideo(null);
+          setLegibleBlockCount(0); setScriptText(""); setScriptError(null); setScriptGenerating(false); reset();
+        }}>New walkthrough</Button>
+        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" disabled={upload.busy || inputKind === "upload"} onClick={handleStartStop}>
           {capturing ? "Stop capture" : "Start capture"}
         </Button>
         <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
@@ -615,11 +709,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           // gates Generate - a timed-out fetch re-enables it, so a click
           // drafts anyway rather than waiting indefinitely on saved formats.
           disabled={
-            capturing || extracting || !hasMaterial || anyDrafting || savedFormatsState === "loading" || readyToDraftCount === 0
+            capturing || extracting || pendingFrames > 0 || upload.busy || upload.result?.status === "needs-visible-only" || !hasMaterial || anyDrafting || readyToDraftCount === 0
           }
           onClick={() => void generate()}
         >
-          {anyDrafting ? "Generating…" : "Generate announcement"}
+          {anyDrafting ? "Generating…" : "Generate both"}
         </Button>
         <Button
           variant="outlined"
@@ -627,7 +721,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           size="small"
           loading={scriptGenerating}
           loadingPosition="start"
-          disabled={capturing || extracting || !hasMaterial || scriptGenerating}
+          disabled={capturing || extracting || pendingFrames > 0 || upload.busy || upload.result?.status === "needs-visible-only" || !hasMaterial || scriptGenerating}
           onClick={() => void handleGenerateScript()}
         >
           {scriptGenerating ? "Generating…" : "Generate video script"}

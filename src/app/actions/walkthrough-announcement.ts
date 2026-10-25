@@ -362,6 +362,7 @@ export interface WalkthroughAnnouncementDraftInput {
    * REQUIRED, same reasoning as emojiPolicy above. Forwarded into
    * buildWalkthroughAnnouncementPrompt below. */
   timing: AnnouncementTiming;
+  revision?: { editedDraft: { title: string; message: string }; revisionNote: string };
 }
 
 /**
@@ -415,6 +416,7 @@ export async function draftWalkthroughAnnouncementAction(
       researchedResources: input.researchedResources,
       // A19: forwards the caller's chosen tone into the composer (AC-6/AC-7).
       timing: input.timing,
+      revision: input.revision,
     });
 
     const prompt = [

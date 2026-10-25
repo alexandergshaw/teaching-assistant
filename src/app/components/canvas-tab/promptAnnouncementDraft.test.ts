@@ -70,7 +70,19 @@ function baseUiState(choice: TemplateChoice, live: LiveDefaults): PromptDraftUiS
 }
 
 describe("AC-18: the chosen template and its outline reach the request", () => {
+  it("refuses unresolved, missing, unavailable and dirty saved choices before a request can be sent", () => {
+    const choice: TemplateChoice = { kind: "saved", exemplarId: "selected", label: "Carried", outline: CHOICE_OUTLINE };
+    const entry = { id: "selected", label: "Acknowledged", outline: RECENT_OUTLINE };
+    expect(() => buildPromptDraftRequest(baseUiState({ kind: "unresolved" }, { pastedOutline: null, mostRecent: null }))).toThrow("Choose a saved example");
+    expect(() => buildPromptDraftRequest(baseUiState(choice, { pastedOutline: null, mostRecent: null, saved: [], blocked: () => false }))).toThrow("unavailable");
+    expect(() => buildPromptDraftRequest(baseUiState(choice, { pastedOutline: null, mostRecent: null, saved: [entry], savedState: "failed" }))).toThrow("unavailable");
+    expect(() => buildPromptDraftRequest(baseUiState(choice, { pastedOutline: null, mostRecent: null, saved: [entry], blocked: () => true }))).toThrow("Save or retry");
+    const request = buildPromptDraftRequest(baseUiState(choice, { pastedOutline: null, mostRecent: null, saved: [entry], savedState: "loaded" }));
+    expect(request.outline).toBe(RECENT_OUTLINE);
+    expect(request.resolvedTemplate).toEqual({ kind: "saved", exemplarId: "selected", label: "Acknowledged" });
+  });
   const CHOICES: Record<TemplateChoice["kind"], TemplateChoice> = {
+    unresolved: { kind: "unresolved" },
     default: { kind: "default" },
     pasted: { kind: "pasted" },
     saved: { kind: "saved", exemplarId: "ex-chosen", label: "Midterm note", outline: CHOICE_OUTLINE },
@@ -107,7 +119,7 @@ describe("AC-18: the chosen template and its outline reach the request", () => {
   });
 
   it.each(rows)("choice=$choice live=$live", ({ choice, live, expectedTemplate, expectedOutline }) => {
-    const state = baseUiState(CHOICES[choice], LIVES[live]);
+    const state = baseUiState(CHOICES[choice], { ...LIVES[live], savedState: "loaded", saved: [{ id: "ex-chosen", label: "Midterm note", outline: CHOICE_OUTLINE }] });
     const req = buildPromptDraftRequest(state);
     expect(req.resolvedTemplate).toEqual(expectedTemplate);
     expect(req.outline).toBe(expectedOutline);
@@ -119,7 +131,7 @@ describe("AC-18: the chosen template and its outline reach the request", () => {
   it("an always-none implementation would mismatch on at least 11 of the 16 rows (control)", () => {
     let mismatches = 0;
     for (const { choice, live, expectedTemplate, expectedOutline } of rows) {
-      const state = baseUiState(CHOICES[choice], LIVES[live]);
+      const state = baseUiState(CHOICES[choice], { ...LIVES[live], savedState: "loaded", saved: [{ id: "ex-chosen", label: "Midterm note", outline: CHOICE_OUTLINE }] });
       const req = buildPromptDraftRequest(state);
       const alwaysNone = { template: { kind: "none" } as ResolvedTemplate, outline: EMPTY_ANNOUNCEMENT_OUTLINE };
       const templateMismatch = JSON.stringify(alwaysNone.template) !== JSON.stringify(expectedTemplate);

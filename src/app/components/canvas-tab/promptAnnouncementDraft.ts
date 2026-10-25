@@ -42,7 +42,9 @@ function capAndTrimPrompt(promptText: string): string {
  * here or defaulted to "none").
  */
 export function buildPromptDraftRequest(state: PromptDraftUiState): PromptAnnouncementDraftRequest {
-  const { template, outline } = resolveChoice(state.choice, state.live);
+  const resolved = resolveChoice(state.choice, state.live);
+  if (resolved.error) throw new Error(resolved.error);
+  const { template, outline } = resolved;
   return {
     promptText: capAndTrimPrompt(state.promptText),
     courseLabel: state.courseLabel,

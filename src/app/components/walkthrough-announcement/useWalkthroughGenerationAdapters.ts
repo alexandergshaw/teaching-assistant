@@ -91,6 +91,7 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
         researchedResources,
         researchOutcome: ctx.researchOutcome,
         timing: ctx.timing,
+        revision: ctx.revision,
       });
       if ("error" in result) return { error: result.error };
       return { title: result.title, message: result.message, researchNotice: result.researchNotice };

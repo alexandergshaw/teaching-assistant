@@ -15,7 +15,7 @@ describe("one autosaved walkthrough announcement collection", () => {
 
   it("has exactly one library mount outside the collapsible setup", () => {
     expect((panel.match(/<AnnouncementLibrary\b/g) ?? []).length).toBe(1);
-    expect(panel).toMatch(/<AnnouncementCourseFieldset[\s\S]*?collapsed=\{setupCollapsed\}[\s\S]*?\/>\s*<AnnouncementLibrary/);
+    expect(panel).toMatch(/<AnnouncementCourseFieldset[\s\S]*?collapsed=\{setupCollapsed\}[\s\S]*?\/>[\s\S]*?<details>[\s\S]*?<AnnouncementLibrary/);
     expect(setup).not.toContain("AnnouncementLibrary");
   });
 
@@ -30,11 +30,11 @@ describe("one autosaved walkthrough announcement collection", () => {
     expect(panel).toContain("card.acknowledged ? [card.acknowledged] : []");
     expect(panel).toContain("hasPastedText: false");
     expect(panel).toContain("pastedOutline: null");
-    expect(panel).toContain("saved: optionSource.saved, blocked: library.controller.blocked");
+    expect(panel).toContain("saved: optionSource.saved, savedState: savedFormatsState, blocked: library.controller.blocked");
     expect(panel).toContain("outline: e.outline");
     expect(panel).toContain("label: e.label || new Date(e.createdAt).toLocaleDateString()");
     expect(panel).toContain("optionSource={optionSource}");
-    expect(panel).toContain("useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint })");
+    expect(panel).toContain('useAnnouncementDraftSlots({ scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" })');
   });
 
   it("keeps capture, manual generation, and draft posting controls connected", () => {

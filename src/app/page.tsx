@@ -91,6 +91,7 @@ export default function Home() {
     toolsSection,
     librarySection,
     manualView,
+    recView: nav.recView,
     automateView,
     buildView,
     contentView,

@@ -38,6 +38,12 @@ const SOURCE_PATH = join(process.cwd(), "src/app/components/home/useAppNavigatio
 const source = sourceCode(readFileSync(SOURCE_PATH, "utf8")).replace(/\r\n/g, "\n");
 const initialStateSource = sourceCode(readFileSync(join(process.cwd(), "src/app/components/home/navigation-initial-state.ts"), "utf8")).replace(/\r\n/g, "\n");
 
+it("exposes the existing Recording mirror to callers without exposing its setter", () => {
+  const returned = source.slice(source.lastIndexOf("  return {"));
+  expect(returned).toMatch(/\brecView,/);
+  expect(returned).not.toMatch(/\bsetRecView\b/);
+});
+
 describe("useAppNavigation's contentView restore guard delegates to normalizeContentView (D6r)", () => {
   it("the contentView useState initializer calls normalizeContentView(localStorage.getItem(VIEW_KEY)) - pinning the FACT that it delegates, not a restated literal list", () => {
     // Isolate the contentView initializer block specifically (between its own

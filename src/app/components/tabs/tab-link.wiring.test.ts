@@ -7,7 +7,10 @@ import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSo
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { parseUrlState } from "../../url-state";
+import ts from "typescript";
+import { parseUrlState, resolveRecViewFromUrl } from "../../url-state";
+import { buildTabHref } from "./tab-link";
+import { toolsStateFromRailItem } from "./tab-rails";
 
 const root = process.cwd();
 const read = (...p: string[]) => sourceCode(readFileSync(join(root, ...p), "utf8")).replace(/\r\n/g, "\n");
@@ -23,6 +26,25 @@ function between(source: string, from: string, to: string): string {
   const b = source.indexOf(to, a);
   expect(b, `could not find ${to} after ${from}`).toBeGreaterThan(a);
   return source.slice(a, b);
+}
+
+function evaluate(expression: string, bindings: Record<string, unknown>) {
+  const js = ts.transpileModule(`const candidate = (${expression});`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  return new Function(...Object.keys(bindings), `${js}\nreturn candidate;`)(...Object.values(bindings));
+}
+
+function initializer(source: string, name: string): ts.Expression {
+  const ast = ts.createSourceFile("subject.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let found: ts.Expression | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name) found = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  expect(found, name).toBeDefined();
+  return found!;
 }
 
 describe("AC1/AC2: TabRail renders an anchor with a guarded click when given an href", () => {
@@ -100,6 +122,32 @@ describe("AC1/AC2: page.tsx wires hrefs into the top strip, all three rails and 
     for (const key of Object.keys(parseUrlState("?tab=manual"))) {
       expect(literal, `navState is missing ${key}`).toMatch(new RegExp(`\\b${key}\\b`));
     }
+  });
+
+  it("carries the stored Recording mirror through the hook return and page into outer hrefs, while inner links select their own view", () => {
+    const saved = "captions";
+    const stateCall = initializer(NAV, "[recView, setRecView]") as ts.CallExpression;
+    const recView = evaluate(stateCall.arguments[0].getText(), {
+      window: { location: { search: "?tab=courses" } },
+      localStorage: { getItem: () => saved }, resolveRecViewFromUrl,
+    })();
+    expect(recView).toBe(saved);
+    const returned = NAV.slice(NAV.lastIndexOf("  return {") + "  return ".length).split(";")[0];
+    const defaults = parseUrlState("?tab=courses");
+    const bindings = Object.fromEntries(returned.match(/\b\w+\b/g)!.map((name) => [name, "unused"]));
+    const nav = evaluate(returned, { ...bindings, ...defaults, activeTab: "courses", recView });
+    expect(nav.recView).toBe(saved);
+    const navState = evaluate(initializer(PAGE, "navState").getText(), { ...defaults, activeTab: "courses", nav });
+    const recording = toolsStateFromRailItem("manual:recording", navState.toolsSection, navState.manualView);
+    const expected = "/?tab=manual&manualView=recording&recView=captions";
+    expect(buildTabHref(navState, { tab: "manual", ...recording })).toBe(expected);
+    expect(buildTabHref({ ...navState, ...recording }, { tab: "manual" })).toBe(expected);
+    const component = read("src", "app", "components", "RecordingTab.tsx");
+    const innerHref = evaluate(initializer(component, "recViewHref").getText(), {
+      window: { location: { search: expected.slice(1) } }, parseUrlState, buildTabHref,
+    });
+    expect(innerHref("speed")).toBe("/?tab=manual&manualView=recording&recView=speed");
+    expect(innerHref("record")).toBe("/?tab=manual&manualView=recording");
   });
 });
 

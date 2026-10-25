@@ -872,6 +872,7 @@ export function useAppNavigation() {
     setLibrarySection: selectLibrarySection,
     manualView,
     setManualView,
+    recView,
     buildView,
     setBuildView,
     contentView,

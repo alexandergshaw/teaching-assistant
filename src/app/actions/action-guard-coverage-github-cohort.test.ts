@@ -274,6 +274,7 @@ function githubReachingActionFiles(): Set<string> {
 // fails the moment a file this list does not know about starts reaching the
 // same target (R2-r9's rule: an enumeration is a floor, never the set).
 const GITHUB_FILES = new Set([
+  "actions/announcement-library.ts",
   "actions/accommodations.ts",
   "actions/automation-runs.ts",
   "actions/bulk-course-message.ts",
@@ -362,6 +363,12 @@ const GITHUB_FILES = new Set([
 // resolveCanvasCredential, which only reaches the owner's env pair when the
 // CALLING identity's own role is "owner" - see docs/r4-scope.md section 2.4.
 const GITHUB_NOT_OWNER_ONLY: Record<string, string> = {
+  listAnnouncementLibraryAction:
+    "requires an active session and owned course_hub row, then reads only owner/course-scoped announcement rows; getCourse imports the GitHub closure but this endpoint invokes no GitHub operation",
+  saveAnnouncementLibraryEntryAction:
+    "requires an active session and owned course_hub row, then inserts only that owner/course or invokes service-only scoped CAS; no GitHub operation or owner credential is used",
+  deleteAnnouncementLibraryEntryAction:
+    "requires an active session and owned course_hub row, then deletes only by id/user/course; the transitive course module GitHub import is never invoked",
   extractDeckSourceFileAction:
     "reads only the caller's own uploaded bytes via extractTextFromBuffer/checkWireBudget - never touches the ./github edge its sibling extractDeckSourceRepoAction does",
   getMostRecentAnnouncementExemplarAction:
@@ -663,7 +670,7 @@ describe("R2 wave 0: GitHub-PAT cohort defaults to owner-only (RULING 83)", () =
   it(
     "GITHUB_NOT_OWNER_ONLY has exactly the reviewed-permissive entries we expect - a deletion must be deliberate",
     () => {
-      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(71);
+      expect(Object.keys(GITHUB_NOT_OWNER_ONLY).length).toBe(74);
     }
   );
 

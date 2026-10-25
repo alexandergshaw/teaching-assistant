@@ -47837,3 +47837,22 @@ immutability; owner/live-provider operator must assess classification and
 abstraction quality on instructor files. A real PowerPoint/Word/PDF comparison
 walk remains necessary for output appearance and supported-file fidelity. No live
 DB, applied migration, live provider quality or rendered UI success is claimed.
+
+## Walkthrough announcement library (2026-10-25)
+
+Baseline at 064f5e08: walkthrough announcements have a manual insert-only exemplar
+save form and saved-format draft choices. Existing exemplars must remain available;
+recording, script generation, draft regeneration and explicit posting retain their
+behavior. The library adds multiple editable labeled examples with automatic
+per-course persistence and optional plain TXT/MD imports. Confirmed revisions feed
+the actual lower draft adapter as outlines; raw examples do not enter generation
+requests. Existing generated draft text stays unchanged until explicit regeneration.
+
+Independent backend review accepted scoped ownership, atomic compare-and-set over
+POST, uncertain-request acknowledgement, finite input bounds and private diagnostics.
+Controller regression oracles cover serialized writes, stale responses, edit/revert,
+uncertain creates and removal, navigation choices, and fresh draft receipt metadata.
+The service-only RPC migration must apply through the normal GitHub migration action
+before live editing is verified. These tests render no component; production browser
+autosave, reload, labeled draft choices and navigation evidence are recorded in the
+backlog delivery note separately from source and controller checks.

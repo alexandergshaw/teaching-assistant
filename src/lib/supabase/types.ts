@@ -641,7 +641,16 @@ export interface Database {
       };
     };
     Views: Record<string, { Row: Record<string, unknown>; Relationships: [] }>;
-    Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;
+    Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }> & {
+      update_announcement_library_entry: {
+        Args: {
+          p_id: string; p_user_id: string; p_course_id: string;
+          p_exemplar_text: string; p_label: string | null; p_outline: Json;
+          p_expected_text: string; p_expected_label: string | null;
+        };
+        Returns: AnnouncementExemplarsRow[];
+      };
+    };
     Enums: Record<string, string>;
     CompositeTypes: Record<string, Record<string, unknown>>;
   };

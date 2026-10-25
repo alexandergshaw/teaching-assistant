@@ -37,6 +37,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
+import { deriveAnnouncementOutline } from "./announcement-outline";
+import type { AnnouncementLibraryEntry, AnnouncementLibraryResult, SaveAnnouncementLibraryInput } from "./announcement-library-types";
 
 export interface AnnouncementExemplar {
   id: string;
@@ -185,4 +187,69 @@ export async function deleteAnnouncementExemplar(
     .eq("user_id", userId);
 
   if (error) throw new Error(error.message);
+}
+
+// Editor-facing helpers coexist with the original insert-only API above.
+// The service client bypasses RLS: every read/update/delete is owner AND course
+// scoped. A primary-key collision never grants access to a foreign row.
+function libraryEntry(row: Database["public"]["Tables"]["announcement_exemplars"]["Row"]): AnnouncementLibraryEntry {
+  return { ...mapAnnouncementExemplar(row), outline: deriveAnnouncementOutline(row.exemplar_text) };
+}
+
+export async function listAnnouncementLibraryEntries(
+  supabase: SupabaseClient<Database>, userId: string, courseId: string,
+): Promise<AnnouncementLibraryEntry[]> {
+  const entries: AnnouncementLibraryEntry[] = [];
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.from("announcement_exemplars").select("*")
+      .eq("user_id", userId).eq("course_id", courseId)
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw new Error("Announcement library unavailable");
+    entries.push(...(data ?? []).map(libraryEntry));
+    if ((data ?? []).length < pageSize) return entries;
+  }
+}
+
+export async function saveAnnouncementLibraryEntry(
+  supabase: SupabaseClient<Database>, userId: string, input: SaveAnnouncementLibraryInput,
+): Promise<AnnouncementLibraryResult<AnnouncementLibraryEntry>> {
+  const desired = { exemplar_text: input.exemplarText, label: input.label,
+    outline: deriveAnnouncementOutline(input.exemplarText) as unknown as Json };
+  if (input.expected === null) {
+    const { data, error } = await supabase.from("announcement_exemplars")
+      .insert({ id: input.id, user_id: userId, course_id: input.courseId, ...desired })
+      .select("*").single();
+    if (!error) return { ok: true, value: libraryEntry(data) };
+    if (error.code !== "23505") return { ok: false, code: "unavailable" };
+  } else {
+    // POST keeps arbitrary/legacy snapshot text out of URL filters. The SQL
+    // function performs the owner/course check and atomic CAS, including retry
+    // acknowledgement, under one row lock. Missing edits never create rows.
+    const { data, error } = await supabase.rpc("update_announcement_library_entry", {
+      p_id: input.id, p_user_id: userId, p_course_id: input.courseId,
+      p_exemplar_text: input.exemplarText, p_label: input.label, p_outline: desired.outline,
+      p_expected_text: input.expected.exemplarText, p_expected_label: input.expected.label,
+    });
+    if (error) return { ok: false, code: "unavailable" };
+    return data?.[0] ? { ok: true, value: libraryEntry(data[0]) } : { ok: false, code: "conflict" };
+  }
+  // A retry may have already committed despite losing its response. A scoped,
+  // identical row acknowledges that write; a stale/missing/foreign row conflicts.
+  const { data, error } = await supabase.from("announcement_exemplars").select("*")
+    .eq("id", input.id).eq("user_id", userId).eq("course_id", input.courseId).maybeSingle();
+  if (error) return { ok: false, code: "unavailable" };
+  if (data && data.exemplar_text === input.exemplarText && data.label === input.label) {
+    return { ok: true, value: libraryEntry(data) };
+  }
+  return { ok: false, code: "conflict" };
+}
+
+export async function deleteAnnouncementLibraryEntry(
+  supabase: SupabaseClient<Database>, userId: string, courseId: string, id: string,
+): Promise<void> {
+  const { error } = await supabase.from("announcement_exemplars").delete()
+    .eq("id", id).eq("user_id", userId).eq("course_id", courseId);
+  if (error) throw new Error("Announcement library unavailable");
 }

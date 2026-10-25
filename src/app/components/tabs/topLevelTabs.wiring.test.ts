@@ -266,6 +266,13 @@ describe("the five top-level tabs are registered, in the strip, and rendered", (
     expect(guardIndex, "the courses branch never checks coursesSection === \"oneoff\"").toBeGreaterThan(-1);
     expect(slice.indexOf("<OneOffTasksTab", guardIndex)).toBeGreaterThan(guardIndex);
   });
+
+  it("renders the Institutions directory inside Courses behind its durable section value", () => {
+    const slice = branchSlice(read(PAGE), "courses");
+    const guardIndex = slice.indexOf('coursesSection === "institutions"');
+    expect(guardIndex, "the Courses branch never checks the Institutions section").toBeGreaterThan(-1);
+    expect(slice.indexOf("<InstitutionDirectoryTab", guardIndex)).toBeGreaterThan(guardIndex);
+  });
 });
 
 // D26. The flattening itself: one level, and every chip in it landing

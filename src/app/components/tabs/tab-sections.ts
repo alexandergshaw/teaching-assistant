@@ -65,7 +65,7 @@ export const DEFAULT_TAB: ActiveTab = "manual";
 // families have a remembered view - drop it and "?tab=manual" with both a
 // stored manualView and a stored workflowsView becomes ambiguous.
 
-export type CoursesSection = "courses" | "tasks" | "oneoff";
+export type CoursesSection = "courses" | "tasks" | "oneoff" | "institutions";
 // WORKFLOWS-COLLAPSE W2: the Tools tab's "workflows" section retired - its
 // Workflows and Automations views live in the Automate container
 // (manualView="artifact-design", automateView). "manual" is the only LIVE
@@ -76,7 +76,7 @@ export type CoursesSection = "courses" | "tasks" | "oneoff";
 export type ToolsSection = "manual";
 export type LibrarySection = "files" | "knowledge" | "drafts";
 
-export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks", "oneoff"];
+export const COURSES_SECTION_ORDER: readonly CoursesSection[] = ["courses", "tasks", "oneoff", "institutions"];
 export const TOOLS_SECTION_ORDER: readonly ToolsSection[] = ["manual"];
 export const LIBRARY_SECTION_ORDER: readonly LibrarySection[] = ["files", "knowledge", "drafts"];
 
@@ -96,6 +96,7 @@ export const COURSES_SECTION_LABELS: Record<CoursesSection, string> = {
   courses: "Courses",
   tasks: "Tasks",
   oneoff: "One-Off Tasks",
+  institutions: "Institutions",
 };
 export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
   files: "Files",

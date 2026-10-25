@@ -2,6 +2,17 @@
 //   npx supabase gen types typescript --project-id <id> --schema public > src/lib/supabase/types.ts
 
 import type {
+  InstitutionDirectoryProfileRow,
+  InstitutionDirectoryProfileInsert,
+  InstitutionDirectoryProfileUpdate,
+  InstitutionDirectoryColumnRow,
+  InstitutionDirectoryColumnInsert,
+  InstitutionDirectoryColumnUpdate,
+  InstitutionDirectoryValueRow,
+  InstitutionDirectoryValueInsert,
+  InstitutionDirectoryValueUpdate,
+} from "./types.institution-directory";
+import type {
   AccessibilityScansRow,
   AccessibilityScansInsert,
   AccessibilityScansUpdate,
@@ -476,6 +487,24 @@ export interface Database {
         Row: Expand<InstitutionFieldsRow>;
         Insert: Expand<InstitutionFieldsInsert>;
         Update: Expand<InstitutionFieldsUpdate>;
+        Relationships: [];
+      };
+      institution_directory_profiles: {
+        Row: Expand<InstitutionDirectoryProfileRow>;
+        Insert: Expand<InstitutionDirectoryProfileInsert>;
+        Update: Expand<InstitutionDirectoryProfileUpdate>;
+        Relationships: [];
+      };
+      institution_directory_columns: {
+        Row: Expand<InstitutionDirectoryColumnRow>;
+        Insert: Expand<InstitutionDirectoryColumnInsert>;
+        Update: Expand<InstitutionDirectoryColumnUpdate>;
+        Relationships: [];
+      };
+      institution_directory_values: {
+        Row: Expand<InstitutionDirectoryValueRow>;
+        Insert: Expand<InstitutionDirectoryValueInsert>;
+        Update: Expand<InstitutionDirectoryValueUpdate>;
         Relationships: [];
       };
       institution_knowledge_questions: {

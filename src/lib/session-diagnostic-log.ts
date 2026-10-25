@@ -70,11 +70,12 @@ import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
  * string so the coverage registry below cannot drift out of sync with what is
  * actually instrumented: adding a surface here without a coverage row fails
  * type-checking at SESSION_DIAGNOSTIC_COVERAGE. */
-export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates";
+export type SessionDiagnosticSurface = "lms-content" | "diagnostics" | "grading" | "messaging" | "templates" | "courses";
 
-const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates"];
+const SURFACES: readonly SessionDiagnosticSurface[] = ["lms-content", "diagnostics", "grading", "messaging", "templates", "courses"];
 
 export const SESSION_DIAGNOSTIC_SURFACE_LABELS: Readonly<Record<SessionDiagnosticSurface, string>> = {
+  courses: "Institutions",
   "lms-content": "Course Content",
   diagnostics: "Diagnostics (Settings)",
   grading: "Grading",
@@ -92,6 +93,7 @@ export interface SessionDiagnosticCoverageRow {
 /** Every instrumented surface, stated in the download. Typed as a full record
  * keyed by surface so a new surface cannot be added without describing it. */
 const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = {
+  courses: "Institutions directory load/profile/column/value outcomes, elapsed time, aggregate institution/column counts, validation/storage/unavailable failure categories, and explicit external-link dispatch by fixed destination category; no institution labels, email addresses, destinations, custom values or credentials. Other Courses operations and browser link-open success are not covered.",
   templates: "PowerPoint and document template load, analyze, save, reuse and download outcomes, elapsed time and fixed error codes; no filenames, source text, model responses or replacement values. Private Pipeline snapshot publication records a terminal verified/refused/uncertain outcome, total elapsed time and bounded slide/byte counts (not individual GitHub upload phase timings); no repository URLs/names or credentials. Template-backed publication includes the disclosed original and shared title/bullet fill. Copilot task dispatch requires explicit server configuration and remains default-off pending live verification; task submission and status refresh record outcomes without task content.",
   "lms-content":
     "Listing courses, listing courses with a saved export, loading a course's modules and pages, and listing addable content.",

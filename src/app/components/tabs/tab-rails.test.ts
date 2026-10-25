@@ -151,8 +151,8 @@ describe("the highlighted Tools chip is derived from the params, never stored", 
 });
 
 describe("the Courses rail is one flat list: Courses, the two Tasks views, and One-Off Tasks (D26)", () => {
-  it("holds exactly four chips, in that order", () => {
-    expect(COURSES_RAIL_ITEMS.map((item) => item.id)).toEqual(["courses", "tasks:term", "tasks:recurring", "oneoff"]);
+  it("holds exactly five chips, with Institutions beside the existing Courses views", () => {
+    expect(COURSES_RAIL_ITEMS.map((item) => item.id)).toEqual(["courses", "tasks:term", "tasks:recurring", "oneoff", "institutions"]);
   });
 
   it("carries every registered Tasks view, derived from TASKS_VIEW_ORDER rather than restated", () => {
@@ -162,7 +162,7 @@ describe("the Courses rail is one flat list: Courses, the two Tasks views, and O
         tasksRailItemId(view)
       );
     }
-    expect(COURSES_RAIL_ITEMS).toHaveLength(2 + TASKS_VIEW_ORDER.length);
+    expect(COURSES_RAIL_ITEMS).toHaveLength(3 + TASKS_VIEW_ORDER.length);
   });
 
   it("keeps the wording the deleted TasksTab subnav used", () => {
@@ -171,6 +171,7 @@ describe("the Courses rail is one flat list: Courses, the two Tasks views, and O
     expect(byId.get("tasks:term")).toBe(TASKS_VIEW_LABELS.term);
     expect(byId.get("tasks:recurring")).toBe(TASKS_VIEW_LABELS.recurring);
     expect(byId.get("oneoff")).toBe("One-Off Tasks");
+    expect(byId.get("institutions")).toBe("Institutions");
   });
 
   it("splits every chip into exactly one of the Courses sections", () => {
@@ -197,6 +198,14 @@ describe("picking a Courses chip writes the param that already owned that view",
     const next = coursesStateFromRailItem("courses", "tasks", "recurring");
     expect(next.coursesSection).toBe("courses");
     expect(next.tasksView).toBe("recurring");
+  });
+
+  it("routes Institutions to its saved Courses section without changing Tasks state", () => {
+    expect(coursesStateFromRailItem("institutions", "courses", "recurring")).toEqual({
+      coursesSection: "institutions",
+      tasksView: "recurring",
+    });
+    expect(coursesRailItemFor("institutions", "term")).toBe("institutions");
   });
 
   it("leaves everything untouched for an id the rail does not contain", () => {

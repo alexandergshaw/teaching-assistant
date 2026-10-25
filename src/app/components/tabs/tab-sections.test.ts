@@ -43,7 +43,7 @@ describe("the five top-level tabs", () => {
 
 describe("each merged tab's sections", () => {
   it("holds the Courses sections in order, plus the two former tabs the others absorbed", () => {
-    expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks", "oneoff"]);
+    expect([...COURSES_SECTION_ORDER]).toEqual(["courses", "tasks", "oneoff", "institutions"]);
     // WORKFLOWS-COLLAPSE W2: the Workflows section retired into the Automate
     // container, so "manual" is the only live Tools section.
     expect([...TOOLS_SECTION_ORDER]).toEqual(["manual"]);

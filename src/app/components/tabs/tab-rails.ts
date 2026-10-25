@@ -52,7 +52,7 @@ import {
 
 // --- Courses -------------------------------------------------------------
 
-export type CoursesRailItemId = "courses" | "oneoff" | `tasks:${TasksView}`;
+export type CoursesRailItemId = "courses" | "oneoff" | "institutions" | `tasks:${TasksView}`;
 
 /** The id of the Courses rail item for one Tasks sub-view. Exported so no
  *  caller has to hand-write the prefixed string. */
@@ -66,6 +66,7 @@ export function tasksRailItemId(view: TasksView): `tasks:${TasksView}` {
 export type CoursesRailItem =
   | { id: "courses"; label: string; section: "courses" }
   | { id: "oneoff"; label: string; section: "oneoff" }
+  | { id: "institutions"; label: string; section: "institutions" }
   | { id: `tasks:${TasksView}`; label: string; section: "tasks"; tasksView: TasksView };
 
 // Derived from TASKS_VIEW_ORDER rather than restated, so a Tasks sub-view
@@ -82,6 +83,7 @@ export const COURSES_RAIL_ITEMS: readonly CoursesRailItem[] = [
     })
   ),
   { id: "oneoff", label: COURSES_SECTION_LABELS.oneoff, section: "oneoff" },
+  { id: "institutions", label: COURSES_SECTION_LABELS.institutions, section: "institutions" },
 ];
 
 const COURSES_RAIL_BY_ID: ReadonlyMap<string, CoursesRailItem> = new Map(
@@ -93,6 +95,7 @@ const COURSES_RAIL_BY_ID: ReadonlyMap<string, CoursesRailItem> = new Map(
  *  nothing stores a rail item, it is read back out of the params every time. */
 export function coursesRailItemFor(section: CoursesSection, tasksView: TasksView): CoursesRailItemId {
   if (section === "oneoff") return "oneoff";
+  if (section === "institutions") return "institutions";
   return section === "tasks" ? tasksRailItemId(tasksView) : "courses";
 }
 
@@ -109,6 +112,7 @@ export function coursesStateFromRailItem(
   if (!item) return { coursesSection: currentSection, tasksView: currentTasksView };
   if (item.section === "courses") return { coursesSection: "courses", tasksView: currentTasksView };
   if (item.section === "oneoff") return { coursesSection: "oneoff", tasksView: currentTasksView };
+  if (item.section === "institutions") return { coursesSection: "institutions", tasksView: currentTasksView };
   return { coursesSection: "tasks", tasksView: item.tasksView };
 }
 

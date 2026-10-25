@@ -5,6 +5,7 @@ import { Tab, Tabs } from "@mui/material";
 import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from "./components/home/HomeIcons";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
+import InstitutionDirectoryTab from "./components/institution-directory/InstitutionDirectoryTab";
 import TasksTab from "./components/TasksTab";
 import VersionControlTab from "./components/VersionControlTab";
 import CanvasTab from "./components/CanvasTab";
@@ -597,6 +598,7 @@ export default function Home() {
                 same tasksView param they always did, so this pane no longer
                 needs a way to change it. */}
             {coursesSection === "tasks" && <TasksTab view={tasksView} />}
+            {coursesSection === "institutions" && <InstitutionDirectoryTab />}
             {coursesSection === "oneoff" && (
               <TabShell>
                 <OneOffTasksTab />

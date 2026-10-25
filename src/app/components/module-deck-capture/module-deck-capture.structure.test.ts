@@ -1,3 +1,6 @@
+import { REC_VIEWS, isRecView } from "@/app/components/recording/rec-views";
+import { normalizeRecView } from "@/app/url-state";
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
 import { describe, it, expect, vi } from "vitest";
 
 import * as fs from "fs";
@@ -38,7 +41,7 @@ vi.setConfig({ testTimeout: 30_000 });
 // union-only fix would otherwise pass right through.
 
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
-const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+const recordingTabSource = sourceCode(fs.readFileSync(RECORDING_TAB_PATH, "utf-8"));
 
 const MODULE_DECK_CAPTURE_DIR = path.resolve(process.cwd(), "src/app/components/module-deck-capture");
 const MODULES_VIEW_PATH = path.resolve(process.cwd(), "src/app/components/content-tab/ModulesView.tsx");
@@ -69,11 +72,8 @@ describe('"moduledeck" is wired into BOTH the recView union AND the SEPARATE res
     // file - deliberately NOT a bare `source.includes('"moduledeck"')`
     // check, which the restore guard's own occurrence would also satisfy
     // and could never fail independently of it.
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).toMatch(/"moduledeck"/);
+    expect(recordingTabSource).toMatch(/useState<RecView>/);
+    expect(isRecView("moduledeck")).toBe(true);
   });
 
   it('"moduledeck" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
@@ -84,16 +84,13 @@ describe('"moduledeck" is wired into BOTH the recView union AND the SEPARATE res
     // satisfied by the union line above happening to contain the same
     // literal, and can genuinely fail on its own when only the guard is
     // broken.
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
-    expect(guardBlock).toMatch(/v === "moduledeck"/);
+    expect(recordingTabSource).toContain('return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));');
+    expect(normalizeRecView("moduledeck")).toBe("moduledeck");
   });
 
   it("the inner-view tab strip includes a moduledeck entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(recordingTabSource).toMatch(/\["moduledeck",\s*"[^"]+"\]/);
+    expect(REC_VIEWS).toContainEqual(["moduledeck", "Module walkthrough deck"]);
+    expect(recordingTabSource).toContain("REC_VIEWS.map(([key, label])");
   });
 });
 

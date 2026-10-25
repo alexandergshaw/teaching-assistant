@@ -2323,7 +2323,7 @@
   question: 'Is true cancellation of abandoned raced LLM work (threading an AbortSignal through callLlm, a 136-site seam) worth the quota savings, or is bounding caller patience (current state) acceptable?'
 
 - id: 'TABS-CTRL-RECORDING'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'loop-and-docs-maintenance'
   title: 'Complete Tier-3 Wave 2: open the clicked Recording sub-view in a new browser tab.'
@@ -2332,7 +2332,7 @@
   blocked_by: []
   instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param recView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
-  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. Run recording-split.structure.test.ts and all RecordingTab source readers enumerated in scope section 8, after confirming their current exact paths. Measure RecordingTab/useAppNavigation ceilings; extract within wave if needed. Filing does not implement or close this feature.'
+  note: 'Owner: coordinator. Test contract accepted independently round2; source accepted independently round1 after bounded manual-initializer extraction, actual page migration precedence, mapped anchor/state/launch/history integration, and Files/Recording/Presentations emission-census repair. Independent exact npm.cmd run test:paths handoff command passed39files/1126tests; Get-FileHash matched19ownedmanifest entries and all35accepted mutation records contain semantic assertion reds, restored-green results and restored hashes. This is mutation sensitivity, not a historical TDD claim. Separate delivery verifier ran npx.cmd tsc --noEmit --incremental false --pretty false exit0, scoped eslint exit0 with baseline pipeline warning only, and npm.cmd run build compiled successfully16.8s and finished TypeScript58s before the documented missing-Supabase-settings prerender failure. Post-build19ownedhashes unchanged. Root publication/browser measurements pending at this record. Nonblocking residual: outer page navState omits recView, so an outer Recording href defaults to Record while the inner clicked-view hrefs are correct; separate follow-up needs a real outer-link destination oracle. Native modified-click, keyboard/focus and first-paint/Back/Forward remain actual browser measurements; no component was rendered by these tests. Excludes withheld announcement recovery and Institutions faster-read code.'
   question: null
 
 - id: 'TABS-CTRL-VERSION-CONTROL'

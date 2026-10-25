@@ -211,7 +211,7 @@ export default function Home() {
   const [legacyRecRedirect] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
-      return legacyRecViewRedirect(localStorage.getItem("ta-rec-view"), manualView) !== null;
+      return legacyRecViewRedirect(localStorage.getItem("ta-rec-view"), manualView, window.location.search) !== null;
     } catch {
       return false;
     }

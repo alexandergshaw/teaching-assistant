@@ -1,3 +1,4 @@
+import { isRecordingUrl } from "@/app/url-state";
 // TOOLS-IA-REORG W2 (R-b1): the "record an announcement" front door moved out of
 // Recording's inner strip into Tools > Announcements > From a recording, so the
 // Recording-local persisted value `ta-rec-view = "announcement"` no longer names
@@ -24,8 +25,10 @@ export interface LegacyRecViewRedirect {
  */
 export function legacyRecViewRedirect(
   storedRecView: string | null,
-  manualView: string
+  manualView: string,
+  search = "",
 ): LegacyRecViewRedirect | null {
+  if (isRecordingUrl(search)) return null;
   if (storedRecView !== LEGACY_ANNOUNCEMENT_REC_VIEW) return null;
   if (manualView !== "recording") return null;
   return { manualView: "announcements", announcementsView: "recording" };

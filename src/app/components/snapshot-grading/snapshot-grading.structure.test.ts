@@ -1,3 +1,6 @@
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
+import { isRecView } from "../recording/rec-views";
+import { normalizeRecView } from "../../url-state";
 import { describe, it, expect, vi } from "vitest";
 
 import * as fs from "fs";
@@ -56,7 +59,7 @@ describe("stripComments handles CRLF line endings (BLOCKER B canary)", () => {
 // this file was written - see the report for both sides of that check.
 
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
-const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+const recordingTabSource = sourceCode(fs.readFileSync(RECORDING_TAB_PATH, "utf-8"));
 
 const PAGE_PATH = path.resolve(process.cwd(), "src/app/page.tsx");
 const pageSource = fs.readFileSync(PAGE_PATH, "utf-8");
@@ -89,18 +92,10 @@ describe("SnapshotGradingPanel is no longer mounted by page.tsx (nav-only remova
 // GRADING_VIEWS guard) - not duplicated here.
 describe('"snapgrade" is fully retired from RecordingTab (recView union, restore guard, and the strip)', () => {
   it('"snapgrade" is NOT in the recView union, NOT in the SEPARATE restore guard\'s v === chain, and NOT in the strip', () => {
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).not.toMatch(/"snapgrade"/);
-
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    expect(recordingTabSource.slice(guardStart, guardEnd)).not.toMatch(/v === "snapgrade"/);
-
+    expect(isRecView("snapgrade")).toBe(false);
+    expect(normalizeRecView("snapgrade")).toBe("record");
+    expect(recordingTabSource).toMatch(/useState<RecView>/);
+    expect(recordingTabSource).toContain('return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));');
     expect(recordingTabSource).not.toMatch(/\["snapgrade",\s*"[^"]+"\]/);
   });
 });

@@ -455,6 +455,15 @@ const ALL_DEFINED: readonly string[] = [...SAFE_FILES, ...MODE2_BLIND_FILES, ...
 // "stripComments" and is not in ALL_DEFINED must fail the enumeration test
 // below rather than vanish silently.
 const EXCLUSIONS: Readonly<Record<string, string>> = {
+  "src/app/components/tabs/tab-link.wiring.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/components/recording/recording-split.structure.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/components/module-deck-capture/module-deck-capture.structure.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/components/message-replies/message-replies.structure.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/url-state.files-view.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/components/home/useAppNavigation.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/url-state.rec-view.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+  "src/app/components/home/navigation-initial-state.test.ts": "Imports the shared tokenizer for code-behavior subjects; no duplicate tokenizer definition",
+
   "src/app/actions/announcement-image.wiring.test.ts":
     "imports stripComments from the shared module @/app/components/ui/modalAdoptionSourceScan - not a duplicated definition",
   "src/app/components/document-templates/wiring.test.ts":

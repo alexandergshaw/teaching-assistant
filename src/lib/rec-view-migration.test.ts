@@ -17,3 +17,16 @@ describe("legacyRecViewRedirect (TOOLS-IA-REORG W2, R-b1)", () => {
     expect(legacyRecViewRedirect("announcement", "grading")).toBeNull();
   });
 });
+
+
+describe("explicit Recording URL precedence", () => {
+  it("suppresses the legacy redirect for valid, omitted and invalid requested views", () => {
+    for (const query of ["?tab=manual&manualView=recording", "?tab=manual&manualView=recording&recView=messages", "?tab=manual&manualView=recording&recView=bad"]) {
+      expect(legacyRecViewRedirect("announcement", "recording", query)).toBeNull();
+    }
+  });
+  it("retains the bare-entry redirect object and ordinary no-redirect cases", () => {
+    expect(legacyRecViewRedirect("announcement", "recording", "")).toEqual({ manualView: "announcements", announcementsView: "recording" });
+    for (const saved of [null, "record", "messages", "moduledeck"]) expect(legacyRecViewRedirect(saved, "recording", "")).toBeNull();
+  });
+});

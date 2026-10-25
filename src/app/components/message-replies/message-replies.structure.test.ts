@@ -1,3 +1,6 @@
+import { REC_VIEWS, isRecView } from "@/app/components/recording/rec-views";
+import { normalizeRecView } from "@/app/url-state";
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
 // docs/message-replies-acceptance-criteria.md M3 - the wiring wave's own
 // reachability + inventory canary for the message-replies tool, mirroring
 // module-deck-capture/module-deck-capture.structure.test.ts (that file's own
@@ -29,7 +32,7 @@ import { countLines } from "../../../lib/count-lines";
 vi.setConfig({ testTimeout: 30_000 });
 
 const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
-const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+const recordingTabSource = sourceCode(fs.readFileSync(RECORDING_TAB_PATH, "utf-8"));
 
 const MESSAGE_REPLIES_DIR = path.resolve(process.cwd(), "src/app/components/message-replies");
 
@@ -58,26 +61,18 @@ describe('"messages" is wired into BOTH the recView union AND the SEPARATE resto
     // the literal `"record" | "discussions" | "speed"`, which section 3/M1
     // requires to keep matching so module-deck-capture.structure.test.ts's
     // own identical anchor stays valid too.
-    const unionLine = recordingTabSource
-      .split("\n")
-      .find((line) => line.includes('"record" | "discussions" | "speed"'));
-    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
-    expect(unionLine).toMatch(/"messages"/);
+    expect(recordingTabSource).toMatch(/useState<RecView>/);
+    expect(isRecView("messages")).toBe(true);
   });
 
   it('"messages" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
-    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
-    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
-    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
-    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
-    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
-    expect(guardBlock).toMatch(/v === "messages"/);
+    expect(recordingTabSource).toContain('return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));');
+    expect(normalizeRecView("messages")).toBe("messages");
   });
 
   it("the inner-view tab strip includes a messages entry, directly after the discussions entry, so the view is reachable by more than a reload or a launch event", () => {
-    expect(recordingTabSource).toMatch(
-      /\["discussions",\s*"[^"]+"\],\s*\["messages",\s*"[^"]+"\]/
-    );
+    expect(REC_VIEWS.slice(1, 3)).toEqual([["discussions", "Discussion replies"], ["messages", "Message replies"]]);
+    expect(recordingTabSource).toContain("REC_VIEWS.map(([key, label])");
   });
 });
 

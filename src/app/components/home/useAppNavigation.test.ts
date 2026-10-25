@@ -1,3 +1,4 @@
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
 // D6r (docs/assignments-quizzes-tabs-acceptance-criteria.md): the contentView
 // restore guard in useAppNavigation.ts's own useState initializer.
 //
@@ -34,7 +35,8 @@ import { normalizeContentView, isContentView, resolveGradingPointer } from "../.
 import { legacyPptDesignView } from "../../../lib/ppt-view-migration";
 
 const SOURCE_PATH = join(process.cwd(), "src/app/components/home/useAppNavigation.ts");
-const source = readFileSync(SOURCE_PATH, "utf8");
+const source = sourceCode(readFileSync(SOURCE_PATH, "utf8")).replace(/\r\n/g, "\n");
+const initialStateSource = sourceCode(readFileSync(join(process.cwd(), "src/app/components/home/navigation-initial-state.ts"), "utf8")).replace(/\r\n/g, "\n");
 
 describe("useAppNavigation's contentView restore guard delegates to normalizeContentView (D6r)", () => {
   it("the contentView useState initializer calls normalizeContentView(localStorage.getItem(VIEW_KEY)) - pinning the FACT that it delegates, not a restated literal list", () => {
@@ -330,7 +332,7 @@ describe("GRAD-SUBTAB wave 1 fix: the initial-load path applies the retired grad
     expect(start, "expected to find the manualView useState initializer").toBeGreaterThan(-1);
     const end = source.indexOf("const [buildView", start);
     expect(end, "expected to find the next useState block after manualView's").toBeGreaterThan(start);
-    const block = source.slice(start, end);
+    const block = initialStateSource;
 
     const urlBranchStart = block.indexOf(
       'if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {'
@@ -455,7 +457,7 @@ describe("GRAD-SUBTAB wave 3 (RES-GRAD-PINS): the manualView/gradingView localSt
     expect(start, "expected to find the manualView useState initializer").toBeGreaterThan(-1);
     const end = source.indexOf("const [buildView", start);
     expect(end, "expected to find the next useState block after manualView's").toBeGreaterThan(start);
-    const block = source.slice(start, end);
+    const block = initialStateSource;
 
     expect(
       block,
@@ -527,7 +529,7 @@ describe("PPT-DESIGN-INTO-PRESENTATIONS (I-NAV-INIT): the initial-load path migr
     expect(start).toBeGreaterThan(-1);
     const end = source.indexOf("const [buildView", start);
     expect(end).toBeGreaterThan(start);
-    const block = source.slice(start, end);
+    const block = initialStateSource;
 
     const urlBranchStart = block.indexOf('if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {');
     const urlBranchEnd = block.indexOf("const savedManual", urlBranchStart);
@@ -619,7 +621,9 @@ describe("WORKFLOWS-COLLAPSE W2: the manualView/automateView initializers migrat
   it("the manualView initializer returns artifact-design for it in BOTH the URL and stored paths", () => {
     const start = source.indexOf("const [manualView, setManualView] = useState<ManualView>(");
     const end = source.indexOf("const [buildView", start);
-    const block = source.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = initialStateSource;
     expect(block.split('if (readLegacyAutomateView()) return "artifact-design";').length - 1).toBe(2);
     // URL path: after the grading pointer, before the generic normalize return.
     const urlLegacy = block.indexOf('if (readLegacyAutomateView()) return "artifact-design";');

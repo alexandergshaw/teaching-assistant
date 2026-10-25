@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
+import { REC_VIEWS, type RecView } from "./recording/rec-views";
+import { REC_VIEW_CHANGE_EVENT, normalizeRecView, resolveRecViewFromUrl, parseUrlState } from "../url-state";
+import { buildTabHref, isPlainLeftClick } from "./tabs/tab-link";
 import TabShell from "./TabShell";
 import CaptionStudio from "./CaptionStudio";
 import SlideStudio from "./SlideStudio";
@@ -65,21 +68,29 @@ export default function RecordingTab({
   // GradingRecordingPanel and SnapshotGradingPanel are now always-mounted
   // siblings of this tab, reached through Tools > Grading's own inner nav
   // (gradingView), not through recView.
-  const [storedRecView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "moduledeck" | "messages"
-  >(() => {
+  const [storedRecView, setRecViewState] = useState<RecView>(() => {
     if (typeof window === "undefined") return "record";
-    const v = localStorage.getItem("ta-rec-view");
-    return v === "discussions" ||
-      v === "speed" ||
-      v === "captions" ||
-      v === "slides" ||
-      v === "avatar" ||
-      v === "moduledeck" ||
-      v === "messages"
-      ? v
-      : "record";
+    return resolveRecViewFromUrl(window.location.search, localStorage.getItem("ta-rec-view"));
   });
+  const setRecView = useCallback((view: RecView) => {
+    setRecViewState(view);
+    localStorage.setItem("ta-rec-view", view);
+    window.dispatchEvent(new CustomEvent(REC_VIEW_CHANGE_EVENT, { detail: view }));
+  }, []);
+  const recViewHref = (view: RecView) => buildTabHref(
+    parseUrlState(typeof window === "undefined" ? "" : window.location.search),
+    { tab: "manual", toolsSection: "manual", manualView: "recording", recView: view },
+  );
+  useEffect(() => {
+    const onPopState = () => {
+      const location = parseUrlState(window.location.search);
+      if (location.tab === "manual" && location.toolsSection === "manual" && location.manualView === "recording") {
+        setRecViewState(normalizeRecView(location.recView));
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", storedRecView);
@@ -121,7 +132,7 @@ export default function RecordingTab({
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, []);
+  }, [setRecView]);
 
   const [error, setError] = useState<string | null>(null);
   const [hasStream, setHasStream] = useState(false);
@@ -607,13 +618,13 @@ export default function RecordingTab({
           under Tools > Announcements and reuses the record wrapper below
           (the strip is hidden while that is showing). */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools" style={announcementsActive ? { display: "none" } : undefined}>
-        {([["record", "Record"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={recView === key}
+        {REC_VIEWS.map(([key, label]) => (
+          <a key={key} href={recViewHref(key)} role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={`rec-panel-${key}`}
             tabIndex={recView === key ? 0 : -1}
             onKeyDown={(e) => {
-              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLAnchorElement>('[role="tab"]') ?? []);
               const idx = tabs.indexOf(e.currentTarget);
               if (idx === -1) return;
               let nextIdx: number;
@@ -627,9 +638,13 @@ export default function RecordingTab({
               tabs[nextIdx].click();
             }}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setRecView(key)}>
+            onClick={(event) => {
+              if (!isPlainLeftClick(event)) return;
+              event.preventDefault();
+              setRecView(key);
+            }}>
             <span className={styles.tabLabelWrap}>{label}</span>
-          </button>
+          </a>
         ))}
       </div>
 

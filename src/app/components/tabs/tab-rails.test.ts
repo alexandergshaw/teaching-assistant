@@ -285,6 +285,9 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     "contentView",
     "gradingView",
     "announcementsView",
+    "presentationsView",
+    "filesView",
+    "recView",
     "tasksView",
     "kbInstitution",
     "kbPage",
@@ -301,7 +304,9 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
       { ...DEFAULT_STATE, tab: "manual", manualView: "announcements", announcementsView: "walkthrough" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "course-planning", buildView: "new" },
       { ...DEFAULT_STATE, tab: "manual", manualView: "artifact-design", automateView: "automations" },
-      { ...DEFAULT_STATE, tab: "files" },
+      { ...DEFAULT_STATE, tab: "files", filesView: "submissions" },
+      { ...DEFAULT_STATE, tab: "manual", manualView: "recording", recView: "messages" },
+      { ...DEFAULT_STATE, tab: "manual", manualView: "presentations", presentationsView: "pipeline" },
       {
         ...DEFAULT_STATE,
         tab: "files",
@@ -318,11 +323,14 @@ describe("no view param was renamed or retired by the flattening (D26)", () => {
     return [...names].sort();
   }
 
-  it("emits exactly the frozen param names (twelve after ANNOUNCEMENTS-TAB A-W1 added announcementsView; draftsView left in GRAD-SUBTAB wave 3)", () => {
+  it("emits exactly the frozen param names, exercising each non-default inner branch", () => {
     expect(emittedParamNames()).toEqual([...EXPECTED_PARAM_NAMES].sort());
   });
 
   it("still reads each view param back under its own name", () => {
+    expect(parseUrlState("?tab=files&filesView=submissions").filesView).toBe("submissions");
+    expect(parseUrlState("?tab=manual&manualView=recording&recView=messages").recView).toBe("messages");
+    expect(parseUrlState("?tab=manual&manualView=presentations&presentationsView=pipeline").presentationsView).toBe("pipeline");
     // The direction a rename would break first: an old link arriving with the
     // old name. Each of these names a view whose chip moved into a flattened
     // rail, so each is one the flattening had the opportunity to rename.

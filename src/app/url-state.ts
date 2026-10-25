@@ -1,3 +1,4 @@
+import { isRecView, type RecView } from "./components/recording/rec-views";
 // Pure helpers mapping the app's full tab/sub-tab nesting to and from the
 // URL's query string, so the browser's Back/Forward buttons can move between
 // them.
@@ -355,6 +356,7 @@ export interface UrlNavState {
   toolsSection: ToolsSection;
   librarySection: LibrarySection;
   filesView?: FilesView;
+  recView?: RecView;
   manualView: ManualViewType;
   automateView: AutomateView;
   buildView: BuildViewType;
@@ -498,6 +500,7 @@ export function parseUrlState(search: string): UrlNavState {
     : {};
   return {
     ...filesView,
+    ...(params.has("recView") ? { recView: normalizeRecView(params.get("recView")) } : {}),
     tab: draftsToLibrary ? "files" : destination.tab,
     coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
     // "manual" is the only live Tools section (W2): a legacy "workflows"
@@ -569,6 +572,9 @@ export function buildUrlSearch(state: UrlNavState): string {
       if (state.manualView === "content" && state.contentView !== DEFAULT_CONTENT_VIEW) {
         params.set(CONTENT_VIEW_PARAM, state.contentView);
       }
+      if (state.manualView === "recording" && normalizeRecView(state.recView) !== DEFAULT_REC_VIEW) {
+        params.set("recView", normalizeRecView(state.recView));
+      }
       if (state.manualView === "grading" && state.gradingView !== DEFAULT_GRADING_VIEW) {
         params.set(GRADING_VIEW_PARAM, state.gradingView);
       }
@@ -603,4 +609,18 @@ export function buildUrlSearch(state: UrlNavState): string {
   }
 
   return `?${params.toString()}`;
+}
+
+export const DEFAULT_REC_VIEW: RecView = "record";
+export const REC_VIEW_CHANGE_EVENT = "recording-view-change";
+export function normalizeRecView(value: unknown): RecView {
+  return isRecView(value) ? value : DEFAULT_REC_VIEW;
+}
+export function isRecordingUrl(search: string): boolean {
+  if (!new URLSearchParams(search).has("tab")) return false;
+  const location = parseUrlState(search);
+  return location.tab === "manual" && location.toolsSection === "manual" && location.manualView === "recording";
+}
+export function resolveRecViewFromUrl(search: string, saved: unknown): RecView {
+  return isRecordingUrl(search) ? normalizeRecView(parseUrlState(search).recView) : normalizeRecView(saved);
 }

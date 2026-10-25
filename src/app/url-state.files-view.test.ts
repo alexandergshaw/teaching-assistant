@@ -1,3 +1,4 @@
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
@@ -9,8 +10,8 @@ import {
   type UrlNavState,
 } from "./url-state";
 
-const filesTab = readFileSync("src/app/components/FilesTab.tsx", "utf8");
-const navigation = readFileSync("src/app/components/home/useAppNavigation.ts", "utf8");
+const filesTab = sourceCode(readFileSync("src/app/components/FilesTab.tsx", "utf8")).replace(/\r\n/g, "\n");
+const navigation = sourceCode(readFileSync("src/app/components/home/useAppNavigation.ts", "utf8")).replace(/\r\n/g, "\n");
 
 // Source contracts only: this suite does not render components or a browser.
 function between(source: string, start: string, end: string): string {
@@ -122,7 +123,7 @@ describe("Files view deep links", () => {
     const componentPop = between(filesTab, "const onPopState =", "}, []);");
     expect(componentPop).toMatch(/if \(location\.tab === "files" && location\.librarySection === "files"\) \{\s*setFilesViewState\(parseFilesView\(window\.location\.search\)\);\s*\}/);
     const navPop = between(navigation, "const onPopState =", "}, [setKbInstitution]);");
-    expect(navPop).toMatch(/const restoredFilesView = parseFilesView\(window\.location\.search\);\s*lastKnownSearchRef\.current = buildUrlSearch\(\{ \.\.\.parsed, filesView: restoredFilesView \}\);\s*setActiveTab\(parsed\.tab\);/);
+    expect(navPop).toMatch(/const restoredFilesView = parseFilesView\(window\.location\.search\);\s*lastKnownSearchRef\.current = buildUrlSearch\(\{ \.\.\.parsed, filesView: restoredFilesView, recView: normalizeRecView\(parsed\.recView\) \}\);\s*setActiveTab\(parsed\.tab\);/);
     expect(navPop).toMatch(/if \(parsed\.tab === "files"\) \{\s*setLibrarySection\(parsed\.librarySection\);\s*if \(parsed\.librarySection === "files"\) setFilesView\(restoredFilesView\);/);
     for (const pop of [componentPop, navPop]) {
       expect(pop).toContain('window.addEventListener("popstate", onPopState);');

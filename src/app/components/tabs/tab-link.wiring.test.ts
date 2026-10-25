@@ -1,3 +1,4 @@
+import { stripComments as sourceCode } from "@/app/components/ui/modalAdoptionSourceScan";
 // Source-text wiring for the Tier-1 tab anchors (tabs-ctrl-click scope, AC1-AC3).
 // Nothing renders under vitest here, so the anchor + guard contract and the
 // URL-wins-over-localStorage cold-load ordering are asserted by reading source.
@@ -9,7 +10,7 @@ import { join } from "path";
 import { parseUrlState } from "../../url-state";
 
 const root = process.cwd();
-const read = (...p: string[]) => readFileSync(join(root, ...p), "utf8");
+const read = (...p: string[]) => sourceCode(readFileSync(join(root, ...p), "utf8")).replace(/\r\n/g, "\n");
 
 const TAB_RAIL = read("src", "app", "components", "tabs", "TabRail.tsx");
 const MANUAL_RAIL = read("src", "app", "components", "manual", "ManualRail.tsx");
@@ -111,7 +112,7 @@ describe("AC3: every Tier-1 field's initializer reads the URL before its persist
     { field: "coursesSection", param: "coursesSection", key: "COURSES_SECTION_KEY" },
     { field: "toolsSection", param: "toolsSection", key: "TOOLS_SECTION_KEY" },
     { field: "librarySection", param: "librarySection", key: "LIBRARY_SECTION_KEY" },
-    { field: "manualView", param: "manualView", key: "MANUAL_VIEW_KEY" },
+    { field: "manualView", param: "manualView", key: '"ta-manual-view"' },
     { field: "buildView", param: "buildView", key: "BUILD_VIEW_KEY" },
     { field: "contentView", param: "contentView", key: "VIEW_KEY" },
     { field: "automateView", param: "automateView", key: "AUTOMATE_VIEW_KEY" },
@@ -125,7 +126,12 @@ describe("AC3: every Tier-1 field's initializer reads the URL before its persist
     const start = NAV.indexOf(`const [${field}, `);
     expect(start, `no useState for ${field}`).toBeGreaterThan(-1);
     const next = NAV.indexOf("\n  const [", start + 1);
-    return NAV.slice(start, next > start ? next : undefined);
+    const block = NAV.slice(start, next > start ? next : undefined);
+    if (field === "manualView") {
+      expect(block).toContain("return initializeManualView(window.location.search, localStorage, toolsSection, readLegacyAutomateView);");
+      return read("src", "app", "components", "home", "navigation-initial-state.ts");
+    }
+    return block;
   }
 
   it("tab: readNavSource lets the URL tab win over ta-active-tab", () => {

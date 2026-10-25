@@ -5,7 +5,6 @@ const source = readFileSync(new URL("./InstitutionDirectoryTab.tsx", import.meta
 
 describe("institution directory production handler wiring", () => {
   it.each([
-    ["listInstitutionDirectoryAction", "runInstitutionDirectoryList"],
     ["saveInstitutionDirectoryProfileAction", "runProfileRequest"],
     ["removeInstitutionDirectoryProfileAction", "runInstitutionDirectoryRemoveProfile"],
     ["saveInstitutionDirectoryColumnAction", "runColumnRequest"],
@@ -23,18 +22,17 @@ describe("institution directory production handler wiring", () => {
   });
 
   it("delegates closed errors and busy reset to handlers with the real setters", () => {
-    expect(source).toContain("isRefresh: loadedOnce.current, setError, setBusy");
+    expect(source).toContain("directoryLoaderForAccount(account, listInstitutionDirectoryAction)");
     expect(source).toContain("request: () => saveInstitutionDirectoryProfileAction(profile, mode), setError, setBusy");
     expect(source).toContain("request: () => removeInstitutionDirectoryProfileAction(record.profile.acronym), setError, setBusy");
     expect(source).toContain("request: () => removeInstitutionDirectoryColumnAction(id), setError, setBusy");
     expect(source).toMatch(/saveInstitutionDirectoryColumnAction\([\s\S]{0,500}?setError, setBusy/);
     expect(source).toMatch(/saveInstitutionDirectoryValueAction\([\s\S]{0,500}?setError, setBusy/);
-    expect(source).toContain("Could not load institutions. Try again.");
-    expect(source).toContain("Could not refresh institutions. Your last saved rows are still shown; try again.");
+
   });
 
   it("refreshes through a separate list handler after fulfilled mutations", () => {
-    expect(source).toMatch(/await load\(\)/);
-    expect(source).toContain("runInstitutionDirectoryList({ startedAt: started");
+    expect(source).toMatch(/await load\(true\)/);
+    expect(source).toContain("await loader?.load(force)");
   });
 });

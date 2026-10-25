@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField } from "@mui/material";
 import {
   listInstitutionDirectoryAction,
@@ -22,7 +22,6 @@ import {
   runInstitutionDirectoryClearValue,
   runInstitutionDirectoryCreateColumn,
   runInstitutionDirectoryCreateProfile,
-  runInstitutionDirectoryList,
   runInstitutionDirectoryRemoveColumn,
   runInstitutionDirectoryRemoveProfile,
   runInstitutionDirectoryRenameColumn,
@@ -30,10 +29,14 @@ import {
   runInstitutionDirectoryUpdateProfile,
 } from "./institution-directory-handlers";
 import ProfileEditor, { type DirectoryProfileInput } from "./ProfileEditor";
+import { DIRECTORY_LOAD_TIMEOUT_MS, directoryLoaderForAccount, selectDirectoryAccount } from "./directory-loader";
 import { createClient } from "@/lib/supabase/client";
 import { useDraftNavigation } from "./useDraftNavigation";
 
 const EMPTY_STATE: InstitutionDirectoryState = { records: [], columns: [] };
+const EMPTY_SNAPSHOT = { data: null, loading: false, error: null };
+const emptySnapshot = () => EMPTY_SNAPSHOT;
+const emptySubscribe = () => () => {};
 function monotonicNow(): number { return globalThis.performance.now(); }
 
 function labelForError(code: string): string {
@@ -95,26 +98,42 @@ function CustomValue({
   />{link?.ok && <a href={link.value} target="_blank" rel="noopener noreferrer" onClick={() => recordInstitutionDirectoryDiagnostic("external-open", "success", "custom-column-link")}>Open link</a>}</div>;
 }
 
-export default function InstitutionDirectoryTab() {
-  const [account, setAccount] = useState<string | null>(null);
-  useEffect(() => {
-    const client = createClient();
-    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-      setAccount(session?.user.id ?? "signed-out");
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-  if (account === null) return <p role="status">Loading institutions…</p>;
-  if (account === "signed-out") return <p role="alert">Sign in to view and edit your institutions.</p>;
-  return <InstitutionDirectoryPanel key={account} />;
+// This listener survives tab navigation so sign-out also erases an unmounted directory.
+let observingAccount = false;
+function observeDirectoryAccount() {
+  if (observingAccount) return;
+  observingAccount = true;
+  createClient().auth.onAuthStateChange((_event, session) => {
+    selectDirectoryAccount(session?.user.id ?? null);
+  });
 }
 
-function InstitutionDirectoryPanel() {
+export default function InstitutionDirectoryTab() {
+  const [account, setAccount] = useState<string | null>(null);
+  const [authFailed, setAuthFailed] = useState(false);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  useEffect(() => {
+    observeDirectoryAccount();
+    const client = createClient();
+    const timer = setTimeout(() => setAuthFailed(true), DIRECTORY_LOAD_TIMEOUT_MS);
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      clearTimeout(timer);
+      setAuthFailed(false);
+      selectDirectoryAccount(session?.user.id ?? null);
+      setAccount(session?.user.id ?? "signed-out");
+    });
+    return () => { clearTimeout(timer); subscription.unsubscribe(); };
+  }, [authAttempt]);
+  return <InstitutionDirectoryPanel key={account ?? "auth"} account={account} authFailed={authFailed} retryAuth={() => { setAuthFailed(false); setAuthAttempt((attempt) => attempt + 1); }} />;
+}
+
+function InstitutionDirectoryPanel({ account, authFailed, retryAuth }: { account: string | null; authFailed: boolean; retryAuth: () => void }) {
   const sectionRef = useRef<HTMLElement>(null);
   const draftNavigation = useDraftNavigation(sectionRef);
-  const [state, setState] = useState(EMPTY_STATE);
-  const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "failed">("loading");
-  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [loader] = useState(() => account && account !== "signed-out" ? directoryLoaderForAccount(account, listInstitutionDirectoryAction) : null);
+  const snapshot = useSyncExternalStore(loader?.subscribe ?? emptySubscribe, loader?.getSnapshot ?? emptySnapshot, emptySnapshot);
+  const state = snapshot.data ?? EMPTY_STATE;
+  const authenticated = !!account && account !== "signed-out";
   const [editor, setEditor] = useState<InstitutionDirectoryRecord | null | undefined>(undefined);
   const [editorVersion, setEditorVersion] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -124,8 +143,6 @@ function InstitutionDirectoryPanel() {
   const [columnType, setColumnType] = useState<DirectoryColumnType>("text");
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameLabel, setRenameLabel] = useState("");
-  const loadedOnce = useRef(false);
-  const requestSequence = useRef(0);
 
   function openEditor(record: InstitutionDirectoryRecord | null) {
     draftNavigation.requestLeave(() => {
@@ -136,45 +153,11 @@ function InstitutionDirectoryPanel() {
     });
   }
 
-  const load = useCallback(async () => {
-    const requestId = ++requestSequence.current;
-    const started = monotonicNow();
-    if (!loadedOnce.current) setLoadStatus("loading");
-    setRefreshFailed(false);
-    const request = await runInstitutionDirectoryList({ startedAt: started, request: listInstitutionDirectoryAction, isRefresh: loadedOnce.current, setError, setBusy, shouldApplyUnavailable: () => requestId === requestSequence.current, onUnavailable: () => {
-      if (!loadedOnce.current) setLoadStatus("failed"); else setRefreshFailed(true);
-    } });
-    if (requestId !== requestSequence.current) return;
-    if (request.kind === "unavailable") return;
-    const result = request.value;
-    if (!result.ok) {
-      recordInstitutionDirectoryDiagnostic("list", "failure", "directory", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started });
-      if (result.code === "unauthenticated") {
-        loadedOnce.current = false;
-        setState(EMPTY_STATE);
-        setRefreshFailed(false);
-        setLoadStatus("failed");
-        setError(labelForError(result.code));
-        return;
-      }
-      if (!loadedOnce.current) setLoadStatus("failed"); else setRefreshFailed(true);
-      setError(loadedOnce.current ? labelForError("refresh-failed") : labelForError(result.code));
-      return;
-    }
-    recordInstitutionDirectoryDiagnostic("list", "success", "directory", undefined, {
-      durationMs: monotonicNow() - started,
-      institutionCount: result.state.records.length,
-      columnCount: result.state.columns.length,
-    });
-    setState(result.state);
-    loadedOnce.current = true;
-    setLoadStatus("ready");
-    setError(null);
-  }, []);
+  const load = useCallback(async (force = false) => { await loader?.load(force); }, [loader]);
   useEffect(() => {
     let active = true;
     void Promise.resolve().then(() => { if (active) return load(); });
-    return () => { active = false; requestSequence.current += 1; };
+    return () => { active = false; };
   }, [load]);
 
   async function saveProfile(profile: DirectoryProfileInput) {
@@ -188,7 +171,7 @@ function InstitutionDirectoryPanel() {
     const result = request.value;
     if (!result.ok) { recordInstitutionDirectoryDiagnostic(operation, "failure", "profile", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); setBusy(false); return; }
     recordInstitutionDirectoryDiagnostic(operation, "success", "profile", undefined, { durationMs: monotonicNow() - started });
-    setEditor(undefined); await load(); setBusy(false); draftNavigation.finishLeave();
+    setEditor(undefined); await load(true); setBusy(false); draftNavigation.finishLeave();
   }
 
   async function removeProfile(record: InstitutionDirectoryRecord) {
@@ -198,7 +181,7 @@ function InstitutionDirectoryPanel() {
     const request = await runInstitutionDirectoryRemoveProfile({ startedAt: started, request: () => removeInstitutionDirectoryProfileAction(record.profile.acronym), setError, setBusy });
     if (request.kind === "unavailable") return;
     const result = request.value;
-    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-profile", "failure", "profile", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic("remove-profile", "success", "profile", undefined, { durationMs: monotonicNow() - started }); await load(); }
+    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-profile", "failure", "profile", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic("remove-profile", "success", "profile", undefined, { durationMs: monotonicNow() - started }); await load(true); }
     setBusy(false);
   }
 
@@ -212,7 +195,7 @@ function InstitutionDirectoryPanel() {
     const result = request.value;
     if (!result.ok) { recordInstitutionDirectoryDiagnostic(operation, "failure", "column", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); setBusy(false); return; }
     recordInstitutionDirectoryDiagnostic(operation, "success", "column", undefined, { durationMs: monotonicNow() - started });
-    setColumnForm(false); setRenameId(null); setColumnLabel(""); await load(); setBusy(false);
+    setColumnForm(false); setRenameId(null); setColumnLabel(""); await load(true); setBusy(false);
   }
 
   async function removeColumn(id: string, label: string) {
@@ -222,7 +205,7 @@ function InstitutionDirectoryPanel() {
     const request = await runInstitutionDirectoryRemoveColumn({ startedAt: started, request: () => removeInstitutionDirectoryColumnAction(id), setError, setBusy });
     if (request.kind === "unavailable") return;
     const result = request.value;
-    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-column", "failure", "column", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic("remove-column", "success", "column", undefined, { durationMs: monotonicNow() - started }); await load(); }
+    if (!result.ok) { recordInstitutionDirectoryDiagnostic("remove-column", "failure", "column", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic("remove-column", "success", "column", undefined, { durationMs: monotonicNow() - started }); await load(true); }
     setBusy(false);
   }
 
@@ -234,21 +217,23 @@ function InstitutionDirectoryPanel() {
     const request = await runValueRequest({ startedAt: started, request: () => saveInstitutionDirectoryValueAction({ acronym: record.profile.acronym, columnId, value }), setError, setBusy });
     if (request.kind === "unavailable") return;
     const result = request.value;
-    if (!result.ok) { recordInstitutionDirectoryDiagnostic(operation, "failure", "value", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic(operation, "success", "value", undefined, { durationMs: monotonicNow() - started }); await load(); }
+    if (!result.ok) { recordInstitutionDirectoryDiagnostic(operation, "failure", "value", institutionDirectoryDiagnosticReason(result.code), { durationMs: monotonicNow() - started }); setError(labelForError(result.code)); } else { recordInstitutionDirectoryDiagnostic(operation, "success", "value", undefined, { durationMs: monotonicNow() - started }); await load(true); }
     setBusy(false);
   }
-
-  if (loadStatus === "loading") return <section aria-label="Institutions"><p role="status">Loading institutions…</p></section>;
-  if (loadStatus === "failed") return <section aria-label="Institutions"><p role="alert">{error ?? "Could not load institutions."}</p><Button onClick={() => void load()}>Try again</Button></section>;
 
   return (
     <section ref={sectionRef} aria-labelledby="institution-directory-title" style={{ padding: "var(--space-4)" }}>
       <header style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", flexWrap: "wrap", alignItems: "center" }}>
         <div><h1 id="institution-directory-title">Institutions</h1><p className="field-hint">Keep institution contacts and links together. Passwords belong in Bitwarden; this directory never stores them.</p></div>
-        <Button variant="contained" disabled={busy} onClick={() => openEditor(null)}>Add institution</Button>
+        <Button variant="contained" disabled={busy || !authenticated} onClick={() => openEditor(null)}>Add institution</Button>
       </header>
       {error && <p role="alert">{error}</p>}
-      {refreshFailed && <Button onClick={() => void load()}>Retry refresh</Button>}
+      {account === "signed-out" && <p role="alert">Sign in to view and edit your institutions.</p>}
+      {!account && !authFailed && <p role="status">Checking your session…</p>}
+      {!account && authFailed && <div><p role="alert">Checking your session took too long.</p><Button onClick={retryAuth}>Try again</Button></div>}
+      {authenticated && (snapshot.loading || (!snapshot.data && !snapshot.error)) && <p role="status">{snapshot.data ? "Refreshing institutions; your last saved rows are shown." : "Loading institutions…"}</p>}
+      {snapshot.error && <p role="alert">{snapshot.error}</p>}
+      {authenticated && <Button disabled={snapshot.loading} onClick={() => void load()}>{snapshot.error ? "Try again" : "Refresh"}</Button>}
       {editor !== undefined && <ProfileEditor key={`${editor?.profile.acronym ?? "new"}:${editorVersion}`} record={editor ?? undefined} onDirtyChange={draftNavigation.setDirty} onSave={(profile) => void saveProfile(profile)} onCancel={() => draftNavigation.requestLeave(() => setEditor(undefined))} busy={busy} error={error} />}
       <Dialog data-institution-draft-dialog open={draftNavigation.confirming} onClose={draftNavigation.stay} aria-labelledby="institution-unsaved-title">
         <DialogTitle id="institution-unsaved-title">Unsaved institution changes</DialogTitle>
@@ -260,7 +245,7 @@ function InstitutionDirectoryPanel() {
         </DialogActions>
       </Dialog>
       <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBlock: "var(--space-3)" }}>
-        <Button variant="outlined" onClick={() => { setColumnForm(true); setError(null); }} disabled={busy}>Add column</Button>
+        <Button variant="outlined" onClick={() => { setColumnForm(true); setError(null); }} disabled={busy || !authenticated}>Add column</Button>
         {columnForm && <>
           <TextField size="small" label="Column name" value={columnLabel} onChange={(e) => setColumnLabel(e.target.value)} disabled={busy} />
           <TextField select size="small" label="Column type" value={columnType} onChange={(e) => setColumnType(e.target.value as DirectoryColumnType)} disabled={busy}>
@@ -270,7 +255,7 @@ function InstitutionDirectoryPanel() {
           <Button onClick={() => { setColumnForm(false); setColumnLabel(""); }} disabled={busy}>Cancel</Button>
         </>}
       </div>
-      {state.records.length === 0 && <p>No institutions yet. Add an institution to start your directory.</p>}
+      {snapshot.data && state.records.length === 0 && <p>No institutions yet. Add an institution to start your directory.</p>}
         <TableContainer sx={{ maxHeight: "70vh" }}>
           <Table size="small" stickyHeader aria-label="Institution directory">
             <TableHead><TableRow>

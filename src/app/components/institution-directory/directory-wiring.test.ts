@@ -15,20 +15,28 @@ describe("institution directory delivery seams", () => {
 
   it("remounts drafts and pending state for a different authenticated account and editor row", () => {
     expect(panel).toContain("client.auth.onAuthStateChange");
-    expect(panel).toContain('<InstitutionDirectoryPanel key={account} />');
+    expect(panel).toContain('<InstitutionDirectoryPanel key={account ?? "auth"} account={account}');
     expect(panel).toContain('key={`${editor?.profile.acronym ?? "new"}:${editorVersion}`}');
     expect(panel).toContain('account === "signed-out"');
     expect(panel).toContain("subscription.unsubscribe()");
   });
 
   it("keeps column management outside the empty-record branch and guards all editor switches", () => {
-    expect(panel).toContain('{state.records.length === 0 && <p>No institutions yet.');
+    expect(panel).toContain('{snapshot.data && state.records.length === 0 && <p>No institutions yet.');
     expect(panel).not.toContain('state.records.length === 0 ?');
     expect(panel).toContain('onClick={() => openEditor(null)}');
     expect(panel.match(/onClick=\{\(\) => openEditor\(record\)\}/g)).toHaveLength(2);
     expect(panel).toContain('Save and continue');
     expect(panel).toContain('Discard changes');
     expect(panel).toContain('draftNavigation.stay');
+  });
+
+  it("keeps the table shell visible during first load and bounded failure", () => {
+    expect(panel).not.toContain('if (loadStatus');
+    expect(panel).toContain('Checking your session took too long.');
+    expect(panel).toContain('snapshot.data ? "Refreshing institutions; your last saved rows are shown."');
+    expect(panel).toContain('snapshot.error ? "Try again" : "Refresh"');
+    expect(panel).toContain('aria-label="Institution directory"');
   });
 
   it("distinguishes unset and unsafe saved LMS destinations without an active link", () => {

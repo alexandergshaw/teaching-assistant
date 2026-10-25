@@ -57,7 +57,7 @@ export function buildInstitutionDirectoryDiagnostic(input: {
   operation: InstitutionDirectoryOperation;
   outcome: InstitutionDirectoryOutcome;
   target: InstitutionDirectoryTarget;
-  reason?: "validation" | "storage" | "unavailable" | "unauthenticated" | "not-found";
+  reason?: "validation" | "storage" | "unavailable" | "unauthenticated" | "not-found" | "timeout";
   metrics?: InstitutionDirectoryMetrics;
 }): SessionDiagnosticEntry {
   const metrics = input.metrics ?? {};
@@ -84,7 +84,7 @@ export function recordInstitutionDirectoryDiagnostic(
   operation: InstitutionDirectoryOperation,
   outcome: InstitutionDirectoryOutcome,
   target: InstitutionDirectoryTarget,
-  reason?: "validation" | "storage" | "unavailable" | "unauthenticated" | "not-found",
+  reason?: "validation" | "storage" | "unavailable" | "unauthenticated" | "not-found" | "timeout",
   metrics?: InstitutionDirectoryMetrics
 ): void {
   try {

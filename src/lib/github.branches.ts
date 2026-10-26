@@ -1,3 +1,4 @@
+import type { GithubBoundedReadContext } from "./github-bounded-read";
 // Branch and commit history operations.
 
 import { ghFetch, ghJson } from "./github.repos";
@@ -30,10 +31,10 @@ export interface CommitInfo {
 }
 
 /** Recent commits on `ref` (default branch when omitted). */
-export async function listCommits(owner: string, repo: string, ref?: string, perPage = 30): Promise<CommitInfo[]> {
+export async function listCommits(owner: string, repo: string, ref?: string, perPage = 30, bounded?: GithubBoundedReadContext): Promise<CommitInfo[]> {
   const data = await ghJson<
     Array<{ sha?: string; html_url?: string; commit?: { message?: string; author?: { name?: string; date?: string } } }>
-  >(`/repos/${owner}/${repo}/commits?per_page=${perPage}${ref ? `&sha=${encodeURIComponent(ref)}` : ""}`);
+  >(`/repos/${owner}/${repo}/commits?per_page=${perPage}${ref ? `&sha=${encodeURIComponent(ref)}` : ""}`, undefined, bounded);
   return data
     .filter((c) => c.sha)
     .map((c) => ({

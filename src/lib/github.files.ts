@@ -1,3 +1,4 @@
+import { readBoundedResponse, type GithubBoundedReadContext } from "./github-bounded-read";
 // File operations: read, write, bulk delete/move via Git Data API.
 
 import { getRepo } from "./github.repos";
@@ -26,21 +27,26 @@ export interface RepoTreeResult {
    * incomplete listing as the whole truth.
    */
   truncated: boolean;
+  excluded?: Array<{ path: string; reason: "unsupported" | "unsafe-path" }>;
+  unenumerated?: boolean;
 }
 
 /** The full recursive file tree of a repo at `ref` (default branch when omitted),
  *  plus whether GitHub's own listing was truncated. */
-export async function getRepoTreeWithMeta(owner: string, repo: string, ref?: string): Promise<RepoTreeResult> {
+export async function getRepoTreeWithMeta(owner: string, repo: string, ref?: string, bounded?: GithubBoundedReadContext): Promise<RepoTreeResult> {
   // A blank-but-present ref ("  ") is truthy; never forward it as a branch name.
-  const branch = ref && ref.trim() ? ref.trim() : (await getRepo(owner, repo)).defaultBranch;
+  const branch = ref && ref.trim() ? ref.trim() : (await getRepo(owner, repo, bounded)).defaultBranch;
   const data = await ghJson<{
     tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }>;
     truncated?: boolean;
-  }>(`/repos/${owner}/${repo}/git/trees/${encodeRefSegment(branch)}?recursive=1`);
+  }>(`/repos/${owner}/${repo}/git/trees/${encodeRefSegment(branch)}?recursive=1`, undefined, bounded);
   const entries = (data.tree ?? [])
     .filter((t): t is { path: string; type: "blob" | "tree"; size?: number; sha?: string; mode?: string } => !!t.path && (t.type === "blob" || t.type === "tree"))
     .map((t) => ({ path: t.path, type: t.type, size: t.size ?? 0, sha: t.sha ?? "", mode: t.mode }));
-  return { entries, truncated: !!data.truncated };
+  return { entries, truncated: !!data.truncated, ...(bounded ? {
+    excluded: (data.tree ?? []).filter((t) => t.type === "commit" || t.mode === "160000").map((t) => ({ path: t.path ?? "", reason: "unsupported" as const })),
+    unenumerated: typeof data.truncated !== "boolean" || !Array.isArray(data.tree) || (data.tree ?? []).some((t) => !t.path || !["blob", "tree", "commit"].includes(t.type ?? "")),
+  } : {}) };
 }
 
 /** The full recursive file tree of a repo at `ref` (default branch when omitted). */
@@ -49,12 +55,12 @@ export async function getRepoTree(owner: string, repo: string, ref?: string): Pr
 }
 
 /** Read one file's text content (raw). */
-export async function getFileText(owner: string, repo: string, path: string, ref?: string): Promise<string> {
+export async function getFileText(owner: string, repo: string, path: string, ref?: string, bounded?: GithubBoundedReadContext, byteCap = 300_000): Promise<string> {
   const res = await ghFetch(
     `/repos/${owner}/${repo}/contents/${encodePath(path)}${ref && ref.trim() ? `?ref=${encodeRefSegment(ref)}` : ""}`,
-    { headers: { Accept: "application/vnd.github.raw" } }
+    { headers: { Accept: "application/vnd.github.raw" } }, bounded, byteCap
   );
-  return res.text();
+  return bounded ? readBoundedResponse(res, bounded, byteCap) : res.text();
 }
 
 /** Create or update a file (committed on `branch`, or the default branch). */

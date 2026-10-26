@@ -1,5 +1,6 @@
 // Repository CRUD, listing, and discovery operations.
 
+import { checkGithubReadDeadline, readBoundedResponse, GithubReadLimitError, type GithubBoundedReadContext } from "./github-bounded-read";
 import { GithubHttpError } from "./github-http-error";
 import { validateGithubOwnerRepo } from "./github-ref-name";
 
@@ -26,9 +27,11 @@ function ghError(status: number, detail: string): string {
   return `GitHub request failed (HTTP ${status})${message ? `: ${message}` : ""}.`;
 }
 
-async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
+async function ghFetch(path: string, init?: RequestInit, bounded?: GithubBoundedReadContext, responseCap = 1_000_000): Promise<Response> {
+  if (bounded) { checkGithubReadDeadline(bounded); if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid GitHub API path"); }
   const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {
     ...init,
+    ...(bounded ? { redirect: "manual" as const, signal: bounded.controller.signal } : {}),
     headers: {
       Authorization: `Bearer ${githubToken()}`,
       Accept: "application/vnd.github+json",
@@ -36,6 +39,7 @@ async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
       ...init?.headers,
     },
   });
+  if (bounded && res.status >= 300 && res.status < 400) { await res.body?.cancel(); throw new GithubReadLimitError("redirect"); }
   if (!res.ok) {
     // GithubHttpError, not Error: the MESSAGE is unchanged (still whatever
     // ghError produces), so every existing caller that reads err.message or
@@ -46,12 +50,15 @@ async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
     // x-ratelimit-remaining - no longer has to recover the status by parsing
     // this message's own prose. Reading res.headers after res.text() is fine:
     // consuming the body does not detach the headers.
-    throw new GithubHttpError(ghError(res.status, await res.text().catch(() => "")), res.status, res.headers);
+    throw new GithubHttpError(ghError(res.status, bounded ? await readBoundedResponse(res, bounded, responseCap) : await res.text().catch(() => "")), res.status, res.headers);
   }
   return res;
 }
 
-const ghJson = async <T>(path: string, init?: RequestInit): Promise<T> => (await ghFetch(path, init)).json() as Promise<T>;
+const ghJson = async <T>(path: string, init?: RequestInit, bounded?: GithubBoundedReadContext): Promise<T> => {
+  const res = await ghFetch(path, init, bounded);
+  return bounded ? JSON.parse(await readBoundedResponse(res, bounded, 1_000_000)) as T : res.json() as Promise<T>;
+};
 
 export interface GithubRepo {
   /** "owner/name". */
@@ -122,8 +129,10 @@ export async function listRepos(): Promise<GithubRepo[]> {
   return out;
 }
 
-export async function getRepo(owner: string, repo: string): Promise<GithubRepo> {
-  return mapRepo(await ghJson<RawRepo>(`/repos/${owner}/${repo}`));
+export async function getRepo(owner: string, repo: string, bounded?: GithubBoundedReadContext): Promise<GithubRepo> {
+  const raw = await ghJson<RawRepo>(`/repos/${owner}/${repo}`, undefined, bounded);
+  if (bounded && (typeof raw.default_branch !== "string" || !raw.default_branch.trim())) throw new Error("Repository default ref is unavailable.");
+  return mapRepo(raw);
 }
 
 /** Logins of the orgs the authenticated user owns (admin role), sorted. */

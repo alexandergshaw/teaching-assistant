@@ -1,3 +1,4 @@
+import { repoFilesToSubmittedFiles } from "./repo-file-submissions";
 import JSZip from "jszip";
 import {
   DOCUMENT_EXTENSIONS,
@@ -570,13 +571,7 @@ async function foldGithubRepoContent(url: string): Promise<{
     // the real per-file list alongside the "Submission link" pseudo-file, so
     // the Files column and browsing panel show the actual graded source, not
     // just a link to it.
-    const files: SubmittedFileInfo[] = repoResult.files.map((file) => ({
-      name: file.path,
-      extension: getFileExtension(file.path),
-      previewContent: file.text,
-      previewTruncated: file.truncated ?? false,
-      mimeType: "text/plain",
-    }));
+    const files: SubmittedFileInfo[] = repoFilesToSubmittedFiles(repoResult.files);
     return {
       contentPart: `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`,
       gradedRepo: repoResult.repo,

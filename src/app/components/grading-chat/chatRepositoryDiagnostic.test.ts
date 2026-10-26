@@ -1,11 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as gradingLog from "../grading/gradingDiagnosticLog";
 import { buildSessionDiagnosticLog, formatSessionDiagnosticLogCsv, formatSessionDiagnosticLogJson, readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
-import { recordRepositoryStaging, recordRepositoryBatchResult } from "./chatRepositoryDiagnostic";
+import { recordRepositoryStaging, recordRepositoryBatchResult, recordRepositoryCollection } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, stageRepositoryBatch, stageRepositoryBatchResult } from "./chatRepositoryBatch";
 
 beforeEach(() => { vi.restoreAllMocks(); resetSessionDiagnosticLogForTests("2026-10-25T00:00:00.000Z"); });
 describe("repository staging diagnostics", () => {
+  it("exports collection counts through the actual helper and recorder with no source material", () => {
+    vi.spyOn(performance, "now").mockReturnValue(33);
+    const secrets = ["private-student", "https://github.com/private/project", "src/private.ts", "private-source", "private-attempt"];
+    const response = { operation: "collect" as const, attemptId: secrets[4], studentKey: { sessionEpoch: secrets[0], sourceIndex: 0 }, mappings: [{}], evidence: [{
+      manifest: { originalUrl: secrets[1], files: [{ path: secrets[2] }], coverage: { complete: false, omitted: [{ path: secrets[2], reason: "unreadable" }] } }, files: [{ text: secrets[3] }],
+    }] } as unknown as import("@/lib/grade/repository-evidence-types").RepositoryCollectResponse;
+    recordRepositoryCollection(true, response, 10);
+    recordRepositoryCollection(false, undefined, 20);
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries[0]).toMatchObject({ operation: "collect_repository_evidence", outcome: "success", durationMs: 23, detail: { acceptedLinks: 1, includedFiles: 1, omittedFiles: 1, partialCoverage: true } });
+    expect(state.entries[0].classificationStudentCount).toBeUndefined();
+    const log = buildSessionDiagnosticLog(state, { currentInstitution: "", currentCourse: "", currentPage: "/", browser: "test" }, "2026-10-25T00:00:04.000Z");
+    for (const output of [formatSessionDiagnosticLogJson(log), formatSessionDiagnosticLogCsv(log)]) {
+      for (const secret of secrets) expect(output).not.toContain(secret);
+      for (const key of ["acceptedLinks", "includedFiles", "omittedFiles", "partialCoverage"]) expect(output).toContain(key);
+      expect(output).toContain("Repository evidence collection failed");
+    }
+  });
   it("records the actual UI batch-result helper as success for a valid batch after unresolved history", () => {
     const history = stageRepositoryBatch("Alice: https://github.com/a/b", emptyRepositoryEvidence());
     const result = stageRepositoryBatchResult("https://github.com/c/d", history);

@@ -31,7 +31,7 @@ export function ChatRepositoryEvidence({ evidence, onChange }: {
         {(["accepted", "duplicate", "rejected", "unresolved"] as const).map((status) => `${evidence.lines.filter((line) => line.status === status).length} ${status}`).join("; ")}
       </p>
       {evidence.lines.length > 0 && <>
-        <p>Repository evidence staged. Student matching and regrading are not available here yet.</p>
+        <p>Repository evidence staged locally. Confirm existing students and scopes below before fetching.</p>
         <ol style={{ maxHeight: "14rem", overflowY: "auto", overflowWrap: "anywhere" }}>
           {evidence.lines.map((line, index) => <li key={index}>
             <code>{line.original}</code> — {line.status}: {line.reason}

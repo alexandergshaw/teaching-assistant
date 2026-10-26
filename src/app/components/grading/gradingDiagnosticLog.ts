@@ -18,6 +18,7 @@ import type { RecordingSplit } from "@/lib/grade/recording-split";
 
 export type GradingDiagnosticOperation =
   | "stage_repository_evidence"
+  | "collect_repository_evidence"
   | "resolve_header"
   | "generate_rubric"
   | "prepare_submission"
@@ -44,6 +45,7 @@ export type GradingDiagnosticOperation =
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
   stage_repository_evidence: "Stage repository evidence",
+  collect_repository_evidence: "Collect repository evidence",
   resolve_header: "Resolve run header",
   generate_rubric: "Generate rubric",
   prepare_submission: "Prepare submission",
@@ -89,6 +91,18 @@ export interface RecordGradingDiagnosticArgs {
   code?: string;
   /** Server-side action time in milliseconds. */
   serverMs?: number;
+  repositoryDetail?: { acceptedLinks?: number; includedFiles?: number; omittedFiles?: number; partialCoverage?: boolean };
+}
+
+function repositoryDetail(value: RecordGradingDiagnosticArgs["repositoryDetail"]): Record<string, number | boolean> | undefined {
+  if (!value) return undefined;
+  const detail: Record<string, number | boolean> = {};
+  for (const key of ["acceptedLinks", "includedFiles", "omittedFiles"] as const) {
+    const count = value[key];
+    if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000) detail[key] = count;
+  }
+  if (typeof value.partialCoverage === "boolean") detail.partialCoverage = value.partialCoverage;
+  return detail;
 }
 
 /** Record one grading operation into the app-wide session log. Call it
@@ -109,6 +123,7 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     cause: args.cause,
     code: args.code,
     serverMs: args.serverMs,
+    detail: repositoryDetail(args.repositoryDetail),
   });
 }
 

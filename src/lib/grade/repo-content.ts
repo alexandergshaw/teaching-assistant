@@ -132,3 +132,5 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
     files: budgeted.files,
   };
 }
+
+export { collectRepositoryEvidence as fetchStrictRepositoryEvidence } from "./repository-evidence-collector";

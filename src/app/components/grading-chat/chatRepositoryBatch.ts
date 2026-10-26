@@ -17,7 +17,7 @@ export interface RepositoryEvidenceLine {
   url?: string;
   key?: string;
   requested?: ParsedSubmissionRepoUrl;
-  scope?: "repository" | "tree" | "blob";
+  scope?: "repository" | "tree" | "blob" | "commit";
 }
 export interface RepositoryEvidenceState {
   lines: RepositoryEvidenceLine[];
@@ -38,20 +38,23 @@ function classify(original: string): RepositoryEvidenceLine {
   let url: URL;
   try { url = new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`); }
   catch { return rejected; }
-  if (!/^https?:$/.test(url.protocol) || !/^(www\.)?github\.com$/i.test(url.hostname) || url.username || url.password || url.port || url.search || url.hash) return rejected;
+  if (url.protocol !== "https:" || !/^(www\.)?github\.com$/i.test(url.hostname) || url.username || url.password || url.port || url.search || url.hash) return rejected;
   // Inspect the original path before URL normalization can erase traversal.
   const rawPath = candidate.replace(/^(https?:\/\/)?[^/]+/i, "").replace(/\/$/, "");
   let parts: string[];
   try { parts = rawPath.split("/").slice(1).map(decodeURIComponent); }
   catch { return rejected; }
   if (parts.some((part) => !part || part === "." || part === ".." || /[\\/\u0000-\u001f\u007f]/.test(part))) return rejected;
-  if (parts.length !== 2 && !(parts.length >= 4 && (parts[2] === "tree" || parts[2] === "blob"))) return rejected;
+  const commit = parts[2] === "commit";
+  if (commit && (parts.length !== 4 || !/^[a-fA-F0-9]{40}$/.test(parts[3]))) return rejected;
+  if (parts.length !== 2 && !commit && !(parts.length >= 4 && (parts[2] === "tree" || parts[2] === "blob"))) return rejected;
   if (parts[2] === "blob" && parts.length < 5) return rejected;
-  const requested = parseSubmissionGithubUrl(candidate);
+  const requested = commit ? parseSubmissionGithubUrl(`https://github.com/${parts[0]}/${parts[1]}`) : parseSubmissionGithubUrl(candidate);
   if ("error" in requested) return rejected;
-  const scope = parts.length === 2 ? "repository" : parts[2] as "tree" | "blob";
+  if (commit) requested.ref = parts[3].toLowerCase();
+  const scope = parts.length === 2 ? "repository" : parts[2] as "tree" | "blob" | "commit";
   const key = JSON.stringify([requested.owner.toLowerCase(), requested.repo.toLowerCase(), scope, requested.ref ?? "", requested.subpath ?? ""]);
-  return { original, status: "accepted", reason: "Staged locally; not matched to a student.", url: candidate, key, requested, scope };
+  return { original, status: "accepted", reason: "Staged locally; not matched to a student.", url: url.href, key, requested, scope };
 }
 
 /** Atomic admission: a refused batch never hides a retained suffix. */

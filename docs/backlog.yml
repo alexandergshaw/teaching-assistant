@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'CHAT-REPO-EVIDENCE-COLLECTION'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Confirm existing chat students and collect bounded immutable repository evidence without replacing grades.'
+  owns: ['src/app/api/grading-chat-repository', 'src/lib/grade/repository-evidence*', 'src/lib/grade/repo-file-submissions*', 'src/lib/github-bounded-read*', 'src/lib/github.repos.ts', 'src/lib/github.files.ts', 'src/lib/github.branches.ts', 'src/lib/grade/repo-content.ts', 'src/lib/grade/extraction.ts', 'src/app/actions/grading-chat-intake.ts', 'src/app/components/grading-chat/ChatRepositoryMappings.tsx', 'src/app/components/grading-chat/chatRepositoryProposals*', 'src/app/components/grading-chat/useChatRepositoryProposals*', 'src/app/components/grading-chat/continuousRepositoryAdapter*', 'src/app/components/grading-chat/ChatRepositoryEvidence.tsx', 'src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/grading-chat/chatRepositoryBatch*', 'src/app/components/grading-chat/chatRepositoryDiagnostic*', 'src/app/components/grading/gradingDiagnosticLog*']
+  verify: 'npm.cmd run test:paths src/app/api/grading-chat-repository/route.test.ts src/lib/github-bounded-read.test.ts src/lib/grade/repository-evidence-collector.test.ts src/app/components/grading-chat/useChatRepositoryProposals.test.ts src/app/components/grading-chat/chatRepositoryProposals.wiring.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Checked proposal contract packet1; real stage-to-confirmed-session-key-to-route-to-GitHub chain, strict original URL and immutable SHA/path checks, shared byte/deadline budgets, omissions and submodules, actual hook deferred-result/remap/reset/retry and JSON/CSV diagnostic oracles. Rendered browser is required separately. No collection action may grade, execute or post.'
+  from: 'CHAT-REPO-GRADING-REFERENCE-WORKFLOW; checked .agnostic-loop/repo-chat-proposals-contract.md final round2.'
+  note: 'Owner: coordinator. Combined source independently SHIP final round2 after targeted retention, explicit revocation, visible included paths/time, HTTPS normalization and retry-exhaustion recovery fixes. Independent affected fourteen-path npm.cmd run test:paths command passed153tests. Existing full closure retained the unrelated pinned Institution action-guard baseline failure; relevant new and legacy gates passed. Explicit batch control names at most three confirmed pending students per click, dispatches sequentially, and leaves further targets unattempted until another click. Retains prior grades and manual edits. Global gates, browser and publication remain pending. Proposal/review/accept code immediately follows; collection alone is not the requested full workflow.'
+  question: null
 - id: 'CHAT-REPO-EVIDENCE-STAGING'
   state: 'actionable'
   kind: 'feature'
@@ -2372,7 +2384,7 @@
   question: null
 
 - id: 'TABS-CTRL-VERSION-CONTROL'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'loop-and-docs-maintenance'
   title: 'Complete Tier-3 Wave 3: open Version Control and Org Management sub-views in a new browser tab.'
@@ -2381,7 +2393,7 @@
   blocked_by: []
   instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param vcSubTab + vcOrgView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
-  note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. Preserve ta-vc-subtab and ta-vc-org-view. Scope names no dedicated structural gate; rerun caller/source-reader census before build. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  note: 'Owner: coordinator. Delivered f5e2a7a3 to actual main after independent oracle and whole-code SHIP. Exact reviewed manifest hashes and semantic-negative/restored-green receipts inspected independently; independent focused and neighboring npm.cmd run test:paths commands passed. A mechanical heterogeneous fixture annotation fixed the sole TypeScript error without changing cases. Final npx.cmd tsc --noEmit --incremental false --pretty false exit0; npm.cmd run build compiled35.3s and finished TypeScript51s before known missing-local-Supabase prerender failure. Main-delivery guard complete:true for10ownedpaths with no mismatch; Vercel dpl_FWjEae3oeh5WFBCB1UtWHdAC6iLj READY. Authenticated production browser verified direct Bulk URL selection, native Ctrl-click Repos child selection with original Bulk retained, Enter and Back restoration. No repository mutation, Copilot dispatch or merge performed. Org-specific native gestures, Space/focus and first-paint behavior remain browser verification residuals with coordinator and actual browser instrument; source tests render no components. Unrelated baseline institution action-guard census debt was not changed.'
   question: null
 
 - id: 'TABS-CTRL-FILES'

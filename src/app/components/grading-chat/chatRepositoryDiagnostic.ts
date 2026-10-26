@@ -1,5 +1,20 @@
 import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
 import type { RepositoryBatchResult, RepositoryStageOutcome } from "./chatRepositoryBatch";
+import type { RepositoryCollectResponse } from "@/lib/grade/repository-evidence-types";
+
+export function recordRepositoryCollection(success: boolean, response: RepositoryCollectResponse | undefined, startedAtMs: number, acceptedLinks = 0): void {
+  try {
+    recordGradingDiagnosticEntry({
+      at: new Date().toISOString(), operation: "collect_repository_evidence", outcome: success ? "success" : "failure",
+      durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
+      error: success ? undefined : "Repository evidence collection failed",
+      repositoryDetail: response ? { acceptedLinks: response.mappings.length,
+        includedFiles: response.evidence.reduce((sum, item) => sum + item.manifest.files.length, 0),
+        omittedFiles: response.evidence.reduce((sum, item) => sum + item.manifest.coverage.omitted.length, 0),
+        partialCoverage: response.evidence.some((item) => !item.manifest.coverage.complete) } : { acceptedLinks },
+    });
+  } catch { /* Diagnostics cannot change collection. */ }
+}
 
 export function recordRepositoryStaging(args: {
   outcome: RepositoryStageOutcome;

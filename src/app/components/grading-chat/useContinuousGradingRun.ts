@@ -28,6 +28,7 @@
 // imported from "react", so this file can be driven by the same no-render
 // vi.mock("react", ...) lifecycle-test harness.
 import { useRef, useState } from "react";
+import { listRepositoryStudents, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
 import {
   resolveChatRunHeaderAction,
   prepareChatSubmissionAction,
@@ -136,6 +137,7 @@ export interface UseContinuousGradingRunParams {
 }
 
 export interface UseContinuousGradingRunResult {
+  readonly repositoryStudents: readonly RepositorySessionStudent[];
   readonly beginSession: (params: {
     readonly assignmentInstructions: string;
     readonly rubric: string;
@@ -278,6 +280,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [pendingSplit, setPendingSplit] = useState<PendingSplit | null>(null);
   const [classifyingRecording, setClassifyingRecording] = useState(false);
   const [diagnostics, setDiagnostics] = useState<readonly ItemDiagnostic[]>([]);
+  const [repositoryStudents, setRepositoryStudents] = useState<readonly RepositorySessionStudent[]>([]);
 
   const markQueued = (sourceIndex: number, trigger: GradeTrigger) => {
     const attempts = dispatchMetaRef.current.get(sourceIndex)?.attempts ?? 0;
@@ -286,6 +289,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
   // Presentation only: mirrors pendingRef / inFlightIndexRef as student labels.
   const publishPending = () => {
+    setRepositoryStudents(listRepositoryStudents("grading-chat-" + sessionIdRef.current, retainedBodiesRef.current));
     const labelOf = (index: number) => retainedBodiesRef.current.get(index)?.entry.student;
     const pending = new Set<string>();
     for (const index of pendingRef.current) {
@@ -913,9 +917,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setPendingSplit(null);
     setClassifyingRecording(false);
     setDiagnostics([]);
+    setRepositoryStudents([]);
   };
 
   return {
+    repositoryStudents,
     beginSession,
     submit,
     reset,

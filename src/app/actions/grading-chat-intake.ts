@@ -16,6 +16,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeProvider } from "@/lib/llm";
 import type { LlmProvider } from "@/lib/llm";
 import { checkFileWireBudget } from "@/lib/upload-budget";
+import { repoFilesToSubmittedFiles } from "@/lib/grade/repo-file-submissions";
 import { getFileExtension } from "@/lib/office-extract";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
 import {
@@ -103,13 +104,7 @@ function buildRepoUrlEntry(repo: GradableRepoContent): StudentSubmissionEntry {
     student: repo.repo,
     content: repo.content,
     mergedFileCount: repo.fileCount,
-    submittedFiles: repo.files.map((file) => ({
-      name: file.path,
-      extension: getFileExtension(file.path),
-      previewContent: file.text,
-      previewTruncated: file.truncated ?? false,
-      mimeType: "text/plain",
-    })),
+    submittedFiles: repoFilesToSubmittedFiles(repo.files),
     gradedRepo: repo.repo,
     gradedRef: repo.ref,
   };

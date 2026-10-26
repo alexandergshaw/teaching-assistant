@@ -26,6 +26,9 @@ import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
 import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
+import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
+import { useChatRepositoryProposals } from "./useChatRepositoryProposals";
+import { recordRepositoryCollection } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
@@ -280,6 +283,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
+  const repositoryProposals = useChatRepositoryProposals({ sessionEpoch: driver.runKey, evidence: repositoryEvidence, students: () => driver.repositoryStudents, onSettled: recordRepositoryCollection });
   const { supabase, user } = useSupabase();
 
   // Restore the stored harshness after mount (a state initializer would
@@ -370,6 +374,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     driver.reset();
+    repositoryProposals.reset();
     setRepositoryEvidence(emptyRepositoryEvidence());
     setRepositoryEvidenceSession((session) => session + 1);
     setSubmitError(null);
@@ -853,6 +858,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         />
 
         <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
+        <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
         <ChatComposer
           disabled={busy || preparing}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

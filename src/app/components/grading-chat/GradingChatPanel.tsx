@@ -27,6 +27,9 @@ import SubmissionClassificationBadge from "../grading/SubmissionClassificationBa
 import { ChatComposer } from "./ChatComposer";
 import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
 import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
+import { ChatFileRolePreview } from "./ChatFileRolePreview";
+import { useChatFileRoles } from "./useChatFileRoles";
+import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import { useChatRepositoryProposals } from "./useChatRepositoryProposals";
 import { recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
@@ -374,6 +377,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     driver.reset();
+    roleIntake.cancel();
     repositoryProposals.reset();
     setRepositoryEvidence(emptyRepositoryEvidence());
     setRepositoryEvidenceSession((session) => session + 1);
@@ -397,8 +401,17 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // explicitly: the instructions/rubric state captured by this closure is stale
   // until the next render, so it must not be what beginSession reads. The Canvas
   // fetch is awaited BEFORE beginSession.
-  const ensureSession = async (canvasUrl?: string): Promise<boolean> => {
+  const ensureSession = async (canvasUrl?: string, roleSetup?: ConfirmedRoleSetup, current: () => boolean = () => true): Promise<boolean> => {
+    if (!current()) return false;
     if (driver.headerState === "ready") return true;
+    if (roleSetup) {
+      const result = await driver.beginSession({ assignmentInstructions: roleSetup.instructions, rubric: roleSetup.rubric,
+        harshness: roleSetup.harshness, feedbackWordTarget: roleSetup.feedbackWordTarget,
+        applyNamingDeduction: roleSetup.applyNamingDeduction, applyLengthDeduction: roleSetup.applyLengthDeduction, isCurrent: current });
+      if (!current()) return false;
+      if (result.kind === "refused") { sessionRefusalRef.current = result.reason; setSubmitError(result.reason); return false; }
+      setSubmitError(null); return true;
+    }
     const scope = canvasUrl ? deriveChatScope(canvasUrl) : "";
     const needsFill = !instructions.trim() || !rubric.trim();
 
@@ -471,6 +484,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitText = (content: string, label: string | undefined) =>
     withPreparing(async () => {
+      if (roleIntake.isPending()) return;
       if (!(await ensureSession())) return;
       const outcome = await driver.submit({ kind: "text", content, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -479,7 +493,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // driver. If the ingest call rejects or throws, the temp object is removed
   // best-effort (R10); the server's own delete and the orphan sweep remain the
   // real guarantees.
-  const submitStoragedZip = async (file: File): Promise<SubmitOutcome> => {
+  const submitStoragedZip = async (file: File, current: () => boolean): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
     setZipPhase("uploading");
     try {
@@ -490,6 +504,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       }
       setZipPhase("preparing");
       try {
+        if (!current()) { await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
         const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
         if (outcome.kind === "refused") await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath);
         return outcome;
@@ -503,7 +518,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   };
   // LARGE-SINGLE-FILE W2: a large office/text file goes to Storage, then the
   // driver's storaged-file submit (the server extracts it to a text-only entry).
-  const submitStoragedSingleFile = async (file: File, label: string | undefined): Promise<SubmitOutcome> => {
+  const submitStoragedSingleFile = async (file: File, label: string | undefined, current: () => boolean): Promise<SubmitOutcome> => {
     setZipPhase("uploading");
     try {
       return await submitStoragedFile({
@@ -511,20 +526,20 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         label,
         userId: user?.id ?? null,
         storage: supabase.storage,
-        submit: driver.submit,
+        submit: (input) => current() ? driver.submit(input) : Promise.resolve({ kind: "refused", reason: "File intake was canceled." }),
         onUploaded: () => setZipPhase("preparing"),
       });
     } finally {
       setZipPhase(null);
     }
   };
-  const handleSubmitFiles = (files: File[], label?: string) => withPreparing(async () => {
+  const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean): Promise<SubmitOutcome[]> => {
     // A label names ONE student's ONE submission: forwarded only for a
     // single-file pick; a multi-file batch falls back to the filenames.
     const fileLabel = files.length === 1 ? label : undefined;
     // The session is begun once for the whole batch, not once per file.
-    let began = false;
     const outcomes = await submitFilesSequentially<SubmitOutcome>(files, async (file) => {
+      if (!current()) return { kind: "refused", reason: "File intake was canceled." };
       // VIDEO-GRADING W4: a video is decided FIRST (the zip preflight's "split
       // the archive" wording is wrong for it) and goes straight to Storage; a
       // non-video returns null and takes the unchanged path below.
@@ -535,14 +550,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         storage: supabase.storage,
         pendingStaged: driver.pendingVideoCount(),
         enabled: VIDEO_GRADING_ENABLED,
-        ensureSession: async () => {
-          if (began) return true;
-          if (!(await ensureSession())) return false;
-          began = true;
-          return true;
-        },
+        ensureSession: async () => current(),
         sessionRefusal: () => sessionRefusalRef.current,
-        submit: driver.submit,
+        submit: (input) => current() ? driver.submit(input) : Promise.resolve({ kind: "refused", reason: "File intake was canceled." }),
       });
       if (videoOutcome !== null) return videoOutcome;
       // FIX-1 size pre-flight: an oversized file is refused here, with a
@@ -563,28 +573,32 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         safeIntake(() => recordIntakeGate({ stage: "gate", file, transport: "body", rawReason: preflight.message }));
         return { kind: "refused", reason: preflight.message };
       }
-      if (!began) {
-        if (!(await ensureSession())) {
-          return { kind: "refused", reason: sessionRefusalRef.current };
-        }
-        began = true;
-      }
-      if (transport.kind === "storage") return isZip ? submitStoragedZip(file) : submitStoragedSingleFile(file, fileLabel);
+      if (!current()) return { kind: "refused", reason: "File intake was canceled." };
+      if (transport.kind === "storage") return isZip ? submitStoragedZip(file, current) : submitStoragedSingleFile(file, fileLabel, current);
       return driver.submit({ kind: "file", file, label: fileLabel });
     });
     const reasons: string[] = [];
     outcomes.forEach((outcome, index) => {
       if (outcome.kind !== "accepted") reasons.push(`${files[index].name}: ${outcome.reason}`);
     });
-    setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
-  });
+    if (current()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
+    return outcomes;
+  };
+  const roleIntake = useChatFileRoles({ epoch: driver.runKey, locked: sessionReady, draft: { instructions, rubric },
+    options: { harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction },
+    canStage: !preparing && driver.headerState !== "resolving",
+    start: (setup, current) => ensureSession(undefined, setup, current),
+    submit: async (file, label, current) => (await handleConfirmedFiles([file], label, current))[0],
+    applySetup: (setup) => { setInstructions(setup.instructions); setRubric(setup.rubric); } });
+  const handleSubmitFiles = (files: File[], label?: string) => { roleIntake.stage(files, label); };
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
-  const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());
-  const handleRejectSplit = () => reportSplitOutcome(driver.rejectRecordingSplit());
+  const handleConfirmSplit = () => { if (roleIntake.isPending()) { setSubmitError("Finish or cancel the file preview before grading this recording."); return; } reportSplitOutcome(driver.confirmRecordingSplit()); };
+  const handleRejectSplit = () => { if (roleIntake.isPending()) { setSubmitError("Finish or cancel the file preview before grading this recording."); return; } reportSplitOutcome(driver.rejectRecordingSplit()); };
 
   const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
+      if (roleIntake.isPending()) return;
       if (!(await ensureSession(url))) return;
       const outcome = await driver.submit({ kind: "url", url, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -592,6 +606,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
     withPreparing(async () => {
+      if (roleIntake.isPending()) return;
       if (!(await ensureSession())) return;
       const outcome = await driver.submit({ kind: "composite", student, parts });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -617,7 +632,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const handlePanelDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    if (busy || preparing) return;
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) handleSubmitFiles(files);
   };
@@ -860,8 +874,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
         <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
         <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
+        <ChatFileRolePreview intake={roleIntake} />
         <ChatComposer
-          disabled={busy || preparing}
+          disabled={busy || preparing || roleIntake.pending}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
           onSubmitComposite={handleSubmitComposite}
         />

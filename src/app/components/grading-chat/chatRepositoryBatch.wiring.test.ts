@@ -28,10 +28,10 @@ describe("repository staging live caller boundary (source only)", () => {
     for (const confirmed of [false, true]) {
       let key = 7;
       const effects: string[] = [];
-      const run = new Function("window", "driver", "repositoryProposals", "setRepositoryEvidence", "emptyRepositoryEvidence", "setRepositoryEvidenceSession", "setSubmitError", "setSetupNote", `${handler}; return handleNewSession;`)({ confirm: () => confirmed }, { reset: () => effects.push("driver") }, { reset: () => effects.push("proposals") }, () => effects.push("evidence"), () => ({ lines: [], error: null }), (update: (value: number) => number) => { key = update(key); }, () => effects.push("error"), () => effects.push("setup"));
+      const run = new Function("window", "driver", "roleIntake", "repositoryProposals", "setRepositoryEvidence", "emptyRepositoryEvidence", "setRepositoryEvidenceSession", "setSubmitError", "setSetupNote", `${handler}; return handleNewSession;`)({ confirm: () => confirmed }, { reset: () => effects.push("driver") }, { cancel: () => effects.push("roles") }, { reset: () => effects.push("proposals") }, () => effects.push("evidence"), () => ({ lines: [], error: null }), (update: (value: number) => number) => { key = update(key); }, () => effects.push("error"), () => effects.push("setup"));
       run();
       expect(key).toBe(confirmed ? 8 : 7);
-      expect(effects).toEqual(confirmed ? ["driver", "proposals", "evidence", "error", "setup"] : []);
+      expect(effects).toEqual(confirmed ? ["driver", "roles", "proposals", "evidence", "error", "setup"] : []);
     }
   });
   it("calls the parser and safe diagnostics without grading controls", () => {

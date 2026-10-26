@@ -17,6 +17,8 @@ import type { SubmissionZipClassification } from "@/lib/grade/types";
 import type { RecordingSplit } from "@/lib/grade/recording-split";
 
 export type GradingDiagnosticOperation =
+  | "stage_file_roles"
+  | "confirm_file_roles"
   | "stage_repository_evidence"
   | "collect_repository_evidence"
   | "propose_repository_grade"
@@ -47,6 +49,8 @@ export type GradingDiagnosticOperation =
   | "classify_recording_multiple";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
+  stage_file_roles: "Stage file roles",
+  confirm_file_roles: "Confirm file roles",
   stage_repository_evidence: "Stage repository evidence",
   collect_repository_evidence: "Collect repository evidence",
   propose_repository_grade: "Propose repository grade",
@@ -78,6 +82,7 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
 };
 
 export interface RecordGradingDiagnosticArgs {
+  roleDetail?: { files?: number; assignmentFiles?: number; rubricFiles?: number; combinedFiles?: number; submissionFiles?: number; excludedFiles?: number; unresolvedFiles?: number; failedFiles?: number; unattemptedFiles?: number };
   at: string;
   operation: GradingDiagnosticOperation;
   outcome: "success" | "failure";
@@ -129,8 +134,15 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     cause: args.cause,
     code: args.code,
     serverMs: args.serverMs,
-    detail: repositoryDetail(args.repositoryDetail),
+    detail: args.roleDetail ? roleDetail(args.roleDetail) : repositoryDetail(args.repositoryDetail),
   });
+}
+function roleDetail(value: NonNullable<RecordGradingDiagnosticArgs["roleDetail"]>): Record<string, number> {
+  const detail: Record<string, number> = {};
+  for (const key of ["files", "assignmentFiles", "rubricFiles", "combinedFiles", "submissionFiles", "excludedFiles", "unresolvedFiles", "failedFiles", "unattemptedFiles"] as const) {
+    const count = value[key]; if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= 40) detail[key] = count;
+  }
+  return detail;
 }
 
 /** The slice of the whole-run `useActionState` result the decision reads. */

@@ -142,6 +142,7 @@ export interface UseContinuousGradingRunResult {
   readonly beginSession: (params: {
     readonly assignmentInstructions: string;
     readonly rubric: string;
+    readonly isCurrent?: () => boolean;
     /** Captured once at session start and frozen for the session; absent = balanced. */
     readonly harshness?: GradeHarshness;
     /** Captured once and frozen for the session; absent = no length directive. */
@@ -241,6 +242,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const prepareSingleFile = params.prepareSingleFile ?? postPrepareSingleFile;
 
   const headerRef = useRef<ResolvedRunHeader | null>(null);
+  const headerAttemptRef = useRef<{ epoch: number; priorState: HeaderState; priorError: string | null } | null>(null);
   const assignmentInstructionsRef = useRef("");
   const harshnessRef = useRef<GradeHarshness>("balanced");
   const feedbackWordTargetRef = useRef<number | undefined>(undefined);
@@ -492,15 +494,32 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pump();
   };
 
-  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean }) => {
+  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; isCurrent?: () => boolean; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean }) => {
+    const sessionAtStart = sessionIdRef.current;
+    const stale = () => ({ kind: "refused" as const, reason: "The session changed while setup was resolving. Nothing was submitted." });
     // Idempotent: a header already resolved for this session is a no-op, so
     // a second call (e.g. from every submit()) never re-spends a
     // generateRubric model call.
+    if (sessionParams.isCurrent?.() === false) return stale();
     if (headerRef.current) return { kind: "ready" as const };
+    const previous = headerAttemptRef.current?.epoch === sessionAtStart ? headerAttemptRef.current : null;
+    const attempt = { epoch: sessionAtStart, priorState: previous ? previous.priorState : headerState, priorError: previous ? previous.priorError : sessionError };
+    headerAttemptRef.current = attempt;
+    const invalid = () => {
+      if (sessionIdRef.current !== sessionAtStart || headerAttemptRef.current !== attempt) return true;
+      if (sessionParams.isCurrent?.() !== false) return false;
+      headerAttemptRef.current = null;
+      setHeaderState(attempt.priorState); setSessionError(attempt.priorError);
+      return true;
+    };
 
     setHeaderState("resolving");
     const headerStartedAtMs = chatSeamNowMs();
-    const header = await resolveChatRunHeaderAction(sessionParams.assignmentInstructions, sessionParams.rubric, provider);
+    let header: Awaited<ReturnType<typeof resolveChatRunHeaderAction>>;
+    try { header = await resolveChatRunHeaderAction(sessionParams.assignmentInstructions, sessionParams.rubric, provider); }
+    catch (error) { if (invalid()) return stale(); headerAttemptRef.current = null; throw error; }
+    if (invalid()) return stale();
+    headerAttemptRef.current = null;
     recordChatSeamSettled({
       operation: "resolve_header",
       startedAtMs: headerStartedAtMs,
@@ -888,6 +907,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
   const reset = () => {
     sessionIdRef.current += 1;
+    headerAttemptRef.current = null;
     canvasUrlRef.current = "";
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();

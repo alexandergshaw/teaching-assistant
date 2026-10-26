@@ -268,7 +268,9 @@ function ensureSessionBlock(): string {
   const end = source.indexOf("const handleSubmitText");
   expect(start, "expected the ensureSession declaration").toBeGreaterThan(-1);
   expect(end, "expected the handleSubmitText declaration").toBeGreaterThan(-1);
-  return source.slice(start, end);
+  const legacyStart = source.indexOf("const scope = canvasUrl", start);
+  expect(legacyStart, "expected the unchanged Canvas/draft setup branch after explicit role setup").toBeGreaterThan(start);
+  return source.slice(legacyStart, end);
 }
 
 describe("GradingChatPanel - W2 AR1: the Canvas fetch is awaited before beginSession", () => {
@@ -563,7 +565,7 @@ describe("submission labels: file and url modes carry the optional label", () =>
 
   it("the panel forwards the label to the driver only for a single-file pick", () => {
     const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("const handleSubmitFiles");
+    const start = source.indexOf("const handleConfirmedFiles");
     const files = source.slice(start, source.indexOf("const handleSubmitUrl"));
     expect(files).toMatch(/files\.length === 1 \? label : undefined/);
     expect(files).toContain('kind: "file", file, label: fileLabel');
@@ -613,15 +615,15 @@ describe("GradingChatPanel - controls #1: clear controls", () => {
 });
 
 describe("GradingChatPanel - controls #4: loading indicators", () => {
-  it("every submit handler runs inside withPreparing and the composer is disabled while preparing", () => {
+  it("legacy non-file submits run inside withPreparing and a role preview also disables the composer", () => {
     const source = withoutLineComments(read(PANEL));
-    for (const name of ["handleSubmitText", "handleSubmitFiles", "handleSubmitUrl", "handleSubmitComposite"]) {
+    for (const name of ["handleSubmitText", "handleSubmitUrl", "handleSubmitComposite"]) {
       const start = source.indexOf(`const ${name}`);
       expect(start, name).toBeGreaterThan(-1);
       expect(source.slice(start, start + 200), name).toContain("withPreparing(");
     }
     expect(source).toMatch(/finally\s*\{\s*setPreparing\(false\)/);
-    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\}/);
+    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\s*\|\|\s*roleIntake\.pending\}/);
   });
 
   it("the grading indicator is driven by OUTSTANDING work (dispatched - completed), not driver.inFlight", () => {
@@ -657,7 +659,7 @@ describe("GradingChatPanel - controls #3: harshness control and wire", () => {
 
   it("captures harshness at beginSession (not per submit)", () => {
     const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("driver.beginSession(");
+    const start = source.lastIndexOf("driver.beginSession(");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toMatch(/\bharshness\b/);
     const driver = withoutLineComments(read(DRIVER));
@@ -694,7 +696,7 @@ describe("GradingChatPanel - deduction controls W1: file-name deduction control 
 
   it("captures the flag at beginSession (not per submit)", () => {
     const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("driver.beginSession(");
+    const start = source.lastIndexOf("driver.beginSession(");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toMatch(/\bapplyNamingDeduction\b/);
     const driver = withoutLineComments(read(DRIVER));
@@ -730,7 +732,7 @@ describe("GradingChatPanel - deduction controls W2: length deduction control and
 
   it("captures the flag at beginSession (not per submit)", () => {
     const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("driver.beginSession(");
+    const start = source.lastIndexOf("driver.beginSession(");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toMatch(/\bapplyLengthDeduction\b/);
     const driver = withoutLineComments(read(DRIVER));
@@ -767,7 +769,7 @@ describe("GradingChatPanel - feedback length control W2: word-count field and wi
 
   it("beginSession receives the coerced target (captured once, not per submit)", () => {
     const source = withoutLineComments(read(PANEL));
-    const start = source.indexOf("driver.beginSession(");
+    const start = source.lastIndexOf("driver.beginSession(");
     const call = source.slice(start, source.indexOf("});", start));
     expect(call).toContain("feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText)");
     const driver = withoutLineComments(read(DRIVER));

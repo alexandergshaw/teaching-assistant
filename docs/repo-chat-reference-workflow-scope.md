@@ -1,6 +1,6 @@
 # Repository evidence in grading chat: reference workflow scope
 
-Status: author round B, bounded amendment after independent round A check; ready for the independent delta check. Baseline: `a6a4bfd0a0e6d64be905d447b04dcc8d507ca853` (`git rev-parse HEAD`). This is scope, not implementation or a claim of browser verification.
+Status: accepted after independent final round-2 SHIP; the bounded amendment corrected literal Additional link prefix handling. Baseline: `a6a4bfd0a0e6d64be905d447b04dcc8d507ca853` (`git rev-parse HEAD`). This is scope, not implementation or a claim of browser verification.
 
 ## Leverage claim
 

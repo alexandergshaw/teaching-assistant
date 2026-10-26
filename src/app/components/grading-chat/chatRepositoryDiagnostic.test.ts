@@ -1,11 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as gradingLog from "../grading/gradingDiagnosticLog";
 import { buildSessionDiagnosticLog, formatSessionDiagnosticLogCsv, formatSessionDiagnosticLogJson, readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
-import { recordRepositoryStaging, recordRepositoryBatchResult, recordRepositoryCollection } from "./chatRepositoryDiagnostic";
+import { recordRepositoryStaging, recordRepositoryBatchResult, recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, stageRepositoryBatch, stageRepositoryBatchResult } from "./chatRepositoryBatch";
 
 beforeEach(() => { vi.restoreAllMocks(); resetSessionDiagnosticLogForTests("2026-10-25T00:00:00.000Z"); });
 describe("repository staging diagnostics", () => {
+  it("exports proposal, review and acceptance through actual JSON/CSV with closed meaningful counts", () => {
+    vi.spyOn(performance, "now").mockReturnValue(25);
+    recordRepositoryWorkflow("propose", true, 10, { criteriaChanged: 2, privateName: "private-student", sourceText: "private-source" } as never);
+    recordRepositoryWorkflow("review", true, 12, { reviewFindings: 1, url: "https://github.com/private/secret" } as never);
+    recordRepositoryWorkflow("accept", false, 20, { acceptedFields: 3, rawError: "private-provider-error" } as never);
+    const state = readSessionDiagnosticLogState();
+    expect(state.entries).toMatchObject([
+      { operation: "propose_repository_grade", durationMs: 15, outcome: "success", detail: { criteriaChanged: 2 } },
+      { operation: "review_repository_grade", durationMs: 13, outcome: "success", detail: { reviewFindings: 1 } },
+      { operation: "accept_repository_grade", durationMs: 5, outcome: "failure", detail: { acceptedFields: 3 }, error: "Repository acceptance refused" },
+    ]);
+    const log = buildSessionDiagnosticLog(state, { currentInstitution: "", currentCourse: "", currentPage: "/", browser: "test" }, "2026-10-25T00:00:04Z");
+    for (const output of [formatSessionDiagnosticLogJson(log), formatSessionDiagnosticLogCsv(log)]) {
+      for (const key of ["criteriaChanged", "reviewFindings", "acceptedFields"]) expect(output).toContain(key);
+      for (const secret of ["private-student", "private-source", "https://github.com/private/secret", "private-provider-error"]) expect(output).not.toContain(secret);
+    }
+    vi.spyOn(gradingLog, "recordGradingDiagnosticEntry").mockImplementation(() => { throw new Error("private-provider-error"); });
+    expect(() => recordRepositoryWorkflow("propose", false, 10, {})).not.toThrow();
+  });
   it("exports collection counts through the actual helper and recorder with no source material", () => {
     vi.spyOn(performance, "now").mockReturnValue(33);
     const secrets = ["private-student", "https://github.com/private/project", "src/private.ts", "private-source", "private-attempt"];

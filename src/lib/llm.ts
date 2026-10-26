@@ -1,3 +1,4 @@
+import { createGithubBoundedReadContext, readBoundedResponse, checkGithubReadDeadline } from "./github-bounded-read";
 import {
   getGeminiApiKey,
   getGeminiModel,
@@ -379,9 +380,11 @@ export function parseUsageMetadata(data: unknown): LlmUsage | undefined {
   }
 }
 
+export type BoundedLlmCallOptions = { deadlineMs: number; signal?: AbortSignal; maxAttempts: 1; responseByteLimit: number; hardOutputTokenCap: number };
 export async function callLlm(
   req: LlmRequest,
-  provider: LlmProvider = DEFAULT_PROVIDER
+  provider: LlmProvider = DEFAULT_PROVIDER,
+  bounded?: BoundedLlmCallOptions
 ): Promise<LlmResult> {
   // Generic text generation always uses Gemini. The Course Engine ("other")
   // provider does not implement this generic interface — it is wired per-feature
@@ -389,7 +392,8 @@ export async function callLlm(
   // here with "other" is an unmatched feature, which transparently falls back to
   // Gemini rather than failing.
   void provider;
-  return callGemini(req);
+  if (bounded && (provider !== "gemini" || req.webSearch)) return { ok: false, status: 0, body: "Unsupported evidence provider or tool selection." };
+  return callGemini(req, bounded);
 }
 
 // Transport hardening. Features such as lecture-plan generation fan out many
@@ -460,11 +464,27 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
  */
 async function postGenerateContent(
   model: string,
-  body: string
+  body: string,
+  bounded?: BoundedLlmCallOptions
 ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
   const apiKey = getGeminiApiKey();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
+  if (bounded) {
+    const context = createGithubBoundedReadContext(bounded.deadlineMs, bounded.responseByteLimit);
+    const abort = () => context.controller.abort();
+    bounded.signal?.addEventListener("abort", abort, { once: true });
+    if (bounded.signal?.aborted) abort();
+    try {
+      checkGithubReadDeadline(context);
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, redirect: "manual", signal: context.controller.signal });
+      if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new Error("redirect"); }
+      const text = await readBoundedResponse(response, context, bounded.responseByteLimit);
+      if (!response.ok) return { ok: false, status: response.status, body: "Evidence model request failed." };
+      return { ok: true, data: JSON.parse(text) as unknown };
+    } catch { return { ok: false, status: 0, body: "Evidence model request was incomplete or exceeded its budget." }; }
+    finally { context.dispose(); bounded.signal?.removeEventListener("abort", abort); }
+  }
   let lastResult: { ok: false; status: number; body: string } = {
     ok: false,
     status: 0,
@@ -513,7 +533,7 @@ async function postGenerateContent(
   return lastResult;
 }
 
-async function callGemini(req: LlmRequest): Promise<LlmResult> {
+async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions): Promise<LlmResult> {
   // Y6 (docs/reply-resource-search-yield-acceptance-criteria.md): a
   // webSearch request may use a different model - the lite default is the
   // most tool-shy tier for actually deciding to run Google Search (see
@@ -541,7 +561,9 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
     allowLowTemperature: getGeminiAllowLowTemperature(),
     thinkingLevel: getGeminiThinkingLevel(),
     minOutputTokens: getGeminiMinOutputTokens(),
-  });
+  }) ?? (bounded ? {} : undefined);
+
+  if (bounded && generationConfig) generationConfig.maxOutputTokens = Math.min(typeof generationConfig.maxOutputTokens === "number" ? generationConfig.maxOutputTokens : bounded.hardOutputTokenCap, bounded.hardOutputTokenCap, req.generationConfig?.maxOutputTokens ?? bounded.hardOutputTokenCap);
 
   const body = JSON.stringify({
     contents: req.contents,
@@ -560,7 +582,7 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
   // every 200 response already — nothing extra is requested here, and the
   // measurement costs zero.
   const startedAt = Date.now();
-  const result = await postGenerateContent(model, body);
+  const result = await postGenerateContent(model, body, bounded);
   const elapsedMs = Date.now() - startedAt;
   if (!result.ok) {
     return result;

@@ -10,18 +10,21 @@ function freeze<T>(value: T): T {
   if (value && typeof value === "object") { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
   return value;
 }
-export async function collectRepositoryEvidence(request: RepositoryCollectRequest, deadline = Date.now() + LIMIT.deadlineMs): Promise<RepositoryCollectResponse> {
+export async function collectRepositoryEvidence(request: RepositoryCollectRequest, deadline = Date.now() + LIMIT.deadlineMs, pins?: readonly { commitSha: string }[]): Promise<RepositoryCollectResponse> {
   if (!validateRepositoryCollectRequest(request)) throw new Error("Invalid confirmed repository mapping.");
   const snapshot = structuredClone(request);
+  if (pins && snapshot.mappings.some((source, index) => source.scope.kind === "commit" && pins[index]?.commitSha.toLowerCase() !== source.scope.requestedRef?.toLowerCase())) throw new Error("Immutable commit URL and verification pin must match.");
   const context = createGithubBoundedReadContext(deadline, LIMIT.networkBytes);
   const evidence: RepositoryCollectedEvidence[] = []; let fileCount = 0; let sourceBytes = 0;
   try {
-    for (const source of snapshot.mappings) {
+    for (const [sourceIndex, source] of snapshot.mappings.entries()) {
       checkGithubReadDeadline(context);
       const { owner, repo, kind, requestedRef, requestedPath } = source.scope;
-      const ref = requestedRef ?? (await getRepo(owner, repo, context)).defaultBranch;
+      const pinnedSha = pins?.[sourceIndex]?.commitSha;
+      if (pins && (!pinnedSha || !FULL_COMMIT_SHA.test(pinnedSha))) throw new Error("Invalid immutable reverification pin.");
+      const ref = pinnedSha ?? requestedRef ?? (await getRepo(owner, repo, context)).defaultBranch;
       if (!ref) throw new Error("Repository default ref is unavailable.");
-      const commitSha = kind === "commit" ? ref : (await listCommits(owner, repo, ref, 1, context))[0]?.sha;
+      const commitSha = (pinnedSha ?? (kind === "commit" ? ref : (await listCommits(owner, repo, ref, 1, context))[0]?.sha))?.toLowerCase();
       if (!commitSha || !FULL_COMMIT_SHA.test(commitSha)) throw new Error("Repository immutable pin could not be resolved.");
       const tree = await getRepoTreeWithMeta(owner, repo, commitSha, context);
       const inScope = (p: string) => kind === "blob" ? p === requestedPath : requestedPath === null || p === requestedPath || p.startsWith(`${requestedPath}/`);

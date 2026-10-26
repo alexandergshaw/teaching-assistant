@@ -19,6 +19,9 @@ import type { RecordingSplit } from "@/lib/grade/recording-split";
 export type GradingDiagnosticOperation =
   | "stage_repository_evidence"
   | "collect_repository_evidence"
+  | "propose_repository_grade"
+  | "review_repository_grade"
+  | "accept_repository_grade"
   | "resolve_header"
   | "generate_rubric"
   | "prepare_submission"
@@ -46,6 +49,9 @@ export type GradingDiagnosticOperation =
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
   stage_repository_evidence: "Stage repository evidence",
   collect_repository_evidence: "Collect repository evidence",
+  propose_repository_grade: "Propose repository grade",
+  review_repository_grade: "Review repository grade",
+  accept_repository_grade: "Accept repository grade",
   resolve_header: "Resolve run header",
   generate_rubric: "Generate rubric",
   prepare_submission: "Prepare submission",
@@ -91,13 +97,13 @@ export interface RecordGradingDiagnosticArgs {
   code?: string;
   /** Server-side action time in milliseconds. */
   serverMs?: number;
-  repositoryDetail?: { acceptedLinks?: number; includedFiles?: number; omittedFiles?: number; partialCoverage?: boolean };
+  repositoryDetail?: { acceptedLinks?: number; includedFiles?: number; omittedFiles?: number; partialCoverage?: boolean; criteriaChanged?: number; reviewFindings?: number; acceptedFields?: number };
 }
 
 function repositoryDetail(value: RecordGradingDiagnosticArgs["repositoryDetail"]): Record<string, number | boolean> | undefined {
   if (!value) return undefined;
   const detail: Record<string, number | boolean> = {};
-  for (const key of ["acceptedLinks", "includedFiles", "omittedFiles"] as const) {
+  for (const key of ["acceptedLinks", "includedFiles", "omittedFiles", "criteriaChanged", "reviewFindings", "acceptedFields"] as const) {
     const count = value[key];
     if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000) detail[key] = count;
   }

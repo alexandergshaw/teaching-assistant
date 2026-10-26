@@ -38,7 +38,7 @@ export { CANONICAL_REPLY_MARKER, isReplySectionMarker };
 // The original matcher. UNCHANGED by backlog 4.3 - indent-skip and mandatory
 // colon and all - per ruling B43-7: no rubric this already parses may ever
 // change behaviour.
-function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
+function extractRubricCriteriaStrict(rubric: string, observe?: (name: string) => void): RubricCriterion[] {
   const out: RubricCriterion[] = [];
   const seen = new Set<string>();
   const lines = rubric.split(/\r?\n/);
@@ -59,6 +59,7 @@ function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
     if (!match) continue;
     const name = match[1].trim();
     if (!name) continue;
+    observe?.(name);
     const key = normalizeAreaName(name);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -110,7 +111,7 @@ function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
 // or dash, so nothing after it can complete the match. Every regex variant
 // measured during backlog 4.3, including today's shipped matcher, has this
 // gap.
-function extractRubricCriteriaWidened(rubric: string): RubricCriterion[] {
+function extractRubricCriteriaWidened(rubric: string, observe?: (name: string) => void): RubricCriterion[] {
   const out: RubricCriterion[] = [];
   const seen = new Set<string>();
   const lines = rubric.split(/\r?\n/);
@@ -127,6 +128,7 @@ function extractRubricCriteriaWidened(rubric: string): RubricCriterion[] {
     if (!match) continue;
     const name = match[1].trim();
     if (!name) continue;
+    observe?.(name);
     const key = normalizeAreaName(name);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -442,3 +444,12 @@ export async function generateSampleAnswer(
 
 export { buildSystemPrompt, normalizeAreaName, buildSampleAnswerPrompt };
 export type { RubricCriterion };
+
+export function extractRubricCriteriaForEvidence(rubric: string): { ok: true; criteria: RubricCriterion[] } | { ok: false; reason: "ambiguous-rubric" } {
+  let names: string[] = [];
+  let criteria = extractRubricCriteriaStrict(rubric, (name) => names.push(name));
+  if (!criteria.length) { names = []; criteria = extractRubricCriteriaWidened(rubric, (name) => names.push(name)); }
+  const keys = names.map(normalizeAreaName);
+  if (!criteria.length || keys.some((key) => !key) || new Set(keys).size !== keys.length || criteria.some((criterion) => criterion.points === null || !Number.isFinite(criterion.points) || criterion.points < 0)) return { ok: false, reason: "ambiguous-rubric" };
+  return { ok: true, criteria };
+}

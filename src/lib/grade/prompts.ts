@@ -107,7 +107,8 @@ export function buildSystemPrompt(
   /** Grading-chat length deduction (docs/grading-chat-deduction-controls-scope.md
    *  PART B). Trailing 10th positional param, default false: appends nothing,
    *  so every existing call is byte-identical. True appends the length rule. */
-  applyLengthDeduction: boolean = false
+  applyLengthDeduction: boolean = false,
+  evidenceOutputContract?: string
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -193,7 +194,7 @@ ASSIGNMENT INSTRUCTIONS:
 ${assignmentInstructions}
 
 RUBRIC:
-${rubric}${pinned}
+${rubric}${pinned}${evidenceOutputContract ? `\n\n${evidenceOutputContract}` : ""}
 
 Grade each student submission against the rubric and respond ONLY in JSON using this shape:
 {
@@ -202,13 +203,13 @@ ${strengthsSchemaLine}${overallCommentSchemaLine}
   "rubricResults": [
     {
       "area": "criterion name",
-      "score": "numeric or text score"
+      "score": ${evidenceOutputContract ? '{"earned": 0, "possible": 0}, "comment": "criterion rationale [evidence:file-id]"' : '"numeric or text score"'}
     }
   ]
 }
 
 Rules:
-- Include one rubricResults item for each rubric area, with its area name and score only (no per-criterion comment).
+${evidenceOutputContract ? '- Include exactly one rubricResults item for each frozen rubric area in its original order and exact name. score must contain finite numeric earned and possible values; possible must equal the frozen maximum and earned must be between zero and that maximum. Each item MUST include a nonempty comment explaining the score with valid [evidence:file-id] citations. Do not invent file IDs.' : '- Include one rubricResults item for each rubric area, with its area name and score only (no per-criterion comment).'}
 - Always find at least one deduction for a submission, but be generous/lenient in your evaluation.
 - For every rubric area, before assigning its score, enumerate the specific requirements the assignment instructions state for that area, and for each one identify the exact construct in the submission that satisfies it, or state plainly that it is absent. Base this check on what the submission itself does, not on how closely it resembles code or examples printed in the instructions.
 - For every deduction, in overallComment explicitly name the affected rubric area and give the specific reason from the submission, citing the exact file name(s) and the specific construct or behavior found missing or incorrect as evidence, drawn from the requirement-by-requirement check above.

@@ -28,7 +28,7 @@ import { ChatComposer } from "./ChatComposer";
 import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
 import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
 import { useChatRepositoryProposals } from "./useChatRepositoryProposals";
-import { recordRepositoryCollection } from "./chatRepositoryDiagnostic";
+import { recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
@@ -283,7 +283,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
-  const repositoryProposals = useChatRepositoryProposals({ sessionEpoch: driver.runKey, evidence: repositoryEvidence, students: () => driver.repositoryStudents, onSettled: recordRepositoryCollection });
+  const repositoryProposals = useChatRepositoryProposals({ sessionEpoch: driver.runKey, evidence: repositoryEvidence, students: () => driver.repositoryStudents, driver: driver.repositoryAdapter, onSettled: recordRepositoryCollection, onWorkflowSettled: recordRepositoryWorkflow });
   const { supabase, user } = useSupabase();
 
   // Restore the stored harshness after mount (a state initializer would
@@ -815,6 +815,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
           run={driver.run}
+          repositoryProposals={repositoryProposals.workflow}
           canvasUrl={driver.canvasUrl}
           runKey={driver.runKey}
           editsSurface={driver.runKey}

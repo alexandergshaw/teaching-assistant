@@ -28,7 +28,7 @@
 // imported from "react", so this file can be driven by the same no-render
 // vi.mock("react", ...) lifecycle-test harness.
 import { useRef, useState } from "react";
-import { listRepositoryStudents, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
+import { createContinuousRepositoryAdapter, listRepositoryStudents, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
 import {
   resolveChatRunHeaderAction,
   prepareChatSubmissionAction,
@@ -137,6 +137,7 @@ export interface UseContinuousGradingRunParams {
 }
 
 export interface UseContinuousGradingRunResult {
+  readonly repositoryAdapter: ContinuousRepositoryAdapter;
   readonly repositoryStudents: readonly RepositorySessionStudent[];
   readonly beginSession: (params: {
     readonly assignmentInstructions: string;
@@ -254,6 +255,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const sessionIdRef = useRef(0);
   const takenLabelsRef = useRef<Set<string>>(new Set());
   const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
+  const repositoryRevisionsRef = useRef(new Map<number, number>());
+  const repositoryOriginalsRef = useRef(new Map<number, GradeRunItemRequestBody>());
   const pendingRef = useRef<Set<number>>(new Set());
   const inFlightIndexRef = useRef<Set<number>>(new Set());
   // ZIP-CLASS-VS-SINGLE: the latest zip ingest's classification (per-ingest;
@@ -332,6 +335,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // Last-wins by sourceIndex: a retried row replaces its failed arrival so
   // completedCount never double-counts (W1-R2).
   const recordArrival = (arrived: ArrivedItemResult) => {
+    repositoryRevisionsRef.current.set(arrived.sourceIndex, (repositoryRevisionsRef.current.get(arrived.sourceIndex) ?? 0) + 1);
     const at = arrivedRef.current.findIndex((a) => a.sourceIndex === arrived.sourceIndex);
     if (at >= 0) arrivedRef.current[at] = arrived;
     else arrivedRef.current.push(arrived);
@@ -887,6 +891,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     canvasUrlRef.current = "";
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();
+    repositoryRevisionsRef.current = new Map();
+    repositoryOriginalsRef.current = new Map();
     pendingRef.current = new Set();
     inFlightIndexRef.current = new Set();
     classificationRef.current = null;
@@ -921,6 +927,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   };
 
   return {
+    repositoryAdapter: createContinuousRepositoryAdapter({ epoch: () => "grading-chat-" + sessionIdRef.current,
+      bodies: retainedBodiesRef.current, arrived: arrivedRef.current, pending: pendingRef.current,
+      revisions: repositoryRevisionsRef.current, rubricFingerprint: headerRef.current?.rubricFingerprint ?? "",
+      originals: repositoryOriginalsRef.current,
+      publish: () => { rebuildRun(); publishPending(); } }),
     repositoryStudents,
     beginSession,
     submit,

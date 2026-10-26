@@ -77,20 +77,8 @@ import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grad
 import { describeUngradedRowLabel } from "./grading-results/ungradedRowLabel";
 import { StudentNameCell } from "./grading-results/StudentNameCell";
 import { timePostGrades } from "./grading/gradingActionSeam";
-
-// CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
-// file's line-budget extraction). ExpandIcon moved to
-// grading-results/RowFeedbackBoxes.tsx (duplicated, not imported - see that
-// file's header comment for why) once the single "Overall feedback" expand
-// button became three per-box expand buttons.
-
-// Sort helpers, seedEdits, recomputeTotal, buildCsvContent, and their pure
-// support functions moved to ./grading-results/gradingResultsHelpers.ts (see
-// that file's header comment for the full inventory and why). The sort
-// STATE/handlers (sortState, sortedResults, handleSort, sortLabel) later
-// moved again, to ./grading-results/useResultsSort.ts, and the <thead> row
-// that reads them moved to ./grading-results/ResultsTableHeaderRow.tsx - both
-// part of this file's line-budget extraction.
+import { RepositoryProposalReview } from "./grading-results/RepositoryProposalReview";
+import type { RepositoryWorkflowAdapter } from "./grading-chat/chatRepositoryWorkflow";
 
 // B1 (ux-audit-grading.md): "skipped" is a genuine third outcome, distinct
 // from "posted" and "error" - postCanvasGradesAction's own `skipped` array
@@ -115,6 +103,7 @@ export interface GradingPostOutcome {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export type GradingResultsProps = {
+  repositoryProposals?: RepositoryWorkflowAdapter;
   /** The grading run to display (non-null; callers gate on results.length). */
   run: GradingRun;
   /** Canvas assignment/discussion URL grades post back to. */
@@ -228,6 +217,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   onRegrade,
   regradingStudents,
   unresolvedStudents,
+  repositoryProposals,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -752,6 +742,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         <RegradeButton busy={regradingStudents?.has(result.student) ?? false} onClick={() => handleRegradeRow(result.student)} />
                       </div>
                     )}
+                    {repositoryProposals && <RepositoryProposalReview row={result} edit={edit} adapter={repositoryProposals} onAccepted={(next, scoreChanged) => {
+                      setEdits((previous) => ({ ...previous, [result.student]: next }));
+                      if (scoreChanged) clearPostStatus(result.student);
+                    }} />}
                     {status && status.status !== "idle" && (
                       <div
                         className={styles.fieldHint}

@@ -67,7 +67,7 @@ describe("recordGradingDiagnosticEntry / recordWholeRunSettled (call shape)", ()
     recordGradingDiagnosticEntry({ at: "2026-10-25T00:00:00Z", operation: "collect_repository_evidence", outcome: "success", durationMs: 5,
       repositoryDetail: { acceptedLinks: 3, includedFiles: 80, omittedFiles: 7, partialCoverage: true, privateName: "student-secret", sourcePath: "src/private.ts" } as never });
     recordGradingDiagnosticEntry({ at: "2026-10-25T00:00:01Z", operation: "collect_repository_evidence", outcome: "failure", durationMs: 5,
-      repositoryDetail: { acceptedLinks: NaN, includedFiles: Infinity, omittedFiles: -1, partialCoverage: "private-error" } as never });
+      repositoryDetail: { acceptedLinks: NaN, includedFiles: Infinity, omittedFiles: -1, partialCoverage: "private-error", criteriaChanged: "private-criterion", reviewFindings: Infinity, acceptedFields: -1 } as never });
     expect(readSessionDiagnosticLogState().entries[0].detail).toEqual({ acceptedLinks: 3, includedFiles: 80, omittedFiles: 7, partialCoverage: true });
     expect(readSessionDiagnosticLogState().entries[1].detail).toBeUndefined();
     const log = buildSessionDiagnosticLog(readSessionDiagnosticLogState(), { currentInstitution: "", currentCourse: "", currentPage: "/", browser: "test" }, "2026-10-25T00:00:02Z");

@@ -1,6 +1,16 @@
 import { recordGradingDiagnosticEntry } from "../grading/gradingDiagnosticLog";
 import type { RepositoryBatchResult, RepositoryStageOutcome } from "./chatRepositoryBatch";
 import type { RepositoryCollectResponse } from "@/lib/grade/repository-evidence-types";
+import type { RepositoryWorkflowCounts, RepositoryWorkflowOperation } from "./chatRepositoryWorkflow";
+
+export function recordRepositoryWorkflow(operation: RepositoryWorkflowOperation, success: boolean, startedAtMs: number, counts: RepositoryWorkflowCounts): void {
+  try {
+    recordGradingDiagnosticEntry({ at: new Date().toISOString(), operation: operation === "propose" ? "propose_repository_grade" : operation === "review" ? "review_repository_grade" : "accept_repository_grade",
+      outcome: success ? "success" : "failure", durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
+      error: success ? undefined : operation === "propose" ? "Repository proposal failed" : operation === "review" ? "Repository review failed" : "Repository acceptance refused",
+      repositoryDetail: { criteriaChanged: counts.criteriaChanged, reviewFindings: counts.reviewFindings, acceptedFields: counts.acceptedFields } });
+  } catch { /* Diagnostics cannot change repository operations. */ }
+}
 
 export function recordRepositoryCollection(success: boolean, response: RepositoryCollectResponse | undefined, startedAtMs: number, acceptedLinks = 0): void {
   try {

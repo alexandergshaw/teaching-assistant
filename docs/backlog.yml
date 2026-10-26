@@ -4,8 +4,20 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'CHAT-REPO-EVIDENCE-PROPOSALS'
+  state: 'verification'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Propose targeted repository-backed grade changes, independently audit them and explicitly adopt selected fields without losing instructor edits.'
+  owns: ['src/lib/grade/repository-proposal*', 'src/lib/grade/repository-evidence*', 'src/lib/grade/engine.ts', 'src/lib/grade/prompts.ts', 'src/lib/grade/rubric.ts', 'src/lib/llm.ts', 'src/app/api/grading-chat-repository', 'src/app/components/grading-chat', 'src/app/components/grading-results/RepositoryProposalReview.tsx', 'src/app/components/grading-results/repositoryProposalEdits*', 'src/app/components/GradingResults.tsx', 'src/app/components/grading/gradingDiagnosticLog*']
+  verify: 'npm.cmd run test:paths -- src/lib/grade/repository-proposal-output.test.ts src/lib/grade/repository-proposal.test.ts src/lib/grade/repository-proposal-review.test.ts src/lib/grade/engine.evidence-only.test.ts src/app/api/grading-chat-repository/route.test.ts src/app/components/grading-chat/useContinuousGradingRun.proposals.test.ts src/app/components/grading-results/repositoryProposalEdits.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Accepted proposal contract packet2: actual route-to-engine raw-output validation, forced evidence-only execution policy, immutable source revalidation, separate review context, selected-field compare-and-swap adoption, stale completion rejection and private-safe JSON/CSV metrics. Global gates and independent whole-change review precede publication. Rendered browser and live model quality remain separate instruments.'
+  from: 'CHAT-REPO-GRADING-REFERENCE-WORKFLOW; checked .agnostic-loop/repo-chat-proposals-contract.md final round2; this row is created by the commit adding it.'
+  note: 'Owner: coordinator. Independent final round2 SHIP closed explicit commit versus pin mismatch, revoked evidence eligibility and review aggregate retention blockers. Independent twelve-path test:paths command passed96tests; final client twenty-path command passed272tests. Final coordinator tsc passed; build compilation and TypeScript passed, then local prerender failed for missing Supabase configuration. Publish this reviewed code with its staging and collection dependencies; rendered browser interaction and authorized live-model quality remain unproven. Manual-handoff assertion returned unproven because this host activity has no admitted supervisor store; no accepted events were manufactured. Main byte/mode delivery proof is separate. No submitted-code execution or LMS posting is authorized for agent verification. Mixed assignment/rubric and class-ZIP intake remains an umbrella obligation.'
+  question: null
 - id: 'CHAT-REPO-EVIDENCE-COLLECTION'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'repo-grader-workflow'
   title: 'Confirm existing chat students and collect bounded immutable repository evidence without replacing grades.'
@@ -14,10 +26,10 @@
   blocked_by: []
   instrument: 'Checked proposal contract packet1; real stage-to-confirmed-session-key-to-route-to-GitHub chain, strict original URL and immutable SHA/path checks, shared byte/deadline budgets, omissions and submodules, actual hook deferred-result/remap/reset/retry and JSON/CSV diagnostic oracles. Rendered browser is required separately. No collection action may grade, execute or post.'
   from: 'CHAT-REPO-GRADING-REFERENCE-WORKFLOW; checked .agnostic-loop/repo-chat-proposals-contract.md final round2.'
-  note: 'Owner: coordinator. Combined source independently SHIP final round2 after targeted retention, explicit revocation, visible included paths/time, HTTPS normalization and retry-exhaustion recovery fixes. Independent affected fourteen-path npm.cmd run test:paths command passed153tests. Existing full closure retained the unrelated pinned Institution action-guard baseline failure; relevant new and legacy gates passed. Explicit batch control names at most three confirmed pending students per click, dispatches sequentially, and leaves further targets unattempted until another click. Retains prior grades and manual edits. Global gates, browser and publication remain pending. Proposal/review/accept code immediately follows; collection alone is not the requested full workflow.'
+  note: 'Owner: coordinator. Combined source independently SHIP final round2 after targeted retention, explicit revocation, visible included paths/time, HTTPS normalization and retry-exhaustion recovery fixes. Independent affected fourteen-path npm.cmd run test:paths command passed153tests. Existing full closure retained the unrelated pinned Institution action-guard baseline failure; relevant new and legacy gates passed. Explicit batch control names at most three confirmed pending students per click, dispatches sequentially, and leaves further targets unattempted until another click. Retains prior grades and manual edits. Coordinator tsc and build compilation passed; local prerender lacks Supabase configuration. Reviewed code is included in this publication; rendered browser verification remains open. Proposal/review/accept code immediately follows; collection alone is not the requested full workflow.'
   question: null
 - id: 'CHAT-REPO-EVIDENCE-STAGING'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'repo-grader-workflow'
   title: 'Stage a pasted batch of repository evidence inside grading chat without creating duplicate students or triggering grading.'

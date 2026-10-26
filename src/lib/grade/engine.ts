@@ -1,10 +1,11 @@
+import { parseRepositoryProposalOutput } from "./repository-proposal-output";
 import {
   getGeminiInterRequestDelayMs,
   getGeminiMaxCharsPerSubmission,
   getGeminiMaxOutputTokens,
   getGeminiMaxSubmissions,
 } from "../gemini";
-import { callLlm, type LlmPart, type LlmProvider } from "../llm";
+import { callLlm, type LlmPart, type LlmProvider, type BoundedLlmCallOptions } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
 import {
   RESUBMIT_NOTICE,
@@ -26,7 +27,7 @@ import {
 import { collectInlineVisualParts } from "./inline-visuals";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
-import { buildSystemPrompt, extractRubricCriteria } from "./rubric";
+import { buildSystemPrompt, extractRubricCriteria, extractRubricCriteriaForEvidence } from "./rubric";
 import { buildSubmittedFileNamesBlock, composeReplyExclusionDisclosure, SUBMISSION_FRAMING_HEADER } from "./prompts";
 // A39 wave 4b (docs/a39-waves.md 8.4.2): the canonical-column reconciliation
 // that used to be inline here is now a PURE projection (reconcile.ts),
@@ -89,7 +90,8 @@ async function scoreAxis(
   // RECORDING ONE-VS-MANY W3: when set, this call grades ONE segment of a
   // multi-submission recording; a fixed-wording note confines the model to it.
   videoGradeWindowSec?: RecordingWindow,
-  callSink?: GradeCallSink
+  callSink?: GradeCallSink,
+  evidenceOptions?: GradingRunOptions
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -121,12 +123,15 @@ async function scoreAxis(
     ),
   ];
 
+  if (evidenceOptions?.evidenceContext && (parts.reduce((sum, part) => sum + ("text" in part ? part.text.length : 0), 0) > getGeminiMaxCharsPerSubmission() || new TextEncoder().encode(JSON.stringify(parts)).byteLength > 3.5 * 1024 * 1024)) throw new GradeCallError("Combined evidence prompt exceeds its budget.", "model unparseable");
+
   const result = await callLlm(
     {
       contents: [{ role: "user", parts }],
       generationConfig: { temperature: 0.2, maxOutputTokens },
     },
-    provider
+    provider,
+    evidenceOptions?.modelCallOptions
   );
 
   if (!result.ok) {
@@ -151,6 +156,11 @@ async function scoreAxis(
       gradeFailureClassForFinishReason(result.finishReason),
       result.finishReason
     );
+  }
+  if (evidenceOptions?.evidenceContext) {
+    const strict = parseRepositoryProposalOutput(result.text, evidenceOptions.evidenceContext.criteria, evidenceOptions.evidenceContext.allowedEvidenceIds);
+    if (!strict.ok || (commentSplit && !strict.value.separateStrengths)) throw new GradeCallError("Repository proposal output was incomplete.", "model unparseable");
+    return { ...strict.value, strengths: commentSplit ? strict.value.separateStrengths! : strict.value.overallComment, improvements: commentSplit ? [strict.value.overallComment, strict.value.improvements].filter(Boolean).join("\n\n") : strict.value.improvements };
   }
   if (!hasParseableRubricJson(result.text)) {
     throw new GradeCallError("The model's response was not valid grading JSON, so it was not graded.", "model unparseable");
@@ -227,9 +237,10 @@ async function gradeSubmission(
   submittedFiles: SubmittedFileInfo[] = [],
   commentSplit = false,
   videoGradeWindowSec?: RecordingWindow,
-  callSink?: GradeCallSink
+  callSink?: GradeCallSink,
+  evidenceOptions?: GradingRunOptions
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, evidenceOptions);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -310,6 +321,9 @@ async function gradeDiscussionAxes(a: {
  * existing call site compiles unchanged.
  */
 export interface GradingRunOptions {
+  readonly executionPolicy?: "evidence-only";
+  readonly evidenceContext?: { criteria: readonly RubricCriterion[]; allowedEvidenceIds: readonly string[]; provenance: string };
+  readonly modelCallOptions?: BoundedLlmCallOptions;
   /** Absolute epoch-ms. The loop refuses to START a student at or past this.
    *  Undefined on the attended browser path, which keeps today's behaviour.
    *  A forged/too-generous value can only make the run do LESS work, so
@@ -413,7 +427,10 @@ async function gradeStudentEntries(
   // Pin the rubric's criteria so every student is graded on the same areas with
   // the same names (otherwise the per-student LLM calls drift, and the results
   // table shows mismatched, half-filled columns).
-  const criteria = extractRubricCriteria(rubric);
+  const evidenceOnly = options.executionPolicy === "evidence-only";
+  const audit = evidenceOnly ? extractRubricCriteriaForEvidence(rubric) : null;
+  if (evidenceOnly && (!audit?.ok || !options.evidenceContext || provider !== "gemini" || studentSubmissions.some((entry) => entry.discussionAxes || entry.content.length > maxCharsPerSubmission || entry.submittedFiles.some((file) => file.videoRef)))) throw new Error("Unsupported or incomplete evidence grading input.");
+  const criteria = audit?.ok ? audit.criteria : extractRubricCriteria(rubric);
   // A8 Wave B (docs/a8-scoring-architecture.md 3.2): THREE prompts, built
   // once; WHICH one an entry uses is chosen PER ENTRY (3.3/3.6). singleAxisPrompt
   // is today's call, byte for byte (ALL criteria, axisScope "all").
@@ -430,6 +447,7 @@ async function gradeStudentEntries(
   const replyAxisPrompt = hasReplySection
     ? buildSystemPrompt(assignmentInstructions, rubric, replyCriteria, axisMode, axisRouting, "reply-only", harshness, feedbackWordTarget, namingDeduction, lengthDeduction)
     : null;
+  const evidencePrompt = evidenceOnly ? buildSystemPrompt(assignmentInstructions, rubric, criteria, "some", axisRouting, "all", harshness, feedbackWordTarget, namingDeduction, lengthDeduction, options.evidenceContext?.provenance) : singleAxisPrompt;
   const results: GradeResult[] = [];
 
   // N13a: entry 0 always STARTS (it does not follow that results[0] is a
@@ -467,7 +485,7 @@ async function gradeStudentEntries(
 
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). Never throws.
-    const codeRun = precomputedCodeRun ?? (await runSubmittedCode(submittedFiles));
+    const codeRun = evidenceOnly ? null : precomputedCodeRun ?? (await runSubmittedCode(submittedFiles));
 
     try {
       const result = initialTrunc
@@ -489,7 +507,7 @@ async function gradeStudentEntries(
             callSink,
           })
         : await gradeSubmission(
-            singleAxisPrompt,
+            evidencePrompt,
             student,
             truncatedContent,
             provider,
@@ -499,7 +517,8 @@ async function gradeStudentEntries(
             submittedFiles,
             commentSplit === true,
             videoGradeWindowSec,
-            callSink
+            callSink,
+            evidenceOnly ? options : undefined
           );
       results.push({
         ...result,
@@ -604,7 +623,7 @@ async function gradeStudentEntries(
   // A39 wave 4b: this used to be ~60 lines of inline mutation here; it is now
   // a call into the pure projection reconcile.ts holds, so the incremental
   // seam (wave 4c) can reconcile the same way one item at a time.
-  const reconciled = reconcileRun(results, criteria.map((c) => c.name));
+  const reconciled = evidenceOnly ? { results, rubricAreaNames: criteria.map((c) => c.name) } : reconcileRun(results, criteria.map((c) => c.name));
 
   return {
     results: reconciled.results,

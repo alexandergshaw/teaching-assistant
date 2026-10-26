@@ -13,3 +13,18 @@ export type RepositoryEvidenceSource = ConfirmedRepositoryMapping & { originalUr
 export type RepositoryCollectedEvidence = { manifest: RepositoryEvidenceManifest; files: readonly { id: string; path: string; text: string; truncated: boolean }[] };
 export type RepositoryCollectRequest = { operation: "collect"; attemptId: string; studentKey: SessionStudentKey; mappings: RepositoryEvidenceSource[] };
 export type RepositoryCollectResponse = { operation: "collect"; attemptId: string; studentKey: SessionStudentKey; mappings: RepositoryEvidenceSource[]; evidence: readonly RepositoryCollectedEvidence[] };
+export type RepositoryPinnedSource = { source: RepositoryEvidenceSource; commitSha: string; digest: string };
+export type RepositoryProposalBase = {
+  entry: import("./types").StudentSubmissionEntry;
+  assignmentInstructions: string; rubric: string; provider: import("../llm").LlmProvider; pointsPossible: number | null;
+  commentSplit?: boolean; harshness?: import("./types").GradeHarshness; feedbackWordTarget?: number;
+  applyNamingDeduction?: boolean; applyLengthDeduction?: boolean;
+};
+export type RepositoryProposeRequest = { operation: "propose"; attemptId: string; revision: EvidenceRevision; base: RepositoryProposalBase; prior: import("./types").GradeResult; current: import("./types").GradeResult; evidence: RepositoryPinnedSource[]; partialAcknowledged: boolean };
+export type RepositoryCriterionDelta = { criterionId: string; area: string; prior: string; current: string; proposed: string; rationale: string; evidenceFileIds: readonly string[] };
+export type ProposalReview = { proposalId: string; revision: EvidenceRevision; attemptId: string; status: "completed" | "incomplete" | "failed"; findings: readonly { criterionId: string | null; category: "unsupported-deduction" | "missed-credit" | "identity" | "timing" | "coverage"; evidenceFileIds: readonly string[]; explanation: string }[] };
+export type RepositoryGradeProposal = { proposalId: string; revision: EvidenceRevision; snapshotDigest: string; candidateDigest: string; prior: import("./types").GradeResult; current: import("./types").GradeResult; proposed: import("./types").GradeResult; criterionDeltas: readonly RepositoryCriterionDelta[]; review?: ProposalReview };
+export type RepositoryProposeResponse = { operation: "propose"; attemptId: string; revision: EvidenceRevision; proposal: RepositoryGradeProposal; manifests: readonly RepositoryEvidenceManifest[]; entryDigest: string };
+export type RepositoryReviewRequest = Omit<RepositoryProposeRequest, "operation"> & { operation: "review"; proposal: RepositoryGradeProposal };
+export type RepositoryReviewResponse = { operation: "review"; attemptId: string; revision: EvidenceRevision; candidateDigest: string; review: ProposalReview; manifests: readonly RepositoryEvidenceManifest[] };
+export type RepositoryOperationRequest = RepositoryCollectRequest | RepositoryProposeRequest | RepositoryReviewRequest;

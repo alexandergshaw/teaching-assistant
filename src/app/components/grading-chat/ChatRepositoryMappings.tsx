@@ -79,6 +79,6 @@ export function ChatRepositoryMappings({ evidence, students, proposals }: {
         </div>)}
       </div>;
     })}
-    <p>Evidence collection preserves existing grades and edits. Targeted grade proposals and independent review are not available yet.</p>
+    <p>Evidence collection preserves existing grades and edits. Open Repository grade proposal in the matching result row to propose, independently review and explicitly accept selected fields.</p>
   </section>;
 }

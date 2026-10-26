@@ -13,9 +13,19 @@ describe("repository collection production caller wiring (source only; no render
     expect(panel.indexOf("repositoryProposals.reset()")).toBeGreaterThan(panel.indexOf("!window.confirm("));
     expect(read("useContinuousGradingRun.ts")).toContain("listRepositoryStudents(\"grading-chat-\" + sessionIdRef.current, retainedBodiesRef.current)");
   });
-  it("exposes honest packet-one collection controls without enabled proposal/review stubs", () => {
+  it("links collection to the optional live proposal/review/adoption row adapter", () => {
     const source = read("ChatRepositoryMappings.tsx");
-    expect(source).toContain("Targeted grade proposals and independent review are not available yet.");
+    expect(source).toContain("Open Repository grade proposal in the matching result row");
+    const panel = read("GradingChatPanel.tsx"), results = readFileSync("src/app/components/GradingResults.tsx", "utf8"), leaf = readFileSync("src/app/components/grading-results/RepositoryProposalReview.tsx", "utf8");
+    expect(panel).toContain("repositoryProposals={repositoryProposals.workflow}");
+    expect(panel).toContain("onWorkflowSettled: recordRepositoryWorkflow");
+    expect(results).toContain("repositoryProposals?: RepositoryWorkflowAdapter");
+    expect(results).toContain("<RepositoryProposalReview row={result} edit={edit}");
+    expect(results).toContain("[result.student]: next"); expect(results).toContain("if (scoreChanged) clearPostStatus(result.student)");
+    expect(leaf).toContain("adapter.propose(row.student, edit, acknowledge)");
+    expect(leaf).toContain("adapter.review(row.student, edit)");
+    expect(leaf).toContain("adapter.accept(row.student, edit, state.comparisonSignature, selection)");
+    expect(leaf).toContain("window.confirm("); expect(leaf).not.toContain("handleRegradeRow");
     expect(source).toContain("Original submission:");
     expect(source).toContain("Submission timing unknown.");
     expect(source).toContain("manifest.collectedAt");

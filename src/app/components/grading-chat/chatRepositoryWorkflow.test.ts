@@ -12,7 +12,7 @@ const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)
 const key = { sessionEpoch: "budget-session", sourceIndex: 0 }, id = JSON.stringify(["budget-session", 0]), sha = "a".repeat(40);
 const grade: GradeResult = { student: "private-student", totalScore: "6/10", strengths: "old strength", improvements: "old advice", resubmitNotice: "", overallComment: "old strength old advice", feedback: "old", rubricAreas: [{ area: "Correctness", score: "6/10", comment: "prior rationale" }], mergedFileCount: 0, submittedFiles: [] };
 const edit = { total: "7/10", strengths: "manual", improvements: "advice", resubmitNotice: "", overall: "manual advice", areas: { Correctness: { score: "7/10" } } };
-const body: GradeRunItemRequestBody = { sourceIndex: 0, provider: "gemini", assignmentInstructions: "Evaluate", rubric: "Correctness (10 pts): behavior", pointsPossible: 10, entry: { student: "private-student", content: "private-original", submittedFiles: [], mergedFileCount: 0 } };
+const body: GradeRunItemRequestBody = { sourceIndex: 0, provider: "gemini", assignmentInstructions: "Evaluate", rubric: "Correctness (10 pts): behavior", pointsPossible: 10, applyLengthDeduction: true, lengthDeductionThresholdWords: 25, entry: { student: "private-student", content: "private-original", submittedFiles: [], mergedFileCount: 0 } };
 const scope = { owner: "acme", repo: "work", kind: "commit" as const, requestedRef: sha, requestedPath: null };
 const collection: RepositoryCollectResponse = { operation: "collect", attemptId: "collect-one", studentKey: key, mappings: [{ stagedItemId: "source-one", studentKey: key, scope, mappingRevision: 1, basis: "instructor-confirmed", originalUrl: `https://github.com/acme/work/commit/${sha}` }], evidence: [{ files: [{ id: "repo-main", path: "private.py", text: "private-source", truncated: false }], manifest: { scope, originalUrl: `https://github.com/acme/work/commit/${sha}`, commitSha: sha, pin: "immutable", digest: "fixed", collectedAt: "2026-10-25T00:00:00Z", timing: { kind: "unknown", reason: "no-trusted-submission-time" }, files: [{ id: "repo-main", path: "private.py", bytes: 14, truncated: false }], coverage: { complete: true, treeTruncated: false, omitted: [], unenumerated: false } } }] };
 function reviewResponse(request: RepositoryReviewRequest): RepositoryReviewResponse {
@@ -38,6 +38,12 @@ async function setup() {
 }
 beforeEach(() => resetSessionDiagnosticLogForTests("2026-10-25T00:00:00Z"));
 describe("review cumulative retention admission", () => {
+  it("captures the original frozen threshold in both proposal and independent review bases", async () => {
+    const session = await setup(); expect(session.transport).toHaveBeenCalledTimes(2);
+    expect(session.transport.mock.calls.map(([request]) => request.operation)).toEqual(["propose", "review"]);
+    for (const [request] of session.transport.mock.calls) expect(request.base).toMatchObject({ assignmentInstructions: "Evaluate", applyLengthDeduction: true, lengthDeductionThresholdWords: 25 });
+    expect(session.transport.mock.calls[1][0].base).toEqual(session.transport.mock.calls[0][0].base);
+  });
   it("refuses at 11,999,999 retained bytes before reserving or retaining the next review request/state", async () => {
     const session = await setup(), previous = session.workflow.states.get(id)!; session.retain(11_999_999);
     await session.workflow.adapter(false).review("private-student", edit);

@@ -68,7 +68,8 @@ export function createRepositoryWorkflow(params: {
     const entry = withoutIdentity(structuredClone(original.entry)); delete entry.submissionUrl; delete entry.codeRun;
     const base: RepositoryProposalBase = { entry, assignmentInstructions: original.assignmentInstructions, rubric: original.rubric,
       provider: original.provider, pointsPossible: original.pointsPossible, commentSplit: original.commentSplit, harshness: original.harshness,
-      feedbackWordTarget: original.feedbackWordTarget, applyNamingDeduction: original.applyNamingDeduction, applyLengthDeduction: original.applyLengthDeduction };
+      feedbackWordTarget: original.feedbackWordTarget, applyNamingDeduction: original.applyNamingDeduction, applyLengthDeduction: original.applyLengthDeduction,
+      lengthDeductionThresholdWords: original.lengthDeductionThresholdWords };
     const revision: EvidenceRevision = { ...snapshot.key, mappingRevision: Math.max(...evidence.mappings.map((mapping) => mapping.mappingRevision)),
       evidenceRevision: same ? old.request.revision.evidenceRevision : ++evidenceRevision, rubricFingerprint: snapshot.rubricFingerprint,
       baseGradeRevision: snapshot.gradeRevision, baseEditRevision: same ? old.request.revision.baseEditRevision : ++editRevision };

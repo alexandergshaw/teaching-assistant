@@ -325,7 +325,7 @@ ${LENGTH_DEDUCTION_DIRECTIVE}`);
   it("the engine resolves an unset applyLengthDeduction to false and passes it after namingDeduction at all four calls", () => {
     const engine = readFileSync(join(process.cwd(), "src/lib/grade/engine.ts"), "utf8");
     expect(engine).toContain("options.applyLengthDeduction ?? false");
-    const sites = engine.match(/feedbackWordTarget, namingDeduction, lengthDeduction\)/g) ?? [];
+    const sites = engine.match(/feedbackWordTarget, namingDeduction, lengthDeduction, undefined, options\.lengthDeductionThresholdWords\)/g) ?? [];
     expect(sites).toHaveLength(4);
   });
 });

@@ -28,6 +28,8 @@
 // imported from "react", so this file can be driven by the same no-render
 // vi.mock("react", ...) lifecycle-test harness.
 import { useRef, useState } from "react";
+import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT } from "@/lib/grade/length-deduction-policy";
+import { lengthDeductionThresholdError } from "./chatLengthDeduction";
 import { createContinuousRepositoryAdapter, listRepositoryStudents, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
 import {
   resolveChatRunHeaderAction,
@@ -151,6 +153,7 @@ export interface UseContinuousGradingRunResult {
     readonly applyNamingDeduction?: boolean;
     /** Captured once and frozen for the session; absent = no length deduction (default off). */
     readonly applyLengthDeduction?: boolean;
+    readonly lengthDeductionThresholdWords?: number;
   }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
   readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
   readonly reset: () => void;
@@ -248,6 +251,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const feedbackWordTargetRef = useRef<number | undefined>(undefined);
   const applyNamingDeductionRef = useRef(true);
   const applyLengthDeductionRef = useRef(false);
+  const lengthDeductionThresholdWordsRef = useRef(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT);
   const arrivedRef = useRef<ArrivedItemResult[]>([]);
   const queueRef = useRef<GradeRunItemRequestBody[]>([]);
   const inFlightRef = useRef(0);
@@ -479,6 +483,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}),
         ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}),
         ...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {}),
+        ...(applyLengthDeductionRef.current === true ? { lengthDeductionThresholdWords: lengthDeductionThresholdWordsRef.current } : {}),
         ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
@@ -494,7 +499,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pump();
   };
 
-  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; isCurrent?: () => boolean; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean }) => {
+  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; isCurrent?: () => boolean; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean; lengthDeductionThresholdWords?: number }) => {
     const sessionAtStart = sessionIdRef.current;
     const stale = () => ({ kind: "refused" as const, reason: "The session changed while setup was resolving. Nothing was submitted." });
     // Idempotent: a header already resolved for this session is a no-op, so
@@ -502,6 +507,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // generateRubric model call.
     if (sessionParams.isCurrent?.() === false) return stale();
     if (headerRef.current) return { kind: "ready" as const };
+    const thresholdError = lengthDeductionThresholdError(sessionParams.applyLengthDeduction === true, sessionParams.lengthDeductionThresholdWords);
+    if (thresholdError) return { kind: "refused" as const, reason: thresholdError };
     const previous = headerAttemptRef.current?.epoch === sessionAtStart ? headerAttemptRef.current : null;
     const attempt = { epoch: sessionAtStart, priorState: previous ? previous.priorState : headerState, priorError: previous ? previous.priorError : sessionError };
     headerAttemptRef.current = attempt;
@@ -537,6 +544,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     feedbackWordTargetRef.current = sessionParams.feedbackWordTarget;
     applyNamingDeductionRef.current = sessionParams.applyNamingDeduction ?? true;
     applyLengthDeductionRef.current = sessionParams.applyLengthDeduction ?? false;
+    lengthDeductionThresholdWordsRef.current = sessionParams.lengthDeductionThresholdWords ?? LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT;
     setHeaderState("ready");
     setSessionError(null);
     return { kind: "ready" as const };
@@ -924,6 +932,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     feedbackWordTargetRef.current = undefined;
     applyNamingDeductionRef.current = true;
     applyLengthDeductionRef.current = false;
+    lengthDeductionThresholdWordsRef.current = LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT;
     arrivedRef.current = [];
     queueRef.current = [];
     inFlightRef.current = 0;

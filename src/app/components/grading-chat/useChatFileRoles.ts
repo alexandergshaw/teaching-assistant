@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { admitRoleFiles, isSetupRole, readRoleSetup, resolveRoleSetup, type ChatFileRole, type ChatRoleChoices, type ChatRoleDraft, type ChatRoleOptions, type ChatRoleRow, type ConfirmedRoleSetup } from "./chatFileRoles";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { recordChatFileRoleDiagnostic } from "./chatFileRoleDiagnostic";
+import { lengthDeductionThresholdError } from "./chatLengthDeduction";
 type Params = { epoch: string; locked: boolean; draft: ChatRoleDraft; options: ChatRoleOptions;
   start: (setup: ConfirmedRoleSetup, current: () => boolean) => Promise<boolean>;
   submit: (file: File, label: string | undefined, current: () => boolean) => Promise<SubmitOutcome>;
@@ -14,6 +15,11 @@ export function createChatFileRolesController(initial: Params) {
   let readQueue = Promise.resolve();
   let listener: (view: ReturnType<typeof snapshot>) => void = () => {};
   const emit = () => listener(snapshot());
+  const resolve = () => {
+    const resolved = resolveRoleSetup(rows, params.draft, choices, params.locked);
+    const error = lengthDeductionThresholdError(params.options.applyLengthDeduction, params.options.lengthDeductionThresholdWords);
+    return error ? { ...resolved, errors: [...resolved.errors, error] } : resolved;
+  };
   const diagnostic = (operation: "stage" | "confirm", outcome: "success" | "failure", startedAtMs: number, failure?: "limits" | "pending-preview" | "setup-invalid" | "setup-refused" | "file-failed" | "canceled") => {
     try { recordChatFileRoleDiagnostic({ operation, outcome, startedAtMs, rows, failure }); } catch { /* Diagnostics cannot change intake. */ }
   };
@@ -46,7 +52,7 @@ export function createChatFileRolesController(initial: Params) {
   };
   const confirm = async (setupOnly = false): Promise<void> => {
     if (busy || !rows.length) return;
-    const resolved = resolveRoleSetup(rows, params.draft, choices, params.locked), submissions = rows.filter((row) => row.role === "submission" && row.file);
+    const resolved = resolve(), submissions = rows.filter((row) => row.role === "submission" && row.file);
     if (resolved.errors.length || (!setupOnly && !submissions.length) || (setupOnly && rows.some((row) => row.role === "submission"))) { error = resolved.errors[0] ?? "Keep at least one submission, or use setup with setup-only files."; emit(); return; }
     const token = ++revision, epoch = params.epoch, setup: ConfirmedRoleSetup = Object.freeze({ ...resolved.effective, ...params.options });
     const current = () => revision === token && params.epoch === epoch;
@@ -73,7 +79,7 @@ export function createChatFileRolesController(initial: Params) {
     finally { if (current()) { busy = false; phase = "settled"; emit(); } }
   };
   function snapshot() { return { rows, error, busy, phase, pending: rows.length > 0, choices,
-    resolved: resolveRoleSetup(rows, params.draft, choices, params.locked), locked: params.locked,
+    resolved: resolve(), locked: params.locked,
     stage, assign, confirm, cancel, isPending: () => rows.length > 0,
     choose(field: keyof ChatRoleDraft, value: "draft" | "file") { if (!busy) { choices = { ...choices, [field]: value }; error = null; emit(); } },
   }; }

@@ -30,6 +30,8 @@ import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
 import { ChatFileRolePreview } from "./ChatFileRolePreview";
 import { useChatFileRoles } from "./useChatFileRoles";
 import type { ConfirmedRoleSetup } from "./chatFileRoles";
+import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT, LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX } from "@/lib/grade/length-deduction-policy";
+import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
 import { useChatRepositoryProposals } from "./useChatRepositoryProposals";
 import { recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepositoryDiagnostic";
 import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
@@ -279,6 +281,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [feedbackLengthText, setFeedbackLengthText] = useState("");
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
+  const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
@@ -338,8 +341,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   }, []);
 
   const changeApplyLengthDeduction = (next: boolean) => {
+    if (sessionReady || driver.headerState === "resolving" || preparing || roleIntake.isPending()) return;
     setApplyLengthDeduction(next);
     persistApplyLengthDeduction(next);
+  };
+  const changeLengthThreshold = (next: string) => {
+    recordLengthDeductionThresholdChange(lengthThresholdText, next);
+    setLengthThresholdText(next);
   };
 
   const changeApplyNamingDeduction = (next: boolean) => {
@@ -407,11 +415,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     if (roleSetup) {
       const result = await driver.beginSession({ assignmentInstructions: roleSetup.instructions, rubric: roleSetup.rubric,
         harshness: roleSetup.harshness, feedbackWordTarget: roleSetup.feedbackWordTarget,
-        applyNamingDeduction: roleSetup.applyNamingDeduction, applyLengthDeduction: roleSetup.applyLengthDeduction, isCurrent: current });
+        applyNamingDeduction: roleSetup.applyNamingDeduction, applyLengthDeduction: roleSetup.applyLengthDeduction,
+        lengthDeductionThresholdWords: roleSetup.lengthDeductionThresholdWords, isCurrent: current });
       if (!current()) return false;
       if (result.kind === "refused") { sessionRefusalRef.current = result.reason; setSubmitError(result.reason); return false; }
       setSubmitError(null); return true;
     }
+    const threshold = parseLengthDeductionThreshold(lengthThresholdText);
+    if (applyLengthDeduction && threshold === null) { setSubmitError(LENGTH_THRESHOLD_ERROR); return false; }
     const scope = canvasUrl ? deriveChatScope(canvasUrl) : "";
     const needsFill = !instructions.trim() || !rubric.trim();
 
@@ -463,6 +474,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText),
       applyNamingDeduction,
       applyLengthDeduction,
+      lengthDeductionThresholdWords: applyLengthDeduction ? threshold! : undefined,
     });
     if (result.kind === "refused") {
       sessionRefusalRef.current = result.reason;
@@ -585,7 +597,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     return outcomes;
   };
   const roleIntake = useChatFileRoles({ epoch: driver.runKey, locked: sessionReady, draft: { instructions, rubric },
-    options: { harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction },
+    options: { harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
+      lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
     canStage: !preparing && driver.headerState !== "resolving",
     start: (setup, current) => ensureSession(undefined, setup, current),
     submit: async (file, label, current) => (await handleConfirmedFiles([file], label, current))[0],
@@ -617,8 +630,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const handleClearInstructions = () => setInstructions("");
   const handleClearRubric = () => setRubric("");
   const handleClearAll = () => {
+    if (sessionReady || driver.headerState === "resolving" || preparing || roleIntake.isPending()) return;
     setInstructions("");
     setRubric("");
+    changeLengthThreshold(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
   };
 
   const busy = driver.headerState === "resolving";
@@ -797,13 +812,19 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
               size="small"
               checked={applyLengthDeduction}
               onChange={(event) => changeApplyLengthDeduction(event.target.checked)}
-              disabled={sessionReady}
+              disabled={sessionReady || busy || preparing || roleIntake.pending}
             />
           }
           label="Deduct for length"
         />
-        {!sessionReady && (instructions !== "" || rubric !== "") && (
-          <Button variant="text" size="small" aria-label="Clear all setup fields" onClick={handleClearAll}>
+        <TextField size="small" type="text" label="Deduct when at least N words below the minimum"
+          value={lengthThresholdText} onChange={(event) => changeLengthThreshold(event.target.value)}
+          disabled={!applyLengthDeduction || sessionReady || busy || preparing || roleIntake.pending}
+          error={applyLengthDeduction && parseLengthDeductionThreshold(lengthThresholdText) === null}
+          helperText={sessionReady || busy ? "Frozen for this session. Start a New session to change it." : roleIntake.pending || preparing ? "Finish or cancel the current intake before changing this setting." : !applyLengthDeduction ? "Enable Deduct for length to set a threshold." : parseLengthDeductionThreshold(lengthThresholdText) === null ? LENGTH_THRESHOLD_ERROR : "Uses only an explicit assignment or rubric minimum; does not change the deduction amount."}
+          slotProps={{ htmlInput: { inputMode: "numeric", min: 1, max: LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX, step: 1 } }} />
+        {!sessionReady && (instructions !== "" || rubric !== "" || lengthThresholdText !== String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT)) && (
+          <Button variant="text" size="small" aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing || roleIntake.pending} onClick={handleClearAll}>
             Clear all
           </Button>
         )}

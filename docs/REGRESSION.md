@@ -47868,3 +47868,14 @@ component. The source barrier can truncate unused Forward history. Independent
 coordinator `npx.cmd tsc --noEmit --incremental false --pretty false` passed.
 `npm.cmd run build` compiled and finished TypeScript, then hit the documented
 missing-Supabase-settings prerender failure. Production checks remain distinct.
+
+
+## Grading chat length deduction baseline, before configurable word shortfall
+
+Recorded 2026-10-25 by reading `src/lib/grade/prompts.ts` and searching
+`rg -n -i "length deduction|length.deduction" docs/REGRESSION.md` (no match).
+The chat checkbox defaults false. `applyLengthDeduction=true` appends the
+existing `LENGTH_DEDUCTION_DIRECTIVE`, which asks for deductions when work is
+substantially shorter than the assignment appears to require. OFF appends
+nothing. There is no numeric shortfall threshold in that policy. This is
+prompt guidance, not deterministic word counting or measured live compliance.

@@ -1,3 +1,4 @@
+import { isLengthDeductionThresholdWords } from "./length-deduction-policy";
 import { isSubmissionFileInventories } from "./submission-file-inventory";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "../upload-budget";
 import { validateGithubOwnerRepo } from "../github-ref-name";
@@ -64,7 +65,8 @@ function validFile(value: unknown): boolean {
   return record(value) && only(value, ["name", "extension", "previewContent", "previewTruncated"], ["mimeType"]) && text(value.name, 4096) && text(value.extension, 30) && text(value.previewContent, 3_000_000) && typeof value.previewTruncated === "boolean" && (value.mimeType === undefined || text(value.mimeType, 200));
 }
 export function validateRepositoryProposalBase(value: unknown): value is import("./repository-evidence-types").RepositoryProposalBase {
-  if (!record(value) || !only(value, ["entry", "assignmentInstructions", "rubric", "provider", "pointsPossible"], ["commentSplit", "harshness", "feedbackWordTarget", "applyNamingDeduction", "applyLengthDeduction"])) return false;
+  if (!record(value) || !only(value, ["entry", "assignmentInstructions", "rubric", "provider", "pointsPossible"], ["commentSplit", "harshness", "feedbackWordTarget", "applyNamingDeduction", "applyLengthDeduction", "lengthDeductionThresholdWords"])) return false;
+  if (Object.hasOwn(value, "lengthDeductionThresholdWords") && !isLengthDeductionThresholdWords(value.lengthDeductionThresholdWords)) return false;
   const entry = value.entry;
   if (!record(entry) || !only(entry, ["student", "content", "mergedFileCount", "submittedFiles"], ["gradedRepo", "gradedRef", "repoReadNote", "linkFetch", "studentNameSource", "repositoryInventories"]) || !text(entry.student, 500) || !text(entry.content, 3_000_000) || !integer(entry.mergedFileCount) || !Array.isArray(entry.submittedFiles) || entry.submittedFiles.length > 100 || !entry.submittedFiles.every(validFile)) return false;
   if (entry.repositoryInventories !== undefined && !isSubmissionFileInventories(entry.repositoryInventories)) return false;

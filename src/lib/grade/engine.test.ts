@@ -412,3 +412,11 @@ describe("gradeEntries - commentSplit routing (G8)", () => {
     expect(run.results[0].improvements).toBe("ADVICE_Z");
   });
 });
+
+it("threads the shortfall policy into both independently scored discussion axes", async () => {
+  mockCallLlm.mockResolvedValue({ ok: true, text: OK_RESPONSE_TEXT });
+  const rubric = "Initial post (6 pts): argument\nReply section:\nReplies (4 pts): response";
+  await gradeEntries([entry({ discussionAxes: { initialPostContent: "initial", replyContent: "reply", replyCount: 1 } })], "Minimum 500 words", rubric, "gemini", 10, { applyLengthDeduction: true, lengthDeductionThresholdWords: 25 });
+  expect(mockCallLlm).toHaveBeenCalledTimes(2);
+  for (const call of mockCallLlm.mock.calls) expect(JSON.stringify(call[0])).toContain("shortfall >= 25 words");
+});

@@ -9,6 +9,13 @@ function setup() {
   const controller = createChatFileRolesController(params); return { controller, params, start, submit, applySetup };
 }
 describe("role controller real callbacks", () => {
+  it("refuses an invalid enabled threshold before start and ignores it when deduction is off", async () => {
+    const s = setup(); s.controller.sync({ ...s.params, options: { ...options, lengthDeductionThresholdWords: NaN } });
+    s.controller.snapshot().stage([new File(["student"], "student.txt")]); await s.controller.snapshot().assign(1, "submission");
+    expect(s.controller.snapshot().resolved.errors.join(" ")).toContain("whole number"); await s.controller.snapshot().confirm(); expect(s.start).not.toHaveBeenCalled(); expect(s.submit).not.toHaveBeenCalled();
+    s.controller.sync({ ...s.params, options: { ...options, applyLengthDeduction: false, lengthDeductionThresholdWords: NaN } }); await s.controller.snapshot().confirm();
+    expect(s.start).toHaveBeenCalledTimes(1); expect(s.submit).toHaveBeenCalledTimes(1);
+  });
   it("stages unknown roles without work, captures setup/options once and never sends setup files", async () => {
     const s = setup(), assignment = new File(["ASSIGNMENT_ONLY_SENTINEL"], "assignment.txt"), rubric = new File(["Correctness (12 pts): behavior"], "rubric.txt"), zip = new File(["zip"], "class.zip");
     s.controller.snapshot().stage([assignment, rubric, zip]);

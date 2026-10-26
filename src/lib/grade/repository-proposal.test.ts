@@ -161,3 +161,38 @@ it("accepts uppercase spelling of the same fixed commit without broadening or ch
   expect(fetcher.mock.calls.filter((call) => String(call[0]).includes("/git/trees/"))).toHaveLength(1);
   expect(fetcher.mock.calls.find((call) => String(call[0]).includes("/git/trees/"))![0]).toContain(`/git/trees/${sha}`);
 });
+it("carries a frozen word shortfall through the real strict engine and independent review", async () => {
+  const input = await request(); input.base.lengthDeductionThresholdWords = 25;
+  input.base.assignmentInstructions = "Minimum 500 words";
+  fetcher.mockClear();
+  const response = await send(input); expect(response.status).toBe(200);
+  const result: RepositoryProposeResponse = await response.json();
+  const gradingWire = JSON.parse(fetcher.mock.calls.find((call) => String(call[0]).includes("generativelanguage"))![1].body);
+  expect(gradingWire.contents[0].parts[0].text).toContain("shortfall >= 25 words");
+  expect(gradingWire.contents[0].parts[0].text).toContain("No code was executed for this revision");
+  expect((await send({ ...input, operation: "review", attemptId: "review-threshold", proposal: result.proposal })).status).toBe(200);
+  const calls = fetcher.mock.calls.filter((call) => String(call[0]).includes("generativelanguage"));
+  expect(calls).toHaveLength(2);
+  const reviewContext = JSON.parse(JSON.parse(calls[1][1].body).contents[0].parts[0].text);
+  expect(reviewContext.lengthPolicy.applyLengthDeduction).toBe(true);
+  expect(reviewContext.lengthPolicy.lengthDeductionThresholdWords).toBe(25);
+  expect(reviewContext.lengthPolicy.directive).toContain("shortfall >= 25 words");
+  expect(runner).not.toHaveBeenCalled();
+});
+it.each([null, "25", 1.5, 0, 1_000_001])("rejects malformed repository policy %s before any fetch", async (value) => {
+  const input = await request(); fetcher.mockClear();
+  expect((await send({ ...input, base: { ...input.base, lengthDeductionThresholdWords: value } })).status).toBe(400);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("snapshots the threshold before asynchronous evidence collection", async () => {
+  const { proposeRepositoryGrade } = await import("./repository-proposal");
+  const input = await request(); input.base.lengthDeductionThresholdWords = 25;
+  fetcher.mockClear();
+  const pending = proposeRepositoryGrade(input, Date.now() + 50_000);
+  input.base.lengthDeductionThresholdWords = 1;
+  await pending;
+  const wire = JSON.parse(fetcher.mock.calls.find((call) => String(call[0]).includes("generativelanguage"))![1].body);
+  expect(wire.contents[0].parts[0].text).toContain("shortfall >= 25 words");
+  expect(wire.contents[0].parts[0].text).not.toContain("shortfall >= 1 words");
+});

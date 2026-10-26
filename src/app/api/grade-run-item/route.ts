@@ -1,3 +1,4 @@
+import { isLengthDeductionThresholdWords } from "@/lib/grade/length-deduction-policy";
 import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -89,6 +90,7 @@ interface GradeRunItemRequestBody {
   feedbackWordTarget?: unknown;
   applyNamingDeduction?: unknown;
   applyLengthDeduction?: unknown;
+  lengthDeductionThresholdWords?: unknown;
   gradeWindowSec?: unknown;
 }
 
@@ -145,8 +147,10 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   feedbackWordTarget: number | undefined;
   applyNamingDeduction: boolean;
   applyLengthDeduction: boolean;
+  lengthDeductionThresholdWords: number | undefined;
   videoGradeWindowSec: RecordingWindow | undefined;
 } | null {
+  if (Object.hasOwn(body, "lengthDeductionThresholdWords") && !isLengthDeductionThresholdWords(body.lengthDeductionThresholdWords)) return null;
   if (typeof body.sourceIndex !== "number" || !Number.isInteger(body.sourceIndex) || body.sourceIndex < 0) {
     return null;
   }
@@ -222,6 +226,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
     // Default-safe, default OFF: only a literal true turns the length deduction
     // on; an absent or invalid value keeps today's prompt.
     applyLengthDeduction: body.applyLengthDeduction === true,
+    lengthDeductionThresholdWords: body.lengthDeductionThresholdWords as number | undefined,
     videoGradeWindowSec,
   };
 }
@@ -293,7 +298,7 @@ export async function POST(req: NextRequest) {
   if (!parsed) {
     return NextResponse.json({ error: "This submission could not be read." }, { status: 400 });
   }
-  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, videoGradeWindowSec } = parsed;
+  const { sourceIndex, entry, assignmentInstructions, rubric, provider, pointsPossible, commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, lengthDeductionThresholdWords, videoGradeWindowSec } = parsed;
 
   // VIDEO-GRADING W3 (T11): dark behind VIDEO_GRADING_ENABLED. With the flag on,
   // a videoRef must name an object in THIS caller's own grading-uploads
@@ -353,7 +358,7 @@ export async function POST(req: NextRequest) {
       (async () => {
         const resolved = await resolveEntryLinks(entry);
         if (videoMode) {
-          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
+          const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, lengthDeductionThresholdWords, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
             buildVideoSeamDeps(),
             { userId: videoOwnerId, uploadDeadlineMs: startedAtMs + VIDEO_PREPARE_BUDGET_MS, signal: videoAbort.signal },
@@ -368,7 +373,7 @@ export async function POST(req: NextRequest) {
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };
         }
         gradeStartedAtMs = Date.now();
-        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
+        const graded = await gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, lengthDeductionThresholdWords, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) });
         return { graded, linkFetch: resolved.linkFetch };
       })(),
       waitMs

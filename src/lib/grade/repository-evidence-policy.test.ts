@@ -14,3 +14,8 @@ describe("confirmed repository scope validation", () => {
     expect(validateRepositoryScope("https://github.com/owner/repo/commit/abc", { ...commit, requestedRef: "abc" })).toBe(false);
   });
 });
+import { validateRepositoryProposalBase } from "./repository-evidence-policy";
+const base = { entry: { student: "Student", content: "words", mergedFileCount: 1, submittedFiles: [] }, assignmentInstructions: "500 word minimum", rubric: "Content (10 pts): reasoning", provider: "gemini", pointsPossible: 10 };
+it.each([1, 25, 1_000_000])("admits frozen proposal threshold %s", (value) => expect(validateRepositoryProposalBase({ ...base, lengthDeductionThresholdWords: value })).toBe(true));
+it.each([null, "25", 1.5, NaN, Infinity, 0, -1, 1_000_001, undefined])("refuses malformed frozen proposal threshold %s", (value) => expect(validateRepositoryProposalBase({ ...base, lengthDeductionThresholdWords: value })).toBe(false));
+it("keeps legacy proposal omission valid", () => expect(validateRepositoryProposalBase(base)).toBe(true));

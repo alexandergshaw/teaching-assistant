@@ -18,7 +18,7 @@ export type RepositoryProposalBase = {
   entry: import("./types").StudentSubmissionEntry;
   assignmentInstructions: string; rubric: string; provider: import("../llm").LlmProvider; pointsPossible: number | null;
   commentSplit?: boolean; harshness?: import("./types").GradeHarshness; feedbackWordTarget?: number;
-  applyNamingDeduction?: boolean; applyLengthDeduction?: boolean;
+  applyNamingDeduction?: boolean; applyLengthDeduction?: boolean; lengthDeductionThresholdWords?: number;
 };
 export type RepositoryProposeRequest = { operation: "propose"; attemptId: string; revision: EvidenceRevision; base: RepositoryProposalBase; prior: import("./types").GradeResult; current: import("./types").GradeResult; evidence: RepositoryPinnedSource[]; partialAcknowledged: boolean };
 export type RepositoryCriterionDelta = { criterionId: string; area: string; prior: string; current: string; proposed: string; rationale: string; evidenceFileIds: readonly string[] };

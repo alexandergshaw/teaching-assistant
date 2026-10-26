@@ -17,6 +17,7 @@ import type { SubmissionZipClassification } from "@/lib/grade/types";
 import type { RecordingSplit } from "@/lib/grade/recording-split";
 
 export type GradingDiagnosticOperation =
+  | "change_length_deduction_threshold"
   | "stage_file_roles"
   | "confirm_file_roles"
   | "stage_repository_evidence"
@@ -49,6 +50,7 @@ export type GradingDiagnosticOperation =
   | "classify_recording_multiple";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
+  change_length_deduction_threshold: "Change length deduction threshold",
   stage_file_roles: "Stage file roles",
   confirm_file_roles: "Confirm file roles",
   stage_repository_evidence: "Stage repository evidence",
@@ -82,6 +84,7 @@ export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnos
 };
 
 export interface RecordGradingDiagnosticArgs {
+  lengthPolicyDetail?: { thresholdWords?: number };
   roleDetail?: { files?: number; assignmentFiles?: number; rubricFiles?: number; combinedFiles?: number; submissionFiles?: number; excludedFiles?: number; unresolvedFiles?: number; failedFiles?: number; unattemptedFiles?: number };
   at: string;
   operation: GradingDiagnosticOperation;
@@ -134,8 +137,12 @@ export function recordGradingDiagnosticEntry(args: RecordGradingDiagnosticArgs):
     cause: args.cause,
     code: args.code,
     serverMs: args.serverMs,
-    detail: args.roleDetail ? roleDetail(args.roleDetail) : repositoryDetail(args.repositoryDetail),
+    detail: args.lengthPolicyDetail ? lengthPolicyDetail(args.lengthPolicyDetail) : args.roleDetail ? roleDetail(args.roleDetail) : repositoryDetail(args.repositoryDetail),
   });
+}
+function lengthPolicyDetail(value: NonNullable<RecordGradingDiagnosticArgs["lengthPolicyDetail"]>): Record<string, number> {
+  const count = value.thresholdWords;
+  return typeof count === "number" && Number.isInteger(count) && count >= 1 && count <= 1_000_000 ? { thresholdWords: count } : {};
 }
 function roleDetail(value: NonNullable<RecordGradingDiagnosticArgs["roleDetail"]>): Record<string, number> {
   const detail: Record<string, number> = {};

@@ -600,7 +600,8 @@ describe("GradingChatPanel - controls #1: clear controls", () => {
     const body = source.slice(start, source.indexOf("};", start));
     expect(body).toContain('setInstructions("")');
     expect(body).toContain('setRubric("")');
-    expect(source).toMatch(/!sessionReady\s*&&\s*\(instructions\s*!==\s*""\s*\|\|\s*rubric\s*!==\s*""\)/);
+    expect(source).toMatch(/!sessionReady\s*&&\s*\(instructions\s*!==\s*""\s*\|\|\s*rubric\s*!==\s*""\s*\|\|\s*lengthThresholdText/);
+    expect(body).toContain("changeLengthThreshold(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT))");
     expect(source).toContain("onClick={handleClearAll}");
   });
 
@@ -719,7 +720,7 @@ describe("GradingChatPanel - deduction controls W2: length deduction control and
     const control = source.slice(open, start);
     expect(control).toContain("<Checkbox");
     expect(control).toContain("checked={applyLengthDeduction}");
-    expect(control).toContain("disabled={sessionReady}");
+    expect(control).toContain("disabled={sessionReady || busy || preparing || roleIntake.pending}");
   });
 
   it("persists under its own key, defaults OFF, and restores in a mount effect", () => {

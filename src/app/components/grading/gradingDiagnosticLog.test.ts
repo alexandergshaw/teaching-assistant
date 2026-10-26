@@ -32,6 +32,11 @@ function errState(message: string): WholeRunSettledState {
 }
 
 describe("decideWholeRunDiagnostic (pure)", () => {
+  it("labels threshold changes and drops invalid or caller-supplied setting detail", () => {
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.change_length_deduction_threshold).toBe("Change length deduction threshold");
+    for (const count of [0, -1, 1.5, Infinity, 1_000_001]) recordGradingDiagnosticEntry({ at: "2026-10-25T00:00:00Z", operation: "change_length_deduction_threshold", outcome: "success", durationMs: 0, lengthPolicyDetail: { thresholdWords: count, raw: "PRIVATE_INPUT" } as never });
+    expect(readSessionDiagnosticLogState().entries.every((entry) => entry.detail === undefined)).toBe(true);
+  });
   it("labels repository evidence staging explicitly", () => {
     expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.stage_repository_evidence).toBe("Stage repository evidence");
   });

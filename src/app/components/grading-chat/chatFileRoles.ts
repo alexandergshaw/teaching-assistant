@@ -8,7 +8,7 @@ export type ChatFileRole = "unassigned" | "instructions" | "rubric" | "combined"
 export type ChatFileRoleStatus = "unassigned" | "ready" | "reading" | "error" | "accepted" | "partial" | "failed" | "unattempted";
 export type ChatRoleRow = { id: number; name: string; size: number; file: File | null; role: ChatFileRole; status: ChatFileRoleStatus; text?: string; error?: string };
 export type ChatRoleDraft = { instructions: string; rubric: string };
-export type ChatRoleOptions = { harshness: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction: boolean; applyLengthDeduction: boolean };
+export type ChatRoleOptions = { harshness: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction: boolean; applyLengthDeduction: boolean; lengthDeductionThresholdWords?: number };
 export type ConfirmedRoleSetup = Readonly<ChatRoleDraft & ChatRoleOptions>;
 export type ChatRoleChoices = { instructions: "draft" | "file"; rubric: "draft" | "file" };
 export const isSetupRole = (role: ChatFileRole) => role === "instructions" || role === "rubric" || role === "combined";

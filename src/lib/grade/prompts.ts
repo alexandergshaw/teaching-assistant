@@ -1,3 +1,4 @@
+import { isLengthDeductionThresholdWords, lengthDeductionThresholdDirective } from "./length-deduction-policy";
 import { FEEDBACK_WORD_TARGET_MAX, FEEDBACK_WORD_TARGET_MIN } from "./types";
 import type { GradeHarshness, RubricCriterion, SubmittedFileInfo } from "./types";
 import { buildRepositoryInventoryBlock, type SubmissionFileInventory } from "./submission-file-inventory";
@@ -108,7 +109,8 @@ export function buildSystemPrompt(
    *  PART B). Trailing 10th positional param, default false: appends nothing,
    *  so every existing call is byte-identical. True appends the length rule. */
   applyLengthDeduction: boolean = false,
-  evidenceOutputContract?: string
+  evidenceOutputContract?: string,
+  lengthDeductionThresholdWords?: number
 ): string {
   const separateStrengths = praiseRouting === "separate-strengths";
   // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
@@ -243,7 +245,9 @@ ${resubmissionRule}
   if (harshnessDirective) parts.push(harshnessDirective);
   const lengthDirective = feedbackLengthDirective(feedbackWordTarget);
   if (lengthDirective) parts.push(lengthDirective);
-  if (applyLengthDeduction) parts.push(LENGTH_DEDUCTION_DIRECTIVE);
+  if (applyLengthDeduction) parts.push(isLengthDeductionThresholdWords(lengthDeductionThresholdWords)
+    ? lengthDeductionThresholdDirective(lengthDeductionThresholdWords)
+    : LENGTH_DEDUCTION_DIRECTIVE);
   return parts.join("\n\n");
 }
 

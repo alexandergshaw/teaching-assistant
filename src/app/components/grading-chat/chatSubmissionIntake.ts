@@ -173,7 +173,8 @@ export function mergeCompositeEntries(resolvedParts: readonly StudentSubmissionE
     }
   }
 
-  return { student, content, mergedFileCount, submittedFiles };
+  const repositoryInventories = resolvedParts.flatMap((part) => part.repositoryInventories ?? []);
+  return { student, content, mergedFileCount, submittedFiles, ...(repositoryInventories.length ? { repositoryInventories } : {}) };
 }
 
 /**

@@ -28,6 +28,7 @@ export interface SubmissionRepoTreeEntry {
 }
 
 export interface ParsedSubmissionRepoUrl {
+  kind?: "tree" | "blob";
   owner: string;
   repo: string;
   /** Branch, tag, or commit from a /tree/<ref> or /blob/<ref> URL segment. */
@@ -95,7 +96,8 @@ export function parseSubmissionGithubUrl(raw: string): ParsedSubmissionRepoUrl |
     if (segments.length > 4) subpath = segments.slice(4).join("/");
   }
 
-  return { owner, repo, ref, subpath };
+  if (segments[2] === "blob" && !subpath) return { error: "The GitHub blob URL is missing a file path." };
+  return { owner, repo, ref, subpath, ...((segments[2] === "tree" || segments[2] === "blob") ? { kind: segments[2] as "tree" | "blob" } : {}) };
 }
 
 /** Whether a submitted URL is (parseable as) a GitHub repository link, for

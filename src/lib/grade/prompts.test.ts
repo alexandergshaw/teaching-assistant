@@ -54,13 +54,13 @@ describe("buildSubmittedFileNamesBlock", () => {
     expect(block).toContain("trip_math.cpp");
   });
 
-  it("reduces a folder-prefixed path (the GitHub-repo submission shape) to its base name", () => {
+  it("preserves the repository-relative path", () => {
     const block = buildSubmittedFileNamesBlock([
       file({ name: "assignments/module_02/TripMath.java", extension: "java" }),
     ]);
 
     expect(block).toContain("TripMath.java");
-    expect(block).not.toContain("assignments/module_02/TripMath.java");
+    expect(block).toContain("assignments/module_02/TripMath.java");
   });
 
   it("does not alter the case of a submitted file name (Java's public-class-name rule needs exact case)", () => {
@@ -85,14 +85,14 @@ describe("buildSubmittedFileNamesBlock", () => {
     expect(buildSubmittedFileNamesBlock([])).toBe("");
   });
 
-  it("deduplicates a repeated base name", () => {
+  it("keeps separate paths sharing a basename", () => {
     const block = buildSubmittedFileNamesBlock([
       file({ name: "calculator.py" }),
       file({ name: "sub/calculator.py" }),
     ]);
 
     const occurrences = block.split("calculator.py").length - 1;
-    expect(occurrences).toBe(1);
+    expect(occurrences).toBe(2);
   });
 });
 

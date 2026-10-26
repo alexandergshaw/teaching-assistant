@@ -553,3 +553,8 @@ describe("buildIncrementalRun (ZIP-CLASS-VS-SINGLE): stamps the zip classificati
     expect("submissionClassification" in run).toBe(false);
   });
 });
+
+it("charges serialized UTF8 inventory metadata even when no source content was readable", () => {
+  const repositoryInventories: NonNullable<StudentSubmissionEntry["repositoryInventories"]> = [{ source: "org/repo", scope: { kind: "repository", path: null }, enumerationComplete: false, files: [{ path: "漢/REQUIRED", content: "unsupported" }] }];
+  expect(estimateNeededWireBytes(entry({ content: "x", repositoryInventories }))).toBe(1 + new TextEncoder().encode(JSON.stringify(repositoryInventories)).byteLength);
+});

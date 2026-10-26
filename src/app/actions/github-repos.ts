@@ -42,6 +42,7 @@ import {
   listBranches,
   getRepoTreeWithMeta,
   type GithubRepo,
+  type RepoDigest,
   type CopyRepoOptions,
   type CopyRepoResult,
   type CopyPathsOptions,
@@ -73,8 +74,6 @@ import { buildRepoNoSubmissionResult, withBranchNote } from "@/lib/grade-zeros";
 import { classifyBranchMergeCheck, describeBranchMergeNote, type BranchMergeCheck } from "@/lib/repo-grade-merge-check";
 import { normalizeTargetBranch } from "@/lib/github-ref-name";
 
-type RepoFile = { path: string; content: string; truncated: boolean };
-type RepoDigest = { fullName: string; text: string; fileCount: number; files: RepoFile[] };
 
 // ── Repository operations (fork, branches, commits, PRs, Actions) ───────────
 
@@ -621,6 +620,7 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
   return {
     student: label?.trim() || digest.fullName,
     content: digest.text,
+    repositoryInventories: digest.inventory ? [digest.inventory] : undefined,
     mergedFileCount: digest.fileCount,
     submittedFiles,
   };

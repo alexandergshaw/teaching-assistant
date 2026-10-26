@@ -43,10 +43,10 @@ export async function getRepoTreeWithMeta(owner: string, repo: string, ref?: str
   const entries = (data.tree ?? [])
     .filter((t): t is { path: string; type: "blob" | "tree"; size?: number; sha?: string; mode?: string } => !!t.path && (t.type === "blob" || t.type === "tree"))
     .map((t) => ({ path: t.path, type: t.type, size: t.size ?? 0, sha: t.sha ?? "", mode: t.mode }));
-  return { entries, truncated: !!data.truncated, ...(bounded ? {
+  return { entries, truncated: !!data.truncated,
     excluded: (data.tree ?? []).filter((t) => t.type === "commit" || t.mode === "160000").map((t) => ({ path: t.path ?? "", reason: "unsupported" as const })),
     unenumerated: typeof data.truncated !== "boolean" || !Array.isArray(data.tree) || (data.tree ?? []).some((t) => !t.path || !["blob", "tree", "commit"].includes(t.type ?? "")),
-  } : {}) };
+  };
 }
 
 /** The full recursive file tree of a repo at `ref` (default branch when omitted). */

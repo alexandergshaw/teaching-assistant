@@ -1,3 +1,4 @@
+import type { SubmissionFileInventory } from "./submission-file-inventory";
 import type { CodeRunResult } from "../code-runner";
 
 export const MAX_NESTED_ZIP_DEPTH = 3;
@@ -484,6 +485,7 @@ export interface GradingRunEntry {
  * One student's submission ready to grade (text + any attached files).
  */
 export interface StudentSubmissionEntry {
+  repositoryInventories?: SubmissionFileInventory[];
   student: string;
   content: string;
   mergedFileCount: number;

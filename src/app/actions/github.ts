@@ -598,6 +598,7 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
   return {
     student: label?.trim() || digest.fullName,
     content: digest.text,
+    repositoryInventories: digest.inventory ? [digest.inventory] : undefined,
     mergedFileCount: digest.fileCount,
     submittedFiles,
   };

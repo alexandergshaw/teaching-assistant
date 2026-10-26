@@ -1,3 +1,4 @@
+import { isSubmissionFileInventories } from "./submission-file-inventory";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "../upload-budget";
 import { validateGithubOwnerRepo } from "../github-ref-name";
 import type { RepositoryCollectRequest, RepositoryScope } from "./repository-evidence-types";
@@ -65,7 +66,8 @@ function validFile(value: unknown): boolean {
 export function validateRepositoryProposalBase(value: unknown): value is import("./repository-evidence-types").RepositoryProposalBase {
   if (!record(value) || !only(value, ["entry", "assignmentInstructions", "rubric", "provider", "pointsPossible"], ["commentSplit", "harshness", "feedbackWordTarget", "applyNamingDeduction", "applyLengthDeduction"])) return false;
   const entry = value.entry;
-  if (!record(entry) || !only(entry, ["student", "content", "mergedFileCount", "submittedFiles"], ["gradedRepo", "gradedRef", "repoReadNote", "linkFetch", "studentNameSource"]) || !text(entry.student, 500) || !text(entry.content, 3_000_000) || !integer(entry.mergedFileCount) || !Array.isArray(entry.submittedFiles) || entry.submittedFiles.length > 100 || !entry.submittedFiles.every(validFile)) return false;
+  if (!record(entry) || !only(entry, ["student", "content", "mergedFileCount", "submittedFiles"], ["gradedRepo", "gradedRef", "repoReadNote", "linkFetch", "studentNameSource", "repositoryInventories"]) || !text(entry.student, 500) || !text(entry.content, 3_000_000) || !integer(entry.mergedFileCount) || !Array.isArray(entry.submittedFiles) || entry.submittedFiles.length > 100 || !entry.submittedFiles.every(validFile)) return false;
+  if (entry.repositoryInventories !== undefined && !isSubmissionFileInventories(entry.repositoryInventories)) return false;
   if (!text(value.assignmentInstructions, 20_000) || !text(value.rubric, 20_000) || !["gemini", "other", "embedded"].includes(String(value.provider)) || (value.pointsPossible !== null && (typeof value.pointsPossible !== "number" || !Number.isFinite(value.pointsPossible) || value.pointsPossible < 0))) return false;
   for (const key of ["commentSplit", "applyNamingDeduction", "applyLengthDeduction"]) if (Object.hasOwn(value, key) && typeof value[key] !== "boolean") return false;
   return (value.harshness === undefined || ["lenient", "balanced", "strict"].includes(String(value.harshness))) && (value.feedbackWordTarget === undefined || (integer(value.feedbackWordTarget) && value.feedbackWordTarget >= 20 && value.feedbackWordTarget <= 500));

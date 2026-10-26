@@ -1,6 +1,6 @@
 import { FEEDBACK_WORD_TARGET_MAX, FEEDBACK_WORD_TARGET_MIN } from "./types";
 import type { GradeHarshness, RubricCriterion, SubmittedFileInfo } from "./types";
-import { getBaseFileName } from "./utils";
+import { buildRepositoryInventoryBlock, type SubmissionFileInventory } from "./submission-file-inventory";
 
 /**
  * docs/grading-prompt-injection-analysis.md, mitigation (a) (residual
@@ -186,7 +186,7 @@ You MUST return exactly one rubricResults item for each required area listed abo
         }`
       : "";
   const namingRule = applyNamingDeduction
-    ? `- If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. A required file that is missing from that list, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.`
+    ? `- If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. Use REPOSITORY FILE INVENTORY for repository presence, independently of readable content and namespaced evidence IDs. Preserve relative paths and compare a bare required name against exact basenames. Only a complete inventory within the submitted scope establishes absence; unknown coverage and out-of-scope paths do not establish missing files. A required file proven absent, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.`
     : `- Do not treat file names, file naming, or naming conventions as a basis for any deduction. Even if the assignment instructions state them, a file submitted under a different name than requested is NOT a rubric violation for this run; evaluate only the content of what was submitted against each rubric area, and never deduct, or note a deduction, for a filename mismatch.`;
   const basePrompt = `You are a teaching assistant helping to grade student submissions.
 
@@ -345,46 +345,11 @@ Rules:
 - Do not include markdown or text outside the JSON object.`;
 }
 
-/**
- * Build a clearly delimited block naming every file actually submitted, so
- * the grading model can compare it against any required file names in the
- * assignment instructions instead of having to notice filenames buried in
- * the "--- FILE: path ---" headers inside the submission content (that
- * impressionistic read is what let a misnamed TripMath.java pass a real
- * grading run undetected - see the Rules bullet in buildSystemPrompt above
- * that tells the model to actually use this list).
- *
- * Names are reduced to their base filename (no directory prefix) because the
- * assignment instructions state bare required names (e.g. "Calculator.java"),
- * and submittedFiles entries are NOT consistently shaped: the zip path
- * already strips to a bare citation filename (see parseSubmissionFileName in
- * ./utils), but the GitHub-repo path keeps the full repo-relative path (see
- * extraction.ts). Comparing full paths against bare required names would
- * cause false mismatches on the repo path alone.
- *
- * Pseudo-entries that are not real submitted files (e.g. the "Discussion
- * post" / "Submission text" / "Submission link" placeholders extraction.ts
- * adds when there is no file, only text or a link) never contain a "." and
- * are filtered out, so they cannot be mistaken for a real submitted file
- * with a strange name.
- *
- * Returns "" when there are no real files to list, so this block - and the
- * filename-requirement rule that depends on it - is inert wherever a
- * submission has nothing to compare.
- */
-export function buildSubmittedFileNamesBlock(submittedFiles: SubmittedFileInfo[]): string {
-  const baseNames = submittedFiles
-    .map((file) => getBaseFileName(file.name))
-    .filter((name) => name.includes("."));
-  const uniqueNames = Array.from(new Set(baseNames));
-
-  if (uniqueNames.length === 0) {
-    return "";
-  }
-
-  return `\n\nSUBMITTED FILES (the exact, complete list of files in this submission - use this list, not just names mentioned in the file content, to check any stated filename requirements):\n${uniqueNames
-    .map((name) => `- ${name}`)
-    .join("\n")}`;
+/** Preserve real paths and extensionless filenames; repository presence comes from its independent inventory. */
+export function buildSubmittedFileNamesBlock(submittedFiles: SubmittedFileInfo[], inventories: readonly SubmissionFileInventory[] = []): string {
+  const names = [...new Set(submittedFiles.filter((file) => file.extension !== "(none)").map((file) => file.name).filter((name) => !["Discussion post", "Submission text", "Submission link"].includes(name)))];
+  const block = names.length ? "\n\nSUBMITTED FILES (known supplied files; content previews may be incomplete; this list alone does not prove repository absence):\n" + names.map((name) => "- " + JSON.stringify(name)).join("\n") : "";
+  return block + buildRepositoryInventoryBlock(inventories);
 }
 
 export function buildFileNameConventionPrompt(rawFileNames: string[]): string {

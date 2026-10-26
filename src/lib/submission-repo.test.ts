@@ -23,12 +23,12 @@ describe("parseSubmissionGithubUrl", () => {
 
   it("parses a /tree/<ref> URL", () => {
     const result = parseSubmissionGithubUrl("https://github.com/octocat/Hello-World/tree/main");
-    expect(result).toEqual({ owner: "octocat", repo: "Hello-World", ref: "main", subpath: undefined });
+    expect(result).toEqual({ owner: "octocat", repo: "Hello-World", ref: "main", subpath: undefined, kind: "tree" });
   });
 
   it("parses a /tree/<ref>/<subpath> URL", () => {
     const result = parseSubmissionGithubUrl("https://github.com/octocat/Hello-World/tree/dev/src/app");
-    expect(result).toEqual({ owner: "octocat", repo: "Hello-World", ref: "dev", subpath: "src/app" });
+    expect(result).toEqual({ owner: "octocat", repo: "Hello-World", ref: "dev", subpath: "src/app", kind: "tree" });
   });
 
   it("strips a trailing .git suffix", () => {
@@ -192,4 +192,8 @@ describe("applyTotalByteBudget", () => {
     expect(out.map((f) => f.path)).toEqual(["a.py"]);
     expect(truncated).toBe(true);
   });
+});
+
+it("does not broaden a malformed blob URL to the whole repository", () => {
+  expect(parseSubmissionGithubUrl("https://github.com/o/r/blob/main")).toHaveProperty("error");
 });

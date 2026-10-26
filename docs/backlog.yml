@@ -4,6 +4,18 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'GITHUB-REQUIRED-FILE-DETECTION'
+  state: 'verification'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Detect required repository files from a truthful scoped inventory rather than a filtered content sample.'
+  owns: ['src/lib/submission-repo.ts', 'src/lib/submission-repo.test.ts', 'src/lib/grade/submission-file-inventory.ts', 'src/lib/grade/submission-file-inventory.test.ts', 'src/lib/grade/repo-required-files-flow.test.ts', 'src/lib/grade/repo-content.ts', 'src/lib/grade/repo-content.test.ts', 'src/lib/grade/repo-file-submissions.ts', 'src/lib/grade/repo-file-submissions.test.ts', 'src/lib/grade/prompts.ts', 'src/lib/grade/prompts.test.ts', 'src/lib/grade/types.ts', 'src/lib/grade/extraction.ts', 'src/lib/grade/engine.ts', 'src/lib/grade/repository-evidence-entry.ts', 'src/lib/grade/repository-evidence-entry.test.ts', 'src/lib/grade/repository-evidence-policy.ts', 'src/lib/github.digest.ts', 'src/lib/github.digest.test.ts', 'src/lib/github.files.ts', 'src/lib/github.files.ref-traversal.test.ts', 'src/app/actions/grading-chat-intake.ts', 'src/app/actions/github.ts', 'src/app/actions/github-repos.ts', 'src/app/api/grade-run-item/route.ts', 'src/app/api/grade-run-item/route.test.ts', 'src/app/components/grading-chat/chatSubmissionIntake.ts', 'src/app/components/grading/incrementalRunPlan.ts', 'src/app/components/grading/incrementalRunPlan.test.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/grade/submission-file-inventory.test.ts src/lib/grade/repo-required-files-flow.test.ts src/lib/grade/repo-content.test.ts src/lib/grade/prompts.test.ts src/lib/submission-repo.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Actual URL intake-to-model fixtures must distinguish source inventory from selected readable content, include nested and extensionless required names, preserve explicit tree/blob scope and exact case policy, and prevent missing-file deductions when enumeration or reading is incomplete. Preserve source budgets and legacy callers. Independent source review and scoped production regressions precede main publication.'
+  from: 'Owner 2026-10-25: app has a real hard time detecting required files within a GitHub URL repo; created by the commit adding this row.'
+  note: 'Owner: coordinator. Confirmed cause: filtered and readable source samples were labeled exact and complete, with paths and extensionless names lost. Bounded independent inventory now survives URL intake, Canvas, inline/deferred ZIP, strict repository proposals, direct Repo Grades, composite and API transport. Final independent round2 SHIP closed malformed enum coercion and multi-link ZIP inventory loss; its exact seven-path test:paths command passed110tests. Original final cohort passed22files538tests, scoped lint passed, and coordinator final tsc passed. Two semantic mutants were killed and exact source bytes restored. Scoped main publication follows; owner-example live model verification remains open, since no concrete URL was supplied. Existing unsupported-only no-source grading policy, legacy moving-ref fallback and case-insensitive direct folder selection are unchanged; incomplete inventory never proves absence. No live grading, code execution or posting was performed. Concurrent role-aware client intake is excluded from this fix.'
+  question: null
 - id: 'CHAT-REPO-EVIDENCE-PROPOSALS'
   state: 'verification'
   kind: 'feature'

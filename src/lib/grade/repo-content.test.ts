@@ -7,16 +7,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // on-demand "Load code" fetch built from the same primitives).
 vi.mock("../github", () => ({
   getRepo: vi.fn(),
-  getRepoTree: vi.fn(),
+  getRepoTreeWithMeta: vi.fn(),
   getFileText: vi.fn(),
   listCommits: vi.fn(),
 }));
 
-import { getRepo, getRepoTree, getFileText, listCommits } from "../github";
+import { getRepo, getRepoTreeWithMeta, getFileText, listCommits } from "../github";
 import { fetchGradableRepoContent } from "./repo-content";
 
 const mockGetRepo = vi.mocked(getRepo);
-const mockGetRepoTree = vi.mocked(getRepoTree);
+const mockGetRepoTree = vi.mocked(getRepoTreeWithMeta);
 const mockGetFileText = vi.mocked(getFileText);
 const mockListCommits = vi.mocked(listCommits);
 
@@ -53,7 +53,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
   it("fetches a plain github.com/owner/repo URL against the default branch", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "deadbeefcafe0123456789", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 20, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 20, sha: "x" }], truncated: false });
     mockGetFileText.mockResolvedValueOnce("print('hi')");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
@@ -77,10 +77,10 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     // reported size, that is deliberately made oversized for "big.py" here so
     // this test exercises clampFileBytes's per-file cut, not the earlier
     // pre-fetch exclusion (a differently-scoped cap this file does not test).
-    mockGetRepoTree.mockResolvedValueOnce([
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [
       { path: "big.py", type: "blob", size: 5, sha: "x" },
       { path: "small.py", type: "blob", size: 5, sha: "y" },
-    ]);
+    ], truncated: false });
     mockGetFileText.mockResolvedValueOnce("x".repeat(400_000));
     mockGetFileText.mockResolvedValueOnce("y = 1");
 
@@ -95,7 +95,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
   it("handles a trailing slash", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo());
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 5, sha: "x" }], truncated: false });
     mockGetFileText.mockResolvedValueOnce("x = 1");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat/");
@@ -106,7 +106,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
   it("handles a .git suffix", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo());
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 5, sha: "x" }], truncated: false });
     mockGetFileText.mockResolvedValueOnce("x = 1");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat.git");
@@ -118,7 +118,7 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
   it("handles a /tree/<branch> deep link and reads that branch", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "branchsha", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 5, sha: "x" }], truncated: false });
     mockGetFileText.mockResolvedValueOnce("x = 1");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat/tree/dev");
@@ -129,10 +129,10 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
   it("handles a /tree/<branch>/<subpath> deep link into a folder", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [
       { path: "src/main.py", type: "blob", size: 5, sha: "x" },
       { path: "other/skip.py", type: "blob", size: 5, sha: "y" },
-    ]);
+    ], truncated: false });
     mockGetFileText.mockResolvedValueOnce("x = 1");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat/tree/dev/src");
@@ -166,7 +166,7 @@ describe("fetchGradableRepoContent - degraded/failure modes (AC2.3)", () => {
   it("falls back to the branch name as ref when the commit lookup fails, and still succeeds", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
     mockListCommits.mockRejectedValueOnce(new Error("boom"));
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 5, sha: "x" }], truncated: false });
     mockGetFileText.mockResolvedValueOnce("ok");
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
@@ -188,7 +188,7 @@ describe("fetchGradableRepoContent - degraded/failure modes (AC2.3)", () => {
   it("returns an error when no recognized source files are found", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo());
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "package-lock.json", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "package-lock.json", type: "blob", size: 5, sha: "x" }], truncated: false });
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
     expect(result).toHaveProperty("error");
@@ -200,10 +200,46 @@ describe("fetchGradableRepoContent - degraded/failure modes (AC2.3)", () => {
   it("returns an error when every selected file fails to fetch", async () => {
     mockGetRepo.mockResolvedValueOnce(fakeRepo());
     mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
-    mockGetRepoTree.mockResolvedValueOnce([{ path: "main.py", type: "blob", size: 5, sha: "x" }]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "main.py", type: "blob", size: 5, sha: "x" }], truncated: false });
     mockGetFileText.mockRejectedValueOnce(new Error("unreadable"));
 
     const result = await fetchGradableRepoContent("https://github.com/octo/cat");
     expect(result).toHaveProperty("error");
+  });
+});
+
+describe("repository presence is independent of source sampling", () => {
+  it("retains known present files excluded by type/size/read failures and truncated tree uncertainty", async () => {
+    mockGetRepo.mockResolvedValueOnce(fakeRepo()); mockListCommits.mockResolvedValueOnce([]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [
+      { path: "src/main.py", type: "blob", size: 5, sha: "a" }, { path: "tests/main.py", type: "blob", size: 5, sha: "b" },
+      { path: "src/Main.py", type: "blob", size: 5, sha: "c" }, { path: "Makefile", type: "blob", size: 500001, sha: "d" },
+      { path: "proof.png", type: "blob", size: 5, sha: "e" }, { path: "REQUIRED", type: "blob", size: 0, sha: "f" }
+    ], truncated: true });
+    mockGetFileText.mockImplementation(async (_owner, _repo, path) => { if (path === "tests/main.py") throw new Error("unreadable"); return "safe source"; });
+    const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+    if ("error" in result) throw new Error(result.error);
+    expect(result.inventory).toMatchObject({ enumerationComplete: false, files: [
+      { path: "src/main.py", content: "read" }, { path: "tests/main.py", content: "unreadable" }, { path: "src/Main.py", content: "read" },
+      { path: "Makefile", content: "budget" }, { path: "proof.png", content: "unsupported" }, { path: "REQUIRED", content: "unsupported" }
+    ] });
+    expect(mockGetFileText.mock.calls.map((call) => call[2]).sort()).toEqual(["src/Main.py", "src/main.py", "tests/main.py"].sort());
+    expect(result.content).not.toContain("File: proof.png"); expect(result.truncated).toBe(true);
+  });
+  it("honors an explicit blob URL without importing siblings or directory descendants", async () => {
+    mockGetRepo.mockResolvedValueOnce(fakeRepo()); mockListCommits.mockResolvedValueOnce([]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "src/main.py", type: "blob", size: 1, sha: "a" }, { path: "src/main.py/nested.py", type: "blob", size: 1, sha: "b" }, { path: "src/other.py", type: "blob", size: 1, sha: "c" }], truncated: false });
+    mockGetFileText.mockResolvedValueOnce("source");
+    const result = await fetchGradableRepoContent("https://github.com/octo/cat/blob/main/src/main.py");
+    if ("error" in result) throw new Error(result.error);
+    expect(result.inventory).toEqual({ source: "octo/cat @ main", scope: { kind: "blob", path: "src/main.py" }, enumerationComplete: true, files: [{ path: "src/main.py", content: "read" }] });
+    expect(mockGetFileText).toHaveBeenCalledTimes(1);
+  });
+  it("returns presence evidence even when no selected content can be read", async () => {
+    mockGetRepo.mockResolvedValueOnce(fakeRepo()); mockListCommits.mockResolvedValueOnce([]);
+    mockGetRepoTree.mockResolvedValueOnce({ entries: [{ path: "REQUIRED", type: "blob", size: 0, sha: "a" }], truncated: false });
+    const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+    expect(result).toMatchObject({ error: expect.any(String), inventory: { enumerationComplete: true, files: [{ path: "REQUIRED", content: "unsupported" }] } });
+    expect(mockGetFileText).not.toHaveBeenCalled();
   });
 });

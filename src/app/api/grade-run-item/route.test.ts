@@ -580,3 +580,9 @@ describe("POST /api/grade-run-item - real requireAppOwner() guard (F1 fix)", () 
     expect(mockFreshGradeEntries).not.toHaveBeenCalled();
   });
 });
+
+it("rejects malformed repository inventory before model dispatch", async () => {
+  const malformed = { ...VALID_BODY, entry: { ...VALID_BODY.entry, repositoryInventories: [{ source: "repo", scope: { kind: "blob", path: null }, enumerationComplete: true, files: [] }] } };
+  const response = await POST(jsonRequest(malformed) as Parameters<typeof POST>[0]);
+  expect(response.status).toBe(400); expect(mockGradeEntries).not.toHaveBeenCalled();
+});

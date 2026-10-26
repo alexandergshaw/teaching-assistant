@@ -6,3 +6,7 @@ it("preserves structured repository file previews and explicit truncation", () =
     { name: "README", extension: "", previewContent: "plain", previewTruncated: false, mimeType: "text/plain" },
   ]);
 });
+it("a dotted parent directory does not invent an extension for a required extensionless file", () => {
+  const files = repoFilesToSubmittedFiles([{ path: "project.v2/REQUIRED", text: "" }, { path: "project.v2/.env", text: "" }]);
+  expect(files.map((file) => [file.name, file.extension])).toEqual([["project.v2/REQUIRED", ""], ["project.v2/.env", ""]]);
+});

@@ -1,3 +1,4 @@
+import { isSubmissionFileInventories } from "@/lib/grade/submission-file-inventory";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -165,7 +166,10 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   }
   if (!Array.isArray(rawEntry.submittedFiles) || !rawEntry.submittedFiles.every(isSubmittedFileInfo)) return null;
 
+  if (rawEntry.repositoryInventories !== undefined && !isSubmissionFileInventories(rawEntry.repositoryInventories)) return null;
+
   const entry: StudentSubmissionEntry = {
+    ...(rawEntry.repositoryInventories !== undefined ? { repositoryInventories: rawEntry.repositoryInventories as StudentSubmissionEntry["repositoryInventories"] } : {}),
     student: rawEntry.student,
     content: rawEntry.content,
     mergedFileCount: rawEntry.mergedFileCount,

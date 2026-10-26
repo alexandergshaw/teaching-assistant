@@ -1,3 +1,4 @@
+import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { parseRepositoryProposalOutput } from "./repository-proposal-output";
 import {
   getGeminiInterRequestDelayMs,
@@ -91,7 +92,8 @@ async function scoreAxis(
   // multi-submission recording; a fixed-wording note confines the model to it.
   videoGradeWindowSec?: RecordingWindow,
   callSink?: GradeCallSink,
-  evidenceOptions?: GradingRunOptions
+  evidenceOptions?: GradingRunOptions,
+  repositoryInventories?: SubmissionFileInventory[]
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -110,7 +112,8 @@ async function scoreAxis(
   // student for a platform limitation, the same mistake gradeEntriesEmbedded
   // (embedded-grader/index.ts) avoids for its own deterministic criterion.
   const codeNote = codeRun && !codeRun.error && !codeRun.neededStdin ? buildCodeExecutionNote(codeRun) : "";
-  const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles);
+  const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories);
+  if (repositoryInventories?.length && fileListBlock.length > getGeminiMaxCharsPerSubmission()) throw new GradeCallError("Repository file inventory exceeds the grading input budget.", "model unparseable");
 
   const parts: LlmPart[] = [
     {
@@ -238,9 +241,10 @@ async function gradeSubmission(
   commentSplit = false,
   videoGradeWindowSec?: RecordingWindow,
   callSink?: GradeCallSink,
-  evidenceOptions?: GradingRunOptions
+  evidenceOptions?: GradingRunOptions,
+  repositoryInventories?: SubmissionFileInventory[]
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, evidenceOptions);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, evidenceOptions, repositoryInventories);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -461,11 +465,11 @@ async function gradeStudentEntries(
       deadlineStoppedAt = i;
       break;
     }
-    const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef } = limitedEntries[i];
+    const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef, repositoryInventories } = limitedEntries[i];
     const axes = limitedEntries[i].discussionAxes;
     const { text: truncatedContent, truncated: contentTruncated } = truncateSubmission(
       content,
-      maxCharsPerSubmission
+      Math.max(0, maxCharsPerSubmission - (repositoryInventories?.length ? buildSubmittedFileNamesBlock(submittedFiles, repositoryInventories).length : 0))
     );
     // Each axis slice is truncated independently (3.3); the single-axis path
     // truncates `content` exactly as before.
@@ -518,7 +522,8 @@ async function gradeStudentEntries(
             commentSplit === true,
             videoGradeWindowSec,
             callSink,
-            evidenceOnly ? options : undefined
+            evidenceOnly ? options : undefined,
+            repositoryInventories
           );
       results.push({
         ...result,

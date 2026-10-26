@@ -432,3 +432,12 @@ describe("isScaffoldingFile", () => {
     expect(isScaffoldingFile("/")).toBe(false);
   });
 });
+
+it("the direct repo digest retains scoped presence independently of source and read budgets", async () => {
+  vi.mocked(getRepo).mockResolvedValue({ defaultBranch: "main", fullName: "org/repo", description: "" } as Awaited<ReturnType<typeof getRepo>>);
+  vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ truncated: false, entries: [{ path: "week1/main.py", type: "blob", size: 5, sha: "a" }, { path: "week1/REQUIRED", type: "blob", size: 0, sha: "b" }, { path: "week1/proof.png", type: "blob", size: 2, sha: "c" }, { path: "week10/sibling.py", type: "blob", size: 1, sha: "d" }] });
+  vi.mocked(getFileText).mockResolvedValue("code");
+  const digest = await ingestRepo("org", "repo", { pathPrefix: "week1" });
+  expect(digest.inventory).toEqual({ source: "org/repo @ main", scope: { kind: "tree", path: "week1" }, enumerationComplete: true, files: [{ path: "week1/main.py", content: "read" }, { path: "week1/REQUIRED", content: "unsupported" }, { path: "week1/proof.png", content: "unsupported" }] });
+  expect(digest.files.map((file) => file.path)).toEqual(["week1/main.py"]);
+});

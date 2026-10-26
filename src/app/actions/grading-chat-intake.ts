@@ -105,6 +105,7 @@ function buildRepoUrlEntry(repo: GradableRepoContent): StudentSubmissionEntry {
     content: repo.content,
     mergedFileCount: repo.fileCount,
     submittedFiles: repoFilesToSubmittedFiles(repo.files),
+    repositoryInventories: repo.inventory ? [repo.inventory] : undefined,
     gradedRepo: repo.repo,
     gradedRef: repo.ref,
   };

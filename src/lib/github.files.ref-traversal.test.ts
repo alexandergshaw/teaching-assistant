@@ -72,3 +72,10 @@ describe("getFileText ref handling", () => {
     expect(new URL(String(fetchMock.mock.calls[0][0])).search).toBe("");
   });
 });
+
+it("unbounded legacy tree reads retain unknown enumeration and unsupported entries", async () => {
+  fetchMock.mockResolvedValueOnce(okJson({ tree: [{ path: "module", type: "commit", mode: "160000" }, { path: "required.py", type: "blob", size: 0 }]}));
+  const tree = await getRepoTreeWithMeta("o", "r", "main");
+  expect(tree.unenumerated).toBe(true); expect(tree.excluded).toEqual([{ path: "module", reason: "unsupported" }]);
+  expect(tree.entries.map((entry) => entry.path)).toEqual(["required.py"]);
+});

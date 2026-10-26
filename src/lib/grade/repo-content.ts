@@ -1,3 +1,4 @@
+import { boundSubmissionInventory, inventoryPathInScope, type SubmissionFileInventory } from "./submission-file-inventory";
 /**
  * Fetches a Canvas submission's linked GitHub repository so grading reads the
  * actual CODE, not the URL string (defect: canvasWorkToEntry used to note the
@@ -16,7 +17,7 @@
  * already existed and was already tested.
  */
 
-import { getRepo, getRepoTree, getFileText, listCommits } from "../github";
+import { getRepo, getRepoTreeWithMeta, getFileText, listCommits } from "../github";
 import {
   parseSubmissionGithubUrl,
   selectSubmissionRepoFiles,
@@ -26,6 +27,7 @@ import {
 } from "../submission-repo";
 
 export interface GradableRepoContent {
+  inventory?: SubmissionFileInventory;
   /** "owner/repo". */
   repo: string;
   /** The resolved commit sha (or branch/tag name when the commit lookup failed). */
@@ -43,7 +45,7 @@ export interface GradableRepoContent {
   files: SubmissionRepoFile[];
 }
 
-export type GradableRepoResult = GradableRepoContent | { error: string };
+export type GradableRepoResult = GradableRepoContent | { error: string; inventory?: SubmissionFileInventory };
 
 /**
  * Fetch and flatten a submitted GitHub repo's source into one text blob.
@@ -85,16 +87,21 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
 
   let tree;
   try {
-    tree = await getRepoTree(owner, repo, resolvedRef);
+    tree = await getRepoTreeWithMeta(owner, repo, resolvedRef);
   } catch (err) {
     return {
       error: `could not read the file tree for "${owner}/${repo}" at "${resolvedRef}"${err instanceof Error ? `: ${err.message}` : ""}`,
     };
   }
 
-  const { selected, truncated: selectionTruncated } = selectSubmissionRepoFiles(tree, subpath);
+  const scope: SubmissionFileInventory["scope"] = { kind: subpath ? parsed.kind ?? "tree" : "repository", path: subpath ?? null };
+  const scoped = tree.entries.filter((entry) => entry.type === "blob" && inventoryPathInScope(entry.path, scope));
+  const { selected, truncated: selectionTruncated } = selectSubmissionRepoFiles(scoped);
+  const selectedPaths = new Set(selected.map((entry) => entry.path));
+  const inventory = boundSubmissionInventory({ source: `${owner}/${repo} @ ${resolvedRef}`, scope, enumerationComplete: !tree.truncated && !tree.unenumerated, files: scoped.map((entry) => ({ path: entry.path, content: selectedPaths.has(entry.path) ? "unreadable" : selectSubmissionRepoFiles([entry], undefined, { maxFiles: 1, maxFileBytes: Number.MAX_SAFE_INTEGER }).selected.length ? "budget" : "unsupported" })) });
   if (selected.length === 0) {
     return {
+      inventory,
       error: subpath
         ? `no recognized source files were found under "${subpath}" in "${owner}/${repo}"`
         : `no recognized source files were found in "${owner}/${repo}"`,
@@ -117,18 +124,24 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
   }
 
   if (fetched.length === 0) {
-    return { error: `could not read any files from "${owner}/${repo}" (they may all be unreadable or too large)` };
+    return { inventory, error: `could not read any files from "${owner}/${repo}" (they may all be unreadable or too large)` };
   }
 
   const budgeted = applyTotalByteBudget(fetched);
+  for (const file of inventory.files) {
+    const read = budgeted.files.find((item) => item.path === file.path);
+    if (read) file.content = read.truncated ? "truncated" : "read";
+    else if (fetched.some((item) => item.path === file.path)) file.content = "budget";
+  }
   const content = budgeted.files.map((f) => `File: ${f.path}\n\n${f.text}`).join("\n\n---\n\n");
 
   return {
+    inventory,
     repo: `${owner}/${repo}`,
     ref: resolvedRef,
     content,
     fileCount: budgeted.files.length,
-    truncated: selectionTruncated || perFileTruncated || budgeted.truncated,
+    truncated: tree.truncated || !inventory.enumerationComplete || selected.length !== fetched.length || selectionTruncated || perFileTruncated || budgeted.truncated,
     files: budgeted.files,
   };
 }

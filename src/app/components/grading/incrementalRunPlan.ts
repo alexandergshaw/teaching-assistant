@@ -91,7 +91,7 @@ export interface ArrivedItemResult {
  * encoded yet).
  */
 export function estimateEntryWireBytes(entry: StudentSubmissionEntry): number {
-  let total = entry.content.length;
+  let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
   for (const file of entry.submittedFiles) {
     if (file.rawBase64) total += file.rawBase64.length;
   }
@@ -123,7 +123,7 @@ function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
 }
 
 export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
-  let total = entry.content.length;
+  let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
   for (const file of entry.submittedFiles) {
     if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;
   }

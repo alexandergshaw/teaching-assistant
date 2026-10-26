@@ -1,3 +1,4 @@
+import { boundSubmissionInventory, type SubmissionFileInventory } from "./grade/submission-file-inventory";
 // Codebase digest for LLM analysis (course/rubric generation, grading).
 
 import { getRepo } from "./github.repos";
@@ -116,6 +117,7 @@ export interface RepoDigestSkipCounts {
 }
 
 export interface RepoDigest {
+  inventory?: SubmissionFileInventory;
   fullName: string;
   description: string;
   fileCount: number;
@@ -274,9 +276,12 @@ export async function ingestRepo(
 
   const info = await getRepo(owner, repo);
   const branch = ref || info.defaultBranch;
-  const { entries: tree, truncated: treeTruncated } = await getRepoTreeWithMeta(owner, repo, branch);
+  const treeResult = await getRepoTreeWithMeta(owner, repo, branch);
+  const { entries: tree, truncated: treeTruncated } = treeResult;
 
   const selection = selectDigestFiles(tree, { maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix });
+  const prefix = opts.pathPrefix?.replace(/\/$/, "");
+  const inventory = boundSubmissionInventory({ source: info.fullName + " @ " + branch, scope: { kind: prefix ? "tree" : "repository", path: prefix ?? null }, enumerationComplete: !treeTruncated && !treeResult.unenumerated, files: tree.filter((entry) => entry.type === "blob" && (!prefix || entry.path.toLowerCase().startsWith(prefix.toLowerCase() + "/"))).map((entry) => ({ path: entry.path, content: selection.selected.some((file) => file.path === entry.path) ? "unreadable" : selectDigestFiles([entry], { maxFiles: 1, maxBytes: Number.MAX_SAFE_INTEGER, perFileBytes, maxBlobBytes }).selected.length || entry.size >= maxBlobBytes ? "budget" : "unsupported" })) });
   const header = `# Repository: ${info.fullName}${info.description ? `\n\n${info.description}` : ""}`;
 
   if (selection.prefixMatchedNothing) {
@@ -287,6 +292,7 @@ export async function ingestRepo(
       text: header,
       truncated: treeTruncated,
       files: [],
+      inventory,
       prefixMatchedNothing: true,
       skipped: { type: 0, size: 0, budget: 0, fetchError: 0 },
       treeTruncated,
@@ -327,7 +333,12 @@ export async function ingestRepo(
     count += 1;
   }
 
+  for (const item of inventory.files) {
+    const file = files.find((file) => file.path === item.path);
+    if (file) item.content = file.truncated ? "truncated" : "read";
+  }
   return {
+    inventory,
     fullName: info.fullName,
     description: info.description,
     fileCount: count,

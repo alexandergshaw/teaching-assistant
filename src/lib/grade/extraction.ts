@@ -1,3 +1,4 @@
+import { isSubmissionFileInventories, type SubmissionFileInventory } from "./submission-file-inventory";
 import { repoFilesToSubmittedFiles } from "./repo-file-submissions";
 import JSZip from "jszip";
 import {
@@ -341,10 +342,11 @@ export async function ingestZipEntries(
   // Zip link submissions: resolve each Canvas link.html redirect to the code
   // it points at, before inference and grouping (runs unconditionally).
   let deferredLinks: Map<string, string> | null = null;
+  let inlineRepos = new Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>();
   if (options?.deferLinks) {
     deferredLinks = deferLinkSubmissions(submissions);
   } else {
-    await resolveLinkSubmissions(submissions, rawData);
+    inlineRepos = await resolveLinkSubmissions(submissions, rawData);
   }
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
@@ -352,6 +354,20 @@ export async function ingestZipEntries(
   const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging);
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
+  }
+  const foldedByEntry = new Map<StudentSubmissionEntry, Array<Awaited<ReturnType<typeof foldGithubRepoContent>>>>();
+  for (const [path, folded] of inlineRepos) {
+    const parsed = parseSubmissionFileName(path, inferredLookup, zipParents[path]);
+    const targets = entries.filter((entry) => parsed.studentDisplay === entry.student && entry.submittedFiles.some((file) => file.name === parsed.citationFileName));
+    if (targets.length !== 1) throw new Error("Submitted repository links could not be attributed to a single student.");
+    foldedByEntry.set(targets[0], [...(foldedByEntry.get(targets[0]) ?? []), folded]);
+  }
+  for (const [entry, folded] of foldedByEntry) {
+    const inventories = folded.flatMap((repo) => repo.inventory ? [repo.inventory] : []);
+    if (!isSubmissionFileInventories(inventories)) throw new Error("Submitted repository link inventories exceed supported metadata limits.");
+    entry.repositoryInventories = inventories.length ? inventories : undefined;
+    for (const file of folded.flatMap((repo) => repo.files)) if (!entry.submittedFiles.some((existing) => existing.name === file.name && existing.previewContent === file.previewContent)) entry.submittedFiles.push(file);
+    if (folded.length === 1) { entry.gradedRepo = folded[0].gradedRepo; entry.gradedRef = folded[0].gradedRef; }
   }
   const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
   return { entries, attemptedSupportedFiles, failedSupportedFiles, classification, videoOutcomes };
@@ -560,12 +576,13 @@ async function foldGithubRepoContent(url: string): Promise<{
   gradedRef: string | null;
   repoReadNote: string | null;
   files: SubmittedFileInfo[];
+  inventory?: SubmissionFileInventory;
 }> {
   try {
     const repoResult = await fetchGradableRepoContent(url);
     if ("error" in repoResult) {
       const repoReadNote = `Could not read the linked GitHub repository: ${repoResult.error}.`;
-      return { contentPart: `Note: ${repoReadNote}`, gradedRepo: null, gradedRef: null, repoReadNote, files: [] };
+      return { contentPart: `Note: ${repoReadNote}`, gradedRepo: null, gradedRef: null, repoReadNote, files: [], inventory: repoResult.inventory };
     }
     // F5 (docs/grading-results-file-viewer-acceptance-criteria.md): surface
     // the real per-file list alongside the "Submission link" pseudo-file, so
@@ -578,6 +595,7 @@ async function foldGithubRepoContent(url: string): Promise<{
       gradedRef: repoResult.ref,
       repoReadNote: null,
       files,
+      inventory: repoResult.inventory,
     };
   } catch (err) {
     const repoReadNote = `Could not read the linked GitHub repository: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
@@ -595,11 +613,13 @@ async function foldGithubRepoContent(url: string): Promise<{
  * Drive is detected but NOT fetched in this wave; any other host is a note
  * with no fetch.
  */
-async function resolveSubmittedLink(url: string): Promise<string> {
+async function resolveSubmittedLink(url: string, onRepo?: (folded: Awaited<ReturnType<typeof foldGithubRepoContent>>) => void): Promise<string> {
   const parts = [`Submitted link: ${url}`];
   const normalized = normalizeSubmittedRepoUrl(url);
   if (looksLikeGithubUrl(normalized)) {
-    parts.push((await foldGithubRepoContent(normalized)).contentPart);
+    const folded = await foldGithubRepoContent(normalized);
+    onRepo?.(folded);
+    parts.push(folded.contentPart);
   } else if (parseGoogleDriveUrl(url)) {
     parts.push(
       `Note: This submission was a link to Google Drive (${url}); automatic fetch of Drive links from a zip is not supported yet.`
@@ -620,7 +640,8 @@ async function resolveSubmittedLink(url: string): Promise<string> {
 async function resolveLinkSubmissions(
   submissions: Record<string, string>,
   rawData: Record<string, string>
-): Promise<void> {
+): Promise<Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>> {
+  const repos = new Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>();
   for (const path of Object.keys(submissions)) {
     const extension = getFileExtension(path);
     if (extension !== "html" && extension !== "htm") continue;
@@ -628,13 +649,14 @@ async function resolveLinkSubmissions(
     if (!url) continue;
     let resolved: string;
     try {
-      resolved = await resolveSubmittedLink(url);
+      resolved = await resolveSubmittedLink(url, (folded) => repos.set(path, folded));
     } catch (err) {
       resolved = `Submitted link: ${url}\n\n---\n\nNote: Could not resolve the submitted link: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
     }
     submissions[path] = resolved;
     delete rawData[path];
   }
+  return repos;
 }
 
 /**
@@ -761,11 +783,12 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
   if (plan.action === "github") {
     const folded = await foldGithubRepoContent(normalizeSubmittedRepoUrl(url));
     if (folded.gradedRepo === null) {
-      return withLinkNote(entry, "failed", folded.repoReadNote ?? "Could not read the linked GitHub repository.");
+      return { ...withLinkNote(entry, "failed", folded.repoReadNote ?? "Could not read the linked GitHub repository."), repositoryInventories: folded.inventory ? [folded.inventory] : undefined };
     }
     return withFoldedContent(entry, folded.contentPart, folded.files, {
       gradedRepo: folded.gradedRepo,
       gradedRef: folded.gradedRef,
+      repositoryInventories: folded.inventory ? [folded.inventory] : undefined,
     });
   }
 
@@ -859,6 +882,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
   let gradedRepo: string | null = null;
   let gradedRef: string | null = null;
   let repoReadNote: string | null = null;
+  let repositoryInventories: SubmissionFileInventory[] | undefined;
 
   if (work.text) {
     contentParts.push(work.text);
@@ -895,6 +919,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
       gradedRepo = folded.gradedRepo;
       gradedRef = folded.gradedRef;
       repoReadNote = folded.repoReadNote;
+      repositoryInventories = folded.inventory ? [folded.inventory] : undefined;
       submittedFiles.push(...folded.files);
     }
   }
@@ -954,6 +979,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     submittedFiles,
     userId: work.userId,
     submissionUrl: work.submissionUrl ?? null,
+    repositoryInventories,
     gradedRepo,
     gradedRef,
     repoReadNote,

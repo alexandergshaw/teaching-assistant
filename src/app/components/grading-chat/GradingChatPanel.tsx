@@ -25,6 +25,8 @@ import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
+import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
+import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView, type LedgerView } from "./ingestLedger";
@@ -262,6 +264,8 @@ function GradingProgress({ status }: { status: RunStatus | null }) {
 
 export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
   const [instructions, setInstructions] = useState("");
+  const [repositoryEvidence, setRepositoryEvidence] = useState<RepositoryEvidenceState>(emptyRepositoryEvidence);
+  const [repositoryEvidenceSession, setRepositoryEvidenceSession] = useState(0);
   const [rubric, setRubric] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
@@ -366,6 +370,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     driver.reset();
+    setRepositoryEvidence(emptyRepositoryEvidence());
+    setRepositoryEvidenceSession((session) => session + 1);
     setSubmitError(null);
     setSetupNote(null);
   };
@@ -792,7 +798,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           )}
           {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
         </div>
-        <Button variant="outlined" size="small" disabled={driver.headerState === "unset" || preparing} onClick={handleNewSession}>
+        <Button variant="outlined" size="small" disabled={preparing} onClick={handleNewSession}>
           New session
         </Button>
       </div>
@@ -846,6 +852,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           })}
         />
 
+        <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
         <ChatComposer
           disabled={busy || preparing}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

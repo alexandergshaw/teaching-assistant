@@ -31,6 +31,9 @@ function errState(message: string): WholeRunSettledState {
 }
 
 describe("decideWholeRunDiagnostic (pure)", () => {
+  it("labels repository evidence staging explicitly", () => {
+    expect(GRADING_DIAGNOSTIC_OPERATION_LABELS.stage_repository_evidence).toBe("Stage repository evidence");
+  });
   it("returns null when no whole-run dispatch is in flight", () => {
     expect(decideWholeRunDiagnostic({ startedAtMs: null, settledAtMs: 5000, state: okState() })).toBeNull();
   });

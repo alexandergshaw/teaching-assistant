@@ -17,6 +17,7 @@ import type { SubmissionZipClassification } from "@/lib/grade/types";
 import type { RecordingSplit } from "@/lib/grade/recording-split";
 
 export type GradingDiagnosticOperation =
+  | "stage_repository_evidence"
   | "resolve_header"
   | "generate_rubric"
   | "prepare_submission"
@@ -42,6 +43,7 @@ export type GradingDiagnosticOperation =
   | "classify_recording_multiple";
 
 export const GRADING_DIAGNOSTIC_OPERATION_LABELS: Readonly<Record<GradingDiagnosticOperation, string>> = {
+  stage_repository_evidence: "Stage repository evidence",
   resolve_header: "Resolve run header",
   generate_rubric: "Generate rubric",
   prepare_submission: "Prepare submission",

@@ -280,7 +280,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           : undefined
       }
     >
-      <div className={styles.ghActions}>
+      <div className={`${styles.ghActions} ${chatStyles.composerRow}`}>
         <SegmentedToggle
           label="Submission type"
           options={[
@@ -339,7 +339,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
         <div role="group" aria-label="Composite submission parts">
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {parts.map((part, index) => (
-              <li key={index} className={styles.adaptRow}>
+              <li key={index} className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
                 <span className={styles.ghMeta}>{describePart(part)}</span>
                 <Button variant="text" size="small" aria-label={`Remove part ${index + 1}`} disabled={disabled} onClick={() => removePart(index)}>
                   Remove
@@ -347,7 +347,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
               </li>
             ))}
           </ul>
-          <div className={styles.adaptRow}>
+          <div className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
             <TextField
               size="small"
               className={chatStyles.composerLabel}
@@ -365,7 +365,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
       )}
 
       {mode === "text" && (
-        <div className={styles.adaptRow}>
+        <div className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
           <TextField
             inputRef={textFieldRef}
             multiline
@@ -412,7 +412,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
       )}
 
       {mode === "record" && (
-        <div className={styles.adaptRow}>
+        <div className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
           {capture.recording ? (
             <Button variant="contained" size="small" aria-label="Stop recording" onClick={capture.stop}>
               {`Stop recording (${capture.frameCount} captured)`}
@@ -442,7 +442,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
       )}
 
       {mode === "url" && (
-        <div className={styles.adaptRow}>
+        <div className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
           <TextField
             type="url"
             className={chatStyles.composerGrow}
@@ -495,7 +495,7 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           ...LMS_ASSIGNMENT_COPY,
         });
         return (
-        <div className={styles.adaptRow}>
+        <div className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
           <TextField
             select
             size="small"

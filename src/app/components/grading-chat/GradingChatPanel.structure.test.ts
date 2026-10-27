@@ -431,10 +431,10 @@ describe("GradingChatPanel - W3 F3: compact setup fields", () => {
   });
 });
 
-describe("GradingChatPanel - W3 F4: the intake error rides inside the sticky wrapper, below the results", () => {
-  it("submitError role=alert is inside chatStyles.stickyComposer and after the results mount", () => {
+describe("GradingChatPanel - responsive intake: the error stays in normal flow below results", () => {
+  it("submitError role=alert is inside chatStyles.auxiliary and after the results mount", () => {
     const source = withoutLineComments(read(PANEL));
-    const wrapperOpen = source.indexOf("chatStyles.stickyComposer");
+    const wrapperOpen = source.indexOf("chatStyles.auxiliary");
     const mountIdx = source.indexOf("<ChatComposer");
     const alertIdx = source.indexOf('role="alert"');
     const resultsIdx = source.indexOf("<GradingResults");
@@ -453,7 +453,7 @@ describe("ChatComposer - W3 F5: Send stays grouped with the Submission text fiel
     const source = withoutLineComments(read(COMPOSER));
     const labelIdx = source.indexOf('label="Submission text"');
     expect(labelIdx).toBeGreaterThan(-1);
-    const rowOpen = source.lastIndexOf("<div className={styles.adaptRow}>", labelIdx);
+    const rowOpen = source.lastIndexOf("chatStyles.composerRow", labelIdx);
     expect(rowOpen).toBeGreaterThan(-1);
     const rowClose = source.indexOf("</div>", labelIdx);
     expect(rowClose).toBeGreaterThan(labelIdx);
@@ -809,9 +809,9 @@ describe("ChatComposer - record-a-submission: frames become composite parts", ()
 });
 
 describe("GradingChatPanel - recording split confirm surface (reachability)", () => {
-  it("renders RecordingSplitConfirm from driver.pendingSplit, inside the sticky composer wrapper, wired to both driver actions", () => {
+  it("renders RecordingSplitConfirm from driver.pendingSplit in normal flow, wired to both driver actions", () => {
     const source = withoutLineComments(read(PANEL));
-    const sticky = source.indexOf("chatStyles.stickyComposer");
+    const sticky = source.indexOf("chatStyles.auxiliary");
     const at = source.indexOf("<RecordingSplitConfirm");
     expect(sticky).toBeGreaterThan(-1);
     expect(at).toBeGreaterThan(sticky);
@@ -832,7 +832,7 @@ describe("GradingChatPanel - locked setup text stays copyable (read-only, not ed
   function lockedSlice(): string {
     const source = withoutLineComments(read(PANEL));
     const from = source.indexOf("chatStyles.setupSummary");
-    const to = source.indexOf("<div className={styles.ghActions}>", from);
+    const to = source.indexOf("chatStyles.settingsGrid", from);
     expect(from).toBeGreaterThan(-1);
     expect(to).toBeGreaterThan(from);
     return source.slice(from, to);
@@ -880,9 +880,9 @@ describe("GradingChatPanel - recording analyzing indicator", () => {
     expect(body).toContain("aria-busy");
   });
 
-  it("keeps the sticky wrapper order: confirm card, then progress, then composer", () => {
+  it("keeps normal-flow order: confirm card, then progress, then composer", () => {
     const src = source();
-    const a = src.indexOf("chatStyles.stickyComposer");
+    const a = src.indexOf("chatStyles.auxiliary");
     const b = src.indexOf("<RecordingSplitConfirm", a);
     const c = src.indexOf("<GradingProgress", a);
     const d = src.indexOf("<ChatComposer", a);

@@ -114,6 +114,7 @@ describe("grading-results client files stay client-bundle-safe (A23: transitive 
     "./ResultsTableHeaderRow.tsx",
     "./gradeRowFilter.ts", // chat grading-table search: the pure display-row filter leaf (type-only import, zero runtime edges).
     "./FeedbackExpandModal.tsx",
+    "./GradingResultsContext.tsx", // Responsive chat context extraction.
     "./RegradeButton.tsx", // chat grading: the per-row Regrade control with a busy spinner, extracted to keep GradingResults.tsx under the ceiling.
     "./RepositoryProposalReview.tsx",
     "./repositoryProposalEdits.ts",

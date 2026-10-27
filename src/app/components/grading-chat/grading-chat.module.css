@@ -17,7 +17,30 @@
   border-top: 1px solid var(--border-soft);
 }
 
-/* Session bar: meta column on the left, New session button on the right. */
+/* The measured primary navigation height follows wrapping and viewport changes.
+   The topbar and banner already publish their offsets for the sticky Tabs. */
+.panel {
+  --chat-session-top: calc(var(--topbar-height) + var(--in-session-banner-height, 0px) + var(--chat-navigation-height, 0px));
+}
+
+.panel :focus {
+  scroll-margin-top: calc(var(--chat-session-top) + var(--chat-session-actions-height, 0px) + var(--space-2));
+}
+
+.sessionActions {
+  position: sticky;
+  top: var(--chat-session-top);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  background: var(--card-background);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* Session metadata stays in the document flow below setup. */
 .sessionBar {
   display: flex;
   align-items: flex-start;
@@ -67,7 +90,9 @@
    hidden measuring textarea carries aria-hidden, so it is excluded and
    autosize's maxRows cap still measures an unfloored single row. */
 .composerGrow textarea:not([aria-hidden="true"]) {
-  min-height: var(--composer-floor);
+  min-height: min(var(--composer-floor, 0px), 25vh);
+  max-height: 25vh;
+  overflow-y: auto !important;
 }
 
 .composerLabel {
@@ -127,4 +152,129 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* Every shrink constraint is local to grading chat; the sticky ancestor chain
+   remains free of overflow clipping. */
+.panel, .panel * {
+  box-sizing: border-box;
+}
+
+.panel, .stream, .composer, .auxiliary, .setupDisclosure,
+.setupGrid, .settingsGrid, .compactField, .composerRow {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.panel :is(input, select, textarea),
+.panel :global(.MuiFormControl-root),
+.panel :global(.MuiInputBase-root),
+.panel :global(.MuiToggleButtonGroup-root) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.panel :global(.MuiFormControlLabel-root) {
+  min-width: 0;
+  margin-left: 0;
+}
+
+.panel :global(.MuiFormLabel-root) {
+  max-width: 100%;
+}
+
+.panel :global(.MuiFormHelperText-root) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.panel :global(.MuiToggleButtonGroup-root) {
+  flex-wrap: wrap;
+}
+
+.panel button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.setupDisclosure > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--space-3) 0;
+}
+
+.setupGrid, .settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.settingsGrid {
+  margin-top: var(--space-4);
+  align-items: start;
+}
+
+.thresholdField {
+  grid-column: 1 / -1;
+}
+
+.thresholdField :global(.MuiInputLabel-root) {
+  position: static;
+  transform: none;
+  white-space: normal;
+  overflow: visible;
+  line-height: var(--line-normal);
+  margin-bottom: var(--space-1);
+}
+
+.thresholdField fieldset legend {
+  display: none;
+}
+
+.setupSummary {
+  grid-column: 1 / -1;
+}
+
+.auxiliary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.auxiliary > *, .stream > *, .composerRow > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composerRow {
+  flex-wrap: wrap;
+}
+
+.composerLabel {
+  min-width: 0;
+}
+
+.diagnosticsScroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  margin-top: var(--space-2);
+}
+
+.diagnosticsScroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1024px), (max-height: 700px) {
+  .stickyComposer {
+    position: static;
+  }
+}
+
+@media (max-width: 700px) {
+  .setupGrid, .settingsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

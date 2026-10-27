@@ -83,6 +83,6 @@ describe("vertical expand wiring", () => {
 
   it("the CSS floor reaches only the real textarea, not the aria-hidden measurer", () => {
     const css = readFileSync(join(DIR, "grading-chat.module.css"), "utf8");
-    expect(css).toMatch(/\.composerGrow textarea:not\(\[aria-hidden="true"\]\) \{\s*min-height: var\(--composer-floor\);/);
+    expect(css).toMatch(/\.composerGrow textarea:not\(\[aria-hidden="true"\]\) \{\s*min-height: min\(var\(--composer-floor, 0px\), 25vh\);/);
   });
 });

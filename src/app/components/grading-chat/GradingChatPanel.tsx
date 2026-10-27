@@ -232,6 +232,7 @@ function RunDiagnostics({ items, copiedKey, onCopy }: { items: readonly ItemDiag
       <Button variant="outlined" size="small" onClick={() => void onCopy(COPY_KEY_DIAGNOSTICS, formatDiagnosticsText(items))}>
         {copiedKey === COPY_KEY_DIAGNOSTICS ? "Copied" : "Copy diagnostics"}
       </Button>
+      <div className={chatStyles.diagnosticsScroll} role="region" aria-label="Run diagnostics table" tabIndex={0}>
       <table className={styles.generatedRubricTable}>
         <thead>
           <tr>
@@ -248,6 +249,7 @@ function RunDiagnostics({ items, copiedKey, onCopy }: { items: readonly ItemDiag
           ))}
         </tbody>
       </table>
+      </div>
     </details>
   );
 }
@@ -271,6 +273,29 @@ function GradingProgress({ status }: { status: RunStatus | null }) {
 }
 
 export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sessionActionsRef = useRef<HTMLDivElement>(null);
+  const setupRef = useRef<HTMLDetailsElement>(null);
+  const setupFocusedRef = useRef(false);
+  const previousReadyRef = useRef(false);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    const actions = sessionActionsRef.current;
+    const navigation = panel?.closest(`.${styles.tabContainer}`)?.querySelector<HTMLElement>(":scope > .MuiTabs-root");
+    if (!panel || !actions || !navigation) return;
+    // Only the primary Tabs row sticks; the lower navigation rails scroll away.
+    const measure = () => {
+      panel.style.setProperty("--chat-navigation-height", `${navigation.getBoundingClientRect().height}px`);
+      panel.style.setProperty("--chat-session-actions-height", `${actions.getBoundingClientRect().height}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(navigation);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, []);
+
   const [instructions, setInstructions] = useState("");
   const [repositoryEvidence, setRepositoryEvidence] = useState<RepositoryEvidenceState>(emptyRepositoryEvidence);
   const [repositoryEvidenceSession, setRepositoryEvidenceSession] = useState(0);
@@ -376,6 +401,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // is established closes that path by construction - they cannot diverge from
   // what was actually captured because they can no longer be edited.
   const sessionReady = driver.headerState === "ready";
+  useEffect(() => {
+    const setup = setupRef.current;
+    if (setup && sessionReady && !previousReadyRef.current) {
+      if (setupFocusedRef.current) setup.querySelector("summary")?.focus();
+      setup.open = false;
+    }
+    previousReadyRef.current = sessionReady;
+  }, [sessionReady]);
 
   const handleNewSession = () => {
     if (
@@ -385,6 +418,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     driver.reset();
+    if (setupRef.current) setupRef.current.open = true;
     roleIntake.cancel();
     repositoryProposals.reset();
     setRepositoryEvidence(emptyRepositoryEvidence());
@@ -653,7 +687,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   return (
     <div
-      className={`${styles.card} ${styles.form}`}
+      ref={panelRef}
+      className={`${styles.card} ${styles.form} ${chatStyles.panel}`}
       onDragOver={(event) => {
         if (busy || preparing) return;
         event.preventDefault();
@@ -670,6 +705,24 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           : undefined
       }
     >
+      <div ref={sessionActionsRef} className={chatStyles.sessionActions}>
+        <Button variant="outlined" size="small" disabled={preparing} onClick={handleNewSession}
+          aria-describedby={preparing ? "grading-chat-new-session-unavailable" : undefined}>
+          New session
+        </Button>
+        {preparing && (
+          <span id="grading-chat-new-session-unavailable" className={styles.ghMeta}>
+            Finish preparing the current submission before starting a new session.
+          </span>
+        )}
+      </div>
+      <details ref={setupRef} className={chatStyles.setupDisclosure} open
+        onFocusCapture={() => { setupFocusedRef.current = true; }}
+        onBlurCapture={(event) => {
+          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setupFocusedRef.current = false;
+        }}>
+        <summary>{sessionReady ? "Assignment setup (locked)" : "Assignment setup"}</summary>
+        <div className={chatStyles.setupGrid}>
       {!sessionReady ? (
         <>
           <div className={chatStyles.compactField}>
@@ -769,7 +822,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         </>
       )}
 
-      <div className={styles.ghActions}>
+      </div>
+      <div className={chatStyles.settingsGrid}>
         <SegmentedToggle
           label="Grading strictness"
           showLabel
@@ -817,7 +871,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           }
           label="Deduct for length"
         />
-        <TextField size="small" type="text" label="Deduct when at least N words below the minimum"
+        <TextField className={chatStyles.thresholdField} size="small" type="text" label="Deduct when at least N words below the minimum"
           value={lengthThresholdText} onChange={(event) => changeLengthThreshold(event.target.value)}
           disabled={!applyLengthDeduction || sessionReady || busy || preparing || roleIntake.pending}
           error={applyLengthDeduction && parseLengthDeductionThreshold(lengthThresholdText) === null}
@@ -830,6 +884,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         )}
       </div>
 
+      </details>
+
       <div className={chatStyles.sessionBar}>
         <div className={chatStyles.sessionMeta}>
           <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
@@ -838,9 +894,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           )}
           {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
         </div>
-        <Button variant="outlined" size="small" disabled={preparing} onClick={handleNewSession}>
-          New session
-        </Button>
       </div>
 
       {hasRows && driver.run ? (
@@ -859,6 +912,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}
           searchable
+          compactContext
           onRegrade={driver.regrade}
           regradingStudents={driver.pendingStudents}
           unresolvedStudents={driver.unresolvedStudents}
@@ -869,7 +923,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <p className={chatStyles.streamEmpty}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
-      <div className={chatStyles.stickyComposer}>
+      <div className={chatStyles.auxiliary}>
         {submitError && (
           <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
             {submitError}
@@ -896,6 +950,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
         <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
         <ChatFileRolePreview intake={roleIntake} />
+      </div>
+      <div className={chatStyles.stickyComposer}>
         <ChatComposer
           disabled={busy || preparing || roleIntake.pending}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

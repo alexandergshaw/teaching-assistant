@@ -524,7 +524,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const headerStartedAtMs = chatSeamNowMs();
     let header: Awaited<ReturnType<typeof resolveChatRunHeaderAction>>;
     try { header = await resolveChatRunHeaderAction(sessionParams.assignmentInstructions, sessionParams.rubric, provider); }
-    catch (error) { if (invalid()) return stale(); headerAttemptRef.current = null; throw error; }
+    catch {
+      if (invalid()) return stale();
+      header = { kind: "refused", error: "Assignment setup could not be prepared. Try again." };
+    }
     if (invalid()) return stale();
     headerAttemptRef.current = null;
     recordChatSeamSettled({

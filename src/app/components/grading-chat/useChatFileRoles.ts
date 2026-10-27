@@ -76,7 +76,10 @@ export function createChatFileRolesController(initial: Params) {
       }
       diagnostic("confirm", rows.some((row) => row.status === "failed") ? "failure" : "success", started, rows.some((row) => row.status === "failed") ? "file-failed" : undefined);
     } catch { if (current()) { error = "Session setup failed. Files remain available; confirm again after correcting setup."; diagnostic("confirm", "failure", started, "setup-refused"); } }
-    finally { if (current()) { busy = false; phase = "settled"; emit(); } }
+    finally { if (current()) {
+      if (rows.every((row) => row.role === "exclude" || row.status === "accepted")) cancel();
+      else { busy = false; phase = "settled"; emit(); }
+    } }
   };
   function snapshot() { return { rows, error, busy, phase, pending: rows.length > 0, choices,
     resolved: resolve(), locked: params.locked,

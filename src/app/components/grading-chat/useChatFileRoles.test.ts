@@ -9,6 +9,50 @@ function setup() {
   const controller = createChatFileRolesController(params); return { controller, params, start, submit, applySetup };
 }
 describe("role controller real callbacks", () => {
+  it("releases a fully accepted batch so text, URL and another file are no longer blocked", async () => {
+    const s = setup(), settled = s.controller.snapshot();
+    settled.stage([new File(["student"], "student.txt"), new File(["ignored"], "ignore.txt")]);
+    await s.controller.snapshot().assign(1, "submission"); await s.controller.snapshot().assign(2, "exclude");
+    await s.controller.snapshot().confirm();
+    expect(s.controller.snapshot().pending).toBe(false); expect(settled.isPending()).toBe(false);
+    expect(s.controller.snapshot().busy).toBe(false); expect(s.controller.snapshot().rows).toEqual([]);
+    expect(s.controller.snapshot().stage([new File(["next"], "next.txt")])).toBe(true);
+  });
+  it("keeps mixed accepted and refused rows until retry succeeds without resending the accepted file", async () => {
+    const s = setup(), accepted = new File(["first"], "first.txt"), refused = new File(["second"], "second.txt");
+    s.submit.mockResolvedValueOnce({ kind: "accepted", entryCount: 1 }).mockResolvedValueOnce({ kind: "refused", reason: "Try again" });
+    s.controller.snapshot().stage([accepted, refused]);
+    for (const row of s.controller.snapshot().rows) await s.controller.snapshot().assign(row.id, "submission");
+    await s.controller.snapshot().confirm();
+    expect(s.controller.snapshot().pending).toBe(true);
+    expect(s.controller.snapshot().rows.map((row) => row.file)).toEqual([null, refused]);
+    await s.controller.snapshot().confirm();
+    expect(s.submit.mock.calls.map(([file]) => file)).toEqual([accepted, refused, refused]);
+    expect(s.controller.snapshot().pending).toBe(false);
+  });
+  it("does not clear a new preview when a canceled submission resolves late", async () => {
+    const s = setup(); let finish!: (outcome: SubmitOutcome) => void;
+    s.submit.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    s.controller.snapshot().stage([new File(["old"], "old.txt")]); await s.controller.snapshot().assign(1, "submission");
+    const pending = s.controller.snapshot().confirm(); await Promise.resolve();
+    expect(s.controller.snapshot().busy).toBe(true); expect(s.controller.snapshot().pending).toBe(true);
+    s.controller.snapshot().cancel(); const next = new File(["new"], "new.txt"); s.controller.snapshot().stage([next]);
+    finish({ kind: "accepted", entryCount: 1 }); await pending;
+    expect(s.controller.snapshot().rows[0].file).toBe(next); expect(s.controller.snapshot().pending).toBe(true);
+  });
+  it("releases an accepted batch after an overlapping stage was refused", async () => {
+    const s = setup(); let finish!: (outcome: SubmitOutcome) => void;
+    s.submit.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    s.controller.snapshot().stage([new File(["original"], "original.txt")]); await s.controller.snapshot().assign(1, "submission");
+    const pending = s.controller.snapshot().confirm(); await Promise.resolve();
+    const next = new File(["next"], "next.txt");
+    expect(s.controller.snapshot().stage([next])).toBe(false);
+    expect(s.controller.snapshot().error).toContain("Finish or cancel");
+    finish({ kind: "accepted", entryCount: 1 }); await pending;
+    expect(s.controller.snapshot().pending).toBe(false); expect(s.controller.snapshot().isPending()).toBe(false);
+    expect(s.controller.snapshot().error).toBeNull(); expect(s.controller.snapshot().busy).toBe(false);
+    expect(s.controller.snapshot().stage([next])).toBe(true);
+  });
   it("refuses an invalid enabled threshold before start and ignores it when deduction is off", async () => {
     const s = setup(); s.controller.sync({ ...s.params, options: { ...options, lengthDeductionThresholdWords: NaN } });
     s.controller.snapshot().stage([new File(["student"], "student.txt")]); await s.controller.snapshot().assign(1, "submission");

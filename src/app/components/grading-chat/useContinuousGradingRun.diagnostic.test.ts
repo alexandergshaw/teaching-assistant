@@ -102,6 +102,14 @@ function grading() {
 }
 
 describe("useContinuousGradingRun - diagnostic seams", () => {
+  it("resolve_header settles a thrown action as a closed failure without recording its private message", async () => {
+    resolveChatRunHeaderActionMock.mockRejectedValueOnce(new Error("Private Student in secret.docx"));
+    const driver = useTestDriver();
+    expect((await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" })).kind).toBe("refused");
+    const entries = grading(); expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ operation: "resolve_header", outcome: "failure", error: "refused" });
+    expect(JSON.stringify(entries)).not.toMatch(/Private Student|secret\.docx/);
+  });
   it("resolve_header records success", async () => {
     const driver = useTestDriver();
     await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });

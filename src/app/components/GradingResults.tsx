@@ -3,7 +3,6 @@
 import type { ReactNode, Ref } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
@@ -13,12 +12,11 @@ import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
 import { FilesCell } from "./grading-results/FilesCell";
 import { RegradeButton } from "./grading-results/RegradeButton";
-import { CopyIcon } from "./grading-results/icons";
 import { useResultsSort } from "./grading-results/useResultsSort";
 import { ResultsTableHeaderRow } from "./grading-results/ResultsTableHeaderRow";
 import { FeedbackExpandModal } from "./grading-results/FeedbackExpandModal";
-import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";
-import { hasTrendableResults, toClassTrendsEntry } from "./grading-results/classTrendsEntry";
+import { GradingResultsContext } from "./grading-results/GradingResultsContext";
+import layout from "./grading-results/results-layout.module.css";
 import styles from "../page.module.css";
 import controls from "./recording/RecordingControls.module.css";
 import { filterGradeRowsForTable } from "./grading-results/gradeRowFilter";
@@ -170,6 +168,8 @@ export type GradingResultsProps = {
    * only the DISPLAYED rows (posting, CSV and trends still read run.results).
    * Only the chat grading mount passes it. */
   searchable?: boolean;
+  /** Chat-only collapsed checklist, sample answer and class trends. */
+  compactContext?: boolean;
   /** Placeholder for the search bar; only read when `searchable`. */
   filterPlaceholder?: string;
   /** Opt-in, default off: when provided, each row renders a Regrade button that
@@ -213,6 +213,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   banner,
   sectionRef,
   searchable,
+  compactContext,
   filterPlaceholder = "Search by student name or feedback",
   onRegrade,
   regradingStudents,
@@ -584,11 +585,11 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   };
 
   return (
-    <section className={styles.results} ref={sectionRef} tabIndex={-1}>
+    <section className={`${styles.results} ${layout.results}`} ref={sectionRef} tabIndex={-1}>
       {banner}
-      <div className={styles.resultsHeader}>
+      <div className={`${styles.resultsHeader} ${layout.header}`}>
         <h2>Grading Results</h2>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+        <div className={layout.actions}>
           {canvasGradable && (
             <Button variant="contained" size="small" onClick={() => handlePostGrades()} disabled={posting}>
               {posting ? "Posting…" : `Post ${gradableResults.length} grade(s) to Canvas`}
@@ -611,51 +612,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </p>
       )}
 
-      {run.fullCreditChecklist && run.fullCreditChecklist.length > 0 && (
-        <section className={styles.resultsChecklist}>
-          <h3>What earns full credit</h3>
-          <ul>
-            {run.fullCreditChecklist.map((item, index) => (
-              <li key={`full-credit-${index + 1}`}>{item}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {run.sampleAnswer && run.sampleAnswer.trim() && (
-        <section className={styles.resultsChecklist}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)" }}>
-            <h3 style={{ margin: 0 }}>Sample correct answer</h3>
-            <IconButton
-              size="small"
-              title={copiedKey === "sample-answer" ? "Copied" : "Copy sample answer"}
-              aria-label="Copy sample correct answer"
-              onClick={() => onCopy("sample-answer", run.sampleAnswer ?? "")}
-            >
-              <CopyIcon />
-            </IconButton>
-          </div>
-          <div style={{ whiteSpace: "pre-wrap", marginTop: "var(--space-2)" }}>{run.sampleAnswer}</div>
-        </section>
-      )}
-
-      {(() => {
-        // A16-1 (docs/a16-scope.md sections 4.1/4.6): the SAME ClassTrendsPanel
-        // Drafted Grades already mounts, reached from every LMS Grading
-        // surface through this one component. The adapter passes `run` by
-        // REFERENCE (classTrendsEntry.ts's own header comment) - no
-        // filtering, reordering or rewriting of any result - and the mount
-        // is gated on hasTrendableResults so a run with nothing graded yet
-        // renders nothing at all, never a "Trends (0)" button.
-        const classTrendsEntry = toClassTrendsEntry(run, { courseName: "", assignmentName, canvasUrl });
-        return (
-          hasTrendableResults(classTrendsEntry) && (
-            <div style={{ margin: "0 0 var(--space-2)" }}>
-              <ClassTrendsPanel entry={classTrendsEntry} defaultExpanded />
-            </div>
-          )
-        );
-      })()}
+      <GradingResultsContext run={run} assignmentName={assignmentName} canvasUrl={canvasUrl}
+        copiedKey={copiedKey} onCopy={onCopy} compactContext={compactContext} />
 
       {searchable && (
         <>
@@ -681,7 +639,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </>
       )}
 
-      <div className={styles.matrixWrap}>
+      <p className={styles.fieldHint}>Scroll the table sideways for all criteria and actions.</p>
+      <div className={`${styles.matrixWrap} ${layout.tableScroll}`} role="region" aria-label="Grading results table" tabIndex={0}>
         <table className={styles.matrix}>
           <thead>
             <ResultsTableHeaderRow

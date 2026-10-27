@@ -24,13 +24,14 @@ function read(relativePath: string): string {
 }
 
 const GRADING_RESULTS_SOURCE = read("src/app/components/GradingResults.tsx");
+const CONTEXT_SOURCE = read("src/app/components/grading-results/GradingResultsContext.tsx");
 
 // ── icons.tsx ────────────────────────────────────────────────────────────
 
 /** True when `source` both imports `name` from ./grading-results/icons AND
  * actually renders it as JSX (`<name`), not merely imports it unused. */
 function importsAndRendersIcon(source: string, name: string): boolean {
-  const importPattern = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']\\./grading-results/icons["']`);
+  const importPattern = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']\\./(?:grading-results/)?icons["']`);
   const renderPattern = new RegExp(`<${name}\\b`);
   return importPattern.test(source) && renderPattern.test(source);
 }
@@ -52,9 +53,10 @@ describe("importsAndRendersIcon (canary)", () => {
   });
 });
 
-describe("GradingResults.tsx renders CopyIcon (moved to icons.tsx) directly", () => {
+describe("GradingResults.tsx renders context leaf with its CopyIcon", () => {
   it("imports and renders CopyIcon from ./grading-results/icons", () => {
-    expect(importsAndRendersIcon(GRADING_RESULTS_SOURCE, "CopyIcon")).toBe(true);
+    expect(GRADING_RESULTS_SOURCE).toContain("<GradingResultsContext");
+    expect(importsAndRendersIcon(CONTEXT_SOURCE, "CopyIcon")).toBe(true);
   });
 });
 
@@ -250,7 +252,7 @@ describe("GradingResults.tsx renders FeedbackExpandModal, gated and fully wired"
  * ./drafted-grades/ClassTrendsPanel AND actually renders it - mirrors
  * importsAndRendersIcon above. */
 function importsAndRendersClassTrendsPanel(source: string): boolean {
-  const importPattern = /import\s+ClassTrendsPanel\s+from\s*["']\.\/drafted-grades\/ClassTrendsPanel["']/;
+  const importPattern = /import\s+ClassTrendsPanel\s+from\s*["']\.\.?\/drafted-grades\/ClassTrendsPanel["']/;
   const renderPattern = /<ClassTrendsPanel\b/;
   return importPattern.test(source) && renderPattern.test(source);
 }
@@ -277,7 +279,8 @@ describe("importsAndRendersClassTrendsPanel (canary)", () => {
 
 describe("GradingResults.tsx renders ClassTrendsPanel (V1)", () => {
   it("imports and renders it from ./drafted-grades/ClassTrendsPanel", () => {
-    expect(importsAndRendersClassTrendsPanel(GRADING_RESULTS_SOURCE)).toBe(true);
+    expect(GRADING_RESULTS_SOURCE).toMatch(/<GradingResultsContext\s+run=\{run\}/);
+    expect(importsAndRendersClassTrendsPanel(CONTEXT_SOURCE)).toBe(true);
   });
 });
 
@@ -310,7 +313,7 @@ describe("classTrendsMountIsGated (canary)", () => {
 
 describe("GradingResults.tsx's ClassTrendsPanel mount is gated by hasTrendableResults (V2)", () => {
   it("the tag is not reachable unless hasTrendableResults(...) is true", () => {
-    expect(classTrendsMountIsGated(GRADING_RESULTS_SOURCE)).toBe(true);
+    expect(classTrendsMountIsGated(CONTEXT_SOURCE)).toBe(true);
   });
 });
 

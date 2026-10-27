@@ -94,6 +94,40 @@ beforeEach(() => {
 });
 
 describe("beginSession epoch ownership across reset", () => {
+  it("returns a readable refusal after a current setup exception and allows a fresh successful attempt", async () => {
+    resolveChatRunHeaderActionMock.mockRejectedValueOnce(new Error("private provider failure"));
+    let driver = useTestDriver();
+    const result = await driver.beginSession({ assignmentInstructions: "Instructions", rubric: "Rubric" });
+    expect(result).toEqual({ kind: "refused", reason: "Assignment setup could not be prepared. Try again." });
+    driver = useTestDriver();
+    expect(driver.headerState).toBe("refused"); expect(driver.sessionError).toBe(result.kind === "refused" ? result.reason : null);
+    expect((await driver.submit({ kind: "text", content: "Not yet" })).kind).toBe("refused");
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+    await driver.beginSession({ assignmentInstructions: "Retry instructions", rubric: "Retry rubric" }); driver = useTestDriver();
+    expect(driver.headerState).toBe("ready"); expect(driver.sessionError).toBeNull();
+    dispatchItemMock.mockResolvedValue(gradedRow("Student"));
+    await driver.submit({ kind: "text", content: "Now ready", label: "Student" });
+    expect(dispatchItemMock.mock.calls[0][0]).toMatchObject({ assignmentInstructions: "Retry instructions", rubric: readyHeader.effectiveRubric });
+  });
+  it("restores a canceled setup attempt without publishing its later exception", async () => {
+    let reject!: (error: Error) => void, current = true;
+    resolveChatRunHeaderActionMock.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+    let driver = useTestDriver(); const pending = driver.beginSession({ assignmentInstructions: "Canceled", rubric: "Rubric", isCurrent: () => current });
+    driver = useTestDriver(); expect(driver.headerState).toBe("resolving"); current = false;
+    reject(new Error("canceled private failure")); expect((await pending).kind).toBe("refused");
+    driver = useTestDriver(); expect(driver.headerState).toBe("unset"); expect(driver.sessionError).toBeNull();
+  });
+  it("keeps a newer attempt in the same session when the older attempt rejects", async () => {
+    let rejectOld!: (error: Error) => void;
+    resolveChatRunHeaderActionMock.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectOld = reject; }));
+    let driver = useTestDriver(); const old = driver.beginSession({ assignmentInstructions: "Old", rubric: "Old" });
+    driver = useTestDriver();
+    await driver.beginSession({ assignmentInstructions: "New", rubric: "New" });
+    rejectOld(new Error("Old private failure")); expect((await old).kind).toBe("refused");
+    driver = useTestDriver(); expect(driver.headerState).toBe("ready"); expect(driver.sessionError).toBeNull();
+    dispatchItemMock.mockResolvedValue(gradedRow("Student")); await driver.submit({ kind: "text", content: "Work" });
+    expect(dispatchItemMock.mock.calls[0][0]).toMatchObject({ assignmentInstructions: "New" });
+  });
   it.each(["success", "refusal", "throw"].flatMap((old) => ["ready", "resolving", "refused"].map((newer) => ({ old, newer }))))("keeps NEW $newer state when OLD resolves as $old", async ({ old, newer }) => {
     let resolveOld!: (value: typeof readyHeader | { kind: "refused"; error: string }) => void, rejectOld!: (error: Error) => void;
     let resolveNew!: (value: typeof readyHeader | { kind: "refused"; error: string }) => void;

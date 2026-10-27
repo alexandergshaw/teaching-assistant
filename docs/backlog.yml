@@ -1,3 +1,51 @@
+- id: 'CHAT-GRADING-SESSION-LOCK-RECOVERY'
+  state: 'verification'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Release completed file previews and recover from thrown setup failures instead of locking grading chat.'
+  owns: ['src/app/components/grading-chat/useChatFileRoles.ts', 'src/app/components/grading-chat/useChatFileRoles.test.ts', 'src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/grading-chat/useContinuousGradingRun.headerEpoch.test.ts', 'src/app/components/grading-chat/useContinuousGradingRun.diagnostic.test.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/useChatFileRoles.test.ts src/app/components/grading-chat/useContinuousGradingRun.lifecycle.test.ts'
+  blocked_by: []
+  instrument: 'Actual controller and hook lifecycle regressions: fully accepted file batches release pending state, mixed refusals remain retryable without repeating accepted files, current setup exceptions leave resolving with a readable refusal, and stale completions cannot alter a newer session.'
+  from: 'Owner 2026-10-27: live grading chat is unusable; go online and try it.'
+  note: 'Owner: coordinator. Independently SHIP final round2: accepted terminal previews clear even after an overlapping stage warning; refused and partial batches retain retry state. Current header exceptions become readable retryable refusals; canceled and superseded attempts cannot alter a newer session. Author five-path test:paths passed80 tests; independent final delta three paths passed37. Root project typecheck passed before the type-neutral final cleanup change; final byte/size/content gates passed25 tests. Live page opens and file entry is enabled, but an actual synthetic production grading request was blocked by automatic approval review pending explicit one-call authorization. No live grade or posting success is claimed. Separate remaining draft-retention and embedded-document picture findings remain open. No admitted supervisor store exists; manual-handoff assertion is unproven rather than fabricated.'
+  question: null
+- id: 'CHAT-DOCUMENT-EMBEDDED-PICTURES'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Preserve and evaluate pictures embedded in student documents across grading-chat transports.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Synthetic document fixtures must reach the actual model request with bounded visual parts through small, stored and image-only document intake. Missing visual access must be explicit rather than treated as missing student evidence.'
+  from: 'Owner 2026-10-27: pictures submitted inside documents are not recognized during grading.'
+  note: 'Owner: coordinator. Initial source diagnosis finds existing small-DOCX visual extraction, but stored large-file intake is text-only and image-only documents may be refused before visual extraction. Confirm exact seams and preserve budgets before implementation. Urgent live grading-session lock recovery is foreground.'
+  question: null
+- id: 'WALKTHROUGH-MULTIPLE-DIRECT-TEMPLATE-SLOTS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'rich-text-copy-fidelity'
+  title: 'Expose multiple editable announcement-template text slots directly in the From a walkthrough view.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Rendered walkthrough view must allow adding, labeling and editing multiple template text slots, autosave each through the existing library, and use saved selections in the lower drafts without replacing generated drafts until explicit regeneration.'
+  from: 'Owner 2026-10-27: multiple text slots for announcement templates directly on From a walkthrough.'
+  note: 'Owner: coordinator. Reuse existing announcement exemplar library and autosave rather than introduce competing persistence. Scope current visible wiring and discoverability. Urgent live grading-session lock recovery is foreground.'
+  question: null
+- id: 'CHAT-GRADING-SPLIT-SCREEN'
+  state: 'verification'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Make grading chat usable when the browser is snapped beside another window.'
+  owns: ['src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/components/grading-chat/grading-chat.module.css', 'src/app/components/grading-chat/ChatComposer.tsx', 'src/app/components/GradingResults.tsx', 'src/app/components/grading-results/GradingResultsContext.tsx', 'src/app/components/grading-results/results-layout.module.css']
+  verify: 'npm.cmd run test:paths -- src/file-size-ceiling.structure.test.ts src/app/components/grading-chat/GradingChatPanel.structure.test.ts'
+  blocked_by: []
+  instrument: 'Rendered actual-component and authenticated shell checks at narrow, short and full widths: compact setup/context, no bottom dock obstruction, no page horizontal overflow, local keyboard-scrollable tables, reachable reset and submission controls. Preserve frozen policy, evidence, edits, reset and posting decisions. Source tests do not render components.'
+  from: 'Owner 2026-10-25: grading chat needs an overhaul when the window is dual screened.'
+  note: 'Owner: coordinator. Independently SHIP round1; exact thirteen-path test:paths passed306 tests, scoped component lint clean and root typecheck passed. Setup becomes a native disclosure, auxiliary panels leave the sticky dock, narrow or short windows use normal-flow composer placement, and table/diagnostics scrolling is local and keyboard focusable. Actual isolated browser used real Panel and driver with synthetic transport: two successful rows and a failed row, reopened setup survives another submission, no document horizontal overflow at observed768x800 and640x700, local table ArrowRight moved40px and Tab exited. Fixture chrome differs from production. Remaining full-width/short-height/zoom/banner/mode matrix and authenticated deployed layout checks are explicitly unverified after browser runtime interruption. Local build compiled and passed TypeScript then hit known missing Supabase prerender settings. No live provider or student posting was performed. Leverage remains retained editable grading tied to frozen setup.'
+  question: null
 # GENERATED SOURCE OF TRUTH. Hand-edit THIS file (docs/backlog.yml) -
 # never docs/BACKLOG.md, which is rendered from it by
 # `npm run backlog:render` and checked by `npm run backlog:check-generated`.
@@ -77,7 +125,7 @@
   note: 'Owner: coordinator. Accepted scope is docs/repo-chat-reference-workflow-scope.md. Main fc673ada delivers reviewed staging, immutable collection and proposal/review/adoption code. This publication adds role-aware assignment/rubric plus class-ZIP intake, independently SHIP final round2 after fixing preview cancellation through actual Panel and driver header ownership. Independent delta five-path command passed90tests, including newer-session races and rollback preservation; author full twenty-three-path command passed321tests. No-render tests prove callback behavior, not upload usability. Chrome local file access remains unavailable; actual mixed-file upload, keyboard/responsive interaction and comparative ease versus the reference remain explicit live verification obligations. Coordinate CHAT-GRADING-NEW-SESSION-VISIBILITY and existing REPO-PAGE-OVERHAUL separately. No live provider grading, submitted-code execution or posting was performed. No admitted supervisor store exists for this host run; source/main proof is separate from the unproven manual-handoff assertion.'
   question: null
 - id: 'CHAT-GRADING-NEW-SESSION-VISIBILITY'
-  state: 'unscoped'
+  state: 'verification'
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'Keep the New session control always visible in the chat grading window.'
@@ -86,7 +134,7 @@
   blocked_by: []
   instrument: 'Planned acceptance: the New session control remains visible and reachable without scrolling through the conversation or results, including empty, populated, grading-in-progress and error states and narrow viewports. Preserve existing session reset, in-flight work protection and any confirmation before discarding work. If starting a session is temporarily unavailable, keep the control visible and explain why. Verify in a rendered browser with scrolling, keyboard and responsive checks; source-only tests do not establish visibility.'
   from: 'Owner request in this chat, 2026-10-25: the option to start a new session on the chat grading window should always be visible.'
-  note: 'Owner: coordinator. Reuse the existing GradingChatPanel New session action; scope persistent header or sticky placement and its relationship to the existing composer before implementation. This row records the request; no implementation or browser verification is claimed.'
+  note: 'Owner: coordinator. Implemented one sticky existing New session action with measured primary navigation and toolbar heights, preserving confirmation/reset and preparing-only disabled behavior. Independent implementation round1 SHIP with eight-path test:paths229 tests. Included in independently reviewed responsive candidate. Actual synthetic populated768x800 browser showed action at top111px above table focus157.5px. Real authenticated banner/mobile and exhaustive reset/focus checks remain open. No component-render claim is made from unit tests.'
   question: null
 - id: 'COURSES-COLUMN-REORDER'
   state: 'unscoped'

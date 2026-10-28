@@ -114,6 +114,8 @@ export function readServerDiagnostic(raw: unknown): ChatDetailBag {
         const lowered = value.toLowerCase();
         out.finishReason = FINISH_REASONS.includes(lowered) ? lowered : "other";
       }
+    } else if (key === "visualCoverage") {
+      if (value === "complete" || value === "incomplete" || value === "failed" || value === "unavailable") out.visualCoverage = value;
     } else if (key === "failure") {
       if (isGradeFailureClass(value)) out.failure = value;
     } else {

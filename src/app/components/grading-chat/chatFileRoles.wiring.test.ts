@@ -13,6 +13,7 @@ vi.mock("@/app/actions/grading-chat-intake", () => ({ resolveChatRunHeaderAction
 import { useContinuousGradingRun } from "./useContinuousGradingRun";
 import { createChatFileRolesController } from "./useChatFileRoles";
 import { submitFilesSequentially } from "./chatFileBatch";
+import { createDirectFileIntake } from "./chatDirectFileIntake";
 import { resolveSetupFill } from "./chatSetupFill";
 import { applyOverride, computeOverrideOffer, countOverriddenFields } from "./chatOverrideOffer";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
@@ -186,7 +187,30 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     await driver.submit({ kind: "text", content: "LATER_TEXT", label: "Later" }); await new Promise((resolve) => setTimeout(resolve, 0)); driver.regrade("Taylor"); await new Promise((resolve) => setTimeout(resolve, 0));
     expect(dispatch).toHaveBeenCalledTimes(4); for (const [request] of dispatch.mock.calls) expect(request.lengthDeductionThresholdWords).toBe(25);
   });
-  it("pins both loose-file entry points to preview, guards other inputs and uses the renamed accessible preview", () => {
+  it.each(["single", "multiple", "zip"])("actual direct router reaches existing transport and frozen driver: %s", async (mode) => {
+    header.mockImplementation(async (_instructions: string, rubric: string) => ({ kind: "ok", effectiveRubric: rubric, rubricFingerprint: "fixture", criteriaNames: [], rubricUsed: "provided" }));
+    prepare.mockResolvedValue({ kind: "entries", entries: [{ student: "Student", content: "STUDENT", submittedFiles: [], mergedFileCount: 0 }], pointsPossible: 20 });
+    const dispatch = vi.fn(async (request: GradeRunItemRequestBody) => result(request.entry.student));
+    const useDriver = () => { h.begin(); return useContinuousGradingRun({ provider: "gemini", dispatchItem: dispatch }); };
+    let driver = useDriver(); const stage = vi.fn(), intake = createDirectFileIntake();
+    const route = (instructions: string) => {
+      const start = callback("ensureSession", { driver, sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
+      const consume = callback("handleConfirmedFiles", { driver, submitFilesSequentially, submitLooseVideo: vi.fn(async () => null), user: { id: "owner" }, supabase: { storage: {} }, VIDEO_GRADING_ENABLED: false,
+        isZipFileName: (name: string) => name.endsWith(".zip"), chooseZipTransport: () => ({ kind: "body" }), chooseSingleFileTransport: () => ({ kind: "body" }), preflightUploadFile: () => ({ ok: true }),
+        safeIntake: (fn: () => void) => fn(), recordIntakeGate: vi.fn(), submitStoragedZip: vi.fn(), submitStoragedSingleFile: vi.fn(), sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn() });
+      return callback("handleSubmitFiles", { directIntake: { current: intake }, preparing: false, driver, roleIntake: { isPending: () => false, stage }, includeSetupFiles: false,
+        setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setSubmitError: vi.fn(), instructions, rubric: "FROZEN_RUBRIC", harshness: "strict", feedbackLengthText: "80", coerceFeedbackWordTarget: Number,
+        applyNamingDeduction: false, applyLengthDeduction: true, lengthThresholdText: "25", parseLengthDeductionThreshold, ensureSession: start, handleConfirmedFiles: consume });
+    };
+    const files = mode === "multiple" ? [new File(["ONE"], "same.docx"), new File(["TWO"], "same.docx")] : [new File(["ONE"], mode === "zip" ? "class.zip" : "student.pdf")];
+    await route("FROZEN_ASSIGNMENT")(files, "Single label"); expect(stage).not.toHaveBeenCalled(); expect(header).toHaveBeenCalledOnce();
+    expect(prepare.mock.calls.map((call) => (call[0] as FormData).get("file"))).toEqual(files);
+    for (const [request] of dispatch.mock.calls) expect(request).toMatchObject({ assignmentInstructions: "FROZEN_ASSIGNMENT", harshness: "strict", feedbackWordTarget: 80, applyNamingDeduction: false, lengthDeductionThresholdWords: 25 });
+    driver = useDriver(); await route("CHANGED_ASSIGNMENT")([new File(["LATER"], "later.pdf")]); expect(header).toHaveBeenCalledOnce();
+    expect(dispatch.mock.calls.at(-1)?.[0].assignmentInstructions).toBe("FROZEN_ASSIGNMENT");
+  });
+  it("pins both loose-file entry points to the shared direct-or-preview router, guards other inputs and retains accessible preview", () => {
+    expect(panel).toContain("useState(false)"); expect(panel).toContain("if (includeSetupFiles && !blocked)"); expect(panel).toContain("Include assignment or rubric files");
     expect(panel).toContain("roleIntake.stage(files, label)"); expect(panel).toContain("if (files.length > 0) handleSubmitFiles(files)"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
     expect(panel.match(/if \(roleIntake.isPending\(\)\) return/g)).toHaveLength(3); expect(panel).toContain("disabled={busy || preparing || roleIntake.pending}"); expect(panel).toContain("<ChatFileRolePreview intake={roleIntake}");
     const ui = readFileSync("src/app/components/grading-chat/ChatFileRolePreview.tsx", "utf8"); expect(ui).toContain("Confirm roles and grade"); expect(ui).toContain("Use setup"); expect(ui).toContain("Cancel file preview"); expect(ui).toContain("readOnly value={intake.resolved.effective[field]}");

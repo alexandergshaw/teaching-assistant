@@ -161,6 +161,7 @@ export interface SubmittedFileInfo {
   rawBase64?: string;
   mimeType?: string;
   videoRef?: VideoRef;
+  documentVisuals?: import("./document-visual-schema").DocumentVisuals;
 }
 
 /**

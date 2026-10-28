@@ -1,55 +1,34 @@
-import { extractOfficeImagesWithData } from "../office-edit";
-import {
-  GEMINI_IMAGE_MIME_TYPES,
-  OFFICE_IMAGE_SOURCE_MIME_TYPES,
-  graderNeedsFileBytes,
-} from "./constants";
+import { DOCUMENT_EXTENSIONS } from "../office-extract";
+import { OFFICE_IMAGE_SOURCE_MIME_TYPES, graderNeedsFileBytes } from "./constants";
+import { prepareDocumentVisuals } from "./document-visuals";
+import { DOCUMENT_PICTURE_LIMIT, DOCUMENT_VISUAL_BYTE_LIMIT } from "./document-visual-schema";
+import type { DocumentVisuals } from "./document-visual-schema";
 import type { SubmittedFileInfo } from "./types";
-
-export interface InlineVisualPart {
-  name: string;
-  base64: string;
-  mimeType: string;
-}
-
-/**
- * Embedded raster images of one docx/pptx, as inline parts. Parses UNTRUSTED
- * bytes: extractOfficeImagesWithData opens the zip through openOfficeZip, which
- * runs the zip-bomb caps (assertContainerWithinCaps) before any decompression.
- * Any error (corrupt zip, cap breach, bad XML) yields no parts for this file so
- * the grade proceeds on its text. Known gap (RES-VIS-6): emf/wmf/svg images are
- * not returned by office-edit, so a screenshot pasted as EMF/WMF yields nothing.
- */
-async function officeImageParts(f: SubmittedFileInfo, kind: "docx" | "pptx"): Promise<InlineVisualPart[]> {
-  try {
-    const images = await extractOfficeImagesWithData(kind, Buffer.from(f.rawBase64 ?? "", "base64"));
-    const parts: InlineVisualPart[] = [];
-    images.forEach((im, i) => {
-      if (!im.base64 || !im.mimeType || !GEMINI_IMAGE_MIME_TYPES.has(im.mimeType)) return;
-      parts.push({ name: `${f.name} (image ${i + 1}: ${im.name})`, base64: im.base64, mimeType: im.mimeType });
-    });
-    return parts;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The submitted files whose visuals go to the model as inline data: images and
- * PDFs as-is (so a PDF's embedded screenshots are seen, not only its extracted
- * text), and the embedded raster images of a docx/pptx. A file with no
- * rawBase64 or no MIME type is skipped. Never throws.
- */
-export async function collectInlineVisualParts(submittedFiles: SubmittedFileInfo[]): Promise<InlineVisualPart[]> {
-  const parts: InlineVisualPart[] = [];
+export interface InlineVisualPart { name: string; base64: string; mimeType: string }
+export interface CollectedVisuals { parts: InlineVisualPart[]; documents: { file: SubmittedFileInfo; coverage: DocumentVisuals }[] }
+/** Prepared representations win over raw fallback, preventing duplicate pictures. */
+export async function collectInlineVisualEvidence(submittedFiles: SubmittedFileInfo[]): Promise<CollectedVisuals> {
+  const out: CollectedVisuals = { parts: [], documents: [] };
+  let remainingParts = DOCUMENT_PICTURE_LIMIT;
+  let remainingBytes = DOCUMENT_VISUAL_BYTE_LIMIT;
   for (const f of submittedFiles) {
-    if (!f.rawBase64 || !f.mimeType) continue;
-    if (graderNeedsFileBytes(f.mimeType)) {
-      parts.push({ name: f.name, base64: f.rawBase64, mimeType: f.mimeType });
-      continue;
+    const kind = f.extension === "docx" || f.extension === "pptx" ? f.extension : f.mimeType ? OFFICE_IMAGE_SOURCE_MIME_TYPES[f.mimeType] : undefined;
+    if (f.documentVisuals || kind || (DOCUMENT_EXTENSIONS.has(f.extension) && f.extension !== "pdf")) {
+      let coverage = f.documentVisuals ?? await prepareDocumentVisuals(kind ?? f.extension, f.rawBase64 ? Buffer.from(f.rawBase64, "base64") : undefined, { parts: remainingParts, bytes: remainingBytes });
+      if (coverage.parts.length && (coverage.parts.length > remainingParts || new TextEncoder().encode(JSON.stringify(coverage)).byteLength > remainingBytes)) {
+        coverage = { ...coverage, status: "incomplete", reason: "budget", omitted: coverage.found, parts: [] };
+      }
+      remainingParts -= coverage.parts.length;
+      remainingBytes = Math.max(0, remainingBytes - new TextEncoder().encode(JSON.stringify(coverage)).byteLength);
+      out.documents.push({ file: f, coverage });
+      out.parts.push(...coverage.parts.map(p => ({ ...p, name: f.name + " (" + p.name + ")" })));
+    } else if (f.rawBase64 && f.mimeType && graderNeedsFileBytes(f.mimeType)) {
+      out.parts.push({ name: f.name, base64: f.rawBase64, mimeType: f.mimeType });
     }
-    const kind = OFFICE_IMAGE_SOURCE_MIME_TYPES[f.mimeType];
-    if (kind) parts.push(...(await officeImageParts(f, kind)));
   }
-  return parts;
+  return out;
+}
+/** Compatibility projection; grading consumes the coverage-bearing form. */
+export async function collectInlineVisualParts(submittedFiles: SubmittedFileInfo[]): Promise<InlineVisualPart[]> {
+  return (await collectInlineVisualEvidence(submittedFiles)).parts;
 }

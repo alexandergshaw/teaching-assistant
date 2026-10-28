@@ -6,6 +6,7 @@
 // no parameter that can carry a student name, file name, submission text,
 // prompt, error message or token VALUE (only token COUNTS).
 
+import type { DocumentVisualStatus } from "./document-visual-schema";
 import type { GradeFailureClass } from "./grade-failure";
 
 /** The only keys a diagnostic may ever carry. Pinned by the tests. */
@@ -20,11 +21,21 @@ export const GRADE_ITEM_DIAGNOSTIC_KEYS = [
   "outputTokens",
   "finishReason",
   "failure",
+  "picturesPrepared",
+  "picturesSent",
+  "picturesOmitted",
+  "visualCoverage",
 ] as const;
 
 export type GradeItemDiagnosticKey = (typeof GRADE_ITEM_DIAGNOSTIC_KEYS)[number];
 
-export interface GradeItemDiagnostic {
+export interface GradeVisualDiagnostic {
+  picturesPrepared?: number;
+  picturesSent?: number;
+  picturesOmitted?: number;
+  visualCoverage?: DocumentVisualStatus;
+}
+export interface GradeItemDiagnostic extends GradeVisualDiagnostic {
   serverMs?: number;
   prepMs?: number;
   gradeMs?: number;
@@ -54,10 +65,12 @@ export interface GradeCallRecord {
 export interface GradeCallSink {
   recordCall(call: GradeCallRecord): void;
   recordFailure(failure: GradeFailureClass): void;
+  recordVisuals?(visuals: GradeVisualDiagnostic): void;
 }
 
 export interface GradeCallSinkState extends GradeCallSink {
   readonly calls: GradeCallRecord[];
+  visuals?: GradeVisualDiagnostic;
   failure: GradeFailureClass | undefined;
 }
 
@@ -65,6 +78,7 @@ export function createGradeCallSink(): GradeCallSinkState {
   const state: GradeCallSinkState = {
     calls: [],
     failure: undefined,
+    recordVisuals(visuals) { state.visuals = visuals; },
     recordCall(call) {
       state.calls.push(call);
     },
@@ -75,7 +89,7 @@ export function createGradeCallSink(): GradeCallSinkState {
   return state;
 }
 
-export interface GradeItemDiagnosticInput {
+export interface GradeItemDiagnosticInput extends GradeVisualDiagnostic {
   serverMs?: number;
   prepMs?: number;
   gradeMs?: number;
@@ -109,6 +123,11 @@ function sumReported(values: ReadonlyArray<number | undefined>): number | undefi
 
 export function buildGradeItemDiagnostic(input: GradeItemDiagnosticInput): GradeItemDiagnostic {
   const out: GradeItemDiagnostic = {};
+  for (const key of ["picturesPrepared", "picturesSent", "picturesOmitted"] as const) {
+    const count = cleanCount(input[key]);
+    if (count !== undefined) out[key] = count;
+  }
+  if (input.visualCoverage && ["complete", "incomplete", "failed", "unavailable"].includes(input.visualCoverage)) out.visualCoverage = input.visualCoverage;
   const serverMs = cleanCount(input.serverMs);
   if (serverMs !== undefined) out.serverMs = serverMs;
   const prepMs = cleanCount(input.prepMs);

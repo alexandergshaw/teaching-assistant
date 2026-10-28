@@ -25,7 +25,7 @@ import {
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
 } from "./types";
-import { collectInlineVisualParts } from "./inline-visuals";
+import { collectInlineVisualEvidence } from "./inline-visuals";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, hasParseableRubricJson, extractStrengthsField, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, extractRubricCriteria, extractRubricCriteriaForEvidence } from "./rubric";
@@ -484,8 +484,23 @@ async function gradeStudentEntries(
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
       : contentTruncated;
 
+    const visuals = await collectInlineVisualEvidence(submittedFiles);
+    const affected = visuals.documents.filter(d => (d.file.extension === "docx" || d.file.extension === "pptx") && (d.coverage.status === "incomplete" || d.coverage.status === "failed"));
+    if (visuals.documents.length) callSink?.recordVisuals?.({
+      picturesPrepared: visuals.documents.reduce((n, d) => n + d.coverage.parts.length, 0),
+      picturesSent: affected.length ? 0 : visuals.documents.reduce((n, d) => n + d.coverage.parts.length, 0),
+      picturesOmitted: visuals.documents.reduce((n, d) => n + d.coverage.omitted, 0),
+      visualCoverage: affected.some(d => d.coverage.status === "failed") ? "failed" : affected.length ? "incomplete" : visuals.documents.some(d => d.coverage.status === "unavailable") ? "unavailable" : "complete",
+    });
+    if (affected.length) {
+      results.push(buildUngradedRow(limitedEntries[i], {
+        kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId,
+        message: `${GRADING_FAILURE_PREFIX}Embedded picture evidence could not be fully inspected in ${affected.map(d => d.file.name).join(", ")}. Supply a supported PDF or export the pictures, then try again.`,
+      }));
+      continue;
+    }
     const inlineFiles: GradeAttachment[] = [
-      ...(await collectInlineVisualParts(submittedFiles)),
+      ...visuals.parts,
       ...(options.extraAttachments ?? []),
     ];
 
@@ -515,7 +530,7 @@ async function gradeStudentEntries(
         : await gradeSubmission(
             evidencePrompt,
             student,
-            truncatedContent,
+            truncatedContent + (visuals.documents.some(d => d.coverage.status === "unavailable") ? "\n[Document visual inspection unavailable for this format. Only extracted text was available; this does not establish that pictures are absent.]" : ""),
             provider,
             inlineFiles,
             pointsPossible,

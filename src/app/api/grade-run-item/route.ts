@@ -21,6 +21,7 @@ import { downloadFile, removeFiles } from "@/lib/supabase/storage";
 import { SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import { coerceFeedbackWordTarget } from "@/lib/grade/types";
 import { isRecordingWindow, type RecordingWindow } from "@/lib/grade/recording-split";
+import { isDocumentVisuals } from "@/lib/grade/document-visual-schema";
 import type { GradeHarshness, StudentSubmissionEntry, SubmittedFileInfo } from "@/lib/grade/types";
 import {
   ITEM_REQUEST_BYTE_BUDGET,
@@ -120,6 +121,9 @@ function isSubmittedFileInfo(value: unknown): value is SubmittedFileInfo {
   if (typeof value.previewContent !== "string" || typeof value.previewTruncated !== "boolean") return false;
   if (value.rawBase64 !== undefined && typeof value.rawBase64 !== "string") return false;
   if (value.mimeType !== undefined && typeof value.mimeType !== "string") return false;
+  if (value.documentVisuals !== undefined && !isDocumentVisuals(value.documentVisuals)) return false;
+  if ((value.extension === "docx" || value.extension === "pptx") && value.documentVisuals?.status === "unavailable") return false;
+  if (value.documentVisuals !== undefined && value.extension !== "docx" && value.extension !== "pptx" && value.documentVisuals.status !== "unavailable") return false;
   if (value.videoRef !== undefined) {
     // A video entry carries videoRef, NEVER rawBase64 (T14).
     if (value.rawBase64 !== undefined) return false;
@@ -190,6 +194,7 @@ function parseRequestBody(body: GradeRunItemRequestBody): {
   };
 
   if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) return null;
+  if (entry.submittedFiles.some(f => f.documentVisuals) && new TextEncoder().encode(JSON.stringify(body)).byteLength > ITEM_REQUEST_BYTE_BUDGET) return null;
 
   if (typeof body.assignmentInstructions !== "string" || body.assignmentInstructions.length > MAX_INSTRUCTIONS_CHARS) {
     return null;
@@ -331,6 +336,7 @@ export async function POST(req: NextRequest) {
         gradeMs: gradeStartedAtMs === undefined ? undefined : nowMs - gradeStartedAtMs,
         model: safeModelName(),
         calls: callSink.calls,
+        ...callSink.visuals,
         failure: failure ?? callSink.failure,
       });
       return { diagnostic };

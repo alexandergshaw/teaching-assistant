@@ -15,7 +15,18 @@ describe("announcement library production wiring", () => {
   it("always renders library outside collapsed setup and includes dirty edits in unload and course-switch guards", () => {
     const panel = source("WalkthroughAnnouncementPanel.tsx");
     expect(panel).toContain("<AnnouncementLibrary key={library.scopeKey}");
-    expect(panel).toMatch(/<AnnouncementCourseFieldset[\s\S]*?collapsed=\{setupCollapsed\}[\s\S]*?\/>[\s\S]*?<details>[\s\S]*?<AnnouncementLibrary/);
+    const tree = ts.createSourceFile("panel.tsx", panel, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const mounts: ts.JsxSelfClosingElement[] = [];
+    function visit(node: ts.Node) {
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(tree) === "AnnouncementLibrary") mounts.push(node);
+      ts.forEachChild(node, visit);
+    }
+    visit(tree);
+    expect(mounts).toHaveLength(1);
+    for (let parent = mounts[0].parent; parent; parent = parent.parent) {
+      if (ts.isJsxElement(parent)) expect(["details", "AnnouncementCourseFieldset"]).not.toContain(parent.openingElement.tagName.getText(tree));
+    }
+    expect(panel).toContain("collapsed={setupCollapsed}");
     expect(panel).toContain("!library.controller.dirty() && !shouldWarnBeforeUnload");
     expect(panel).toContain("library.controller.dirty() && !window.confirm");
   });
@@ -35,10 +46,19 @@ describe("announcement library production wiring", () => {
   });
   it("keeps accessible row controls, explicit deletion confirmation, import and add/remove focus paths", () => {
     const ui = source("AnnouncementLibrary.tsx");
-    for (const token of ['aria-live="polite"', 'type="file"', "multiple", "Confirm remove announcement", "bodyInputs.current.get(id)?.focus()", "addButton.current?.focus()", 'label={`Announcement ${index + 1} text`}']) expect(ui).toContain(token);
+    for (const token of ['aria-live="polite"', 'type="file"', "multiple", "Confirm remove announcement", "bodyInputs.current.get(id)?.focus()", "addButton.current?.focus()", 'label={`Template ${index + 1} text`}']) expect(ui).toContain(token);
     expect(ui).toContain("useAnnouncementLibraryDeparture(controller)");
     expect(ui).toContain("open={departure.confirming}");
     expect(ui).toContain('aria-label={`Add a draft from this announcement ${index + 1}`}' );
     expect(ui).toContain('card.status !== "Saved"'); expect(ui).toContain("importAnnouncementLibraryFiles(controller");
+  });
+  it("names directly editable template slots while retaining the card map and autosave edits", () => {
+    const ui = source("AnnouncementLibrary.tsx");
+    for (const token of ["Announcement templates", "Add template slot", 'label={`Template ${index + 1} label`}',
+      "Paste a previous announcement into each template slot. Each slot saves automatically. Choose its label under Format to match in the drafts below.",
+      'state.load === "loaded" && state.cards.length === 0 && "No templates saved yet. Add a template slot to get started."',
+      "state.cards.map((card, index)", "key={card.id}", "const id = controller.add()", "onClick={add}",
+      'controller.edit(card.id, "label", e.target.value)', 'controller.edit(card.id, "exemplarText", e.target.value)',
+      "value={card.label}", "value={card.exemplarText}", "multiline minRows={6}"]) expect(ui).toContain(token);
   });
 });

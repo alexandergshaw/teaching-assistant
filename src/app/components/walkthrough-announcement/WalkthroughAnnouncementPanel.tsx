@@ -490,12 +490,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       />
 
       {pairPreferences.notice && <p role="status">{pairPreferences.notice}</p>}
-      <details>
-        <summary>Manage saved examples ({savedExemplars.length}) - {savedFormatsState}{library.controller.dirty() || library.state.cards.some(card => card.error) ? "; unsaved edits or errors - open to save or retry" : ""}</summary>
-        <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
-          canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
-          onRemoved={() => { /* Keep selections visible; unavailable IDs block generation. */ }} />
-      </details>
+      <AnnouncementLibrary key={library.scopeKey} controller={library.controller} state={library.state} enabled={library.enabled}
+        canAddDraft={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE} addDraft={choice => addSlot(choice, "beginning-of-week")}
+        onRemoved={() => { /* Keep selections visible; unavailable IDs block generation. */ }} />
 
       <fieldset className={controls.section}>
         <legend className={controls.sectionLegend}>Upload a walkthrough video</legend>

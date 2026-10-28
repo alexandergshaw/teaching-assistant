@@ -20,6 +20,7 @@
  * No new dependency: every helper below already exists and is imported,
  * not reimplemented.
  */
+import { prepareDocumentVisuals } from "./document-visuals";
 import { getFileExtension, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, extractTextFromBuffer } from "../office-extract";
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED, getMimeType } from "./constants";
 import { toPreviewContent } from "./utils";
@@ -199,14 +200,16 @@ export async function buildSingleFileEntry(
     } catch {
       extracted = null;
     }
-    if (!extracted || !extracted.trim()) {
-      return null;
-    }
+    const documentVisuals = DOCUMENT_EXTENSIONS.has(extension) && extension !== "pdf"
+      ? await prepareDocumentVisuals(extension, buffer) : undefined;
+    const hasText = Boolean(extracted?.trim());
+    if (!hasText && !documentVisuals?.parts.length) return null;
+    extracted = hasText ? extracted! : `[Document with embedded pictures: ${name}; no extracted text]`;
     const preview = toPreviewContent(extracted);
     let student = stem;
     let studentNameSource: "filename" | "inferred" | "unresolved" = "filename";
     if (needsName) {
-      const inferred = provider ? await inferStudentNameFromContent(extracted, provider) : null;
+      const inferred = provider && hasText ? await inferStudentNameFromContent(extracted, provider) : null;
       if (inferred) {
         student = inferred;
         studentNameSource = "inferred";
@@ -226,6 +229,7 @@ export async function buildSingleFileEntry(
           previewContent: preview.text,
           previewTruncated: preview.truncated,
           ...(textOnly ? {} : { rawBase64: buffer.toString("base64") }),
+          ...(documentVisuals ? { documentVisuals } : {}),
           mimeType: getMimeType(extension),
         },
       ],

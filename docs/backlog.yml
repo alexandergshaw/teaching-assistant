@@ -1,3 +1,39 @@
+- id: 'CHAT-ARCHIVE-IMAGE-ONLY-DOCUMENTS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Keep image-only DOCX/PPTX submissions inside class archives through extraction and grouping.'
+  owns: ['src/lib/grade/extraction.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'A synthetic class ZIP containing image-only DOCX and PPTX must preserve student grouping and original file inventory through extraction to the grading request, with bounded literal picture bytes and truthful incomplete-evidence handling.'
+  from: 'Separate residual identified during CHAT-DOCUMENT-EMBEDDED-PICTURES repair on 2026-10-27.'
+  note: 'Owner: coordinator. Loose small/stored image-only documents are covered by the reviewed repair. Archive extraction may still discard image-only documents before visual collection. Scope and implement this admission seam separately; do not claim all document transports are repaired. No credentials or provider call is required to build its request-level regression.'
+  question: null
+- id: 'CHAT-GRADING-PRESERVE-REFUSED-DRAFTS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Retain pasted text, URLs and composite parts when grading setup or intake refuses the submission.'
+  owns: ['src/app/components/grading-chat/ChatComposer.tsx']
+  verify: null
+  blocked_by: []
+  instrument: 'Actual composer callback lifecycle must retain drafts on refused or thrown intake and clear only captured accepted content without erasing newer edits. Verify text, URL and composite parts with deferred results and session reset.'
+  from: 'Confirmed during the owner-requested live grading-chat investigation on 2026-10-27.'
+  note: 'Owner: coordinator. Existing void callbacks clear local drafts immediately, before setup success is known. Recommended correction is outcome-aware clearing with captured revision guards. This is separate from the published lock recovery and the active direct-upload correction; no implementation is claimed yet.'
+  question: null
+- id: 'CHAT-GRADING-DIRECT-STUDENT-UPLOADS'
+  state: 'verification'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Grade ordinary student uploads directly and make mixed assignment/rubric file setup an explicit option.'
+  owns: ['src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/components/grading-chat/chatDirectFileIntake.ts', 'src/app/components/grading-chat/chatDirectFileIntake.test.ts', 'src/app/components/grading-chat/chatFileRoles.wiring.test.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatDirectFileIntake.test.ts src/app/components/grading-chat/chatFileRoles.wiring.test.ts src/app/components/grading-chat/GradingChatPanel.structure.test.ts src/app/components/grading-chat/useChatFileRoles.test.ts src/app/components/grading-chat/chatFileRoles.test.ts src/app/components/grading-chat/chatFileRoleDiagnostic.test.ts src/app/components/grading-chat/chatFileBatch.test.ts src/app/components/grading-chat/useContinuousGradingRun.headerEpoch.test.ts src/app/components/grading-chat/useContinuousGradingRun.lifecycle.test.ts src/app/components/grading-chat/video-w4.wiring.test.ts src/app/components/grading-chat/grading-chat-storage-keys.structure.test.ts src/file-size-ceiling.structure.test.ts src/source-bytes.structure.test.ts src/lib/no-emojis.test.ts'
+  blocked_by: []
+  instrument: 'Normal single, multiple and class ZIP uploads bypass role approval, retain admission limits and frozen setup, and dispatch once. Explicit mixed-setup mode retains role confirmation. Reset and concurrent input must not dispatch stale or duplicate batches.'
+  from: 'Owner 2026-10-27 objects to the approval flow imposed on uploaded grading-chat documents.'
+  note: 'Owner: coordinator. Independently SHIP round1. Ordinary single, multiple and class ZIP uploads use direct admission and existing grading transport with no role stage. Default-off Include assignment or rubric files preserves explicit mixed-file review. Synchronous latch, batch limits, captured frozen header, reset token, per-file continuation, label and Storage phase guards are covered through actual callbacks and driver. Independent fourteen-path test:paths passed260 tests; scoped lint clean. Root final integrated typecheck passed after a test-only mock typing correction; final five-path test:paths passed65 tests. Actual paid model submission remains unverified because automatic approval review requires explicit authorization. No student posting performed. Leverage is one captured setup reused across submissions without repetitive classification.'
+  question: null
 - id: 'CHAT-GRADING-SESSION-LOCK-RECOVERY'
   state: 'verification'
   kind: 'bug'
@@ -11,28 +47,28 @@
   note: 'Owner: coordinator. Independently SHIP final round2: accepted terminal previews clear even after an overlapping stage warning; refused and partial batches retain retry state. Current header exceptions become readable retryable refusals; canceled and superseded attempts cannot alter a newer session. Author five-path test:paths passed80 tests; independent final delta three paths passed37. Root project typecheck passed before the type-neutral final cleanup change; final byte/size/content gates passed25 tests. Live page opens and file entry is enabled, but an actual synthetic production grading request was blocked by automatic approval review pending explicit one-call authorization. No live grade or posting success is claimed. Separate remaining draft-retention and embedded-document picture findings remain open. No admitted supervisor store exists; manual-handoff assertion is unproven rather than fabricated.'
   question: null
 - id: 'CHAT-DOCUMENT-EMBEDDED-PICTURES'
-  state: 'actionable'
+  state: 'verification'
   kind: 'bug'
   area: 'repo-grader-workflow'
   title: 'Preserve and evaluate pictures embedded in student documents across grading-chat transports.'
-  owns: []
-  verify: null
+  owns: ['src/lib/grade/document-visual-schema.ts', 'src/lib/grade/document-visuals.ts', 'src/lib/grade/document-visuals.test.ts', 'src/lib/grade/types.ts', 'src/lib/grade/single-file-entry.ts', 'src/lib/grade/inline-visuals.ts', 'src/lib/grade/engine.ts', 'src/lib/grade/grade-item-diagnostic.ts', 'src/lib/grade/grade-item-diagnostic.test.ts', 'src/app/components/grading/incrementalRunPlan.ts', 'src/app/components/grading-chat/chatGradeDetail.ts', 'src/app/components/grading-chat/chatGradeDetail.test.ts', 'src/app/api/grade-run-item/route.ts', 'src/app/api/grade-submission-file/route.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/grade/document-visuals.test.ts src/lib/grade/inline-visuals.test.ts src/lib/grade/single-file-entry.test.ts src/lib/grade/grade-item-diagnostic.test.ts src/lib/grade/engine.diagnostic.test.ts src/app/components/grading/incrementalRunPlan.test.ts src/app/api/grade-submission-file/route.test.ts src/app/api/grade-run-item/route.test.ts src/app/api/grade-run-item/route.diagnostic.test.ts src/app/api/grade-run-item/route.videoref.test.ts src/app/components/grading-chat/chatGradeDetail.test.ts src/lib/session-diagnostic-log.test.ts src/file-size-ceiling.structure.test.ts src/source-bytes.structure.test.ts src/lib/canvas-client-boundary.runtime-graph.test.ts src/lib/office-edit.zip-caps.test.ts src/lib/office-extract.zip-caps.test.ts src/lib/zip-caps.office.test.ts src/lib/no-emojis.test.ts'
   blocked_by: []
   instrument: 'Synthetic document fixtures must reach the actual model request with bounded visual parts through small, stored and image-only document intake. Missing visual access must be explicit rather than treated as missing student evidence.'
   from: 'Owner 2026-10-27: pictures submitted inside documents are not recognized during grading.'
-  note: 'Owner: coordinator. Initial source diagnosis finds existing small-DOCX visual extraction, but stored large-file intake is text-only and image-only documents may be refused before visual extraction. Confirm exact seams and preserve budgets before implementation. Urgent live grading-session lock recovery is foreground.'
+  note: 'Owner: coordinator. Independently SHIP round1 with fourteen reviewed hashes and seven-path test:paths131 tests, including41 actual request cases. Bounded DOCX/PPTX picture payload stays on the original file, survives small and stored transports, accepts supported image-only documents and reaches captured model requests. Known omitted or failed in-scope visual inspection produces explicit ungraded remediation before any model call, rather than a false missing-evidence deduction. Wire budgets, nested validation, privacy-safe coverage/count diagnostics and JSON/CSV are tested. Author nineteen-path command passed349 tests; scoped lint clean and isolated semantic mutations were killed with clean controls. Archive image-only admission remains a separate row. DOC/PPT/XLSX/XLS/ODT/ODP/ODS/RTF visual inspection, VML, headers/footers, charts and faithful rendering remain unsupported; readable legacy text grading is preserved with disclosure. No live provider interpretation or real student-document/browser proof is claimed.'
   question: null
 - id: 'WALKTHROUGH-MULTIPLE-DIRECT-TEMPLATE-SLOTS'
-  state: 'actionable'
+  state: 'verification'
   kind: 'feature'
   area: 'rich-text-copy-fidelity'
   title: 'Expose multiple editable announcement-template text slots directly in the From a walkthrough view.'
-  owns: []
-  verify: null
+  owns: ['src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx', 'src/app/components/walkthrough-announcement/AnnouncementLibrary.tsx', 'src/app/components/walkthrough-announcement/announcement-library-flow.structure.test.ts', 'src/app/components/walkthrough-announcement/announcement-library.structure.test.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/walkthrough-announcement/announcement-library-flow.structure.test.ts src/app/components/walkthrough-announcement/announcement-library.structure.test.ts src/app/components/walkthrough-announcement/announcement-library-controller.test.ts'
   blocked_by: []
   instrument: 'Rendered walkthrough view must allow adding, labeling and editing multiple template text slots, autosave each through the existing library, and use saved selections in the lower drafts without replacing generated drafts until explicit regeneration.'
   from: 'Owner 2026-10-27: multiple text slots for announcement templates directly on From a walkthrough.'
-  note: 'Owner: coordinator. Reuse existing announcement exemplar library and autosave rather than introduce competing persistence. Scope current visible wiring and discoverability. Urgent live grading-session lock recovery is foreground.'
+  note: 'Owner: coordinator. Independently SHIP round1, seven-path test:paths129 tests and reviewed frozen hashes. The single existing library is directly mounted before video upload, outside setup disclosures, with Add template slot and separate label/text editors. Existing autosave, recovery, departure guards and saved-only draft selectors remain unchanged. No new persistence, migration or provider path. Actual browser visibility/focus/live autosave and reload remain coordinator verification obligations; source tests render no component. Leverage is reusable saved instructor templates feeding lower drafts without repasting.'
   question: null
 - id: 'CHAT-GRADING-SPLIT-SCREEN'
   state: 'verification'

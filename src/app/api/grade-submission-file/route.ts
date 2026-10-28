@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: UNREADABLE_MESSAGE }, { status: 422 });
   }
   const entry = label.length > 0 ? { ...built, student: label, studentNameSource: "filename" as const } : built;
-  if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) {
+  if (Math.max(estimateNeededWireBytes(entry), new TextEncoder().encode(JSON.stringify({ entry })).byteLength) > ITEM_REQUEST_BYTE_BUDGET) {
     return NextResponse.json({ error: TEXT_TOO_LARGE_MESSAGE }, { status: 413 });
   }
   return NextResponse.json({ entry }, { status: 200 });

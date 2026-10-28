@@ -72,6 +72,12 @@ describe("chatGradeDetail: grade_item projection (AC-11, AC-12)", () => {
 });
 
 describe("chatGradeDetail: PII by construction (AC-13)", () => {
+  it("document coverage accepts only closed tokens and count keys through the session backstop", () => {
+    const success = buildGradeItemDetail({}, { picturesPrepared: 2, picturesSent: 2, picturesOmitted: 0, visualCoverage: "complete", imageBytes: "private" });
+    expect(success).toEqual({ picturesPrepared: 2, picturesSent: 2, picturesOmitted: 0, visualCoverage: "complete" });
+    expect(sanitizeSessionDiagnosticDetail(success)).toEqual(success);
+    expect(readServerDiagnostic({ visualCoverage: "private-name", picturesPrepared: -1, picturesSent: "private", picturesOmitted: Infinity })).toEqual({});
+  });
   it("canaries in every untrusted slot never reach the stored detail", () => {
     const hostile = "ZZ_CANARY_STUDENT";
     const bag = buildGradeItemDetail(

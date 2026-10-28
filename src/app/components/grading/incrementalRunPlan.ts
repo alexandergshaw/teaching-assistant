@@ -93,6 +93,7 @@ export interface ArrivedItemResult {
  * encoded yet).
  */
 export function estimateEntryWireBytes(entry: StudentSubmissionEntry): number {
+  if (entry.submittedFiles.some(f => f.documentVisuals)) return new TextEncoder().encode(JSON.stringify(entry)).byteLength;
   let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
   for (const file of entry.submittedFiles) {
     if (file.rawBase64) total += file.rawBase64.length;
@@ -121,10 +122,14 @@ export function graderReadsFileBytes(mimeType: string | undefined): boolean {
  * rawBase64 and skips a truncated candidate that has none.
  */
 function fileNeedsRawBytes(file: SubmittedFileInfo): boolean {
+  // Prepared Office pictures replace the container; UI text preview truncation
+  // does not make a DOCX/PPTX a runnable code file.
+  if (file.documentVisuals && (file.extension === "docx" || file.extension === "pptx")) return false;
   return graderReadsFileBytes(file.mimeType) || file.previewTruncated;
 }
 
 export function estimateNeededWireBytes(entry: StudentSubmissionEntry): number {
+  if (entry.submittedFiles.some(f => f.documentVisuals)) return new TextEncoder().encode(JSON.stringify(stripUnneededRawBase64(entry))).byteLength;
   let total = entry.content.length + (entry.repositoryInventories ? new TextEncoder().encode(JSON.stringify(entry.repositoryInventories)).byteLength : 0);
   for (const file of entry.submittedFiles) {
     if (file.rawBase64 && fileNeedsRawBytes(file)) total += file.rawBase64.length;

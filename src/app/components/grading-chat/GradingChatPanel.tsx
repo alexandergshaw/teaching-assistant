@@ -29,6 +29,7 @@ import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
 import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
 import { ChatFileRolePreview } from "./ChatFileRolePreview";
 import { useChatFileRoles } from "./useChatFileRoles";
+import { createDirectFileIntake } from "./chatDirectFileIntake";
 import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT, LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX } from "@/lib/grade/length-deduction-policy";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
@@ -307,6 +308,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [applyNamingDeduction, setApplyNamingDeduction] = useState(true);
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
+  const directIntake = useRef(createDirectFileIntake());
+  const [includeSetupFiles, setIncludeSetupFiles] = useState(false);
+  const [directPreparing, setDirectPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [zipPhase, setZipPhase] = useState<"uploading" | "preparing" | null>(null);
@@ -417,6 +421,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     ) {
       return;
     }
+    directIntake.current.cancel();
+    setIncludeSetupFiles(false);
+    setDirectPreparing(false);
+    setPreparing(false);
+    setZipPhase(null);
     driver.reset();
     if (setupRef.current) setupRef.current.open = true;
     roleIntake.cancel();
@@ -541,14 +550,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // real guarantees.
   const submitStoragedZip = async (file: File, current: () => boolean): Promise<SubmitOutcome> => {
     if (!user) return { kind: "refused", reason: "You must be signed in to upload a zip." };
-    setZipPhase("uploading");
+    if (current()) setZipPhase("uploading");
     try {
       const uploaded = await uploadGradingZip(supabase.storage, user.id, file);
       if (!uploaded.ok) {
         safeIntake(() => recordIntakeGate({ stage: "upload", file, transport: "storage", rawReason: uploaded.message }));
         return { kind: "refused", reason: uploaded.message };
       }
-      setZipPhase("preparing");
+      if (current()) setZipPhase("preparing");
       try {
         if (!current()) { await deleteGradingZipBestEffort(supabase.storage, uploaded.storagePath); return { kind: "refused", reason: "File intake was canceled." }; }
         const outcome = await driver.submit({ kind: "storaged-zip", storagePath: uploaded.storagePath, name: file.name });
@@ -559,13 +568,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         throw err;
       }
     } finally {
-      setZipPhase(null);
+      if (current()) setZipPhase(null);
     }
   };
   // LARGE-SINGLE-FILE W2: a large office/text file goes to Storage, then the
   // driver's storaged-file submit (the server extracts it to a text-only entry).
   const submitStoragedSingleFile = async (file: File, label: string | undefined, current: () => boolean): Promise<SubmitOutcome> => {
-    setZipPhase("uploading");
+    if (current()) setZipPhase("uploading");
     try {
       return await submitStoragedFile({
         file,
@@ -573,10 +582,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         userId: user?.id ?? null,
         storage: supabase.storage,
         submit: (input) => current() ? driver.submit(input) : Promise.resolve({ kind: "refused", reason: "File intake was canceled." }),
-        onUploaded: () => setZipPhase("preparing"),
+        onUploaded: () => { if (current()) setZipPhase("preparing"); },
       });
     } finally {
-      setZipPhase(null);
+      if (current()) setZipPhase(null);
     }
   };
   const handleConfirmedFiles = async (files: File[], label: string | undefined, current: () => boolean): Promise<SubmitOutcome[]> => {
@@ -637,7 +646,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     start: (setup, current) => ensureSession(undefined, setup, current),
     submit: async (file, label, current) => (await handleConfirmedFiles([file], label, current))[0],
     applySetup: (setup) => { setInstructions(setup.instructions); setRubric(setup.rubric); } });
-  const handleSubmitFiles = (files: File[], label?: string) => { roleIntake.stage(files, label); };
+  const handleSubmitFiles = (files: File[], label?: string) => {
+    const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving" || roleIntake.isPending();
+    if (includeSetupFiles && !blocked) { roleIntake.stage(files, label); return; }
+    return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
+      setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
+        lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
+      start: (setup, current) => ensureSession(undefined, setup, current), submit: handleConfirmedFiles });
+  };
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
   const handleConfirmSplit = () => { if (roleIntake.isPending()) { setSubmitError("Finish or cancel the file preview before grading this recording."); return; } reportSplitOutcome(driver.confirmRecordingSplit()); };
@@ -706,11 +722,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       }
     >
       <div ref={sessionActionsRef} className={chatStyles.sessionActions}>
-        <Button variant="outlined" size="small" disabled={preparing} onClick={handleNewSession}
-          aria-describedby={preparing ? "grading-chat-new-session-unavailable" : undefined}>
+        <Button variant="outlined" size="small" disabled={preparing && !directPreparing} onClick={handleNewSession}
+          aria-describedby={preparing && !directPreparing ? "grading-chat-new-session-unavailable" : undefined}>
           New session
         </Button>
-        {preparing && (
+        {preparing && !directPreparing && (
           <span id="grading-chat-new-session-unavailable" className={styles.ghMeta}>
             Finish preparing the current submission before starting a new session.
           </span>
@@ -949,6 +965,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
         <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
         <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
+        <label>
+          <input type="checkbox" checked={includeSetupFiles} disabled={busy || preparing || roleIntake.pending}
+            onChange={(event) => { if (!directIntake.current.isPending() && !roleIntake.isPending() && !preparing && !busy) setIncludeSetupFiles(event.target.checked); }} />
+          Include assignment or rubric files
+        </label>
+        <p className={styles.ghMeta}>Unchecked: grade every file as a student submission. Checked: review file roles before grading.</p>
         <ChatFileRolePreview intake={roleIntake} />
       </div>
       <div className={chatStyles.stickyComposer}>

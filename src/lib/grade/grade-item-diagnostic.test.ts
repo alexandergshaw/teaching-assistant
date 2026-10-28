@@ -55,6 +55,7 @@ describe("buildGradeItemDiagnostic", () => {
       model: "m1",
       calls: [{ promptTokens: 1, outputTokens: 1, elapsedMs: 1, finishReason: "STOP" }],
       failure: "unclassified",
+      picturesPrepared: 1, picturesSent: 1, picturesOmitted: 0, visualCoverage: "complete",
     });
     for (const k of Object.keys(d)) expect(GRADE_ITEM_DIAGNOSTIC_KEYS as readonly string[]).toContain(k);
     expect(Object.keys(d).sort()).toEqual([...GRADE_ITEM_DIAGNOSTIC_KEYS].sort());

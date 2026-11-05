@@ -61,6 +61,20 @@ export interface LlmRequest {
   webSearch?: boolean;
 }
 
+/** Server-owned budget for model work that cannot safely replay a dispatch. */
+export interface LlmExecutionPolicy {
+  readonly deadlineMs: number;
+  readonly signal?: AbortSignal;
+  readonly pinnedGemini?: Readonly<{ model: string; onDispatch: () => void }>;
+}
+
+export class LlmOutcomeUnknownError extends Error {
+  constructor() {
+    super("The model request may have completed, but its outcome is unknown.");
+    this.name = "LlmOutcomeUnknownError";
+  }
+}
+
 /**
  * True for Gemini 3.x model names (gemini-3, gemini-3-flash,
  * gemini-3.1-flash-lite, gemini-3.1-pro-preview, ...), false for gemini-2.5.x,
@@ -204,9 +218,11 @@ export interface LlmUsage {
  * actually succeeded took," not "how long this invocation took including
  * throttling."
  */
+type LlmFailure = { ok: false; status: number; body: string; outcome?: "unknown" };
+
 export type LlmResult =
   | { ok: true; text: string; sources?: Source[]; finishReason?: string; usage?: LlmUsage; elapsedMs?: number }
-  | { ok: false; status: number; body: string };
+  | LlmFailure;
 
 /**
  * Result of an image-generation call (generateGeminiImage). Three shapes,
@@ -381,15 +397,19 @@ export function parseUsageMetadata(data: unknown): LlmUsage | undefined {
 
 export async function callLlm(
   req: LlmRequest,
-  provider: LlmProvider = DEFAULT_PROVIDER
+  provider: LlmProvider = DEFAULT_PROVIDER,
+  execution?: LlmExecutionPolicy
 ): Promise<LlmResult> {
+  if (execution?.pinnedGemini && provider !== "gemini") {
+    return { ok: false, status: 0, body: "Configured model provider changed before dispatch." };
+  }
   // Generic text generation always uses Gemini. The Course Engine ("other")
   // provider does not implement this generic interface — it is wired per-feature
   // at the action level (schedule / lecture / materials). Any call that reaches
   // here with "other" is an unmatched feature, which transparently falls back to
   // Gemini rather than failing.
   void provider;
-  return callGemini(req);
+  return callGemini(req, execution);
 }
 
 // Transport hardening. Features such as lecture-plan generation fan out many
@@ -446,6 +466,78 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
   return exp + Math.floor(Math.random() * 400);
 }
 
+type GenerateContentResult = { ok: true; data: unknown } | LlmFailure;
+
+// These response codes explicitly reject the request. A gateway timeout or
+// server error can arrive after the model accepted it.
+const REFUSED_MODEL_STATUS = new Set([400, 401, 403, 404, 413, 415, 422, 429]);
+const MAX_ABORT_DELAY_MS = 2_147_483_647;
+
+function modelOutcomeUnknown(status: number): LlmFailure {
+  return { ok: false, status, body: "Model outcome unknown.", outcome: "unknown" };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasGeminiResponseEnvelope(data: unknown): boolean {
+  if (!isJsonObject(data)) return false;
+  const { candidates, promptFeedback } = data;
+  if (candidates === undefined || (Array.isArray(candidates) && candidates.length === 0)) {
+    return isJsonObject(promptFeedback) && typeof promptFeedback.blockReason === "string";
+  }
+  if (!Array.isArray(candidates) || !isJsonObject(candidates[0])) return false;
+
+  const { content, finishReason } = candidates[0];
+  if (content === undefined) return typeof finishReason === "string";
+  if (!isJsonObject(content)) return false;
+  const { parts } = content;
+  if (parts === undefined) return typeof finishReason === "string";
+  return Array.isArray(parts) && parts.every((part: unknown) =>
+    isJsonObject(part) && (part.text === undefined || typeof part.text === "string")
+  );
+}
+
+async function postGenerateContentOnce(
+  url: string,
+  request: RequestInit,
+  execution: LlmExecutionPolicy,
+): Promise<GenerateContentResult> {
+  const remaining = execution.deadlineMs - Date.now();
+  if (
+    !Number.isSafeInteger(remaining) ||
+    remaining <= 0 ||
+    remaining > MAX_ABORT_DELAY_MS ||
+    execution.signal?.aborted
+  ) {
+    return { ok: false, status: 0, body: "Model request stopped before dispatch." };
+  }
+
+  const deadline = AbortSignal.timeout(remaining);
+  const signal = execution.signal ? AbortSignal.any([deadline, execution.signal]) : deadline;
+  execution.pinnedGemini?.onDispatch();
+  try {
+    const response = await fetch(url, { ...request, signal, redirect: "error" });
+    if (REFUSED_MODEL_STATUS.has(response.status)) {
+      // The status is sufficient. Discard the provider body and its contents.
+      void response.body?.cancel().catch(() => undefined);
+      return { ok: false, status: response.status, body: "Model request refused." };
+    }
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      return modelOutcomeUnknown(response.status);
+    }
+    const data: unknown = await response.json();
+    return hasGeminiResponseEnvelope(data)
+      ? { ok: true, data }
+      : modelOutcomeUnknown(response.status);
+  } catch {
+    // A local abort or lost response cannot establish provider termination.
+    return modelOutcomeUnknown(0);
+  }
+}
+
 /**
  * Shared low-level transport for a Gemini `:generateContent` call: builds the
  * URL, retries rate-limit/5xx/network failures with backoff (see the block
@@ -460,10 +552,17 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
  */
 async function postGenerateContent(
   model: string,
-  body: string
-): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
+  body: string,
+  execution?: LlmExecutionPolicy,
+): Promise<GenerateContentResult> {
   const apiKey = getGeminiApiKey();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  };
+  if (execution) return postGenerateContentOnce(url, request, execution);
 
   let lastResult: { ok: false; status: number; body: string } = {
     ok: false,
@@ -476,11 +575,7 @@ async function postGenerateContent(
 
     let response: Response;
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
+      response = await fetch(url, request);
     } catch (err) {
       if (isAbortError(err)) {
         // Our own deadline fired (or a caller cancelled this call). This is
@@ -513,7 +608,7 @@ async function postGenerateContent(
   return lastResult;
 }
 
-async function callGemini(req: LlmRequest): Promise<LlmResult> {
+async function callGemini(req: LlmRequest, execution?: LlmExecutionPolicy): Promise<LlmResult> {
   // Y6 (docs/reply-resource-search-yield-acceptance-criteria.md): a
   // webSearch request may use a different model - the lite default is the
   // most tool-shy tier for actually deciding to run Google Search (see
@@ -524,6 +619,11 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
   // getGeminiSearchModel() falls back to getGeminiModel(), so every request
   // is byte-identical to before this existed.
   const model = req.webSearch ? getGeminiSearchModel() : getGeminiModel();
+  if (execution?.pinnedGemini && (
+    model !== execution.pinnedGemini.model || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(model)
+  )) {
+    return { ok: false, status: 0, body: "Configured model changed or is invalid before dispatch." };
+  }
 
   // Gemini 3 generation config normalization. Two vendor facts drive this:
   // (1) Google's Gemini 3 guide recommends leaving temperature at its 1.0
@@ -560,7 +660,7 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
   // every 200 response already — nothing extra is requested here, and the
   // measurement costs zero.
   const startedAt = Date.now();
-  const result = await postGenerateContent(model, body);
+  const result = await postGenerateContent(model, body, execution);
   const elapsedMs = Date.now() - startedAt;
   if (!result.ok) {
     return result;

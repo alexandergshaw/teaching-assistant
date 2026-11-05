@@ -8,7 +8,7 @@ afterEach(cleanupSupervisorFixtures);
 describe('automatic supervisor',()=>{
  it('drives real subprocess roles from unscoped selection to independently checked local delivery',async()=>{
   const f=await supervisorFixture();const result=await drive(f.store,f.config,f.selection);const state=await f.store.load();
-  expect(result.status.checkpoints).toEqual({});expect(state.items['fixture-item'].status).toBe('shipped');expect(await readFile(path.join(f.workspace,'output.txt'),'utf8')).toBe('done');
+  expect(result.status.checkpoints['fixture-item']).toContain('independent live verification');expect(state.items['fixture-item'].status).toBe('regression-passed');expect(await readFile(path.join(f.workspace,'output.txt'),'utf8')).toBe('done');
   const roles=result.status.jobs.map(j=>j.task.role);expect(roles).toEqual(['specialist','checker','criteria','checker','architect','checker','planner','checker','test-designer','checker','implementer','checker','implementer','checker','verifier','checker','specialist','checker','finalizer','checker']);
   expect(new Set(result.status.jobs.map(j=>j.worker.context)).size).toBe(20);expect(Object.values(state.evidence).every(e=>e.exitCode===0)).toBe(true);
  },180_000);

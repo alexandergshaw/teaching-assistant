@@ -1,5 +1,6 @@
 import type { NextAction, NextActionsFunction } from './dispatch-types';
 import { actionKey, activityId, checkedPlan, taskFor, validatePlanScope } from './workflow';
+import { isLiveComplete } from './live-verification';
 
 export const nextActions: NextActionsFunction = (state,journal,context) => {
   const item = state.items[context.selection.id];
@@ -8,10 +9,11 @@ export const nextActions: NextActionsFunction = (state,journal,context) => {
   if (inbox) return [{kind:'import-inbox',key:inbox.actionKey,job:inbox.id}];
   if (Object.values(journal.jobs).some(j => ['prepared','pending','running','unknown'].includes(j.status))) return terminal('blocked','Outstanding launch requires observation or explicit owner recovery');
   if (Object.values(journal.jobs).some(j => j.item === context.selection.id && j.status === 'rejected' && !j.rejection?.startsWith('retryable-execution:'))) return terminal('blocked',journal.checkpoints[context.selection.id] ?? 'Rejected launch requires explicit reconciliation or corrected manual continuation');
+  if (item && isLiveComplete(state,item)) return terminal('complete','Independent live verification recorded');
+  if (item?.status === 'regression-passed' || item?.status === 'shipped') return terminal('owner-needed','Source acceptance recorded; independent live verification requires an authorized observation workflow');
   if (state.runStatus !== 'running') return terminal('blocked',`Run ${state.runStatus}`);
   if (context.now > context.config.budget.deadline || context.now > state.policy.deadline) return terminal('blocked','Dispatch deadline exhausted');
   if (!item) return [{kind:'bootstrap',key:actionKey(context.selection,context.config),selection:context.selection}];
-  if (item.status === 'shipped') return terminal('complete','Local delivery recorded');
   if (item.needs.length) return terminal('blocked',item.needs.join('; '));
   if (Object.values(state.assignments).some(a => a.status !== 'finished' && !a.reconciled)) return terminal('blocked','Existing manual or uncertain assignment retains locks; finish or reconcile it');
   const owner = Object.values(state.activities).find(a => a.item === item.id && (a.status === 'owner-needed' || a.status === 'withdrawn'));
@@ -57,9 +59,5 @@ export const nextActions: NextActionsFunction = (state,journal,context) => {
   }
   if (item.status === 'implemented') return activity('verification') ?? advance('verified',['verification']);
   if (item.status === 'verified') return activity('whole-change-review') ?? activity('final-report') ?? advance('regression-passed',['final-report']);
-  if (item.status === 'regression-passed') {
-    if (!context.config.grant.allowLocalDelivery) return terminal('blocked','Owner local-delivery grant required');
-    return advance('shipped',['final-report']);
-  }
   return terminal('blocked','Unsupported workflow state');
 };

@@ -1,9 +1,17 @@
-import type { Activity, Artifact, Assignment, Context, Decision, Envelope, Evidence, FinalReport, Item, ItemStatus, LoopState, Operation, VerificationReport, Worker } from './types';
+import type { Activity, Artifact, Assignment, Context, Decision, Envelope, Evidence, FinalReport, Item, ItemStatus, LiveReport, LoopState, Operation, VerificationReport, Worker } from './types';
 import { validateContext, validateEvent, validatePolicy, validateState } from './validation';
 import { continuePolicy } from './policy-continuation';
+import { isLiveComplete, liveActivity, liveKind, matchesLiveContract, qualifyingLiveArtifact } from './live-verification';
+import { assertLiveReportDirectory, configureLiveRecovery, isHistoricalLiveInput } from './live-recovery';
 
 export function createState(policy: unknown): LoopState {
-  return { schemaVersion: 1, revision: 0, policy: validatePolicy(policy), runStatus: 'running', items: {}, activities: {}, assignments: {}, artifacts: {}, evidence: {}, decisions: {}, operations: {}, verificationReports: {}, finalReports: {}, events: [] };
+  const checked = validatePolicy(policy);
+  if (checked.artifactDirectory) {
+    const directory = safePath(checked.artifactDirectory);
+    requireThat(!directory.split('/').includes('.git') && checked.candidateExclusions.some(root =>
+      directory === safePath(root) || directory.startsWith(`${safePath(root)}/`)), 'manual artifact directory must be a generated candidate exclusion outside Git metadata');
+  }
+  return { schemaVersion: 1, revision: 0, policy: checked, runStatus: 'running', items: {}, activities: {}, assignments: {}, artifacts: {}, evidence: {}, decisions: {}, operations: {}, verificationReports: {}, finalReports: {}, events: [] };
 }
 export const equal = (a: unknown, b: unknown): boolean => {
   if (a === b) return true;
@@ -32,7 +40,7 @@ export function currentEvidence(s: LoopState, id: string, c: Context): Evidence 
 function liveAssignment(s: LoopState, id: string, c: Context): Assignment {
   const a = s.assignments[id]; requireThat(a && a.status === 'running', `assignment fenced or missing: ${id}`);
   requireThat(c.now <= a.deadline && c.now <= s.policy.deadline && a.policyHash === c.candidate.policyHash, 'assignment budget or policy stale');
-  for (const [id, hash] of Object.entries(a.inputs)) requireThat(currentArtifact(s,id,c).hash === hash, 'assignment input stale');
+  for (const [id, hash] of Object.entries(a.inputs)) requireThat(isHistoricalLiveInput(s,a.item,a.activity,id,hash) || currentArtifact(s,id,c).hash === hash, 'assignment input stale');
   return a;
 }
 function owner(s: LoopState, e: Envelope): void { requireThat(e.actor === s.policy.owner,'owner authority required'); }
@@ -43,20 +51,24 @@ function noCycles(map: Record<string,{ dependencies: string[] }>): void {
   function visit(id: string): void { if (visited.has(id)) return; requireThat(!visiting.has(id),'dependency cycle'); requireThat(map[id],`missing dependency ${id}`); visiting.add(id); for (const next of map[id].dependencies) visit(next); visiting.delete(id); visited.add(id); }
   Object.keys(map).forEach(visit);
 }
-export function assignmentBlockers(s: LoopState, item: Item, c: Context): string[] {
+export function assignmentBlockers(s: LoopState, item: Item, c: Context, activity?: Activity): string[] {
   const out: string[] = [];
   if (s.runStatus !== 'running') out.push(`run ${s.runStatus}`);
   if (c.now > s.policy.deadline) out.push('run deadline exhausted');
   if (Object.keys(s.assignments).length >= s.policy.maxAssignments) out.push('assignment budget exhausted');
   if (item.needs.length) out.push(...item.needs);
-  if (item.status === 'shipped') out.push('already shipped');
-  if (item.dependencies.some(d => s.items[d]?.status !== 'shipped')) out.push('item dependencies unsettled');
+  const recovering = activity?.id === liveActivity(item.id) && Boolean(s.liveContracts?.[item.id]);
+  if (isLiveComplete(s,item)) out.push('already shipped');
+  else if (['regression-passed','shipped'].includes(item.status) && !recovering) out.push('source accepted; only canonical live verification may continue');
+  if (!recovering && item.dependencies.some(d => !isLiveComplete(s,s.items[d]))) out.push('item dependencies unsettled');
   const active = Object.values(s.assignments).filter(a => a.status !== 'finished' && !a.reconciled);
   if (active.length >= s.policy.concurrency) out.push('concurrency exhausted');
   for (const a of active) if (overlaps(item.affectedPaths,a.affectedPaths) || item.dependencies.includes(a.item) || s.items[a.item].dependencies.includes(item.id)) out.push(`locked/dependent assignment ${a.id}`);
   if (Object.values(s.activities).some(a => a.item === item.id && a.status === 'owner-needed')) out.push('owner disposition required');
   for (const artifact of Object.values(s.artifacts).filter(a => a.acceptedHash && s.activities[a.activity].item === item.id)) {
-    try { currentArtifact(s,artifact.id,c); } catch { out.push(`accepted artifact stale: ${artifact.id}`); }
+    if (!recovering || artifact.activity === activity?.id) {
+      try { currentArtifact(s,artifact.id,c); } catch { out.push(`accepted artifact stale: ${artifact.id}`); }
+    }
   }
   return out;
 }
@@ -90,15 +102,18 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
   requireThat(Number.isSafeInteger(c.now) && c.now >= 0,'context time invalid');
   switch (event.type) {
     case 'policy.continue': continuePolicy(s,event,c); break;
+    case 'live.configure': configureLiveRecovery(s,event,c,safePath); break;
     case 'item.create': {
       const item = p as unknown as Omit<Item,'status'|'needs'|'escalation'>; unique(s.items,item.id);
       requireThat(item.criteria.length > 0 && new Set(item.criteria).size === item.criteria.length,'unique nonempty criteria required');
       item.affectedPaths.forEach(safePath); requireThat(new Set(item.affectedPaths.map(safePath)).size === item.affectedPaths.length,'case-colliding paths');
+      if (s.policy.artifactDirectory) requireThat(!overlaps(item.affectedPaths,[s.policy.artifactDirectory]),'generated manual artifacts must remain outside item source paths');
       requireThat(item.requiredGates.every(g => s.policy.gates[g]),'unknown required gate');
       s.items[item.id] = { ...item, status: 'queued', needs: [], escalation: null }; noCycles(s.items); break;
     }
     case 'activity.create': {
       const a = p as unknown as Omit<Activity,'status'|'rounds'|'authors'|'reviews'>; unique(s.activities,a.id); requireThat(s.items[a.item],'missing item');
+      requireThat(a.kind !== liveKind && a.id !== liveActivity(a.item),'live activity requires owner-configured observation contract');
       requireThat(a.requirements.length > 0 && a.requirements.every(r => s.items[a.item].criteria.includes(r)),'activity requirements outside item');
       requireThat(!Object.values(s.activities).some(x => x.item === a.item && x.kind === a.kind && x.requirements.some(r => a.requirements.includes(r))),'semantic activity already exists; review budget cannot reset');
       s.activities[a.id] = { ...a,status:'open',rounds:0,authors:[],reviews:[] }; noCycles(s.activities); break;
@@ -124,19 +139,38 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
       const a = p as unknown as Omit<Assignment,'baseline'|'policyHash'|'publicationToken'|'status'|'reconciled'|'reason'>;
       unique(s.assignments,a.id); const item = s.items[a.item], activity = s.activities[a.activity];
       requireThat(item && activity?.item === a.item,'assignment parent mismatch');
-      const blockers = assignmentBlockers(s,item,c).filter(reason => a.role === 'transcriber' && reason === 'owner disposition required' ? false : true); requireThat(!blockers.length,blockers.join('; '));
+      const blockers = assignmentBlockers(s,item,c,activity).filter(reason => a.role === 'transcriber' && reason === 'owner disposition required' ? false : true); requireThat(!blockers.length,blockers.join('; '));
       requireThat(activity.dependencies.every(d => s.activities[d].status === 'accepted'),'activity dependencies unsettled');
       requireThat(a.deadline > c.now && a.deadline <= s.policy.deadline,'assignment deadline outside budget');
       requireThat(a.allowedActions.every(x => s.policy.allowedActions.includes(x)),'action outside policy');
       const allocation = c.artifactAllocation;
       if (allocation) { safePath(allocation.directory); allocation.paths.forEach(safePath); requireThat(allocation.paths.every(file => safePath(file).startsWith(`${safePath(allocation.directory)}/`)) && s.policy.candidateExclusions.some(root => safePath(allocation.directory) === safePath(root) || safePath(allocation.directory).startsWith(`${safePath(root)}/`)),'artifact allocation outside excluded generated directory'); }
-      requireThat(a.writePaths.every(x => a.affectedPaths.includes(x)) && a.affectedPaths.every(x => item.affectedPaths.includes(x) || allocation?.paths.includes(x)),'assignment scope outside item');
+      const liveDirectory = activity.kind === liveKind && s.liveContracts?.[item.id]?.reportDirectory;
+      if (liveDirectory) assertLiveReportDirectory(s.policy,liveDirectory,safePath);
+      const livePath = (file: string) => Boolean(liveDirectory && safePath(file).startsWith(`${safePath(liveDirectory)}/`));
+      requireThat(a.writePaths.every(x => a.affectedPaths.includes(x)) && a.affectedPaths.every(x => item.affectedPaths.includes(x) || allocation?.paths.includes(x) || livePath(x)),'assignment scope outside item');
       [...a.writePaths,...a.affectedPaths].forEach(safePath);
       requireThat(!a.writePaths.length || a.allowedActions.includes('write'),'write permission missing');
+      if (activity.kind === liveKind) {
+        owner(s,event);
+        const source = s.liveContracts?.[item.id]?.source;
+        requireThat(source && Object.keys(a.inputs).length === 1 && isHistoricalLiveInput(s,item.id,activity.id,source.artifact,a.inputs[source.artifact]),'live assignment must bind the historical source final artifact');
+        requireThat(a.allowedActions.every(action => action === 'write' || action === 'review'),'live assignment has report-write and review authority only');
+        requireThat(activity.status === 'open' && activity.rounds < 2,'live review budget exhausted');
+        if (a.role === 'verifier') {
+          requireThat(a.deliverables.length === 1 && a.writePaths.length === 1 && a.writePaths.every(livePath),'live observer requires one generated report deliverable in the owner-authorized report directory');
+        } else {
+          requireThat(a.role === 'checker' && !a.writePaths.length && !a.deliverables.length,'live activity requires a verifier or read-only independent checker');
+          const report = Object.values(s.artifacts).filter(artifact => artifact.activity === activity.id).sort((x,y) => y.version-x.version)[0];
+          requireThat(report && s.liveReports?.[report.id] && s.assignments[report.assignment]?.status === 'finished','observer must finish the imported live report before checker admission');
+          currentArtifact(s,report.id,c,false);
+        }
+      }
       if (a.role === 'checker') { independent(a.worker,activity.authors); requireThat(activity.rounds < 2 && activity.status === 'open','substantive review budget exhausted'); }
       if (a.role === 'verifier') independent(a.worker,[...Object.values(s.assignments).filter(x => x.item === a.item && x.role === 'implementer').map(x => x.worker),...Object.values(s.artifacts).filter(x => s.activities[x.activity].item === a.item && s.activities[x.activity].kind === 'implementation').map(x => x.author)]);
-      for (const [id, hash] of Object.entries(a.inputs)) requireThat(currentArtifact(s,id,c).hash === hash,'input hash mismatch');
+      for (const [id, hash] of Object.entries(a.inputs)) requireThat(isHistoricalLiveInput(s,a.item,a.activity,id,hash) || currentArtifact(s,id,c).hash === hash,'input hash mismatch');
       for (const running of Object.values(s.assignments).filter(x => x.status !== 'finished' && !x.reconciled)) requireThat(!a.resources.some(r => running.resources.includes(r)) && !Object.keys(a.inputs).some(i => Object.hasOwn(running.inputs,i)), 'resource/shared-input conflict');
+      for (const running of Object.values(s.assignments).filter(x => x.status !== 'finished' && !x.reconciled)) requireThat(!overlaps(a.affectedPaths,running.affectedPaths), 'assignment path conflict');
       s.assignments[a.id] = { ...a, baseline:c.candidate,policyHash:c.candidate.policyHash,publicationToken:event.id,status:'running',reconciled:false,reason:null }; break;
     }
     case 'artifact.submit': {
@@ -144,7 +178,7 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
       requireThat(p.publicationToken === a.publicationToken,'publication token fenced'); unique(s.artifacts,artifact.id);
       requireThat(equal(c.artifacts[artifact.id],artifact),'artifact lacks observed IO bytes');
       requireThat(artifact.activity === a.activity && equal(artifact.author,a.worker),'artifact author/activity mismatch');
-      const roles: Record<string,string> = { scope:'specialist',criteria:'criteria',design:'architect',plan:'planner','test-design':'test-designer',implementation:'implementer',verification:'verifier','verification-report':'verifier','final-report':'finalizer' };
+      const roles: Record<string,string> = { scope:'specialist',criteria:'criteria',design:'architect',plan:'planner','test-design':'test-designer',implementation:'implementer',verification:'verifier','verification-report':'verifier','final-report':'finalizer',[liveKind]:'verifier' };
       const requiredRole = roles[s.activities[a.activity].kind];
       requireThat(!requiredRole || a.role === requiredRole || (a.role === 'transcriber' && s.activities[a.activity].status === 'owner-needed'),'artifact role/activity contract mismatch');
       if (s.activities[a.activity].kind === 'whole-change-review') independent(a.worker,Object.values(s.artifacts).filter(x => s.activities[x.activity].item === a.item && s.activities[x.activity].kind === 'implementation').map(x => x.author));
@@ -161,7 +195,7 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
       const dirty = new Set([artifact.activity]);
       let expanded = true;
       while (expanded) { expanded = false; for (const activity of Object.values(s.activities)) if (!dirty.has(activity.id) && (activity.dependencies.some(id => dirty.has(id)) || Object.values(s.artifacts).some(a => a.activity === activity.id && a.inputs.some(id => dirty.has(s.artifacts[id]?.activity))))) { dirty.add(activity.id); expanded = true; } }
-      for (const id of dirty) { const activity = s.activities[id]; activity.status = activity.rounds >= 2 ? 'owner-needed' : 'open'; s.items[activity.item].status = 'queued'; }
+      for (const id of dirty) { const activity = s.activities[id]; activity.status = activity.rounds >= 2 ? 'owner-needed' : 'open'; if (activity.kind !== liveKind) s.items[activity.item].status = 'queued'; }
       for (const a of Object.values(s.artifacts)) if (dirty.has(a.activity)) a.acceptedHash = null;
       for (const a of Object.values(s.assignments)) if (a.status === 'running' && (dirty.has(a.activity) || Object.keys(a.inputs).some(id => dirty.has(s.artifacts[id]?.activity)))) { a.status = 'cancelled'; a.publicationToken = `fenced:${event.id}`; a.reason = p.reason as string; }
       break;
@@ -171,6 +205,7 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
       const artifact = currentArtifact(s,p.artifact as string,c,false), activity = s.activities[artifact.activity];
       requireThat(a.activity === activity.id && activity.status === 'open' && activity.rounds < 2,'review budget exhausted'); independent(a.worker,activity.authors);
       requireThat(s.assignments[s.artifacts[artifact.id].assignment].status === 'finished','author ownership/deliverables not finalized');
+      if (activity.kind === liveKind) requireThat(s.liveReports?.[artifact.id],'imported live report required before independent review');
       requireThat(artifact.hash === p.hash && artifact.version === Math.max(...Object.values(s.artifacts).filter(x => x.activity === activity.id).map(x => x.version)),'review hash/version stale');
       requireThat(!activity.reviews.some(r => r.hash === artifact.hash),'same artifact already checked');
       const findings = p.findings as Activity['reviews'][number]['findings']; requireThat((p.verdict === 'clean') === (findings.length === 0),'verdict/findings mismatch');
@@ -203,6 +238,8 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
     case 'assignment.finish': {
       const a = liveAssignment(s,p.assignment as string,c); noOperations(s,a.id);
       requireThat(a.deliverables.every(id => s.artifacts[id]?.assignment === a.id),'required deliverables missing');
+      if (s.activities[a.activity].kind === liveKind && a.role === 'verifier') requireThat(a.deliverables.every(id => s.liveReports?.[id]),'immutable live report result must be imported before observer finish');
+      if (s.activities[a.activity].kind === liveKind && a.role === 'checker') requireThat(s.events.some(event => event.type === 'review.record' && event.payload.assignment === a.id),'independent live review must be recorded before checker finish');
       const changed = new Set([...Object.keys(a.baseline.files),...Object.keys(c.candidate.files)].filter(path => a.baseline.files[path] !== c.candidate.files[path]));
       requireThat([...changed].every(path => a.writePaths.includes(path)),'unowned candidate edit');
       requireThat(a.baseline.environmentHash === c.candidate.environmentHash && a.baseline.toolHash === c.candidate.toolHash,'assignment environment/tool stale');
@@ -240,18 +277,34 @@ export function applyEvent(state: LoopState, raw: unknown, context: Context): Lo
       requireThat(a.role === 'finalizer' && s.artifacts[id]?.assignment === a.id,'final report ownership required'); currentArtifact(s,id,c,false);
       requireThat(equal(c.finalReports?.[id],report),'final report bytes not observed'); verifyFinal(s,s.items[a.item],report,c); unique(s.finalReports,id); s.finalReports[id] = report; break;
     }
+    case 'live.record': {
+      const a = liveAssignment(s,p.assignment as string,c), id = p.artifact as string, report = p.report as LiveReport;
+      const item = s.items[a.item], contract = s.liveContracts?.[a.item];
+      requireThat(a.role === 'verifier' && a.activity === liveActivity(item.id) && s.artifacts[id]?.assignment === a.id,'live observer report ownership required');
+      requireThat(p.publicationToken === a.publicationToken,'live report publication token fenced');
+      currentArtifact(s,id,c,false);
+      requireThat(equal(c.liveReports?.[id],report),'live report bytes not observed');
+      requireThat(contract && matchesLiveContract(item,contract,report) && report.observedAt <= c.now,'live report fails owner observation contract or source binding');
+      s.liveReports ??= Object.create(null) as NonNullable<LoopState['liveReports']>;
+      unique(s.liveReports,id); s.liveReports[id] = report; break;
+    }
     case 'item.advance': {
       const item = s.items[p.item as string]; requireThat(item,'missing item');
       const steps: ItemStatus[] = ['queued','scoped','criteria-accepted','design-accepted','ready-to-build','implemented','verified','regression-passed','shipped'];
-      requireThat(steps[steps.indexOf(item.status)+1] === p.status,'illegal item transition');
-      const ids = p.artifacts as string[]; const artifacts = ids.map(id => currentArtifact(s,id,c));
+      requireThat(steps[steps.indexOf(item.status)+1] === p.status || (item.status === 'shipped' && p.status === 'shipped' && !isLiveComplete(s,item)),'illegal item transition');
+      const ids = p.artifacts as string[];
+      const artifacts = ids.map(id => p.status === 'shipped' && isHistoricalLiveInput(s,item.id,liveActivity(item.id),id,s.artifacts[id]?.hash) ? s.artifacts[id] : currentArtifact(s,id,c));
       requireThat(artifacts.every(a => s.activities[a.activity].item === item.id),'transition artifact wrong item');
       const kinds = artifacts.map(a => s.activities[a.activity].kind);
       const minimum: Partial<Record<ItemStatus,string[]>> = { scoped:['scope'], 'criteria-accepted':['criteria'], 'design-accepted':['design'], 'ready-to-build':['plan','test-design'], implemented:['implementation'] };
       requireThat([...(minimum[p.status as ItemStatus] ?? []),...(item.requiredArtifacts[p.status as string] ?? [])].every(kind => kinds.includes(kind)),'required accepted artifacts missing');
       if (p.status === 'implemented') gates(s,item,p.evidence as string[],c);
       if (p.status === 'verified') requireThat(ids.some(id => { const report = s.verificationReports[id]; if (!report) return false; verifyReport(s,s.assignments[s.artifacts[id].assignment],report,c); return true; }),'accepted criterion-bound verification required');
-      if (p.status === 'regression-passed' || p.status === 'shipped') requireThat(ids.some(id => { const report = s.finalReports[id]; if (!report) return false; verifyFinal(s,item,report,c); return true; }),'accepted final report required');
+      if (p.status === 'regression-passed') requireThat(ids.some(id => { const report = s.finalReports[id]; if (!report || s.activities[s.artifacts[id].activity].kind !== 'final-report') return false; verifyFinal(s,item,report,c); return true; }),'accepted final report required');
+      if (p.status === 'shipped') {
+        const live = qualifyingLiveArtifact(s,item);
+        requireThat(live && ids.includes(live),'independently reviewed passing live verification is required to ship');
+      }
       item.status = p.status as ItemStatus; break;
     }
     case 'item.block': case 'item.escalate': {

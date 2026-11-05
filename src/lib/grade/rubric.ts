@@ -1,4 +1,4 @@
-import { callLlm, type LlmProvider } from "../llm";
+import { callLlm, LlmOutcomeUnknownError, type LlmExecutionPolicy, type LlmProvider } from "../llm";
 import { findRubricForTopic } from "../research/rubric-bank";
 import { generateEmbeddedRubricText } from "../embedded-grader/rubric";
 import { courseKindContract, type CourseKind } from "../course-kind";
@@ -241,10 +241,13 @@ export async function inferFileNameConvention(
   }
 }
 
+export class BoundedRubricRefusalError extends Error {}
+
 export async function generateRubric(
   assignmentInstructions: string,
   provider: LlmProvider = "gemini",
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  modelExecution?: LlmExecutionPolicy
 ): Promise<string> {
   // Embedded Deterministic Engine: prefer a rubric the instructor has already
   // authored for this topic (the rubric bank grows as real rubrics pass through
@@ -294,10 +297,13 @@ ${rubricTierPromptLines()}
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
     },
-    provider
+    provider,
+    modelExecution
   );
 
   if (!result.ok) {
+    if (result.outcome === "unknown") throw new LlmOutcomeUnknownError();
+    if (modelExecution) throw new BoundedRubricRefusalError("The model declined the rubric request before grading could begin.");
     throw new Error(`Rubric generation failed: HTTP ${result.status} ${result.body}`);
   }
 

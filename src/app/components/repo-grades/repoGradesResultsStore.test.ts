@@ -1,6 +1,6 @@
 // RG-PERSIST-RESULTS (W5): the persist/restore mapper leaf. Oracles come from
 // docs/repo-grades-persist-results-test-notes.md (FR-1..FR-7, M3 pure half).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   RELOAD_INTERRUPTED_POST_MESSAGE,
   RESULTS_PERSIST_ERROR,
@@ -8,6 +8,7 @@ import {
   describeRestoredRepoGradeCells,
   evictToBudget,
   loadRepoGradeCellsFrom,
+  readRepoGradeCellsFrom,
   parseStoredCells,
   persistRepoGradeCellsTo,
   restoreRepoGradeCells,
@@ -286,7 +287,7 @@ describe("FR-6: byte budget, oldest-first eviction, quota retry", () => {
     expect(storage.data[KEY].length).toBeLessThan(1_100_000);
   });
 
-  it("evicts 25% and retries once on QuotaExceededError, then succeeds with no error", () => {
+  it("evicts 25% on quota recovery and discloses partial retention", () => {
     const storage = fakeStorage();
     let calls = 0;
     const original = storage.setItem.bind(storage);
@@ -296,11 +297,43 @@ describe("FR-6: byte budget, oldest-first eviction, quota retry", () => {
       original(k, v);
     };
     const edits = editsOf(Array.from({ length: 8 }, (_, i): [string, string, Partial<RepoGradeCellEdit>] => ["org/r", `w${i}`, { score: String(i + 1) }]));
-    const error = persistRepoGradeCellsTo(storage, KEY, "c1", edits, "2026-10-04T00:00:00.000Z");
-    expect(error).toBeNull();
+    const report = vi.fn();
+    const error = persistRepoGradeCellsTo(storage, KEY, "c1", edits, "2026-10-04T00:00:00.000Z", report);
+    expect(error).toMatch(/retained only some/);
+    expect(report).toHaveBeenCalledWith({ outcome: "partial", failureCategory: "quota_exceeded", affectedResultCount: 2 });
     expect(calls).toBe(2);
     const stored = parseStoredCells(storage.data[KEY]);
     expect(Object.keys(stored.c1["org/r"]).length).toBe(6);
+  });
+
+  it("distinguishes empty, corrupt, and denied restores and keeps unreadable data intact", () => {
+    const storage = fakeStorage();
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toMatchObject({ outcome: "success", affectedResultCount: 0 });
+    storage.data[KEY] = "private invalid record";
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toMatchObject({
+      outcome: "failed", failureCategory: "invalid_stored_data",
+    });
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", {}, "t")).toMatch(/invalid/);
+    expect(storage.data[KEY]).toBe("private invalid record");
+    storage.getItem = () => { throw new DOMException("private message", "SecurityError"); };
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toEqual({
+      outcome: "denied", failureCategory: "permission_denied",
+    });
+  });
+
+  it("restores a protected instructor draft and a separate generated conflict with exact feedback", () => {
+    const storage = fakeStorage();
+    const candidate = "Candidate\nhttps://example.test/help";
+    const edits = editsOf([["org/r", "w1", {
+      comment: "Instructor draft",
+      draftRevision: 2,
+      conflictingGrade: { generatedScore: "0/10", generatedComment: candidate, comment: candidate, strengths: candidate },
+    }]]);
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", edits, "t")).toBeNull();
+    expect(loadRepoGradeCellsFrom(storage, KEY, "c1")["org/r"].w1).toMatchObject({
+      comment: "Instructor draft", draftRevision: 2,
+      conflictingGrade: { generatedScore: "0/10", generatedComment: candidate, comment: candidate, strengths: candidate },
+    });
   });
 
   it("surfaces a fixed, content-free error after a second failure and never throws", () => {

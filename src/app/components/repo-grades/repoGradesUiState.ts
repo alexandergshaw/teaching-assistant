@@ -18,10 +18,12 @@ import { DEFAULT_REPO_GRADE_SORT, parseRepoGradeSortState, type RepoGradeSortSta
 import type { RepoGradeAssignmentMap } from "./repoGradesAssignmentMapping";
 import { EMPTY_REPO_GRADE_CELL_EDITS, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
+  classifyRepoFeedbackStorageError,
   clearRepoGradeCellsIn,
-  loadRepoGradeCellsFrom,
+  readRepoGradeCellsFrom,
   persistRepoGradeCellsTo,
 } from "./repoGradesResultsStore";
+import { recordRepoFeedbackStorage } from "./repoFeedbackClipboard";
 
 const COURSE_KEY = "ta-repo-grades-course";
 const ORG_PREFIX_KEY = "ta-repo-grades-org-prefix";
@@ -72,17 +74,11 @@ const README_INSTRUCTIONS_KEY = "ta-repo-grades-readme-instructions";
 // documents why those two are deliberately different even when they happen
 // to produce the same target list.
 const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
-// Task B (docs for this feature - the embedded engine's own "Code runs"
-// scoring, request 1): whether a "Grade" / "Grade all" call on the embedded
-// deterministic engine runs each repo's code in the sandbox and scores it
-// (gradeEntriesEmbedded's own auto-run criterion, src/lib/embedded-grader/
-// index.ts) - the SAME thing the LLM path has always done unconditionally
-// (gradeEntries' internal runSubmittedCode call). Default FALSE: before this
-// feature, the embedded engine's repo-grading branches
-// (gradeRepoAction/gradeReposAction) never ran code at all - a silent gap,
-// not a documented default - so this control must start OFF, or every
-// existing course's embedded-engine scores would shift the moment this
-// shipped. Deliberately a SINGLE global flag, not per-column: like
+// Whether "Grade" / "Grade all" runs supported repository code through the
+// configured compiler service before grading. When enabled, the LLM receives
+// compiler output and the embedded engine scores its "Code runs" criterion.
+// Default FALSE keeps this potentially costly/external-service execution opt-in
+// for repo grading. Deliberately a SINGLE global flag, not per-column: like
 // useReadmeInstructions/bulkSelectionOnly above, this view only ever grades
 // with one provider/engine at a time, so a per-column value would let two
 // columns of the SAME grading run disagree about whether code scoring is on
@@ -99,6 +95,7 @@ const SEARCH_KEY = "ta-repo-grades-search";
 // RG-PERSIST-RESULTS (W5): graded cells, per course. NOT on the sign-out
 // keep-list - client-state-sweep erases it (pinned by its test).
 const CELLS_KEY = "ta-repo-grades-cells";
+const HISTORY_DRAFTS_KEY = "ta-repo-grades-history-drafts";
 // U1.5/U1.6 (docs/repo-grades-ux-overhaul-acceptance-criteria.md) - the
 // folder chooser's own selection, the 13th ta- key (section 5's storage
 // design table). Stored per COURSE, the same shape and reason as
@@ -387,16 +384,38 @@ export function persistAssignmentMapping(courseId: string, mapping: RepoGradeAss
 // key literal).
 
 /** Reads `courseId`'s saved graded cells. READ ONLY - never writes/removes. */
-export function loadRepoGradeCells(courseId: string): RepoGradeCellEditsByRepo {
-  if (typeof window === "undefined" || !courseId) return EMPTY_REPO_GRADE_CELL_EDITS;
-  return loadRepoGradeCellsFrom(localStorage, CELLS_KEY, courseId);
+export function loadRepoGradeCells(courseId: string, source: "current" | "history" = "current") {
+  if (typeof window === "undefined" || !courseId) return { edits: EMPTY_REPO_GRADE_CELL_EDITS, notice: null };
+  const started = performance.now();
+  const key = source === "history" ? HISTORY_DRAFTS_KEY : CELLS_KEY;
+  try {
+    const { edits, notice, result } = readRepoGradeCellsFrom(window.localStorage, key, courseId);
+    recordRepoFeedbackStorage("repo_feedback_restore", "browser_local", started, result);
+    return { edits, notice };
+  } catch (error) {
+    recordRepoFeedbackStorage("repo_feedback_restore", "browser_local", started, classifyRepoFeedbackStorageError(error));
+    return { edits: EMPTY_REPO_GRADE_CELL_EDITS, notice: "Browser grading results could not be accessed." };
+  }
 }
 
 /** Writes `courseId`'s graded cells. Returns null, or a fixed content-free
  * error string when the browser refused the write twice. */
-export function persistRepoGradeCells(courseId: string, edits: RepoGradeCellEditsByRepo): string | null {
+export function persistRepoGradeCells(
+  courseId: string, edits: RepoGradeCellEditsByRepo, source: "current" | "history" = "current",
+  expected?: RepoGradeCellEditsByRepo,
+): string | null {
   if (typeof window === "undefined" || !courseId) return null;
-  return persistRepoGradeCellsTo(localStorage, CELLS_KEY, courseId, edits, new Date().toISOString());
+  const started = performance.now();
+  const key = source === "history" ? HISTORY_DRAFTS_KEY : CELLS_KEY;
+  const report = (result: ReturnType<typeof classifyRepoFeedbackStorageError>) => {
+    recordRepoFeedbackStorage("repo_feedback_draft_save", "browser_local", started, result);
+  };
+  try {
+    return persistRepoGradeCellsTo(window.localStorage, key, courseId, edits, new Date().toISOString(), report, expected);
+  } catch (error) {
+    report(classifyRepoFeedbackStorageError(error));
+    return "Browser grading results could not be stored. Your work is still available for this session.";
+  }
 }
 
 /** Discards `courseId`'s saved graded cells; other courses are untouched. */

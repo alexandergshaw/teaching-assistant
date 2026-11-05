@@ -3,12 +3,15 @@ import { atomicFile } from './atomic-file';
 import { mkdir, open, readFile, unlink, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { validateState } from './validation';
-import { applyEvent, createState } from './engine';
+import { applyEvent, createState, safePath } from './engine';
 import { captureCandidate } from './candidate';
 import { canonical, digest } from './json';
-import { contained, safeFile } from './paths';
-import type { Context, Envelope, LoopState } from './types';
+import { contained, physicalPath, safeFile } from './paths';
+import type { Context, Envelope, LiveContract, LoopState } from './types';
 import { assertManualStore } from './policy-continuation';
+import { observeEvent } from './observed';
+import { assertLiveReportDirectory } from './live-recovery';
+import { liveActivity } from './live-verification';
 
 export class LoopStore {
   readonly directory: string;
@@ -39,14 +42,30 @@ export class LoopStore {
     const filename = path.join(this.directory, `state.${randomUUID()}.tmp`);
     await atomicFile(filename, path.join(this.directory, 'state.json'), JSON.stringify(state, null, 2));
   }
+  private async assertGeneratedPaths(workspace: string, directory: string, files: string[] = []): Promise<void> {
+    const root = await realpath(workspace);
+    const generated = await physicalPath(path.resolve(root,directory));
+    const state = await realpath(this.directory);
+    const git = await physicalPath(path.join(root,'.git'));
+    if (!contained(root,generated) || contained(generated,state) || contained(state,generated)) throw new Error('Manual artifact directory must be inside the workspace and separate from loop state');
+    if (contained(git,generated) || contained(generated,git)) throw new Error('Manual artifact directory must be separate from Git metadata');
+    for (const file of files) {
+      const actual = await physicalPath(path.resolve(root,file));
+      if (actual === generated || !contained(generated,actual) || contained(state,actual) || contained(git,actual)) throw new Error('Manual artifact path must be inside its generated directory and outside protected paths');
+    }
+  }
   async init(policy: unknown): Promise<LoopState> {
     return this.locked(async () => {
       try { await lstat(path.join(this.directory, 'state.json')); throw new Error('Store already initialized'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       const state = createState(policy);
-      const root = path.resolve(state.policy.workspace);
-      if (contained(root, this.directory)) {
-        const relative = path.relative(root, this.directory).split(path.sep).join('/');
+      const root = await realpath(state.policy.workspace);
+      const store = await realpath(this.directory);
+      if (state.policy.artifactDirectory) {
+        await this.assertGeneratedPaths(root,state.policy.artifactDirectory);
+      }
+      if (contained(root,store)) {
+        const relative = path.relative(root,store).split(path.sep).join('/');
         if (!state.policy.candidateExclusions.some(value => relative === value || relative.startsWith(`${value}/`))) throw new Error('State directory must be outside candidate or explicitly excluded');
       }
       await captureCandidate(state.policy);
@@ -73,7 +92,7 @@ export class LoopStore {
       await this.verifiedBlob(path.join(this.directory, 'blobs', artifact.hash), artifact.hash);
     }
     for (const evidence of Object.values(state.evidence)) await this.verifiedBlob(evidence.outputPath, evidence.outputHash);
-    for (const [id, report] of Object.entries({ ...state.verificationReports, ...state.finalReports })) {
+    for (const [id, report] of [...Object.entries(state.verificationReports), ...Object.entries(state.finalReports), ...Object.entries(state.liveReports ?? {})]) {
       const artifact = state.artifacts[id];
       if (!artifact || canonical(JSON.parse((await this.verifiedBlob(path.join(this.directory, 'blobs', artifact.hash), artifact.hash)).toString('utf8'))) !== canonical(report)) throw new Error('Report bytes do not bind stored report');
     }
@@ -135,6 +154,34 @@ export class LoopStore {
       const finalContext: Context = { ...context, now: Date.now(), candidate: await captureCandidate(state.policy) };
       // Never trust a caller's manual-mode claim or amend fixed native grants.
       finalContext.manualPolicyContinuation = false;
+      finalContext.manualLiveRecovery = false;
+      // Native supervision applies its own fixed allocation. This file adapter
+      // derives manual allocation only from the fixed policy and owner event.
+      delete finalContext.artifactAllocation;
+      if (event.type === 'assignment.start') {
+        const paths = Array.isArray(event.payload.writePaths) ? event.payload.writePaths.filter((file): file is string => typeof file === 'string') : [];
+        const directory = state.policy.artifactDirectory;
+        if (directory && event.actor === state.policy.owner) {
+          const allocated = paths.filter(file => safePath(file).startsWith(`${safePath(directory)}/`));
+          if (allocated.length) {
+            throw new Error('Manual generated-artifact allocation is disabled pending alias-safety verification');
+          }
+        }
+        const item = String(event.payload.item), live = state.liveContracts?.[item];
+        if (live && event.payload.activity === liveActivity(item)) {
+          throw new Error('Manual live-report allocation is disabled pending alias-safety verification');
+        }
+      }
+      if (event.type === 'live.configure') {
+        await assertManualStore(this.directory);
+        const contract = event.payload.contract as LiveContract;
+        if (typeof contract?.reportDirectory === 'string') {
+          assertLiveReportDirectory(state.policy,contract.reportDirectory,safePath);
+          await this.assertGeneratedPaths(state.policy.workspace,contract.reportDirectory);
+        }
+        finalContext.manualLiveRecovery = true;
+      }
+      if (event.type === 'live.record') finalContext.liveReports = (await observeEvent(this,event,state)).liveReports;
       if (event.type === 'policy.continue') {
         await assertManualStore(this.directory);
         finalContext.manualPolicyContinuation = true;

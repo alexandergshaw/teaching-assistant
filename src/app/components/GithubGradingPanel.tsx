@@ -391,6 +391,9 @@ export default function GithubGradingPanel() {
     // Files were found for these repos but none could be read (unsupported
     // type) - a materially different, weaker claim than no-submission above.
     const runUndeterminedRepos = r.undeterminedRepos ?? [];
+    if (r.unfinishedRepos?.length) {
+      setError(r.unfinishedRepos.map(({ label, reason }) => `${label}: ${reason}`).join(" "));
+    }
     setRun(r.run);
     setRubric(r.rubric);
     // AC A5: captured separately from the live `gradingFolder` control so

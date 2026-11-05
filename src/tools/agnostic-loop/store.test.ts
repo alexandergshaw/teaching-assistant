@@ -25,6 +25,14 @@ async function fixture() {
   await store.init(policy); return { root, store, policy };
 }
 describe('durable atomic store', () => {
+  it('rejects allocation overlapping state through a workspace alias', async () => {
+    const {root,policy} = await fixture();
+    const alias = path.join(root,'workspace-alias');
+    await symlink(policy.workspace,alias,process.platform === 'win32' ? 'junction' : 'dir');
+    const store = new LoopStore(path.join(policy.workspace,'artifacts','state'));
+    await expect(store.init({...policy,workspace:alias,artifactDirectory:'artifacts',candidateExclusions:['artifacts']})).rejects.toThrow('separate from loop state');
+    await expect(readFile(path.join(store.directory,'state.json'),'utf8')).rejects.toThrow('ENOENT');
+  });
   it('captures the whole candidate once per transaction and still captures for public context', async () => {
     const {store,policy} = await fixture();
     await writeFile(path.join(policy.workspace,'source.txt'),'actual source');

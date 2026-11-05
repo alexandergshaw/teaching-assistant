@@ -22,6 +22,8 @@ import type { RepoGradePostStatus } from "./repoGradesRows";
 export type PersistedRepoGradePostStatus = Exclude<RepoGradePostStatus, "posting">;
 
 export interface PersistedRepoGradeCell {
+  draftRevision?: number;
+  conflictingGrade?: Omit<PersistedRepoGradeCell, "conflictingGrade">;
   at: string;
   comment: string;
   generatedComment: string | null;
@@ -59,6 +61,25 @@ export interface RepoGradeCellsStorage {
   removeItem(key: string): void;
 }
 
+export type RepoFeedbackStorageResult = {
+  outcome: "success" | "blocked" | "denied" | "failed" | "partial";
+  failureCategory: "none" | "permission_denied" | "quota_exceeded" | "storage_unavailable" |
+    "invalid_stored_data" | "retention_limit" | "transport_rejected" | "service_rejected" |
+    "stale_scope" | "conflict" | "unknown";
+  affectedResultCount?: number;
+};
+
+export function classifyRepoFeedbackStorageError(error: unknown): RepoFeedbackStorageResult {
+  const name = error instanceof Error || error instanceof DOMException ? error.name : "";
+  if (name === "QuotaExceededError") return { outcome: "failed", failureCategory: "quota_exceeded" };
+  if (name === "SecurityError" || name === "NotAllowedError") return { outcome: "denied", failureCategory: "permission_denied" };
+  return { outcome: "failed", failureCategory: "storage_unavailable" };
+}
+
+const INVALID_STORED_DATA = "Some saved grading results could not be read because the browser data is invalid.";
+const STORAGE_UNAVAILABLE = "Browser grading results could not be accessed. Work shown in this session may not survive a reload.";
+const STORAGE_PARTIAL = "Browser storage retained only some grading results. Feedback omitted from storage remains available in this session.";
+
 /** courseId -> repo -> folder -> persisted cell. Containers are null-prototype. */
 export type PersistedCellsByCourse = Record<string, Record<string, Record<string, PersistedRepoGradeCell>>>;
 
@@ -72,7 +93,7 @@ function clipMessage(message: string | null): string | null {
 }
 
 /** The ONLY writer of the persisted shape. Enumerated field by field. */
-export function toPersisted(edit: RepoGradeCellEdit, at: string): PersistedRepoGradeCell {
+export function toPersisted(edit: RepoGradeCellEdit, at: string, includeConflict = true): PersistedRepoGradeCell {
   const interrupted = edit.postStatus === "posting";
   const postStatus: PersistedRepoGradePostStatus = edit.postStatus === "posting" ? "error" : edit.postStatus;
   return {
@@ -90,6 +111,10 @@ export function toPersisted(edit: RepoGradeCellEdit, at: string): PersistedRepoG
     score: edit.score,
     strengths: edit.strengths,
     submissionTruncated: edit.submissionTruncated,
+    ...(edit.draftRevision ? { draftRevision: edit.draftRevision } : {}),
+    ...(includeConflict && edit.conflictingGrade
+      ? { conflictingGrade: toPersisted({ ...defaultRepoGradeCellEdit(), ...edit.conflictingGrade }, "", false) }
+      : {}),
   };
 }
 
@@ -112,7 +137,7 @@ function parseMergeStatus(value: unknown): BranchMergeStatus | null {
 }
 
 /** Tolerant typed parse of ONE cell; null when any field is malformed. */
-function parseCell(value: unknown): PersistedRepoGradeCell | null {
+function parseCell(value: unknown, invalid: () => void, includeConflict = true): PersistedRepoGradeCell | null {
   if (!isRecord(value)) return null;
   const { at, comment, improvements, resubmitNotice, score, strengths, submissionTruncated } = value;
   if (
@@ -139,6 +164,9 @@ function parseCell(value: unknown): PersistedRepoGradeCell | null {
     if (typeof area.area !== "string" || typeof area.score !== "string" || typeof area.comment !== "string") return null;
     rubricAreas.push({ area: area.area, score: area.score, comment: area.comment });
   }
+  const conflict = includeConflict && value.conflictingGrade !== undefined
+    ? parseCell(value.conflictingGrade, invalid, false) : undefined;
+  if (conflict === null) invalid();
   return {
     at,
     comment,
@@ -154,32 +182,40 @@ function parseCell(value: unknown): PersistedRepoGradeCell | null {
     score,
     strengths,
     submissionTruncated,
+    ...(typeof value.draftRevision === "number" && Number.isSafeInteger(value.draftRevision) && value.draftRevision > 0
+      ? { draftRevision: value.draftRevision } : {}),
+    ...(conflict ? { conflictingGrade: conflict } : {}),
   };
 }
 
 /** Never throws. Non-JSON or a wrong top-level shape -> empty. A bad CELL is
  * dropped; its good siblings (and other courses) are kept. */
-export function parseStoredCells(raw: string | null): PersistedCellsByCourse {
+export function parseStoredCells(raw: string | null, invalid = () => {}): PersistedCellsByCourse {
   const result = newMap<Record<string, Record<string, PersistedRepoGradeCell>>>();
-  if (!raw) return result;
+  if (raw === null) return result;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
+    invalid();
     return result;
   }
-  if (!isRecord(parsed)) return result;
+  if (!isRecord(parsed)) {
+    invalid();
+    return result;
+  }
   for (const courseId of Object.keys(parsed)) {
     const byRepo = parsed[courseId];
-    if (!isRecord(byRepo)) continue;
+    if (!isRecord(byRepo)) { invalid(); continue; }
     const repos = newMap<Record<string, PersistedRepoGradeCell>>();
     for (const repo of Object.keys(byRepo)) {
       const byFolder = byRepo[repo];
-      if (!isRecord(byFolder)) continue;
+      if (!isRecord(byFolder)) { invalid(); continue; }
       const folders = newMap<PersistedRepoGradeCell>();
       for (const folder of Object.keys(byFolder)) {
-        const cell = parseCell(byFolder[folder]);
+        const cell = parseCell(byFolder[folder], invalid);
         if (cell) folders[folder] = cell;
+        else invalid();
       }
       if (Object.keys(folders).length > 0) repos[repo] = folders;
     }
@@ -199,38 +235,52 @@ export function restoreRepoGradeCells(
   for (const repo of Object.keys(stored)) {
     const folders = newMap<RepoGradeCellEdit>();
     for (const folder of Object.keys(stored[repo])) {
-      const p = stored[repo][folder];
-      folders[folder] = {
-        ...defaultRepoGradeCellEdit(),
-        score: p.score,
-        comment: p.comment,
-        strengths: p.strengths,
-        improvements: p.improvements,
-        resubmitNotice: p.resubmitNotice,
-        postStatus: p.postStatus,
-        postMessage: p.postMessage,
-        rubricAreas: p.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: a.comment })),
-        generatedScore: p.generatedScore,
-        generatedComment: p.generatedComment,
-        mergeStatus: p.mergeStatus,
-        mergeFoundOnBranch: p.mergeFoundOnBranch,
-        submissionTruncated: p.submissionTruncated,
-      };
+      folders[folder] = restoreCell(stored[repo][folder]);
     }
     result[repo] = folders;
   }
   return result;
 }
 
+function restoreCell(p: PersistedRepoGradeCell): RepoGradeCellEdit {
+  return {
+    ...defaultRepoGradeCellEdit(),
+    score: p.score,
+    comment: p.comment,
+    strengths: p.strengths,
+    improvements: p.improvements,
+    resubmitNotice: p.resubmitNotice,
+    postStatus: p.postStatus,
+    postMessage: p.postMessage,
+    rubricAreas: p.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: a.comment })),
+    generatedScore: p.generatedScore,
+    generatedComment: p.generatedComment,
+    mergeStatus: p.mergeStatus,
+    mergeFoundOnBranch: p.mergeFoundOnBranch,
+    submissionTruncated: p.submissionTruncated,
+    ...(p.draftRevision ? { draftRevision: p.draftRevision } : {}),
+    ...(p.conflictingGrade ? { conflictingGrade: restoreCell(p.conflictingGrade) } : {}),
+  };
+}
+
 /** READ ONLY: one course's restored edits. Never writes or removes. */
 export function loadRepoGradeCellsFrom(storage: RepoGradeCellsStorage, key: string, courseId: string): RepoGradeCellEditsByRepo {
-  let raw: string | null = null;
+  return readRepoGradeCellsFrom(storage, key, courseId).edits;
+}
+
+export function readRepoGradeCellsFrom(storage: RepoGradeCellsStorage, key: string, courseId: string) {
   try {
-    raw = storage.getItem(key);
-  } catch {
-    raw = null;
+    let invalid = false;
+    const cells = parseStoredCells(storage.getItem(key), () => { invalid = true; });
+    const slice = cells[courseId];
+    const count = slice ? flatten(slice).length : 0;
+    const result: RepoFeedbackStorageResult = invalid
+      ? { outcome: count ? "partial" : "failed", failureCategory: "invalid_stored_data", affectedResultCount: count }
+      : { outcome: "success", failureCategory: "none", affectedResultCount: count };
+    return { edits: restoreRepoGradeCells(slice), notice: invalid ? INVALID_STORED_DATA : null, result };
+  } catch (error) {
+    return { edits: restoreRepoGradeCells(undefined), notice: STORAGE_UNAVAILABLE, result: classifyRepoFeedbackStorageError(error) };
   }
-  return restoreRepoGradeCells(parseStoredCells(raw)[courseId]);
 }
 
 interface FlatCell {
@@ -316,16 +366,31 @@ export function persistRepoGradeCellsTo(
   key: string,
   courseId: string,
   edits: RepoGradeCellEditsByRepo,
-  now: string
+  now: string,
+  report?: (result: RepoFeedbackStorageResult) => void,
+  expected?: RepoGradeCellEditsByRepo,
 ): string | null {
   let raw: string | null = null;
   try {
     raw = storage.getItem(key);
-  } catch {
-    raw = null;
+  } catch (error) {
+    report?.(classifyRepoFeedbackStorageError(error));
+    return STORAGE_UNAVAILABLE;
   }
-  const blob = parseStoredCells(raw);
+  let invalid = false;
+  const blob = parseStoredCells(raw, () => { invalid = true; });
+  if (invalid) {
+    report?.({ outcome: "blocked", failureCategory: "invalid_stored_data" });
+    return INVALID_STORED_DATA;
+  }
   const previous = blob[courseId];
+  if (expected) {
+    const current = restoreRepoGradeCells(previous);
+    if (JSON.stringify(current) !== JSON.stringify(expected)) {
+      report?.({ outcome: "blocked", failureCategory: "conflict" });
+      return "A different version of this draft was saved in this browser. Your edits are available in this session.";
+    }
+  }
   const slice = newMap<Record<string, PersistedRepoGradeCell>>();
   for (const repo of Object.keys(edits)) {
     const folders = newMap<PersistedRepoGradeCell>();
@@ -340,21 +405,48 @@ export function persistRepoGradeCellsTo(
   else delete blob[courseId];
 
   const next = evictToBudget(blob);
-  try {
-    if (raw === null && Object.keys(next).length === 0) return null;
-    writeBlob(storage, key, next);
+  const desiredCount = totalCells(blob);
+  const complete = (saved: PersistedCellsByCourse, quota: boolean) => {
+    const retained = totalCells(saved);
+    if (retained !== desiredCount) {
+      report?.({ outcome: "partial", failureCategory: quota ? "quota_exceeded" : "retention_limit", affectedResultCount: desiredCount - retained });
+      return STORAGE_PARTIAL;
+    }
+    report?.({ outcome: "success", failureCategory: "none", affectedResultCount: retained });
     return null;
-  } catch {
-    // fall through to evict-and-retry
+  };
+  if ((desiredCount > 0 && totalCells(next) === 0) || (expected && totalCells(next) !== desiredCount)) {
+    report?.({ outcome: "blocked", failureCategory: "retention_limit", affectedResultCount: desiredCount });
+    return "The browser storage limit prevented this save. Your work remains available in this session.";
+  }
+  try {
+    if (raw !== null || Object.keys(next).length > 0) writeBlob(storage, key, next);
+    return complete(next, false);
+  } catch (error) {
+    const failure = classifyRepoFeedbackStorageError(error);
+    if (failure.failureCategory !== "quota_exceeded") {
+      report?.(failure);
+      return STORAGE_UNAVAILABLE;
+    }
+    if (expected) {
+      report?.(failure);
+      return RESULTS_PERSIST_ERROR;
+    }
+    // Quota failures can recover by keeping the newest complete cells.
   }
   try {
     const reduced = dropOldest(next, Math.max(1, Math.ceil(totalCells(next) * 0.25)));
     // Reporting success while nothing was stored would be a lie.
-    if (Object.keys(reduced).length === 0 && Object.keys(next).length > 0) return RESULTS_PERSIST_ERROR;
+    if (Object.keys(reduced).length === 0 && Object.keys(next).length > 0) {
+      report?.({ outcome: "failed", failureCategory: "quota_exceeded" });
+      return RESULTS_PERSIST_ERROR;
+    }
     writeBlob(storage, key, reduced);
-    return null;
-  } catch {
-    return RESULTS_PERSIST_ERROR;
+    return complete(reduced, true);
+  } catch (error) {
+    const failure = classifyRepoFeedbackStorageError(error);
+    report?.(failure);
+    return failure.failureCategory === "quota_exceeded" ? RESULTS_PERSIST_ERROR : STORAGE_UNAVAILABLE;
   }
 }
 

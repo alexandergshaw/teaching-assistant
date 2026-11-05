@@ -25,6 +25,7 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useState } from "react";
+import { useSupabase } from "@/context/SupabaseProvider";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
@@ -71,6 +72,8 @@ import {
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
 import { describeRestoredRepoGradeCells } from "./repoGradesResultsStore";
+import RepoGradesDashboard from "./RepoGradesDashboard";
+import { updateRepoGradesCourseEdits, type RepoGradesCourseEdits } from "./repoGradesDashboardModel";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
 import { visibleRepoRows } from "./repoGradesVisibleRows";
@@ -109,6 +112,11 @@ const LINK_GITHUB_USERNAMES_STEP_LABEL = "Link GitHub usernames to roster";
 const NO_GRADE_SET: ReadonlySet<string> = new Set();
 
 export default function RepoGradesTab() {
+  const { user, loading } = useSupabase();
+  return !loading && user ? <AccountRepoGradesTab key={user.id} /> : null;
+}
+
+function AccountRepoGradesTab() {
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
   const [provider] = useLlmProvider();
 
@@ -185,7 +193,12 @@ export default function RepoGradesTab() {
   // re-grading. Restored in the `cellStateResetForCourse` block below, and
   // declared ABOVE `sortedRows` because the folder-sort reads live scores
   // (N4 item 13). -----------------------------------------------------------
-  const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
+  const [cellState, setCellState] = useState<RepoGradesCourseEdits>(() => ({
+    scope: {},
+    edits: EMPTY_REPO_GRADE_CELL_EDITS,
+  }));
+  const { edits: cellEdits, scope: cellScope } = cellState;
+  const setCellEdits = (edits: RepoGradeCellEditsByRepo) => setCellState({ scope: {}, edits });
   const model = scan ? buildRepoGradeGridModel(scan.repos, roster, effectiveStudentRepos, uiState.orgPrefix) : null;
   // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N5 item
   // 17: `cellEdits`/`model.columns` let sortRepoGradeRows sort by a folder
@@ -474,11 +487,13 @@ export default function RepoGradesTab() {
   const [cellStateResetForCourse, setCellStateResetForCourse] = useState<string | null>(null);
   const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
   const [persistError, setPersistError] = useState<string | null>(null);
+  const hasCourse = course !== null;
   if (uiState.courseId !== cellStateResetForCourse) {
     setCellStateResetForCourse(uiState.courseId);
-    const restoredEdits = loadRepoGradeCells(uiState.courseId);
+    const { edits: restoredEdits, notice } = loadRepoGradeCells(uiState.courseId);
     setCellEdits(restoredEdits);
-    setRestoredNotice(describeRestoredRepoGradeCells(restoredEdits));
+    setRestoredNotice([notice, describeRestoredRepoGradeCells(restoredEdits)].filter(Boolean).join(" ") || null);
+    setPersistError(null);
     setPostSummary("");
     // U1.5/U1.6 - folded in here rather than a separate branch, per this
     // feature's own design note above: this block IS index.tsx's "the course
@@ -507,6 +522,7 @@ export default function RepoGradesTab() {
   // synchronous in the effect.
   useEffect(() => {
     if (cellStateResetForCourse !== uiState.courseId) return;
+    if (!hasCourse) return;
     const error = persistRepoGradeCells(uiState.courseId, cellEdits);
     let cancelled = false;
     void (async () => {
@@ -516,7 +532,7 @@ export default function RepoGradesTab() {
     return () => {
       cancelled = true;
     };
-  }, [cellEdits, uiState.courseId, cellStateResetForCourse]);
+  }, [cellEdits, uiState.courseId, cellStateResetForCourse, hasCourse]);
 
   const handleDiscardSavedResults = () => {
     if (!window.confirm("Discard all saved grading results for this course? Graded scores and feedback on screen will be cleared. This cannot be undone.")) return;
@@ -567,9 +583,10 @@ export default function RepoGradesTab() {
     bulkProgress,
     trendsEntry,
   } = useRepoGradesGradingActions({
+    cellScope,
     rows: sortedRows,
     cellEdits,
-    setCellEdits,
+    setCellEdits: (update) => setCellState((current) => updateRepoGradesCourseEdits(current, cellScope, update)),
     selected,
     instructions: uiState.instructions,
     resolveRubricForColumn: rubricSource.resolveRubricForColumn,
@@ -720,6 +737,21 @@ export default function RepoGradesTab() {
         scanTruncated={!!scan?.truncated}
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
+
+      {course && cellStateResetForCourse === course.id && (
+        <RepoGradesDashboard
+          key={course.id}
+          courseId={course.id}
+          cellEdits={cellEdits}
+          scan={scan}
+          scanLoading={scanLoading}
+          scanFailed={scanError !== null}
+          hasRepoPrefix={!!uiState.orgPrefix.trim()}
+          gradeRows={sortedRows}
+          gradeColumns={columnsWithMapping}
+          grading={{ handleGradeCell, handleGradeColumn, handleScoreChange, handleFeedbackFieldChange, bulkRunningFolder }}
+        />
+      )}
 
       {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
           comment near the top of this file): LinkUsernamesPanel.tsx already

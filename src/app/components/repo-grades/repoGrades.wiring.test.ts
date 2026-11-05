@@ -417,7 +417,7 @@ describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanv
     const returnIdx = body.indexOf("return;", branchIdx);
     expect(returnIdx).toBeGreaterThan(-1);
     const branch = body.slice(branchIdx, returnIdx);
-    expect(branch).toContain("setPostSummary(");
+    expect(branch).toContain("announceGrade(");
   });
 
   it("postCanvasGradesAction is called from inside handlePostColumn, the function index.tsx wires to RepoGradesGrid's onPostColumn prop - not some other unrelated function", () => {

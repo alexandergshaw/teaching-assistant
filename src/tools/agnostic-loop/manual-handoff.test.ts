@@ -35,7 +35,7 @@ describe('manual host delivery assertion', () => {
     state.items.feature.status = 'verified';
     expect(assessManualHandoff(state, ['feature']).complete).toBe(false);
     state.items.feature.status = 'shipped';
-    expect(assessManualHandoff(state, ['feature']).complete).toBe(true);
+    expect(assessManualHandoff(state, ['feature']).complete).toBe(false);
   });
   it('blocks retained assignments, uncertainty and owner-needed work even with a shipped marker', () => {
     const state = fixture(); state.items.feature.status = 'shipped'; assignment(state, 'quarantined');
@@ -52,7 +52,7 @@ describe('manual host delivery assertion', () => {
   it('checks every named item rather than treating one delivery as whole-request completion', () => {
     const state = fixture(); state.items.done = { ...state.items.feature, id: 'done', status: 'shipped' };
     expect(assessManualHandoff(state, ['done', 'feature']).complete).toBe(false);
-    expect(assessManualHandoff(state, ['done']).complete).toBe(true);
+    expect(assessManualHandoff(state, ['done']).complete).toBe(false);
   });
   it('reports expired pending delivery without recommending blind admission, renewal or gate reruns', () => {
     const state = fixture(); state.policy.deadline = 100; state.items.feature.status = 'verified';
@@ -79,9 +79,9 @@ describe('manual host delivery assertion', () => {
       expect(report.items[0].action).toContain('Continue independent role admission');
     }
   });
-  it('keeps completed local delivery complete after the deadline expires', () => {
+  it('keeps a legacy shipment pending after the deadline expires', () => {
     const state = fixture(); state.policy.deadline = 100; state.items.feature.status = 'shipped';
-    expect(assessManualHandoff(state, ['feature'], 101)).toMatchObject({complete:true,deadlineExpired:true,items:[{pending:false,handoffState:'complete',action:'Local delivery recorded'}]});
+    expect(assessManualHandoff(state, ['feature'], 101)).toMatchObject({complete:false,deadlineExpired:true,items:[{pending:true,handoffState:'pending-expired'}]});
   });
   it('prioritizes unresolved operation cleanup over expiry and retains worker ownership', () => {
     const state = fixture(); state.policy.deadline = 100; assignment(state);
@@ -99,12 +99,17 @@ describe('manual host delivery assertion', () => {
     const filename = path.join(directory, 'state.json'); const state = fixture();
     await writeFile(filename, JSON.stringify(state)); const before = await readFile(filename);
     const run = (...args: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', '--experimental-default-type=module', '--experimental-loader', './src/tools/backlog/resolve-ts-hook.ts', './src/tools/agnostic-loop/manual-handoff.ts', ...args], { cwd: process.cwd(), encoding: 'utf8', timeout: 10000 });
-    const pending = run(directory, 'feature');
+    const pending = run(directory, 'feature', '--target', 'origin/main');
     expect(pending.status, pending.stderr).toBe(2); expect(JSON.parse(pending.stdout).complete).toBe(false);
     expect(await readFile(filename)).toEqual(before);
-    expect(run(directory, 'missing').status).toBe(1);
-    state.items.feature.status = 'shipped'; await writeFile(filename, JSON.stringify(state));
-    expect(run(directory, 'feature').status).toBe(0);
-    await writeFile(filename, '{}'); expect(run(directory, 'feature').status).toBe(1);
+    expect(run(directory, 'missing', '--target', 'origin/main').status).toBe(1);
+    expect(run(directory, 'feature', '--target', 'origin/task').status).toBe(1);
+    state.items.feature.status = 'shipped';
+    state.items.feature.affectedPaths = ['src/feature.ts'];
+    await writeFile(filename, JSON.stringify(state));
+    const localOnly = run(directory, 'feature', '--target', 'origin/main');
+    expect(localOnly.status).toBe(2);
+    expect(JSON.parse(localOnly.stdout).gitDelivery.reason).toBe('Source acceptance is still pending');
+    await writeFile(filename, '{}'); expect(run(directory, 'feature', '--target', 'origin/main').status).toBe(1);
   }, 30000);
 });

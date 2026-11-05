@@ -9,6 +9,7 @@ import { exportPacket, importResult } from './adapter';
 import { reconcileOperation, recoverOperations, runGate } from './runner';
 import { buildManualFinalReport } from './manual-final-report';
 import type { Residual } from './types';
+import { isLiveComplete } from './live-verification';
 
 export async function dispatch(args: string[]): Promise<unknown> {
   if (['dispatch', 'drive', 'doctor', 'explain', 'mcp'].includes(args[0])) return (await import('./dispatch-cli')).dispatchAutomatic(args);
@@ -43,7 +44,7 @@ export async function dispatch(args: string[]): Promise<unknown> {
     const status = { ...state, candidate: context.candidate, staleArtifacts: Object.keys(state.artifacts).filter(id => !context.artifacts[id]), scheduling: nextAssignments(state, context), limitations: ['Provider identity is operator-attested', 'No hostile-worker sandbox', 'Whole-candidate evidence only'] };
     if (flags['--output'] === 'summary') return {
       revision: state.revision, runStatus: state.runStatus,
-      items: Object.values(state.items).map(({ id, status, needs, escalation }) => ({ id, status, needs, escalation })),
+      items: Object.values(state.items).map(item => ({ id: item.id, status: item.status, needs: item.needs, escalation: item.escalation, liveComplete: isLiveComplete(state,item) })),
       assignments: Object.values(state.assignments).map(({ id, item, role, status, reconciled, reason }) => ({ id, item, role, status, reconciled, reason })),
       operations: Object.values(state.operations).map(({ id, assignment, status, reconciled }) => ({ id, assignment, status, reconciled })),
       candidate: context.candidate.digest, staleArtifacts: status.staleArtifacts, scheduling: status.scheduling, limitations: status.limitations,
@@ -60,7 +61,7 @@ export async function dispatch(args: string[]): Promise<unknown> {
   if (command === 'run') return runGate(store, parameters[0], parameters[1], actor);
   const raw = JSON.parse(await readFile(parameters[0], 'utf8'));
   const event = validateEvent({ ...raw, actor });
-  if (event.type.startsWith('operation.') || ['artifact.submit', 'evidence.record'].includes(event.type)) throw new Error('This lifecycle event requires import or run; bare apply cannot fabricate observed records');
+  if (event.type.startsWith('operation.') || ['artifact.submit', 'evidence.record', 'live.record'].includes(event.type)) throw new Error('This lifecycle event requires import, result or run; bare apply cannot fabricate observed records');
   return store.transact(event, await observeEvent(store, event));
 }
 

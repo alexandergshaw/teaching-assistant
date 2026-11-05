@@ -162,10 +162,13 @@ function parseFixture(src: string, tsx = false): SF {
 describe("A-1: gradeOneTarget's collector push is direct and follows exactly both early-return ifs", () => {
   const body = findFunctionBody(bulkHookFile, "gradeOneTarget")!;
   const stmts = directStmts(body);
-  it("a direct statement spreads result.run.results onto runResults, after exactly 2 ifs, no other exit-shaped statement", () => {
+  it("collects results after rejecting transport/no-submission exits but before returning an ungraded outcome", () => {
     const idx = stmts.findIndex((s) => isSpreadPush(s, "runResults", ["result", "run", "results"]));
     expect(idx).toBeGreaterThan(-1);
-    expect(countIfStatements(body)).toBe(2);
+    expect(stmts.slice(0, idx).filter(ts.isIfStatement).map((stmt) => stmt.expression.getText(bulkHookFile)))
+      .toEqual(["!isCurrent()", "!isCurrent()", '"error" in result', '"noSubmission" in result']);
+    expect(stmts.slice(idx).filter(ts.isIfStatement).map((stmt) => stmt.expression.getText(bulkHookFile)))
+      .toEqual(['provisionalOutcome.status === "failed"']);
     expect(countKinds(body, EXOTIC_EXIT_KINDS)).toBe(0);
   });
   it("canary S-25: `if (first) { runResults.push(...) }` is NOT a direct statement", () => {
@@ -210,12 +213,13 @@ describe("A-2: runBulkGrade's refusal, gradeBulkPlan's collector declaration and
   // `gradeBulkPlan` (the worker pool, now called by `runBulkGrade` AFTER it
   // claims its lock) - the collector itself did not change, the function
   // holding it did.
-  it("(a) FIRST direct statement is `if (<ref>.current) return null;`, where <ref> is bound by a `useRef` call in this file", () => {
+  it("(a) FIRST direct statement checks the current course scope and live lock before admitting a run", () => {
     const first = runBulkGradeStmts[0];
     expect(ts.isIfStatement(first)).toBe(true);
     if (!ts.isIfStatement(first)) return;
-    const cond = first.expression;
-    expect(ts.isPropertyAccessExpression(cond) && cond.name.text === "current").toBe(true);
+    expect(first.expression.getText(bulkHookFile)).toBe("!isCurrent() || runLockRef.current.has(scope)");
+    const cond = ts.isBinaryExpression(first.expression) && ts.isCallExpression(first.expression.right)
+      && ts.isPropertyAccessExpression(first.expression.right.expression) ? first.expression.right.expression.expression : first.expression;
     if (ts.isPropertyAccessExpression(cond)) {
       expect(ts.isIdentifier(cond.expression)).toBe(true);
       if (ts.isIdentifier(cond.expression)) {
@@ -302,19 +306,20 @@ function containsAwait(node: Node): boolean {
   return found;
 }
 
-describe("A-3: handleGradeColumn - one if, an attempt-time clear, an unconditional final set, no other exit", () => {
+describe("A-3: handleGradeColumn clears trends only after admission and ignores stale completions", () => {
   const body = findFunctionBody(actionsHookFile, "handleGradeColumn")!;
   const stmts = directStmts(body);
-  it("exactly one IfStatement (the pre-existing empty-plan return), no setLastRunCohort in its then-block", () => {
-    expect(countIfStatements(body)).toBe(1);
-    const ifStmt = stmts.find(ts.isIfStatement)!;
+  it("does not clear trends on an empty plan", () => {
+    const ifStmt = stmts.filter(ts.isIfStatement).find((stmt) => stmt.expression.getText(actionsHookFile) === "plan.targets.length === 0")!;
+    expect(ifStmt).toBeDefined();
     const thenStmts = ts.isBlock(ifStmt.thenStatement) ? [...ifStmt.thenStatement.statements] : [ifStmt.thenStatement];
     expect(setLastRunCohortCalls(thenStmts)).toHaveLength(0);
   });
-  it("no switch/loop/try/labelled statement, no throw, and exactly ONE return in the whole body", () => {
+  it("guards both initial and final course scope, and refuses overlapping manual targets", () => {
     expect(countKinds(body, EXOTIC_EXIT_KINDS)).toBe(0);
     expect(countKinds(body, [ts.SyntaxKind.ThrowStatement])).toBe(0);
-    expect(countKinds(body, [ts.SyntaxKind.ReturnStatement])).toBe(1);
+    expect(stmts.filter(ts.isIfStatement).map((stmt) => stmt.expression.getText(actionsHookFile)))
+      .toEqual(["!isCurrent()", "plan.targets.length === 0", "!release", "!isCurrent()"]);
   });
   it("(a) exactly one setLastRunCohort(null), after the if and before the first await-containing statement", () => {
     const ifIndex = stmts.findIndex(ts.isIfStatement);
@@ -354,7 +359,10 @@ describe("A-3: handleGradeColumn - one if, an attempt-time clear, an uncondition
       if (!ts.isVariableStatement(s) || !(s.declarationList.flags & ts.NodeFlags.Const)) return false;
       const [d] = s.declarationList.declarations;
       if (!d || !isIdent(d.name, resultsName) || !d.initializer || !ts.isAwaitExpression(d.initializer)) return false;
-      const call = d.initializer.expression;
+      const wrapped = d.initializer.expression;
+      if (!ts.isCallExpression(wrapped) || !ts.isPropertyAccessExpression(wrapped.expression)
+        || wrapped.expression.name.text !== "finally" || !isIdent(wrapped.arguments[0], "release")) return false;
+      const call = wrapped.expression.expression;
       return ts.isCallExpression(call) && isIdent(call.expression, "runBulkGrade");
     });
     expect(declIndex).toBeGreaterThan(-1);
@@ -475,14 +483,29 @@ function enclosingFunction(node: Node): Node | undefined {
   while (n && !ts.isFunctionDeclaration(n) && !ts.isArrowFunction(n) && !ts.isFunctionExpression(n)) n = n.parent;
   return n;
 }
+function isAccountRenderRoot(node: Node | undefined): boolean {
+  if (!node || !ts.isFunctionDeclaration(node) || !isIdent(node.name, "AccountRepoGradesTab")) return false;
+  if (!ts.isSourceFile(node.parent)) return false;
+  const source = node.parent;
+  const [mount] = findJsxSelfClosing(source, "AccountRepoGradesTab");
+  if (!mount || countAnyJsxByTag(source, "AccountRepoGradesTab") !== 1) return false;
+  const choice = mount.parent;
+  if (!ts.isConditionalExpression(choice) || choice.whenTrue !== mount) return false;
+  if (!isNullLiteral(choice.whenFalse) || choice.condition.getText() !== "!loading && user") return false;
+  if (mount.attributes.properties.length !== 1 || mount.attributes.properties[0].getText() !== "key={user.id}") return false;
+  const returned = choice.parent;
+  if (!ts.isReturnStatement(returned)) return false;
+  const entry = enclosingFunction(returned);
+  return !!entry && ts.isFunctionDeclaration(entry) && isDefaultExportedFunction(entry)
+    && returned.parent === entry.body;
+}
 /** Walks from `wrapper` (the element directly enclosing the mount) up to the
  * render root, requiring EXACTLY the chain section 13.2's A-6 row names: an
  * optional parens, one `trendsEntry &&` BinaryExpression, a JsxExpression,
  * the top-level JsxFragment, then a ReturnStatement that is a DIRECT
- * statement of the DEFAULT-EXPORTED component's own body (scope A-6:
- * "a DIRECT statement of the default-exported component function's body" -
- * the as-built check stopped at "parent is a ReturnStatement", which F-8's
- * non-default-function fixture passed; this closes that). Returns the gating
+ * statement of the render component's own body. The render component is
+ * reached from the default export through its direct, account-keyed return.
+ * Returns the gating
  * JsxExpression on success, for A-8's sibling-order check. */
 function gatePathFromWrapper(wrapper: Node): import("typescript").JsxExpression | null {
   let node = skipParens(wrapper);
@@ -494,9 +517,10 @@ function gatePathFromWrapper(wrapper: Node): import("typescript").JsxExpression 
   const jsxExpr = node.parent;
   if (!ts.isJsxFragment(jsxExpr.parent)) return null;
   const up = skipParens(jsxExpr.parent);
-  if (!ts.isReturnStatement(up.parent)) return null;
+  if (!ts.isReturnStatement(up.parent) || !ts.isBlock(up.parent.parent)) return null;
   const fn = enclosingFunction(up.parent);
-  return isDefaultExportedFunction(fn) ? jsxExpr : null;
+  if (!fn || !ts.isFunctionDeclaration(fn) || fn.body !== up.parent.parent) return null;
+  return isAccountRenderRoot(fn) ? jsxExpr : null;
 }
 function findJsxSelfClosing(root: Node, tagName: string): import("typescript").JsxSelfClosingElement[] {
   const found: import("typescript").JsxSelfClosingElement[] = [];
@@ -554,24 +578,32 @@ function hidingAttrNames(el: JsxTag): string[] {
   }
   return bad;
 }
-/** The three fixture shapes section 13.2 requires as canaries for the mount
+/** The fixture shapes section 13.2 requires as canaries for the mount
  * gate, each expected to fail. */
+const A6_ACCOUNT_ENTRY = `export default function RepoGradesTab() {
+  return !loading && user ? <AccountRepoGradesTab key={user.id} /> : null;
+}`;
 const A6_CANARIES: Array<[string, string]> = [
   [
     "a correct gate wrapping a negated one",
-    `function C() { return (<>{trendsEntry && (<div>{!trendsEntry && <ClassTrendsPanel entry={trendsEntry} defaultExpanded />}</div>)}</>); }`,
+    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{trendsEntry && (<div>{!trendsEntry && <ClassTrendsPanel entry={trendsEntry} defaultExpanded />}</div>)}</>); }`,
   ],
   [
     "S-23a: left operand is not bare trendsEntry",
-    `function C() { return (<>{model && trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{model && trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
   ],
   [
     "S-23b: a ConditionalExpression sits on the path",
-    `function C() { return (<>{flag ? (trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)) : null}</>); }`,
+    `${A6_ACCOUNT_ENTRY} function AccountRepoGradesTab() { return (<>{flag ? (trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)) : null}</>); }`,
   ],
   [
     "F-8: the wrapping return belongs to a non-default, non-exported function",
     `function helperRender() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
+  ],
+  [
+    "the account render component is unreachable from the default export",
+    `export default function RepoGradesTab() { return null; }
+     function AccountRepoGradesTab() { return (<>{trendsEntry && (<div><ClassTrendsPanel entry={trendsEntry} defaultExpanded /></div>)}</>); }`,
   ],
 ];
 
@@ -589,7 +621,7 @@ describe("A-6: index.tsx mounts exactly one ClassTrendsPanel, gated by the enume
     const expandedAttr = panel.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText() === "defaultExpanded") as import("typescript").JsxAttribute | undefined;
     expect(expandedAttr && expandedAttr.initializer === undefined).toBe(true);
   });
-  it("the enumerated ancestor path from the panel's wrapper to the default-exported component's return holds", () => {
+  it("the enumerated ancestor path reaches the default export through the account render component", () => {
     expect(ts.isJsxElement(panels[0].parent)).toBe(true);
     expect(gatePathFromWrapper(panels[0].parent)).not.toBeNull();
   });

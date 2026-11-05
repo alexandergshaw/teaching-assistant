@@ -81,7 +81,7 @@ describe('automatic dispatch public entry', () => {
     await expect(readFile(preset.gates.typecheck.args[0])).resolves.toBeDefined();
     await expect(readFile(path.join(process.cwd(), 'src/tools/vitest-paths/cli.ts'))).resolves.toBeDefined();
   });
-  it('public CLI and actual MCP drive each complete the offline role loop without manual stage events', async () => {
+  it('public CLI and actual MCP drive each reach source acceptance and report live work pending', async () => {
     try {
       const expectedRoles = ['specialist', 'checker', 'criteria', 'checker', 'architect', 'checker', 'planner', 'checker', 'test-designer', 'checker', 'implementer', 'checker', 'implementer', 'checker', 'verifier', 'checker', 'specialist', 'checker', 'finalizer', 'checker'];
       for (const transport of ['cli', 'mcp']) {
@@ -98,9 +98,9 @@ describe('automatic dispatch public entry', () => {
           const reply = replies.find(r => r.id === 2)!.result as { isError: boolean; content: { text: string }[] };
           expect(reply.isError).toBe(false); result = JSON.parse(reply.content[0].text);
         }
-        expect(result.status.checkpoints, JSON.stringify(result.status.checkpoints)).toEqual({});
+        expect(result.status.checkpoints[fixture.selection.id]).toContain('independent live verification');
         expect(result.status.jobs.map(j => j.task.role)).toEqual(expectedRoles);
-        expect((await fixture.store.load()).items[fixture.selection.id].status).toBe('shipped');
+        expect((await fixture.store.load()).items[fixture.selection.id].status).toBe('regression-passed');
         expect(await readFile(path.join(fixture.workspace, 'output.txt'), 'utf8')).toBe('done');
       }
     } finally { await cleanupSupervisorFixtures(); }
@@ -126,7 +126,7 @@ describe('validated legacy compact status',()=>{
    const full=await cli(['status','--state',store.directory]) as {result:Record<string,unknown>};expect(full.result).toEqual(JSON.parse(JSON.stringify(expected)));
    const compact=await cli(['status','--output','summary','--state',store.directory]) as {result:Record<string,unknown>};
    expect(Object.keys(compact.result).sort()).toEqual(['revision','runStatus','items','assignments','operations','candidate','staleArtifacts','scheduling','limitations'].sort());
-   expect(compact.result).toEqual({revision:S.revision,runStatus:S.runStatus,items:[{id:'item',status:'queued',needs:['owner prerequisite'],escalation:'inspect fixture'}],assignments:[{id:'assignment',item:'item',role:'criteria',status:'cancelled',reconciled:false,reason:'owner cancelled'}],operations:[{id:'operation',assignment:'assignment',status:'unknown',reconciled:false}],candidate:expected.candidate.digest,staleArtifacts:expected.staleArtifacts,scheduling:expected.scheduling,limitations:expected.limitations});
+   expect(compact.result).toEqual({revision:S.revision,runStatus:S.runStatus,items:[{id:'item',status:'queued',needs:['owner prerequisite'],escalation:'inspect fixture',liveComplete:false}],assignments:[{id:'assignment',item:'item',role:'criteria',status:'cancelled',reconciled:false,reason:'owner cancelled'}],operations:[{id:'operation',assignment:'assignment',status:'unknown',reconciled:false}],candidate:expected.candidate.digest,staleArtifacts:expected.staleArtifacts,scheduling:expected.scheduling,limitations:expected.limitations});
    const forbidden=new Set(['events','files','artifacts','verificationReports','finalReports','outputPath','policy']);
    const inspect=(v:unknown)=>{if(v&&typeof v==='object')for(const [key,value]of Object.entries(v)){expect(forbidden.has(key),key).toBe(false);inspect(value);}};inspect(compact.result);
    expect(Buffer.byteLength(JSON.stringify(compact.result))).toBeLessThan(Buffer.byteLength(JSON.stringify(full.result)));

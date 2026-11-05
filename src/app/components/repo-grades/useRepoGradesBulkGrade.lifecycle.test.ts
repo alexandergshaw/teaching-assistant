@@ -58,6 +58,7 @@ const h0 = vi.hoisted(() => {
 vi.mock("react", () => ({
   useState: h0.useState,
   useRef: h0.useRef,
+  useLayoutEffect: (setup: () => void) => setup(),
   default: { useState: h0.useState, useRef: h0.useRef },
 }));
 
@@ -204,6 +205,7 @@ function zeroAreaResult(repo: string): ReturnType<typeof successResult> {
 }
 
 describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingActions, driven via handleGradeColumn/handleGradeCell", () => {
+  const cellScope = {};
   let cellEditsState: RepoGradeCellEditsByRepo;
   let announceCalls: string[];
   let resolveRubricForColumnMock: ReturnType<typeof vi.fn>;
@@ -225,6 +227,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
 
   function makeParams(overrides: Partial<UseRepoGradesGradingActionsParams> = {}): UseRepoGradesGradingActionsParams {
     return {
+      cellScope,
       rows: ROWS,
       cellEdits: cellEditsState,
       setCellEdits: (updater) => {
@@ -278,6 +281,37 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       resolveAll: () => pending.forEach((release) => release()),
     };
   }
+
+  it.each(["single", "folder"] as const)("keeps newer feedback and blocks overlapping grading when %s starts first", async (first) => {
+    const grading = usePendingGradeCalls();
+    const render = useTestRender();
+    const single = () => render.handleGradeCell(ROWS[0], COLUMNS[0]);
+    const folder = () => render.handleGradeColumn("week-1");
+    const pending = (first === "single" ? single : folder)();
+    await (first === "single" ? folder : single)();
+    expect(rubricDeferreds).toHaveLength(1);
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await flushMicrotasks();
+    render.handleFeedbackFieldChange(ROWS[0].repo, "week-1", "strengths", "Keep newer draft");
+    grading.resolveAll();
+    await pending;
+    const cell = cellEditsState[ROWS[0].repo]["week-1"];
+    expect(cell).toMatchObject({ grading: false, strengths: "Keep newer draft", comment: "Keep newer draft" });
+    expect(cell.conflictingGrade?.generatedScore).toBeTruthy();
+    expect(gradeRepoActionMock).toHaveBeenCalledTimes(first === "single" ? 1 : TARGET_REPOS.length);
+  });
+
+  it("hides old folder progress and ignores a late rubric after changing course generation", async () => {
+    const initial = useTestRender();
+    const pending = initial.handleGradeColumn("week-1");
+    const next = useTestRenderWith({ courseId: "course-2", cellScope: {} });
+    expect(next.bulkRunningFolder).toBeNull();
+    expect(next.bulkProgress).toBeNull();
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await pending;
+    expect(gradeRepoActionMock).not.toHaveBeenCalled();
+    expect(announceCalls).toEqual([]);
+  });
 
   it("A26: two clicks during a pending rubric fetch must not double every grading call", async () => {
     const grading = usePendingGradeCalls();

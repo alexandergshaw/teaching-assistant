@@ -13,6 +13,9 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
 import { studentRepoName } from "@/lib/student-repo-names";
 import { fetchJUnitSummary, testWorkflowYaml } from "@/lib/github-test-workflow";
+import { repoGradeAdmissionMode, runManualRepoGrade, type ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
+import { getGeminiInterRequestDelayMs, getGeminiMaxSubmissions } from "@/lib/gemini";
+import { sleep } from "@/lib/grade/utils";
 
 
 /**
@@ -608,19 +611,7 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
  * matrix shows every student as a row. Generates a rubric from the first repo
  * when none is supplied.
  */
-export async function gradeReposAction(
-  repos: RepoQueueItem[],
-  assignmentInstructions: string,
-  rubric: string,
-  provider: LlmProvider = "gemini",
-  gradingFolder?: string,
-  // See gradeRepoAction's (github-repos.ts) identical parameter for the full
-  // rationale - this is that same fix, for the bulk multi-repo path this
-  // older panel (GithubGradingPanel.tsx) uses. Default false/omitted keeps
-  // today's behavior: GithubGradingPanel.tsx never passes it, so this fix
-  // changes no existing course's grades on that surface.
-  runCode?: boolean
-): Promise<
+type RepoBatchGradeResponse =
   | {
       run: GradingRun;
       rubric: string;
@@ -635,14 +626,97 @@ export async function gradeReposAction(
       // conflates "nothing here" with "something here I couldn't read" -
       // see the computation below for why they can be told apart.
       undeterminedRepos?: string[];
+      unfinishedRepos?: Array<{ label: string; reason: string }>;
     }
-  | { error: string }
-> {
+  | { error: string };
+
+export async function gradeReposAction(
+  repos: RepoQueueItem[],
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini",
+  gradingFolder?: string,
+  // Omission keeps the existing code execution policy for manual callers.
+  runCode?: boolean
+): Promise<RepoBatchGradeResponse> {
   try {
     await requireAppOwner();
-    // One common folder scopes every repo in the queue for this run (AC A2),
-    // not a per-repo value - normalized once, outside the loop.
     const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
+    if (repoGradeAdmissionMode() === "legacy-manual") {
+      return await evaluateRepoGradeBatch(repos, assignmentInstructions, rubric, provider, pathPrefix, runCode);
+    }
+
+    // Reserve each target in turn so a batch can exceed the account's
+    // concurrent capacity. Reuse the first resolved rubric for later targets.
+    let combined: Exclude<RepoBatchGradeResponse, { error: string }> | undefined;
+    const evaluated = new Set<string>();
+    const unfinishedRepos: NonNullable<Exclude<RepoBatchGradeResponse, { error: string }>["unfinishedRepos"]> = [];
+    const limit = getGeminiMaxSubmissions();
+    const delay = getGeminiInterRequestDelayMs();
+    let modelSlots = 0;
+    let stopped = false;
+    const beforeModelGrade = async () => {
+      if (modelSlots >= limit) return false;
+      if (modelSlots > 0 && delay > 0) await sleep(delay);
+      modelSlots += 1;
+      return true;
+    };
+    for (const item of repos) {
+      const parsed = parseRepoRef(item.repoRef);
+      if (!parsed) continue;
+      const repo = `${parsed.owner}/${parsed.repo}`.toLowerCase();
+      const target = JSON.stringify([repo, item.branch || ""]);
+      if (evaluated.has(target)) continue;
+      evaluated.add(target);
+      const label = item.label?.trim() || repo;
+      if (stopped) {
+        unfinishedRepos.push({ label, reason: "Grading did not start because the batch stopped." });
+        continue;
+      }
+      const batchRubric = provider === "embedded" ? rubric : combined?.rubric || rubric;
+      const result = await runManualRepoGrade(repo, (execution) => evaluateRepoGradeBatch(
+        [item], assignmentInstructions, batchRubric, provider, pathPrefix, runCode, execution, beforeModelGrade,
+      ));
+      if ("error" in result) {
+        unfinishedRepos.push({ label, reason: result.error });
+        stopped = true;
+        continue;
+      }
+      unfinishedRepos.push(...(result.unfinishedRepos ?? []));
+      if (!combined) {
+        combined = result;
+        continue;
+      }
+      const runHeader = combined.run.results.length ? combined.run : result.run;
+      combined = {
+        run: { ...runHeader, results: [...combined.run.results, ...result.run.results] },
+        rubric: result.rubric,
+        truncatedRepos: [...(combined.truncatedRepos ?? []), ...(result.truncatedRepos ?? [])],
+        noSubmissionRepos: [...(combined.noSubmissionRepos ?? []), ...(result.noSubmissionRepos ?? [])],
+        undeterminedRepos: [...(combined.undeterminedRepos ?? []), ...(result.undeterminedRepos ?? [])],
+      };
+    }
+    if (evaluated.size === 0) return { error: "No valid repositories to grade." };
+    return {
+      ...(combined ?? { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [] }, rubric }),
+      ...(unfinishedRepos.length > 0 && { unfinishedRepos }),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not grade the repositories." };
+  }
+}
+
+async function evaluateRepoGradeBatch(
+  repos: RepoQueueItem[],
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider,
+  pathPrefix: string | undefined,
+  runCode: boolean | undefined,
+  execution?: ManualRepoGradeExecution,
+  beforeModelGrade?: () => Promise<boolean>,
+): Promise<RepoBatchGradeResponse> {
+    const modelExecution = execution?.modelExecution;
     const rawDigests: Array<{ label?: string; digest: RepoDigest }> = [];
     for (const item of repos) {
       const parsed = parseRepoRef(item.repoRef);
@@ -650,7 +724,10 @@ export async function gradeReposAction(
       const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, item.branch || undefined);
       rawDigests.push({ label: item.label, digest });
     }
-    if (rawDigests.length === 0) return { error: "No valid repositories to grade." };
+    if (rawDigests.length === 0) {
+      execution?.markKnownFailure();
+      return { error: "No valid repositories to grade." };
+    }
     const instructions = assignmentInstructions.trim() || "Evaluate each student's repository.";
 
     // `digest.truncated` used to be read (fileCount/text) and dropped right
@@ -740,6 +817,7 @@ export async function gradeReposAction(
     if (provider === "embedded") {
       const builtRubric = buildEmbeddedRubric({ rubricText: rubric, instructions });
       if (builtRubric.checks.length === 0) {
+        execution?.markKnownFailure();
         return { error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
       }
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
@@ -757,12 +835,26 @@ export async function gradeReposAction(
     // entries with an always-empty submittedFiles - that emptiness was the
     // reason a repo-graded row never had a file list to preview.
     const entries: StudentSubmissionEntry[] = digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label));
-    const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
-    const run = await gradeEntries(entries, instructions, effectiveRubric, provider, null, { source: "github" });
+    if (beforeModelGrade && !(await beforeModelGrade())) {
+      execution?.markKnownFailure();
+      return {
+        run: { results: [], rubricAreaNames: [], fullCreditChecklist: [] },
+        rubric: rubric.trim(),
+        truncatedRepos,
+        noSubmissionRepos,
+        undeterminedRepos,
+        unfinishedRepos: entries.map(({ student: label }) => ({ label, reason: "Grading did not start because the batch reached its submission limit." })),
+      };
+    }
+    const rubricInput = `${instructions}\n\n${entries[0].content}`;
+    const effectiveRubric = rubric.trim() || await (modelExecution
+      ? generateRubric(rubricInput, provider, "coding", modelExecution)
+      : generateRubric(rubricInput, provider));
+    const run = await gradeEntries(entries, instructions, effectiveRubric, provider, null, {
+      source: "github", autoRunCode: runCode !== false,
+      ...(execution && { modelExecution, deadlineMs: execution.modelExecution.deadlineMs, callSink: execution.callSink }),
+    });
     return { run, rubric: effectiveRubric, truncatedRepos, noSubmissionRepos, undeterminedRepos };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not grade the repositories." };
-  }
 }
 
 /** List a repo's Actions workflows (so the user can choose which to run). */

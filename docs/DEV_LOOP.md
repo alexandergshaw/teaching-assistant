@@ -207,6 +207,21 @@ never per feature and never several groups rolled together.
 **Root-cause analysis** for anything that failed, then fix and re-run until
 clean.
 
+**A local `shipped` transition is not a pushed delivery.** Before claiming an
+item complete, run the host handoff guard for every requested item with its
+intended remote main target, normally `--target origin/main`. The guard must
+prove the loop has no retained work, the target tracking ref is current against
+the remote, and all declared owned paths are clean with final-candidate hashes
+and complete path sets matching both `HEAD` and that remote tree. For candidate
+regular files, Git modes must be supported (`100644` or `100755`) and match
+exactly between `HEAD` and the remote; symlinks and unsupported modes fail
+closed. Invalid UTF-8 Git paths also fail closed.
+If it reports `pending-main`, delivery is not complete: publish only the
+independently reviewed owned chunk under the existing Git grant, then rerun the
+guard. The guard never fetches or pushes by itself. A status summary, local
+commit, feature-branch push, or local `shipped` marker cannot substitute for
+the target check.
+
 **Record disposals as they happen; reconcile the backlog at the push.** A
 disposal is not recorded until it is in `docs/BACKLOG.md` - residuals and
 relocations are created during the check rounds, often many waves before the

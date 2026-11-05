@@ -252,7 +252,7 @@ describe("both grading paths set the new feedback/file fields alongside the exis
     expect(body).toContain('improvements: first?.improvements ?? ""');
     expect(body).toContain('resubmitNotice: first?.resubmitNotice ?? ""');
     expect(body).toContain("submittedFiles: first?.submittedFiles ?? []");
-    expect(body).toContain("submissionTruncated: first?.submissionTruncated ?? false");
+    expect(body).toContain("submissionTruncated: !!result.digestTruncated || !!first?.submissionTruncated");
     // Same patch object as rubricAreas/generatedScore, not a second write.
     expect(body).toContain("rubricAreas: first?.rubricAreas ?? []");
     expect(body).toContain("generatedScore: first?.totalScore ?? null");
@@ -267,7 +267,7 @@ describe("both grading paths set the new feedback/file fields alongside the exis
     expect(body).toContain('improvements: first?.improvements ?? ""');
     expect(body).toContain('resubmitNotice: first?.resubmitNotice ?? ""');
     expect(body).toContain("submittedFiles: first?.submittedFiles ?? []");
-    expect(body).toContain("submissionTruncated: first?.submissionTruncated ?? false");
+    expect(body).toContain("submissionTruncated: !!result.digestTruncated || !!first?.submissionTruncated");
     expect(body).toContain("generatedScore: first?.totalScore ?? null");
   });
 });
@@ -299,14 +299,16 @@ const OPTIONS = {
 
 // R-2: the derived root set against a HAND-FROZEN literal, never a second
 // readdirSync - a directoryRoots-vs-readdirSync comparison is circular and
-// discharges nothing (both go to zero together). 39 non-test, non-.d.ts
-// .ts/.tsx basenames of this directory.
+// discharges nothing (both go to zero together). These are the non-test,
+// non-.d.ts .ts/.tsx basenames of this directory.
 const FROZEN_REPO_GRADES_ROOTS = [
   "LinkUsernamesPanel.tsx",
   "LinkUsernamesRosterSection.tsx",
   "RepoBindingControl.tsx",
+  "RepoDashboardFeedback.tsx",
   "RepoGradeCellControl.tsx",
   "RepoGradesControls.tsx",
+  "RepoGradesDashboard.tsx",
   "RepoGradesGrid.tsx",
   // RG-SEARCH-STICKY Wave C: the grade-set typeahead (browser-safe imports only).
   "RepoGradesGradeSetTypeahead.tsx",
@@ -320,6 +322,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "classTrendsFolderEntry.ts",
   "index.tsx",
   "linkRepoUsernames.ts",
+  "repoFeedbackClipboard.ts",
   "repoGradePostScore.ts",
   "repoGradeScoreDisplay.ts",
   "repoGradeStudentName.ts",
@@ -330,6 +333,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "repoGradesBulkGrade.ts",
   "repoGradesCellEdits.ts",
   "repoGradesCoursePicker.ts",
+  "repoGradesDashboardModel.ts",
   "repoGradesFolderSelection.ts",
   // RG-SEARCH-STICKY Wave C: the pure grade-set reducer and grade-scope decision.
   "repoGradesGradeSet.ts",
@@ -348,6 +352,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   // RG-SEARCH-STICKY Wave C: the pure visible-rows selector and filter summary.
   "repoGradesVisibleRows.ts",
   "rosterUsernameOverlay.ts",
+  "useRepoGradeHistory.ts",
   "useRepoGradesBulkGrade.ts",
   "useRepoGradesData.ts",
   "useRepoGradesGradingActions.ts",
@@ -355,7 +360,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
 ].sort();
 
 describe("R-2: the derived repo-grades root set matches the hand-frozen list", () => {
-  it("directoryRoots(repo-grades) names exactly the 39 frozen basenames", () => {
+  it("directoryRoots(repo-grades) names exactly the frozen basenames", () => {
     const derived = directoryRoots(REPO_GRADES_DIR)
       .map((abs) => abs.slice(REPO_GRADES_DIR.length + 1))
       .sort();

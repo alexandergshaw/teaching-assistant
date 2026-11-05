@@ -25,21 +25,17 @@ async function assertRejected(d: DemoDriver, type: string, payload: Record<strin
 }
 
 describe('public CLI conformance', () => {
-  it('traverses accepted artifacts, actual subprocess gates, verification and local delivery', async () => {
+  it('fails closed when the public demo requests disabled manual generated-artifact allocation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'agnostic-demo-test-'));
     directories.push(root);
-    const result = await runDemo(root) as { status: string; stateDirectory: string; evidence: string[]; rejected: string[]; ownerDisposition: { rounds: number; acceptedHash: string } };
-    expect(result.status).toBe('shipped');
-    expect(result.evidence.length).toBeGreaterThanOrEqual(2);
-    expect(result.rejected).toContain('self-review');
-    expect(result.rejected).toContain('third-substantive-review');
-    expect(result.ownerDisposition.rounds).toBe(2);
-    expect(result.ownerDisposition.acceptedHash).toMatch(/^[a-f0-9]{64}$/);
-    const state = JSON.parse(await readFile(path.join(result.stateDirectory, 'state.json'), 'utf8'));
-    expect(state.items.transform.status).toBe('shipped');
-    expect(Object.values(state.evidence).every((record: unknown) => (record as { exitCode: number }).exitCode === 0)).toBe(true);
-    expect(state.verificationReports['verification-report'].criteria.uppercase.length).toBeGreaterThan(0);
-  }, 300_000);
+    await expect(runDemo(root)).rejects.toThrow('Manual generated-artifact allocation is disabled pending alias-safety verification');
+
+    const d = new DemoDriver(root, path.join(root, 'project'), path.join(root, '.agnostic-loop'));
+    const state = await d.state();
+    expect(state.items.transform.status).toBe('queued');
+    expect(state.assignments).toEqual({});
+    expect(state.artifacts).toEqual({});
+  }, 60_000);
 
   it('rejects same instance and same context reviews without advancing durable state', async () => {
     const d = await fixture();
@@ -53,6 +49,38 @@ describe('public CLI conformance', () => {
     }
     await d.review('criteria');
     expect((await d.state()).artifacts.criteria.acceptedHash).toBe(artifact.hash);
+  }, 60_000);
+
+  it('rejects disabled manual allocation and enforces declared source ownership', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(),'agnostic-manual-allocation-'));
+    directories.push(root);
+    const created = await createDemoFixture(root,policy => {
+      policy.artifactDirectory = 'artifacts';
+      policy.candidateExclusions.push('secrets');
+    });
+    const d = new DemoDriver(created.root,created.workspace,created.stateDirectory);
+    const item = {id:'transform',objective:'Synthetic manual allocation fixture',owner:'operator',
+      affectedPaths:['input.txt'],dependencies:[],criteria:['uppercase'],requiredArtifacts:{},requiredGates:[],triage:{}};
+    await assertRejected(d,'item.create',{...item,affectedPaths:['artifacts/report.txt']},/outside item source paths/);
+    await d.event('item.create',item);
+    await d.activity('criteria');
+    const start = {id:'author',item:'transform',activity:'criteria',role:'criteria',worker:demoWorker('author'),
+      inputs:{},writePaths:['artifacts/report.txt'],affectedPaths:['artifacts/report.txt'],resources:[],allowedActions:['write'],
+      deadline:Date.now()+60_000,deliverables:['report']};
+    const file = path.join(root,'untrusted-allocation.json');
+    await writeFile(file,JSON.stringify({id:'untrusted',expectedRevision:(await d.state()).revision,type:'assignment.start',payload:start}));
+    expect(invokeCli(['apply',file,'--state',created.stateDirectory,'--actor','worker']).stdout).toContain('outside item');
+    await assertRejected(d,'assignment.start',{...start,writePaths:['secrets/report.txt'],affectedPaths:['secrets/report.txt']},/outside item/);
+    await assertRejected(d,'assignment.start',start,/Manual generated-artifact allocation is disabled/);
+    const sourceStart = {...start,writePaths:['input.txt'],affectedPaths:['input.txt']};
+    await d.event('assignment.start',sourceStart);
+    await assertRejected(d,'assignment.start',{...sourceStart,id:'second',worker:demoWorker('second')},/locked\/dependent assignment author/);
+    const alternate = path.join(created.workspace,'artifacts','alternate.txt');
+    await writeFile(alternate,'Synthetic unowned bytes');
+    expect(d.command(['import','author','report',alternate],false).stdout).toContain('outside assignment ownership');
+    d.command(['import','author','report',path.join(created.workspace,'input.txt')]);
+    await d.finish('author');
+    expect((await d.state()).items.transform.affectedPaths).toEqual(['input.txt']);
   }, 60_000);
 
   it('reloads pending assignments and event IDs, rejects stale CAS and conflicting replay', async () => {

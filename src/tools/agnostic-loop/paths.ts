@@ -9,6 +9,17 @@ export function contained(root: string, target: string): boolean {
   const rel = path.relative(path.resolve(root), path.resolve(target));
   return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
 }
+
+export async function physicalPath(target: string): Promise<string> {
+  try { await lstat(target); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const parent = path.dirname(target);
+    if (parent === target) throw error;
+    return path.join(await physicalPath(parent),path.basename(target));
+  }
+  return realpath(target);
+}
 export async function safeFile(root: string, relative: string): Promise<string> {
   relativePath(relative);
   const base = await realpath(root);

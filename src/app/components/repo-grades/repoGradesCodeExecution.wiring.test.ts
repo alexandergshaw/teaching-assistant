@@ -39,6 +39,7 @@ const uiStateSource = read(`${REPO_GRADES}/repoGradesUiState.ts`);
 const gradingActionsSource = read(`${REPO_GRADES}/useRepoGradesGradingActions.ts`);
 const bulkGradeSource = read(`${REPO_GRADES}/useRepoGradesBulkGrade.ts`);
 const githubReposSource = read("src/app/actions/github-repos.ts");
+const repoGradeEvaluatorSource = read("src/lib/repo-grade-evaluator.ts");
 const githubSource = read("src/app/actions/github.ts");
 const codeRunnerSource = read("src/lib/code-runner.ts");
 
@@ -287,11 +288,11 @@ describe("github-repos.ts's gradeRepoAction runs the embedded engine's code ONLY
   });
 
   it("imports attachCodeRuns from the shared code-runner module - never a re-implemented copy", () => {
-    expect(githubReposSource).toMatch(/import\s*\{\s*attachCodeRuns\s*\}\s*from\s*"@\/lib\/code-runner"/);
+    expect(repoGradeEvaluatorSource).toMatch(/import\s*\{\s*attachCodeRuns\s*\}\s*from\s*"@\/lib\/code-runner"/);
   });
 
   it("attachCodeRuns is gated behind `if (runCode)`, not called unconditionally", () => {
-    expect(conditionGatingCall(githubReposSource, "attachCodeRuns")).toBe("runCode");
+    expect(conditionGatingCall(repoGradeEvaluatorSource, "attachCodeRuns")).toBe("runCode");
   });
 
   it("gradeRepoAction declares an eighth parameter named runCode, optional (so every existing caller that omits it keeps today's behavior)", () => {
@@ -346,8 +347,10 @@ describe("RepoGradesControls.tsx renders the code-scoring checkbox, wired to the
     expect(controlsSource).toContain("onChange={(e) => onRunCodeScoringChange(e.target.checked)}");
   });
 
-  it("states plainly, next to the control, that this changes scores and that SpeedGrader will not show a matching rubric line", () => {
-    expect(controlsSource).toContain("This changes scores, so it defaults off.");
+  it("states plainly, next to the control, that code is sent to the compiler service and can affect the score", () => {
+    expect(controlsSource).toContain("Auto-run submitted code before grading");
+    expect(controlsSource).toContain("configured compiler/interpreter service");
+    expect(controlsSource).toContain("sent to that external execution service");
     expect(controlsSource).toContain("SpeedGrader");
   });
 });

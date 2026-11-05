@@ -3,18 +3,26 @@ import { LoopStore } from './store';
 import { canonical, keys, object } from './json';
 import { validateEvent } from './validation';
 import { observeEvent } from './observed';
+import { isHistoricalLiveInput } from './live-recovery';
+import { liveActivity } from './live-verification';
 
 export async function exportPacket(store: LoopStore, assignmentId: string, output: string): Promise<unknown> {
   const state = await store.load(); const assignment = state.assignments[assignmentId];
   if (!assignment || assignment.status !== 'running') throw new Error('Packet requires running assignment');
   const context = await store.context(state);
-  for (const [id, hash] of Object.entries(assignment.inputs)) if (state.artifacts[id]?.acceptedHash !== hash || context.artifacts[id]?.hash !== hash) throw new Error('Packet input is no longer accepted/current');
+  for (const [id, hash] of Object.entries(assignment.inputs)) if (!isHistoricalLiveInput(state,assignment.item,assignment.activity,id,hash) && (state.artifacts[id]?.acceptedHash !== hash || context.artifacts[id]?.hash !== hash)) throw new Error('Packet input is no longer accepted/current');
   const candidate = context.candidate;
   if (candidate.policyHash !== assignment.policyHash) throw new Error('Packet policy is stale');
   const packet = { schemaVersion: 1, revision: state.revision, assignment, item: state.items[assignment.item], activity: state.activities[assignment.activity], inputs: Object.keys(assignment.inputs).map(id => state.artifacts[id]), decisions: Object.values(state.decisions).filter(d => d.activity === assignment.activity), candidate, budget: { deadline: state.policy.deadline, maxAssignments: state.policy.maxAssignments, remainingAssignments: state.policy.maxAssignments - Object.keys(state.assignments).length }, identityStatus: 'operator-attested; file adapter cannot independently authenticate provider identity', usage: 'unavailable' };
-  await writeFile(output, JSON.stringify(packet, null, 2)); return packet;
+  const live = assignment.activity === liveActivity(assignment.item) ? {
+    contract: state.liveContracts?.[assignment.item],
+    sourceBlob: `blobs/${state.liveContracts?.[assignment.item]?.source.hash}`,
+    reviewArtifact: assignment.role === 'checker' ? Object.values(state.artifacts).filter(a => a.activity === assignment.activity).sort((a,b) => b.version-a.version)[0] : undefined,
+  } : undefined;
+  const exported = { ...packet, ...(live ? { live } : {}) };
+  await writeFile(output, JSON.stringify(exported, null, 2)); return exported;
 }
-const workerEvents = ['review.record', 'transcription.verify', 'assignment.finish', 'verification.record', 'final.record'];
+const workerEvents = ['review.record', 'transcription.verify', 'assignment.finish', 'verification.record', 'final.record', 'live.record'];
 export async function importResult(store: LoopStore, filename: string, actor: string): Promise<unknown> {
   const result = object(JSON.parse(await readFile(filename, 'utf8')), 'result');
   keys(result, ['schemaVersion', 'id', 'expectedRevision', 'assignment', 'worker', 'publicationToken', 'event', 'usage'], 'result');

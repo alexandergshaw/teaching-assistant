@@ -4,7 +4,7 @@ import {
   getGeminiMaxOutputTokens,
   getGeminiMaxSubmissions,
 } from "../gemini";
-import { callLlm, type LlmPart, type LlmProvider } from "../llm";
+import { callLlm, LlmOutcomeUnknownError, type LlmExecutionPolicy, type LlmPart, type LlmProvider } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
 import {
   RESUBMIT_NOTICE,
@@ -89,7 +89,8 @@ async function scoreAxis(
   // RECORDING ONE-VS-MANY W3: when set, this call grades ONE segment of a
   // multi-submission recording; a fixed-wording note confines the model to it.
   videoGradeWindowSec?: RecordingWindow,
-  callSink?: GradeCallSink
+  callSink?: GradeCallSink,
+  modelExecution?: LlmExecutionPolicy
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -126,12 +127,14 @@ async function scoreAxis(
       contents: [{ role: "user", parts }],
       generationConfig: { temperature: 0.2, maxOutputTokens },
     },
-    provider
+    provider,
+    modelExecution
   );
 
   if (!result.ok) {
-    console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
     callSink?.recordCall({ status: result.status });
+    if (result.outcome === "unknown") throw new LlmOutcomeUnknownError();
+    console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
     throw new GradeCallError(normalizeGeminiError(result.status, result.body), gradeFailureClassForStatus(result.status));
   }
   callSink?.recordCall({
@@ -227,9 +230,10 @@ async function gradeSubmission(
   submittedFiles: SubmittedFileInfo[] = [],
   commentSplit = false,
   videoGradeWindowSec?: RecordingWindow,
-  callSink?: GradeCallSink
+  callSink?: GradeCallSink,
+  modelExecution?: LlmExecutionPolicy
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, modelExecution);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -274,8 +278,9 @@ async function gradeDiscussionAxes(a: {
   videoGradeWindowSec?: RecordingWindow;
   pointsPossible: number | null;
   callSink?: GradeCallSink;
+  modelExecution?: LlmExecutionPolicy;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink);
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, a.modelExecution);
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -290,7 +295,7 @@ async function gradeDiscussionAxes(a: {
   let replyStrengths = "";
   let replyImprovements = "";
   if (a.replyCount > 0 && a.replyText !== null) {
-    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink);
+    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink, a.modelExecution);
     replyAreas = reply.rubricAreas;
     replyStrengths = reply.strengths;
     replyImprovements = reply.improvements;
@@ -310,6 +315,8 @@ async function gradeDiscussionAxes(a: {
  * existing call site compiles unchanged.
  */
 export interface GradingRunOptions {
+  /** Opt-in server budget for grading model requests with ambiguous outcomes. */
+  readonly modelExecution?: LlmExecutionPolicy;
   /** Absolute epoch-ms. The loop refuses to START a student at or past this.
    *  Undefined on the attended browser path, which keeps today's behaviour.
    *  A forged/too-generous value can only make the run do LESS work, so
@@ -334,6 +341,9 @@ export interface GradingRunOptions {
   /** Grading-chat length deduction. Unset means false (no directive), keeping
    *  every other caller byte-identical. */
   readonly applyLengthDeduction?: boolean;
+  /** Opt out of automatic compiler/interpreter execution for submitted code.
+   * Unset preserves the established behavior. */
+  readonly autoRunCode?: boolean;
   /** A37: the grading surface, stamped onto each not-attempted row so the
    *  review table can name a surface-specific action. Display-copy only. */
   readonly source?: GradingSource;
@@ -402,7 +412,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec, callSink } = options;
+  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec, callSink, modelExecution } = options;
   const namingDeduction = options.applyNamingDeduction ?? true;
   const lengthDeduction = options.applyLengthDeduction ?? false;
   const maxSubmissions = getGeminiMaxSubmissions();
@@ -467,7 +477,7 @@ async function gradeStudentEntries(
 
     // Run any code the student submitted (returns null with no network when there
     // is nothing runnable). Never throws.
-    const codeRun = precomputedCodeRun ?? (await runSubmittedCode(submittedFiles));
+    const codeRun = precomputedCodeRun ?? (options.autoRunCode === false ? null : await runSubmittedCode(submittedFiles));
 
     try {
       const result = initialTrunc
@@ -487,6 +497,7 @@ async function gradeStudentEntries(
             videoGradeWindowSec,
             pointsPossible,
             callSink,
+            modelExecution,
           })
         : await gradeSubmission(
             singleAxisPrompt,
@@ -499,7 +510,8 @@ async function gradeStudentEntries(
             submittedFiles,
             commentSplit === true,
             videoGradeWindowSec,
-            callSink
+            callSink,
+            modelExecution
           );
       results.push({
         ...result,
@@ -512,6 +524,7 @@ async function gradeStudentEntries(
         submissionTruncated,
       });
     } catch (error) {
+      if (modelExecution && error instanceof LlmOutcomeUnknownError) throw error;
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
       callSink?.recordFailure(error instanceof GradeCallError ? error.failureClass : "unclassified");

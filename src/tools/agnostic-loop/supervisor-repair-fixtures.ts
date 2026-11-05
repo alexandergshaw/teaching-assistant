@@ -236,7 +236,7 @@ export async function runReentry() {
   const reentered = await f.store.load();
   invariant(reentered.items[f.selection.id].status !== 'queued' && reentered.revision > reset.revision, 'R1:acknowledged advance must leave queued after invalidation');
   invariant(!reentered.events.some(e => e.id === `dispatch:${action.key}` && e.id === oldAdvance.id), 'R1:later genuine transition needs distinct action identity');
-  await until(f, (s, status) => s.items[f.selection.id].status === 'shipped' || status.actions[0]?.kind === 'owner-needed', 'bounded reentry disposition');
+  await until(f, (s, status) => s.items[f.selection.id].status === 'regression-passed' || status.actions[0]?.kind === 'owner-needed', 'bounded reentry disposition');
   return f;
 }
 export async function runCheckpoint() {
@@ -250,7 +250,7 @@ export async function runCheckpoint() {
   const status = await dispatchStatus(new LoopStore(f.store.directory), f.config, f.selection);
   const explanation = status.checkpoints[f.selection.id];
   invariant(typeof explanation === 'string' && /limit|budget|exhaust|blocked|unchanged|progress|prerequisite/i.test(explanation) && /step|advance|scoped|queued|action|stage/i.test(explanation), 'R4:bounded stop must persist blocked action/stage and prerequisite or exhausted limit');
-  invariant((await f.store.load()).items[f.selection.id].status !== 'shipped', 'R4:partial bounded drive must not claim delivery');
+  invariant((await f.store.load()).items[f.selection.id].status !== 'regression-passed', 'R4:partial bounded drive must not claim delivery');
   return f;
 }
 export async function runGateRepair(stage: FailureStage, options: Omit<Options, 'stage'> = {}) {
@@ -270,7 +270,7 @@ export async function runGateRepair(stage: FailureStage, options: Omit<Options, 
   await step(f);
   await assertFailurePacket(f, f.evidence);
   invariant(await readFile(path.join(f.workspace, 'output.txt'), 'utf8') === 'repaired-output', 'R2:literal diagnostic-dependent repair must change actual candidate');
-  await until(f, s => s.items[f.selection.id].status === 'shipped', 'repaired local delivery');
+  await until(f, s => s.items[f.selection.id].status === 'regression-passed', 'repaired source acceptance');
   const state = await f.store.load(), wave = waveIn(state)!;
   invariant(wave.activity === f.wave.activity && state.activities[wave.activity].rounds === f.budget.rounds + 1, 'R5:repair must consume remaining review in the same activity');
   invariant(wave.hash !== f.wave.hash && state.activities[wave.activity].reviews.at(-1)?.hash === wave.hash, 'R2:changed repair must receive independent checking');
@@ -340,7 +340,7 @@ export async function nonGateControl(mode: 'review' | 'invalidation' | 'paused' 
     const { state } = await until(f, s => Boolean(waveIn(s)), 'direct invalidation wave');
     await invalidateAcceptedWave(f, waveIn(state)!);
   }
-  await until(f, s => s.items[f.selection.id].status === 'shipped', `non-gate ${mode} delivery`);
+  await until(f, s => s.items[f.selection.id].status === 'regression-passed', `non-gate ${mode} delivery`);
   invariant(!Object.values((await f.store.load()).evidence).some(e => e.exitCode !== 0), 'NON_GATE:fixture must not manufacture failed gate evidence');
   for (const record of await packets(f)) invariant(diagnosticRecords(record.request.packet).length === 0, 'NON_GATE:repair purpose/retry prefix alone cannot require or invent gate diagnostics');
 }
@@ -369,7 +369,7 @@ export async function wrongItemControl() {
   f.selection = other;
   const { state } = await until(f, s => Boolean(waveIn(s, other.id)), 'unrelated item accepted wave');
   await invalidateAcceptedWave(f, waveIn(state, other.id)!);
-  await until(f, s => s.items[other.id].status === 'shipped', 'unrelated item repair delivery');
+  await until(f, s => s.items[other.id].status === 'regression-passed', 'unrelated item repair source acceptance');
   for (const record of await packets(f)) {
     const task = record.request.packet.task as { item: string };
     if (task.item === other.id) invariant(diagnosticRecords(record.request.packet).length === 0, 'DIAGNOSTICS:unrelated historical failure must never be attached to another item');

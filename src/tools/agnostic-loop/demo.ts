@@ -132,11 +132,14 @@ export class DemoDriver {
 }
 
 export async function runDemo(directory: string): Promise<unknown> {
-  const fixture = await createDemoFixture(directory);
+  const fixture = await createDemoFixture(directory,policy => {
+    policy.artifactDirectory = 'artifacts';
+    policy.candidateExclusions.push('.git');
+  });
   const d = new DemoDriver(fixture.root, fixture.workspace, fixture.stateDirectory);
   await d.event('item.create', {
     id: 'transform', objective: 'Uppercase input while preserving original input', owner: 'operator',
-    affectedPaths: ['input.txt', 'output.txt', ...['scope', 'criteria', 'design', 'plan', 'tests', 'implementation', 'verification-report', 'whole-change', 'final-report'].map(id => `artifacts/${id}.txt`)], dependencies: [], criteria: ['uppercase'],
+    affectedPaths: ['input.txt', 'output.txt'], dependencies: [], criteria: ['uppercase'],
     requiredArtifacts: { 'criteria-accepted': ['criteria'], 'design-accepted': ['design'], 'ready-to-build': ['plan', 'test-design'] },
     requiredGates: ['behavior', 'regression'], triage: { security: 'Local fixed commands; no remote service', accessibility: 'Plain CLI JSON', reliability: 'Durable operation records' },
   });
@@ -183,10 +186,9 @@ export async function runDemo(directory: string): Promise<unknown> {
   await d.finish('finalize');
   await d.review('final-report');
   await d.advance('regression-passed', ['final-report'], evidence);
-  await d.advance('shipped', ['final-report'], evidence);
   await d.event('item.create', {
     id: 'owner-example', objective: 'Demonstrate exact owner disposition after two defective rounds', owner: 'operator',
-    affectedPaths: ['artifacts/draft-one.txt', 'artifacts/draft-two.txt', 'artifacts/owner-result.txt'], dependencies: [], criteria: ['uppercase'],
+    affectedPaths: [], dependencies: [], criteria: ['uppercase'],
     requiredArtifacts: {}, requiredGates: [], triage: { reliability: 'Review-round accounting persists across CLI processes' },
   });
   await d.activity('owner-criteria', 'criteria', 'owner-example');

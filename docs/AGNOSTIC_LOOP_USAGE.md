@@ -187,17 +187,103 @@ Before ending the active implementation turn or claiming delivery, assert every
 requested item explicitly, separately for each store:
 
 ```powershell
-node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/manual-handoff.ts C:/absolute/store ITEM_ID
+node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/agnostic-loop/manual-handoff.ts C:/absolute/store ITEM_ID --target origin/main
 ```
 
-The read-only guard verifies the stored snapshot and immutable blobs without a
-whole-candidate scan. Exit `2` means delivery is pending and lists retained work;
-exit `1` means the assertion is unproven (including missing/invalid state or an
-unknown item). Only exit `0` attests that every named item has a recorded `shipped`
-status and no retained assignment, uncertain operation or recorded outstanding
-need. It does not independently re-verify the candidate or authorize delivery.
+Exit `2` means either the loop handoff is still pending or its owned paths are
+absent or differ on the live remote `main`. The JSON reports source
+publication separately in `gitDelivery`. A published source candidate with
+observations outstanding reports `pending-live` while its policy window is
+open. Exit `1` means the
+assertion is unproven. Causes include missing or invalid state, an unknown item,
+missing candidate evidence, local worktree or index drift, an invalid target,
+or stale or moving refs.
+
+Exit `0` requires a recorded `shipped` loop state backed by independently
+reviewed live observations, no retained assignment, uncertain operation or
+outstanding need, and source publication proof. Each requested item must declare
+owned paths. Their worktree file bytes and types, complete Git file sets, and
+candidate hashes must agree with the admitted candidate and pinned `HEAD`.
+Owned index entries with assume-unchanged or skip-worktree flags invalidate
+local proof. The guard also walks owned directories to catch extra files,
+nested Git metadata, and unsupported entry types that Git status can omit.
+The fetched remote `main` commit must match the live remote, and its complete owned path sets,
+blob bytes, and regular-file modes must match the pinned candidate. Supported
+regular-file modes are `100644` and `100755`. Invalid UTF-8 Git tree paths
+invalidate proof. If the tracking ref is stale, fetch explicitly and rerun. If
+the check reports `pending-main`, finish the authorized publication to
+`main` and rerun. The guard does not fetch, commit, merge, or push.
 Run normal gates and engine transitions first. Include all requested item IDs;
 passing for a subset does not complete the request.
+
+### Live verification and recovery
+
+Manual generated-artifact and live-report allocation are currently disabled.
+The second independent review found that nested symlinks or junctions can alias
+two authorized report paths to the same physical file. Do not use the examples
+below as a claim that manual live delivery is currently operational; the
+unresolved item and owner disposition are tracked in `docs/backlog.yml`.
+
+The accepted final report and the `regression-passed` transition establish
+source acceptance. The main delivery guard can check publication at that
+point. A legacy version-one `shipped` event remains in history and has
+`liveComplete: false` until a qualified live report supports a new transition.
+Dependent work uses the same live completion check.
+
+In a manual store, the policy owner opens the canonical
+`ITEM:live-verification` activity with an `apply` event of type
+`live.configure`. Its payload is `{ item, contract }`. The contract has
+`source: { artifact, hash, candidate, revision }` for the exact historical
+final report and its source revision or immutable build identity, plus
+`target`, `environment`, immutable `deployment`, an excluded generated
+`reportDirectory` within the fixed manual `artifactDirectory` when present,
+a `requirements` map from
+each accepted criterion ID to its expected live observation, and `smoke` with
+the expected application check. Set `persistence` to the expected persistence
+check when applicable and `null` otherwise. The owner contract supplies the
+expected values. The observer supplies evidence about them. Live report
+directories must stay separate from Git metadata and loop state, including
+when a workspace is opened through a filesystem alias.
+
+Admit a `verifier` assignment on that activity with the single historical
+final artifact and hash in `inputs`. Give it one report deliverable and one
+owned path under the policy's excluded generated artifact directory. Export
+the packet, including the immutable source blob reference. The assignment
+uses the current policy binding while the source input retains its original
+candidate and policy hash. Mutable historical source files may be absent.
+
+Use `import` to capture the JSON report and `result` with a `live.record`
+event to attach it. The result payload contains `assignment`, `artifact`,
+`publicationToken` and `report`. The report contains `item`, `source`,
+`target`, `environment`, `deployment`, `sourceLink` evidence,
+`observedSourceRevision`, `observedSourceCandidate` (the candidate digest),
+`observedAt` (Unix milliseconds), `criteria`, `smoke`, `persistence`,
+`cleanup` and `limitations`. Every criterion, the application smoke and
+applicable persistence check record `instrument`, `expected`, `observed`,
+`outcome` and `followUp`. Outcomes are `pass`, `fail`, `unknown` or
+`unavailable`. Use a follow-up with `owner` and `measurement` for unknown
+and unavailable results. Cleanup records `outcome` (`complete`,
+`not-needed` or `pending`), `evidence` and `followUp`. Pending cleanup
+requires an owner and next measurement. Use JSON `null` for inapplicable
+persistence and absent follow-ups.
+
+Finish the observer assignment, then admit an independent read-only
+`checker` with the same historical final input. The checker checks
+deployment provenance and the imported report and records its review
+against the exact artifact and hash. Finish the checker and advance to
+`shipped` citing the accepted live artifact. Failure, uncertainty, missing
+coverage or pending cleanup leave delivery pending. An owner can invalidate
+a live report to obtain another observation within the original activity's
+review and assignment budgets. An expired window requires explicit,
+authorized `policy.continue` before further assignments. Recovery preserves
+source history, consumed assignments and review rounds.
+
+This manual adapter records operator-attested observations. The operator
+must separately authorize any deployment, network access, credentials,
+test data or side effects required by the observation. Native dispatch
+stops at source acceptance and reports live verification pending. A
+separately authorized native observation grant and workflow would be needed
+to run that phase through native dispatch.
 
 This command is an operator preflight, not an automatically installed Stop hook
 or a scheduler. The existing backlog dispatch-marker Stop hook cannot prove a
@@ -228,6 +314,16 @@ evidence or authorize owner dispositions. The filesystem is the trust boundary:
 this CLI is not a sandbox against a hostile worker with direct write access.
 Provider and model identities are recorded attestations in the file adapter.
 
+For a new manual policy, set `artifactDirectory` to a generated directory
+already listed in `candidateExclusions`, or to a subdirectory of one. Keep it
+separate from loop state, Git metadata and item source paths. The policy owner
+allocates exact report paths there through the assignment's `writePaths` and
+`affectedPaths`. The store derives that allocation under its lock. An
+exclusion alone grants no write authority. Report allocation does not add to
+the item's `affectedPaths`, which the publication guard uses to check source
+files. Version-one policies without this optional field retain their original
+assignment scope.
+
 Each checker uses a distinct worker instance and context from the artifact's
 authors. Each implementation verifier is similarly independent. The engine
 binds acceptance to imported immutable bytes, rather than trusting a worker's
@@ -239,7 +335,7 @@ any relevant change requires new evidence.
 The demo leaves complete runnable policy, event, handoff and result fixtures in
 its destination. Inspect `policy.json`, `event-*.json`, `*-packet.json` and
 `result-*.json` alongside `project/artifacts/`. Every mutation uses a fresh CLI
-process. The primary item reaches `shipped` with local delivery; a separate
+process. The primary item reaches `regression-passed` with source acceptance; a separate
 example rejects self-review and accepts an exact owner patch after two defective
 rounds. The demonstration uses independent worker identities for each role.
 

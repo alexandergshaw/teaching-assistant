@@ -54,6 +54,10 @@ import { composeOverallCommentLocal, type FeedbackField } from "../grading-resul
 import type { BranchMergeStatus } from "@/lib/repo-grade-merge-check";
 
 export interface RepoGradeCellEdit {
+  /** Session revision used to protect instructor edits during grading. */
+  draftRevision?: number;
+  /** A completed evaluation held separately because a newer draft won. */
+  conflictingGrade?: Partial<RepoGradeCellEdit>;
   /** Raw, editable score text - typed directly, or seeded by a grading call. */
   score: string;
   /** The composed feedback text actually posted to Canvas
@@ -211,6 +215,23 @@ export function applyRepoGradeFeedbackFieldEdit(
 export type RepoGradeCellEditsByRepo = Readonly<Record<string, Readonly<Record<string, RepoGradeCellEdit>>>>;
 
 export const EMPTY_REPO_GRADE_CELL_EDITS: RepoGradeCellEditsByRepo = {};
+
+export function applyRepoGradeCompletion(
+  edits: RepoGradeCellEditsByRepo,
+  repo: string,
+  folder: string,
+  startingRevision: number,
+  patch: Partial<RepoGradeCellEdit>,
+): RepoGradeCellEditsByRepo {
+  const current = getRepoGradeCellEdit(edits, repo, folder);
+  return setRepoGradeCellEdit(edits, repo, folder, patch.generatedScore != null && (
+    (current.draftRevision ?? 0) !== startingRevision || startingRevision > 0 ||
+    (!!patch.submissionTruncated && current.generatedScore !== null) ||
+    current.score !== (current.generatedScore ?? "") ||
+    current.comment !== (current.generatedComment ?? "")
+  ) ? { grading: false, gradeError: null, conflictingGrade: patch }
+    : { ...patch, ...(patch.generatedScore != null ? { conflictingGrade: undefined } : {}) });
+}
 
 /** Reads one cell's edit state, defaulting to `defaultRepoGradeCellEdit()`
  * when this exact (repo, folder) pair has never been written. Never throws -

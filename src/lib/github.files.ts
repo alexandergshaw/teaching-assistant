@@ -49,10 +49,10 @@ export async function getRepoTree(owner: string, repo: string, ref?: string): Pr
 }
 
 /** Read one file's text content (raw). */
-export async function getFileText(owner: string, repo: string, path: string, ref?: string): Promise<string> {
+export async function getFileText(owner: string, repo: string, path: string, ref?: string, signal?: AbortSignal): Promise<string> {
   const res = await ghFetch(
     `/repos/${owner}/${repo}/contents/${encodePath(path)}${ref && ref.trim() ? `?ref=${encodeRefSegment(ref)}` : ""}`,
-    { headers: { Accept: "application/vnd.github.raw" } }
+    { headers: { Accept: "application/vnd.github.raw" }, ...(signal && { signal }) }
   );
   return res.text();
 }

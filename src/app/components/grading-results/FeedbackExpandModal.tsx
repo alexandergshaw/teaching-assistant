@@ -13,6 +13,7 @@
 // the `edits` map's shape or fallback rules - the caller already has that
 // logic (`edits[student] ?? blankRowEdit()`) for its own other renders.
 import TextField from "@mui/material/TextField";
+import type { RefObject } from "react";
 import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
 import { FEEDBACK_FIELD_META, type FeedbackBoxesEdit, type FeedbackField } from "./gradingResultsHelpers";
@@ -23,6 +24,7 @@ export interface FeedbackExpandModalProps {
   edit: FeedbackBoxesEdit;
   onChange: (field: FeedbackField, value: string) => void;
   onClose: () => void;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   /** Same as RowFeedbackBoxes.tsx's own `namePrefix` prop - see that file's
    * doc comment. Repo Grades passes the folder column name here so this
    * modal's own label/aria-label stay consistent with the inline boxes'
@@ -31,11 +33,11 @@ export interface FeedbackExpandModalProps {
   namePrefix?: string;
 }
 
-export function FeedbackExpandModal({ student, field, edit, onChange, onClose, namePrefix }: FeedbackExpandModalProps) {
+export function FeedbackExpandModal({ student, field, edit, onChange, onClose, namePrefix, restoreFocusRef }: FeedbackExpandModalProps) {
   const meta = FEEDBACK_FIELD_META[field];
   const label = namePrefix ? `${namePrefix} ${meta.descriptorLower} for ${student}` : `${meta.descriptorCapitalized} for ${student}`;
   return (
-    <ModalShell label={label} onDismiss={onClose}>
+    <ModalShell label={label} onDismiss={onClose} restoreFocusRef={restoreFocusRef}>
       <div className={styles.previewHeader}>
         <div>
           <p className={styles.previewMeta}>Student: {student}</p>

@@ -1,6 +1,6 @@
 // Codebase digest for LLM analysis (course/rubric generation, grading).
 
-import { getRepo } from "./github.repos";
+import { getRepo, getRepoCommitTree } from "./github.repos";
 import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "./github.files";
 import { ghFetch } from "./github.repos";
 import { encodeRefSegment } from "./github-ref-name";
@@ -44,7 +44,8 @@ const SKIP_DIR =
 
 // Lockfiles and compiled/minified/sourcemap output: technically text, but
 // never something worth putting in a grading prompt.
-const SKIP_FILE = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|composer\.lock|Gemfile\.lock|\.min\.(js|css)$|\.map$)/i;
+const LOCKFILES = ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "composer.lock", "gemfile.lock"];
+const GENERATED_ASSET = /(?:\.min\.(?:js|css)|\.map)$/i;
 
 // Filenames with no extension that are still clearly text/source, matched by
 // basename only (case-insensitive).
@@ -113,6 +114,8 @@ export interface RepoDigestSkipCounts {
   budget: number;
   /** Passed every filter, but the GitHub fetch for the file's content threw. */
   fetchError: number;
+  /** Pinned inputs that may be student work but cannot be read as text. */
+  unsupported?: number;
 }
 
 export interface RepoDigest {
@@ -149,6 +152,8 @@ export interface RepoDigest {
    * GitHub's listing cut off, not actually be absent.
    */
   treeTruncated?: boolean;
+  /** The immutable Git commit from which a pinned digest was built. */
+  sourceCommit?: string;
 }
 
 // ── Ingest budgets ──────────────────────────────────────────────────────────
@@ -187,6 +192,7 @@ export interface SelectDigestFilesOpts {
   perFileBytes: number;
   maxBlobBytes: number;
   pathPrefix?: string;
+  requireCompleteSubmission?: boolean;
 }
 
 export interface DigestSelection {
@@ -194,7 +200,7 @@ export interface DigestSelection {
   selected: RepoTreeEntry[];
   /** True only when `pathPrefix` was given and matched no blob anywhere in the tree. */
   prefixMatchedNothing: boolean;
-  skipped: { type: number; size: number; budget: number };
+  skipped: Omit<RepoDigestSkipCounts, "fetchError">;
 }
 
 /**
@@ -221,15 +227,32 @@ export function selectDigestFiles(tree: RepoTreeEntry[], opts: SelectDigestFiles
     return { selected: [], prefixMatchedNothing: true, skipped: { type: 0, size: 0, budget: 0 } };
   }
 
-  const skipped = { type: 0, size: 0, budget: 0 };
+  const skipped: DigestSelection["skipped"] = { type: 0, size: 0, budget: 0 };
   const candidates: RepoTreeEntry[] = [];
   for (const t of blobsInScope) {
-    if (t.size <= 0) continue; // empty file: nothing to feed the model, not a meaningful exclusion to report
+    const path = t.path.toLowerCase();
+    const generatedLockfile = opts.requireCompleteSubmission
+      ? LOCKFILES.includes(path.split("/").pop() ?? "")
+      : LOCKFILES.some((lockfile) => path.includes(lockfile));
+    const generated = SKIP_DIR.test(t.path) || GENERATED_ASSET.test(t.path) || generatedLockfile;
+    if (opts.requireCompleteSubmission) {
+      if (generated) {
+        skipped.type += 1;
+        continue;
+      }
+      if (!isTextCandidate(t.path, t.mode)) {
+        skipped.type += 1;
+        skipped.unsupported = (skipped.unsupported ?? 0) + 1;
+        continue;
+      }
+    } else if (t.size <= 0) {
+      continue; // Legacy digest callers ignore empty files.
+    }
     if (t.size >= opts.maxBlobBytes) {
       skipped.size += 1;
       continue;
     }
-    if (SKIP_DIR.test(t.path) || SKIP_FILE.test(t.path) || !isTextCandidate(t.path, t.mode)) {
+    if (!opts.requireCompleteSubmission && (generated || !isTextCandidate(t.path, t.mode))) {
       skipped.type += 1;
       continue;
     }
@@ -263,7 +286,7 @@ export function selectDigestFiles(tree: RepoTreeEntry[], opts: SelectDigestFiles
 export async function ingestRepo(
   owner: string,
   repo: string,
-  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number; pathPrefix?: string } = {},
+  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number; pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal } = {},
   ref?: string
 ): Promise<RepoDigest> {
   const budget = opts.pathPrefix ? SCOPED_BUDGET : DEFAULT_BUDGET;
@@ -272,11 +295,24 @@ export async function ingestRepo(
   const perFileBytes = opts.perFileBytes ?? budget.perFileBytes;
   const maxBlobBytes = opts.maxBlobBytes ?? budget.maxBlobBytes;
 
-  const info = await getRepo(owner, repo);
-  const branch = ref || info.defaultBranch;
-  const { entries: tree, truncated: treeTruncated } = await getRepoTreeWithMeta(owner, repo, branch);
-
-  const selection = selectDigestFiles(tree, { maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix });
+  const { sourceCommit, signal } = opts;
+  const info = sourceCommit !== undefined
+    ? { fullName: `${owner}/${repo}`, description: "", defaultBranch: "" }
+    : await getRepo(owner, repo);
+  const readRef = sourceCommit ?? (ref || info.defaultBranch);
+  const { entries: tree, truncated: treeTruncated } = sourceCommit !== undefined
+    ? await getRepoCommitTree(owner, repo, sourceCommit, signal && { signal })
+    : await getRepoTreeWithMeta(owner, repo, readRef);
+  const folder = opts.pathPrefix?.replace(/\/$/, "");
+  // Discovery produces exact Git paths. Legacy manually typed folder names
+  // keep their existing case-insensitive matching.
+  const scopedTree = sourceCommit !== undefined
+    ? tree.filter((entry) => (!folder || entry.path.startsWith(`${folder}/`)) && !isScaffoldingFile(entry.path))
+    : tree;
+  const selection = selectDigestFiles(scopedTree, {
+    maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix,
+    requireCompleteSubmission: sourceCommit !== undefined,
+  });
   const header = `# Repository: ${info.fullName}${info.description ? `\n\n${info.description}` : ""}`;
 
   if (selection.prefixMatchedNothing) {
@@ -290,6 +326,7 @@ export async function ingestRepo(
       prefixMatchedNothing: true,
       skipped: { type: 0, size: 0, budget: 0, fetchError: 0 },
       treeTruncated,
+      ...(sourceCommit !== undefined ? { sourceCommit } : {}),
     };
   }
 
@@ -302,13 +339,18 @@ export async function ingestRepo(
   // size ceiling or the count/byte cap already excluded anything, so that a
   // fetch that happens to fail below does not mask exclusions that already
   // happened above (C2 item 4/5 - the flag must reflect everything dropped).
-  let truncated = selection.skipped.size > 0 || selection.skipped.budget > 0 || treeTruncated;
+  let truncated = selection.skipped.size > 0 || selection.skipped.budget > 0 || treeTruncated || !!selection.skipped.unsupported;
 
-  for (const f of selection.selected) {
+  for (const f of sourceCommit !== undefined && (treeTruncated || selection.skipped.unsupported) ? [] : selection.selected) {
     let body: string;
     try {
-      body = await getFileText(owner, repo, f.path, branch);
+      // GitHub's contents endpoint can dereference a symlink. The grading
+      // input contract accepts regular repository files.
+      if (sourceCommit !== undefined && f.mode === "120000") throw new Error("Unsupported symlink.");
+      signal?.throwIfAborted();
+      body = await getFileText(owner, repo, f.path, readRef, signal);
     } catch {
+      signal?.throwIfAborted();
       fetchErrorCount += 1;
       truncated = true;
       continue;
@@ -335,8 +377,9 @@ export async function ingestRepo(
     truncated,
     files,
     prefixMatchedNothing: false,
-    skipped: { type: selection.skipped.type, size: selection.skipped.size, budget: selection.skipped.budget, fetchError: fetchErrorCount },
+    skipped: { ...selection.skipped, fetchError: fetchErrorCount },
     treeTruncated,
+    ...(sourceCommit !== undefined ? { sourceCommit } : {}),
   };
 }
 

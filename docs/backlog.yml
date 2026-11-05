@@ -4,6 +4,30 @@
 #
 # Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
 # src/tools/backlog/yaml-codec.ts.
+- id: 'AGNOSTIC-LIVE-VERIFICATION'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'loop-and-docs-maintenance'
+  title: 'Require independently reviewed live evidence while preserving separate source publication and safe recovery.'
+  owns: ['src/tools/agnostic-loop/', 'docs/AGNOSTIC_LOOP_USAGE.md']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise complete public source-to-live lifecycle, immutable report and deployment bindings, old-store recovery and separate real-Git publication. Establish a separately authorized native live-observation workflow without changing fixed grants; verify invalidated source or deployment contract rebinding without resetting review budgets. Live browser observations remain owner-attested.'
+  from: 'Owner request in this chat: implement applicable gaps from the provider-agnostic development loop document.'
+  note: 'Manual generated-artifact and live-report allocation are disabled in the current working tree after the second review found that nested symlink or junction aliases can give separate assignments write access to one physical report. The owner chose to retain the implementation disabled. Native live observation, safe contract rebinding and a working public publication-plus-live proof remain open; no live production observation or full lifecycle completion is claimed.'
+  question: null
+- id: 'REPO-GRADES-CLASS-DASHBOARD'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'repo-grader-workflow'
+  title: 'Automatically evaluate changed repositories across connected classes at app startup and show each class a complete repository-grading dashboard.'
+  owns: ['src/app/components/repo-grades/', 'src/app/actions/github-repos.ts', 'src/lib/grade/', 'src/lib/session-diagnostic-log.ts', 'docs/repo-grades-dashboard-criteria.md', 'docs/repo-grades-dashboard-architecture.md']
+  verify: null
+  blocked_by: []
+  instrument: 'Independently checked criteria and design; tests exercise app-start discovery across connected classes, new-commit detection and durable successful evaluation watermarks, repository and folder evaluation, repeat/restart and concurrent-run safety, saved-result readback, feedback generation and copying, partial failures, account isolation, diagnostic privacy, and explicit posting controls. Browser verification covers rendered table and feedback controls; real GitHub and model verification remains explicit.'
+  from: 'Owner request in this chat: plan and implement a dashboard for each class showing all available assignment and student grades on load without selecting an assignment or running grading.'
+  note: 'The owner requested this as the next item while provider-agnostic loop implementation continues, clarified that grades must come from the existing repository evaluation tooling rather than an LMS, and directed: run repo grading for all connected classes each time the app opens for repositories with new commits. The owner also requires the new view to preserve existing feedback generation and copying. The owner chose to keep the new dashboard feedback controls disabled after the second review found cross-course storage eviction can lose older feedback and a retained conflict result cannot be edited or expanded. These remain dashboard implementation residuals, to be verified with cross-course storage-pressure and conflict-result edit and expand tests plus browser interaction checks. The original grading table remains available. The owner chose to keep coordinated admission disabled after its second review found known pre-dispatch failures still retain uncertain reservations and interrupted-batch notices do not survive reload. Preserve saved grades until successful replacement, avoid duplicate model calls and unsupported historical identity joins, and never treat a partial read as complete. The startup-course read, history preview, and pinned evaluator are implemented with activation disabled and have focused test and review coverage. The owner chose to keep profile-aware discovery disabled after the second review found that a redirect can bypass the HTTP request budget. The server planner reports discovery as blocked for configured courses before contacting GitHub. Before activation, implement and verify durable suppression of repeat evaluations for the same commit SHA across refs under the account lock. Live database, provider, and browser verification remains outstanding.'
+  question: null
 - id: 'LLM-AGNOSTIC-POLL-EFFICIENCY'
   state: 'verification'
   kind: 'chore'
@@ -2347,4 +2371,17 @@
   instrument: 'Existing scope docs/tabs-ctrl-click-new-browser-tab-scope.md sections 4b, 7 and 10 R3. Param filesView. AC1-AC4 plus AC-T: cold-load URL wins over stored view; pure initializer/build/parse oracle and anchor/guard source pins must fail the wrong-view implementation. Real ctrl/cmd/middle/shift-click and Space/Enter behavior require owner browser walk; no component renders in vitest.'
   from: 'a8a98bd3 ships primary Wave 1 only; deferred inner-strip obligation in docs/tabs-ctrl-click-new-browser-tab-scope.md section 10 R3, filed during 2026-10-15 adoption.'
   note: 'Owner: coordinator; receiving step: bounded wave build from the existing scope recipe, with independent test-author/checker and as-built accessibility review. Proposed parameter names preserve the existing recommendation, not a new owner ruling. Closure requires the owned new test instrument to be authored and proven red before green; the command is a target, not a claimed passing run. R5 key confirmed by reading FilesTab.tsx:85-92: ta-files-view. Confirm again before build. Scope names no dedicated structural gate; rerun caller/source-reader census. Serialize on url-state/useAppNavigation with other inner-tab waves. Filing does not implement or close this feature.'
+  question: null
+
+- id: 'AGNOSTIC-MAIN-DELIVERY-PROOF'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'loop-and-docs-maintenance'
+  title: 'Prevent a locally verified or task-branch push from being reported as delivered to main.'
+  owns: ['src/tools/agnostic-loop/main-delivery.ts', 'src/tools/agnostic-loop/main-delivery.test.ts', 'src/tools/agnostic-loop/manual-handoff.ts', 'src/tools/agnostic-loop/manual-handoff.test.ts', 'docs/AGNOSTIC_LOOP_USAGE.md']
+  verify: 'npm.cmd run test:paths -- src/tools/agnostic-loop/main-delivery.test.ts src/tools/agnostic-loop/manual-handoff.test.ts; npm.cmd run docs:gate'
+  blocked_by: []
+  instrument: 'The explicit manual completion assertion must fail closed on index assume-unchanged/skip-worktree, local symlink/type/byte drift, ignored/untracked files under owned directories, stale/mutable refs, invalid target, missing/unknown requested IDs, and candidate/main mode or file-set mismatch. Pin HEAD and fetched remote OIDs for all tree/blob evidence. CLI exit/status output matches docs (incomplete delivery vs unproven assertion). Local-bare-Git integration proves branch-only delivery does not pass; current tool remains explicitly host-invoked because Codex has no repository Stop-hook callback.'
+  from: 'Owner direction after Pipeline work was pushed to its task branch instead of main, 2026-10-17: examine why and tighten controls; first independent review of the main-delivery proof found concrete fail-open evidence paths.'
+  note: 'Current reviewed findings: git status can hide assume-unchanged/skip-worktree and local replacement drift; tree/blob reads must use immutable commit IDs rather than mutable refs; CLI currently reports all git evidence exceptions as exit 2 despite documentation promising exit 1 for unproven state. Main delivery was corrected manually for the Pipeline release. This row makes the recurring guard itself safe; it cannot install a cross-host Codex final-response hook, so callers must explicitly run it and record its output.'
   question: null

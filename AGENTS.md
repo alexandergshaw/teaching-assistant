@@ -10,6 +10,17 @@ Never insert emojis into any code, comments, strings, variable names, documentat
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+<!-- BEGIN:mui-component-rule -->
+# Use Material UI components first
+
+Before adding or changing any UI component, including buttons, check the
+installed Material UI (`@mui/material`) library for a component that supports
+the intended behavior. Use the MUI component when one is available and follow
+the app's existing theme and usage patterns. When MUI has no suitable component,
+build the custom component to match the look and interaction states of existing
+app components, using the app's design tokens.
+<!-- END:mui-component-rule -->
+
 <!-- BEGIN:dev-loop-pointer -->
 # The dev loop lives in docs/DEV_LOOP.md
 

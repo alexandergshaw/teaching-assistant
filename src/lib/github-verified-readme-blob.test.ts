@@ -12,6 +12,96 @@ const scope = { accountId: "blob-tests", credential: "fingerprint" };
 afterEach(() => vi.useRealTimers());
 
 describe("shared verified README blob cache", () => {
+  it("coalesces five identical misses and isolates cancellation of the initiating waiter", async () => {
+    const data = object("concurrent-read");
+    const result = Promise.withResolvers<Buffer>();
+    const first = new AbortController();
+    const load = vi.fn<(readSignal: AbortSignal) => Promise<Buffer>>(() => result.promise);
+    const requests = Array.from({ length: 5 }, (_, index) =>
+      readVerifiedReadmeBlob(scope, data, load, index === 0 ? first.signal : signal));
+    const outcomes = Promise.allSettled(requests);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledOnce();
+    first.abort();
+    expect(load.mock.calls[0][0].aborted).toBe(false);
+    result.resolve(data.bytes);
+    const settled = await outcomes;
+    expect(settled[0].status).toBe("rejected");
+    expect(settled.slice(1)).toEqual(Array.from({ length: 4 }, () => ({ status: "fulfilled", value: "concurrent-read" })));
+  });
+
+  it("aborts an abandoned shared load and permits a replacement without retaining late results", async () => {
+    const data = object("abandoned-shared-read");
+    const result = Promise.withResolvers<Buffer>();
+    const controllers = [new AbortController(), new AbortController()];
+    const load = vi.fn<(readSignal: AbortSignal) => Promise<Buffer>>(() => result.promise);
+    const outcomes = Promise.allSettled(controllers.map((caller) => readVerifiedReadmeBlob(scope, data, load, caller.signal)));
+    await Promise.resolve();
+    controllers.forEach((caller) => caller.abort());
+    expect(load.mock.calls[0][0].aborted).toBe(true);
+    expect((await outcomes).every((row) => row.status === "rejected")).toBe(true);
+    result.resolve(data.bytes);
+    const retry = vi.fn(async () => data.bytes);
+    await expect(readVerifiedReadmeBlob(scope, data, retry, signal)).resolves.toBe("abandoned-shared-read");
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("does not cache when the last caller aborts between the completed read and its continuation", async () => {
+    const data = object("abort-at-continuation-boundary");
+    const caller = new AbortController();
+    let queued = false;
+    const load = vi.fn(async (readSignal: AbortSignal) => {
+      // The first check after load returns is inside untilAbort. Schedule the
+      // caller abort after that check but before the awaiting read continues.
+      vi.spyOn(readSignal, "throwIfAborted").mockImplementation(() => {
+        AbortSignal.prototype.throwIfAborted.call(readSignal);
+        if (!queued) {
+          queued = true;
+          queueMicrotask(() => caller.abort());
+        }
+      });
+      return data.bytes;
+    });
+    await expect(readVerifiedReadmeBlob(scope, data, load, caller.signal)).rejects.toThrow();
+    const retry = vi.fn(async () => data.bytes);
+    await expect(readVerifiedReadmeBlob(scope, data, retry, signal)).resolves.toBe("abort-at-continuation-boundary");
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("shares failures only while in flight and isolates account and credential identities", async () => {
+    const data = object("failed-concurrent-read");
+    const result = Promise.withResolvers<Buffer>();
+    const load = vi.fn(() => result.promise);
+    const outcomes = Promise.allSettled([
+      readVerifiedReadmeBlob(scope, data, load, signal), readVerifiedReadmeBlob(scope, data, load, signal),
+      readVerifiedReadmeBlob({ ...scope, accountId: "another" }, data, load, signal),
+      readVerifiedReadmeBlob({ ...scope, credential: "rotated" }, data, load, signal),
+    ]);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(3);
+    result.reject(new Error("upstream throttled"));
+    expect((await outcomes).every((row) => row.status === "rejected")).toBe(true);
+    const retry = vi.fn(async () => data.bytes);
+    await readVerifiedReadmeBlob(scope, data, retry, signal);
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("bounds in-flight entries and deadlines even if the transport ignores abort", async () => {
+    vi.useFakeTimers();
+    const data = object("pending-budget");
+    const load = vi.fn<(readSignal: AbortSignal) => Promise<Buffer>>(() => new Promise<Buffer>(() => {}));
+    const outcomes = Promise.allSettled(Array.from({ length: 32 }, (_, index) =>
+      readVerifiedReadmeBlob({ ...scope, accountId: `pending-${index}` }, data, load, signal)));
+    await expect(readVerifiedReadmeBlob({ ...scope, accountId: "overflow" }, data, load, signal)).rejects.toThrow("capacity");
+    expect(load).toHaveBeenCalledTimes(32);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await outcomes).every((row) => row.status === "rejected")).toBe(true);
+    expect(load.mock.calls.every(([readSignal]) => readSignal.aborted)).toBe(true);
+    const retry = vi.fn(async () => data.bytes);
+    await readVerifiedReadmeBlob({ ...scope, accountId: "overflow" }, data, retry, signal);
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("reuses only exact account, credential, SHA and size and keeps blank text", async () => {
     const data = object(" \r\n");
     const load = vi.fn(async () => data.bytes);

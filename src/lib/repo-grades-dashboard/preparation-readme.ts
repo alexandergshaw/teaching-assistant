@@ -126,17 +126,17 @@ export async function readPinnedRepoGradeReadme(
     const token = process.env.GITHUB_TOKEN?.trim();
     if (!isPinnedTarget(target) || !isExactPath(folder) || !token) return { status: "failure" };
     const base = `https://api.github.com/repos/${owner}/${repo}/git`;
-    async function get(path: string, limit: number, accept = "application/vnd.github+json") {
-      requestSignal.throwIfAborted();
+    async function get(path: string, limit: number, accept = "application/vnd.github+json", readSignal = requestSignal) {
+      readSignal.throwIfAborted();
       const response = await fetch(`${base}${path}`, {
-        cache: "no-store", redirect: "error", signal: requestSignal,
+        cache: "no-store", redirect: "error", signal: readSignal,
         headers: { Authorization: `Bearer ${token}`, Accept: accept, "X-GitHub-Api-Version": "2022-11-28" },
       });
-      if (requestSignal.aborted || response.status !== 200 || response.redirected) {
+      if (readSignal.aborted || response.status !== 200 || response.redirected) {
         void response.body?.cancel().catch(() => {});
         throw new Error("GitHub object unavailable");
       }
-      return readBody(response, limit, requestSignal);
+      return readBody(response, limit, readSignal);
     }
 
     const commit: unknown = JSON.parse(utf8.decode(await get(`/commits/${sourceCommit}`, MAX_COMMIT_BYTES)));
@@ -189,7 +189,7 @@ export async function readPinnedRepoGradeReadme(
       return { status: "failure" };
     }
     const text = await readVerifiedReadmeBlob(treeScope, entry,
-      () => get(`/blobs/${entry.sha}`, entry.size, "application/vnd.github.raw+json"), requestSignal);
+      (readSignal) => get(`/blobs/${entry.sha}`, entry.size, "application/vnd.github.raw+json", readSignal), requestSignal);
     return verified({ status: text.trim() === "" ? "blank" : "present", path: entry.path, blobSha: entry.sha, text });
   } catch {
     return { status: "failure" };

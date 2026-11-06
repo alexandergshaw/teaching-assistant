@@ -72,6 +72,64 @@ afterEach(() => {
 });
 
 describe("readPinnedRepoGradeReadme", () => {
+  it("fails all joined readers on a throttle without fan-out and does not retain the failed response", async () => {
+    const readme = blob(preferred, "throttled concurrent instructions");
+    const tree = makeTree([readme]);
+    const payload = Promise.withResolvers<Response>();
+    let retry = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/commits/")) return Response.json({ sha: target.sourceCommit, tree: { sha: tree.sha } });
+      if (url.includes("/trees/")) return Response.json(tree);
+      return retry ? new Response(new Uint8Array(readme.bytes)) : payload.promise;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const read = (index: number) => readPinnedRepoGradeReadme({ ...target, repo: `Throttled${index}` }, folder, undefined, "coalesced-throttle");
+    const readers = Array.from({ length: 3 }, (_, index) => read(index));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("/trees/"))).toHaveLength(3));
+    payload.resolve(new Response(null, { status: 429, headers: { "retry-after": "60" } }));
+    expect(await Promise.all(readers)).toEqual([failure, failure, failure]);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(1);
+    retry = true;
+    await expect(read(0)).resolves.toMatchObject({ status: "present" });
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+  });
+
+  it("uses one blob request for five independently authorized repositories and survives one caller cancelling", async () => {
+    const readme = blob(preferred, "shared concurrent instructions");
+    const tree = makeTree([readme]);
+    const payload = Promise.withResolvers<Response>();
+    const first = new AbortController();
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/commits/")) return url.includes("/Revoked/") ? new Response(null, { status: 403 })
+        : Response.json({ sha: target.sourceCommit, tree: { sha: tree.sha } });
+      if (url.includes("/trees/")) return Response.json(tree);
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return payload.promise;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const accountId = "coalesced-readme-integration";
+    const readers = Array.from({ length: 5 }, (_, index) => readPinnedRepoGradeReadme(
+      { ...target, repo: `Concurrent${index}` }, folder, index === 0 ? first.signal : undefined, accountId));
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url.includes("/trees/"))).toHaveLength(5);
+      expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(1);
+    });
+    await expect(readPinnedRepoGradeReadme({ ...target, repo: "Revoked" }, folder, undefined, accountId)).resolves.toEqual(failure);
+    first.abort();
+    const blobCall = fetchMock.mock.calls.find(([url]) => url.includes("/blobs/"))!;
+    expect(blobCall[1].signal?.aborted).toBe(false);
+    payload.resolve(new Response(new Uint8Array(readme.bytes)));
+    const results = await Promise.all(readers);
+    expect(results[0]).toEqual(failure);
+    results.slice(1).forEach((result, offset) => expect(result).toMatchObject({
+      status: "present", text: "shared concurrent instructions", target: { repo: `Concurrent${offset + 1}` }, path: preferred,
+    }));
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/commits/"))).toHaveLength(6);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(1);
+  });
+
   it("deduplicates classroom README blobs while preserving target identity, conflicts and authorization", async () => {
     const shared = blob(preferred, "common instructions");
     const changed = blob(preferred, "different instructions");

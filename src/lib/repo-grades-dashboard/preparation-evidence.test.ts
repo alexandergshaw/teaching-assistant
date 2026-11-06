@@ -105,7 +105,7 @@ describe("composeRepoGradePreparationEvidence", () => {
       ],
     });
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([
-      ...Object.values(a.urls), ...Object.values(b.urls),
+      ...Object.values(a.urls), b.urls.commit, b.urls.tree,
     ].sort());
     expect(JSON.stringify(original)).not.toMatch(/private-token|raw-github-metadata|account-private|course-private|api\.github\.com/);
 

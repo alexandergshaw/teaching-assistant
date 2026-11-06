@@ -101,6 +101,77 @@ describe("readPinnedRepoGradeReadme", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("requires live authorization and isolates cached evidence by account, credential, repo and folder", async () => {
+    const accountId = "readme-cache-account";
+    const readme = blob(preferred, "instructions");
+    let denied = false;
+    const fetchMock = stubGithub([readme], (path) =>
+      denied && path.startsWith("/commits/") ? new Response(null, { status: 403 }) : undefined);
+    const read = (account = accountId, selectedFolder = folder) =>
+      readPinnedRepoGradeReadme(target, selectedFolder, undefined, account);
+    await expect(read()).resolves.toMatchObject({ status: "present" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const otherRef = { ...target, sourceRef: "another/ref" };
+    await expect(readPinnedRepoGradeReadme(otherRef, folder, undefined, accountId))
+      .resolves.toMatchObject({ status: "present", target: otherRef });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    denied = true;
+    await expect(read()).resolves.toEqual(failure);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    denied = false;
+    await expect(read("another-account")).resolves.toMatchObject({ status: "present" });
+    await expect(read(accountId, "Week/subfolder")).resolves.toMatchObject({ status: "absent" });
+    vi.stubEnv("GITHUB_TOKEN", "rotated-token");
+    await expect(read()).resolves.toMatchObject({ status: "present" });
+    expect(fetchMock).toHaveBeenCalledTimes(13);
+
+    const otherRepo = { ...target, repo: "Another-class" };
+    const otherRepoFetch = vi.fn(async (url: string) => {
+      if (url.includes("/commits/")) {
+        return Response.json({ sha: target.sourceCommit, tree: { sha: makeTree([readme]).sha } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", otherRepoFetch);
+    await expect(readPinnedRepoGradeReadme(otherRepo, folder, undefined, accountId)).resolves.toEqual(failure);
+    expect(otherRepoFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("only retains fully verified evidence for the commit's current tree pointer", async () => {
+    const accountId = "readme-verified-cache";
+    let corrupt = true;
+    const read = () => readPinnedRepoGradeReadme(target, folder, undefined, accountId);
+    const first = stubGithub([blob(preferred, "first")], (path) =>
+      corrupt && path.startsWith("/blobs/") ? new Response("wrong") : undefined);
+    await expect(read()).resolves.toEqual(failure);
+    corrupt = false;
+    await expect(read()).resolves.toMatchObject({ status: "present", text: "first" });
+    expect(first).toHaveBeenCalledTimes(6);
+
+    const second = stubGithub([blob(preferred, "second")]);
+    await expect(read()).resolves.toMatchObject({ status: "present", text: "second" });
+    expect(second).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { limit: "entry count", accounts: 257, contents: null, requests: 2 },
+    { limit: "text size", accounts: 34, contents: "x".repeat(128_000), requests: 3 },
+  ])("evicts old evidence at the cache's $limit limit", async ({ limit, accounts, contents, requests }) => {
+    const fetchMock = stubGithub(contents === null ? [] : [blob(preferred, contents)]);
+    const read = (index: number) =>
+      readPinnedRepoGradeReadme(target, folder, undefined, `cache-budget-${limit}-${index}`);
+    const expected = { status: contents === null ? "absent" : "present" };
+    for (let index = 0; index < accounts; index += 1) await expect(read(index)).resolves.toMatchObject(expected);
+    fetchMock.mockClear();
+    await expect(read(accounts - 1)).resolves.toMatchObject(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
+    await expect(read(0)).resolves.toMatchObject(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(requests);
+  });
+
   it.each(["", "\ufeff \r\n\t"])("reports verified blank %j without using a lower candidate", async (contents) => {
     const winner = blob(preferred, contents);
     const fetchMock = stubGithub([blob(lower, "lower"), winner]);

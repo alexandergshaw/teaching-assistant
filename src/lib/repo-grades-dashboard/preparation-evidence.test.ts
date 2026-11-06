@@ -80,7 +80,8 @@ function cohort(size: number): Request["inventory"] {
   };
 }
 
-beforeEach(() => vi.stubEnv("GITHUB_TOKEN", "private-token"));
+let testCredential = 0;
+beforeEach(() => vi.stubEnv("GITHUB_TOKEN", `private-token-${testCredential++}`));
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -108,8 +109,10 @@ describe("composeRepoGradePreparationEvidence", () => {
     ].sort());
     expect(JSON.stringify(original)).not.toMatch(/private-token|raw-github-metadata|account-private|course-private|api\.github\.com/);
 
+    fetchMock.mockClear();
     const reversed = await composeRepoGradePreparationEvidence(request({ inventory: { status: "complete", targets: [second, first] } }));
     expect(reversed).toEqual(original);
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([a.urls.commit, b.urls.commit].sort());
   });
 
   it("uses only the configured exact fallback for conclusive absent and blank reads", async () => {
@@ -123,6 +126,26 @@ describe("composeRepoGradePreparationEvidence", () => {
       ],
     });
     expect(fetchMock).toHaveBeenCalledTimes(5);
+    fetchMock.mockClear();
+    await expect(composeRepoGradePreparationEvidence(request({
+      instructionPolicy: { ...fallback, fallbackInstructions: "Updated fallback" },
+    }))).resolves.toMatchObject({ status: "ready", instructions: "Updated fallback" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks the full current cohort for conflicts when only one pinned commit changes", async () => {
+    const updated = { ...second, sourceCommit: "3".repeat(40) };
+    const a = githubFixture(first, exactInstructions);
+    const b = githubFixture(second, exactInstructions);
+    const next = githubFixture(updated, "Different instructions");
+    const fetchMock = mockFetch([a, b, next]);
+    await expect(composeRepoGradePreparationEvidence(request())).resolves.toMatchObject({ status: "ready" });
+
+    fetchMock.mockClear();
+    await expect(composeRepoGradePreparationEvidence(request({
+      inventory: { status: "complete", targets: [first, updated] },
+    }))).resolves.toEqual({ status: "blocked", reason: "conflicting-instructions" });
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([a.urls.commit, ...Object.values(next.urls)].sort());
   });
 
   it.each([undefined, " \t\r\n"])("blocks a cohort with a missing or blank README without a configured fallback (%j)", async (text) => {

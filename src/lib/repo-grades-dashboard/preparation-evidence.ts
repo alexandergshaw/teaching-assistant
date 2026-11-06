@@ -85,7 +85,7 @@ export async function composeRepoGradePreparationEvidence(input: TrustedPreparat
   async function collect() {
     while (active() && nextTarget < targets.length) {
       const target = targets[nextTarget++];
-      const read = await readPinnedRepoGradeReadme(target, configuration.folder, controller.signal);
+      const read = await readPinnedRepoGradeReadme(target, configuration.folder, controller.signal, configuration.accountId);
       if (!active()) return;
       const row = boundEvidence(target, read, fallback !== undefined);
       if ("status" in row) return stop(row.reason);

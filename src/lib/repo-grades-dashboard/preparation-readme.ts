@@ -10,15 +10,52 @@ const MAX_TREE_ENTRIES = 100_000;
 const MAX_README_BYTES = 128_000;
 const MAX_PATH_BYTES = 4_096;
 const DEADLINE_MS = 10_000;
+const README_CACHE_VERSION = "verified-readme-v1";
+const MAX_CACHED_READMES = 256;
+const MAX_CACHED_README_BYTES = 8 * 1024 * 1024;
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 type PinnedTarget = Readonly<{ owner: string; repo: string; sourceRef: string; sourceCommit: string }>;
 
+type VerifiedReadme =
+  | Readonly<{ status: "present" | "blank"; path: string; blobSha: string; text: string }>
+  | Readonly<{ status: "absent" }>;
+
 export type PinnedReadmeEvidence =
-  | (Readonly<{ status: "present" } | { status: "blank" }> &
-    Readonly<{ target: PinnedTarget; path: string; blobSha: string; text: string }>)
-  | Readonly<{ status: "absent"; target: PinnedTarget }>
+  | (VerifiedReadme & Readonly<{ target: PinnedTarget }>)
   | Readonly<{ status: "failure" }>;
+
+const verifiedReadmes = new Map<string, { readme: VerifiedReadme; bytes: number }>();
+let cachedReadmeBytes = 0;
+
+function reuseVerifiedReadme(key: string) {
+  const hit = verifiedReadmes.get(key);
+  if (!hit) return undefined;
+  verifiedReadmes.delete(key);
+  verifiedReadmes.set(key, hit);
+  return hit.readme;
+}
+
+function rememberVerifiedReadme(key: string, readme: VerifiedReadme) {
+  const textUnits = readme.status === "absent" ? 0 : readme.path.length + readme.blobSha.length + readme.text.length;
+  const bytes = 2 * (key.length + textUnits);
+  // Retain only the selected path and SHA, even if the JSON parser shares
+  // their string storage with the original tree payload.
+  const stored = readme.status === "absent" ? readme : {
+    ...readme, path: Buffer.from(readme.path).toString(), blobSha: Buffer.from(readme.blobSha).toString(),
+  };
+  cachedReadmeBytes -= verifiedReadmes.get(key)?.bytes ?? 0;
+  verifiedReadmes.delete(key);
+  verifiedReadmes.set(key, { readme: stored, bytes });
+  cachedReadmeBytes += bytes;
+  while (verifiedReadmes.size > MAX_CACHED_READMES || cachedReadmeBytes > MAX_CACHED_README_BYTES) {
+    const oldest = verifiedReadmes.entries().next().value;
+    if (!oldest) break;
+    const [oldestKey, entry] = oldest;
+    verifiedReadmes.delete(oldestKey);
+    cachedReadmeBytes -= entry.bytes;
+  }
+}
 
 type TreeEntry = Readonly<{ path: string; mode: "040000" | "160000"; sha: string }>
   | Readonly<{ path: string; mode: "100644" | "100755" | "120000"; sha: string; size: number }>;
@@ -129,7 +166,7 @@ async function readBody(response: Response, limit: number, signal: AbortSignal):
 
 /** Reads one server-pinned target. The caller owns authorization and target inventory. */
 export async function readPinnedRepoGradeReadme(
-  pinned: PinnedTarget, folder: string, signal?: AbortSignal,
+  pinned: PinnedTarget, folder: string, signal?: AbortSignal, accountId?: string,
 ): Promise<PinnedReadmeEvidence> {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), DEADLINE_MS);
@@ -158,6 +195,21 @@ export async function readPinnedRepoGradeReadme(
       return { status: "failure" };
     }
     const rootSha = commit.tree.sha;
+    // Keep the live Git commit authorization check on every read. Only the
+    // verified immutable contents for that exact repository and tree can be reused.
+    const cacheKey = accountId && JSON.stringify([
+      README_CACHE_VERSION, accountId, createHash("sha256").update(token).digest("hex"),
+      owner, repo, sourceCommit, rootSha, folder,
+    ]);
+    requestSignal.throwIfAborted();
+    const cached = cacheKey ? reuseVerifiedReadme(cacheKey) : undefined;
+    if (cached) return { ...cached, target };
+    function verified(readme: VerifiedReadme): PinnedReadmeEvidence {
+      requestSignal.throwIfAborted();
+      if (cacheKey) rememberVerifiedReadme(cacheKey, readme);
+      return { ...readme, target };
+    }
+
     const tree: unknown = JSON.parse(utf8.decode(await get(`/trees/${rootSha}?recursive=1`, MAX_TREE_BYTES)));
     const entries = verifyTree(tree, rootSha);
     for (let scope = folder; scope !== ""; scope = scope.slice(0, Math.max(0, scope.lastIndexOf("/")))) {
@@ -171,7 +223,7 @@ export async function readPinnedRepoGradeReadme(
       .filter(({ path, mode }) => mode !== "040000" && path.startsWith(`${folder}/`))
       .map(({ path }) => ({ path, content: "candidate" }));
     const pick = pickReadmeInstructions(candidates, folder);
-    if (!pick) return { status: "absent", target };
+    if (!pick) return verified({ status: "absent" });
     const tied = candidates.filter(({ path }) => path.localeCompare(pick.path) === 0);
     if (tied.length > 1 && pickReadmeInstructions(tied.reverse(), folder)?.path !== pick.path) {
       return { status: "failure" };
@@ -185,7 +237,7 @@ export async function readPinnedRepoGradeReadme(
     if (bytes.byteLength !== entry.size || gitObjectSha("blob", bytes) !== entry.sha) return { status: "failure" };
     const text = utf8.decode(bytes);
     if (text.includes("\0")) return { status: "failure" };
-    return { status: text.trim() === "" ? "blank" : "present", target, path: entry.path, blobSha: entry.sha, text };
+    return verified({ status: text.trim() === "" ? "blank" : "present", path: entry.path, blobSha: entry.sha, text });
   } catch {
     return { status: "failure" };
   } finally {

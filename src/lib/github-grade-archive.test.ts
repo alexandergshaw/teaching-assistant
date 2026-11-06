@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { indexGradeArchive, verifyGradeArchiveFiles } from "./github-grade-archive-zip";
-import { makePinnedArchiveReader } from "./github-grade-archive";
+import { confirmedGradeSourceCooldown, makePinnedArchiveReader } from "./github-grade-archive";
 import { GithubGradeSourceRateLimitError } from "./github-http-error";
 
 const sha = "a".repeat(40);
@@ -77,6 +77,27 @@ describe("pinned grading archive integrity", () => {
 describe("pinned grading archive transport", () => {
   const files = [blob("a.py", "a"), blob("b.py", "b"), blob("c.py", "c")];
 
+  it("reports confirmed credential cooldown without a request, and clears it at expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("GITHUB_TOKEN", "confirmed-cooldown-token");
+      const fetcher = vi.fn(async () => new Response(null, { status: 429, headers: { "Retry-After": "120" } }));
+      vi.stubGlobal("fetch", fetcher);
+      const retryAtMs = Date.now() + 120_000;
+      await expect(makePinnedArchiveReader({ accountId: "cooldown-test", owner: "school", repo: "student", sha })(files))
+        .rejects.toThrow(GithubGradeSourceRateLimitError);
+      expect(confirmedGradeSourceCooldown()).toEqual({ retryAtMs, primary: false });
+      expect(fetcher).toHaveBeenCalledOnce();
+      vi.stubEnv("GITHUB_TOKEN", "different-token");
+      expect(confirmedGradeSourceCooldown()).toBeNull();
+      vi.stubEnv("GITHUB_TOKEN", "confirmed-cooldown-token");
+      vi.advanceTimersByTime(120_000);
+      expect(confirmedGradeSourceCooldown()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { status: 403, location: "api", header: "X-RateLimit-Remaining", value: "25" },
     { status: 429, location: "codeload", header: "Retry-After", value: "120" },
@@ -93,6 +114,8 @@ describe("pinned grading archive transport", () => {
     await expect(reader(files)).rejects.toThrow(expected);
     await expect(reader(files)).rejects.toThrow(expected);
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual(location === "api" ? [apiUrl] : [apiUrl, download]);
+    expect(confirmedGradeSourceCooldown()).toEqual(status === 429
+      ? { retryAtMs: expect.any(Number), primary: false } : null);
   });
 
   it.each(["https://codeload.github.com.example.test/zip", "https://user@codeload.github.com/zip", "http://codeload.github.com/zip"])(

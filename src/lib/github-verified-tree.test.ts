@@ -74,6 +74,76 @@ describe("verified immutable Git tree reuse", () => {
     await expect(getRepoCommitTree("owner", "repo", sha, { ...options, signal: AbortSignal.abort() })).rejects.toThrow();
   });
 
+  it("conditionally reauthorizes cached pinned commits and isolates their validators", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "conditional-token");
+    const sha = "d".repeat(40);
+    let deny = false;
+    const seen: string[] = [];
+    const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.includes("/commits/")) return Response.json(empty);
+      const headers = new Headers(init.headers);
+      const conditional = headers.get("if-none-match") ?? "";
+      seen.push(conditional);
+      if (deny) return new Response(null, { status: 403 });
+      return conditional ? new Response(null, { status: 304 })
+        : Response.json({ sha, tree: { sha: empty.sha } }, { headers: { etag: '"commit-etag"' } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const options = { treeCacheAccountId: "conditional-account" };
+    await getRepoCommitTree("owner", "repo", sha, options);
+    await getRepoCommitTree("owner", "repo", sha, options);
+    expect(seen).toEqual(["", '"commit-etag"']);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    deny = true;
+    await expect(getRepoCommitTree("owner", "repo", sha, options)).rejects.toThrow();
+    deny = false;
+    await getRepoCommitTree("owner", "repo", sha, { treeCacheAccountId: "other-account" });
+    await getRepoCommitTree("owner", "other-repo", sha, options);
+    vi.stubEnv("GITHUB_TOKEN", "conditional-token-rotated");
+    await getRepoCommitTree("owner", "repo", sha, options);
+    expect(seen.slice(-3)).toEqual(["", "", ""]);
+  });
+
+  it("expires validators and rejects an unsolicited 304", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("GITHUB_TOKEN", "conditional-expiry-token");
+    const sha = "e".repeat(40);
+    let unsolicited = false;
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.includes("/commits/")) return Response.json(empty);
+      seen.push(new Headers(init.headers).get("if-none-match") ?? "");
+      return unsolicited ? new Response(null, { status: 304 })
+        : Response.json({ sha, tree: { sha: empty.sha } }, { headers: { etag: '"expiring"' } });
+    }));
+    const options = { treeCacheAccountId: "conditional-expiry" };
+    await getRepoCommitTree("owner", "repo", sha, options);
+    vi.advanceTimersByTime(60 * 60_000);
+    unsolicited = true;
+    await expect(getRepoCommitTree("owner", "repo", sha, options)).rejects.toThrow();
+    expect(seen).toEqual(["", ""]);
+  });
+
+  it("discards the prior validator if GitHub returns a malformed replacement", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "conditional-invalid-token");
+    const sha = "f".repeat(40);
+    let attempt = 0;
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.includes("/commits/")) return Response.json(empty);
+      seen.push(new Headers(init.headers).get("if-none-match") ?? "");
+      attempt += 1;
+      if (attempt === 1) return Response.json({ sha, tree: { sha: empty.sha } }, { headers: { etag: '"old"' } });
+      if (attempt === 2) return Response.json({ sha: "bad", tree: { sha: empty.sha } });
+      return new Response(null, { status: 304 });
+    }));
+    const options = { treeCacheAccountId: "conditional-invalid" };
+    await getRepoCommitTree("owner", "repo", sha, options);
+    await expect(getRepoCommitTree("owner", "repo", sha, options)).rejects.toThrow();
+    await expect(getRepoCommitTree("owner", "repo", sha, options)).rejects.toThrow();
+    expect(seen).toEqual(["", '"old"', ""]);
+  });
+
   it("preserves partial-input outcomes and never caches incomplete evaluator trees", async () => {
     vi.stubEnv("GITHUB_TOKEN", "partial-tree-token");
     const sha = "c".repeat(40);

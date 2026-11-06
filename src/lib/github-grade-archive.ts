@@ -22,6 +22,22 @@ const cache = new Map<string, { archive: GradeArchive | null; expires: number }>
 const retryAfterByCredential = new Map<string, { retryAt: number; confirmedUntil: number }>();
 let cacheBytes = 0;
 
+/** A confirmed, credential-scoped cooldown observed by this server instance.
+ * This does not contact GitHub or treat a permission failure as a throttle. */
+export function confirmedGradeSourceCooldown(): { retryAtMs: number; primary: boolean } | null {
+  let credential: string;
+  try {
+    credential = createHash("sha256").update(githubRestHeaders().Authorization).digest("hex");
+  } catch {
+    return null;
+  }
+  const cooldown = retryAfterByCredential.get(credential);
+  if (!cooldown || cooldown.confirmedUntil <= Date.now()) return null;
+  // Waiting until the latest known cooldown ends also respects an overlapping
+  // unconfirmed secondary limit. The conservative secondary floor is applied.
+  return { retryAtMs: cooldown.retryAt, primary: false };
+}
+
 function unavailable(): never {
   throw new Error("The pinned GitHub repository archive could not be read.");
 }

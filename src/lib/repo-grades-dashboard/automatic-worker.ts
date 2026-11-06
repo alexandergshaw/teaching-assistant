@@ -9,6 +9,7 @@ import { readRepoGradeStartupHistory } from "./startup-history";
 import { automaticRepoGradeEvidenceStore, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
+import { confirmedGradeSourceCooldown } from "@/lib/github-grade-archive";
 
 export type AutomaticRepoGradeMode = "coordinated" | "embedded-only";
 
@@ -82,6 +83,11 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     }
 
     if (!plan) return { state: "blocked", reason: snapshot ? "configuration-changed" : "course-unavailable" };
+    // Do not create a ledger attempt while this instance already knows that
+    // the credential is throttled. The existing scheduler releases the run
+    // lease and resumes the same pinned target after the cooldown.
+    const cooldown = work.retryGithubRateLimits ? confirmedGradeSourceCooldown() : null;
+    if (cooldown) return { state: "github-throttled", rateLimit: cooldown };
     const target = { accountId, courseId, repo: work.repo, folder: work.folder, sourceRef: work.ref, sha: work.sha };
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));

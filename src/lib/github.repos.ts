@@ -33,7 +33,7 @@ export type GithubRepoRequestOptions = Pick<RequestInit, "signal"> & {
   observeResponse?: (response: Response) => void;
 };
 
-type GithubRequestInit = RequestInit & GithubRepoRequestOptions;
+type GithubRequestInit = RequestInit & GithubRepoRequestOptions & { acceptNotModified?: boolean };
 
 export function githubRestHeaders() {
   return {
@@ -43,7 +43,7 @@ export function githubRestHeaders() {
   };
 }
 
-async function ghFetch(path: string, { beforeRequest, observeResponse, ...init }: GithubRequestInit = {}, bounded?: GithubBoundedReadContext, responseCap = 1_000_000): Promise<Response> {
+async function ghFetch(path: string, { beforeRequest, observeResponse, acceptNotModified, ...init }: GithubRequestInit = {}, bounded?: GithubBoundedReadContext, responseCap = 1_000_000): Promise<Response> {
   if (bounded) { checkGithubReadDeadline(bounded); if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid GitHub API path"); }
   beforeRequest?.();
   const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {
@@ -56,6 +56,7 @@ async function ghFetch(path: string, { beforeRequest, observeResponse, ...init }
   });
   if (bounded && res.status >= 300 && res.status < 400) { await res.body?.cancel(); throw new GithubReadLimitError("redirect"); }
   observeResponse?.(res);
+  if (acceptNotModified && res.status === 304) return res;
   if (!res.ok) {
     // GithubHttpError, not Error: the MESSAGE is unchanged (still whatever
     // ghError produces), so every existing caller that reads err.message or
@@ -212,6 +213,12 @@ export function isGithubCommitSha(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{40}$/i.test(value);
 }
 
+// Only the validator and immutable pointer are retained; authorization is still
+// checked by GitHub on every reuse. Never share entries across accounts or tokens.
+const pinnedCommitValidators = new Map<string, { etag: string; treeSha: string; expires: number }>();
+const PINNED_COMMIT_VALIDATOR_TTL = 60 * 60_000;
+const PINNED_COMMIT_VALIDATOR_LIMIT = 256;
+
 /** Capture a mutable source ref once, before making any grading input reads. */
 export async function resolveRepoSourceCommit(
   owner: string, repo: string, sourceRef: string, options?: GithubRepoRequestOptions,
@@ -232,9 +239,43 @@ export async function getRepoCommitTree(
   const reads = headers ? { ...requestOptions, headers, cache: "no-store" as const, redirect: "error" as const } : requestOptions;
   const base = `/repos/${owner}/${repo}/git`;
   const sha = sourceCommit.toLowerCase();
-  const commit = await ghJson<{ sha?: string; tree?: { sha?: string } }>(`${base}/commits/${sha}`, reads);
-  const treeSha = commit.tree?.sha;
-  if (commit.sha !== sha || !isGithubCommitSha(treeSha)) throw new Error("GitHub did not return the pinned commit tree.");
+  let treeSha: string;
+  if (treeCacheAccountId && headers) {
+    const { createHash } = await import("node:crypto");
+    const credential = createHash("sha256").update(headers.Authorization).digest("hex");
+    const key = JSON.stringify([treeCacheAccountId, credential, owner, repo, sha]);
+    const cached = pinnedCommitValidators.get(key);
+    if (cached && cached.expires <= Date.now()) pinnedCommitValidators.delete(key);
+    const valid = pinnedCommitValidators.get(key);
+    const response = await ghFetch(`${base}/commits/${sha}`, {
+      ...reads, headers: { ...headers, ...(valid && { "If-None-Match": valid.etag }) },
+      acceptNotModified: !!valid,
+    });
+    reads.signal?.throwIfAborted();
+    if (response.status === 304 && valid) {
+      treeSha = valid.treeSha;
+    } else {
+      pinnedCommitValidators.delete(key);
+      const commit = await response.json() as { sha?: string; tree?: { sha?: string } };
+      const pointer = commit.tree?.sha;
+      if (commit.sha !== sha || !isGithubCommitSha(pointer)) throw new Error("GitHub did not return the pinned commit tree.");
+      treeSha = pointer;
+      const etag = response.headers.get("etag");
+      if (etag && etag.length <= 1024 && !/[\r\n]/.test(etag)) {
+        pinnedCommitValidators.set(key, { etag, treeSha, expires: Date.now() + PINNED_COMMIT_VALIDATOR_TTL });
+        while (pinnedCommitValidators.size > PINNED_COMMIT_VALIDATOR_LIMIT) {
+          const oldest = pinnedCommitValidators.keys().next().value;
+          if (oldest === undefined) break;
+          pinnedCommitValidators.delete(oldest);
+        }
+      }
+    }
+  } else {
+    const commit = await ghJson<{ sha?: string; tree?: { sha?: string } }>(`${base}/commits/${sha}`, reads);
+    const pointer = commit.tree?.sha;
+    if (commit.sha !== sha || !isGithubCommitSha(pointer)) throw new Error("GitHub did not return the pinned commit tree.");
+    treeSha = pointer;
+  }
 
   if (treeCacheAccountId && headers) {
     const { createHash } = await import("node:crypto");

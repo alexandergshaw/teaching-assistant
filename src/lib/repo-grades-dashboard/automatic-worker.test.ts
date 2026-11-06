@@ -3,7 +3,8 @@ import { createAutomaticRepoGradeWorker } from "./automatic-worker";
 import { repoGradeStartupKey } from "./scheduler";
 import type { RepoGradeLedgerObservation, RepoGradeStartupTarget } from "./scheduler";
 
-const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn() }));
+const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn() }));
+vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
 vi.mock("./runner", () => ({ planRepoGradeCourse: mocks.plan, runRepoGradeTarget: mocks.evaluate }));
 vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore }));
 vi.mock("./startup-history", () => ({ readRepoGradeStartupHistory: mocks.history }));
@@ -42,6 +43,25 @@ describe("durable repository grading discovery", () => {
     await expect(worker(work, "lease")).resolves.toEqual({ state: "github-throttled", rateLimit: { retryAtMs: null, primary: false } });
     expect(mocks.evaluate).not.toHaveBeenCalled();
     await expect(worker(work, "lease")).resolves.toEqual({ state: "unknown" });
+  });
+
+  it("defers a known source cooldown before admitting work and resumes the same target when it clears", async () => {
+    const work = {
+      phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "assignment", ref: "main", sha: "a".repeat(40), retryGithubRateLimits: true,
+    } as const;
+    const cooldown = { retryAtMs: Date.now() + 120_000, primary: false };
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.cooldown.mockReturnValueOnce(cooldown).mockReturnValueOnce(null);
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    mocks.evaluate.mockResolvedValue({ status: "succeeded" });
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker(work, "lease-1")).resolves.toEqual({ state: "github-throttled", rateLimit: cooldown });
+    expect(mocks.history).not.toHaveBeenCalled();
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    await expect(worker(work, "lease-2")).resolves.toEqual({ state: "succeeded" });
+    expect(mocks.evaluate).toHaveBeenCalledOnce();
   });
 
   it("keeps a complete scan that used the final GitHub request and defers the grade before admission", async () => {

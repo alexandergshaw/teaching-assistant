@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import * as pinnedReader from "./preparation-readme";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 type Request = Parameters<typeof composeRepoGradePreparationEvidence>[0];
 type Target = Extract<Request["inventory"], { status: "complete" }>["targets"][number];
@@ -24,6 +25,14 @@ function request(overrides: Partial<Request> = {}): Request {
     ...overrides,
   };
 }
+
+it("propagates a confirmed pre-dispatch README throttle instead of losing it as unavailable evidence", async () => {
+  const fixture = githubFixture(first, exactInstructions);
+  mockFetch([fixture], (url) => url === fixture.urls.commit
+    ? new Response(null, { status: 403, headers: { "x-ratelimit-remaining": "0" } }) : undefined);
+  await expect(composeRepoGradePreparationEvidence(request({ inventory: { status: "complete", targets: [first] } })))
+    .rejects.toBeInstanceOf(PreparationGithubThrottle);
+});
 
 function objectSha(type: "blob" | "tree", bytes: Buffer): string {
   return createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex");

@@ -2,6 +2,7 @@ import "server-only";
 
 import { captureRepoGradePreparationInput, type RepoGradePreparationInput } from "./preparation-input";
 import { readPinnedRepoGradeReadme, type PinnedReadmeEvidence } from "./preparation-readme";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 // Each target may require a commit, tree, and blob request. Keep the full
 // cohort within a separate request and time budget, with no retries.
@@ -106,7 +107,11 @@ export async function composeRepoGradePreparationEvidence(input: TrustedPreparat
           configuration, instructionPolicy, inventory: { status: "complete", targets }, readmeEvidence: evidence,
         } satisfies RepoGradePreparationInput);
         return active() ? captured : blocked.promise;
-      }, () => {
+      }, (error: unknown) => {
+        if (error instanceof PreparationGithubThrottle && !controller.signal.aborted) {
+          controller.abort();
+          throw error;
+        }
         stop("readme-read-failed");
         return blocked.promise;
       });

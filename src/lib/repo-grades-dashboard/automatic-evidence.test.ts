@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
 import type { composeRepoGradePreparationEvidence } from "./preparation-evidence";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 const { readPinned } = vi.hoisted(() => ({ readPinned: vi.fn() }));
 vi.mock("./preparation-readme", () => ({ readPinnedRepoGradeReadme: readPinned }));
@@ -84,5 +85,17 @@ describe("run-scoped automatic grading evidence", () => {
       expect.objectContaining({ cache: "no-store", redirect: "manual" }),
     );
     expect(readPinned).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates a confirmed throttle while reauthorizing cached evidence", async () => {
+    const { store } = storage();
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "2000000000" },
+    })));
+    const resolve = createAutomaticRepoGradeEvidenceResolver("snapshot", store,
+      () => authorizeAutomaticRepoGradeEvidence("Org/first", first.sourceCommit));
+    await expect(resolve(input)).resolves.toMatchObject({ status: "ready" });
+    await expect(resolve(input)).rejects.toBeInstanceOf(PreparationGithubThrottle);
   });
 });

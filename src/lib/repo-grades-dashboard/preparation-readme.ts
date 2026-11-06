@@ -5,6 +5,7 @@ import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { rememberVerifiedGithubTree, reuseVerifiedGithubTree, verifyGithubTree } from "@/lib/github-verified-tree";
 import { readVerifiedReadmeBlob } from "@/lib/github-verified-readme-blob";
+import { PreparationGithubThrottle, preparationGithubThrottle } from "./preparation-github-throttle";
 
 const MAX_COMMIT_BYTES = 1_000_000;
 const MAX_TREE_BYTES = 8_000_000;
@@ -134,6 +135,10 @@ export async function readPinnedRepoGradeReadme(
       });
       if (readSignal.aborted || response.status !== 200 || response.redirected) {
         void response.body?.cancel().catch(() => {});
+        if (!readSignal.aborted && !response.redirected) {
+          const throttle = preparationGithubThrottle(response.status, response.headers);
+          if (throttle) throw throttle;
+        }
         throw new Error("GitHub object unavailable");
       }
       return readBody(response, limit, readSignal);
@@ -191,7 +196,8 @@ export async function readPinnedRepoGradeReadme(
     const text = await readVerifiedReadmeBlob(treeScope, entry,
       (readSignal) => get(`/blobs/${entry.sha}`, entry.size, "application/vnd.github.raw+json", readSignal), requestSignal);
     return verified({ status: text.trim() === "" ? "blank" : "present", path: entry.path, blobSha: entry.sha, text });
-  } catch {
+  } catch (error) {
+    if (error instanceof PreparationGithubThrottle && !requestSignal.aborted) throw error;
     return { status: "failure" };
   } finally {
     clearTimeout(deadline);

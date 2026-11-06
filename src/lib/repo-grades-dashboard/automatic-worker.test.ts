@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAutomaticRepoGradeWorker } from "./automatic-worker";
 import { repoGradeStartupKey } from "./scheduler";
 import type { RepoGradeLedgerObservation, RepoGradeStartupTarget } from "./scheduler";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
+import { prepareRepoGradeStartupProfile } from "./preparation-runtime";
 
 const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn() }));
 vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
@@ -43,6 +45,24 @@ describe("durable repository grading discovery", () => {
     await expect(worker(work, "lease")).resolves.toEqual({ state: "github-throttled", rateLimit: { retryAtMs: null, primary: false } });
     expect(mocks.evaluate).not.toHaveBeenCalled();
     await expect(worker(work, "lease")).resolves.toEqual({ state: "unknown" });
+  });
+
+  it("defers a confirmed preparation throttle only when retry is enabled", async () => {
+    const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+      repo: "Org/Student", folder: "assignment", ref: "main", sha: "a".repeat(40) } as const;
+    const rateLimit = { retryAtMs: Date.now() + 120_000, primary: true };
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    vi.mocked(prepareRepoGradeStartupProfile).mockRejectedValue(new PreparationGithubThrottle(rateLimit));
+    mocks.evaluate.mockImplementation(async (_plan, _target, runtime) => {
+      try { await runtime.loadPreparedProfile({ accountId: "owner", courseId: "course", folder: "assignment" }); }
+      catch { return { status: "profile-unavailable" }; }
+      throw new Error("Expected pre-dispatch preparation failure");
+    });
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker({ ...work, retryGithubRateLimits: true }, "lease")).resolves.toEqual({ state: "github-throttled", rateLimit });
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "blocked", reason: "profile-unavailable" });
   });
 
   it("defers a known source cooldown before admitting work and resumes the same target when it clears", async () => {

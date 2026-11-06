@@ -10,6 +10,7 @@ import { automaticRepoGradeEvidenceStore, readAutomaticRepoGradeSnapshot, type A
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
 import { confirmedGradeSourceCooldown } from "@/lib/github-grade-archive";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 export type AutomaticRepoGradeMode = "coordinated" | "embedded-only";
 
@@ -98,6 +99,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     }
     const expectedRef = plan.folderSources.get(target.folder) ?? null;
     let profileFailure: RepoGradeProfilePreparationFailure | undefined;
+    let preparationThrottle: PreparationGithubThrottle | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
@@ -108,8 +110,14 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
             snapshot.basis, automaticRepoGradeEvidenceStore(work, lease),
             () => authorizeAutomaticRepoGradeEvidence(work.repo, work.sha),
           ) }),
+        }).catch((error: unknown) => {
+          if (error instanceof PreparationGithubThrottle) preparationThrottle = error;
+          throw error;
         }),
     });
+    if (outcome.status === "profile-unavailable" && work.retryGithubRateLimits && preparationThrottle) {
+      return { state: "github-throttled", rateLimit: preparationThrottle.rateLimit };
+    }
     if ((outcome.status === "partial" || outcome.status === "unknown") && outcome.unretainedResult) {
       const payload = JSON.stringify({
         target, status: outcome.status, unretainedResult: outcome.unretainedResult,

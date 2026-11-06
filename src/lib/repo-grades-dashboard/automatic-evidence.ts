@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { createGithubBoundedReadContext } from "@/lib/github-bounded-read";
 import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 import { ghJson, isGithubCommitSha } from "@/lib/github.repos";
+import { asGithubHttpError } from "@/lib/github-http-error";
+import { preparationGithubThrottle } from "./preparation-github-throttle";
 import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import { captureRepoGradePreparationInput } from "./preparation-input";
 
@@ -24,7 +26,10 @@ export async function authorizeAutomaticRepoGradeEvidence(repo: string, sha: str
   try {
     const commit = await ghJson<unknown>(`/repos/${owner}/${name}/git/commits/${sha}`, { cache: "no-store" }, context);
     return object(commit) && commit.sha === sha && object(commit.tree) && isGithubCommitSha(commit.tree.sha);
-  } catch {
+  } catch (error) {
+    const response = asGithubHttpError(error);
+    const throttle = response && preparationGithubThrottle(response.status, response.headers);
+    if (throttle) throw throttle;
     return false;
   } finally {
     context.dispose();

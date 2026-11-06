@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPinnedRepoGradeReadme } from "./preparation-readme";
 import { getRepoCommitTree } from "../github.repos";
 import { discoverRepoGradeSources } from "./discovery";
+import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
 const target = { owner: "Teacher", repo: "Class", sourceRef: "course/week", sourceCommit: "a".repeat(40) };
 const base = "https://api.github.com/repos/Teacher/Class/git";
@@ -87,7 +88,12 @@ describe("readPinnedRepoGradeReadme", () => {
     const readers = Array.from({ length: 3 }, (_, index) => read(index));
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("/trees/"))).toHaveLength(3));
     payload.resolve(new Response(null, { status: 429, headers: { "retry-after": "60" } }));
-    expect(await Promise.all(readers)).toEqual([failure, failure, failure]);
+    const settled = await Promise.allSettled(readers);
+    expect(settled).toHaveLength(3);
+    for (const result of settled) {
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") expect(result.reason).toBeInstanceOf(PreparationGithubThrottle);
+    }
     expect(fetchMock).toHaveBeenCalledTimes(7);
     expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(1);
     retry = true;

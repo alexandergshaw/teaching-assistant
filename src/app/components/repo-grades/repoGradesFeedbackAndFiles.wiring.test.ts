@@ -307,6 +307,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoBindingControl.tsx",
   "RepoDashboardFeedback.tsx",
   "RepoGradeCellControl.tsx",
+  "RepoGradePreparationPolicySettings.tsx",
+  "RepoGradeProfileSettings.tsx",
   "RepoGradesControls.tsx",
   "RepoGradesDashboard.tsx",
   "RepoGradesGrid.tsx",
@@ -342,6 +344,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   // RG-SEARCH-STICKY Wave C: the pure grade-set reducer and grade-scope decision.
   "repoGradesGradeSet.ts",
   "repoGradesPosting.ts",
+  "repoGradesProfileClient.ts",
   "repoGradesRows.ts",
   // RG-PERSIST-RESULTS W5: the pure persist/restore leaf (browser-safe only).
   "repoGradesResultsStore.ts",

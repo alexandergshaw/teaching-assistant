@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
-import { collectInlineVisualParts } from "@/lib/grade/inline-visuals";
+import { collectInlineVisualEvidence } from "@/lib/grade/inline-visuals";
 import { repoGradeAdmissionMode } from "./admission-mode";
 import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
-vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualParts: vi.fn() }));
+vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualEvidence: vi.fn() }));
 vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 
@@ -84,7 +84,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_TOKEN", "test-token");
   vi.stubEnv("GEMINI_API_KEY", "test-key");
   vi.stubEnv("GEMINI_MODEL", model);
-  vi.mocked(collectInlineVisualParts).mockResolvedValue([]);
+  vi.mocked(collectInlineVisualEvidence).mockResolvedValue({ parts: [], documents: [] });
   vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.mocked(requireAppOwner).mockResolvedValue({ id: plan.accountId, email: "owner@example.test" });
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
@@ -170,9 +170,9 @@ describe("admitted pinned repository evaluator", () => {
 
   it("checks the actual Gemini request model after asynchronous grading preparation", async () => {
     const fetcher = fetchRepo();
-    vi.mocked(collectInlineVisualParts).mockImplementationOnce(async () => {
+    vi.mocked(collectInlineVisualEvidence).mockImplementationOnce(async () => {
       vi.stubEnv("GEMINI_MODEL", "gemini-other-version");
-      return [];
+      return { parts: [], documents: [] };
     });
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
     expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
@@ -183,9 +183,9 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo();
     const start = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-    vi.mocked(collectInlineVisualParts).mockImplementationOnce(async () => {
+    vi.mocked(collectInlineVisualEvidence).mockImplementationOnce(async () => {
       clock.mockReturnValue(start + 60_000);
-      return [];
+      return { parts: [], documents: [] };
     });
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
     expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);

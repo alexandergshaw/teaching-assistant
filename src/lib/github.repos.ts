@@ -224,17 +224,48 @@ export async function resolveRepoSourceCommit(
 
 /** Read the Git tree object named by this exact commit's Git object. */
 export async function getRepoCommitTree(
-  owner: string, repo: string, sourceCommit: string, options?: GithubRepoRequestOptions & Pick<RequestInit, "cache" | "redirect">,
+  owner: string, repo: string, sourceCommit: string, options?: GithubRepoRequestOptions & Pick<RequestInit, "cache" | "redirect"> & { treeCacheAccountId?: string },
 ): Promise<RepoTreeResult> {
   if (!isGithubCommitSha(sourceCommit)) throw new Error("A full GitHub commit SHA is required.");
+  const { treeCacheAccountId, ...requestOptions } = options ?? {};
+  const headers = treeCacheAccountId ? githubRestHeaders() : undefined;
+  const reads = headers ? { ...requestOptions, headers, cache: "no-store" as const, redirect: "error" as const } : requestOptions;
   const base = `/repos/${owner}/${repo}/git`;
   const sha = sourceCommit.toLowerCase();
-  const commit = await ghJson<{ sha?: string; tree?: { sha?: string } }>(`${base}/commits/${sha}`, options);
+  const commit = await ghJson<{ sha?: string; tree?: { sha?: string } }>(`${base}/commits/${sha}`, reads);
   const treeSha = commit.tree?.sha;
   if (commit.sha !== sha || !isGithubCommitSha(treeSha)) throw new Error("GitHub did not return the pinned commit tree.");
 
+  if (treeCacheAccountId && headers) {
+    const { createHash } = await import("node:crypto");
+    const { reuseVerifiedGithubTree, rememberVerifiedGithubTree } = await import("./github-verified-tree");
+    const scope = { accountId: treeCacheAccountId, owner, repo, rootSha: treeSha,
+      credential: createHash("sha256").update(headers.Authorization).digest("hex") };
+    reads.signal?.throwIfAborted();
+    const cached = reuseVerifiedGithubTree(scope);
+    const raw = cached ? undefined : await ghJson<unknown>(`${base}/trees/${treeSha}?recursive=1`, reads);
+    reads.signal?.throwIfAborted();
+    let verified = cached;
+    if (!verified) {
+      try {
+        verified = rememberVerifiedGithubTree(scope, raw);
+      } catch {
+        // Preserve the pinned grader's partial-input outcome. Incomplete or
+        // invalid objects must never become a grade or reusable evidence.
+        return { entries: [], truncated: true };
+      }
+    }
+    const entries: RepoTreeResult["entries"] = [];
+    let truncated = false;
+    for (const row of verified.values()) {
+      if (row.mode === "160000") { truncated = true; continue; }
+      entries.push({ ...row, type: row.mode === "040000" ? "tree" : "blob", size: "size" in row ? row.size : 0 });
+    }
+    return { entries, truncated };
+  }
+
   const data = await ghJson<{ sha?: string; tree?: RepoTreeResult["entries"]; truncated?: boolean }>(
-    `${base}/trees/${treeSha}?recursive=1`, options);
+    `${base}/trees/${treeSha}?recursive=1`, reads);
   if (data.sha !== treeSha || !Array.isArray(data.tree) || typeof data.truncated !== "boolean") {
     throw new Error("GitHub did not return a complete tree response.");
   }

@@ -1,4 +1,5 @@
 import "server-only";
+import { rememberVerifiedGithubTree } from "@/lib/github-verified-tree";
 
 import { mapWithConcurrency } from "@/app/actions/shared";
 import { encodeRefSegment, normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
@@ -135,7 +136,17 @@ async function readSource(
     const cacheKey = credential && JSON.stringify([accountId, credential, repo, treeSha]);
     let folders = cacheKey ? cachedFolders.get(cacheKey) : undefined;
     if (!folders) {
-      const loaded = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => readFolders(value, treeSha));
+      const loaded = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => {
+        const result = readFolders(value, treeSha);
+        if (result && accountId && credential) {
+          try {
+            rememberVerifiedGithubTree({ accountId, credential, owner, repo: name, rootSha: treeSha }, value);
+          } catch {
+            // Keep the existing folder projection, but never retain unverified grading evidence.
+          }
+        }
+        return result;
+      });
       if (cacheKey && loaded) rememberFolders(cacheKey, loaded);
       folders = loaded ?? undefined;
     }

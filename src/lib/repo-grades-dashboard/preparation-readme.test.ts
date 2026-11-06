@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPinnedRepoGradeReadme } from "./preparation-readme";
+import { getRepoCommitTree } from "../github.repos";
+import { discoverRepoGradeSources } from "./discovery";
 
 const target = { owner: "Teacher", repo: "Class", sourceRef: "course/week", sourceCommit: "a".repeat(40) };
 const base = "https://api.github.com/repos/Teacher/Class/git";
@@ -70,6 +72,32 @@ afterEach(() => {
 });
 
 describe("readPinnedRepoGradeReadme", () => {
+  it("shares discovery's verified tree with README preparation and evaluation after fresh authorization", async () => {
+    const readme = blob(preferred, "shared instructions");
+    const tree = makeTree([readme]);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/Teacher/repos")) return Response.json([
+        { owner: { login: "Teacher" }, name: "Class", full_name: "Teacher/Class", default_branch: "main" },
+      ]);
+      if (url.endsWith("/commits/main")) return Response.json({ sha: target.sourceCommit, commit: { tree: { sha: tree.sha } } });
+      if (url.endsWith(`/git/commits/${target.sourceCommit}`)) return Response.json({ sha: target.sourceCommit, tree: { sha: tree.sha } });
+      if (url.includes("/git/trees/")) return Response.json(tree);
+      if (url.endsWith(`/blobs/${readme.sha}`)) return new Response(new Uint8Array(readme.bytes));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const accountId = "discovery-readme-evaluator-shared";
+    await expect(discoverRepoGradeSources({ accountId, organization: "Teacher" })).resolves.toMatchObject({ status: "scanned" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await expect(readPinnedRepoGradeReadme(target, folder, undefined, accountId)).resolves.toMatchObject({ status: "present" });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    await expect(getRepoCommitTree(target.owner, target.repo, target.sourceCommit, { treeCacheAccountId: accountId }))
+      .resolves.toMatchObject({ truncated: false });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/git/commits/"))).toHaveLength(2);
+  });
+
   it("uses the commit, tree and winning executable blob IDs and preserves exact UTF-8 bytes", async () => {
     const contents = "\ufeff  Caf\u00e9 \u{10437}\r\nsecond line\r\n";
     const winning = blob(preferred, contents, "100755");
@@ -125,7 +153,7 @@ describe("readPinnedRepoGradeReadme", () => {
     await expect(read(accountId, "Week/subfolder")).resolves.toMatchObject({ status: "absent" });
     vi.stubEnv("GITHUB_TOKEN", "rotated-token");
     await expect(read()).resolves.toMatchObject({ status: "present" });
-    expect(fetchMock).toHaveBeenCalledTimes(13);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
 
     const otherRepo = { ...target, repo: "Another-class" };
     const otherRepoFetch = vi.fn(async (url: string) => {
@@ -148,7 +176,7 @@ describe("readPinnedRepoGradeReadme", () => {
     await expect(read()).resolves.toEqual(failure);
     corrupt = false;
     await expect(read()).resolves.toMatchObject({ status: "present", text: "first" });
-    expect(first).toHaveBeenCalledTimes(6);
+    expect(first).toHaveBeenCalledTimes(5);
 
     const second = stubGithub([blob(preferred, "second")]);
     await expect(read()).resolves.toMatchObject({ status: "present", text: "second" });
@@ -157,7 +185,7 @@ describe("readPinnedRepoGradeReadme", () => {
 
   it.each([
     { limit: "entry count", accounts: 257, contents: null, requests: 2 },
-    { limit: "text size", accounts: 34, contents: "x".repeat(128_000), requests: 3 },
+    { limit: "text size", accounts: 34, contents: "x".repeat(128_000), requests: 2 },
   ])("evicts old evidence at the cache's $limit limit", async ({ limit, accounts, contents, requests }) => {
     const fetchMock = stubGithub(contents === null ? [] : [blob(preferred, contents)]);
     const read = (index: number) =>

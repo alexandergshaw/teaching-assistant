@@ -91,7 +91,7 @@ export async function evaluateRepoGrade(
   const digest = sourceCommit
     ? await ingestRepo(parsed.owner, parsed.repo, {
       pathPrefix, sourceCommit, ...(signal && { signal }),
-      ...(automaticGrader && { readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
+      ...(automaticGrader && { treeCacheAccountId: automaticGrader.accountId, readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
     })
     : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, targetBranch);
   if (sourceCommit && digest.truncated) {

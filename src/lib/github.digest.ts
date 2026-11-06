@@ -290,7 +290,7 @@ export async function ingestRepo(
   repo: string,
   opts: {
     maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number;
-    pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal;
+    pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
   ref?: string
@@ -308,7 +308,7 @@ export async function ingestRepo(
   const readRef = sourceCommit ?? (ref || info.defaultBranch);
   const treeResult = sourceCommit !== undefined
     ? await getRepoCommitTree(owner, repo, sourceCommit, opts.readPinnedFiles
-      ? { signal, cache: "no-store", redirect: "error" }
+      ? { signal, cache: "no-store", redirect: "error", treeCacheAccountId: opts.treeCacheAccountId }
       : signal && { signal })
     : await getRepoTreeWithMeta(owner, repo, readRef);
   const { entries: tree, truncated: treeTruncated } = treeResult;

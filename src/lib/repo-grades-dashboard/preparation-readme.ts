@@ -3,10 +3,10 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
+import { rememberVerifiedGithubTree, reuseVerifiedGithubTree, verifyGithubTree } from "@/lib/github-verified-tree";
 
 const MAX_COMMIT_BYTES = 1_000_000;
 const MAX_TREE_BYTES = 8_000_000;
-const MAX_TREE_ENTRIES = 100_000;
 const MAX_README_BYTES = 128_000;
 const MAX_PATH_BYTES = 4_096;
 const DEADLINE_MS = 10_000;
@@ -57,9 +57,6 @@ function rememberVerifiedReadme(key: string, readme: VerifiedReadme) {
   }
 }
 
-type TreeEntry = Readonly<{ path: string; mode: "040000" | "160000"; sha: string }>
-  | Readonly<{ path: string; mode: "100644" | "100755" | "120000"; sha: string; size: number }>;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -85,51 +82,6 @@ function isPinnedTarget({ owner, repo, sourceRef, sourceCommit }: PinnedTarget):
 
 function gitObjectSha(type: "tree" | "blob", bytes: Buffer): string {
   return createHash("sha1").update(`${type} ${bytes.byteLength}\0`).update(bytes).digest("hex");
-}
-
-function treeEntry(raw: unknown): TreeEntry {
-  if (!isRecord(raw) || !isExactPath(raw.path) || !isSha(raw.sha)) throw new Error("Invalid tree entry");
-  const { path, mode, sha, size, type } = raw;
-  if ((type === "tree" && mode === "040000") || (type === "commit" && mode === "160000")) {
-    if (size === undefined) return { path, mode, sha };
-  } else if (type === "blob" && (mode === "100644" || mode === "100755" || mode === "120000")
-    && typeof size === "number" && Number.isSafeInteger(size) && size >= 0) {
-    return { path, mode, sha, size };
-  }
-  throw new Error("Invalid tree entry mode or size");
-}
-
-function verifyTree(raw: unknown, rootSha: string): Map<string, TreeEntry> {
-  if (!isRecord(raw) || raw.sha !== rootSha || raw.truncated !== false
-    || !Array.isArray(raw.tree) || raw.tree.length > MAX_TREE_ENTRIES) throw new Error("Incomplete tree response");
-
-  const entries = new Map<string, TreeEntry>();
-  const children = new Map<string, { order: Buffer; bytes: Buffer }[]>([["", []]]);
-  for (const row of raw.tree) {
-    const entry = treeEntry(row);
-    if (entries.has(entry.path)) throw new Error("Duplicate tree path");
-    entries.set(entry.path, entry);
-    if (entry.mode === "040000") children.set(entry.path, []);
-  }
-  for (const { path, mode, sha } of entries.values()) {
-    const slash = path.lastIndexOf("/");
-    const parent = children.get(slash === -1 ? "" : path.slice(0, slash));
-    if (!parent) throw new Error("Missing parent tree");
-    const name = path.slice(slash + 1);
-    // Git sorts tree names as if they ended in a slash and serializes mode 040000 as 40000.
-    const directory = mode === "040000";
-    parent.push({
-      order: Buffer.from(directory ? `${name}/` : name),
-      bytes: Buffer.concat([Buffer.from(`${directory ? "40000" : mode} ${name}\0`), Buffer.from(sha, "hex")]),
-    });
-  }
-  for (const [path, rows] of children) {
-    const bytes = Buffer.concat(rows.sort((left, right) => left.order.compare(right.order)).map((row) => row.bytes));
-    if (gitObjectSha("tree", bytes) !== (path === "" ? rootSha : entries.get(path)?.sha)) {
-      throw new Error("Tree object hash mismatch");
-    }
-  }
-  return entries;
 }
 
 async function readBody(response: Response, limit: number, signal: AbortSignal): Promise<Buffer> {
@@ -210,8 +162,14 @@ export async function readPinnedRepoGradeReadme(
       return { ...readme, target };
     }
 
-    const tree: unknown = JSON.parse(utf8.decode(await get(`/trees/${rootSha}?recursive=1`, MAX_TREE_BYTES)));
-    const entries = verifyTree(tree, rootSha);
+    const treeScope = accountId ? { accountId, owner, repo, rootSha,
+      credential: createHash("sha256").update(`Bearer ${token}`).digest("hex") } : undefined;
+    let entries = treeScope && reuseVerifiedGithubTree(treeScope);
+    if (!entries) {
+      const tree: unknown = JSON.parse(utf8.decode(await get(`/trees/${rootSha}?recursive=1`, MAX_TREE_BYTES)));
+      requestSignal.throwIfAborted();
+      entries = treeScope ? rememberVerifiedGithubTree(treeScope, tree) : verifyGithubTree(tree, rootSha);
+    }
     for (let scope = folder; scope !== ""; scope = scope.slice(0, Math.max(0, scope.lastIndexOf("/")))) {
       const scopedEntry = entries.get(scope);
       if (scopedEntry && scopedEntry.mode !== "040000") return { status: "failure" };

@@ -611,6 +611,12 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      repo_grade_preparation_policies: {
+        Row: { user_id: string; course_id: string; folder: string; course_kind: string; prompt_parser_version: string };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       workflow_run_steps: {
         Row: Expand<WorkflowRunStepsRow>;
         Insert: Expand<WorkflowRunStepsInsert>;

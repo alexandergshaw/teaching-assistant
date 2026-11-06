@@ -2,7 +2,7 @@ import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/server";
 import type { RepoGradeAttemptReceiptRow } from "@/lib/supabase/types.repo-grades-dashboard";
-import { repoGradeStartupKey, type RepoGradeHistoryObservation, type RepoGradeStartupTarget } from "./scheduler";
+import { repoGradeStartupKey, type RepoGradeLedgerObservation, type RepoGradeStartupTarget } from "./scheduler";
 
 const MAX_RECEIPTS = 1_000;
 const RECEIPT_COLUMNS = "generation, user_id, course_id, repo, folder, source_ref, source_sha, mode, status, claimed_at";
@@ -13,7 +13,7 @@ const RECEIPT_STATUSES = new Set<RepoGradeAttemptReceiptRow["status"]>([
 // only the ledger can change the persisted status or release a reservation.
 const CLAIM_AGE_LIMIT_MS = 15 * 60 * 1_000;
 
-const OBSERVATION_PRIORITY: Record<RepoGradeHistoryObservation, number> = {
+const OBSERVATION_PRIORITY: Record<RepoGradeLedgerObservation, number> = {
   "never-attempted": 0,
   failed: 1,
   partial: 1,
@@ -33,8 +33,8 @@ function commitKey({ accountId, courseId, repo, sha, folder }: Omit<RepoGradeSta
  * targets are server-discovered. Null means coverage was not established. */
 export async function readRepoGradeStartupHistory(
   ownerId: string, courseId: string, targets: readonly RepoGradeStartupTarget[],
-): Promise<ReadonlyMap<string, RepoGradeHistoryObservation> | null> {
-  const observationsByCommit = new Map<string, RepoGradeHistoryObservation>();
+): Promise<ReadonlyMap<string, RepoGradeLedgerObservation> | null> {
+  const observationsByCommit = new Map<string, RepoGradeLedgerObservation>();
   for (const target of targets) {
     if (target.accountId !== ownerId || target.courseId !== courseId) return null;
     observationsByCommit.set(commitKey(target), "never-attempted");

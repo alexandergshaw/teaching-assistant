@@ -14,6 +14,7 @@ import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 import { truncateSubmission } from "@/lib/grade/utils";
 import type { ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
 import { getRepoGraderIdentity, type RepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
+import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
 
 // The not-merged note (null for every other status) that withBranchNote folds
@@ -64,7 +65,10 @@ export type RepoGradeResponse =
     }
   | { error: string; partial?: true; sourceCommit?: string; reason?: "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated" | "unsupported-submission" };
 
-type RepoGradeExecution = ManualRepoGradeExecution & { automaticGrader?: RepoGraderIdentity };
+type RepoGradeExecution = ManualRepoGradeExecution & {
+  automaticGrader?: RepoGraderIdentity;
+  preparedReadme?: PreparedRepoGradeReadme;
+};
 
 /** Evaluate a validated repository reference after the caller handles authorization and admission. */
 export async function evaluateRepoGrade(
@@ -119,6 +123,11 @@ export async function evaluateRepoGrade(
 
   if (automaticGrader) {
     signal?.throwIfAborted();
+    const prepared = execution.preparedReadme;
+    if (prepared && (prepared.path !== (readmePath ?? null) || prepared.instructions !== effectiveInstructions)) {
+      execution.markKnownFailure();
+      return { error: "Pinned repository instructions do not match the prepared rubric inputs." };
+    }
     const actual = getRepoGraderIdentity(automaticGrader.provider);
     if (provider !== actual.provider || actual.model !== automaticGrader.model || actual.graderVersion !== automaticGrader.graderVersion) {
       execution.markKnownFailure();
@@ -290,7 +299,7 @@ export async function evaluateRepoGrade(
     // this branch never did, so repo grading on the embedded engine has
     // never run or scored a student's code, silently, regardless of what
     // the LLM path does. Code execution is opt-in for the embedded engine.
-    if (runCode) await attachCodeRuns(entries);
+    if (runCode) await attachCodeRuns(entries, modelExecution?.beforeDispatch);
     const run = withBranchNote(gradeEntriesEmbedded(entries, builtRubric), branchNote);
     return { run, rubric: automaticGrader ? rubric : renderRubricText(builtRubric), fullName: digest.fullName, ...provenance, digestTruncated, readmePath, readmeMissing, branchMergeCheck: mergedCheck };
   }

@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import {
-  claimRepoGrade, listOrphanedRepoGradeReservations, readRepoGradeHistory, reconcileEndedRepoGrade, settleRepoGrade,
+  beginRepoGradeDispatch, claimRepoGrade, listOrphanedRepoGradeReservations, readRepoGradeHistory, reconcileEndedRepoGrade, settleRepoGrade,
 } from "./ledger";
 
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
@@ -46,7 +46,7 @@ describe("repository grading ledger RPC boundary", () => {
     await expect(claimRepoGrade(automaticRequest)).resolves.toEqual({
       status: "claimed", claim: { mode: "automatic", generation: 42, token },
     });
-    expect(rpc).toHaveBeenCalledWith("repo_grade_claim", {
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_tracked", {
       p_user_id: "owner", p_course_id: "course", p_repo: "org/repo", p_folder: "",
       p_mode: "automatic", p_source_ref: "main", p_source_sha: automaticRequest.sha,
       p_course_config: automaticRequest.courseConfig, p_cohort_id: token, p_receipt: automaticRequest.cohort.receipt,
@@ -82,9 +82,19 @@ describe("repository grading ledger RPC boundary", () => {
   it("uses the shared claim RPC for manual grading without assigning a fabricated course", async () => {
     rpc.mockResolvedValue({ data: { status: "busy" }, error: null });
     await expect(claimRepoGrade({ mode: "manual", repo: "org/repo" })).resolves.toEqual({ status: "busy" });
-    expect(rpc).toHaveBeenCalledWith("repo_grade_claim", expect.objectContaining({
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_tracked", expect.objectContaining({
       p_user_id: "owner", p_course_id: null, p_folder: null, p_mode: "manual", p_cohort_id: null, p_receipt: null,
     }));
+  });
+
+  it("begins dispatch only with the authenticated claim binding and a valid remaining lease", async () => {
+    const claim = { mode: "manual", generation: 42, token } as const;
+    rpc.mockResolvedValueOnce({ data: 120_000, error: null }).mockResolvedValueOnce({ data: true, error: null });
+    await expect(beginRepoGradeDispatch(claim)).resolves.toBe(120_000);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("repo_grade_begin_dispatch", {
+      p_user_id: "owner", p_generation: 42, p_token: token,
+    });
+    await expect(beginRepoGradeDispatch(claim)).rejects.toThrow("Invalid repository grading dispatch response");
   });
 
   it("never requests a claim for an unauthorized caller", async () => {

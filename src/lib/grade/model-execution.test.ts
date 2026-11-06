@@ -18,6 +18,18 @@ describe("opt-in grading model execution", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves legacy rubric fallback and empty output handling", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ candidates: [{ content: { parts: [{ text: "  Legacy rubric prose.  " }] } }] }))
+      .mockResolvedValueOnce(Response.json({ promptFeedback: { blockReason: "SAFETY" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(generateRubric("Grade for correctness.")).resolves.toBe("Legacy rubric prose.");
+    await expect(generateRubric("Grade for correctness.")).rejects.toThrow("Gemini returned an empty rubric.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   describe.each([
     ["rubric generation", (deadlineMs: number) =>
       generateRubric("Grade for correctness.", "gemini", "coding", { deadlineMs })],

@@ -104,4 +104,19 @@ describe("callLlm with an execution policy", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("awaits durable authorization and skips dispatch when that response is lost", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const authorization = Promise.withResolvers<void>();
+    const pending = callLlm(request, "gemini", {
+      deadlineMs: Date.now() + 10_000,
+      beforeDispatch: () => authorization.promise,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    authorization.reject(new Error("Lost authorization reply"));
+    await expect(pending).rejects.toThrow("Lost authorization reply");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

@@ -5,9 +5,13 @@ import {
   startRepoGradesStartup,
   type RepoGradesStartupAdapter,
 } from "./startup-coordinator";
-import type { RepoGradesStartupProgress } from "./startup-progress";
+import type { RepoGradesStartupPreparation, RepoGradesStartupProgress } from "./startup-progress";
 
-type StartupView = Readonly<{ progress: RepoGradesStartupProgress; stop?: () => void }>;
+type StartupView = Readonly<{
+  progress: RepoGradesStartupProgress;
+  stop?: () => void;
+  retryPreparation?: (preparation: RepoGradesStartupPreparation) => Promise<void>;
+}>;
 
 export function useRepoGradesStartup(accountId: string | null, adapter: RepoGradesStartupAdapter): StartupView {
   const session = useMemo(() => ({ accountId, adapter }), [accountId, adapter]);
@@ -18,7 +22,7 @@ export function useRepoGradesStartup(accountId: string | null, adapter: RepoGrad
     if (!accountId || adapter.status === "disabled") return;
     const scope = { accountId, generation: crypto.randomUUID() };
     const run = startRepoGradesStartup(scope, adapter, (progress) => {
-      setCurrent({ session, progress, stop: run.stop });
+      setCurrent({ session, progress, stop: run.stop, retryPreparation: run.retryPreparation });
     });
     return run.dispose;
   }, [session]);

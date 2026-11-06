@@ -23,7 +23,7 @@ export type RepoGradeSourceRow =
 export type RepoGradeDiscovery =
   | { status: "not-configured" }
   | { status: "blocked"; reason: DiscoveryFailure | "branch-aware-discovery-disabled" }
-  | { status: "scanned"; enumerationComplete: boolean; repos: RepoGradeSourceRow[] };
+  | { status: "scanned"; enumerationComplete: boolean; repos: RepoGradeSourceRow[]; defaultSourceRefs?: Record<string, string> };
 
 function classifyFailure(error: unknown): DiscoveryFailure {
   return error instanceof DiscoveryTransportError ? error.reason : "unavailable";
@@ -149,7 +149,7 @@ export async function discoverRepoGradeSources(scope: {
     if (listing.repos.length * (configuredRefs.size + 1) > MAX_DISCOVERY_SOURCE_ROWS) {
       return { status: "blocked", reason: "source-set-too-large" };
     }
-    const repos = await mapWithConcurrency(listing.repos, DEFAULT_TREE_SCAN_CONCURRENCY, async (item): Promise<RepoGradeSourceRow[]> => {
+    const scans = await mapWithConcurrency(listing.repos, DEFAULT_TREE_SCAN_CONCURRENCY, async (item) => {
       const fallback = normalizeTargetBranch(override.branch || item.defaultBranch);
       const fallbackRef = fallback.ok ? fallback.branch : "";
       const rows: RepoGradeSourceRow[] = [];
@@ -158,9 +158,14 @@ export async function discoverRepoGradeSources(scope: {
       for (const ref of new Set([fallbackRef, ...configuredRefs])) {
         rows.push(await readSource(item, ref, (folder) => (scope.folderSources?.get(folder) ?? fallbackRef) === ref, request));
       }
-      return rows;
+      return { repo: item.fullName.toLowerCase(), fallbackRef, rows };
     });
-    return { status: "scanned", enumerationComplete: listing.complete, repos: repos.flat() };
+    return {
+      status: "scanned", enumerationComplete: listing.complete, repos: scans.flatMap(({ rows }) => rows),
+      ...(configuredRefs.size > 0 && {
+        defaultSourceRefs: Object.fromEntries(scans.map(({ repo, fallbackRef }) => [repo, fallbackRef])),
+      }),
+    };
   } catch (error) {
     return { status: "blocked", reason: classifyFailure(error) };
   } finally {

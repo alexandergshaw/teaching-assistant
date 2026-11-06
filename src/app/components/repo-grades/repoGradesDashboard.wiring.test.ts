@@ -64,6 +64,10 @@ describe("class repository results wiring", () => {
     expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");
   });
 
+  it("exposes per-course profile settings to the owner independently of scan success", () => {
+    expect(dashboard).toContain("{user && isOwnerDecision(accessDecision) && <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />}");
+  });
+
   it("declares table headers and a concise status independent of the scrollable rows", () => {
     expect(dashboard).toContain('<th scope="col">Folder</th>');
     expect(dashboard).toContain('<th scope="row">{repo}</th>');

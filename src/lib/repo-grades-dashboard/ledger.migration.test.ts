@@ -10,6 +10,15 @@ const binding = readFileSync(new URL(
 const fidelity = readFileSync(new URL(
   "../../../supabase/migrations/20261105180704_repo_grade_feedback_fidelity.sql", import.meta.url,
 ), "utf8");
+const crossRef = readFileSync(new URL(
+  "../../../supabase/migrations/20261106034919_repo_grade_claim_cross_ref.sql", import.meta.url,
+), "utf8");
+const dispatchBoundary = readFileSync(new URL(
+  "../../../supabase/migrations/20261106035612_repo_grade_dispatch_boundary.sql", import.meta.url,
+), "utf8");
+const startup = readFileSync(new URL(
+  "../../../supabase/migrations/20261106051231_repo_grade_startup_batch.sql", import.meta.url,
+), "utf8");
 const ledger = readFileSync(new URL("./ledger.ts", import.meta.url), "utf8");
 
 describe("repository grading ledger SQL draft", () => {
@@ -75,5 +84,49 @@ describe("repository grading cohort binding migration structure", () => {
     expect(recovery).toContain("join public.repo_grade_rubric_receipts r using (course_id, user_id, folder, cohort_id, configuration_fingerprint)");
     expect(recovery).toMatch(/a\.generation = p_generation and a\.user_id = p_user_id and a\.course_id = p_course_id\s+and a\.folder = p_folder/);
     expect(recovery).not.toContain("repo_grade_current_profiles");
+  });
+});
+
+describe("repository grading cross-ref claim migration structure", () => {
+  it("replaces the existing claim and widens only the two locked automatic history lookups", () => {
+    const previousClaim = binding.replaceAll("\r\n", "\n")
+      .match(/^create function public\.repo_grade_claim\([\s\S]*?^\$\$;/m)?.[0];
+    const refPredicate = "a.source_ref = p_source_ref and ";
+    expect(previousClaim?.split(refPredicate)).toHaveLength(3);
+    expect(crossRef.replaceAll("\r\n", "\n").replace(/^--[^\n]*\n/gm, "").trim())
+      .toBe(previousClaim
+        ?.replace("create function", "create or replace function")
+        .replaceAll(refPredicate, ""));
+  });
+});
+
+describe("repository grading tracked dispatch migration structure", () => {
+  const [claim, begin] = dispatchBoundary.split("create function public.repo_grade_begin_dispatch(");
+
+  it("marks new claims in the existing account lock and releases only expired prepared reservations", () => {
+    expect(claim).toMatch(/add column dispatch_state text\s+check \(dispatch_state in \('prepared', 'started'\)\)/);
+    expect(claim).not.toContain("default 'prepared'");
+    expect(claim).toMatch(/pg_advisory_xact_lock[\s\S]*a\.dispatch_state = 'prepared'[\s\S]*a\.claimed_at <= clock_timestamp\(\) - interval '15 minutes'[\s\S]*delete from public\.repo_grade_reservations r using expired e[\s\S]*response := public\.repo_grade_claim\([\s\S]*set dispatch_state = 'prepared'/);
+    expect(ledger).toContain('ledgerRpc("repo_grade_claim_tracked"');
+  });
+
+  it("binds the dispatch marker to an unexpired reserved claim and keeps both RPCs service-only", () => {
+    expect(begin).toMatch(/pg_advisory_xact_lock[\s\S]*join public\.repo_grade_reservations r using \(generation, user_id\)[\s\S]*a\.claim_token = p_token[\s\S]*a\.dispatch_state = 'prepared'[\s\S]*for share[\s\S]*remaining_ms <= 0 then return null[\s\S]*set dispatch_state = 'started'/);
+    expect(dispatchBoundary).toMatch(/revoke all on function public\.repo_grade_claim_tracked\([^)]+\),\s+public\.repo_grade_begin_dispatch\(uuid, bigint, uuid\) from public, anon, authenticated/);
+    expect(dispatchBoundary).toMatch(/grant execute on function public\.repo_grade_claim_tracked\([^)]+\),\s+public\.repo_grade_begin_dispatch\(uuid, bigint, uuid\) to service_role/);
+  });
+});
+
+describe("repository grading startup batch migration structure", () => {
+  it("checks the owner and the same start fence under the account lock when staging and sealing", () => {
+    const stage = startup.split("create function public.repo_grade_stage_startup(")[1]?.split("$$;")[0];
+    const seal = startup.split("create function public.repo_grade_seal_startup(")[1]?.split("$$;")[0];
+    expect(stage).toMatch(/pg_advisory_xact_lock[\s\S]*course_hub where id = p_course_id and user_id = p_user_id[\s\S]*t\.started_at is not null or \(b\.closed_at is null and b\.expires_at > now_at\)[\s\S]*where captured is null/);
+    expect(seal).toMatch(/pg_advisory_xact_lock[\s\S]*where t\.user_id = p_user_id and t\.batch_id = p_batch_id[\s\S]*prior\.started_at is not null or \(b\.closed_at is null and b\.expires_at > now_at\)[\s\S]*set sealed_at/);
+  });
+
+  it("prevents a previous opening from starting its target after close or expiry", () => {
+    const start = startup.split("create function public.repo_grade_start_startup_target(")[1]?.split("$$;")[0];
+    expect(start).toMatch(/pg_advisory_xact_lock[\s\S]*b\.user_id = p_user_id and b\.id = p_batch_id and b\.sealed_at is not null\s+and b\.closed_at is null and b\.expires_at > clock_timestamp\(\)[\s\S]*and t\.started_at is null/);
   });
 });

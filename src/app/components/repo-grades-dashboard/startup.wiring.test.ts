@@ -13,7 +13,8 @@ describe("Repo Grades startup wiring", () => {
     expect(home).toMatch(/<RepoGradesStartupStatus \/>\s*<RepoGradesTab \/>/);
     expect(home).toMatch(/<\/main>\s*<\/RepoGradesStartup>/);
     const component = source("./RepoGradesStartup.tsx");
-    expect(component).toContain("const startupAdapter = disabledRepoGradesStartupAdapter");
+    expect(component).toContain("const startupEnabled = false");
+    expect(component).toContain("startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter");
     expect(component).toContain("useRepoGradesStartup(loading ? null : user?.id ?? null, startupAdapter)");
   });
 
@@ -40,5 +41,16 @@ describe("Repo Grades startup wiring", () => {
     expect(component).toContain('<button type="button" aria-disabled={!canStop} aria-describedby={stopHintId}');
     expect(component).toContain("if (canStop) startup.stop?.()");
     expect(component).toContain('<th scope="row">{course.label}</th>');
+    expect(component).toContain("Copy it before reloading or signing out.");
+    expect(component).toContain("value={JSON.stringify(entry, null, 2)}");
+  });
+
+  it("wires an explicit retry button to the current startup lifecycle", () => {
+    const component = source("./RepoGradesStartup.tsx");
+    expect(component).toContain("A retry may use a model call to prepare the rubric. Repository grading remains separate.");
+    expect(component).toContain('<p role="status">{PREPARATION_TEXT[status]}</p>');
+    expect(component).toMatch(/\(canRetry \|\| status === "retrying"\) && \(\s*<button type="button"/);
+    expect(component).toMatch(/onClick=\{\(\) => \{ if \(enabled\) void startup\.retryPreparation\?\.\(preparation\); \}\}/);
+    expect(source("./useRepoGradesStartup.ts")).toContain("retryPreparation: run.retryPreparation");
   });
 });

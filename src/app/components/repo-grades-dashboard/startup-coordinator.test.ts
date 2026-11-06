@@ -10,6 +10,7 @@ import type { RepoGradesStartupProgress } from "./startup-progress";
 
 type ConfiguredAdapter = Extract<RepoGradesStartupAdapter, { status: "configured" }>;
 type Runtime = NonNullable<Awaited<ReturnType<ConfiguredAdapter["openReadyRuntime"]>>>;
+type Evaluation = Awaited<ReturnType<Runtime["runTarget"]>>;
 
 const scope = { accountId: "a", generation: "first" };
 const owned = (courseId: string, organization = "org", accountId = "a") => ({ accountId, courseId, organization });
@@ -34,7 +35,7 @@ function setup(courses = [owned("one")], accountId = "a") {
   const loadDurableHistory = vi.fn<Runtime["loadDurableHistory"]>(async (targets) =>
     new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])),
   );
-  const runTarget = vi.fn<Runtime["runTarget"]>().mockResolvedValue("succeeded");
+  const runTarget = vi.fn<Runtime["runTarget"]>().mockResolvedValue({ status: "succeeded" });
   const openReadyRuntime = vi.fn<ConfiguredAdapter["openReadyRuntime"]>().mockResolvedValue({
     accountId, loadOwnedCourses, discoverCourse, loadDurableHistory, runTarget,
   });
@@ -60,9 +61,9 @@ describe("Repo Grades app startup coordinator", () => {
     const fake = setup();
     fake.discoverCourse.mockResolvedValue(scanned("one", ["a", "b", "c"]));
     fake.runTarget
-      .mockResolvedValueOnce("terminal")
-      .mockResolvedValueOnce("succeeded")
-      .mockResolvedValueOnce("no-submission");
+      .mockResolvedValueOnce({ status: "terminal" })
+      .mockResolvedValueOnce({ status: "succeeded" })
+      .mockResolvedValueOnce({ status: "no-submission" });
     const observer = vi.fn<(progress: RepoGradesStartupProgress) => void>();
     await startRepoGradesStartup(scope, fake.adapter, observer).done;
     expect(observer.mock.lastCall?.[0].courses[0].states).toEqual([
@@ -75,7 +76,7 @@ describe("Repo Grades app startup coordinator", () => {
   it("reports per-class discovery, pending work, and running settlements after stop", async () => {
     const fake = setup([owned("one"), owned("mapping-only", "")]);
     fake.discoverCourse.mockResolvedValue(scanned("one", ["a", "b", "c", "d"]));
-    const outcome = deferred<"partial">();
+    const outcome = deferred<Evaluation>();
     fake.runTarget.mockReturnValue(outcome.promise);
     const updates: RepoGradesStartupProgress[] = [];
     const run = startRepoGradesStartup(scope, fake.adapter, (progress) => updates.push(progress));
@@ -88,17 +89,30 @@ describe("Repo Grades app startup coordinator", () => {
     run.stop();
     expect(updates.at(-1)?.phase).toBe("stopped");
     expect(states()).toEqual([{ state: "running", count: 3 }, { state: "stopped", count: 1 }]);
-    outcome.resolve("partial");
+    const evaluation: Evaluation = {
+      status: "partial",
+      feedbackRetention: "overall",
+      unretainedResult: {
+        score: 75, feedback: "Private feedback",
+        sections: { strengths: "S", improvements: "I", resubmitNotice: "R", rawScore: "3/4" },
+        rubric: [{ area: "A", score: "3/4", comment: "C" }],
+      },
+    };
+    outcome.resolve(evaluation);
     await run.done;
     expect(states()).toEqual([{ state: "partial", count: 3 }, { state: "stopped", count: 1 }]);
     expect(updates.at(-1)?.courses[1].states).toEqual([{ state: "not-configured", count: 0 }]);
+    expect(updates.at(-1)?.recoverableResults).toEqual(fake.runTarget.mock.calls.map(([{ target }]) => ({
+      ...evaluation, target,
+    })));
+    expect(JSON.stringify(readSessionDiagnosticLogState().entries)).not.toContain("Private feedback");
     expect(fake.runTarget).toHaveBeenCalledTimes(3);
   });
 
   it("fences a disposed generation's notifications and diagnostics while preserving its settlement", async () => {
     resetSessionDiagnosticLogForTests(new Date().toISOString());
     const fake = setup();
-    const outcome = deferred<"succeeded">();
+    const outcome = deferred<Evaluation>();
     fake.runTarget.mockReturnValue(outcome.promise);
     const observer = vi.fn();
     const run = startRepoGradesStartup(scope, fake.adapter, observer);
@@ -106,7 +120,7 @@ describe("Repo Grades app startup coordinator", () => {
     run.dispose();
     observer.mockClear();
     const before = readSessionDiagnosticLogState();
-    outcome.resolve("succeeded");
+    outcome.resolve({ status: "succeeded" });
     await run.done;
     expect(observer).not.toHaveBeenCalled();
     expect(readSessionDiagnosticLogState()).toEqual(before);
@@ -133,6 +147,7 @@ describe("Repo Grades app startup coordinator", () => {
     expect(JSON.stringify(entries)).not.toMatch(/private-|secret-|assignment|org\//);
     expect(observer.mock.lastCall?.[0].courses.map((course: RepoGradesStartupProgress["courses"][number]) => course.states[0].state))
       .toEqual(["blocked", "unknown"]);
+    expect(observer.mock.lastCall?.[0].phase).toBe("incomplete");
   });
 
   it("starts no server work with the disabled default, missing readiness or the wrong owner", async () => {
@@ -198,12 +213,12 @@ describe("Repo Grades app startup coordinator", () => {
   it("reserves distinct requests up to capacity and advances after simultaneous settlements", async () => {
     const fake = setup();
     fake.discoverCourse.mockResolvedValue(scanned("one", ["a", "b", "c", "d", "e"]));
-    const gate = deferred<"succeeded">();
+    const gate = deferred<Evaluation>();
     fake.runTarget.mockReturnValue(gate.promise);
     const run = startRepoGradesStartup(scope, fake.adapter);
     await vi.waitFor(() => expect(fake.runTarget).toHaveBeenCalledTimes(3));
     expect(fake.runTarget.mock.calls.map(([r]) => r.target.folder)).toEqual(["a", "b", "c"]);
-    gate.resolve("succeeded");
+    gate.resolve({ status: "succeeded" });
     await run.done;
     expect(fake.runTarget.mock.calls.map(([r]) => r.target.folder)).toEqual(["a", "b", "c", "d", "e"]);
   });
@@ -211,7 +226,7 @@ describe("Repo Grades app startup coordinator", () => {
   it("stops new dispatch on teardown and retains a late outcome only on its original generation", async () => {
     const original = setup();
     original.discoverCourse.mockResolvedValue(scanned("one", ["a", "b", "c", "d"]));
-    const late = deferred<"partial">();
+    const late = deferred<Evaluation>();
     original.runTarget.mockReturnValue(late.promise);
     const first = startRepoGradesStartup(scope, original.adapter);
     await vi.waitFor(() => expect(original.runTarget).toHaveBeenCalledTimes(3));
@@ -228,7 +243,7 @@ describe("Repo Grades app startup coordinator", () => {
     const thirdScope = { ...scope, generation: "third" };
     const third = startRepoGradesStartup(thirdScope, returning.adapter);
     await third.done;
-    late.resolve("partial");
+    late.resolve({ status: "partial" });
     await first.done;
 
     expect(original.runTarget.mock.calls.map(([r]) => r.scope)).toEqual([scope, scope, scope]);

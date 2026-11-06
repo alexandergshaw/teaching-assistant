@@ -95,6 +95,7 @@ describe("discoverRepoGradeSources", () => {
     vi.stubGlobal("fetch", fetcher);
 
     expect(await discoverRepoGradeSources({ organization: "classroom", folderSources })).toEqual({
+      defaultSourceRefs: { "classroom/lab": "default-source", "classroom/other": alternateRef },
       status: "scanned", enumerationComplete: true, repos: [
         { status: "ready", repo: "classroom/lab", sourceRef: "default-source", sourceCommit: sha, folders: ["still-default"] },
         { status: "ready", repo: "classroom/lab", sourceRef: alternateRef, sourceCommit: alternateSha, folders: ["only-alternate", "shared"] },
@@ -135,6 +136,7 @@ describe("discoverRepoGradeSources", () => {
     vi.stubGlobal("fetch", fetcher);
 
     expect(await discoverRepoGradeSources({ organization: "classroom", folderSources })).toEqual({
+      defaultSourceRefs: { "classroom/lab": "default-source" },
       status: "scanned", enumerationComplete: true, repos: [
         { status: "ready", repo: "classroom/lab", sourceRef: "default-source", sourceCommit: sha, folders: ["unrelated"] },
         { status: "blocked", repo: "classroom/lab", sourceRef: failedRef, reason: "unavailable" },
@@ -355,6 +357,7 @@ describe("discoverRepoGradeSources", () => {
       await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
       controller.abort();
       await expect(pending).resolves.toEqual({
+        defaultSourceRefs: { "classroom/lab": "default-source" },
         status: "scanned", enumerationComplete: true, repos: [
           { status: "blocked", repo: "classroom/lab", sourceRef: "default-source", reason: "deadline-exceeded" },
           { status: "blocked", repo: "classroom/lab", sourceRef: "alt", reason: "deadline-exceeded" },

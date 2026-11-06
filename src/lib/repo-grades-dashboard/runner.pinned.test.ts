@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { collectInlineVisualParts } from "@/lib/grade/inline-visuals";
 import { repoGradeAdmissionMode } from "./admission-mode";
-import { claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
 vi.mock("@/lib/grade/inline-visuals", () => ({ collectInlineVisualParts: vi.fn() }));
-vi.mock("./ledger", () => ({ claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 
 const model = "gemini-test-version";
@@ -37,14 +37,14 @@ const claim = { mode: "automatic" as const, generation: 7, token: "server-owned-
 const grader = { provider: "gemini", model, graderVersion: "repo-grader-v1" };
 const frozenRubric = "Correctness (100%):  Evaluate the printed value.";
 
-function preparedRuntime(settings = {}, graderIdentity = grader) {
+function preparedRuntime(settings = {}, graderIdentity = grader, preparedReadme?: { path: string | null; instructions: string }) {
   const captured = captureRepoGradeProfile(
     { accountId: plan.accountId, courseId: plan.courseId, folder: target.folder }, settings, graderIdentity,
   );
   if (captured.status !== "ready") throw new Error("Invalid fixture");
   const receipt = resolveRepoGradeRubric(captured.profile, frozenRubric);
   return { loadPreparedProfile: vi.fn(async () => ({
-    profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1",
+    profile: captured.profile, receipt, cohortId: "8d74ee61-463c-4b3f-af5d-5fc9b55023c1", preparedReadme,
   })) };
 }
 
@@ -88,6 +88,7 @@ beforeEach(() => {
   vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.mocked(requireAppOwner).mockResolvedValue({ id: plan.accountId, email: "owner@example.test" });
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+  vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
 });
 
@@ -107,6 +108,7 @@ describe("admitted pinned repository evaluator", () => {
       `${root}/contents/lab/README.md?ref=${sha}`, `${root}/contents/lab/main.py?ref=${sha}`, modelUrl,
     ]);
     expect(vi.mocked(claimRepoGrade).mock.invocationCallOrder[0]).toBeLessThan(fetcher.mock.invocationCallOrder[0]);
+    expect(vi.mocked(beginRepoGradeDispatch).mock.invocationCallOrder[0]).toBeLessThan(fetcher.mock.invocationCallOrder[4]);
     expect(fetcher.mock.calls.every(([, init]) => init.signal instanceof AbortSignal)).toBe(true);
     const modelRequest = fetcher.mock.calls.find(([url]) => url === modelUrl)?.[1];
     const prompt = JSON.parse(modelRequest?.body as string).contents[0].parts[0].text;
@@ -116,6 +118,23 @@ describe("admitted pinned repository evaluator", () => {
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, expect.objectContaining({
       outcome: "succeeded", inputsComplete: true, result: expect.objectContaining({ score: 80 }),
     }));
+  });
+
+  it("never starts model work if the dispatch marker response is lost", async () => {
+    const fetcher = fetchRepo();
+    vi.mocked(beginRepoGradeDispatch).mockRejectedValue(new Error("Lost marker response"));
+
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
+    expect(fetcher.mock.calls.map(([url]) => url)).not.toContain(modelUrl);
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
+  });
+
+  it("rejects an evaluator README that differs from the prepared cohort before model dispatch", async () => {
+    const fetcher = fetchRepo({ readme: "Different instructions." });
+    const runtime = preparedRuntime({}, grader, { path: files.readme.path, instructions: "Original instructions." });
+    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "failed" });
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "  "])("fails safely without effective instructions when the pinned README is %s", async (readme) => {

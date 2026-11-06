@@ -6,18 +6,27 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { runCases } from "./repo-grades-admission-v2-postgres-cases.mjs";
 import { runSettlementCases } from "./repo-grades-admission-v2-postgres-settlement.mjs";
+import { runCrossRefClaimCases } from "./repo-grades-claim-cross-ref-postgres.mjs";
+import { runDispatchBoundaryCases } from "./repo-grades-dispatch-boundary-postgres.mjs";
+import { runRubricPreparationCases } from "./repo-grades-rubric-preparation-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
   "20260713000000_create_course_hub.sql",
   "20260804000000_course_hub_rubric.sql",
   "20260819000000_course_hub_student_repos.sql",
+  "20260918000000_course_hub_course_kind.sql",
   "20261005000000_course_hub_repo_module_pairing.sql",
   "20261105174633_repo_grade_evaluations.sql",
   "20261105175119_repo_grade_profiles.sql",
   "20261105175836_repo_grade_attempt_profile_binding.sql",
+  "20261105180704_repo_grade_feedback_fidelity.sql",
+  "20261106034919_repo_grade_claim_cross_ref.sql",
 ];
 const draftSchema = "repo_grade_admission_private";
+const dispatchMigrationFile = "20261106035612_repo_grade_dispatch_boundary.sql";
+const preparationMigrationFile = "20261106043419_repo_grade_rubric_preparation_admission.sql";
+const preparationRetryMigrationFile = "20261106053623_repo_grade_preparation_explicit_retry.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -132,6 +141,11 @@ async function main() {
   const migrations = migrationFiles.map((file) =>
     readFileSync(new URL(`../../supabase/migrations/${file}`, import.meta.url), "utf8"),
   );
+  const dispatchMigration = readFileSync(new URL(`../../supabase/migrations/${dispatchMigrationFile}`, import.meta.url), "utf8");
+  const preparationMigration = readFileSync(new URL(`../../supabase/migrations/${preparationMigrationFile}`, import.meta.url), "utf8");
+  const preparationRetryMigration = readFileSync(
+    new URL(`../../supabase/migrations/${preparationRetryMigrationFile}`, import.meta.url), "utf8",
+  );
   const sessions = [];
   async function connect() {
     const session = openPsql(options);
@@ -159,6 +173,15 @@ async function main() {
     assert.equal(await owner.query(schemaAbsent), "t", "Draft schema survived rollback in the writing session.");
     assert.equal(await witness.query(schemaAbsent), "t", "Draft schema survived rollback in a separate session.");
     await owner.query(committed);
+    await owner.query(`begin; ${dispatchMigration} rollback;`);
+    const dispatchMigrationAbsent = `select
+      to_regprocedure('public.repo_grade_claim_tracked(uuid,uuid,text,text,text,text,text,jsonb,uuid,jsonb)') is null
+      and to_regprocedure('public.repo_grade_begin_dispatch(uuid,bigint,uuid)') is null
+      and not exists (select from pg_attribute where attrelid = 'public.repo_grade_attempts'::regclass
+        and attname = 'dispatch_state' and not attisdropped);`;
+    assert.equal(await owner.query(dispatchMigrationAbsent), "t", "Dispatch migration survived rollback in the writing session.");
+    assert.equal(await witness.query(dispatchMigrationAbsent), "t", "Dispatch migration survived rollback in a separate session.");
+    await owner.query(`begin; ${dispatchMigration} commit;`);
 
     const worker = await connect();
     const contender = await connect();
@@ -175,6 +198,20 @@ async function main() {
     }
     await runCases({ owner, worker, contender, witness, waitForBlock });
     await runSettlementCases({ owner, worker, contender, witness, waitForBlock });
+    await runCrossRefClaimCases({ owner, worker, contender, witness, waitForBlock });
+    console.log("PASS: v1 cross-ref admission, claim privileges and PostgreSQL transaction cases completed.");
+    await runDispatchBoundaryCases({ owner, worker, contender, witness, waitForBlock });
+    console.log("PASS: v1 tracked dispatch migration rollback, privileges and PostgreSQL transaction cases completed.");
+    await owner.query(`begin; ${preparationMigration} rollback;`);
+    const preparationAbsent = "select to_regclass('public.repo_grade_preparations') is null;";
+    assert.equal(await owner.query(preparationAbsent), "t", "Preparation schema survived rollback in the writing session.");
+    assert.equal(await witness.query(preparationAbsent), "t", "Preparation schema survived rollback in a separate session.");
+    await owner.query(`begin; ${preparationMigration} commit;`);
+    await owner.query(`begin; ${preparationRetryMigration} rollback;`);
+    assert.equal(await witness.query("select to_regclass('public.repo_grade_preparation_history') is null;"), "t");
+    await owner.query(`begin; ${preparationRetryMigration} commit;`);
+    await runRubricPreparationCases({ owner, worker, contender, witness, waitForBlock });
+    console.log("PASS: rubric preparation migration rollback, privileges and PostgreSQL transaction cases completed.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

@@ -1,7 +1,13 @@
 import type { RepoGradeCourseConfig, RepoGradeFeedbackField, RepoGradeResultRecord } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeRubricReceipt } from "./profile";
+import type { RepoGradeTargetEvidence } from "./preparation-input";
 
 export type RepoGradeCohort = Readonly<{ cohortId: string; receipt: RepoGradeRubricReceipt }>;
+
+export type RepoGradePreparedProvenance = Readonly<{
+  key: string;
+  context: Readonly<{ instructions: string; source: RepoGradeTargetEvidence["source"] }>;
+}>;
 
 export function validRepoGradeCohortId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
@@ -19,6 +25,8 @@ export type RepoGradeClaimRequest = {
       sourceRef: string;
       sha: string;
       cohort: RepoGradeCohort;
+      preparation?: RepoGradePreparedProvenance;
+      startupBatchId?: string;
     }
 );
 

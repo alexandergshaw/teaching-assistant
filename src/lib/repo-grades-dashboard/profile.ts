@@ -58,7 +58,7 @@ function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.isWellFormed() && !/[\s\u0000-\u001f\u007f]/.test(value);
 }
 
-function isFolder(value: unknown): value is string {
+export function isRepoGradeProfileFolder(value: unknown): value is string {
   return typeof value === "string" && value.isWellFormed() && !/[\\\u0000-\u001f\u007f]/.test(value)
     && value.split("/").every((segment) => segment.trim() !== "" && segment !== "." && segment !== "..");
 }
@@ -86,7 +86,7 @@ type ProfileCapture =
  * A null sourceRef means discovery must resolve each repository's default branch. */
 export function captureRepoGradeProfile(rawScope: unknown, rawSettings: unknown, rawGrader: unknown): ProfileCapture {
   const scope = snapshotRecord(rawScope, SCOPE_FIELDS);
-  if (!scope || !isIdentifier(scope.accountId) || !isIdentifier(scope.courseId) || !isFolder(scope.folder)) {
+  if (!scope || !isIdentifier(scope.accountId) || !isIdentifier(scope.courseId) || !isRepoGradeProfileFolder(scope.folder)) {
     return { status: "blocked", reason: "invalid-scope" };
   }
   const graderIdentity = snapshotRecord(rawGrader, GRADER_FIELDS);

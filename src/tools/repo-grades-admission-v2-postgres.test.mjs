@@ -53,3 +53,30 @@ test("CLI exits nonzero before trying psql for missing confirmation or a remote 
     assert.equal(result.stdout, "");
   }
 });
+
+test("the preparation migration uses the guarded harness and shares the grade dispatch boundary", () => {
+  const harness = readFileSync(executable, "utf8");
+  const filename = harness.match(/const preparationMigrationFile = "([^"]+\.sql)";/)?.[1];
+  assert.match(filename ?? "", /^\d{14}_repo_grade_rubric_preparation_admission\.sql$/);
+  assert.match(harness, /await owner\.query\(`begin;\s*select pg_advisory_xact_lock\([^)]+\);\s*\$\{checkFreshDatabase\(\)\}/);
+  assert.match(harness, /await owner\.query\(`begin; \$\{preparationMigration\} rollback;`\)[\s\S]*await owner\.query\(`begin; \$\{preparationMigration\} commit;`\)[\s\S]*await runRubricPreparationCases/);
+  const migration = readFileSync(new URL(`../../supabase/migrations/${filename}`, import.meta.url), "utf8");
+  const reservation = migration.match(/create table public\.repo_grade_preparation_reservations \(([^;]+)\);/)?.[1];
+  assert.match(reservation ?? "", /references auth\.users/);
+  assert.doesNotMatch(reservation ?? "", /course_id|token|references public\./);
+  assert.match(migration, /count\(\*\) from public\.repo_grade_reservations[\s\S]*count\(\*\) from public\.repo_grade_preparation_reservations/);
+  assert.match(migration, /t\.repo = p_repo and t\.source_ref = p_source_ref and t\.source_sha = p_source_sha/);
+  assert.match(migration, /prep\.state <> case when p_outcome = 'failed-before-dispatch' then 'prepared' else 'started' end/);
+  assert.match(migration, /'rubricFingerprint', public\.repo_grade_preparation_rubric_fingerprint\(p_receipt ->> 'rubric'\)/);
+});
+
+test("preparation retry archives the terminal generation before rotating its dispatch token", () => {
+  const harness = readFileSync(new URL("./repo-grades-admission-v2-postgres.mjs", import.meta.url), "utf8");
+  const filename = harness.match(/const preparationRetryMigrationFile = "([^"]+\.sql)";/)?.[1];
+  assert.match(filename ?? "", /^\d{14}_repo_grade_preparation_explicit_retry\.sql$/);
+  const migration = readFileSync(new URL(`../../supabase/migrations/${filename}`, import.meta.url), "utf8");
+  assert.match(harness, /preparationRetryMigration\} rollback;[\s\S]*preparationRetryMigration\} commit;[\s\S]*runRubricPreparationCases/);
+  assert.match(migration, /if prep\.state in \('failed', 'expired'\) then[\s\S]*if p_retry_generation is null then[\s\S]*'explicit-retry-required'/);
+  assert.match(migration, /p_retry_generation is distinct from retry_generation[\s\S]*'retry-unavailable'[\s\S]*insert into public\.repo_grade_preparation_history[\s\S]*token = gen_random_uuid\(\)[\s\S]*insert into public\.repo_grade_preparation_reservations/);
+  assert.match(migration, /grant select, insert on public\.repo_grade_preparation_history to service_role/);
+});

@@ -38,7 +38,7 @@ export type RepoGradePreparationInput = Readonly<{
   readmeEvidence: readonly ReadmeEvidence[];
 }>;
 
-type TargetEvidence = Readonly<{
+export type RepoGradeTargetEvidence = Readonly<{
   target: PinnedTarget;
   source: ReadmeSource | Readonly<{ kind: "saved" }>;
 }>;
@@ -47,14 +47,14 @@ type BlockedReason =
   | "duplicate-target" | "invalid-instruction-evidence" | "missing-instruction-evidence"
   | "duplicate-instruction-evidence" | "conflicting-instructions";
 
-type PreparationCapture =
+export type RepoGradePreparationCapture =
   | Readonly<{
     status: "ready";
     keyVersion: typeof KEY_VERSION;
     key: string;
     instructionDigest: string;
     instructions: string;
-    evidence: readonly TargetEvidence[];
+    evidence: readonly RepoGradeTargetEvidence[];
   }>
   | Readonly<{ status: "blocked"; reason: BlockedReason }>;
 
@@ -160,7 +160,7 @@ function captureReadmeEvidence(
 /** The server supplies the complete scoped inventory and evidence from reads at
  * its pinned commits. An absent or blank fallback requires a conclusive read.
  * The caller must establish read completeness and decode UTF-8 losslessly. */
-export function captureRepoGradePreparationInput(raw: unknown): PreparationCapture {
+export function captureRepoGradePreparationInput(raw: unknown): RepoGradePreparationCapture {
   if (!record(raw, ["configuration", "instructionPolicy", "inventory", "readmeEvidence"]) || !configuration(raw.configuration)) {
     return { status: "blocked", reason: "invalid-configuration" };
   }

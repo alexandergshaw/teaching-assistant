@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runManualRepoGrade, runWithRepoGradeAdmission } from "./admission";
 import { repoGradeAdmissionMode } from "./admission-mode";
-import { claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { BoundedRubricRefusalError } from "@/lib/grade/rubric";
-import { LlmOutcomeUnknownError } from "@/lib/llm";
+import { LlmOutcomeUnknownError, type LlmExecutionPolicy } from "@/lib/llm";
+import { SandboxExecutionRefusedError } from "@/lib/code-runner";
+import { ingestRepo } from "@/lib/github";
+import { evaluateRepoGrade } from "@/lib/repo-grade-evaluator";
 
-vi.mock("./ledger", () => ({ claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
+vi.mock("@/lib/github", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/github")>(),
+  ingestRepo: vi.fn(),
+}));
 
 const manual = { mode: "manual", repo: "school/repo" } as const;
 const automatic = {
@@ -30,9 +37,13 @@ const complete = () => ({ value: "grade", settlement: { outcome: "failed" } as c
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
+  vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 describe("repository grading admission", () => {
   it("keeps the actual coordinated mode unavailable even when explicitly configured", async () => {
@@ -109,11 +120,63 @@ describe("repository grading admission", () => {
     vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "claimed", claim })
       .mockResolvedValueOnce({ status: "busy" });
     vi.mocked(settleRepoGrade).mockResolvedValue(true);
-    const evaluate = vi.fn<() => Promise<ReturnType<typeof complete>>>().mockRejectedValue(new Error("Response lost"));
+    const evaluate = vi.fn(async (beforeDispatch?: LlmExecutionPolicy["beforeDispatch"]) => {
+      await beforeDispatch?.(new AbortController().signal);
+      throw new Error("Response lost");
+    });
     await expect(runWithRepoGradeAdmission(automatic, evaluate)).resolves.toEqual({ status: "unknown" });
     await expect(runWithRepoGradeAdmission(automatic, evaluate)).resolves.toEqual({ status: "busy" });
     expect(evaluate).toHaveBeenCalledTimes(1);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "unknown" });
+  });
+
+  it.each(["preparation failure", "denial", "lost marker", "expired permit"])(
+    "settles %s without authorizing dispatch", async (failure) => {
+      const claim = { mode: "automatic", token: "server", generation: 7 } as const;
+      vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+      vi.mocked(settleRepoGrade).mockResolvedValue(true);
+      if (failure === "denial") vi.mocked(beginRepoGradeDispatch).mockResolvedValue(null);
+      if (failure === "lost marker") vi.mocked(beginRepoGradeDispatch).mockRejectedValue(new Error("Lost reply"));
+      if (failure === "expired permit") {
+        vi.mocked(beginRepoGradeDispatch).mockImplementation(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return 1;
+        });
+      }
+      const dispatch = vi.fn();
+      await expect(runWithRepoGradeAdmission(automatic, async (beforeDispatch) => {
+        if (failure === "preparation failure") throw new Error("GitHub unavailable");
+        await beforeDispatch!(new AbortController().signal);
+        dispatch();
+        return complete();
+      })).resolves.toEqual({ status: "pre-dispatch-failed" });
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
+    },
+  );
+
+  it.each(["before", "during"])("stops dispatch when the signal aborts %s the marker RPC", async (timing) => {
+    const claim = { mode: "automatic", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    const marker = Promise.withResolvers<number>();
+    vi.mocked(beginRepoGradeDispatch).mockReturnValue(marker.promise);
+    const controller = new AbortController();
+    const dispatch = vi.fn();
+
+    await expect(runWithRepoGradeAdmission(automatic, async (beforeDispatch) => {
+      if (timing === "before") controller.abort();
+      const authorization = beforeDispatch!(controller.signal);
+      if (timing === "during") controller.abort();
+      await authorization;
+      dispatch();
+      return complete();
+    })).resolves.toEqual({ status: "pre-dispatch-failed" });
+
+    marker.resolve(60_000);
+    expect(beginRepoGradeDispatch).toHaveBeenCalledTimes(timing === "before" ? 0 : 1);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
   it("releases reservations after known validation and bounded refusals, and retains lost transport", async () => {
@@ -130,6 +193,7 @@ describe("repository grading admission", () => {
     })).resolves.toEqual({ error: "Refused." });
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "failed" });
     await expect(runManualRepoGrade(manual.repo, async (execution) => {
+      await execution?.modelExecution.beforeDispatch?.(new AbortController().signal);
       execution?.callSink.recordCall({ status: 429 });
       execution?.callSink.recordFailure("model quota");
       return { run: { results: [{ ungraded: { kind: "grading-failed" } }] } };
@@ -139,5 +203,53 @@ describe("repository grading admission", () => {
       throw new LlmOutcomeUnknownError();
     })).resolves.toEqual({ error: expect.stringContaining("Reconcile") });
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "unknown" });
+  });
+
+  it.each([
+    { scenario: "prompt safety block", body: { promptFeedback: { blockReason: "SAFETY" } }, outcome: "failed" },
+    { scenario: "candidate safety block", body: { candidates: [{ finishReason: "SAFETY" }] }, outcome: "failed" },
+    { scenario: "empty terminal output", body: { candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [] } }] }, outcome: "failed" },
+    { scenario: "unusable terminal rubric", body: { candidates: [{ finishReason: "STOP", content: { parts: [{ text: '{"rubric":"No criteria available."}' }] } }] }, outcome: "failed" },
+    { scenario: "absent candidates without a block", body: {}, outcome: "unknown" },
+    { scenario: "empty candidates with unspecified prompt feedback", body: { candidates: [], promptFeedback: { blockReason: "BLOCK_REASON_UNSPECIFIED" } }, outcome: "unknown" },
+    { scenario: "candidate text without finish metadata", body: { candidates: [{ content: { parts: [{ text: "Correctness (100%): Runs." }] } }] }, outcome: "unknown" },
+    { scenario: "malformed parts despite a terminal reason", body: { candidates: [{ finishReason: "STOP", content: { parts: [{}] } }] }, outcome: "unknown" },
+    { scenario: "malformed safety response", body: { promptFeedback: { blockReason: "SAFETY" }, candidates: {} }, outcome: "unknown" },
+    { scenario: "transport loss", body: undefined, outcome: "unknown" },
+  ])("settles actual rubric generation for $scenario as $outcome", async ({ body, outcome }) => {
+    const claim = { mode: "manual", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    vi.mocked(ingestRepo).mockResolvedValue({
+      fullName: manual.repo, description: "", fileCount: 1, text: "print(42)", truncated: false,
+      files: [{ path: "main.py", content: "print(42)", truncated: false }],
+    });
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn<typeof fetch>();
+    if (body === undefined) fetchMock.mockRejectedValue(new TypeError("Response lost"));
+    else fetchMock.mockResolvedValue(Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runManualRepoGrade(manual.repo, (execution) => evaluateRepoGrade(
+      { owner: "school", repo: "repo" }, "Grade for correctness.", "", "gemini",
+      undefined, undefined, false, false, false, "a".repeat(40), execution,
+    ));
+
+    expect(result).toEqual({ error: expect.stringContaining(outcome === "failed" ? "rubric" : "Reconcile") });
+    expect(beginRepoGradeDispatch).toHaveBeenCalledExactlyOnceWith(claim);
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.body).toEqual(expect.stringContaining("creating a grading rubric"));
+  });
+
+  it("releases a coordinated manual reservation after a conclusive sandbox refusal", async () => {
+    const claim = { mode: "manual", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    await expect(runManualRepoGrade(manual.repo, async (execution) => {
+      await execution?.modelExecution.beforeDispatch?.(new AbortController().signal);
+      throw new SandboxExecutionRefusedError();
+    })).resolves.toEqual({ error: "The sandbox declined the code execution request." });
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 });

@@ -1,4 +1,6 @@
 import "server-only";
+
+import { isDeepStrictEqual } from "node:util";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { RepoGradeClaimStatus, RepoGradeHistoryRow } from "@/lib/supabase/types.repo-grades-dashboard";
@@ -26,9 +28,10 @@ function validGeneration(generation: unknown): generation is number {
   return typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0;
 }
 
-async function ledgerRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function ledgerRpc(name: string, args: Record<string, unknown>, noRetry = false): Promise<unknown> {
   try {
-    const { data, error } = await createServiceClient().rpc(name, args);
+    const request = createServiceClient().rpc(name, args);
+    const { data, error } = await (noRetry ? request.retry(false) : request);
     if (!error) return data;
   } catch {
     // The database may have accepted the write before its response was lost.
@@ -43,12 +46,15 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   const owner = await requireAppOwner();
   const automatic = request.mode !== "manual";
   const cohort = automatic ? request.cohort : null;
+  const preparation = automatic ? request.preparation : undefined;
+  const startupBatchId = automatic ? request.startupBatchId : undefined;
   if (automatic && (!cohort || !validRepoGradeCohortId(cohort.cohortId)
     || cohort.receipt?.accountId !== owner.id || cohort.receipt.courseId !== request.courseId
     || cohort.receipt.folder !== request.folder)) {
     return { status: "configuration-changed" };
   }
-  const response = await ledgerRpc("repo_grade_claim", {
+  if (preparation && !/^[0-9a-f]{64}$/.test(preparation.key)) return { status: "configuration-changed" };
+  const args = {
     p_user_id: owner.id,
     p_course_id: request.courseId ?? null,
     p_repo: request.repo,
@@ -59,7 +65,19 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     p_course_config: automatic ? request.courseConfig : null,
     p_cohort_id: cohort?.cohortId ?? null,
     p_receipt: cohort?.receipt ?? null,
-  });
+  };
+  let response: unknown;
+  if (startupBatchId) {
+    const { p_mode: mode, ...startupArgs } = args;
+    if (mode !== "automatic" || !validRepoGradeCohortId(startupBatchId)) return { status: "forbidden" };
+    response = await ledgerRpc("repo_grade_claim_startup_target", {
+      ...startupArgs, p_batch_id: startupBatchId, p_preparation_key: preparation?.key ?? null,
+    }, true);
+  } else {
+    response = preparation
+      ? await ledgerRpc("repo_grade_claim_with_preparation", { ...args, p_preparation_key: preparation.key }, true)
+      : await ledgerRpc("repo_grade_claim_tracked", args);
+  }
   if (response && typeof response === "object" && "status" in response) {
     if (DENIED_STATUSES.has(response.status)) return { status: response.status as RepoGradeClaimStatus };
     if (
@@ -68,10 +86,27 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
       && "token" in response && typeof response.token === "string"
       && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(response.token)
     ) {
+      if (preparation && (!("preparation" in response) || !isDeepStrictEqual(response.preparation, preparation.context))) {
+        return { status: "configuration-changed" };
+      }
       return { status: "claimed", claim: { mode: request.mode, generation: response.generation, token: response.token } };
     }
   }
   throw new Error("Invalid repository grading admission response");
+}
+
+export async function beginRepoGradeDispatch(claim: RepoGradeClaim): Promise<number | null> {
+  const owner = await requireAppOwner();
+  const response = await ledgerRpc("repo_grade_begin_dispatch", {
+    p_user_id: owner.id,
+    p_generation: claim.generation,
+    p_token: claim.token,
+  });
+  if (response !== null && (typeof response !== "number" || !Number.isSafeInteger(response)
+    || response <= 0 || response > 15 * 60_000)) {
+    throw new Error("Invalid repository grading dispatch response");
+  }
+  return response;
 }
 
 export function settleRepoGrade(

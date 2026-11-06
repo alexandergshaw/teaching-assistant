@@ -4,6 +4,7 @@ import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 import { isGithubCommitSha } from "@/lib/github.repos";
 import { evaluateRepoGrade, type RepoGradeResponse } from "@/lib/repo-grade-evaluator";
 import { createGradeCallSink } from "@/lib/grade/grade-item-diagnostic";
+import type { LlmExecutionPolicy } from "@/lib/llm";
 import { parseEarnedPossibleScore } from "@/lib/grade/parsing";
 import { isUngraded } from "@/lib/grade/types";
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -16,10 +17,15 @@ import { repoGradeDiscoveryEnabled } from "./discovery-mode";
 import { repoGradeAdmissionMode, runWithRepoGradeAdmission } from "./admission";
 import { restoreRepoGradeProfile, restoreRepoGradeRubric, type RepoGradeProfile } from "./profile";
 import { readCurrentRepoGradeProfilesForOwner } from "./profile-store";
+import type { PreparedRepoGradeReadme, RepoGradePreparationFailure } from "./preparation-runtime";
+import type { RepoGradeCourseKindBasis } from "./preparation-ledger";
 import type { RepoGradeStartupTarget } from "./scheduler";
-import { unretainedRepoGradeFeedbackField, validRepoGradeCohortId, type RepoGradeAutomaticSettlement } from "./state";
+import {
+  unretainedRepoGradeFeedbackField, validRepoGradeCohortId,
+  type RepoGradeAutomaticSettlement, type RepoGradePreparedProvenance,
+} from "./state";
 
-const COURSE_COLUMNS = "github_org, repos, rubric_name, rubric_data, repo_module_pairing, student_repos";
+const COURSE_COLUMNS = "github_org, repos, rubric_name, rubric_data, repo_module_pairing, student_repos, name, course_kind";
 
 type CoursePlan = {
   accountId: string;
@@ -27,34 +33,49 @@ type CoursePlan = {
   courseConfig: RepoGradeCourseConfig;
   discovery: RepoGradeDiscovery;
   folderSources: ReadonlyMap<string, string | null>;
+  courseKindBasis?: RepoGradeCourseKindBasis;
 };
 
 /** The saved organization is the existing Repo Grades scope. Course codebases
  * and student mappings serve other callers and do not filter this inventory. */
 export async function planRepoGradeCourse(accountId: string, courseId: string): Promise<CoursePlan | null> {
-  const { data, error }: { data: RepoGradeCourseConfig | null; error: unknown } = await table().select(COURSE_COLUMNS)
+  const { data, error }: { data: (RepoGradeCourseConfig & { name: string | null; course_kind: string | null }) | null; error: unknown } = await table().select(COURSE_COLUMNS)
     .eq("user_id", accountId).eq("id", courseId).maybeSingle();
   if (error) throw new Error("Repository grading course storage is unavailable");
   if (!data) return null;
-  const organization = data.github_org?.trim();
+  const { name, course_kind, ...courseConfig } = data;
+  const courseKindBasis: RepoGradeCourseKindBasis | undefined = (name === null || typeof name === "string")
+    && (course_kind === null || typeof course_kind === "string") ? [name, course_kind] : undefined;
+  const organization = courseConfig.github_org?.trim();
   if (!organization || !repoGradeDiscoveryEnabled()) {
     const discovery: RepoGradeDiscovery = organization
       ? { status: "blocked", reason: "branch-aware-discovery-disabled" }
       : { status: "not-configured" };
-    return { accountId, courseId, courseConfig: data, discovery, folderSources: new Map() };
+    return { accountId, courseId, courseConfig, discovery, folderSources: new Map(), courseKindBasis };
   }
   const folderSources = await readCurrentRepoGradeProfilesForOwner(accountId, courseId);
   const discovery = await discoverRepoGradeSources({ organization, folderSources });
-  return { accountId, courseId, courseConfig: data, discovery, folderSources };
+  return { accountId, courseId, courseConfig, discovery, folderSources, courseKindBasis };
 }
 
-type PinnedInput = { repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean };
+type PinnedInput = {
+  repo: string; folder: string; sourceCommit: string; profile: RepoGradeProfile; rubric: string; runCode: boolean;
+  preparedReadme?: PreparedRepoGradeReadme;
+  beforeDispatch?: LlmExecutionPolicy["beforeDispatch"];
+};
 type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 
 type AutomaticRuntime = {
+  startupBatchId?: string;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;
-  }): Promise<{ profile: RepoGradeProfile; cohortId: string; receipt: unknown } | null>;
+  }): Promise<{
+    profile: RepoGradeProfile;
+    cohortId: string;
+    receipt: unknown;
+    preparedReadme?: PreparedRepoGradeReadme;
+    preparation?: RepoGradePreparedProvenance;
+  } | RepoGradePreparationFailure | null>;
   evaluatePinned?: (input: PinnedInput) => Promise<PinnedEvaluation>;
 };
 
@@ -63,7 +84,7 @@ const PINNED_EVALUATION_BUDGET_MS = 45_000;
 /** Only the admitted runner invokes the real evaluator. The injected loader
  * must supply a previously prepared cohort, including its exact receipt. */
 async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvaluation> {
-  const { repo, folder, sourceCommit, profile, rubric, runCode } = input;
+  const { repo, folder, sourceCommit, profile, rubric, runCode, beforeDispatch, preparedReadme } = input;
   const [owner, name, extra] = repo.split("/");
   // The sandbox has its own timeout and result contract. A persisted opt-in
   // requires a coordinated execution policy before automatic dispatch.
@@ -80,8 +101,9 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
       profile.useReadmeInstructions, runCode, profile.applyNamingDeduction, sourceCommit,
       {
         automaticGrader: profile,
+        preparedReadme,
         modelExecution: {
-          deadlineMs, signal,
+          deadlineMs, signal, beforeDispatch,
           ...(profile.provider === "gemini" && {
             pinnedGemini: { model: profile.model, onDispatch: () => { dispatched = true; } },
           }),
@@ -104,11 +126,17 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
 }
 
 type RunOutcome = RepoGradeAutomaticSettlement["outcome"] | RepoGradeClaimStatus
-  | "ungraded" | "runtime-unavailable" | "profile-unavailable" | "unsupported-target-branch" | "storage-unavailable";
+  | RepoGradePreparationFailure["status"]
+  | "ungraded" | "runtime-unavailable" | "unsupported-target-branch";
 
 type UnsettledEvaluation = { feedbackRetention?: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord };
 type RunResult =
-  | { status: RunOutcome; feedbackRetention?: never; unretainedResult?: never }
+  | {
+      status: RunOutcome;
+      feedbackRetention?: never;
+      unretainedResult?: never;
+      preparationRetry?: RepoGradePreparationFailure["preparationRetry"];
+    }
   | { status: "partial"; feedbackRetention: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord }
   | ({ status: "unknown" } & UnsettledEvaluation);
 
@@ -210,6 +238,7 @@ export async function runRepoGradeTarget(
     return { status: "profile-unavailable" };
   }
   if (!prepared) return { status: "profile-unavailable" };
+  if ("status" in prepared) return prepared;
   const { cohortId } = prepared;
   const profile = restoreRepoGradeProfile(prepared.profile);
   if (!profile || !validRepoGradeCohortId(cohortId) || profile.accountId !== owner.id
@@ -227,11 +256,13 @@ export async function runRepoGradeTarget(
     mode: "automatic", courseId: plan.courseId, courseConfig: plan.courseConfig,
     repo: source.repo, folder, sourceRef: source.sourceRef, sha: source.sourceCommit,
     cohort: { cohortId, receipt },
-  }, async () => {
+    ...(prepared.preparation && { preparation: prepared.preparation }),
+    ...(runtime.startupBatchId && { startupBatchId: runtime.startupBatchId }),
+  }, async (beforeDispatch) => {
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;
     const evaluation = classifyEvaluation(await evaluatePinned({
       repo: source.repo, folder, sourceCommit: source.sourceCommit, profile, rubric: receipt.rubric,
-      runCode: profile.runCode === true,
+      runCode: profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
     }), source.sourceCommit, source.repo, profile, receipt.rubric);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the
@@ -244,6 +275,7 @@ export async function runRepoGradeTarget(
     return { value, settlement };
   });
   if (admission.status === "completed") return admission.value;
+  if (admission.status === "pre-dispatch-failed" || admission.status === "sandbox-refused") return { status: "failed" };
   if (admission.status === "unknown" && unsettled) {
     return { status: "unknown", ...unsettled };
   }

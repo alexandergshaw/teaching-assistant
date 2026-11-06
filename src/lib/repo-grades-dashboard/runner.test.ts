@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { repoGradeAdmissionMode } from "./admission-mode";
-import { claimRepoGrade, settleRepoGrade } from "./ledger";
+import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
 import { captureRepoGradeProfile, resolveRepoGradeRubric } from "./profile";
 import { runRepoGradeTarget } from "./runner";
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
-vi.mock("./ledger", () => ({ claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("./ledger", () => ({ beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 
 const sha = "a".repeat(40);
@@ -57,6 +57,7 @@ beforeEach(() => {
   vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.mocked(requireAppOwner).mockResolvedValue({ id: "owner", email: "owner@example.test" });
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+  vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
 });
 describe("repository grading dashboard runner", () => {
@@ -219,7 +220,10 @@ describe("repository grading dashboard runner", () => {
 
   it("settles an ambiguous evaluator response as unknown with a single dispatch", async () => {
     const { runtime } = fixture();
-    runtime.evaluatePinned.mockRejectedValueOnce(new Error("Lost response"));
+    runtime.evaluatePinned.mockImplementationOnce(async ({ beforeDispatch }) => {
+      await beforeDispatch?.(new AbortController().signal);
+      throw new Error("Lost response");
+    });
     await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "unknown" });
     expect(runtime.evaluatePinned).toHaveBeenCalledTimes(1);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "unknown" });

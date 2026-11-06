@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   runSubmittedCode,
+  SandboxExecutionRefusedError,
   __resetRuntimeCacheForTests,
   CodeFileInput,
 } from "./code-runner";
@@ -16,6 +17,88 @@ describe("code-runner", () => {
   });
 
   describe("runSubmittedCode - Wandbox fallback and edge cases", () => {
+    const python = [{ name: "main.py", extension: "py", previewContent: "print(1)" }];
+
+    it.each([
+      ["Piston", { compile: { code: 0 } }],
+      ["Piston", { run: { code: null, signal: "" } }],
+      ["Wandbox", { status: "", signal: "  " }],
+      ["Wandbox", { status: "0-incomplete" }],
+    ])("keeps a malformed %s response uncertain", async (provider, response) => {
+      const fetcher = vi.fn<typeof fetch>(async (url) => {
+        const path = String(url);
+        if (path.endsWith("/runtimes")) return Response.json([{ language: "python", version: "3.10.0" }]);
+        if (path.endsWith("/list.json")) return Response.json([]);
+        if (provider === "Wandbox" && path.endsWith("/execute")) return new Response(null, { status: 403 });
+        return Response.json(response);
+      });
+      global.fetch = fetcher;
+      const authorization = vi.fn<(signal: AbortSignal) => Promise<void>>().mockResolvedValue(undefined);
+      const pending = runSubmittedCode(python, undefined, authorization);
+      await expect(pending).rejects.toThrow("did not establish an execution outcome");
+      await expect(pending).rejects.not.toBeInstanceOf(SandboxExecutionRefusedError);
+      const executionRequests = fetcher.mock.calls.filter(([url]) => /\/(execute|compile\.json)$/.test(String(url)));
+      expect(executionRequests).toHaveLength(provider === "Wandbox" ? 2 : 1);
+      expect(authorization).toHaveBeenCalledTimes(executionRequests.length);
+      executionRequests.forEach(([, init], index) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        expect(authorization.mock.calls[index][0]).toBe(init?.signal);
+      });
+    });
+
+    it("accepts a failed compile without a run stage as terminal", async () => {
+      global.fetch = vi.fn(async (url) => String(url).endsWith("/runtimes")
+        ? Response.json([{ language: "python", version: "3.10.0" }])
+        : Response.json({ compile: { code: 1, stderr: "Syntax error" } }));
+
+      await expect(runSubmittedCode(python, undefined, async () => {}))
+        .resolves.toMatchObject({ ran: false, exitCode: null, compileOutput: "Syntax error" });
+    });
+
+    it.each(["explicit refusal", "failed fallback preflight", "ambiguous gateway error"])(
+      "distinguishes %s after Piston refuses the first dispatch", async (outcome) => {
+        const authorization = vi.fn(async () => {});
+        if (outcome === "failed fallback preflight") {
+          authorization.mockResolvedValueOnce().mockRejectedValueOnce(new Error("Fallback authorization expired"));
+        }
+        const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+          const path = String(url);
+          if (path.endsWith("/runtimes")) return Response.json([{ language: "python", version: "3.10.0" }]);
+          if (path.endsWith("/execute")) return new Response(null, { status: 403 });
+          if (path.endsWith("/list.json")) return Response.json([]);
+          return new Response(null, { status: outcome === "ambiguous gateway error" ? 504 : 429 });
+        });
+        global.fetch = fetcher;
+
+        const pending = runSubmittedCode(python, undefined, authorization);
+        if (outcome === "ambiguous gateway error") {
+          await expect(pending).rejects.toThrow("Wandbox returned 504");
+          await expect(pending).rejects.not.toBeInstanceOf(SandboxExecutionRefusedError);
+        } else {
+          await expect(pending).rejects.toBeInstanceOf(SandboxExecutionRefusedError);
+        }
+        expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/compile.json")))
+          .toHaveLength(outcome === "failed fallback preflight" ? 0 : 1);
+      },
+    );
+
+    it.each(["lost authorization", "lost sandbox response"])(
+      "propagates %s without replaying an execution", async (failure) => {
+        const authorization = vi.fn(async () => {
+          if (failure === "lost authorization") throw new Error(failure);
+        });
+        const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+          if (String(url).endsWith("/runtimes")) return Response.json([{ language: "python", version: "3.10.0" }]);
+          throw new Error("lost sandbox response");
+        });
+        global.fetch = fetcher;
+        await expect(runSubmittedCode(python, undefined, authorization)).rejects.toThrow(failure);
+        expect(authorization).toHaveBeenCalledTimes(1);
+        expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname.split("/").at(-1)))
+          .toEqual(failure === "lost authorization" ? ["runtimes"] : ["runtimes", "execute"]);
+      },
+    );
+
     it("sends data files to the Wandbox fallback via codes[]", async () => {
       global.fetch = vi.fn(async (url, init) => {
         const urlStr = String(url);

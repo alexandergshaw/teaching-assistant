@@ -81,8 +81,11 @@ export async function saveRepoGradeProfile(
   return result ? profile : null;
 }
 
-async function readProfile(scope: CourseFolder, cohortId: string | null) {
+async function readProfile(scope: CourseFolder, cohortId: string | null, expectedAccountId?: string) {
   const owner = await requireAppOwner();
+  if (expectedAccountId !== undefined && owner.id !== expectedAccountId) {
+    throw new Error("Repository grading profile account changed");
+  }
   const result = await profileRpc("repo_grade_read_profile", {
     ...scopedArgs(owner.id, scope),
     p_cohort_id: cohortId,
@@ -91,13 +94,21 @@ async function readProfile(scope: CourseFolder, cohortId: string | null) {
   if (typeof result !== "object" || !("profile" in result) || !("receipt" in result)) {
     throw new Error("Invalid repository grading profile read response");
   }
-  return { profile: validateProfile(owner.id, scope, result.profile), receipt: result.receipt };
+  const startupDefault = "startupDefault" in result ? result.startupDefault : false;
+  if (typeof startupDefault !== "boolean") throw new Error("Invalid repository grading profile origin");
+  return { profile: validateProfile(owner.id, scope, result.profile), receipt: result.receipt, startupDefault };
 }
 
 export async function readCurrentRepoGradeProfile(scope: CourseFolder): Promise<RepoGradeProfile | null> {
   const result = await readProfile(scope, null);
   if (result && result.receipt !== null) throw new Error("Invalid repository grading profile read response");
   return result?.profile ?? null;
+}
+
+export async function readCurrentRepoGradeStartupProfile(scope: CourseFolder, expectedAccountId: string) {
+  const result = await readProfile(scope, null, expectedAccountId);
+  if (result && result.receipt !== null) throw new Error("Invalid repository grading profile read response");
+  return result;
 }
 
 /** A single snapshot of current source choices for an already verified owner/course. */

@@ -27,11 +27,12 @@ type CourseInventory = Readonly<{
   discovery: RepoGradeDiscovery;
 }>;
 
-export type RepoGradeHistoryObservation = "never-attempted" | "claimed" | RepoGradeOutcome;
+export type RepoGradeLedgerObservation = "never-attempted" | "claimed" | RepoGradeOutcome;
+export type RepoGradeHistoryObservation = RepoGradeLedgerObservation | "not-started" | "terminal";
 type RunnerStatus = Awaited<ReturnType<typeof runRepoGradeTarget>>["status"];
 type BlockReason = Exclude<RunnerStatus, RepoGradeOutcome | "terminal" | "storage-unavailable"> | "history-unavailable";
 type TargetStatus =
-  | { status: "queued" | "running" | "claimed" | "terminal" | RepoGradeOutcome }
+  | { status: "queued" | "running" | "claimed" | "terminal" | "not-started" | RepoGradeOutcome }
   | { status: "blocked"; reason: BlockReason };
 type Work = Readonly<{ target: RepoGradeStartupTarget; state: Readonly<TargetStatus> }>;
 type State = Readonly<{
@@ -139,7 +140,7 @@ export function stopRepoGradeStartupSchedule(state: State, scope: RepoGradeStart
 export function settleRepoGradeStartupTarget(
   state: State,
   reservation: Reservation,
-  status: RunnerStatus,
+  status: RunnerStatus | "claimed",
 ): State {
   if (!matchesScope(state, reservation.scope)) return state;
   const key = repoGradeStartupKey(reservation.target);
@@ -154,7 +155,11 @@ export function settleRepoGradeStartupTarget(
     case "failed":
     case "unknown":
     case "terminal":
+    case "claimed":
       settled = { status };
+      break;
+    case "busy":
+      settled = { status: "claimed" };
       break;
     case "storage-unavailable":
       settled = { status: "unknown" };

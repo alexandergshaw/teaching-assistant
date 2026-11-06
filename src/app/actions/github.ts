@@ -825,7 +825,7 @@ async function evaluateRepoGradeBatch(
       const embeddedEntries = digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label));
       // Same live defect fix as gradeRepoAction (github-repos.ts) - see that
       // function's own doc comment on `runCode` for the full rationale.
-      if (runCode) await attachCodeRuns(embeddedEntries);
+      if (runCode) await attachCodeRuns(embeddedEntries, modelExecution?.beforeDispatch);
       const run = gradeEntriesEmbedded(embeddedEntries, builtRubric);
       return { run, rubric: renderRubricText(builtRubric), truncatedRepos, noSubmissionRepos, undeterminedRepos };
     }

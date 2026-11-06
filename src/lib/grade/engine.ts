@@ -476,8 +476,12 @@ async function gradeStudentEntries(
     ];
 
     // Run any code the student submitted (returns null with no network when there
-    // is nothing runnable). Never throws.
-    const codeRun = precomputedCodeRun ?? (options.autoRunCode === false ? null : await runSubmittedCode(submittedFiles));
+    // is nothing runnable). A coordinated dispatch propagates an uncertain
+    // sandbox outcome so the reservation stays fenced.
+    const codeRun = precomputedCodeRun ?? (options.autoRunCode === false ? null
+      : modelExecution?.beforeDispatch
+        ? await runSubmittedCode(submittedFiles, undefined, modelExecution.beforeDispatch)
+        : await runSubmittedCode(submittedFiles));
 
     try {
       const result = initialTrunc

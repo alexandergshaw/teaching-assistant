@@ -44,7 +44,8 @@
 // undefined and every case below would throw "requireAppOwner is not a
 // function" instead of exercising the orchestration this file means to test.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { claimRepoGrade, settleRepoGrade } from "@/lib/repo-grades-dashboard/ledger";
+import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "@/lib/repo-grades-dashboard/ledger";
+import { repoGradeAdmissionMode } from "@/lib/repo-grades-dashboard/admission-mode";
 import * as gradingUtils from "@/lib/grade/utils";
 
 const ingestRepo = vi.fn();
@@ -57,7 +58,10 @@ const attachCodeRuns = vi.fn();
 const rememberRubric = vi.fn();
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
-vi.mock("@/lib/repo-grades-dashboard/ledger", () => ({ claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
+vi.mock("@/lib/repo-grades-dashboard/ledger", () => ({
+  beginRepoGradeDispatch: vi.fn(), claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn(),
+}));
+vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 
 vi.mock("@/lib/github", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/github")>();
@@ -82,7 +86,8 @@ vi.mock("@/lib/embedded-grader", () => ({
   renderRubricText: (...args: unknown[]) => renderRubricText(...args),
 }));
 
-vi.mock("@/lib/code-runner", () => ({
+vi.mock("@/lib/code-runner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/code-runner")>(),
   attachCodeRuns: (...args: unknown[]) => attachCodeRuns(...args),
 }));
 
@@ -121,6 +126,7 @@ function digestOf(fullName: string, files: ReturnType<typeof file>[], overrides:
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(repoGradeAdmissionMode).mockReturnValue("legacy-manual");
   gradeEntries.mockResolvedValue({
     results: [{ student: "s", totalScore: "8/10", rubricAreas: [], overallComment: "", strengths: "", improvements: "", resubmitNotice: "", feedback: "", mergedFileCount: 1, submittedFiles: [] }],
     rubricAreaNames: [],
@@ -134,7 +140,7 @@ afterEach(() => {
 });
 
 it("admits each distinct queued repo before grading and carries one shared rubric through the batch", async () => {
-  vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");
+  vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.stubEnv("GRADE_INTER_REQUEST_DELAY_MS", "0");
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: { mode: "manual", generation: 7, token: "server" } });
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
@@ -156,14 +162,18 @@ it("admits each distinct queued repo before grading and carries one shared rubri
 });
 
 it("returns completed rows and explicit unfinished targets after a later ambiguous grade", async () => {
-  vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");
+  vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.stubEnv("GRADE_INTER_REQUEST_DELAY_MS", "0");
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: { mode: "manual", generation: 7, token: "server" } });
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
   ingestRepo.mockResolvedValue(digestOf("org/student", [file("main.py", "print(42)")]));
   const graded = await gradeEntries();
   gradeEntries.mockClear();
-  gradeEntries.mockResolvedValueOnce(graded).mockRejectedValueOnce(new Error("Response lost"));
+  vi.mocked(beginRepoGradeDispatch).mockResolvedValue(60_000);
+  gradeEntries.mockResolvedValueOnce(graded).mockImplementationOnce(async (_entries, _instructions, _rubric, _provider, _points, options) => {
+    await options?.modelExecution?.beforeDispatch?.(new AbortController().signal);
+    throw new Error("Response lost");
+  });
   const result = await gradeReposAction([{ repoRef: "org/first" }, { repoRef: "org/uncertain" }, { repoRef: "org/later" }], "Instructions", "rubric");
   expect(result).toMatchObject({
     run: { results: graded.results },
@@ -178,7 +188,7 @@ it("returns completed rows and explicit unfinished targets after a later ambiguo
 });
 
 it("paces paid grading across a coordinated batch and enforces the configured submission cap", async () => {
-  vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");
+  vi.mocked(repoGradeAdmissionMode).mockReturnValue("coordinated");
   vi.stubEnv("GRADE_MAX_SUBMISSIONS", "2");
   vi.stubEnv("GRADE_INTER_REQUEST_DELAY_MS", "456");
   const sleep = vi.spyOn(gradingUtils, "sleep").mockResolvedValue();

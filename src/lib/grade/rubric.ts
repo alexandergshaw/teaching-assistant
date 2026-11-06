@@ -298,7 +298,7 @@ ${rubricTierPromptLines()}
       generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
     },
     provider,
-    modelExecution
+    modelExecution && { ...modelExecution, requireTerminalTextResponse: true }
   );
 
   if (!result.ok) {
@@ -307,22 +307,29 @@ ${rubricTierPromptLines()}
     throw new Error(`Rubric generation failed: HTTP ${result.status} ${result.body}`);
   }
 
-  const raw = result.text;
+  if (modelExecution && result.finishReason !== "STOP") {
+    throw new BoundedRubricRefusalError("The model did not finish generating a usable rubric.");
+  }
 
-  const jsonText = extractJsonObject(raw);
+  let rubric = result.text.trim();
+  const jsonText = extractJsonObject(rubric);
   if (jsonText) {
     try {
       const parsed = JSON.parse(jsonText) as { rubric?: unknown };
       if (typeof parsed.rubric === "string" && parsed.rubric.trim()) {
-        return parsed.rubric.trim();
+        rubric = parsed.rubric.trim();
       }
     } catch {
       // fall through to raw text
     }
   }
 
-  if (raw.trim()) {
-    return raw.trim();
+  if (modelExecution && extractRubricCriteria(rubric).length === 0) {
+    throw new BoundedRubricRefusalError("The model returned no usable rubric criteria.");
+  }
+
+  if (rubric) {
+    return rubric;
   }
 
   throw new Error("Gemini returned an empty rubric.");

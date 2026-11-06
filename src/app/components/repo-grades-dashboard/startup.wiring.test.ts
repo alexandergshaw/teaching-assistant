@@ -56,11 +56,24 @@ describe("Repo Grades startup wiring", () => {
     expect(component).toContain('import Button from "@mui/material/Button"');
     expect(component).toContain('<Button type="button" variant="outlined" size="small" aria-disabled={!canStop} aria-describedby={stopHintId}');
     expect(component).toContain("if (canStop) startup.stop?.()");
-    expect(component).toContain('<TableCell component="th" scope="row">{course.label}</TableCell>');
     expect(component).toContain("Copy it before reloading or signing out.");
     expect(component).toContain("Manual repository grading is paused while the Embedded pilot is selected.");
     expect(component).toContain("slotProps={{ input: { readOnly: true } }}");
     expect(component).toContain("value={JSON.stringify(entry, null, 2)}");
+  });
+
+  it("shows sortable, keyboard-operable status labels only in the existing startup table", () => {
+    const component = source("./RepoGradesStartup.tsx");
+    const table = source("./RepoGradesStartupTable.tsx");
+    expect(component).toContain("<RepoGradesStartupTable courses={progress.courses} headingId={headingId} />");
+    expect(table).toContain('<Table size="small" aria-labelledby={headingId}>');
+    expect(table).toContain('<TableCell component="th" scope="row">{course.label}</TableCell>');
+    expect(table).toContain('sortDirection={active ? sort.direction : false}');
+    expect(table).toContain('<TableSortLabel component="button" type="button" active={active}');
+    expect(table).toContain('onClick={() => setSort((current) => nextStartupTableSort(current, id))}');
+    expect(table).toContain("sortStartupCourses(courses, sort).map");
+    expect(table).toContain("orderStartupStatuses(course.states).map");
+    expect(table).toContain('label={count ? `${label} (${count})` : label}');
   });
 
   it("wires an explicit retry button to the current startup lifecycle", () => {

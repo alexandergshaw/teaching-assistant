@@ -8,20 +8,16 @@ import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
+import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import { useRepoGradesEmbeddedPilot, useRepoGradesStartupActivation } from "./startup-activation";
 import { serverRepoGradesStartupAdapter } from "./startup-adapter";
 import { disabledRepoGradesStartupAdapter } from "./startup-coordinator";
-import type { CourseStartupState, RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
+import type { RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
+import { STARTUP_STATUS } from "./startup-table";
 import { useRepoGradesStartup } from "./useRepoGradesStartup";
 
 const StartupContext = createContext<ReturnType<typeof useRepoGradesStartup> | null>(null);
@@ -34,25 +30,6 @@ const PHASE_TEXT: Record<RepoGradesStartupProgress["phase"], string> = {
   complete: "Startup repository checks have finished.",
   incomplete: "Startup repository checks finished with incomplete results.",
   stopped: "Startup scheduling has stopped. Work already running can still finish.",
-};
-
-const STATE_TEXT: Record<CourseStartupState, string> = {
-  checking: "Checking",
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Complete",
-  "no-submission": "No submission",
-  "no-work": "No work found",
-  partial: "Partial",
-  failed: "Failed",
-  unknown: "Status unknown",
-  blocked: "Blocked",
-  "embedded-profile-required": "Blocked by Embedded profile requirements",
-  busy: "Already claimed",
-  "already-processed": "Already processed",
-  stopped: "Stopped before starting",
-  "not-started": "Not started in this batch",
-  "not-configured": "No GitHub organization configured",
 };
 
 const PREPARATION_TEXT: Record<RepoGradesStartupPreparation["status"], string> = {
@@ -127,23 +104,7 @@ export function RepoGradesStartupStatus() {
       <p id={stopHintId}>Stops new startup work. Already-running work can still finish.</p>
       {progress.phase === "complete" && progress.courses.length === 0 && <p>No classes were found.</p>}
       {progress.courses.length > 0 && (
-        <TableContainer>
-          <Table size="small" aria-labelledby={headingId}>
-            <TableHead>
-              <TableRow><TableCell scope="col">Class</TableCell><TableCell scope="col">Startup status</TableCell></TableRow>
-            </TableHead>
-            <TableBody>
-              {progress.courses.map((course) => (
-                <TableRow key={course.courseId}>
-                  <TableCell component="th" scope="row">{course.label}</TableCell>
-                  <TableCell>{course.states.map(({ state, count }) =>
-                    count ? `${STATE_TEXT[state]} (${count})` : STATE_TEXT[state],
-                  ).join(", ")}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <RepoGradesStartupTable courses={progress.courses} headingId={headingId} />
       )}
       {!!progress.previousBatch?.courses.length && (
         <>
@@ -152,7 +113,7 @@ export function RepoGradesStartupStatus() {
           <List dense>
             {progress.previousBatch.courses.map((course) => (
               <ListItem key={course.courseId}>
-                {course.label} {course.states.map(({ state, count }) => `${STATE_TEXT[state]} (${count})`).join(", ")}
+                {course.label} {course.states.map(({ state, count }) => `${STARTUP_STATUS[state].label} (${count})`).join(", ")}
               </ListItem>
             ))}
           </List>

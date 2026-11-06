@@ -206,26 +206,28 @@ never per feature and never several groups rolled together.
 
 ## Delivery target and release state
 
-Before publishing a chunk, record its requested destination ref (for example,
-`main`) in the activity. A commit or push to a topic branch is not integration
-and must never be reported as though it reached the requested destination.
-“Commit and push” alone authorizes publishing the current branch; it does not
-silently change the target to `main`.
+**Always push completed, independently reviewed work to `origin/main`.** This
+is the delivery target regardless of the worktree branch or its upstream. Use a
+different target only when the owner explicitly directs it. Record the target
+in the activity before publication.
 
-When the owner requests a destination branch, promote only the reviewed,
-in-scope commits to that ref using ordinary fast-forward, merge, or cherry-pick
-operations. Check the destination's current remote head first, resolve any
+Promote only the reviewed, in-scope commits to the target using ordinary
+fast-forward, merge, or cherry-pick operations. Check the destination's
+current remote head first, resolve any
 movement without force-pushing, and run the relevant gates on the exact
-promoted candidate. After publishing, fetch the destination and verify that
-the candidate is an ancestor of the remote destination (for example, with
-`git merge-base --is-ancestor <candidate> <remote>/<branch>`). Record the
-verified commit and ref in the activity report.
+promoted candidate. After publishing, verify the live remote ref and the
+reviewed paths, and record the verified commit and ref in the activity report.
+For a manual loop item, run the handoff assertion and, for delivery to main,
+the separate main-delivery proof documented in the
+[manual adapter](AGNOSTIC_LOOP_USAGE.md#manual-adapter-and-offline-demonstration).
+If the owner directs another target, verify publication there and report the
+main-only proof's scope.
 
 Report these states separately: **committed locally**, **pushed to a topic
-branch**, **integrated on the requested branch**, and **deployed/live**. A
-successful push proves only the ref that received it. Integration does not
-prove deployment, and deployment does not prove the feature is exposed in the
-app. Never claim a later state without its own evidence.
+branch**, **integrated on the target branch**, and **deployed/live**. Apply the
+[release evidence checks](loop/this-repo.md#release-evidence) before telling
+the owner to test a hosted feature. If publication or a live check is blocked,
+report the last verified state and the outstanding check.
 
 **Root-cause analysis** for anything that failed, then fix and re-run until
 clean.

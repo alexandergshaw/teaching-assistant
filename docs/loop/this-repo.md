@@ -263,6 +263,39 @@ State these rather than working around them:
   single most consequential limit: every UI, accessibility and keyboard claim
   in this repo is a reading claim.
 
+### Release evidence
+
+Record the reviewed commit and owned paths before publication. Record the
+following evidence in the handoff for a hosted feature. If the owner directs
+another publication target, verify its live ref in the source check. The
+production checks still require production evidence.
+
+1. **Main publication.** After the push, use
+   `git ls-remote --exit-code origin refs/heads/main` to read the live main
+   SHA. Fetch that ref if needed. Confirm that the reviewed delivery commit
+   is an ancestor of the observed SHA with
+   `git merge-base --is-ancestor <delivery-commit> <live-main-sha>`. Compare
+   the reviewed paths with
+   `git diff --exit-code <reviewed-commit> <live-main-sha> -- <reviewed-paths>`.
+   When integration rewrites commits, verify the reviewed paths against the
+   integrated commit and record its SHA as the delivery commit. For manual
+   loop items, follow the additional assertions in the
+   [manual adapter](../AGNOSTIC_LOOP_USAGE.md#manual-adapter-and-offline-demonstration).
+2. **Database readiness when the change needs migrations.** Record the
+   successful run of [Apply Supabase migrations](../../.github/workflows/supabase-migrations.yml)
+   on `main` for a revision containing the required SQL, or verify the
+   required migration versions in the production project's migration history.
+   The automatic workflow runs only on qualifying pushes to `main`.
+3. **Hosted app readiness.** In Vercel, resolve the intended production URL
+   to its active deployment. Record the Ready deployment ID or URL and its Git
+   SHA, and confirm that revision contains the reviewed change. Run the
+   agreed smoke check against that URL when access permits.
+
+If any evidence is missing, report each verified stage and the specific pending,
+failed, or inaccessible check. The owner's test handoff names the URL and
+verified revision. A feature-branch push or green local gate supplies neither
+database nor production deployment evidence.
+
 ---
 
 ## 7. Files held elsewhere right now

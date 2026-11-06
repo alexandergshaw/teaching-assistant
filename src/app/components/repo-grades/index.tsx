@@ -891,6 +891,12 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       {saved.incomplete && (
         <p className={pageStyles.fieldHint} role="status">Saved results are incomplete. Older or unavailable attempts may be missing.</p>
       )}
+      {(saved.hasOlder || saved.olderComplete) && (
+        <Button type="button" size="small" aria-disabled={saved.pending || saved.olderComplete} onClick={saved.loadOlder}>
+          {saved.olderComplete ? "All saved results loaded"
+            : saved.pending ? "Loading saved results…" : "Load older results"}
+        </Button>
+      )}
       {course && cellDraft && (
         <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />
       )}

@@ -546,14 +546,16 @@ export default function RepoGradesGrid({
                   {repos.map((repo) => {
                     const row = repo.active;
                     const cell = row?.cells[folder];
+                    const editableEdit = row && column && cell?.status === "ungraded"
+                      ? getRepoGradeCellEdit(cellEdits, row.repo, folder) : undefined;
                     return (
                       <div key={repo.name} className={dashboardStyles.matrixResult}>
                         {repos.length > 1 && <strong>{repo.name}</strong>}
-                        {row && column && cell?.status === "ungraded" ? (
+                        {row && column && editableEdit ? (
                           <RepoGradeCellControl
                             row={row}
                             column={column}
-                            edit={getRepoGradeCellEdit(cellEdits, row.repo, column.folder)}
+                            edit={editableEdit}
                             hasSavedResult={!!repo.cells.get(folder)?.saved}
                             pointsPossible={pointsPossible}
                             onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
@@ -566,7 +568,7 @@ export default function RepoGradesGrid({
                           />
                         ) : cell && cell.status !== "ungraded" && <RepoGradeStatusChip status={cell.status} />}
                         <RepoGradeResultDetails repo={repo} folder={folder}
-                          editable={!!column && cell?.status === "ungraded"} hasScanStatus={!!cell} />
+                          editableEdit={editableEdit} hasScanStatus={!!cell} />
                       </div>
                     );
                   })}

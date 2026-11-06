@@ -5,6 +5,7 @@ import {
   readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests,
 } from "@/lib/session-diagnostic-log";
 import { loadRepoGradeHistoryPage } from "./useRepoGradeHistory";
+import { loadRepoGradeMatrixPages } from "./useRepoGradeMatrixResults";
 
 vi.mock("@/app/actions/repo-grades-dashboard", () => ({ readRepoGradeHistoryAction: vi.fn() }));
 
@@ -45,4 +46,33 @@ it("exports bounded history metrics for success, unavailable storage, and reject
   expect(exported).toContain("transport_rejected");
   expect(exported).toContain("rowCount");
   expect(exported).not.toMatch(/private[-/]|"score"|"generation"/);
+});
+
+it("resumes from the bounded batch cursor without rereading newer pages", async () => {
+  const readHistory = vi.mocked(readRepoGradeHistoryAction).mockReset()
+    .mockImplementation(async (_course, _account, before) => ({
+      status: "loaded", rows: [], nextBefore: before === 100 ? null : (before ?? 110) - 1,
+    }));
+
+  const first = await loadRepoGradeMatrixPages("course", "owner", undefined, () => true);
+  expect(first).toMatchObject({ complete: false, nextBefore: 100 });
+  expect(readHistory.mock.calls.map(([, , before]) => before))
+    .toEqual([undefined, 109, 108, 107, 106, 105, 104, 103, 102, 101]);
+
+  const older = await loadRepoGradeMatrixPages("course", "owner", first?.nextBefore ?? undefined, () => true);
+  expect(older).toMatchObject({ complete: true, nextBefore: null });
+  expect(readHistory).toHaveBeenLastCalledWith("course", "owner", 100);
+  expect(readHistory).toHaveBeenCalledTimes(11);
+});
+
+it("retries a failed continuation at the same cursor and drops it if the course is unavailable", async () => {
+  const readHistory = vi.mocked(readRepoGradeHistoryAction).mockReset()
+    .mockResolvedValueOnce({ status: "storage-unavailable" })
+    .mockResolvedValueOnce({ status: "course-unavailable" });
+
+  await expect(loadRepoGradeMatrixPages("course", "owner", 100, () => true))
+    .resolves.toMatchObject({ complete: false, nextBefore: 100, courseUnavailable: false });
+  await expect(loadRepoGradeMatrixPages("course", "owner", 100, () => true))
+    .resolves.toMatchObject({ complete: false, nextBefore: null, courseUnavailable: true });
+  expect(readHistory.mock.calls).toEqual([["course", "owner", 100], ["course", "owner", 100]]);
 });

@@ -87,7 +87,6 @@ import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 import { RowFeedbackBoxes } from "../grading-results/RowFeedbackBoxes";
 import { FeedbackExpandModal } from "../grading-results/FeedbackExpandModal";
 import type { FeedbackBoxesEdit, FeedbackField } from "../grading-results/gradingResultsHelpers";
-import { copyAllFeedbackText } from "../grading-results/gradingResultsHelpers";
 // docs/grading-results-file-viewer-acceptance-criteria.md, brought to this
 // surface after it shipped on GradingResults.tsx first (REGRESSION entries
 // 356/357/359): browsing a graded cell's own files, reusing
@@ -272,7 +271,6 @@ export default function RepoGradeCellControl({
   const { copy: handleCopyFeedback, copiedKey, failed: copyFailed } = useFeedbackCopy(
     JSON.stringify([row.repo, column.folder, feedbackEdit]),
   );
-  const copyAll = copyAllFeedbackText(feedbackEdit);
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
   const scorePostability = repoGradePostability({
@@ -452,14 +450,8 @@ export default function RepoGradeCellControl({
         )}
         {stage === "running" && <span className={styles.postReason}>This request will finish once started.</span>}
         {stage === "paused" && folderPaused && <span className={styles.postReason}>Resume the folder to continue.</span>}
-        {copyAll.trim() && (
-          <Button type="button" size="small" aria-label={`Copy feedback: ${cellName}`}
-            onClick={() => void handleCopyFeedback("all", copyAll, "all")}>
-            {copiedKey === "all" ? "Copied" : "Copy feedback"}
-          </Button>
-        )}
       </div>
-      {copyAll.trim() && <CopyStatus copied={copiedKey !== null} failed={copyFailed} />}
+      <CopyStatus copied={copiedKey !== null} failed={copyFailed} />
       <FeedbackDisclosure compact title="Details" label={`Grade details: ${cellName}`}>
           <RowFeedbackBoxes
             student={row.repo}

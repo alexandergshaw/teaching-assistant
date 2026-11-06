@@ -78,22 +78,20 @@ describe("class repository results wiring", () => {
     expect(props).toContain("key={course.id}");
     expect(props).toContain("courseId={course.id}");
     expect(dashboard).toContain("const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null");
-    expect(dashboard).toContain("<RepoGradeHistory courseId={courseId} accountId={ownerId}");
     expect(index).toContain("isCellScopeCurrent: () => drafts.isCurrent(cellScope)");
     expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");
   });
 
-  it("exposes per-course profiles and history to the owner independently of scan success", () => {
+  it("exposes per-course profiles to the owner independently of scan success", () => {
     expect(dashboard).toContain("if (!ownerId) return null");
     expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />");
-    expect(dashboard).toMatch(/<FeedbackDisclosure title="Saved evaluation history"[^>]*>\s*\{historyOpen && <RepoGradeHistory/);
   });
 
   it("declares student row headers and assignment column headers in the working gradebook", () => {
     expect(grid).toContain('aria-label="Repository gradebook by student and assignment"');
     expect(grid).toContain('<TableCell component="th" scope="col" role="columnheader" key={folder}');
     expect(grid).toContain('<TableCell component="th" scope="row" role="rowheader"');
-    expect(dashboard).not.toMatch(/gradebookRows|Repository gradebook by student and assignment/);
+    expect(dashboard).not.toMatch(/<Table\b|gradebookRows|Saved evaluation history/);
   });
 
   it("keeps the earlier scored attempt's partial status separate from the latest attempt", () => {
@@ -102,7 +100,6 @@ describe("class repository results wiring", () => {
   });
 
   it("joins the existing grading controls and scoped, read-only saved results in the same cell", () => {
-    expect(dashboard).toContain("const dashboardFeedbackEnabled = false");
     expect(grid).toMatch(/<RepoGradeCellControl[\s\S]*?<RepoGradeResultDetails repo=\{repo\} folder=\{folder\}/);
     expect(dashboard).toContain("repo.cells.get(folder)");
     expect(dashboard).toContain("!editable && cell?.local");
@@ -112,8 +109,17 @@ describe("class repository results wiring", () => {
     expect(dashboard).toContain("rubric={source.rubricAreas}");
     expect(index).toContain('useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision)');
     expect(index).toContain("Saved results are incomplete");
+    expect(index).toMatch(/\(saved\.hasOlder \|\| saved\.olderComplete\) && \(\s*<Button[^>]+aria-disabled=\{saved.pending \|\| saved.olderComplete\} onClick=\{saved.loadOlder\}/);
     expect(feedback).toContain('copy("all", copyAllFeedbackText(feedback), "all")');
     expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost|handleGradeCell|handleGradeColumn/);
+  });
+
+  it("keeps the browser and saved copy buttons after the cell disclosures", () => {
+    expect(grid).toContain("editableEdit={editableEdit}");
+    expect(dashboard).toContain("const browserEdit = editableEdit ?? cell?.local");
+    expect(dashboard).toMatch(/<SavedMatrixResult[\s\S]*?<RepoResultCopy[^>]*source="browser" feedback=\{browserFeedback\}[\s\S]*?<RepoResultCopy[^>]*source="saved" feedback=\{savedFeedback\}/);
+    expect(dashboard.match(/hideCopyAll/g)).toHaveLength(2);
+    expect(cellControl).not.toContain('aria-label={`Copy feedback:');
   });
 
   it("suppresses the idle browser grade status beside a saved attempt and leaves manual grading reachable", () => {
@@ -126,7 +132,7 @@ describe("class repository results wiring", () => {
   it("keeps the retained editor isolated with its course guard and separately keyed modal", () => {
     expect(gradingActions).toMatch(/const handleRetainedDraftChange[\s\S]*?if \(!isCurrent\(\)\) return;\s*setCellEdits\(\(prev\) => applyRetainedRepoGradeDraftEdit\(prev, repo, folder, expected, field, value\)\)/);
 
-    const editor = feedback.slice(feedback.indexOf("function RetainedDraft("), feedback.indexOf("const RETENTION_LABELS"));
+    const editor = feedback.slice(feedback.indexOf("function RetainedDraft("));
     expect(feedback).toMatch(/retainedResults\?\.map\(\(result, index\) => \(\s*<RetainedFeedback key=\{result\.id\} result=\{result\}/);
     expect(feedback).toContain("open && <RetainedDraft");
     expect(editor).toContain("onDraftChange(repo, folder, result, field, value)");

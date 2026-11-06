@@ -15,12 +15,8 @@ import {
   type FeedbackBoxesEdit,
   type FeedbackField,
 } from "../grading-results/gradingResultsHelpers";
-import {
-  applyRepoGradeFeedbackFieldEdit, defaultRepoGradeCellEdit, EMPTY_REPO_GRADE_CELL_EDITS,
-  type RepoGradeCellEdit, type RepoGradeCellEditsByRepo, type RepoGradeFeedbackDraft, type RetainedRepoGradeResult,
-} from "./repoGradesCellEdits";
+import type { RepoGradeCellEdit, RepoGradeFeedbackDraft, RetainedRepoGradeResult } from "./repoGradesCellEdits";
 import { copyRepoFeedback, type RepoFeedbackCopyTarget } from "./repoFeedbackClipboard";
-import { loadRepoGradeCells, persistRepoGradeCells } from "./repoGradesUiState";
 import type { UseRepoGradesGradingActionsResult } from "./useRepoGradesGradingActions";
 import styles from "./repo-grades-dashboard.module.css";
 
@@ -103,12 +99,33 @@ export function FeedbackDisclosure({ title, label, expanded, onExpand, children,
   );
 }
 
-export function RepoResultFeedback({ repo, folder, source, feedback, rubric }: {
+export function RepoResultCopy({ repo, folder, source, feedback }: {
+  repo: string;
+  folder: string;
+  source: "browser" | "saved";
+  feedback: FeedbackBoxesEdit;
+}) {
+  const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([target, feedback]));
+  if (!Object.values(feedback).some((value) => value.trim())) return null;
+  return (
+    <>
+      <Button type="button" size="small" aria-label={`Copy ${target}`}
+        onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
+        {copiedKey === "all" ? "Copied" : `Copy ${source} feedback`}
+      </Button>
+      <CopyStatus copied={copiedKey !== null} failed={failed} />
+    </>
+  );
+}
+
+export function RepoResultFeedback({ repo, folder, source, feedback, rubric, hideCopyAll = false }: {
   repo: string;
   folder: string;
   source: string;
   feedback: FeedbackBoxesEdit;
   rubric: readonly Readonly<RepoGradeCellEdit["rubricAreas"][number]>[];
+  hideCopyAll?: boolean;
 }) {
   const hasComment = Object.values(feedback).some((value) => value.trim() !== "");
   const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
@@ -116,7 +133,7 @@ export function RepoResultFeedback({ repo, folder, source, feedback, rubric }: {
   if (!hasComment && rubric.length === 0) return null;
   return (
     <>
-      {hasComment && (
+      {hasComment && !hideCopyAll && (
         <Button type="button" size="small" aria-label={`Copy ${target}`}
           onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
           {copiedKey === "all" ? "Copied" : "Copy feedback"}
@@ -339,136 +356,6 @@ function RetainedDraft({ accountId, courseId, repo, folder, result, label, isAva
           <ListItem sx={{ display: "list-item" }} key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></ListItem>
         ))}</List>}
       </FeedbackDisclosure>
-    </section>
-  );
-}
-
-const RETENTION_LABELS = {
-  overall: "overall feedback",
-  strengths: "What Went Well",
-  improvements: "What Could Be Better",
-  resubmitNotice: "Resubmission Note",
-  rawScore: "original generated score",
-  rubric: "rubric feedback",
-};
-
-export type HistoricalFeedbackDraft = { edit: RepoGradeCellEdit; notice: string | null; saved: RepoGradeCellEditsByRepo };
-
-export function RepoDashboardHistoricalFeedback({ row, draftScope, sessionDraft, onDraftChange }: {
-  draftScope?: string;
-  sessionDraft?: HistoricalFeedbackDraft;
-  onDraftChange?: (draft: HistoricalFeedbackDraft) => void;
-  row: {
-    repo: string;
-    folder: string;
-    feedback: string | null;
-    score?: number | null;
-    feedback_sections?: Omit<FeedbackBoxesEdit, "overall"> & { rawScore: string } | null;
-    feedback_retention?: keyof typeof RETENTION_LABELS | null;
-    rubric?: readonly Readonly<RepoGradeCellEdit["rubricAreas"][number]>[] | null;
-  };
-}) {
-  const { repo, folder, feedback, feedback_sections: sections, feedback_retention: retention, rubric } = row;
-  const overall = feedback ?? "";
-  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([feedback, sections]));
-  const [opened, setOpened] = useState(false);
-  if (retention) {
-    return <p>Feedback could not be saved because {RETENTION_LABELS[retention]} exceeded the storage limit.</p>;
-  }
-  if (feedback === null && !sections && !rubric?.length) return null;
-  const copyLabel = sections ? "Copy all historical feedback" : "Copy retained overall feedback";
-  const targetName = `${repo}, ${folder || "repository root"}`;
-  return (
-    <FeedbackDisclosure title="Historical feedback" label={`Historical feedback for ${targetName}`}
-      onExpand={(expanded) => { if (expanded) setOpened(true); }}>
-      {sections ? <p>Original generated score {sections.rawScore}</p> : (
-        <p>Individual feedback sections are unavailable in this saved evaluation. Overall and rubric feedback may have been shortened or had links removed.</p>
-      )}
-      {overall && <p className={styles.feedbackText}>{overall}</p>}
-      {sections && FEEDBACK_FIELDS.map((field) => {
-        const meta = FEEDBACK_FIELD_META[field];
-        return (
-          <div key={field}>
-            <p>{meta.fieldLabel}</p>
-            <p className={styles.feedbackText}>{sections[field]}</p>
-            <Button type="button" size="small" aria-label={`Copy historical ${meta.descriptorLower} for ${targetName}`}
-              onClick={() => copy(field, formatFeedback(sections[field] || meta.emptyCopyFallback), field)}>
-              {copiedKey === field ? "Copied" : `Copy ${meta.fieldLabel}`}
-            </Button>
-          </div>
-        );
-      })}
-      {(sections || overall) ? (
-        <>
-          <Button
-            type="button"
-            size="small"
-            aria-label={`${copyLabel} for ${targetName}`}
-            onClick={() => copy("all", copyAllFeedbackText({
-              overall, strengths: sections?.strengths ?? "", improvements: sections?.improvements ?? "",
-              resubmitNotice: sections?.resubmitNotice ?? "",
-            }), "all")}
-          >
-            {copiedKey === "all" ? "Copied" : copyLabel}
-          </Button>
-          <CopyStatus copied={copiedKey !== null} failed={failed} />
-        </>
-      ) : <p>No overall feedback was retained.</p>}
-      {!!rubric?.length && <List dense>{rubric.map((area, index) => (
-        <ListItem sx={{ display: "list-item" }} key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></ListItem>
-      ))}</List>}
-      {opened && draftScope && <HistoricalDraft scope={draftScope} repo={repo} folder={folder}
-        sessionDraft={sessionDraft} onDraftChange={onDraftChange} seed={{
-        ...defaultRepoGradeCellEdit(),
-        score: sections?.rawScore ?? (row.score == null ? "" : String(row.score)),
-        comment: overall,
-        generatedScore: sections?.rawScore ?? null,
-        generatedComment: feedback,
-        strengths: sections?.strengths ?? "",
-        improvements: sections?.improvements ?? "",
-        resubmitNotice: sections?.resubmitNotice ?? "",
-        rubricAreas: rubric?.map((area) => ({ ...area })) ?? [],
-      }} />}
-    </FeedbackDisclosure>
-  );
-}
-
-function HistoricalDraft({ scope, repo, folder, seed, sessionDraft, onDraftChange }: {
-  scope: string;
-  repo: string;
-  folder: string;
-  seed: RepoGradeCellEdit;
-  sessionDraft?: HistoricalFeedbackDraft;
-  onDraftChange?: (draft: HistoricalFeedbackDraft) => void;
-}) {
-  const [restored] = useState(() => sessionDraft ? null : loadRepoGradeCells(scope, "history"));
-  const [draft, setDraft] = useState<RepoGradeCellEdit | null>(() => sessionDraft?.edit ?? restored?.edits[repo]?.[folder] ?? null);
-  const [saveNotice, setSaveNotice] = useState<string | null>(sessionDraft?.notice ?? null);
-  const [saved, setSaved] = useState(sessionDraft?.saved ?? restored?.edits ?? EMPTY_REPO_GRADE_CELL_EDITS);
-
-  const save = (next: RepoGradeCellEdit) => {
-    setDraft(next);
-    const edits = { [repo]: { [folder]: next } };
-    const notice = persistRepoGradeCells(scope, edits, "history", saved);
-    const nextSaved = notice ? saved : edits;
-    setSaved(nextSaved);
-    setSaveNotice(notice);
-    onDraftChange?.({ edit: next, notice, saved: nextSaved });
-  };
-
-  return (
-    <section aria-label={`Instructor draft for historical evaluation of ${repo}, ${folder || "repository root"}`}>
-      {restored?.notice && <p role="status">{restored.notice}</p>}
-      {saveNotice && <p role="status">{saveNotice}</p>}
-      {draft ? (
-        <>
-          <p>Instructor draft for this saved evaluation</p>
-          <LocalFeedback repo={repo} folder={folder} edit={draft}
-            onScoreChange={(score) => save({ ...draft, score })}
-            onFeedbackChange={(field, value) => save(applyRepoGradeFeedbackFieldEdit(draft, field, value))}
-          />
-        </>
-      ) : <Button type="button" size="small" onClick={() => setDraft(seed)}>Start instructor draft</Button>}
     </section>
   );
 }

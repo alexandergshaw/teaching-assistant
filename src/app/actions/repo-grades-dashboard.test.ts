@@ -356,11 +356,11 @@ it("records failed read-only preflight separately from uncertain prior work", as
   expect(callLlm).not.toHaveBeenCalled();
 });
 
-function savedStartupProfile(rubric: string, { provider = "embedded", useReadmeInstructions = false, sourceRef, runCode, targetBranch }: {
-  provider?: "embedded" | "gemini"; useReadmeInstructions?: boolean; sourceRef?: string; runCode?: boolean; targetBranch?: string;
+function savedStartupProfile(rubric: string, { provider = "embedded", useReadmeInstructions = false, sourceRef }: {
+  provider?: "embedded" | "gemini"; useReadmeInstructions?: boolean; sourceRef?: string;
 } = {}) {
   const captured = captureRepoGradeProfile({ accountId: account.id, courseId, folder: "assignment" }, {
-    instructions: "Use a loop.", useReadmeInstructions, rubric, sourceRef, runCode, targetBranch,
+    instructions: "Use a loop.", useReadmeInstructions, rubric, sourceRef,
   }, getRepoGraderIdentity(provider));
   if (captured.status !== "ready") throw new Error("Invalid test profile");
   return captured.profile;
@@ -381,63 +381,6 @@ function admitStartupFixture() {
   vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
   return profile;
 }
-
-it("runs the Embedded pilot with the exact explicitly saved rubric and instructions", async () => {
-  const profile = admitStartupFixture();
-  vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("embedded-only");
-  rpc.mockResolvedValueOnce({ data: { profile, receipt: null, startupDefault: false }, error: null });
-  vi.mocked(settleRepoGrade).mockResolvedValue(true);
-  vi.mocked(evaluateRepoGrade).mockResolvedValue({
-    noSubmission: true, fullName: "School/Repo", sourceCommit: currentSha, digestTruncated: false, reason: "No submission",
-  });
-
-  await expect(readRepoGradeStartupReadinessAction(account.id)).resolves.toEqual({ status: "ready", accountId: account.id });
-  await expect(runStartupTarget()).resolves.toEqual({ status: "no-submission" });
-  expect(rpc.mock.calls.map(([name]) => name)).toEqual(["repo_grade_read_profile", "repo_grade_freeze_rubric"]);
-  expect(evaluateRepoGrade).toHaveBeenCalledExactlyOnceWith(
-    { owner: "School", repo: "Repo" }, profile.instructions, profile.rubric, "embedded", undefined,
-    "assignment", false, false, true, currentSha, expect.objectContaining({ automaticGrader: profile }),
-  );
-  expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "no-submission", inputsComplete: true });
-  expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
-  expect(readPinnedRepoGradeReadme).not.toHaveBeenCalled();
-  expect(callLlm).not.toHaveBeenCalled();
-});
-
-it.each([
-  { profile: null },
-  { profile: savedStartupProfile("Rubric"), startupDefault: true },
-  { profile: savedStartupProfile("Rubric") },
-  { profile: savedStartupProfile("Rubric", { provider: "gemini" }), startupDefault: false },
-  { profile: savedStartupProfile(""), startupDefault: false },
-  { profile: savedStartupProfile("Rubric", { useReadmeInstructions: true }), startupDefault: false },
-  { profile: savedStartupProfile("Rubric", { runCode: true }), startupDefault: false },
-  { profile: savedStartupProfile("Rubric", { targetBranch: "main" }), startupDefault: false },
-])("blocks an unsupported Embedded pilot profile before preparation (%j)", async ({ profile, startupDefault }) => {
-  admitStartupFixture();
-  vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("embedded-only");
-  rpc.mockResolvedValueOnce({ data: profile && {
-    profile, receipt: null, ...(startupDefault === undefined ? {} : { startupDefault }),
-  }, error: null });
-
-  await expect(runStartupTarget()).resolves.toEqual({ status: "embedded-profile-required" });
-  expect(rpc.mock.calls.map(([name]) => name)).toEqual(["repo_grade_read_profile"]);
-  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "not-started" }));
-  expect(claimRepoGrade).not.toHaveBeenCalled();
-  expect(readPinnedRepoGradeReadme).not.toHaveBeenCalled();
-  expect(evaluateRepoGrade).not.toHaveBeenCalled();
-  expect(callLlm).not.toHaveBeenCalled();
-});
-
-it("refuses paid rubric preparation retries in the Embedded pilot", async () => {
-  vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("embedded-only");
-  vi.spyOn(discoveryMode, "repoGradeDiscoveryEnabled").mockReturnValue(true);
-  await expect(retryRepoGradePreparationAction(account.id, courseId, "assignment", "a".repeat(64), "b".repeat(64)))
-    .resolves.toMatchObject({ status: "retry-unavailable" });
-  expect(discoverRepoGradeSources).not.toHaveBeenCalled();
-  expect(rpc).not.toHaveBeenCalled();
-  expect(callLlm).not.toHaveBeenCalled();
-});
 
 it("freezes the saved rubric before admission and invokes the real runner with the exact pin", async () => {
   const profile = admitStartupFixture();

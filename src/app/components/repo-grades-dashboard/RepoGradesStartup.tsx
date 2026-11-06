@@ -20,6 +20,12 @@ const AutomaticContext = createContext<ReturnType<typeof useRepoGradesAutomatic>
 const StartupContext = createContext<ReturnType<typeof useRepoGradesStartup> | null>(null);
 const MANUAL_PAUSE = "Manual repository grading is paused while the Embedded pilot is selected.";
 
+export function useRepoGradesAutomaticRun(accountId: string | null) {
+  const { user, loading } = useSupabase();
+  const status = useContext(AutomaticContext)?.status;
+  return !loading && accountId && user?.id === accountId && status?.status === "loaded" ? status.run : null;
+}
+
 const PHASE_TEXT: Record<RepoGradesStartupProgress["phase"], string> = {
   unavailable: "Automatic repository checks at startup are currently unavailable.",
   checking: "Checking classes for automatic repository work.",

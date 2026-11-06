@@ -622,6 +622,33 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      repo_grade_automatic_runs: {
+        Row: { id: string; user_id: string; created_at: string };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      repo_grade_automatic_courses: {
+        Row: { run_id: string; course_id: string; state: string; reason: string | null };
+        Insert: never;
+        Update: never;
+        Relationships: [{
+          foreignKeyName: "repo_grade_automatic_courses_run_id_fkey";
+          columns: ["run_id"];
+          isOneToOne: false;
+          referencedRelation: "repo_grade_automatic_runs";
+          referencedColumns: ["id"];
+        }];
+      };
+      repo_grade_automatic_targets: {
+        Row: {
+          id: number; run_id: string; course_id: string; repo: string; folder: string;
+          source_ref: string; state: string; reason: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       repo_grade_reservations: {
         Row: { generation: number; user_id: string };
         Insert: never;

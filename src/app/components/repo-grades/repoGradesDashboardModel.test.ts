@@ -118,6 +118,25 @@ describe("class repository results", () => {
     ]);
   });
 
+  it("shows a background block under the confirmed student and exact assignment without changing a saved score", () => {
+    const block = { repo: "ORG/ALICE", folder: "Lab", sourceRef: "work", explanation: "The grading branch changed." };
+    const results = new Map<string, RepoGradeSavedResult>();
+    const score = attempt(1, "org/alice", "Lab", 85);
+    addRepoGradeSavedPage(results, [score, attempt(2, "org/alice", "lab", 80)]);
+    const bob = { ...block, repo: "org/bob" };
+    const matrix = buildRepoGradeMatrix([], {}, results, [], [],
+      [{ id: "1", name: "Alice" }, { id: "2", name: "Bob" }],
+      [{ repo: "org/alice", canvasUserId: "1", student: "Alice" }, { repo: "org/bob", canvasUserId: "2", student: "Bob" }],
+      [block, block, bob]);
+    const rows = visibleRepoGradebookRows(matrix, [], [], "Lab", "", false, DEFAULT_REPO_GRADE_SORT);
+    const [aliceRow, bobRow] = rows;
+    expect(rows.map(({ name }) => name)).toEqual(["Alice", "Bob"]);
+    expect(aliceRow.repos[0].cells.get("Lab")).toMatchObject({ saved: { scored: score }, automaticBlocks: [block] });
+    expect(aliceRow.repos[0].cells.get("lab")?.automaticBlocks).toBeUndefined();
+    expect(bobRow.repos[0].cells.get("Lab")?.automaticBlocks).toEqual([bob]);
+    expect(bobRow.repos[0].active).toBeUndefined();
+  });
+
   it("keeps retained generated results even when the current browser draft has no score or feedback", () => {
     const source = { ...edit("9/10"), comment: "Generated feedback" };
     const retained = { id: "result-1", source, draft: { ...edit("8/10"), comment: "Reviewed feedback" } };

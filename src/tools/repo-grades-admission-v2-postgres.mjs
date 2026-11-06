@@ -17,6 +17,7 @@ import { runAutomaticRepoGradeCutoverCases } from "./repo-grades-automatic-cutov
 import { runAutomaticRepoGradeGithubRetryCases } from "./repo-grades-automatic-github-retry-postgres.mjs";
 import { runAutomaticRepoGradeIntervalCases, seedRepoGradeDailySchedule } from "./repo-grades-automatic-interval-postgres.mjs";
 import { runAutomaticRepoGradeSnapshotCases } from "./repo-grades-automatic-snapshot-postgres.mjs";
+import { runAutomaticRepoGradeClassQueueCases } from "./repo-grades-automatic-class-queue-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -46,6 +47,7 @@ const automaticCutoverMigrationFile = "20261106184758_repo_grade_automatic_start
 const automaticGithubRetryMigrationFile = "20261106194507_repo_grade_automatic_github_retry.sql";
 const automaticIntervalMigrationFile = "20261106194647_repo_grade_automatic_interval.sql";
 const automaticSnapshotMigrationFile = "20261106210512_repo_grade_automatic_pinned_snapshot.sql";
+const automaticClassQueueMigrationFile = "20261106212857_repo_grade_automatic_class_queue.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -278,6 +280,12 @@ async function main() {
     console.log("PASS: automatic grading snapshot privileges, lease fencing, evidence reuse, and cleanup.");
     await runAutomaticRepoGradeIntervalCases({ owner, worker, contender }, priorDaily);
     console.log("PASS: durable intervals, unchanged daily schedules, catch-up and concurrent ticks.");
+    const automaticClassQueueMigration = readFileSync(
+      new URL(`../../supabase/migrations/${automaticClassQueueMigrationFile}`, import.meta.url), "utf8",
+    );
+    await owner.query(`begin; ${automaticClassQueueMigration} commit;`);
+    await runAutomaticRepoGradeClassQueueCases({ owner, worker });
+    console.log("PASS: automatic grading class selection, owner isolation and claim order.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

@@ -1,5 +1,5 @@
 import { useSupabase } from "@/context/SupabaseProvider";
-import { Typography } from "@mui/material";
+import { Alert, Button, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
 import { RepoGradesStartupPreview } from "../repo-grades-dashboard/RepoGradesStartupPreview";
@@ -25,6 +25,33 @@ export default function RepoGradesDashboard({ courseId, gradeColumns }: {
       <RepoGradesStartupPreview key={JSON.stringify([ownerId, courseId])} accountId={ownerId} courseId={courseId} />
       <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
     </section>
+  );
+}
+
+export function RepoGradeAutomaticBlockNotice({ discoveryExplanation, pastRunStartedAt, unavailable, reloading, reloadReasons }: {
+  discoveryExplanation: string | null;
+  pastRunStartedAt?: string;
+  unavailable: boolean;
+  reloading: boolean;
+  reloadReasons?: () => void;
+}) {
+  if (discoveryExplanation === null && !reloadReasons) return null;
+  return (
+    <Stack spacing={1}>
+      {discoveryExplanation !== null && <Alert severity="warning" role="status">
+        {pastRunStartedAt ? <>Automatic discovery for this class was incomplete in the run started{" "}
+          <time dateTime={pastRunStartedAt}>{new Date(pastRunStartedAt).toLocaleString()}</time>.</>
+          : "Latest automatic discovery was incomplete."}{" "}{discoveryExplanation}
+        {" "}Some repositories may not have assignment results from this check.
+      </Alert>}
+      {reloadReasons && <Alert severity={unavailable && !reloading ? "warning" : "info"} role="group"
+        action={<Button type="button" color="inherit" size="small" aria-disabled={reloading}
+          onClick={reloadReasons}>Reload reasons</Button>}>
+        <span role="status">{reloading ? "Loading automatic grading reasons for this class."
+          : unavailable ? "Automatic grading reasons for this class could not be loaded."
+            : "Automatic grading reasons refreshed."}</span>
+      </Alert>}
+    </Stack>
   );
 }
 
@@ -64,6 +91,19 @@ export function RepoGradeResultDetails({ repo, folder, editableEdit, scanStatus 
   const resultLabel = `${repo.name} / ${folder || "Repository root"}`;
   return (
     <>
+      {cell?.automaticBlocks?.map(({ sourceRef, explanation, runStartedAt }) => (
+        <Typography component="p" variant="body2" key={JSON.stringify([sourceRef, explanation])} sx={{ overflowWrap: "anywhere" }}>
+          <strong>Automatic grading blocked</strong> on {sourceRef}
+          {runStartedAt && <> (run started <time dateTime={runStartedAt}>{new Date(runStartedAt).toLocaleString()}</time>)</>}.
+          {" "}{explanation}
+        </Typography>
+      ))}
+      {scanStatus === "missing-folder" && <Typography component="p" variant="caption" color="text.secondary">
+        Check the assignment folder name and the branch selected for the scan.
+      </Typography>}
+      {scanStatus === "scan-error" && <Typography component="p" variant="caption" color="text.secondary">
+        Check that GitHub access and the selected branch are available, then refresh the repository scan.
+      </Typography>}
       {browserStatus && <RepoGradeStatusChip status={browserStatus} source={cell?.saved ? "Browser" : undefined} />}
       {!editable && !scanStatus && browserStatus !== "succeeded"
         && browserStatus !== "partial" && browserStatus !== "no-submission"

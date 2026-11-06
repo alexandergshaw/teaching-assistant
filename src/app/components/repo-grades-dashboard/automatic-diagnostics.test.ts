@@ -15,6 +15,8 @@ describe("automatic repo grading control diagnostics", () => {
     ["background_recovery", "success"],
     ["background_github_retry", "success"],
     ["background_github_cooldown", "blocked"],
+    ["background_class_queue", "success"],
+    ["background_class_queue", "unavailable"],
   ] as const)("records %s with a fixed outcome and no identifiers or payloads", (operation, outcome) => {
     recordRepoGradesStartup(operation, outcome, performance.now());
     const label = `repo_grades_startup_${operation}`;

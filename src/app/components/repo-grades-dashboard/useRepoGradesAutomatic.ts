@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   enqueueRepoGradeAutomaticRunAction, readRepoGradeAutomaticRecoveryAction, readRepoGradeAutomaticStatusAction,
-  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticGithubRetryAction,
+  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticClassQueueAction,
+  setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticGithubRetryAction,
   setRepoGradeAutomaticScheduleAction,
   startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
 } from "@/app/actions/repo-grade-automatic";
@@ -13,10 +14,12 @@ import { recordRepoGradesStartup } from "./startup-diagnostics";
 
 const POLL_MS = 5_000;
 const unavailable = { status: "unavailable" } as const;
+type ControlDiagnostic = "background_preference" | "background_schedule" | "background_start" | "background_stop"
+  | "background_github_retry" | "background_class_queue";
+type StatusRequest = () => Promise<AutomaticRepoGradeStatus>;
 
 function recordControl(
-  operation: "background_preference" | "background_schedule" | "background_retry" | "background_recovery" | "background_start"
-    | "background_stop" | "background_github_retry",
+  operation: ControlDiagnostic | "background_retry" | "background_recovery",
   outcome: "success" | "failed" | "unavailable" | "unchanged",
   startedAt: number,
 ) {
@@ -32,24 +35,28 @@ export function automaticRepoGradeRunActive(run: AutomaticRepoGradeRun | null | 
 }
 
 export function useRepoGradesAutomatic(accountId: string | null) {
-  const [current, setCurrent] = useState<{ accountId: string; status: AutomaticRepoGradeStatus }>();
+  const [current, setCurrent] = useState<{ accountId: string; status: AutomaticRepoGradeStatus; stale: boolean }>();
   const [pendingAccount, setPendingAccount] = useState<string>();
   const [control, setControl] = useState<{ accountId: string; action: "start" | "stop"; changed: boolean }>();
-  const controller = useRef<{ update: (request: () => Promise<AutomaticRepoGradeStatus>) => Promise<AutomaticRepoGradeStatus | undefined> }>(null);
+  const controller = useRef<{
+    update: (request: StatusRequest) => Promise<AutomaticRepoGradeStatus | undefined>;
+  }>(null);
 
   useEffect(() => {
     if (!accountId) return;
     let active = true;
     let revision = 0;
     let lastDiagnostic = "";
+    let lastLoaded: Extract<AutomaticRepoGradeStatus, { status: "loaded" }> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const update = async (request: () => Promise<AutomaticRepoGradeStatus>) => {
+    const update = async (request: StatusRequest) => {
       const attempt = ++revision;
       clearTimeout(timer);
       const startedAt = performance.now();
       const status = await request().catch(() => unavailable);
       if (!active || attempt !== revision) return;
+      const readAgain = () => void update(() => readRepoGradeAutomaticStatusAction(accountId));
       const run = status.status === "loaded" ? status.run : null;
       const retryAt = status.status === "loaded" ? status.githubRetryAt : null;
       const diagnostic = [run?.id, run?.phase, status.status, retryAt].join(":");
@@ -63,8 +70,8 @@ export function useRepoGradesAutomatic(accountId: string | null) {
           // The session diagnostic must not interrupt the durable status view.
         }
       }
-      setCurrent({ accountId, status });
-      const readAgain = () => void update(() => readRepoGradeAutomaticStatusAction(accountId));
+      if (status.status === "loaded") lastLoaded = status;
+      setCurrent({ accountId, status: lastLoaded ?? status, stale: status.status === "unavailable" && !!lastLoaded });
       if (status.status === "unavailable" || automaticRepoGradeRunActive(run)
         || run?.settling) {
         timer = setTimeout(readAgain, POLL_MS);
@@ -86,7 +93,7 @@ export function useRepoGradesAutomatic(accountId: string | null) {
 
   async function change(
     request: (accountId: string) => Promise<AutomaticRepoGradeStatus>,
-    diagnostic: "background_preference" | "background_schedule" | "background_start" | "background_stop" | "background_github_retry",
+    diagnostic: ControlDiagnostic,
   ) {
     if (!accountId || !controller.current) return;
     setPendingAccount(accountId);
@@ -94,11 +101,12 @@ export function useRepoGradesAutomatic(accountId: string | null) {
       const startedAt = performance.now();
       const status = await controller.current.update(() => request(accountId));
       if (status) {
-        const outcome = status.status === "unavailable" ? "unavailable"
+        const outcome = status.status === "unavailable" || (diagnostic === "background_class_queue" && !status.classQueue) ? "unavailable"
           : status.control?.changed === false ? "unchanged" : "success";
         recordControl(diagnostic, outcome, startedAt);
         setControl(status.status === "loaded" && status.control ? { accountId, ...status.control } : undefined);
       }
+      return status;
     } finally {
       setPendingAccount((previous) => previous === accountId ? undefined : previous);
     }
@@ -106,13 +114,19 @@ export function useRepoGradesAutomatic(accountId: string | null) {
 
   return {
     status: current?.accountId === accountId ? current?.status : undefined,
+    stale: current?.accountId === accountId && current.stale,
     pending: pendingAccount === accountId,
     control: control?.accountId === accountId ? control : undefined,
     setEnabled: (enabled: boolean) => change((id) => setRepoGradeAutomaticEnabledAction(id, enabled), "background_preference"),
     setGithubRetry: (enabled: boolean) =>
       change((id) => setRepoGradeAutomaticGithubRetryAction(id, enabled), "background_github_retry"),
-    setSchedule: (schedule: AutomaticRepoGradeScheduleDraft | null) =>
-      change((id) => setRepoGradeAutomaticScheduleAction(id, schedule), "background_schedule"),
+    async setSchedule(schedule: AutomaticRepoGradeScheduleDraft | null) {
+      await change((id) => setRepoGradeAutomaticScheduleAction(id, schedule), "background_schedule");
+    },
+    async setClassQueue(courseIds: string[] | null) {
+      const status = await change((id) => setRepoGradeAutomaticClassQueueAction(id, courseIds), "background_class_queue");
+      return status?.status === "loaded" && !!status.classQueue;
+    },
     start: () => change(startRepoGradeAutomaticRunAction, "background_start"),
     stop: (runId: string) => change((id) => stopRepoGradeAutomaticRunAction(id, runId), "background_stop"),
     async readRecovery(targetId: number) {

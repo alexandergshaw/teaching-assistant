@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { automaticReasonLabel } from "./automatic-reason-label";
+import { automaticReasonLabel } from "@/lib/repo-grades-dashboard/automatic-reason-label";
 
 it.each([
   ["missing-instruction-evidence", "no usable pinned assignment README"],
@@ -21,7 +21,7 @@ it.each(["conflicting-instructions", "missing-instruction-evidence", "readme-tar
   },
 );
 
-it.each(["Private assignment path and instructions", "constructor", "__proto__"])(
+it.each(["Private assignment path and instructions", "constructor", "__proto__", null])(
   "does not display an unrecognized stored reason", (reason) => {
     expect(automaticReasonLabel(reason)).toBe("The worker did not provide a recognized reason.");
   },

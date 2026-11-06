@@ -75,6 +75,8 @@ export async function runAutomaticRepoGradeIntervalCases({ owner, worker, conten
     assert.equal(await worker.query(`select public.repo_grade_automatic_set_schedule('${ownerId}', null, null);`), "t");
     assert.equal((await status()).schedule, null);
     assert.deepEqual((await status(dailyId)).schedule, { ...priorDaily, kind: "daily" });
+    assert.equal(await worker.query(`select public.repo_grade_automatic_control(
+      '${ownerId}', 'stop', null, '${run.id}');`), "t");
   } finally {
     await worker.query("reset role;");
     await contender.query("reset role;");

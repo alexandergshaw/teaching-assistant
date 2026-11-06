@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/server";
-import type { AutomaticRepoGradeCourseState, AutomaticRepoGradeStatus, AutomaticRepoGradeTargetState } from "./automatic-status";
+import type { AutomaticRepoGradeClassQueue, AutomaticRepoGradeCourseState, AutomaticRepoGradeStatus, AutomaticRepoGradeTargetState } from "./automatic-status";
 import type { DiscoveryRateLimit } from "./discovery-transport";
 import { restoreAutomaticRepoGradeSnapshot, type AutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 
@@ -55,6 +55,24 @@ export async function controlAutomaticRepoGrade(accountId: string,
   }) === true;
 }
 
+function parseClassQueue(value: unknown): AutomaticRepoGradeClassQueue | null {
+  if (!record(value) || typeof value.customized !== "boolean" || !Array.isArray(value.courses)
+    || value.courses.length > 1_000) return null;
+  const ids = new Set<string>();
+  const courses: AutomaticRepoGradeClassQueue["courses"] = [];
+  for (const row of value.courses) {
+    if (!record(row) || !isAutomaticRepoGradeId(row.courseId) || ids.has(row.courseId)
+      || typeof row.label !== "string" || typeof row.included !== "boolean") return null;
+    ids.add(row.courseId);
+    courses.push({ courseId: row.courseId, label: row.label, included: row.included });
+  }
+  return { customized: value.customized, courses };
+}
+
+export async function saveAutomaticRepoGradeClassQueue(accountId: string, courseIds: string[] | null) {
+  return await rpc("repo_grade_automatic_set_class_queue", { p_user_id: accountId, p_course_ids: courseIds }) === true;
+}
+
 export async function readAutomaticRepoGrade(accountId: string): Promise<Omit<Extract<AutomaticRepoGradeStatus, { status: "loaded" }>, "status">> {
   const result = await rpc("repo_grade_automatic_status_with_github_retry", { p_user_id: accountId });
   if (!record(result) || typeof result.enabled !== "boolean"
@@ -76,6 +94,7 @@ export async function readAutomaticRepoGrade(accountId: string): Promise<Omit<Ex
     githubRetryEnabled: result.githubRetryEnabled,
     githubRetryAt: result.githubRetryAt,
     schedule,
+    classQueue: parseClassQueue(result.classQueue),
     run: result.run,
     preparations: result.preparations,
     recoveries: result.recoveries,

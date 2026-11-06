@@ -1,5 +1,12 @@
 # Repository grading snapshots
 
+The automatic grading table lets the owner save the classes and their order
+for the next run. App opening, scheduled checks, and **Start checks now**
+all use the saved queue. A run keeps its class selection and order once
+created. The default queue includes every class; a custom queue includes
+only the selected classes. With no classes selected, a scheduled occurrence
+advances without creating a run.
+
 Each new automatic check reads the saved course and branch settings and pins
 the commit and assignment folders for each repository and applicable branch.
 The worker uses those commit IDs for the rest of that run, even if a branch

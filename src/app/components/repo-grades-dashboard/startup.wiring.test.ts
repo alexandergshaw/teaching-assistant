@@ -69,12 +69,12 @@ describe("Repo Grades startup wiring", () => {
     const component = source("./RepoGradesStartup.tsx");
     const table = source("./RepoGradesStartupTable.tsx");
     expect(component).toContain("<RepoGradesStartupTable courses={progress.courses} headingId={headingId} />");
-    expect(table).toContain('<Table size="small" aria-labelledby={headingId}>');
+    expect(table).toContain('<Table size="small" aria-labelledby={headingId} aria-describedby={classQueue?.descriptionId}>');
     expect(table).toContain('<TableCell component="th" scope="row">{course.label}</TableCell>');
     expect(table).toContain('sortDirection={active ? sort.direction : false}');
     expect(table).toContain('<TableSortLabel component="button" type="button" active={active}');
-    expect(table).toContain('onClick={() => setSort((current) => nextStartupTableSort(current, id))}');
-    expect(table).toContain("sortStartupCourses(courses, sort).map");
+    expect(table).toContain("nextStartupTableSort(current, id)");
+    expect(table).toContain("(sort ? sortStartupCourses(courses, sort) : courses).map");
     expect(table).toContain("orderStartupStatuses(course.states).map");
     expect(table).toContain("{course.repositories && (");
     expect(table).toContain("{formatStartupRepositoryCoverage(course.repositories)}");

@@ -1,5 +1,6 @@
 import type { readRepoGradeHistoryAction } from "@/app/actions/repo-grades-dashboard";
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
+import type { AutomaticRepoGradeBlock } from "@/lib/repo-grades-dashboard/automatic-blocks";
 import { suggestRepoStudentBindings, type RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
@@ -140,6 +141,7 @@ type MatrixCell = {
   local: RepoGradeCellEdit | null;
   retained: RepoGradeCellEdit["retainedResults"];
   saved: RepoGradeSavedResult | undefined;
+  automaticBlocks?: AutomaticRepoGradeBlock[];
   browserStatus?: ReturnType<typeof gradeStatusForEdit>;
 };
 
@@ -165,6 +167,7 @@ export function buildRepoGradeMatrix(
   assignments: readonly Pick<CanvasAssignmentBrief, "id" | "name">[],
   roster: readonly RepoBindingRosterEntry[],
   studentRepos: readonly CourseStudentRepo[],
+  automaticBlocks: readonly AutomaticRepoGradeBlock[] = [],
 ) {
   const folders = new Set(gradeColumns.map(({ folder }) => folder));
   const repos = new Map<string, MatrixRepository>();
@@ -204,6 +207,21 @@ export function buildRepoGradeMatrix(
       browser: previous?.browser, local: previous?.local ?? null, saved,
       browserStatus: previous?.browserStatus,
       retained: previous?.retained,
+    });
+  }
+  for (const block of automaticBlocks) {
+    const { repo: name, folder, sourceRef, explanation } = block;
+    folders.add(folder);
+    const repo = repository(name);
+    const previous = repo.cells.get(folder);
+    if (previous?.automaticBlocks?.some((item) => item.sourceRef === sourceRef && item.explanation === explanation)) continue;
+    repo.cells.set(folder, {
+      browser: previous?.browser,
+      local: previous?.local ?? null,
+      retained: previous?.retained,
+      saved: previous?.saved,
+      browserStatus: previous?.browserStatus,
+      automaticBlocks: [...(previous?.automaticBlocks ?? []), block],
     });
   }
   for (const { repo, canvasUserId } of studentRepos) {
@@ -280,7 +298,7 @@ export function visibleRepoGradebookRows(
         return [{ ...repo, active: active.row }];
       }
       const cell = repo.cells.get(selectedFolder);
-      const hasResult = !!(cell?.local || cell?.browserStatus || cell?.retained?.length || cell?.saved);
+      const hasResult = !!(cell?.local || cell?.browserStatus || cell?.retained?.length || cell?.saved || cell?.automaticBlocks?.length);
       const scannedRow = scanned.get(key);
       const operational = scannedRow && (allFolders || scannedRow.cells[selectedFolder]?.status === "ungraded");
       if (selectionFiltered || operational || (!allFolders && !hasResult)

@@ -14,6 +14,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "discovery-unavailable": "The worker could not complete repository discovery.",
   "duplicate-instruction-evidence": "The worker found more than one instruction record for a repository.",
   "duplicate-target": "The worker found duplicate repository targets for the assignment.",
+  "embedded-profile-required": "Save an Embedded grading profile with a fixed rubric and shared instructions. Turn off README instructions, code execution, and target branch checks in that profile.",
   "enumeration-incomplete": "The worker could not list every repository for the class.",
   "explicit-retry-required": "An earlier attempt to prepare the rubric failed. Use Retry rubric preparation to try it again.",
   failed: "Rubric preparation failed. Use Retry rubric preparation if it is available for the assignment.",
@@ -32,7 +33,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "invalid-inventory": "The worker could not verify the repository targets for the assignment.",
   "invalid-scope": "The worker could not verify the class, repository organization or assignment scope.",
   "invalid-settings": "The worker could not use the saved assignment grading settings.",
-  "invalid-source": "The worker could not verify a configured branch or assignment folder.",
+  "invalid-source": "The worker could not verify a configured branch or assignment folder. Check the assignment's source branch and folder in GitHub.",
   "pinned-inventory-unavailable": "The worker could not retain or verify the repository snapshot. Start a new check.",
   "missing-instruction-evidence": `A repository has no usable pinned assignment README. Add the assignment README or switch to shared instructions. ${USE_SHARED_INSTRUCTIONS}`,
   "missing-instructions": "The worker found no usable saved assignment instructions.",
@@ -41,7 +42,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "prior-attempt": "A previous attempt needs review. Check the repository grading history before retrying.",
   "profile-storage-unavailable": "The worker could not load or verify the saved grading profile.",
   "profile-unavailable": "The worker could not verify a grading profile and its rubric. This record has no more specific reason.",
-  "rate-limited": "GitHub limited repository requests.",
+  "rate-limited": "GitHub limited repository requests. Wait for the limit to reset before starting a new check.",
   "rate-limit-retry-disabled": "Automatic GitHub rate-limit retries were turned off while the run was waiting.",
   "rate-limit-retry-exhausted": "The worker reached its limit for retrying GitHub rate limits.",
   "readme-deadline-exceeded": "The worker ran out of time while verifying the assignment READMEs.",
@@ -69,6 +70,6 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "worker-interrupted": "The worker stopped before it could confirm the outcome.",
 };
 
-export function automaticReasonLabel(reason: string): string {
-  return Object.hasOwn(REASON_LABELS, reason) ? REASON_LABELS[reason] : "The worker did not provide a recognized reason.";
+export function automaticReasonLabel(reason: string | null): string {
+  return reason !== null && Object.hasOwn(REASON_LABELS, reason) ? REASON_LABELS[reason] : "The worker did not provide a recognized reason.";
 }

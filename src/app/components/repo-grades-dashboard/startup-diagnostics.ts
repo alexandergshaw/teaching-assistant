@@ -5,7 +5,7 @@ import type { RepoGradePreparationDiagnostic } from "@/lib/repo-grades-dashboard
 type Operation = "readiness" | "courses" | "discovery" | "history" | "evaluation" | "stop"
   | "batch_read" | "batch_seal" | "batch_close" | "preview" | "background" | "background_preference" | "background_schedule"
   | "background_retry" | "background_recovery" | "background_start" | "background_stop"
-  | "background_github_retry" | "background_github_cooldown";
+  | "background_github_retry" | "background_github_cooldown" | "background_block_details" | "background_class_queue";
 type Outcome = "success" | "unavailable" | "incomplete" | "request-failed" | "failed" | "unknown" | "blocked"
   | "unchanged" | "disabled" | "not-configured" | "embedded-profile-required";
 type PreviewResult = Awaited<ReturnType<typeof previewRepoGradeStartupPlanAction>> | { status: "request-failed" };

@@ -33,6 +33,7 @@ import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
 import { useRepoGradesStartupHistoryRevision } from "../repo-grades-dashboard/RepoGradesStartup";
+import { useRepoGradesAutomaticBlocks } from "../repo-grades-dashboard/useRepoGradesAutomaticBlocks";
 import RepoGradesGithubQuota from "./RepoGradesGithubQuota";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
@@ -77,7 +78,7 @@ import {
 } from "./repoGradesAssignmentMapping";
 import { EMPTY_REPO_GRADE_CELL_EDITS } from "./repoGradesCellEdits";
 import { createRepoGradesDraftController } from "./repoGradesDraftController";
-import RepoGradesDashboard from "./RepoGradesDashboard";
+import RepoGradesDashboard, { RepoGradeAutomaticBlockNotice } from "./RepoGradesDashboard";
 import { buildRepoGradeMatrix, buildRepoGradesDashboard, visibleRepoGradebookRows } from "./repoGradesDashboardModel";
 import { useRepoGradeMatrixResults } from "./useRepoGradeMatrixResults";
 import RepoGradesGrid from "./RepoGradesGrid";
@@ -204,6 +205,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const selectedCourseId = course?.id ?? null;
   const ownerId = selectedCourseId && isOwnerDecision(accessDecision) ? accountId : null;
   const historyRevision = useRepoGradesStartupHistoryRevision(ownerId ?? "", selectedCourseId ?? "");
+  const automaticBlocks = useRepoGradesAutomaticBlocks(ownerId, selectedCourseId);
   const saved = useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision);
   const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot, () => null);
   const cellDraft = draftSnapshot?.courseId === selectedCourseId ? draftSnapshot : null;
@@ -437,7 +439,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const bodyRows = visibleRepoRows(displayedRows, uiState.searchQuery, showAll ? NO_GRADE_SET : selected);
   const matrix = buildRepoGradeMatrix(
     buildRepoGradesDashboard(cellEdits, scan),
-    cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos,
+    cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos, automaticBlocks.targets,
   );
   const selectionFiltered = selectionFilterSummary({
     folderScopedCount: displayedRows.length,
@@ -845,6 +847,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
       >
+      <RepoGradeAutomaticBlockNotice discoveryExplanation={automaticBlocks.discoveryExplanation}
+        pastRunStartedAt={automaticBlocks.pastRunStartedAt} unavailable={automaticBlocks.unavailable}
+        reloading={automaticBlocks.reloading} reloadReasons={automaticBlocks.reloadReasons} />
       {course && cellDraft && (
         <RepoGradesGrid
           columns={displayedColumns}

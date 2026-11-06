@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { createClient } from "@/lib/supabase/server";
 import {
-  setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
+  setRepoGradeAutomaticClassQueueAction, setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
   startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
 } from "./repo-grade-automatic";
 
-const mocks = vi.hoisted(() => ({ control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/app-users", async (original) => ({
   ...await original<typeof import("@/lib/supabase/app-users")>(),
@@ -16,6 +18,7 @@ vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeDurableS
 vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   controlAutomaticRepoGrade: mocks.control, readAutomaticRepoGrade: mocks.read,
   saveAutomaticRepoGradeGithubRetry: mocks.saveGithubRetry,
+  saveAutomaticRepoGradeClassQueue: mocks.saveClassQueue,
   saveAutomaticRepoGradeSchedule: mocks.saveSchedule, isAutomaticRepoGradeId: (id: unknown) => typeof id === "string",
 }));
 vi.mock("./repo-grades-dashboard", () => ({ retryRepoGradePreparationAction: vi.fn() }));
@@ -60,6 +63,21 @@ describe("owner automatic grading controls", () => {
     for (const schedule of [daily, interval, null]) {
       expect((await setRepoGradeAutomaticScheduleAction("owner", schedule)).status).toBe("loaded");
       expect(mocks.saveSchedule).toHaveBeenLastCalledWith("owner", schedule);
+    }
+  });
+
+  it("saves the active owner's queue order, preserving the distinction between empty and default", async () => {
+    expect(await setRepoGradeAutomaticClassQueueAction("foreign", ["b", "a"])).toEqual({ status: "unavailable" });
+    vi.mocked(getAppUser).mockResolvedValueOnce({ ...ownerRow, role: "instructor" });
+    expect(await setRepoGradeAutomaticClassQueueAction("owner", ["b", "a"])).toEqual({ status: "unavailable" });
+    for (const invalid of [undefined, { courseIds: ["a"] }, ["a", "a"], [null], Array(1), Array(1_001).fill("a")]) {
+      expect(await setRepoGradeAutomaticClassQueueAction("owner", invalid)).toEqual({ status: "unavailable" });
+    }
+    expect(mocks.saveClassQueue).not.toHaveBeenCalled();
+    mocks.saveClassQueue.mockResolvedValue(true);
+    for (const ordered of [["b", "a"], [], null]) {
+      expect((await setRepoGradeAutomaticClassQueueAction("owner", ordered)).status).toBe("loaded");
+      expect(mocks.saveClassQueue).toHaveBeenLastCalledWith("owner", ordered);
     }
   });
 

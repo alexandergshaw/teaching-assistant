@@ -6,6 +6,11 @@ export type AutomaticRepoGradeSchedule = AutomaticRepoGradeScheduleDraft & { nex
 export type AutomaticRepoGradePreparation = { id: number; label: string; folder: string };
 export type AutomaticRepoGradeRecovery = AutomaticRepoGradePreparation & { repo: string; expiresAt: string };
 
+export type AutomaticRepoGradeClassQueue = {
+  customized: boolean;
+  courses: { courseId: string; label: string; included: boolean }[];
+};
+
 export type AutomaticRepoGradeCourseState = "checking" | "scanned" | "partial" | "not-configured" | "stopped";
 export type AutomaticRepoGradeTargetState = "queued" | "running" | "succeeded" | "no-submission" | "partial"
   | "failed" | "unknown" | "busy" | "blocked" | "already-processed" | "not-started" | "embedded-profile-required" | "stopped";
@@ -31,6 +36,7 @@ export type AutomaticRepoGradeStatus = {
   githubRetryEnabled: boolean;
   githubRetryAt: string | null;
   schedule: AutomaticRepoGradeSchedule | null;
+  classQueue?: AutomaticRepoGradeClassQueue | null;
   run: AutomaticRepoGradeRun | null;
   preparations: AutomaticRepoGradePreparation[];
   recoveries: AutomaticRepoGradeRecovery[];

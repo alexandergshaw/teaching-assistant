@@ -5,8 +5,9 @@ import { Alert, Button, FormControlLabel, List, ListItem, ListItemText, Stack, S
 import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import type { AutomaticRepoGradeRecovery } from "@/lib/repo-grades-dashboard/automatic-status";
 import { automaticCourseProgress } from "./automatic-course-progress";
-import { automaticReasonLabel } from "./automatic-reason-label";
+import { automaticReasonLabel } from "@/lib/repo-grades-dashboard/automatic-reason-label";
 import { AutomaticRepoGradeScheduleControl } from "./AutomaticRepoGradeScheduleControl";
+import { AutomaticRepoGradeClassQueue } from "./AutomaticRepoGradeClassQueue";
 import { automaticRepoGradeRunActive, type useRepoGradesAutomatic } from "./useRepoGradesAutomatic";
 
 const PHASE_TEXT = {
@@ -21,7 +22,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
   const headingId = useId();
   const preferenceHintId = useId();
   const githubRetryHintId = useId();
-  const { status, pending, control, setEnabled, setGithubRetry, setSchedule, start, stop, readRecovery, retryPreparation } = automatic;
+  const { status, stale, pending, control, setEnabled, setGithubRetry, setSchedule, setClassQueue, start, stop, readRecovery, retryPreparation } = automatic;
   const [retryMessage, setRetryMessage] = useState("");
   const recoveries = useLiveRecoveries(status?.status === "loaded" ? status.recoveries : EMPTY_RECOVERIES);
   if (!status || status.status === "unavailable") {
@@ -31,6 +32,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
   }
   const { run } = status;
   const active = automaticRepoGradeRunActive(run);
+  const hasQueuedClasses = status.classQueue?.courses.some((course) => course.included);
   const courses = (run?.courses ?? []).map(automaticCourseProgress);
   const details = (run?.courses ?? []).flatMap((course) => {
     const reasons = [...new Set([course.reason, ...course.counts.map(({ reason }) => reason)]
@@ -41,6 +43,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
   return (
     <section aria-labelledby={headingId}>
       <h2 id={headingId}>Automatic repository grading</h2>
+      {stale && <Alert severity="warning" role="status">Showing the last available automatic grading status while we retry.</Alert>}
       <FormControlLabel
         label="Start automatic repository grading when I open the app"
         control={<Switch checked={status.enabled} disabled={pending}
@@ -63,16 +66,21 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
         : run?.phase === "stopped" && run.settling ? "Scheduling stopped. The worker is finishing the current task."
         : run ? PHASE_TEXT[run.phase] : "No automatic run has started."}</p>
       {control?.changed === false && <p role="status">{control.action === "start"
-        ? "No new run started. The worker already has a run queued or finishing."
+        ? hasQueuedClasses === false ? "No new run started. Select and save at least one class in the queue."
+          : "No new run started. The worker already has a run queued or finishing."
         : "This run has already stopped or finished."}</p>}
       <Stack direction="row" spacing={1}>
-        <Button type="button" variant="outlined" size="small" disabled={active || run?.settling || pending}
+        <Button type="button" variant="outlined" size="small" disabled={active || run?.settling || pending || hasQueuedClasses === false}
           onClick={() => void start()}>Start checks now</Button>
         <Button type="button" variant="outlined" size="small" disabled={!active || pending}
           onClick={() => { if (run) void stop(run.id); }}>Stop current run</Button>
       </Stack>
       <AutomaticRepoGradeScheduleControl schedule={status.schedule} pending={pending} save={setSchedule} />
-      {courses.length > 0 && <RepoGradesStartupTable courses={courses} headingId={headingId} />}
+      {status.classQueue ? <AutomaticRepoGradeClassQueue queue={status.classQueue} courses={courses} pending={pending}
+        save={setClassQueue} /> : <>
+        <Alert severity="warning" role="status">Class queue settings are unavailable.</Alert>
+        {courses.length > 0 && <RepoGradesStartupTable courses={courses} headingId={headingId} />}
+      </>}
       {status.preparations.length > 0 && (
         <>
           <h3>Rubric preparation</h3>

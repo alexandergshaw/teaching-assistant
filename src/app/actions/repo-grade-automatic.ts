@@ -4,7 +4,7 @@ import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/ad
 import {
   automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery,
   readAutomaticRepoGrade, saveAutomaticRepoGradeSchedule,
-  saveAutomaticRepoGradeGithubRetry,
+  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry,
 } from "@/lib/repo-grades-dashboard/automatic-store";
 import type { AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { parseAutomaticRepoGradeSchedule } from "@/lib/repo-grades-dashboard/automatic-schedule";
@@ -64,6 +64,22 @@ export async function setRepoGradeAutomaticScheduleAction(
   if (value !== null && !schedule) return unavailable;
   try {
     if (!await saveAutomaticRepoGradeSchedule(accountId, schedule)) return unavailable;
+    return readStatus(accountId);
+  } catch {
+    return unavailable;
+  }
+}
+
+export async function setRepoGradeAutomaticClassQueueAction(
+  expectedAccountId: unknown, courseIds: unknown,
+): Promise<AutomaticRepoGradeStatus> {
+  const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
+  if (!accountId || (courseIds !== null && (!Array.isArray(courseIds) || courseIds.length > 1_000
+    || !Array.from(courseIds).every(isAutomaticRepoGradeId) || new Set(courseIds).size !== courseIds.length))) {
+    return unavailable;
+  }
+  try {
+    if (!await saveAutomaticRepoGradeClassQueue(accountId, courseIds)) return unavailable;
     return readStatus(accountId);
   } catch {
     return unavailable;

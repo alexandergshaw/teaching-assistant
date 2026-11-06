@@ -5,7 +5,7 @@ import { getGeminiApiKey } from "@/lib/gemini";
 import type { RepoGradeCourseConfig } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeDiscovery } from "./discovery";
 import { getRepoGraderIdentity } from "./grader-identity";
-import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
+import { composeRepoGradePreparationEvidence, type RepoGradePreparationEvidenceFailure } from "./preparation-evidence";
 import { captureRepoGradePreparationPolicy, generatePreparedRepoGradeRubric, type RepoGradeRubricGenerator } from "./preparation-generator";
 import type { RepoGradePreparationCapture, RepoGradePreparationInput } from "./preparation-input";
 import { captureRepoGradeProfile, isEmbeddedRepoGradeStartupProfile, resolveRepoGradeRubric, type RepoGradeProfile } from "./profile";
@@ -37,6 +37,16 @@ export type RepoGradePreparationFailure = {
 export type RepoGradePreparationDiagnostic = {
   status: "ready" | RepoGradePreparationFailure["status"];
   durationMs: number;
+};
+export type RepoGradeProfilePreparationFailure = RepoGradePreparationEvidenceFailure
+  | "profile-storage-unavailable" | "invalid-scope" | "invalid-settings" | "invalid-grader"
+  | "source-configuration-changed" | "unsupported-target-branch" | "automatic-execution-unsupported"
+  | "rubric-generator-unavailable" | "grader-configuration-changed" | "gemini-key-unavailable"
+  | "pinned-target-missing" | "rubric-freeze-unavailable" | "rubric-generation-unavailable";
+type PreparationOptions = {
+  observePreparation?: (metric: RepoGradePreparationDiagnostic) => void;
+  observeProfileFailure?: (reason: RepoGradeProfilePreparationFailure) => void;
+  retry?: RepoGradePreparationRetry;
 };
 
 const PREPARATION_BUDGET_MS = 30_000;
@@ -137,31 +147,43 @@ export async function prepareEmbeddedRepoGradeStartupProfile(
 export async function prepareRepoGradeStartupProfile(
   scope: Scope, discovery: RepoGradeDiscovery, expectedSourceRef: RepoGradeProfile["sourceRef"], target: Target | undefined,
   courseConfig: RepoGradeCourseConfig, courseKindBasis: RepoGradeCourseKindBasis | undefined,
-  observePreparation?: (metric: RepoGradePreparationDiagnostic) => void,
-  retry?: RepoGradePreparationRetry,
+  options: PreparationOptions = {},
 ): Promise<PreparedRepoGradeProfile | RepoGradePreparationFailure | null> {
+  const { observePreparation, observeProfileFailure, retry } = options;
   const { accountId, courseId, folder } = scope;
-  const saved = await readCurrentRepoGradeStartupProfile({ courseId, folder }, accountId);
+  const saved = await readCurrentRepoGradeStartupProfile({ courseId, folder }, accountId).catch((error: unknown) => {
+    observeProfileFailure?.("profile-storage-unavailable");
+    throw error;
+  });
   if (retry && !saved) return { status: "retry-unavailable" };
   // Course attachments have no assignment scope. The automatic default uses
   // the matching pinned assignment instructions to prepare its own rubric.
   const capture = saved ? { status: "ready" as const, profile: saved.profile }
     : captureRepoGradeProfile(scope, {}, getRepoGraderIdentity("gemini"));
-  if (capture.status !== "ready") return null;
+  if (capture.status !== "ready") {
+    observeProfileFailure?.(capture.reason);
+    return null;
+  }
   const { profile } = capture;
-  if (profile.accountId !== accountId || profile.sourceRef !== expectedSourceRef
-    || profile.targetBranch || profile.runCode) return null;
+  const invalidProfile = profile.accountId !== accountId ? "invalid-scope"
+    : profile.sourceRef !== expectedSourceRef ? "source-configuration-changed"
+    : profile.targetBranch ? "unsupported-target-branch"
+    : profile.runCode ? "automatic-execution-unsupported" : null;
+  if (invalidProfile) {
+    observeProfileFailure?.(invalidProfile);
+    return null;
+  }
   if (profile.rubricPolicy !== "generate" || profile.provider !== "gemini") {
     if (retry) return { status: "configuration-changed" };
-    return prepareRepoGradeStartupRubric(profile, discovery, target, courseConfig);
+    return prepareRepoGradeStartupRubric(profile, discovery, target, courseConfig, options);
   }
 
   const startedAt = performance.now();
   let status: RepoGradePreparationDiagnostic["status"] = "storage-unavailable";
   try {
-    const prepared = await prepareRepoGradeStartupRubric(profile, discovery, target, courseConfig, {
+    const prepared = await prepareRepoGradeStartupRubric(profile, discovery, target, courseConfig, options, {
       courseKindBasis, expectedFingerprint: saved?.profile.configurationFingerprint ?? null,
-    }, retry);
+    });
     status = prepared === null ? "profile-unavailable" : "status" in prepared ? prepared.status : "ready";
     return prepared;
   } finally {
@@ -171,11 +193,16 @@ export async function prepareRepoGradeStartupProfile(
 
 async function prepareRepoGradeStartupRubric(
   profile: RepoGradeProfile, discovery: RepoGradeDiscovery, target: Target | undefined, courseConfig: RepoGradeCourseConfig,
+  { observeProfileFailure, retry }: PreparationOptions,
   bootstrap?: { courseKindBasis: RepoGradeCourseKindBasis | undefined; expectedFingerprint: string | null },
-  retry?: RepoGradePreparationRetry,
 ): Promise<PreparedRepoGradeProfile | RepoGradePreparationFailure | null> {
+  function unavailable(reason: RepoGradeProfilePreparationFailure): null {
+    observeProfileFailure?.(reason);
+    return null;
+  }
+
   if (profile.rubricPolicy === "manual" && !profile.useReadmeInstructions) {
-    return freezeRepoGradeRubric(profile, cohortId(profile.configurationFingerprint));
+    return await freezeRepoGradeRubric(profile, cohortId(profile.configurationFingerprint)) ?? unavailable("rubric-freeze-unavailable");
   }
 
   const { accountId, courseId, folder, configurationFingerprint, provider, model, graderVersion } = profile;
@@ -185,13 +212,13 @@ async function prepareRepoGradeStartupRubric(
     const { courseKindBasis } = bootstrap;
     if (!courseKindBasis) return { status: "course-kind-required" };
     const policy = captureRepoGradePreparationPolicy(model, courseKindBasis);
-    if (policy.status !== "ready") return null;
+    if (policy.status !== "ready") return unavailable("rubric-generator-unavailable");
     const activeGrader = getRepoGraderIdentity("gemini");
-    if (activeGrader.model !== model || activeGrader.graderVersion !== graderVersion) return null;
+    if (activeGrader.model !== model || activeGrader.graderVersion !== graderVersion) return unavailable("grader-configuration-changed");
     try {
       getGeminiApiKey();
     } catch {
-      return null;
+      return unavailable("gemini-key-unavailable");
     }
     generator = policy.generator;
     promptParserVersion = policy.version;
@@ -204,11 +231,11 @@ async function prepareRepoGradeStartupRubric(
     instructionPolicy: instructionPolicy(profile),
     inventory: folderInventory(discovery, profile),
   });
-  if (evidence.status !== "ready") return null;
+  if (evidence.status !== "ready") return unavailable(evidence.reason);
   if (retry && retry.key !== evidence.key) return { status: "configuration-changed" };
   const captured = target ? evidence.evidence.find(({ target: pin }) => `${pin.owner}/${pin.repo}` === target.repo
     && pin.sourceRef === target.sourceRef && pin.sourceCommit === target.sha) : retry && evidence.evidence[0];
-  if (!captured) return null;
+  if (!captured) return unavailable("pinned-target-missing");
 
   const preparedReadme: PreparedRepoGradeReadme | undefined = captured.source.kind === "saved" ? undefined : {
     path: captured.source.kind === "pinned-readme" ? captured.source.path : null,
@@ -229,10 +256,10 @@ async function prepareRepoGradeStartupRubric(
       preparation: { key: evidence.key, context: { instructions: evidence.instructions, source: captured.source } },
     };
   }
-  if (provider === "gemini" && profile.rubricPolicy === "generate") return null;
+  if (provider === "gemini" && profile.rubricPolicy === "generate") return unavailable("rubric-generator-unavailable");
   const generated = profile.rubricPolicy === "generate" ? generateEmbeddedRubricText(evidence.instructions) : undefined;
-  if (generated === "") return null;
+  if (generated === "") return unavailable("rubric-generation-unavailable");
   const frozen = await freezeRepoGradeRubric(profile, cohortId(evidence.key), generated);
-  if (!frozen) return null;
+  if (!frozen) return unavailable("rubric-freeze-unavailable");
   return { ...frozen, preparedReadme };
 }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { Alert, Button, FormControlLabel, List, ListItem, Stack, Switch, TextField } from "@mui/material";
+import { Alert, Button, FormControlLabel, List, ListItem, ListItemText, Stack, Switch, TextField } from "@mui/material";
 import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import type { AutomaticRepoGradeRecovery } from "@/lib/repo-grades-dashboard/automatic-status";
 import { automaticCourseProgress } from "./automatic-course-progress";
+import { automaticReasonLabel } from "./automatic-reason-label";
 import { AutomaticRepoGradeScheduleControl } from "./AutomaticRepoGradeScheduleControl";
 import { automaticRepoGradeRunActive, type useRepoGradesAutomatic } from "./useRepoGradesAutomatic";
 
@@ -33,8 +34,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
   const courses = (run?.courses ?? []).map(automaticCourseProgress);
   const details = (run?.courses ?? []).flatMap((course) => {
     const reasons = [...new Set([course.reason, ...course.counts.map(({ reason }) => reason)]
-      .filter((reason) => reason !== null)
-      .map((reason) => reason === "feedback-recovery-available" ? "feedback-retention-unconfirmed" : reason))];
+      .filter((reason) => reason !== null).map(automaticReasonLabel))];
     return reasons.length ? [{ courseId: course.courseId, label: course.label, reasons }] : [];
   });
 
@@ -105,7 +105,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
       {details.length > 0 && (
         <List dense aria-label="Automatic repository grading details">
           {details.map(({ courseId, label, reasons }) => (
-            <ListItem key={courseId}>{label} {reasons.map((reason) => reason.replaceAll("-", " ")).join(", ")}</ListItem>
+            <ListItem key={courseId}><ListItemText primary={label} secondary={reasons.join(" ")} /></ListItem>
           ))}
         </List>
       )}

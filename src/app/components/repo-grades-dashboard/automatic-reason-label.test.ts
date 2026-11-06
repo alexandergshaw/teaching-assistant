@@ -1,0 +1,28 @@
+import { expect, it } from "vitest";
+import { automaticReasonLabel } from "./automatic-reason-label";
+
+it.each([
+  ["missing-instruction-evidence", "no usable pinned assignment README"],
+  ["conflicting-instructions", "READMEs disagree"],
+  ["readme-target-budget-exceeded", "too many repository READMEs"],
+  ["incomplete-inventory", "could not verify all repository branches"],
+  ["profile-unavailable", "This record has no more specific reason"],
+  ["explicit-retry-required", "Use Retry rubric preparation"],
+  ["prior-attempt", "Check the repository grading history"],
+])("explains %s with a specific message", (reason, expected) => {
+  expect(automaticReasonLabel(reason)).toContain(expected);
+});
+
+it.each(["conflicting-instructions", "missing-instruction-evidence", "readme-target-budget-exceeded"])(
+  "explains how to switch from READMEs to shared instructions for %s", (reason) => {
+    expect(automaticReasonLabel(reason)).toContain(
+      'clear "Keep saved README instruction mode", enter shared assignment instructions, and save.',
+    );
+  },
+);
+
+it.each(["Private assignment path and instructions", "constructor", "__proto__"])(
+  "does not display an unrecognized stored reason", (reason) => {
+    expect(automaticReasonLabel(reason)).toBe("The worker did not provide a recognized reason.");
+  },
+);

@@ -189,7 +189,7 @@ export async function runRepoGradeStartupTargetAction(
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedSourceRef)
         : prepareRepoGradeStartupProfile(
           scope, plan.discovery, expectedSourceRef, target, plan.courseConfig, plan.courseKindBasis,
-          (metric) => { diagnostics.preparationDiagnostic = metric; },
+          { observePreparation: (metric) => { diagnostics.preparationDiagnostic = metric; } },
         ),
     });
     return { ...evaluation, ...diagnostics };
@@ -238,7 +238,7 @@ export async function retryRepoGradePreparationAction(
     const prepared = await prepareRepoGradeStartupProfile(
       { accountId: owner.id, courseId: plan.courseId, folder }, plan.discovery,
       plan.folderSources.get(folder) ?? null, undefined, plan.courseConfig, plan.courseKindBasis,
-      undefined, { key, generation },
+      { retry: { key, generation } },
     );
     if (!prepared) return result("profile-unavailable");
     if ("status" in prepared) return result(prepared.status, prepared.preparationRetry);

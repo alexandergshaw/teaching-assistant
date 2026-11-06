@@ -16,6 +16,7 @@ type Blocked = Extract<Capture, { status: "blocked" }> | Readonly<{
   status: "blocked";
   reason: "readme-read-failed" | "readme-target-budget-exceeded" | "readme-deadline-exceeded";
 }>;
+export type RepoGradePreparationEvidenceFailure = Blocked["reason"];
 
 function boundEvidence(
   expected: ReadmeRow["target"], read: PinnedReadmeEvidence, fallbackConfigured: boolean,

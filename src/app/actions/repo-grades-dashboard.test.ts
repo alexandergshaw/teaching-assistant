@@ -4,6 +4,7 @@ import { callLlm } from "@/lib/llm";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { discoverRepoGradeSources } from "@/lib/repo-grades-dashboard/discovery";
+import { createAutomaticRepoGradeWorker } from "@/lib/repo-grades-dashboard/automatic-worker";
 import * as admissionMode from "@/lib/repo-grades-dashboard/admission-mode";
 import * as discoveryMode from "@/lib/repo-grades-dashboard/discovery-mode";
 import {
@@ -779,14 +780,22 @@ it("excludes proven unrelated override failures and blocks unresolved eligible d
   const unrelated = { status: "blocked", repo: other.repo, sourceRef: "override", reason: "unavailable" } as const;
   const defaultSourceRefs = { "school/repo": "Main", "school/other": "Main" };
   const unavailableDefault = { ...unrelated, sourceRef: "Main" };
-  vi.mocked(discoverRepoGradeSources).mockResolvedValueOnce({
+  const blockedDiscovery = {
     status: "scanned", enumerationComplete: true, defaultSourceRefs, repos: [source(), unavailableDefault, unrelated],
-  }).mockResolvedValueOnce({
+  } as const;
+  vi.mocked(discoverRepoGradeSources).mockResolvedValueOnce({ ...blockedDiscovery, repos: [...blockedDiscovery.repos] })
+    .mockResolvedValueOnce({ ...blockedDiscovery, repos: [...blockedDiscovery.repos] }).mockResolvedValueOnce({
     status: "scanned", enumerationComplete: true, defaultSourceRefs, repos: [source(), unrelated, other],
   });
   await expect(runStartupTarget()).resolves.toMatchObject({ status: "profile-unavailable" });
+  const { repo, sourceRef, sourceCommit } = source();
+  await expect(createAutomaticRepoGradeWorker("coordinated")({
+    phase: "grading", runId: batchId, accountId: account.id, courseId, repo,
+    folder: "assignment", ref: sourceRef, sha: sourceCommit,
+  })).resolves.toEqual({ state: "blocked", reason: "incomplete-inventory" });
   expect(fetchModel).not.toHaveBeenCalled();
-  expect(rpc.mock.calls.map(([name]) => name)).toEqual(["repo_grade_read_profile"]);
+  expect(evaluateRepoGrade).not.toHaveBeenCalled();
+  expect(rpc.mock.calls.map(([name]) => name)).toEqual(["repo_grade_read_profile", "repo_grade_read_profile"]);
   await expect(runStartupTarget()).resolves.toMatchObject({ status: "no-submission" });
   expect(fetchModel).toHaveBeenCalledTimes(1);
 });

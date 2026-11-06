@@ -1,7 +1,9 @@
 import "server-only";
 
 import { createRepoGradeStartupSchedule, repoGradeRepositoryCoverage, repoGradeStartupKey } from "./scheduler";
-import { prepareEmbeddedRepoGradeStartupProfile, prepareRepoGradeStartupProfile } from "./preparation-runtime";
+import {
+  prepareEmbeddedRepoGradeStartupProfile, prepareRepoGradeStartupProfile, type RepoGradeProfilePreparationFailure,
+} from "./preparation-runtime";
 import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
 import type { AutomaticRepoGradeCompletion, AutomaticRepoGradeWork } from "./automatic-store";
@@ -78,10 +80,13 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
     const expectedRef = plan.folderSources.get(target.folder) ?? null;
+    let profileFailure: RepoGradeProfilePreparationFailure | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
-        : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis),
+        : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
+          observeProfileFailure: (reason) => { profileFailure = reason; },
+        }),
     });
     if ((outcome.status === "partial" || outcome.status === "unknown") && outcome.unretainedResult) {
       const payload = JSON.stringify({
@@ -110,6 +115,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
         return { state: outcome.status };
       case "partial":
         return { state: "partial", reason: outcome.feedbackRetention ? "feedback-not-retained" : undefined };
+      case "profile-unavailable":
+        return { state: "blocked", reason: profileFailure ?? outcome.status };
       default:
         return { state: "blocked", reason: outcome.status };
     }

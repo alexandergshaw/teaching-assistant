@@ -8,7 +8,7 @@
 // no decisions in it: every value shown and every gate a block renders
 // behind (`course && !missingOrg`, `course && !canvasGateBlockedReason`) all
 // come in as props. This component owns no state and no effects - index.tsx
-// still owns every underlying value (`course`, `scanLoading`, `scan`, etc.)
+// still owns every underlying value (`course`, `scan`, etc.)
 // and only passes down what this file needs to render.
 //
 // U4.19d/19e: `canvasGateBlockedReason` (useRepoGradesData.ts) replaces the
@@ -37,8 +37,6 @@ export interface RepoGradesStatusBannersProps {
    * useRepoGradesData.ts's own doc comment on `canvasGateBlockedReason`. */
   canvasGateBlockedReason: string | null;
   missingOrg: boolean;
-  githubOrg: string;
-  scanLoading: boolean;
   scanError: string | null;
   rosterLoading: boolean;
   rosterError: string | null;
@@ -60,8 +58,6 @@ export default function RepoGradesStatusBanners({
   courseName,
   canvasGateBlockedReason,
   missingOrg,
-  githubOrg,
-  scanLoading,
   scanError,
   rosterLoading,
   rosterError,
@@ -88,15 +84,6 @@ export default function RepoGradesStatusBanners({
           &quot;{courseName}&quot; has no GitHub org set, so its repos cannot be listed - set one on the course tile
           first.
         </p>
-      )}
-
-      {hasCourse && !missingOrg && scanLoading && (
-        <div className={styles.loadingState} role="status" aria-live="polite">
-          <span className={styles.spinner} aria-hidden="true" />
-          <div>
-            <p className={styles.loadingTitle}>Scanning {githubOrg} for repos…</p>
-          </div>
-        </div>
       )}
 
       {hasCourse && !missingOrg && scanError && (

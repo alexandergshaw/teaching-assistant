@@ -218,10 +218,11 @@ describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
     expect(rescanProp()).toContain('<Button type="button"');
   });
 
-  it("AC-W3-2: the node is wired to reloadScan and disabled on scanLoading (not dead)", () => {
+  it("AC-W3-2: Refresh keeps focus and refuses to restart an in-flight scan", () => {
     const node = rescanProp();
-    expect(node).toContain("disabled={scanLoading}");
-    expect(node).toMatch(/onClick=\{\(\) => reloadScan\(\)\}/);
+    expect(node).toContain("aria-disabled={scanLoading}");
+    expect(node).not.toMatch(/\sdisabled=/);
+    expect(node).toMatch(/onClick=\{\(\) => \{ if \(!scanLoading\) reloadScan\(\); \}\}/);
   });
 
   it("AC-W3-3: the Refresh button and its props are gone from RepoGradesControls and its call", () => {

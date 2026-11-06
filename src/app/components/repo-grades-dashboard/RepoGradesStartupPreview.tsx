@@ -3,28 +3,32 @@
 import { useId, useState, useTransition } from "react";
 import { Accordion, AccordionDetails, AccordionSummary, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import { loadRepoGradesStartupPreview } from "./startup-preview-client";
+import { StartupStatusChip } from "./StartupStatusChip";
+import { RepoGradesLoadingStatus } from "../repo-grades/RepoGradesLoadingStatus";
 import styles from "../repo-grades/repo-grades-dashboard.module.css";
 
 type Result = Awaited<ReturnType<typeof loadRepoGradesStartupPreview>>;
 type Preview = Extract<Result, { status: "preview" }>;
 type TargetState = Preview["targets"][number]["state"];
 
-const HISTORY_LABELS: Record<Exclude<TargetState["status"], "blocked">, string> = {
-  queued: "Planned",
-  running: "Running",
-  claimed: "Claim recorded",
-  terminal: "Already processed",
-  "not-started": "Previously left unstarted",
-  succeeded: "Previously graded",
-  "no-submission": "Previously found no submission",
-  partial: "Earlier grading was partial",
-  failed: "Earlier grading failed",
-  unknown: "Earlier outcome unknown",
-};
+const HISTORY_STATUS = {
+  queued: { label: "Planned", tone: "accent" },
+  running: { label: "Running", tone: "accent" },
+  claimed: { label: "Claim recorded", tone: "accent" },
+  terminal: { label: "Already processed", tone: "neutral" },
+  "not-started": { label: "Previously left unstarted", tone: "neutral" },
+  succeeded: { label: "Previously graded", tone: "success" },
+  "no-submission": { label: "Previously found no submission", tone: "neutral" },
+  partial: { label: "Earlier grading was partial", tone: "warning" },
+  failed: { label: "Earlier grading failed", tone: "danger" },
+  unknown: { label: "Earlier outcome unknown", tone: "warning" },
+} as const satisfies Record<Exclude<TargetState["status"], "blocked">, { label: string; tone: string }>;
 
-function historyLabel(state: TargetState) {
-  if (state.status !== "blocked") return HISTORY_LABELS[state.status];
-  return state.reason === "runtime-unavailable" ? "No prior attempt found" : "History unavailable";
+function historyStatus(state: TargetState) {
+  if (state.status !== "blocked") return HISTORY_STATUS[state.status];
+  return state.reason === "runtime-unavailable"
+    ? { label: "No prior attempt found", tone: "neutral" } as const
+    : { label: "History unavailable", tone: "warning" } as const;
 }
 
 function previewMessage(result: Result) {
@@ -50,6 +54,7 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
   const [pending, startTransition] = useTransition();
 
   function loadPreview() {
+    if (pending) return;
     startTransition(async () => {
       const preview = await loadRepoGradesStartupPreview(courseId, accountId);
       setResult(preview);
@@ -61,8 +66,9 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
       <AccordionSummary id={summaryId} aria-controls={panelId}>Startup plan preview</AccordionSummary>
       <AccordionDetails>
         <p>Read-only preview of the saved repository sources and grading history for this class.</p>
-        <Button type="button" variant="outlined" size="small" disabled={pending} onClick={loadPreview}>Preview startup plan</Button>
-        <p role="status">{pending ? "Checking GitHub discovery and grading history." : result ? previewMessage(result) : ""}</p>
+        <Button type="button" variant="outlined" size="small" aria-disabled={pending} onClick={loadPreview}>Preview startup plan</Button>
+        <RepoGradesLoadingStatus label={pending ? "Checking GitHub discovery and grading history…" : null}
+          settledLabel={result ? previewMessage(result) : undefined} />
         {!pending && result?.status === "preview" && result.targets.length > 0 && (
           <TableContainer className={styles.scroll} role="region" aria-label="Startup plan targets" tabIndex={0}>
             <Table className={styles.table} size="small" aria-label="Discovered repository folders and grading history">
@@ -82,7 +88,7 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
                     <TableCell>{folder}</TableCell>
                     <TableCell>{sourceRef}</TableCell>
                     <TableCell><code>{commit}</code></TableCell>
-                    <TableCell>{historyLabel(state)}</TableCell>
+                    <TableCell><StartupStatusChip {...historyStatus(state)} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

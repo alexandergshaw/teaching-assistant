@@ -318,6 +318,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "RepoGradesGradeSetTypeahead.tsx",
   // REPO-GRADES-MODULE-PICKER-HEADER: the folder picker relocated into the sticky header.
   "RepoGradesFolderPicker.tsx",
+  "RepoGradesGithubQuota.tsx",
+  "RepoGradesLoadingStatus.tsx",
   "RepoGradesStatusBanners.tsx",
   // RG-SEARCH-STICKY Wave A: the sticky working-header shell (browser-safe only).
   "RepoGradesStickyHeader.tsx",
@@ -346,6 +348,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "repoGradesFolderSelection.ts",
   // RG-SEARCH-STICKY Wave C: the pure grade-set reducer and grade-scope decision.
   "repoGradesGradeSet.ts",
+  "repoGradesGithubQuotaClient.ts",
   "repoGradesPosting.ts",
   "repoGradesProfileClient.ts",
   "repoGradesRows.ts",

@@ -1,4 +1,4 @@
-import { Chip } from "@mui/material";
+import { Chip, CircularProgress } from "@mui/material";
 
 const STATUS = {
   queued: { label: "Queued", color: "default" },
@@ -18,6 +18,10 @@ const STATUS = {
 
 export type RepoGradeStatus = keyof typeof STATUS;
 
-export default function RepoGradeStatusChip({ status }: { status: RepoGradeStatus }) {
-  return <Chip component="span" size="small" variant="outlined" label={STATUS[status].label} color={STATUS[status].color} />;
+export default function RepoGradeStatusChip({ status, active = false }: { status: RepoGradeStatus; active?: boolean }) {
+  return (
+    <Chip component="span" size="small" variant="outlined" label={STATUS[status].label} color={STATUS[status].color}
+      icon={active ? <CircularProgress color="inherit" size={14} aria-hidden="true" /> : undefined}
+      sx={active ? { fontWeight: 700, bgcolor: "var(--accent-surface)", "& .MuiChip-icon": { color: "inherit" } } : undefined} />
+  );
 }

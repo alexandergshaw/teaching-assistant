@@ -423,7 +423,10 @@ export default function RepoGradeCellControl({
         )}
       </div>
       <div className={styles.cellActions}>
-        <RepoGradeStatusChip status={status} />
+        <span role={queueState === undefined ? "status" : undefined}>
+          {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
+          <RepoGradeStatusChip status={status} active={stage === "running"} />
+        </span>
         <Button
           type="button"
           size="small"

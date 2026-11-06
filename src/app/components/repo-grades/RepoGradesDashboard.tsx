@@ -16,6 +16,7 @@ import { useRepoGradeMatrixResults } from "./useRepoGradeMatrixResults";
 import { FeedbackDisclosure, RepoDashboardHistoricalFeedback, RepoResultFeedback, type HistoricalFeedbackDraft } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import { RepoGradesLoadingStatus } from "./RepoGradesLoadingStatus";
 import type { RepoGradeColumn } from "./repoGradesRows";
 import styles from "./repo-grades-dashboard.module.css";
 
@@ -59,7 +60,7 @@ export default function RepoGradesDashboard({
   const treeFailures = scan?.repos.filter((repo) => repo.folders === null).length ?? 0;
 
   let discoverySummary = "GitHub discovery is unavailable.";
-  if (scanLoading) discoverySummary = "GitHub discovery is running.";
+  if (scanLoading) discoverySummary = "";
   else if (scanFailed) discoverySummary = "GitHub discovery failed.";
   else if (scan) {
     const failed = treeFailures ? ` Tree scans failed for ${treeFailures}.` : "";
@@ -76,7 +77,6 @@ export default function RepoGradesDashboard({
       <p role="status">
         {discoverySummary}
         {hasRepoPrefix && " The current repository prefix limits discovery."}
-        {saved.pending && " Loading saved evaluations."}
         {saved.incomplete && " Saved results are incomplete. Older or unavailable attempts may be missing."}
       </p>
       {user && isOwnerDecision(accessDecision) && (
@@ -87,11 +87,14 @@ export default function RepoGradesDashboard({
       )}
       {ownerId && (
         <div>
-          <Button type="button" size="small" disabled={saved.pending} onClick={saved.refresh}>Refresh saved results</Button>
+          <Button type="button" size="small" aria-disabled={saved.pending}
+            onClick={() => { if (!saved.pending) saved.refresh(); }}>Refresh saved results</Button>
         </div>
       )}
+      <RepoGradesLoadingStatus label={saved.pending ? "Loading saved results for this class…" : null} />
       {columns.length > 0 && rows.length > 0 ? (
-        <TableContainer className={styles.scroll} role="region" aria-labelledby={headingId} tabIndex={0}>
+        <TableContainer className={styles.scroll} role="region" aria-labelledby={headingId} tabIndex={0}
+          aria-busy={saved.pending}>
           <Table size="small" className={`${styles.table} ${styles.matrix}`} aria-label="Repository results by student and assignment">
             <TableHead>
               <TableRow>
@@ -186,7 +189,7 @@ export default function RepoGradesDashboard({
             </TableBody>
           </Table>
         </TableContainer>
-      ) : <p>No assignment folders or repository results to display.</p>}
+      ) : !scanLoading && !saved.pending && <p>No assignment folders or repository results to display.</p>}
       {ownerId && <RepoGradeHistory courseId={courseId} accountId={ownerId} />}
     </section>
   );
@@ -231,7 +234,7 @@ function RepoGradeHistory({ courseId, accountId }: { courseId: string; accountId
   const headingId = useId();
   const [drafts, setDrafts] = useState<Record<string, HistoricalFeedbackDraft>>({});
   const { page, pageNumber, pending, error, older, newer, retry } = useRepoGradeHistory(courseId, accountId);
-  let summary = "Loading saved evaluation history.";
+  let summary = "";
   if (error) {
     summary = error === "course-unavailable"
       ? "Saved evaluation history is unavailable for this course."
@@ -250,14 +253,14 @@ function RepoGradeHistory({ courseId, accountId }: { courseId: string; accountId
     <section className={styles.dashboard} aria-labelledby={headingId}>
       <h3 id={headingId}>Saved repository evaluations</h3>
       <p>Automatic attempts are listed newest first, including repositories outside the current GitHub scan. Browser scores and instructor edits appear above.</p>
-      <p role="status">{summary}</p>
+      <RepoGradesLoadingStatus label={pending ? "Loading saved evaluation history…" : null} settledLabel={summary} />
       <div>
         <Button type="button" size="small" aria-disabled={pending || pageNumber === 1} onClick={newer}>Newer attempts</Button>
         <Button type="button" size="small" aria-disabled={pending || page?.nextBefore == null} onClick={older}>Older attempts</Button>
         <Button type="button" size="small" aria-disabled={pending || !error} onClick={retry}>Retry history read</Button>
       </div>
       {page && page.rows.length > 0 && (
-        <TableContainer className={styles.scroll} role="region" aria-labelledby={headingId} tabIndex={0}>
+        <TableContainer className={styles.scroll} role="region" aria-labelledby={headingId} tabIndex={0} aria-busy={pending}>
           <Table size="small" className={styles.table} aria-label="Saved repository evaluation attempts">
             <TableHead>
               <TableRow>

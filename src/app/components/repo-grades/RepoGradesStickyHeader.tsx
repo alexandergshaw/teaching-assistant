@@ -25,8 +25,7 @@ export interface RepoGradesStickyHeaderProps {
   // The assignment-folder picker (RepoGradesFolderPicker), moved here from the
   // stacked controls panel; index.tsx owns its state and handler.
   folderControl?: ReactNode;
-  // REPO-GRADES-STATUS-PROMINENCE: the visual-only grading progress banner
-  // (spinner + count); index.tsx gates it on the view-level bulkRunningFolder.
+  // Grading progress stays in view for the active folder.
   statusBanner?: ReactNode;
   // REPO-PAGE-OVERHAUL W3: the re-scan (Refresh) button, promoted out of the
   // setup stack; index.tsx wires it to the same reloadScan + scanLoading.

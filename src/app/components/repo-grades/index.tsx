@@ -25,12 +25,13 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, InputBase } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, CircularProgress, InputBase } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
+import RepoGradesGithubQuota from "./RepoGradesGithubQuota";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
   clearRepoGradeCells,
@@ -59,6 +60,7 @@ import RepoGradesControls from "./RepoGradesControls";
 import RepoGradeCourseFilters from "./RepoGradeCourseFilters";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
+import { RepoGradesColumnProgress, RepoGradesLoadingStatus } from "./RepoGradesLoadingStatus";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { confirmableBindingSummary, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
 import {
@@ -597,11 +599,14 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
       <RepoGradeReservationRecovery />
+      <RepoGradesGithubQuota />
       <RepoGradeCourseFilters
         courses={courses}
         courseId={uiState.courseId}
         onCourseIdChange={handleCourseIdChange}
       />
+      <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
+        : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
 
       {/* W4: one persisted "Run setup" disclosure wrapping BOTH the setup
           controls and the link-usernames panel. Defaults open until every repo
@@ -702,8 +707,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         courseName={course?.name ?? ""}
         canvasGateBlockedReason={canvasGateBlockedReason}
         missingOrg={missingOrg}
-        githubOrg={course?.githubOrg ?? ""}
-        scanLoading={scanLoading}
         scanError={scanError}
         rosterLoading={rosterLoading}
         rosterError={rosterError}
@@ -804,21 +807,15 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
         rescanControl={course && !missingOrg ? (
-          <Button type="button" size="small" disabled={scanLoading} onClick={() => reloadScan()}>
-            {scanLoading ? "Scanning..." : "Refresh"}
+          <Button type="button" size="small" aria-disabled={scanLoading}
+            startIcon={scanLoading ? <CircularProgress size={16} color="inherit" aria-hidden="true" /> : undefined}
+            onClick={() => { if (!scanLoading) reloadScan(); }}>
+            {scanLoading ? "Scanning GitHub…" : "Refresh"}
           </Button>
         ) : null}
         folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
         statusBanner={bulkRunningFolder ? (
-          // Visual-only: no role and no aria-live (the postSummary region is the one live region).
-          <div className={pageStyles.loadingState}>
-            {bulkQueue?.folderState !== "paused" && <span className={pageStyles.spinner} aria-hidden="true" />}
-            <div>
-              <p className={pageStyles.loadingTitle}>
-                {bulkQueue?.folderState === "paused" ? "Paused" : bulkQueue?.folderState === "stopping" ? "Stopping" : "Grading"} {bulkProgress ? bulkProgress.done : 0} of {bulkProgress ? bulkProgress.total : 0} in {bulkRunningFolder}...
-              </p>
-            </div>
-          </div>
+          <RepoGradesColumnProgress folder={bulkRunningFolder} progress={bulkProgress} state={bulkQueue?.folderState} />
         ) : null}
         targetBranchControl={
           <label className={styles.headerField}>

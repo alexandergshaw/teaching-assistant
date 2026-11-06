@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, Typography } from "@mui/material";
+import { Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, Typography } from "@mui/material";
 import type { CourseStartupProgress } from "./startup-progress";
+import { StartupStatusChip } from "./StartupStatusChip";
 import {
   formatStartupRepositoryCoverage, nextStartupTableSort, orderStartupStatuses, sortStartupCourses, STARTUP_STATUS,
   type StartupSortColumn, type StartupTableSort,
@@ -65,19 +66,7 @@ export function RepoGradesStartupTable({ courses, headingId }: {
                     {orderStartupStatuses(course.states).map(({ state, count }) => {
                       const { label: statusLabel, tone } = STARTUP_STATUS[state];
                       const label = state === "succeeded" ? "Graded" : statusLabel;
-                      return (
-                        <Chip key={state} size="small" variant="outlined"
-                          label={count ? `${label} (${count})` : label}
-                          sx={{
-                            height: "auto",
-                            minHeight: 24,
-                            fontWeight: 700,
-                            color: tone === "neutral" ? "var(--text-secondary)" : `var(--${tone}-ink)`,
-                            bgcolor: tone === "neutral" ? "var(--surface-subtle)" : `var(--${tone}-surface)`,
-                            "& .MuiChip-label": { whiteSpace: "normal" },
-                          }}
-                        />
-                      );
+                      return <StartupStatusChip key={state} tone={tone} label={count ? `${label} (${count})` : label} />;
                     })}
                   </Stack>
                 </TableCell>

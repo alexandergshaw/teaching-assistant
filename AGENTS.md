@@ -19,6 +19,11 @@ the intended behavior. Use the MUI component when one is available and follow
 the app's existing theme and usage patterns. When MUI has no suitable component,
 build the custom component to match the look and interaction states of existing
 app components, using the app's design tokens.
+
+When working on existing non-MUI components that have suitable MUI equivalents,
+convert them in the same change and regression test the affected behavior. Use
+browser verification for rendered behavior, including keyboard and focus
+interactions where applicable.
 <!-- END:mui-component-rule -->
 
 <!-- BEGIN:dev-loop-pointer -->

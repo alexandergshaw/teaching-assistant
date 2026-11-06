@@ -3,11 +3,11 @@ import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { createClient } from "@/lib/supabase/server";
 import {
   setRepoGradeAutomaticClassQueueAction, setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
-  startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
+  startRepoGradeAutomaticRunAction, startRepoGradeTargetedRunAction, stopRepoGradeAutomaticRunAction,
 } from "./repo-grade-automatic";
 
 const mocks = vi.hoisted(() => ({
-  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(),
+  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(), targeted: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/app-users", async (original) => ({
@@ -19,6 +19,7 @@ vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   controlAutomaticRepoGrade: mocks.control, readAutomaticRepoGrade: mocks.read,
   saveAutomaticRepoGradeGithubRetry: mocks.saveGithubRetry,
   saveAutomaticRepoGradeClassQueue: mocks.saveClassQueue,
+  startTargetedAutomaticRepoGrade: mocks.targeted,
   saveAutomaticRepoGradeSchedule: mocks.saveSchedule, isAutomaticRepoGradeId: (id: unknown) => typeof id === "string",
 }));
 vi.mock("./repo-grades-dashboard", () => ({ retryRepoGradePreparationAction: vi.fn() }));
@@ -42,6 +43,18 @@ describe("owner automatic grading controls", () => {
     vi.mocked(getAppUser).mockResolvedValue(ownerRow);
     mocks.read.mockResolvedValue({ enabled: false, schedule: null, preparations: [], recoveries: [], run: null });
     mocks.saveSchedule.mockResolvedValue(true);
+  });
+
+  it("starts only owner-authorized well-formed selected course targets", async () => {
+    mocks.targeted.mockResolvedValue(true);
+    expect(await startRepoGradeTargetedRunAction("foreign", "course", "lab", null)).toEqual({ status: "unavailable" });
+    expect(await startRepoGradeTargetedRunAction("owner", "course", "../lab", null)).toEqual({ status: "unavailable" });
+    expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", "bad/repo/extra")).toEqual({ status: "unavailable" });
+    expect(mocks.targeted).not.toHaveBeenCalled();
+    expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", "org/student")).toEqual({ status: "started" });
+    expect(mocks.targeted).toHaveBeenCalledWith("owner", "course", "lab", "org/student");
+    mocks.targeted.mockResolvedValue(false);
+    expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", null)).toEqual({ status: "busy" });
   });
 
   it("persists a GitHub retry preference only for the active owner and a boolean choice", async () => {

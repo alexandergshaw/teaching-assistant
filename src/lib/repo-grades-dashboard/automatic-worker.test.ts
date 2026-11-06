@@ -17,6 +17,25 @@ vi.mock("./preparation-runtime", () => ({
 describe("durable repository grading discovery", () => {
   beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); });
 
+  it("limits a targeted run to discovered matching repository folders", async () => {
+    const sha = "a".repeat(40);
+    mocks.plan.mockResolvedValue({ snapshotBasis: "d".repeat(64), courseConfig: { github_org: "Org" },
+      discovery: { status: "scanned", enumerationComplete: true, repos: [
+        { status: "ready", repo: "Org/One", sourceCommit: sha, sourceRef: "main", folders: ["lab", "other"] },
+        { status: "ready", repo: "Org/Two", sourceCommit: sha, sourceRef: "main", folders: ["lab"] },
+      ] } });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    const work = { phase: "discovering", runId: "run", accountId: "owner", courseId: "course" } as const;
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: null } }, "lease"))
+      .toMatchObject({ state: "scanned", targets: [{ repo: "Org/One", folder: "lab" }, { repo: "Org/Two", folder: "lab" }] });
+    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: "Org/Two" } }, "lease"))
+      .toMatchObject({ state: "scanned", targets: [{ repo: "Org/Two", folder: "lab" }] });
+    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: "Org/Other" } }, "lease"))
+      .toMatchObject({ state: "partial", reason: "target-not-found", targets: [] });
+  });
+
   it("keeps a throttled scan in the same run only when retry is enabled", async () => {
     const work = { phase: "discovering", runId: "run", accountId: "owner", courseId: "course" } as const;
     const rateLimit = { retryAtMs: Date.now() + 360_000, primary: true };

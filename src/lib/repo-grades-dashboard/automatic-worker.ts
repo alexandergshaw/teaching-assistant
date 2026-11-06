@@ -48,8 +48,11 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       const schedule = createRepoGradeStartupSchedule({ accountId, generation: runId }, [{
         accountId, courseId, organization: plan.courseConfig.github_org, discovery,
       }], new Map(), false);
-      if (schedule.work.size > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
-      const targets = [...schedule.work.values()].map(({ target }) => target);
+      const targets = [...schedule.work.values()].map(({ target }) => target).filter((target) =>
+        !work.targetFilter || (target.folder === work.targetFilter.folder
+          && (work.targetFilter.repo === null || target.repo === work.targetFilter.repo)));
+      if (targets.length > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
+      if (work.targetFilter && targets.length === 0) return { state: "partial", reason: "target-not-found", targets: [], repositories };
       const bounded = targets.filter(({ folder, sourceRef }) => folder.length <= 512 && sourceRef.length <= 255);
       const incompleteSource = discovery.repos.find(({ status }) => status !== "ready");
       const partial = incompleteSource || bounded.length !== targets.length;

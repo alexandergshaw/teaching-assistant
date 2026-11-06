@@ -12,7 +12,7 @@ import type { RepoGradeClaim } from "./state";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
-export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering" }) | (ClaimScope & Selector & { phase: "grading" });
+export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering"; targetFilter?: { folder: string; repo: string | null } }) | (ClaimScope & Selector & { phase: "grading" });
 type StagedSelector = Selector & {
   state?: Extract<AutomaticRepoGradeTargetState, "already-processed" | "busy" | "failed" | "partial" | "unknown">;
   reason?: "prior-attempt";
@@ -53,6 +53,12 @@ export async function controlAutomaticRepoGrade(accountId: string,
     p_action: control.action,
     ...("enabled" in control && { p_enabled: control.enabled }),
     ...("runId" in control && { p_run_id: control.runId }),
+  }) === true;
+}
+
+export async function startTargetedAutomaticRepoGrade(accountId: string, courseId: string, folder: string, repo: string | null) {
+  return await rpc("repo_grade_automatic_start_targeted", {
+    p_user_id: accountId, p_course_id: courseId, p_folder: folder, p_repo: repo,
   }) === true;
 }
 
@@ -112,7 +118,15 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
     runId: result.runId, accountId: result.accountId, courseId: result.courseId,
     retryGithubRateLimits: result.retryGithubRateLimits === true,
   };
-  if (result.phase === "discovering") return { ...scope, phase: result.phase };
+  if (result.phase === "discovering") {
+    const filter = await rpc("repo_grade_automatic_read_target_filter", {
+      p_run_id: scope.runId, p_user_id: scope.accountId, p_lease: lease,
+    });
+    if (!record(filter) || !(filter.folder === null || typeof filter.folder === "string")
+      || !(filter.repo === null || typeof filter.repo === "string")
+      || (filter.folder === null && filter.repo !== null)) throw new Error("Invalid automatic repository grading target filter");
+    return { ...scope, phase: result.phase, ...(filter.folder !== null && { targetFilter: { folder: filter.folder, repo: filter.repo } }) };
+  }
   if (result.phase === "grading" && typeof result.repo === "string" && typeof result.folder === "string"
     && typeof result.ref === "string" && typeof result.sha === "string" && /^[0-9a-f]{40}$/.test(result.sha)) {
     return { ...scope, phase: result.phase, repo: result.repo, folder: result.folder, ref: result.ref, sha: result.sha };

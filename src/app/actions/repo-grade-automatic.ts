@@ -4,12 +4,14 @@ import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/ad
 import {
   automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery,
   readAutomaticRepoGrade, saveAutomaticRepoGradeSchedule,
-  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry,
+  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry, startTargetedAutomaticRepoGrade,
 } from "@/lib/repo-grades-dashboard/automatic-store";
 import type { AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { parseAutomaticRepoGradeSchedule } from "@/lib/repo-grades-dashboard/automatic-schedule";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { retryRepoGradePreparationAction } from "./repo-grades-dashboard";
+import { isRepoGradeProfileFolder } from "@/lib/repo-grades-dashboard/profile";
+import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 
 const unavailable = { status: "unavailable" } as const;
 
@@ -50,6 +52,24 @@ export async function startRepoGradeAutomaticRunAction(expectedAccountId: unknow
     const changed = await controlAutomaticRepoGrade(accountId, { action: "start" });
     const status = await readStatus(accountId);
     return status.status === "loaded" ? { ...status, control: { action: "start", changed } } : status;
+  } catch {
+    return unavailable;
+  }
+}
+
+/** The selectors only narrow a server-discovered course inventory. */
+export async function startRepoGradeTargetedRunAction(
+  expectedAccountId: unknown, courseId: unknown, folder: unknown, repo: unknown,
+): Promise<{ status: "started" | "busy" | "unavailable" }> {
+  const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
+  if (!accountId || !isAutomaticRepoGradeId(courseId) || !isRepoGradeProfileFolder(folder)
+    || folder.length > 512 || !(repo === null || typeof repo === "string")) return unavailable;
+  if (typeof repo === "string") {
+    const [owner, name, extra] = repo.split("/");
+    if (!owner || !name || extra !== undefined || repo.length > 200 || !validateGithubOwnerRepo(owner, name)) return unavailable;
+  }
+  try {
+    return { status: await startTargetedAutomaticRepoGrade(accountId, courseId, folder, repo) ? "started" : "busy" };
   } catch {
     return unavailable;
   }

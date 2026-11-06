@@ -51,9 +51,41 @@ describe("Repo Grades app startup coordinator", () => {
     await startRepoGradesStartup(scope, fake.adapter, observer).done;
     expect(observer).toHaveBeenLastCalledWith({
       phase: "complete",
-      courses: [{ courseId: "one", label: "Class 1", states: [{ state: "no-work", count: 0 }] }],
+      courses: [{
+        courseId: "one", label: "Class 1", states: [{ state: "no-work", count: 0 }],
+        repositories: { checked: 1, found: 1, enumerationComplete: true },
+      }],
     });
     expect(fake.loadDurableHistory).not.toHaveBeenCalled();
+    expect(fake.runTarget).not.toHaveBeenCalled();
+  });
+
+  it("counts distinct fully checked repositories and keeps partial or absent inventory explicit", async () => {
+    const fake = setup([owned("one"), owned("two"), owned("three")]);
+    fake.discoverCourse
+      .mockResolvedValueOnce({
+        status: "scanned",
+        enumerationComplete: false,
+        repos: [
+          { status: "ready", repo: "Org/Complete", sourceRef: "main", sourceCommit: "sha", folders: ["a", "b"] },
+          { status: "ready", repo: "org/complete", sourceRef: "other", sourceCommit: "sha", folders: ["a"] },
+          { status: "ready", repo: "Org/Mixed", sourceRef: "main", sourceCommit: "sha", folders: ["a"] },
+          { status: "blocked", repo: "org/mixed", sourceRef: "other", reason: "unavailable" },
+          { status: "partial", repo: "org/partial", sourceRef: "main", sourceCommit: "sha", reason: "tree-truncated" },
+        ],
+      })
+      .mockResolvedValueOnce({ status: "scanned", enumerationComplete: true, repos: [] })
+      .mockResolvedValueOnce({ status: "blocked", reason: "unavailable" });
+    const updates: RepoGradesStartupProgress[] = [];
+    await startRepoGradesStartup(scope, fake.adapter, (progress) => updates.push(progress)).done;
+
+    expect(updates.find(({ courses }) => courses.length > 0)?.courses.map(({ repositories }) => repositories))
+      .toEqual([undefined, undefined, undefined]);
+    expect(updates.at(-1)?.courses.map(({ repositories }) => repositories)).toEqual([
+      { checked: 1, found: 3, enumerationComplete: false },
+      { checked: 0, found: 0, enumerationComplete: true },
+      undefined,
+    ]);
     expect(fake.runTarget).not.toHaveBeenCalled();
   });
 

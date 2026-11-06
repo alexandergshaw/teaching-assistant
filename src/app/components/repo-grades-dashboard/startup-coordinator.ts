@@ -9,7 +9,7 @@ import {
 import { recordRepoGradesStartup, recordRepoGradesStartupPreparation } from "./startup-diagnostics";
 import type {
   CourseStartupProgress, CourseStartupState, RepoGradesStartupPreparation, RepoGradesStartupPreparationResult,
-  RepoGradesStartupProgress, RepoGradesStartupRecovery,
+  RepoGradesStartupProgress, RepoGradesStartupRecovery, StartupRepositoryCoverage,
 } from "./startup-progress";
 
 type Schedule = ReturnType<typeof createRepoGradeStartupSchedule>;
@@ -67,6 +67,17 @@ function discoveryState(discovery: Inventory["discovery"]): CourseStartupState {
   return "succeeded";
 }
 
+function repositoryCoverage(discovery: Extract<Inventory["discovery"], { status: "scanned" }>): StartupRepositoryCoverage {
+  const found = new Set<string>();
+  const incomplete = new Set<string>();
+  for (const { repo, status } of discovery.repos) {
+    const key = repo.toLowerCase();
+    found.add(key);
+    if (status !== "ready") incomplete.add(key);
+  }
+  return { checked: found.size - incomplete.size, found: found.size, enumerationComplete: discovery.enumerationComplete };
+}
+
 function evaluationDiagnostic(outcome: Outcome): Parameters<Diagnostic>[1] {
   switch (outcome) {
     case "succeeded":
@@ -108,6 +119,7 @@ export function startRepoGradesStartup(
   let phase: RepoGradesStartupProgress["phase"] = "checking";
   const courses = new Map<string, OwnedCourse>();
   const discoveries = new Map<string, Inventory["discovery"]>();
+  const repositoryCoverageByCourse = new Map<string, StartupRepositoryCoverage>();
   const recoverableResults: RepoGradesStartupRecovery[] = [];
   const preparations = new Map<string, Preparation>();
   let runtime: ReadyRuntime | null = null;
@@ -147,6 +159,7 @@ export function startRepoGradesStartup(
       ...(previousBatch ? { previousBatch } : {}),
       courses: [...courses.values()].map((course, index) => {
         const discovery = discoveries.get(course.courseId);
+        const repositories = repositoryCoverageByCourse.get(course.courseId);
         const counts = byCourse.get(course.courseId) ?? new Map<CourseStartupState, number>();
         const coverage = discovery ? discoveryState(discovery) : stopped ? "stopped" : "checking";
         if (coverage !== "succeeded" || !counts.size) {
@@ -159,6 +172,7 @@ export function startRepoGradesStartup(
           courseId: course.courseId,
           label: course.displayName?.trim() || `Class ${index + 1}`,
           states: [...counts].map(([state, count]) => ({ state, count })),
+          ...(repositories && { repositories }),
         };
       }),
     });
@@ -295,6 +309,9 @@ export function startRepoGradesStartup(
       }
       if (stopped) return;
       discoveries.set(course.courseId, discovery);
+      if (discovery.status === "scanned") {
+        repositoryCoverageByCourse.set(course.courseId, repositoryCoverage(discovery));
+      }
       report();
     }
     const inventories = [...courses.values()].map((course) => ({ ...course, discovery: discoveries.get(course.courseId)! }));

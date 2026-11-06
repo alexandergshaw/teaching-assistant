@@ -53,7 +53,7 @@ describe("Repo Grades startup wiring", () => {
   it("keeps a live region outside the tab and wires focusable, guarded Material UI controls", () => {
     const component = source("./RepoGradesStartup.tsx");
     expect(component).toMatch(/role="status" aria-atomic="true"[\s\S]*\{children\}/);
-    expect(component).toContain('import Button from "@mui/material/Button"');
+    expect(component).toMatch(/import \{[^}]*\bButton\b[^}]*\} from "@mui\/material"/);
     expect(component).toContain('<Button type="button" variant="outlined" size="small" aria-disabled={!canStop} aria-describedby={stopHintId}');
     expect(component).toContain("if (canStop) startup.stop?.()");
     expect(component).toContain("Copy it before reloading or signing out.");
@@ -73,6 +73,9 @@ describe("Repo Grades startup wiring", () => {
     expect(table).toContain('onClick={() => setSort((current) => nextStartupTableSort(current, id))}');
     expect(table).toContain("sortStartupCourses(courses, sort).map");
     expect(table).toContain("orderStartupStatuses(course.states).map");
+    expect(table).toContain("{course.repositories && (");
+    expect(table).toContain("{formatStartupRepositoryCoverage(course.repositories)}");
+    expect(table).toContain("Grading targets identified: {targetCount}");
     expect(table).toContain('label={count ? `${label} (${count})` : label}');
   });
 

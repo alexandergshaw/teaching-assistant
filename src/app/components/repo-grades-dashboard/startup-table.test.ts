@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseStartupProgress } from "./startup-progress";
-import { nextStartupTableSort, orderStartupStatuses, sortStartupCourses } from "./startup-table";
+import { formatStartupRepositoryCoverage, nextStartupTableSort, orderStartupStatuses, sortStartupCourses } from "./startup-table";
 
 const courses = [
   { courseId: "first", label: "Class 10", states: [{ state: "running", count: 3 }] },
@@ -35,5 +35,16 @@ describe("startup status table sorting", () => {
     const reversed = nextStartupTableSort(byStatus, "status");
     expect(reversed).toEqual({ column: "status", direction: "desc" });
     expect(nextStartupTableSort(reversed, "status")).toEqual(byStatus);
+  });
+});
+
+describe("startup repository coverage labels", () => {
+  it("distinguishes complete enumeration, incomplete checks, and a partial repository list", () => {
+    expect(formatStartupRepositoryCoverage({ checked: 0, found: 0, enumerationComplete: true }))
+      .toBe("Repositories checked: 0 of 0");
+    expect(formatStartupRepositoryCoverage({ checked: 4, found: 5, enumerationComplete: true }))
+      .toBe("Repositories checked: 4 of 5 · Incomplete checks: 1");
+    expect(formatStartupRepositoryCoverage({ checked: 4, found: 5, enumerationComplete: false }))
+      .toBe("Repositories checked: 4 of 5 found · Incomplete checks: 1 · Repository list incomplete");
   });
 });

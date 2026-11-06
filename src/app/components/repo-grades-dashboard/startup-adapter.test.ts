@@ -51,6 +51,7 @@ function plan(history: Preview["history"], assignments: Record<string, TargetSta
 }
 
 const unattempted = { status: "blocked", reason: "runtime-unavailable" } as const;
+const repositories = { checked: 1, found: 1, enumerationComplete: true };
 const selector = { key: "c".repeat(64), generation: "d".repeat(64) };
 type RetryResult = Awaited<ReturnType<typeof retryRepoGradePreparationAction>>;
 
@@ -94,10 +95,10 @@ describe("server-backed startup runtime", () => {
       phase: "incomplete",
       historyRevisionByCourse: new Map([["first", 1], ["second", 1]]),
       courses: [
-        { courseId: "first", label: "first", states: [{ state: "succeeded", count: 2 }] },
-        { courseId: "second", label: "second", states: [{ state: "succeeded", count: 1 }] },
-        { courseId: "unknown", label: "unknown", states: [{ state: "unknown", count: 1 }] },
-        { courseId: "empty", label: "empty", states: [{ state: "no-work", count: 0 }] },
+        { courseId: "first", label: "first", repositories, states: [{ state: "succeeded", count: 2 }] },
+        { courseId: "second", label: "second", repositories, states: [{ state: "succeeded", count: 1 }] },
+        { courseId: "unknown", label: "unknown", repositories, states: [{ state: "unknown", count: 1 }] },
+        { courseId: "empty", label: "empty", repositories, states: [{ state: "no-work", count: 0 }] },
         { courseId: "unmapped", label: "unmapped", states: [{ state: "not-configured", count: 0 }] },
       ],
     });
@@ -117,7 +118,7 @@ describe("server-backed startup runtime", () => {
     await startRepoGradesStartup(scope, serverRepoGradesStartupAdapter, observer).done;
     expect(observer).toHaveBeenLastCalledWith({
       historyRevisionByCourse: new Map([["first", 1]]),
-      phase: "incomplete", courses: [{ courseId: "first", label: "first", states: [
+      phase: "incomplete", courses: [{ courseId: "first", label: "first", repositories, states: [
         { state: "unknown", count: 1 }, { state: "failed", count: 1 }, { state: "succeeded", count: 1 },
       ] }],
       previousBatch: { active: false, courses: [{ courseId: "first", label: "first", states: [
@@ -250,7 +251,7 @@ describe("server-backed startup runtime", () => {
     expect(observer).toHaveBeenLastCalledWith({
       phase: "stopped",
       historyRevisionByCourse: new Map([["first", 1]]),
-      courses: [{ courseId: "first", label: "first", states: [{ state: "unknown", count: 1 }, { state: "stopped", count: 1 }] }],
+      courses: [{ courseId: "first", label: "first", repositories, states: [{ state: "unknown", count: 1 }, { state: "stopped", count: 1 }] }],
       recoverableResults: [{ ...evaluation, target: { accountId, courseId: "first", repo, sourceRef, sha: commit, folder: "active" } }],
     });
   });

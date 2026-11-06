@@ -1,4 +1,4 @@
-import type { CourseStartupProgress, CourseStartupState } from "./startup-progress";
+import type { CourseStartupProgress, CourseStartupState, StartupRepositoryCoverage } from "./startup-progress";
 
 type StatusTone = "danger" | "warning" | "accent" | "success" | "neutral";
 
@@ -37,6 +37,16 @@ function statusRank(state: CourseStartupState): number {
 
 export function orderStartupStatuses(states: CourseStartupProgress["states"]) {
   return [...states].sort((a, b) => statusRank(a.state) - statusRank(b.state));
+}
+
+export function formatStartupRepositoryCoverage({ checked, found, enumerationComplete }: StartupRepositoryCoverage): string {
+  const incomplete = found - checked;
+  const details = [
+    `Repositories checked: ${checked} of ${found}${enumerationComplete ? "" : " found"}`,
+    ...(incomplete ? [`Incomplete checks: ${incomplete}`] : []),
+    ...(enumerationComplete ? [] : ["Repository list incomplete"]),
+  ];
+  return details.join(" · ");
 }
 
 function leadingStatusRank({ states }: CourseStartupProgress): number {

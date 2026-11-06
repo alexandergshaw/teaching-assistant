@@ -21,10 +21,17 @@ export type CourseStartupState =
   | "not-started"
   | "not-configured";
 
+export type StartupRepositoryCoverage = Readonly<{
+  checked: number;
+  found: number;
+  enumerationComplete: boolean;
+}>;
+
 export type CourseStartupProgress = Readonly<{
   courseId: string;
   label: string;
   states: readonly Readonly<{ state: CourseStartupState; count: number }>[];
+  repositories?: StartupRepositoryCoverage;
 }>;
 
 export type RepoGradesStartupProgress = Readonly<{

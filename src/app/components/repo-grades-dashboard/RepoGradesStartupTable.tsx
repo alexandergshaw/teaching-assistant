@@ -1,18 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import Chip from "@mui/material/Chip";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TableSortLabel from "@mui/material/TableSortLabel";
+import { Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, Typography } from "@mui/material";
 import type { CourseStartupProgress } from "./startup-progress";
 import {
-  nextStartupTableSort, orderStartupStatuses, sortStartupCourses, STARTUP_STATUS,
+  formatStartupRepositoryCoverage, nextStartupTableSort, orderStartupStatuses, sortStartupCourses, STARTUP_STATUS,
   type StartupSortColumn, type StartupTableSort,
 } from "./startup-table";
 
@@ -53,32 +45,45 @@ export function RepoGradesStartupTable({ courses, headingId }: {
           </TableRow>
         </TableHead>
         <TableBody>
-          {sortStartupCourses(courses, sort).map((course) => (
-            <TableRow key={course.courseId}>
-              <TableCell component="th" scope="row">{course.label}</TableCell>
-              <TableCell>
-                <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: "wrap" }}>
-                  {orderStartupStatuses(course.states).map(({ state, count }) => {
-                    const { label: statusLabel, tone } = STARTUP_STATUS[state];
-                    const label = state === "succeeded" ? "Graded" : statusLabel;
-                    return (
-                      <Chip key={state} size="small" variant="outlined"
-                        label={count ? `${label} (${count})` : label}
-                        sx={{
-                          height: "auto",
-                          minHeight: 24,
-                          fontWeight: 700,
-                          color: tone === "neutral" ? "var(--text-secondary)" : `var(--${tone}-ink)`,
-                          bgcolor: tone === "neutral" ? "var(--surface-subtle)" : `var(--${tone}-surface)`,
-                          "& .MuiChip-label": { whiteSpace: "normal" },
-                        }}
-                      />
-                    );
-                  })}
-                </Stack>
-              </TableCell>
-            </TableRow>
-          ))}
+          {sortStartupCourses(courses, sort).map((course) => {
+            const targetCount = course.states.reduce((total, { count }) => total + count, 0);
+            return (
+              <TableRow key={course.courseId}>
+                <TableCell component="th" scope="row">{course.label}</TableCell>
+                <TableCell>
+                  {course.repositories && (
+                    <Typography component="p" variant="body2" sx={{ mb: "var(--space-1)" }}>
+                      {formatStartupRepositoryCoverage(course.repositories)}
+                    </Typography>
+                  )}
+                  {targetCount > 0 && (
+                    <Typography component="p" variant="body2" sx={{ mb: "var(--space-1)" }}>
+                      Grading targets identified: {targetCount}
+                    </Typography>
+                  )}
+                  <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: "wrap" }}>
+                    {orderStartupStatuses(course.states).map(({ state, count }) => {
+                      const { label: statusLabel, tone } = STARTUP_STATUS[state];
+                      const label = state === "succeeded" ? "Graded" : statusLabel;
+                      return (
+                        <Chip key={state} size="small" variant="outlined"
+                          label={count ? `${label} (${count})` : label}
+                          sx={{
+                            height: "auto",
+                            minHeight: 24,
+                            fontWeight: 700,
+                            color: tone === "neutral" ? "var(--text-secondary)" : `var(--${tone}-ink)`,
+                            bgcolor: tone === "neutral" ? "var(--surface-subtle)" : `var(--${tone}-surface)`,
+                            "& .MuiChip-label": { whiteSpace: "normal" },
+                          }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>

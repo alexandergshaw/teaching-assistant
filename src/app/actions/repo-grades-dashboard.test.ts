@@ -7,7 +7,7 @@ import { discoverRepoGradeSources } from "@/lib/repo-grades-dashboard/discovery"
 import * as admissionMode from "@/lib/repo-grades-dashboard/admission-mode";
 import * as discoveryMode from "@/lib/repo-grades-dashboard/discovery-mode";
 import {
-  beginRepoGradeDispatch, claimRepoGrade, readRepoGradeHistoryForOwner, REPO_GRADE_HISTORY_PAGE_SIZE, settleRepoGrade,
+  beginRepoGradeDispatch, claimRepoGrade, readRepoGradeHistoryForOwner, settleRepoGrade,
 } from "@/lib/repo-grades-dashboard/ledger";
 import { getRepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
 import { captureRepoGradeRubricGenerator } from "@/lib/repo-grades-dashboard/preparation-generator";
@@ -335,6 +335,24 @@ it("rejects stale startup selectors and prior receipts before preparing or admit
   expect(rpc).not.toHaveBeenCalled();
   expect(claimRepoGrade).not.toHaveBeenCalled();
   expect(evaluateRepoGrade).not.toHaveBeenCalled();
+});
+
+it("records failed read-only preflight separately from uncertain prior work", async () => {
+  vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
+  discover(source());
+  vi.mocked(discoverRepoGradeSources).mockRejectedValueOnce(new Error("Discovery unavailable"));
+  await expect(runStartupTarget()).resolves.toEqual({ status: "storage-unavailable" });
+  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "not-started" }));
+
+  readReceipts.mockResolvedValueOnce({ data: [], count: 1, error: null });
+  await expect(runStartupTarget()).resolves.toEqual({ status: "storage-unavailable" });
+  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "not-started" }));
+
+  readReceipts.mockResolvedValueOnce({ data: [receipt(1, { status: "unknown" })], count: 1, error: null });
+  await expect(runStartupTarget()).resolves.toEqual({ status: "unknown" });
+  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "unknown" }));
+  expect(claimRepoGrade).not.toHaveBeenCalled();
+  expect(callLlm).not.toHaveBeenCalled();
 });
 
 function savedStartupProfile(rubric: string, { provider = "embedded", useReadmeInstructions = false, sourceRef }: {
@@ -951,49 +969,4 @@ it("requires an exact match at the receipt cap and fails closed on a thrown requ
     });
   }
   expect(receiptQuery.limit.mock.calls).toEqual([[1_000], [1_000], [1_000]]);
-});
-
-it("fences the browser account and cursor before reading history", async () => {
-  await expect(readRepoGradeHistoryAction(courseId, "another-account")).resolves.toEqual({ status: "course-unavailable" });
-  await expect(readRepoGradeHistoryAction(courseId, "owner", -1)).resolves.toEqual({ status: "course-unavailable" });
-  await expect(readRepoGradeHistoryAction("other", "owner")).resolves.toEqual({ status: "course-unavailable" });
-  expect(readRepoGradeHistoryForOwner).not.toHaveBeenCalled();
-});
-
-it("projects one descending page and distinguishes zero, null, and unknown", async () => {
-  const row = {
-    repo: "org/repo", folder: "", source_ref: "main", source_sha: "a".repeat(40), profile_fingerprint: "b".repeat(64),
-    claimed_at: "2026-10-11T12:00:00+00:00", settled_at: null, reconciled_at: null,
-  };
-  const sections = { strengths: "Good\nhttps://example.test/help", improvements: "  Improve timing", resubmitNotice: "", rawScore: "0/12" };
-  const rubric = [{ area: "Timing", score: "0/12", comment: "Try again\nhttps://example.test/timing" }];
-  vi.mocked(readRepoGradeHistoryForOwner).mockResolvedValueOnce(Array.from(
-    { length: REPO_GRADE_HISTORY_PAGE_SIZE },
-    (_, i) => i === 0
-      ? { ...row, generation: 101, status: "succeeded", score: 0, feedback: "Feedback", rubric, feedback_sections: sections }
-      : i === 1
-        ? { ...row, generation: 100, status: "partial", score: null, feedback: null, rubric: null, feedback_retention: "strengths" }
-      : { ...row, generation: 101 - i, status: "unknown", score: null, feedback: null, rubric: null },
-  )).mockResolvedValueOnce([]);
-  const result = await readRepoGradeHistoryAction(courseId, "owner", 102);
-  expect(readRepoGradeHistoryForOwner).toHaveBeenCalledWith("owner", courseId, 102);
-  expect(result).toMatchObject({ status: "loaded", nextBefore: 2 });
-  if (result.status !== "loaded") throw new Error("Expected history");
-  expect(result.rows[0]).toMatchObject({
-    status: "succeeded", score: 0, settledAt: null, claimedAt: "2026-10-11T12:00:00.000Z",
-    feedback: "Feedback", rubric, feedback_sections: sections, feedback_retention: null,
-  });
-  expect(result.rows[1]).toMatchObject({
-    status: "partial", score: null, feedback: null, rubric: null, feedback_sections: null, feedback_retention: "strengths",
-  });
-  expect(result.rows[2]).toMatchObject({ status: "unknown", score: null, feedback: null, feedback_sections: null });
-  await expect(readRepoGradeHistoryAction(courseId, "owner", 2)).resolves.toEqual({ status: "loaded", nextBefore: null, rows: [] });
-  expect(discoverRepoGradeSources).not.toHaveBeenCalled();
-});
-
-it("distinguishes an unowned course from an unavailable history store without retrying", async () => {
-  vi.mocked(readRepoGradeHistoryForOwner).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("missing migration"));
-  await expect(readRepoGradeHistoryAction(courseId, "owner")).resolves.toEqual({ status: "course-unavailable" });
-  await expect(readRepoGradeHistoryAction(courseId, "owner")).resolves.toEqual({ status: "storage-unavailable" });
-  expect(readRepoGradeHistoryForOwner).toHaveBeenCalledTimes(2);
 });

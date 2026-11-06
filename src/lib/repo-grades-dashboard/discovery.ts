@@ -81,12 +81,18 @@ function readFolders(value: unknown, treeSha: string, includesFolder: (folder: s
   }
   if (tree.truncated) return null;
   const paths: string[] = [];
+  const seen = new Set<string>();
   for (const value of tree.tree) {
     const entry = record(value);
-    if (!entry || typeof entry.path !== "string" || !entry.path) return null;
-    if (entry.type === "tree") paths.push(`${entry.path}/`);
+    const path = entry?.path;
+    // The shared manual folder helper normalizes empty path segments. A
+    // startup target must keep the exact spelling from the pinned tree.
+    if (!entry || typeof path !== "string" || !path.isWellFormed() || /[\\\u0000-\u001f\u007f]/.test(path)
+      || path.split("/").some((part) => !part.trim() || part === "." || part === "..") || seen.has(path)) return null;
+    seen.add(path);
+    if (entry.type === "tree") paths.push(`${path}/`);
     else if (entry.type === "blob" && typeof entry.size === "number" && Number.isSafeInteger(entry.size) && entry.size >= 0) {
-      paths.push(entry.path);
+      paths.push(path);
     } else return null;
   }
   return assignmentFolderPathsFromTree(paths).filter(includesFolder);

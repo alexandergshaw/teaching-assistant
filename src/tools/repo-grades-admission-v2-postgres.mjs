@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { runCases } from "./repo-grades-admission-v2-postgres-cases.mjs";
+import { runSettlementCases } from "./repo-grades-admission-v2-postgres-settlement.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -173,7 +174,8 @@ async function main() {
       throw new Error("Expected the contender to wait on the other backend's advisory lock.");
     }
     await runCases({ owner, worker, contender, witness, waitForBlock });
-    console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed.");
+    await runSettlementCases({ owner, worker, contender, witness, waitForBlock });
+    console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();
   }

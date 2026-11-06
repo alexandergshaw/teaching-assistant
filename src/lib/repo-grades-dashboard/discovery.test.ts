@@ -211,12 +211,23 @@ describe("discoverRepoGradeSources", () => {
     expect(fetcher.mock.calls.map(([url]) => new URL(url).origin)).toEqual([root, root, root]);
   });
 
-  it.each([null, { type: "blob", path: "lab/main.py", size: -1 }])("keeps a malformed recursive tree partial", async (entry) => {
+  const validTreeEntry = { type: "blob", path: "Lab 1/main.py", size: 20 };
+  it.each([
+    null,
+    { ...validTreeEntry, size: -1 },
+    { ...validTreeEntry, path: "/lab/main.py" },
+    { ...validTreeEntry, path: "lab//module/main.py" },
+    { ...validTreeEntry, path: "lab/../module/main.py" },
+    { ...validTreeEntry, path: "lab/ /main.py" },
+    { ...validTreeEntry, path: "lab\\module/main.py" },
+    { ...validTreeEntry, path: "lab/\u0000main.py" },
+    validTreeEntry,
+  ])("keeps a malformed or duplicate recursive tree entry partial (%j)", async (entry) => {
     const fetcher = vi.fn(async (url: string) => {
       if (url.includes("/orgs/")) return Response.json([repo("lab")]);
       if (url.endsWith("/commits/default-source")) return Response.json({ sha });
       if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
-      return Response.json({ sha: treeSha, truncated: false, tree: [entry] });
+      return Response.json({ sha: treeSha, truncated: false, tree: [validTreeEntry, entry] });
     });
     vi.stubGlobal("fetch", fetcher);
     await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({

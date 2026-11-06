@@ -72,6 +72,62 @@ afterEach(() => {
 });
 
 describe("readPinnedRepoGradeReadme", () => {
+  it("deduplicates classroom README blobs while preserving target identity, conflicts and authorization", async () => {
+    const shared = blob(preferred, "common instructions");
+    const changed = blob(preferred, "different instructions");
+    const sharedTree = makeTree([shared]);
+    const changedTree = makeTree([changed]);
+    let denied = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      const different = url.includes("/Different/");
+      if (url.includes("/commits/")) return denied ? new Response(null, { status: 403 })
+        : Response.json({ sha: target.sourceCommit, tree: { sha: (different ? changedTree : sharedTree).sha } });
+      if (url.includes("/trees/")) return Response.json(different ? changedTree : sharedTree);
+      if (url.includes("/blobs/")) return new Response(new Uint8Array(different ? changed.bytes : shared.bytes));
+      throw new Error("Unexpected GitHub request");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const account = "shared-blob-integration";
+    const read = (repo: string, accountId = account) => readPinnedRepoGradeReadme({ ...target, repo }, folder, undefined, accountId);
+    await expect(read("First")).resolves.toMatchObject({ status: "present", text: "common instructions", target: { repo: "First" } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await expect(read("Second")).resolves.toMatchObject({ status: "present", text: "common instructions", target: { repo: "Second" } });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    await expect(read("Different")).resolves.toMatchObject({ status: "present", text: "different instructions", target: { repo: "Different" } });
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(2);
+    denied = true;
+    await expect(read("First")).resolves.toEqual(failure);
+    await expect(read("Revoked")).resolves.toEqual(failure);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    denied = false;
+    await expect(read("Third", "separate-account")).resolves.toMatchObject({ status: "present" });
+    vi.stubEnv("GITHUB_TOKEN", "rotated-blob-token");
+    await expect(read("Fourth")).resolves.toMatchObject({ status: "present" });
+    expect(fetchMock).toHaveBeenCalledTimes(16);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(4);
+  });
+
+  it("requires verified target tree membership and a regular file even when blob content is cached", async () => {
+    const readme = blob(preferred, "cached blob cannot authorize another target");
+    const tree = makeTree([readme]);
+    const account = "shared-blob-tree-membership";
+    const fetchMock = vi.fn(async (url: string) => {
+      const linked = url.includes("/Symlink/");
+      const chosen = linked ? makeTree([{ ...readme, mode: "120000" }]) : tree;
+      if (url.includes("/commits/")) return Response.json({ sha: target.sourceCommit, tree: { sha: chosen.sha } });
+      if (url.includes("/trees/")) return Response.json(url.includes("/Corrupt/") ? { ...chosen, tree: [] } : chosen);
+      return new Response(new Uint8Array(readme.bytes));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const read = (repo: string) => readPinnedRepoGradeReadme({ ...target, repo }, folder, undefined, account);
+    await expect(read("Valid")).resolves.toMatchObject({ status: "present" });
+    await expect(read("Corrupt")).resolves.toEqual(failure);
+    await expect(read("Symlink")).resolves.toEqual(failure);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/blobs/"))).toHaveLength(1);
+  });
+
   it("shares discovery's verified tree with README preparation and evaluation after fresh authorization", async () => {
     const readme = blob(preferred, "shared instructions");
     const tree = makeTree([readme]);

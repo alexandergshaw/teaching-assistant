@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { rememberVerifiedGithubTree, reuseVerifiedGithubTree, verifyGithubTree } from "@/lib/github-verified-tree";
+import { readVerifiedReadmeBlob } from "@/lib/github-verified-readme-blob";
 
 const MAX_COMMIT_BYTES = 1_000_000;
 const MAX_TREE_BYTES = 8_000_000;
@@ -78,10 +79,6 @@ function isPinnedTarget({ owner, repo, sourceRef, sourceCommit }: PinnedTarget):
     || Buffer.byteLength(sourceRef, "utf8") > 1_024 || sourceRef === "" || !isSha(sourceCommit)) return false;
   const ref = normalizeTargetBranch(sourceRef);
   return ref.ok && ref.branch === sourceRef;
-}
-
-function gitObjectSha(type: "tree" | "blob", bytes: Buffer): string {
-  return createHash("sha1").update(`${type} ${bytes.byteLength}\0`).update(bytes).digest("hex");
 }
 
 async function readBody(response: Response, limit: number, signal: AbortSignal): Promise<Buffer> {
@@ -191,10 +188,8 @@ export async function readPinnedRepoGradeReadme(
     if (!entry || (entry.mode !== "100644" && entry.mode !== "100755") || entry.size > MAX_README_BYTES) {
       return { status: "failure" };
     }
-    const bytes = await get(`/blobs/${entry.sha}`, entry.size, "application/vnd.github.raw+json");
-    if (bytes.byteLength !== entry.size || gitObjectSha("blob", bytes) !== entry.sha) return { status: "failure" };
-    const text = utf8.decode(bytes);
-    if (text.includes("\0")) return { status: "failure" };
+    const text = await readVerifiedReadmeBlob(treeScope, entry,
+      () => get(`/blobs/${entry.sha}`, entry.size, "application/vnd.github.raw+json"), requestSignal);
     return verified({ status: text.trim() === "" ? "blank" : "present", path: entry.path, blobSha: entry.sha, text });
   } catch {
     return { status: "failure" };

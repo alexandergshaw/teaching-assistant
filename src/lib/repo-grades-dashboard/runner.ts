@@ -13,6 +13,7 @@ import type {
   RepoGradeClaimStatus, RepoGradeCourseConfig, RepoGradeFeedbackField, RepoGradeResultRecord,
 } from "@/lib/supabase/types.repo-grades-dashboard";
 import { discoverRepoGradeSources, type RepoGradeDiscovery } from "./discovery";
+import { automaticRepoGradeSnapshotBasis, type AutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { repoGradeDiscoveryEnabled } from "./discovery-mode";
 import { repoGradeAdmissionMode, runWithRepoGradeAdmission } from "./admission";
 import { isEmbeddedRepoGradeStartupProfile, restoreRepoGradeProfile, restoreRepoGradeRubric, type RepoGradeProfile } from "./profile";
@@ -34,11 +35,14 @@ type CoursePlan = {
   discovery: RepoGradeDiscovery;
   folderSources: ReadonlyMap<string, string | null>;
   courseKindBasis?: RepoGradeCourseKindBasis;
+  snapshotBasis?: string;
 };
 
 /** The saved organization is the existing Repo Grades scope. Course codebases
  * and student mappings serve other callers and do not filter this inventory. */
-export async function planRepoGradeCourse(accountId: string, courseId: string): Promise<CoursePlan | null> {
+export async function planRepoGradeCourse(
+  accountId: string, courseId: string, snapshot?: AutomaticRepoGradeSnapshot,
+): Promise<CoursePlan | null> {
   const { data, error }: { data: (RepoGradeCourseConfig & { name: string | null; course_kind: string | null }) | null; error: unknown } = await table().select(COURSE_COLUMNS)
     .eq("user_id", accountId).eq("id", courseId).maybeSingle();
   if (error) throw new Error("Repository grading course storage is unavailable");
@@ -48,14 +52,19 @@ export async function planRepoGradeCourse(accountId: string, courseId: string): 
     && (course_kind === null || typeof course_kind === "string") ? [name, course_kind] : undefined;
   const organization = courseConfig.github_org?.trim();
   if (!organization || !repoGradeDiscoveryEnabled()) {
+    if (snapshot) return null;
     const discovery: RepoGradeDiscovery = organization
       ? { status: "blocked", reason: "branch-aware-discovery-disabled" }
       : { status: "not-configured" };
     return { accountId, courseId, courseConfig, discovery, folderSources: new Map(), courseKindBasis };
   }
   const folderSources = await readCurrentRepoGradeProfilesForOwner(accountId, courseId);
+  const snapshotBasis = automaticRepoGradeSnapshotBasis(accountId, courseId, courseConfig, courseKindBasis, folderSources);
+  if (snapshot) return snapshot.basis === snapshotBasis
+    ? { accountId, courseId, courseConfig, discovery: snapshot.discovery, folderSources, courseKindBasis, snapshotBasis }
+    : null;
   const discovery = await discoverRepoGradeSources({ accountId, organization, folderSources });
-  return { accountId, courseId, courseConfig, discovery, folderSources, courseKindBasis };
+  return { accountId, courseId, courseConfig, discovery, folderSources, courseKindBasis, snapshotBasis };
 }
 
 type PinnedInput = {

@@ -33,6 +33,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "invalid-scope": "The worker could not verify the class, repository organization or assignment scope.",
   "invalid-settings": "The worker could not use the saved assignment grading settings.",
   "invalid-source": "The worker could not verify a configured branch or assignment folder.",
+  "pinned-inventory-unavailable": "The worker could not retain or verify the repository snapshot. Start a new check.",
   "missing-instruction-evidence": `A repository has no usable pinned assignment README. Add the assignment README or switch to shared instructions. ${USE_SHARED_INSTRUCTIONS}`,
   "missing-instructions": "The worker found no usable saved assignment instructions.",
   "owner-unavailable": "The worker could not verify the account that owns this run.",

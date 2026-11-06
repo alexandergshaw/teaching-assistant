@@ -3,6 +3,7 @@ import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { AutomaticRepoGradeCourseState, AutomaticRepoGradeStatus, AutomaticRepoGradeTargetState } from "./automatic-status";
 import type { DiscoveryRateLimit } from "./discovery-transport";
+import { restoreAutomaticRepoGradeSnapshot, type AutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 
 import type { RepoGradePreparationRetry } from "./preparation-ledger";
 import type { RepoGradeRepositoryCoverage } from "./scheduler";
@@ -18,6 +19,7 @@ type StagedSelector = Selector & {
 type DiscoveryCompletion = {
   state: Exclude<AutomaticRepoGradeCourseState, "checking" | "stopped">; reason?: string; targets: StagedSelector[];
   repositories?: RepoGradeRepositoryCoverage;
+  snapshot?: AutomaticRepoGradeSnapshot;
 };
 type TargetCompletion = {
   state: Exclude<AutomaticRepoGradeTargetState, "queued" | "running" | "stopped">;
@@ -98,6 +100,36 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
   throw new Error("Invalid automatic repository grading work");
 }
 
+export async function readAutomaticRepoGradeSnapshot(work: ClaimScope, lease: string) {
+  const result = await rpc("repo_grade_automatic_read_pinned_inventory", {
+    p_run_id: work.runId, p_lease: lease, p_user_id: work.accountId, p_course_id: work.courseId,
+  });
+  if (!record(result) || !Object.hasOwn(result, "snapshot")) return { status: "unavailable" } as const;
+  if (result.snapshot === null) return { status: "legacy" } as const;
+  const snapshot = restoreAutomaticRepoGradeSnapshot(result.snapshot);
+  return snapshot ? { status: "ready", snapshot } as const : { status: "unavailable" } as const;
+}
+
+export function automaticRepoGradeEvidenceStore(
+  work: Extract<AutomaticRepoGradeWork, { phase: "grading" }>, lease: string,
+) {
+  const scope = {
+    p_run_id: work.runId, p_lease: lease, p_user_id: work.accountId, p_course_id: work.courseId, p_folder: work.folder,
+  };
+  return {
+    async read(basis: string) {
+      const result = await rpc("repo_grade_automatic_read_pinned_evidence", { ...scope, p_basis: basis });
+      if (!record(result) || !Object.hasOwn(result, "evidence")) throw new Error("Repository grading evidence unavailable");
+      return result.evidence;
+    },
+    async write(basis: string, evidence: unknown) {
+      if (await rpc("repo_grade_automatic_save_pinned_evidence", { ...scope, p_basis: basis, p_evidence: evidence }) !== true) {
+        throw new Error("Repository grading evidence unavailable");
+      }
+    },
+  };
+}
+
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
   if (result.state === "github-throttled") {
     const { retryAtMs, primary } = result.rateLimit;
@@ -109,13 +141,17 @@ export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lea
     }) === true;
   }
   const discovery = "targets" in result;
-  return await rpc(discovery ? "repo_grade_automatic_finish_discovery" : "repo_grade_automatic_finish", {
+  const finish = discovery
+    ? result.snapshot ? "repo_grade_automatic_finish_pinned_discovery" : "repo_grade_automatic_finish_discovery"
+    : "repo_grade_automatic_finish";
+  return await rpc(finish, {
     p_run_id: work.runId,
     p_lease: lease,
     p_course_id: work.courseId,
     p_state: result.state,
     p_reason: result.reason ?? null,
-    ...(discovery ? { p_targets: result.targets, p_repositories: result.repositories ?? null } : {
+    ...(discovery ? { p_targets: result.targets, p_repositories: result.repositories ?? null,
+      ...(result.snapshot && { p_snapshot: result.snapshot }) } : {
       p_preparation_key: result.preparationRetry?.key ?? null,
       p_preparation_generation: result.preparationRetry?.generation ?? null,
       p_recovery: result.recovery ?? null,

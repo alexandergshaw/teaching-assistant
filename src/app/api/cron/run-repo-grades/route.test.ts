@@ -63,8 +63,8 @@ describe("durable repository grading worker route", () => {
     expect(await response.json()).toEqual({ status: "ok", handled: 1, scheduled: { accepted: 0, failed: 0 } });
     expect(mocks.getUserById).toHaveBeenCalledWith(accountId);
     expect(mocks.resolve).toHaveBeenCalledWith(accountId, "owner@example.test", true);
-    expect(mocks.worker).toHaveBeenCalledWith(work);
     const [lease] = mocks.claim.mock.calls[0];
+    expect(mocks.worker).toHaveBeenCalledWith(work, lease);
     expect(mocks.finish).toHaveBeenCalledWith(work, lease, { state: "scanned", targets: [] });
   });
 

@@ -16,6 +16,7 @@ import { runAutomaticRepoGradeScheduleCases } from "./repo-grades-automatic-sche
 import { runAutomaticRepoGradeCutoverCases } from "./repo-grades-automatic-cutover-postgres.mjs";
 import { runAutomaticRepoGradeGithubRetryCases } from "./repo-grades-automatic-github-retry-postgres.mjs";
 import { runAutomaticRepoGradeIntervalCases, seedRepoGradeDailySchedule } from "./repo-grades-automatic-interval-postgres.mjs";
+import { runAutomaticRepoGradeSnapshotCases } from "./repo-grades-automatic-snapshot-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -44,6 +45,7 @@ const automaticScheduleMigrationFile = "20261106182023_repo_grade_automatic_sche
 const automaticCutoverMigrationFile = "20261106184758_repo_grade_automatic_startup_cutover.sql";
 const automaticGithubRetryMigrationFile = "20261106194507_repo_grade_automatic_github_retry.sql";
 const automaticIntervalMigrationFile = "20261106194647_repo_grade_automatic_interval.sql";
+const automaticSnapshotMigrationFile = "20261106210512_repo_grade_automatic_pinned_snapshot.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -268,6 +270,12 @@ async function main() {
       new URL(`../../supabase/migrations/${automaticIntervalMigrationFile}`, import.meta.url), "utf8",
     );
     await owner.query(`begin; ${automaticIntervalMigration} commit;`);
+    const automaticSnapshotMigration = readFileSync(
+      new URL(`../../supabase/migrations/${automaticSnapshotMigrationFile}`, import.meta.url), "utf8",
+    );
+    await owner.query(`begin; ${automaticSnapshotMigration} commit;`);
+    await runAutomaticRepoGradeSnapshotCases({ owner, worker });
+    console.log("PASS: automatic grading snapshot privileges, lease fencing, evidence reuse, and cleanup.");
     await runAutomaticRepoGradeIntervalCases({ owner, worker, contender }, priorDaily);
     console.log("PASS: durable intervals, unchanged daily schedules, catch-up and concurrent ticks.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");

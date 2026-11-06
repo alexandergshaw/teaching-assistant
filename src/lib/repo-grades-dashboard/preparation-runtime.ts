@@ -47,6 +47,7 @@ type PreparationOptions = {
   observePreparation?: (metric: RepoGradePreparationDiagnostic) => void;
   observeProfileFailure?: (reason: RepoGradeProfilePreparationFailure) => void;
   retry?: RepoGradePreparationRetry;
+  resolveEvidence?: typeof composeRepoGradePreparationEvidence;
 };
 
 const PREPARATION_BUDGET_MS = 30_000;
@@ -193,7 +194,7 @@ export async function prepareRepoGradeStartupProfile(
 
 async function prepareRepoGradeStartupRubric(
   profile: RepoGradeProfile, discovery: RepoGradeDiscovery, target: Target | undefined, courseConfig: RepoGradeCourseConfig,
-  { observeProfileFailure, retry }: PreparationOptions,
+  { observeProfileFailure, retry, resolveEvidence = composeRepoGradePreparationEvidence }: PreparationOptions,
   bootstrap?: { courseKindBasis: RepoGradeCourseKindBasis | undefined; expectedFingerprint: string | null },
 ): Promise<PreparedRepoGradeProfile | RepoGradePreparationFailure | null> {
   function unavailable(reason: RepoGradeProfilePreparationFailure): null {
@@ -223,7 +224,7 @@ async function prepareRepoGradeStartupRubric(
     generator = policy.generator;
     promptParserVersion = policy.version;
   }
-  const evidence = await composeRepoGradePreparationEvidence({
+  const evidence = await resolveEvidence({
     configuration: {
       accountId, courseId, folder, configurationFingerprint, provider, model, graderVersion,
       promptParserVersion, courseKind: generator?.courseKind ?? "coding",

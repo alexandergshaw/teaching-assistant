@@ -47,7 +47,7 @@ export async function GET(request: Request) {
         ? { state: "partial", reason: "owner-unavailable", targets: [] }
         : { state: "blocked", reason: "owner-unavailable" };
       const result = identity?.role === "owner"
-        ? await runAsOwner(identity, () => worker(work)).catch((): AutomaticRepoGradeCompletion => work.phase === "discovering"
+        ? await runAsOwner(identity, () => worker(work, lease)).catch((): AutomaticRepoGradeCompletion => work.phase === "discovering"
           ? { state: "partial", reason: "discovery-unavailable", targets: [] }
           : { state: "unknown", reason: "worker-interrupted" })
         : unavailable;

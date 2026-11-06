@@ -87,12 +87,14 @@ beforeEach(() => {
   vi.mocked(readCurrentRepoGradeProfilesForOwner).mockResolvedValue(new Map());
   batchRpc.mockImplementation((name: string) => ({
     retry: () => ({
-      abortSignal: async () => ({ data: name === "repo_grade_stage_startup" ? [] : true, error: null }),
+      abortSignal: async () => ({ data: name === "repo_grade_stage_startup" ? []
+        : name === "repo_grade_automatic_read_pinned_inventory" ? { snapshot: null } : true, error: null }),
     }),
   }));
   vi.mocked(createServiceClient).mockReturnValue({
     from,
-    rpc: (name: string, args: unknown) => name.includes("startup") && name !== "repo_grade_claim_startup_target"
+    rpc: (name: string, args: unknown) => name === "repo_grade_automatic_read_pinned_inventory"
+      || (name.includes("startup") && name !== "repo_grade_claim_startup_target")
       ? batchRpc(name, args) : rpc(name, args),
   } as never);
   from.mockReturnValue(receiptQuery);
@@ -792,7 +794,7 @@ it("excludes proven unrelated override failures and blocks unresolved eligible d
   await expect(createAutomaticRepoGradeWorker("coordinated")({
     phase: "grading", runId: batchId, accountId: account.id, courseId, repo,
     folder: "assignment", ref: sourceRef, sha: sourceCommit,
-  })).resolves.toEqual({ state: "blocked", reason: "incomplete-inventory" });
+  }, "test-lease")).resolves.toEqual({ state: "blocked", reason: "incomplete-inventory" });
   expect(fetchModel).not.toHaveBeenCalled();
   expect(evaluateRepoGrade).not.toHaveBeenCalled();
   expect(rpc.mock.calls.map(([name]) => name)).toEqual(["repo_grade_read_profile", "repo_grade_read_profile"]);

@@ -6,29 +6,34 @@ import {
 } from "./preparation-runtime";
 import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
-import type { AutomaticRepoGradeCompletion, AutomaticRepoGradeWork } from "./automatic-store";
+import { automaticRepoGradeEvidenceStore, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
+import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
+import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
 
-type Plan = Awaited<ReturnType<typeof planRepoGradeCourse>>;
 export type AutomaticRepoGradeMode = "coordinated" | "embedded-only";
 
 export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
-  // Reuse a pinned scan within one tick. A later invocation rechecks the
-  // source, and the grading ledger still validates the current configuration.
-  const plans = new Map<string, Plan>();
-
-  return async (work: AutomaticRepoGradeWork): Promise<AutomaticRepoGradeCompletion> => {
+  // Legacy and partial courses still share a scan within one tick, as before.
+  const legacyPlans = new Map<string, Awaited<ReturnType<typeof planRepoGradeCourse>>>();
+  return async (work: AutomaticRepoGradeWork, lease: string): Promise<AutomaticRepoGradeCompletion> => {
     const { accountId, courseId, runId } = work;
-    const key = [runId, courseId].join(":");
-    if (!plans.has(key)) plans.set(key, await planRepoGradeCourse(accountId, courseId));
-    const plan = plans.get(key);
+    const stored = work.phase === "grading" ? await readAutomaticRepoGradeSnapshot(work, lease) : undefined;
+    if (stored?.status === "unavailable") return { state: "blocked", reason: "pinned-inventory-unavailable" };
+    const snapshot = stored?.status === "ready" ? stored.snapshot : undefined;
+    const key = `${runId}:${courseId}`;
+    const plan = snapshot ? await planRepoGradeCourse(accountId, courseId, snapshot)
+      : stored?.status === "legacy" && legacyPlans.has(key) ? legacyPlans.get(key)
+        : await planRepoGradeCourse(accountId, courseId);
+    if (stored?.status === "legacy" && plan) legacyPlans.set(key, plan);
     const discovery = plan?.discovery;
     const incompleteDueToRateLimit = discovery?.status === "blocked" ? discovery.reason === "rate-limited"
       : discovery?.status === "scanned" && discovery.repos.some((row) => row.status === "blocked" && row.reason === "rate-limited");
     if (work.retryGithubRateLimits && discovery && discovery.status !== "not-configured"
-      && (incompleteDueToRateLimit || (work.phase === "grading" && discovery.rateLimit))) {
-      // Rediscover after the cooldown. No rubric preparation or evaluation
-      // has started on this lease, so the same queue item may safely retry.
-      plans.delete(key);
+      && (incompleteDueToRateLimit || (work.phase === "grading" && discovery.rateLimit
+        && (!snapshot || (discovery.rateLimit.retryAtMs ?? 0) > Date.now())))) {
+      // No rubric preparation or evaluation has started. An incomplete scan
+      // can retry discovery; a complete snapshot keeps its pins after cooldown.
+      legacyPlans.delete(key);
       return { state: "github-throttled", rateLimit: discovery.rateLimit ?? { retryAtMs: null, primary: false } };
     }
     if (work.phase === "discovering") {
@@ -43,15 +48,21 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       }], new Map(), false);
       if (schedule.work.size > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
       const targets = [...schedule.work.values()].map(({ target }) => target);
-      const history = targets.length ? await readRepoGradeStartupHistory(accountId, courseId, targets) : new Map();
-      if (!history) return { state: "partial", reason: "history-unavailable", targets: [], repositories };
       const bounded = targets.filter(({ folder, sourceRef }) => folder.length <= 512 && sourceRef.length <= 255);
       const incompleteSource = discovery.repos.find(({ status }) => status !== "ready");
+      const partial = incompleteSource || bounded.length !== targets.length;
+      // Saved/manual profiles may still grade verified targets on the legacy
+      // path. Never advertise a partial scan as complete pinned evidence.
+      const pinned = !partial && plan.snapshotBasis && captureAutomaticRepoGradeSnapshot(plan.snapshotBasis, discovery);
+      if (!partial && !pinned) return { state: "partial", reason: "pinned-inventory-unavailable", targets: [], repositories };
+      const history = targets.length ? await readRepoGradeStartupHistory(accountId, courseId, targets) : new Map();
+      if (!history) return { state: "partial", reason: "history-unavailable", targets: [], repositories };
+      if (partial) legacyPlans.set(key, plan);
       return {
-        repositories,
-        state: incompleteSource || bounded.length !== targets.length ? "partial" : "scanned",
+        repositories, state: partial ? "partial" : "scanned",
         reason: incompleteSource && "reason" in incompleteSource ? incompleteSource.reason
           : bounded.length !== targets.length ? "invalid-source" : undefined,
+        ...(pinned && { snapshot: pinned }),
         targets: bounded.map((target) => {
           const { repo, folder, sourceRef, sha } = target;
           const selector = { repo, folder, ref: sourceRef, sha };
@@ -70,7 +81,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       };
     }
 
-    if (!plan) return { state: "blocked", reason: "course-unavailable" };
+    if (!plan) return { state: "blocked", reason: snapshot ? "configuration-changed" : "course-unavailable" };
     const target = { accountId, courseId, repo: work.repo, folder: work.folder, sourceRef: work.ref, sha: work.sha };
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));
@@ -86,6 +97,10 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
         : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
           observeProfileFailure: (reason) => { profileFailure = reason; },
+          ...(snapshot && { resolveEvidence: createAutomaticRepoGradeEvidenceResolver(
+            snapshot.basis, automaticRepoGradeEvidenceStore(work, lease),
+            () => authorizeAutomaticRepoGradeEvidence(work.repo, work.sha),
+          ) }),
         }),
     });
     if ((outcome.status === "partial" || outcome.status === "unknown") && outcome.unretainedResult) {

@@ -126,21 +126,31 @@ describe("server-backed startup runtime", () => {
     expect(runRepoGradeStartupTargetAction).toHaveBeenCalledExactlyOnceWith(accountId, "first", repo, "tail", sourceRef, commit, generation);
   });
 
-  it.each([false, null])("fails closed when batch sealing returns %s", async (seal) => {
+  it.each(["unavailable", "request-failed"] as const)("closes a possibly sealed batch after %s acknowledgement", async (cause) => {
     resetSessionDiagnosticLogForTests("2026-11-05T12:00:00.000Z");
     vi.mocked(readRepoGradeStartupCoursesAction).mockResolvedValue({ status: "complete", courses: [course("first")] });
     vi.mocked(planRepoGradeCourseAction).mockResolvedValue(plan("complete", { target: unattempted }));
-    if (seal === null) vi.mocked(sealRepoGradeStartupBatchAction).mockRejectedValue(new Error("private failure"));
-    else vi.mocked(sealRepoGradeStartupBatchAction).mockResolvedValue(seal);
+    let active = false;
+    vi.mocked(sealRepoGradeStartupBatchAction).mockImplementationOnce(async () => {
+      active = true;
+      if (cause === "request-failed") throw new Error("private failure");
+      return false;
+    });
+    vi.mocked(closeRepoGradeStartupBatchAction).mockImplementationOnce(async () => {
+      expect(active).toBe(true);
+      active = false;
+      return true;
+    });
     const observer = vi.fn();
     await startRepoGradesStartup(scope, serverRepoGradesStartupAdapter, observer).done;
     expect(observer.mock.lastCall?.[0].phase).toBe("incomplete");
     expect(runRepoGradeStartupTargetAction).not.toHaveBeenCalled();
-    expect(closeRepoGradeStartupBatchAction).not.toHaveBeenCalled();
-    expect(readSessionDiagnosticLogState().entries.at(-1)).toMatchObject({
-      operation: "repo_grades_startup_batch_seal", outcome: "failure",
-      cause: seal === null ? "request-failed" : "unavailable", course: "", institution: "", error: "",
-    });
+    expect(closeRepoGradeStartupBatchAction).toHaveBeenCalledExactlyOnceWith(accountId, generation);
+    expect(active).toBe(false);
+    expect(readSessionDiagnosticLogState().entries.slice(-2)).toMatchObject([
+      { operation: "repo_grades_startup_batch_seal", outcome: "failure", cause, course: "", institution: "", error: "" },
+      { operation: "repo_grades_startup_batch_close", outcome: "success", course: "", institution: "", error: "" },
+    ]);
   });
 
   it("distinguishes a complete empty class list from an unproven one", async () => {

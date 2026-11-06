@@ -310,14 +310,6 @@ export function startRepoGradesStartup(
     schedule = createRepoGradeStartupSchedule(scope, inventories, history, true);
     const queued = [...schedule.work.values()].filter(({ state }) => state.status === "queued").length;
     if (!queued) return;
-    if (batch && !await measure("batch_seal", () => batch.seal(queued),
-      (sealed) => [sealed ? "success" : "unavailable", queued])) {
-      phase = "incomplete";
-      return;
-    }
-    phase = "processing";
-    report();
-
     const pending = new Set<Promise<void>>();
     const dispatch = async (reservation: Reservation) => {
       let evaluation: Evaluation;
@@ -347,6 +339,13 @@ export function startRepoGradesStartup(
     };
 
     try {
+      if (batch && !await measure("batch_seal", () => batch.seal(queued),
+        (sealed) => [sealed ? "success" : "unavailable", queued])) {
+        phase = "incomplete";
+        return;
+      }
+      phase = "processing";
+      report();
       for (;;) {
         while (schedule && !stopped && (!readyRuntime.dispatchOneAtATime || !pending.size)) {
           const next = reserveNextRepoGradeStartupTarget(schedule, scope);
@@ -360,6 +359,8 @@ export function startRepoGradesStartup(
         await Promise.race(pending);
       }
     } finally {
+      // A failed acknowledgement can hide a committed seal. Close this
+      // generation even when no target was dispatched.
       if (batch && !await measure("batch_close", () => batch.close(),
         (closed) => [closed ? "success" : "unavailable"])) phase = "incomplete";
     }

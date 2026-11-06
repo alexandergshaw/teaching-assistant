@@ -13,7 +13,9 @@ describe("Repo Grades startup wiring", () => {
     expect(home).toMatch(/<RepoGradesStartupStatus \/>\s*<RepoGradesTab \/>/);
     expect(home).toMatch(/<\/main>\s*<\/RepoGradesStartup>/);
     const component = source("./RepoGradesStartup.tsx");
-    expect(component).toContain("const startupEnabled = false");
+    expect(source("../../layout.tsx")).toContain('<RepoGradesStartupActivation enabled={repoGradeAdmissionMode() === "embedded-only"}>');
+    expect(source("./startup-activation.tsx")).toContain("createContext(false)");
+    expect(component).toContain("useRepoGradesStartupActivation() && isOwnerDecision(accessDecision)");
     expect(component).toContain("startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter");
     expect(component).toContain("useRepoGradesStartup(loading ? null : user?.id ?? null, startupAdapter)");
   });
@@ -47,13 +49,16 @@ describe("Repo Grades startup wiring", () => {
     expect(client).not.toMatch(/runRepoGrade|BatchAction|StartupTargetAction/);
   });
 
-  it("keeps a live region outside the tab and wires a focusable, guarded native stop button", () => {
+  it("keeps a live region outside the tab and wires focusable, guarded Material UI controls", () => {
     const component = source("./RepoGradesStartup.tsx");
     expect(component).toMatch(/role="status" aria-atomic="true"[\s\S]*\{children\}/);
-    expect(component).toContain('<button type="button" aria-disabled={!canStop} aria-describedby={stopHintId}');
+    expect(component).toContain('import Button from "@mui/material/Button"');
+    expect(component).toContain('<Button type="button" variant="outlined" size="small" aria-disabled={!canStop} aria-describedby={stopHintId}');
     expect(component).toContain("if (canStop) startup.stop?.()");
-    expect(component).toContain('<th scope="row">{course.label}</th>');
+    expect(component).toContain('<TableCell component="th" scope="row">{course.label}</TableCell>');
     expect(component).toContain("Copy it before reloading or signing out.");
+    expect(component).toContain("Manual repository grading is paused while the Embedded pilot is selected.");
+    expect(component).toContain("slotProps={{ input: { readOnly: true } }}");
     expect(component).toContain("value={JSON.stringify(entry, null, 2)}");
   });
 
@@ -61,7 +66,7 @@ describe("Repo Grades startup wiring", () => {
     const component = source("./RepoGradesStartup.tsx");
     expect(component).toContain("A retry may use a model call to prepare the rubric. Repository grading remains separate.");
     expect(component).toContain('<p role="status">{PREPARATION_TEXT[status]}</p>');
-    expect(component).toMatch(/\(canRetry \|\| status === "retrying"\) && \(\s*<button type="button"/);
+    expect(component).toMatch(/\(canRetry \|\| status === "retrying"\) && \(\s*<Button type="button"/);
     expect(component).toMatch(/onClick=\{\(\) => \{ if \(enabled\) void startup\.retryPreparation\?\.\(preparation\); \}\}/);
     expect(source("./useRepoGradesStartup.ts")).toContain("retryPreparation: run.retryPreparation");
   });

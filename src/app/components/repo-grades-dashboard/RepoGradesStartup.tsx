@@ -1,17 +1,31 @@
 "use client";
 
 import { createContext, useContext, useId, type ReactNode } from "react";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import TextField from "@mui/material/TextField";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
+import { useRepoGradesStartupActivation } from "./startup-activation";
 import { serverRepoGradesStartupAdapter } from "./startup-adapter";
 import { disabledRepoGradesStartupAdapter } from "./startup-coordinator";
-import type { CourseStartupState, RepoGradesStartupPreparation, RepoGradesStartupProgress } from "./startup-progress";
+import type { CourseStartupState, RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
 import { useRepoGradesStartup } from "./useRepoGradesStartup";
 
-// Requires verified discovery and durable admission before activation.
-const startupEnabled = false;
-const startupAdapter = startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter;
 const StartupContext = createContext<ReturnType<typeof useRepoGradesStartup> | null>(null);
+const MANUAL_PAUSE = "Manual repository grading is paused while the Embedded pilot is selected.";
 
 const PHASE_TEXT: Record<RepoGradesStartupProgress["phase"], string> = {
   unavailable: "Automatic repository checks at startup are currently unavailable.",
@@ -60,7 +74,9 @@ const PREPARATION_TEXT: Record<RepoGradesStartupPreparation["status"], string> =
 };
 
 export function RepoGradesStartup({ children }: { children: ReactNode }) {
-  const { user, loading } = useSupabase();
+  const { user, loading, accessDecision } = useSupabase();
+  const startupEnabled = useRepoGradesStartupActivation() && isOwnerDecision(accessDecision);
+  const startupAdapter = startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter;
   const startup = useRepoGradesStartup(loading ? null : user?.id ?? null, startupAdapter);
   return (
     <StartupContext.Provider value={startup}>
@@ -84,80 +100,88 @@ export function useRepoGradesStartupHistoryRevision(accountId: string, courseId:
 
 export function RepoGradesStartupStatus() {
   const startup = useContext(StartupContext);
+  const pilotEnabled = useRepoGradesStartupActivation();
   const headingId = useId();
   const stopHintId = useId();
   const progress = startup?.progress;
-  if (!startup || !progress || progress.phase === "unavailable") return <p>{PHASE_TEXT.unavailable}</p>;
+  if (!startup || !progress || progress.phase === "unavailable") {
+    return <Alert severity={pilotEnabled ? "warning" : "info"} role="status">
+      {PHASE_TEXT.unavailable} {pilotEnabled && MANUAL_PAUSE}
+    </Alert>;
+  }
 
   const canStop = !!startup.stop && (progress.phase === "checking" || progress.phase === "processing");
   return (
     <section aria-labelledby={headingId}>
       <h2 id={headingId}>Startup repository checks</h2>
       <p>{PHASE_TEXT[progress.phase]}</p>
+      {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
       {progress.courses.some(({ states }) => states.some(({ state }) => state === "embedded-profile-required")) && (
         <p>The Embedded pilot requires a saved Embedded profile with a fixed rubric and instructions. Turn off README instructions, code execution, and target branch checks for that profile.</p>
       )}
-      <button type="button" aria-disabled={!canStop} aria-describedby={stopHintId} onClick={() => {
+      <Button type="button" variant="outlined" size="small" aria-disabled={!canStop} aria-describedby={stopHintId} onClick={() => {
         if (canStop) startup.stop?.();
       }}>
         Stop scheduling
-      </button>
+      </Button>
       <p id={stopHintId}>Stops new startup work. Already-running work can still finish.</p>
       {progress.phase === "complete" && progress.courses.length === 0 && <p>No classes were found.</p>}
       {progress.courses.length > 0 && (
-        <table>
-          <thead>
-            <tr><th scope="col">Class</th><th scope="col">Startup status</th></tr>
-          </thead>
-          <tbody>
-            {progress.courses.map((course) => (
-              <tr key={course.courseId}>
-                <th scope="row">{course.label}</th>
-                <td>{course.states.map(({ state, count }) =>
-                  count ? `${STATE_TEXT[state]} (${count})` : STATE_TEXT[state],
-                ).join(", ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <TableContainer>
+          <Table size="small" aria-labelledby={headingId}>
+            <TableHead>
+              <TableRow><TableCell scope="col">Class</TableCell><TableCell scope="col">Startup status</TableCell></TableRow>
+            </TableHead>
+            <TableBody>
+              {progress.courses.map((course) => (
+                <TableRow key={course.courseId}>
+                  <TableCell component="th" scope="row">{course.label}</TableCell>
+                  <TableCell>{course.states.map(({ state, count }) =>
+                    count ? `${STATE_TEXT[state]} (${count})` : STATE_TEXT[state],
+                  ).join(", ")}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
       {!!progress.previousBatch?.courses.length && (
         <>
           <h3>Previous startup batch</h3>
           {progress.previousBatch.active && <p>Another opening still holds this batch. Refresh later to check its status.</p>}
-          <ul>
+          <List dense>
             {progress.previousBatch.courses.map((course) => (
-              <li key={course.courseId}>
+              <ListItem key={course.courseId}>
                 {course.label} {course.states.map(({ state, count }) => `${STATE_TEXT[state]} (${count})`).join(", ")}
-              </li>
+              </ListItem>
             ))}
-          </ul>
+          </List>
         </>
       )}
       {!!progress.preparations?.length && (
         <>
           <h3>Rubric preparation</h3>
           <p>A retry may use a model call to prepare the rubric. Repository grading remains separate.</p>
-          <ul>
+          <List dense>
             {progress.preparations.map((preparation) => {
               const { courseId, folder, status, canRetry } = preparation;
               const course = progress.courses.find((entry) => entry.courseId === courseId);
               const label = `${course?.label ?? "Class"} / ${folder}`;
               const enabled = progress.preparationRetryAvailable && canRetry;
               return (
-                <li key={JSON.stringify([courseId, folder])}>
+                <ListItem key={JSON.stringify([courseId, folder])} sx={{ display: "block" }}>
                   <p>{label}</p>
                   <p role="status">{PREPARATION_TEXT[status]}</p>
                   {(canRetry || status === "retrying") && (
-                    <button type="button" aria-label={`Retry rubric preparation for ${label}`} aria-disabled={!enabled}
+                    <Button type="button" variant="outlined" size="small" aria-label={`Retry rubric preparation for ${label}`} aria-disabled={!enabled}
                       onClick={() => { if (enabled) void startup.retryPreparation?.(preparation); }}>
                       Retry rubric preparation
-                    </button>
+                    </Button>
                   )}
-                </li>
+                </ListItem>
               );
             })}
-          </ul>
+          </List>
         </>
       )}
       {!!progress.recoverableResults?.length && (
@@ -169,14 +193,25 @@ export function RepoGradesStartupStatus() {
             const course = progress.courses.find(({ courseId }) => courseId === target.courseId);
             const label = `${course?.label ?? target.courseId} / ${target.repo} / ${target.folder} / ${target.sourceRef}`;
             return (
-              <details key={JSON.stringify(target)}>
-                <summary>{label}</summary>
-                <textarea aria-label={`Recovery data for ${label}`} readOnly rows={10} value={JSON.stringify(entry, null, 2)} />
-              </details>
+              <RecoveryFeedback key={JSON.stringify(target)} label={label} entry={entry} />
             );
           })}
         </>
       )}
     </section>
+  );
+}
+
+function RecoveryFeedback({ label, entry }: { label: string; entry: RepoGradesStartupRecovery }) {
+  const summaryId = useId();
+  const panelId = useId();
+  return (
+    <Accordion>
+      <AccordionSummary id={summaryId} aria-controls={panelId}>{label}</AccordionSummary>
+      <AccordionDetails>
+        <TextField label={`Recovery data for ${label}`} multiline rows={10} fullWidth
+          slotProps={{ input: { readOnly: true } }} value={JSON.stringify(entry, null, 2)} />
+      </AccordionDetails>
+    </Accordion>
   );
 }

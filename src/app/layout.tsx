@@ -14,6 +14,8 @@ import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
 import { ACCESS_DECISION_HEADER } from "@/lib/supabase/proxy";
 import type { AccessDecision } from "@/lib/access";
+import { repoGradeAdmissionMode } from "@/lib/repo-grades-dashboard/admission-mode";
+import { RepoGradesStartupActivation } from "./components/repo-grades-dashboard/startup-activation";
 
 export const metadata: Metadata = {
   title: "Teaching Assistant",
@@ -160,7 +162,11 @@ export default async function RootLayout({
                 <FilesInboxProvider>
                   <DraftedGradesInboxProvider>
                     <MailInboxProvider>
-                      <AccessibilityProvider>{children}</AccessibilityProvider>
+                      <AccessibilityProvider>
+                        <RepoGradesStartupActivation enabled={repoGradeAdmissionMode() === "embedded-only"}>
+                          {children}
+                        </RepoGradesStartupActivation>
+                      </AccessibilityProvider>
                     </MailInboxProvider>
                   </DraftedGradesInboxProvider>
                 </FilesInboxProvider>

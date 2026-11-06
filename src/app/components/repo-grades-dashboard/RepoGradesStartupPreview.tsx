@@ -1,6 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import Button from "@mui/material/Button";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 import { loadRepoGradesStartupPreview } from "./startup-preview-client";
 import styles from "../repo-grades/repo-grades-dashboard.module.css";
 
@@ -43,6 +53,8 @@ function previewMessage(result: Result) {
 }
 
 export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: string; courseId: string }) {
+  const summaryId = useId();
+  const panelId = useId();
   const [result, setResult] = useState<Result | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -54,37 +66,39 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
   }
 
   return (
-    <details className={styles.profileSettings}>
-      <summary>Startup plan preview</summary>
-      <p>Check the saved repository sources and grading history for this class. Automatic grading is disabled.</p>
-      <button type="button" disabled={pending} onClick={loadPreview}>Preview startup plan</button>
-      <p role="status">{pending ? "Checking GitHub discovery and grading history." : result ? previewMessage(result) : ""}</p>
-      {!pending && result?.status === "preview" && result.targets.length > 0 && (
-        <div className={styles.scroll} role="region" aria-label="Startup plan targets" tabIndex={0}>
-          <table className={styles.table} aria-label="Discovered repository folders and grading history">
-            <thead>
-              <tr>
-                <th scope="col">Repository</th>
-                <th scope="col">Folder</th>
-                <th scope="col">Source ref</th>
-                <th scope="col">Pinned commit</th>
-                <th scope="col">Grading history</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.targets.map(({ repo, folder, sourceRef, commit, state }) => (
-                <tr key={JSON.stringify([repo, folder, sourceRef, commit])}>
-                  <th scope="row">{repo}</th>
-                  <td>{folder}</td>
-                  <td>{sourceRef}</td>
-                  <td><code>{commit}</code></td>
-                  <td>{historyLabel(state)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </details>
+    <Accordion>
+      <AccordionSummary id={summaryId} aria-controls={panelId}>Startup plan preview</AccordionSummary>
+      <AccordionDetails>
+        <p>Read-only preview of the saved repository sources and grading history for this class.</p>
+        <Button type="button" variant="outlined" size="small" disabled={pending} onClick={loadPreview}>Preview startup plan</Button>
+        <p role="status">{pending ? "Checking GitHub discovery and grading history." : result ? previewMessage(result) : ""}</p>
+        {!pending && result?.status === "preview" && result.targets.length > 0 && (
+          <TableContainer className={styles.scroll} role="region" aria-label="Startup plan targets" tabIndex={0}>
+            <Table className={styles.table} size="small" aria-label="Discovered repository folders and grading history">
+              <TableHead>
+                <TableRow>
+                  <TableCell scope="col">Repository</TableCell>
+                  <TableCell scope="col">Folder</TableCell>
+                  <TableCell scope="col">Source ref</TableCell>
+                  <TableCell scope="col">Pinned commit</TableCell>
+                  <TableCell scope="col">Grading history</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {result.targets.map(({ repo, folder, sourceRef, commit, state }) => (
+                  <TableRow key={JSON.stringify([repo, folder, sourceRef, commit])}>
+                    <TableCell component="th" scope="row">{repo}</TableCell>
+                    <TableCell>{folder}</TableCell>
+                    <TableCell>{sourceRef}</TableCell>
+                    <TableCell><code>{commit}</code></TableCell>
+                    <TableCell>{historyLabel(state)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </AccordionDetails>
+    </Accordion>
   );
 }

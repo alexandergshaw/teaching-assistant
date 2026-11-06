@@ -46,12 +46,24 @@ afterEach(() => {
 });
 
 describe("repository grading admission", () => {
-  it("requires an explicit Embedded pilot selection and pauses untracked manual requests", async () => {
+  it("pauses untracked manual requests only when the selected Embedded pilot can start", async () => {
     const actual = await vi.importActual<typeof import("./admission-mode")>("./admission-mode");
     vi.mocked(repoGradeAdmissionMode).mockImplementation(actual.repoGradeAdmissionMode);
     vi.stubEnv("REPO_GRADE_ADMISSION_MODE", undefined);
+    vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", undefined);
+    vi.stubEnv("REPO_GRADE_EMBEDDED_CUTOVER_CONFIRMED", undefined);
     expect(repoGradeAdmissionMode()).toBe("legacy-manual");
     vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "embedded-only");
+    expect(repoGradeAdmissionMode()).toBe("legacy-manual");
+    vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
+    expect(repoGradeAdmissionMode()).toBe("legacy-manual");
+    vi.stubEnv("REPO_GRADE_EMBEDDED_CUTOVER_CONFIRMED", "true");
+    vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "false");
+    expect(repoGradeAdmissionMode()).toBe("legacy-manual");
+    const manualGrade = vi.fn(async () => ({ noSubmission: true as const }));
+    await expect(runManualRepoGrade(manual.repo, manualGrade)).resolves.toEqual({ noSubmission: true });
+    expect(manualGrade).toHaveBeenCalledExactlyOnceWith(undefined);
+    vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
     expect(repoGradeAdmissionMode()).toBe("embedded-only");
     const evaluate = vi.fn();
     await expect(runManualRepoGrade(manual.repo, evaluate)).resolves.toEqual({

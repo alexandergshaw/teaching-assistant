@@ -14,7 +14,7 @@ import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
 import { ACCESS_DECISION_HEADER } from "@/lib/supabase/proxy";
 import type { AccessDecision } from "@/lib/access";
-import { repoGradeAdmissionMode, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
+import { repoGradeAdmissionMode, repoGradeDurableStartupAvailable, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
 import { RepoGradesStartupActivation } from "./components/repo-grades-dashboard/startup-activation";
 
 export const metadata: Metadata = {
@@ -164,7 +164,7 @@ export default async function RootLayout({
                   <DraftedGradesInboxProvider>
                     <MailInboxProvider>
                       <AccessibilityProvider>
-                        <RepoGradesStartupActivation enabled={repoGradeStartupAvailable(repoGradeMode)} embeddedPilot={repoGradeMode === "embedded-only"}>
+                        <RepoGradesStartupActivation enabled={repoGradeStartupAvailable(repoGradeMode)} embeddedPilot={repoGradeMode === "embedded-only"} durable={repoGradeDurableStartupAvailable(repoGradeMode)}>
                           {children}
                         </RepoGradesStartupActivation>
                       </AccessibilityProvider>

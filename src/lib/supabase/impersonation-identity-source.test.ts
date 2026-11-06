@@ -89,6 +89,7 @@ function collectRunAsOwnerCallers(): string[] {
  * derived from a live account check rather than assembled by hand.
  */
 const PINNED_CALLERS = [
+  "app/api/cron/run-repo-grades/route.ts",
   "app/api/cron/run-schedules/route.ts",
   "app/api/github/webhook/route.ts",
   "app/api/triggers/[token]/route.ts",

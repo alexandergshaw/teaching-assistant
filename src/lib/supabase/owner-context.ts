@@ -14,10 +14,11 @@ import { resolveAccess, canUseApp, type AccessProfile } from "../access";
  *
  * The bypass is safe ONLY because of who is allowed to call runAsOwner and
  * under what conditions:
- *   - The callers are FOUR, across three route handlers plus one shared
+ *   - The callers are five, across four route handlers plus one shared
  *     helper - grep `runAsOwner(` before assuming a different count, this
  *     comment has been wrong about the count before:
  *       - src/app/api/cron/run-schedules/route.ts (time-based schedules)
+ *       - src/app/api/cron/run-repo-grades/route.ts (durable repository grading)
  *       - src/app/api/triggers/[token]/route.ts (the inbound webhook endpoint
  *         for external per-trigger-token webhooks)
  *       - src/app/api/github/webhook/route.ts (the GitHub push webhook
@@ -27,7 +28,7 @@ import { resolveAccess, canUseApp, type AccessProfile } from "../access";
  *         direct caller of runAsOwner in its own right, not merely a helper
  *         invoked inside someone else's impersonation scope)
  *   - Each caller calls runAsOwner ONLY after (a) authenticating the request
- *     against a server-only secret - the cron route verifies an
+ *     against a server-only secret - each cron route verifies an
  *     `Authorization: Bearer <token>` header against the CRON_SECRET env var;
  *     the token-webhook route matches the unguessable per-trigger `webhook_token`
  *     from the URL against an enabled trigger row; the GitHub webhook route
@@ -39,20 +40,20 @@ import { resolveAccess, canUseApp, type AccessProfile } from "../access";
  *     through resolveImpersonationIdentity (below), which re-checks the
  *     account's LIVE role/status via app_users using the SAME resolveAccess()
  *     decision the request gate and the server-action guard use (AC A4) -
- *     never a hand-rolled copy of that rule, and never simply "is this the
- *     owner" (see the AM3 note below). All four also gate the workflow
- *     through isHeadlessSafeWorkflow before running it. SECURITY: an
+ *     never a hand-rolled copy of that rule. The workflow callers also gate each
+ *     workflow through isHeadlessSafeWorkflow, while the repository grading
+ *     cron requires an owner and a persisted queue claim. SECURITY: an
  *     UNVERIFIED address must never be impersonated as owner - `emailVerified`
  *     is what stands between "this address is on OWNER_EMAILS" and "Supabase
  *     has actually confirmed this account owns that address"; a caller that
  *     passes anything other than the real `Boolean(user.email_confirmed_at)`
  *     (in particular, a hard-coded `true`) reopens BUG 1 (see
  *     src/lib/access.ts's own `emailVerified` doc comment) for whichever of
- *     the four unattended entry points it is.
+ *     the unattended entry points it is.
  *   - This module exports nothing that a client component could import: it
  *     has no "use client" directive and is never imported by one. Grep
  *     `runAsOwner(` before changing that invariant - it must stay imported
- *     only by the three trusted route handlers above and
+ *     only by the four trusted route handlers above and
  *     src/lib/workflow-trigger-runner.ts.
  *   - AsyncLocalStorage scopes the impersonation to the exact async call
  *     tree started inside runAsOwner's callback. It is not global, not
@@ -145,11 +146,11 @@ export function getImpersonatedOwner(): OwnerIdentity | null {
  * (pending, suspended, or deleted since the schedule/trigger/webhook
  * subscription was created).
  *
- * This is the ONE place all four runAsOwner callers (see this file's header)
+ * This is the ONE place all runAsOwner callers (see this file's header)
  * compute the identity to impersonate, so the live-status re-check they each
  * need is the SAME resolveAccess() decision used everywhere else in the app
  * (AC A4) rather than four independently hand-maintained copies of it - the
- * exact kind of drift that let one of the four skip the re-check entirely in
+ * exact kind of drift that let one of the callers skip the re-check entirely in
  * an earlier draft of this design. Each caller already holds the target
  * user's full auth user (id/email/`email_confirmed_at`) from its own
  * `auth.admin.getUserById` call; this function only adds the app_users
@@ -163,8 +164,8 @@ export function getImpersonatedOwner(): OwnerIdentity | null {
  * OWNER_EMAILS" and "an account Supabase has actually confirmed owns that
  * address". Passing anything other than the caller's real
  * `email_confirmed_at` (in particular, hard-coding `true`) would reopen BUG 1
- * for every one of the four unattended entry points this function serves:
- * cron schedules, the per-trigger webhook token route, the GitHub push
+ * for every unattended entry point this function serves:
+ * cron schedules, cron repository grading, the per-trigger webhook token route, the GitHub push
  * webhook, and the unattended event-trigger loop.
  */
 export async function resolveImpersonationIdentity(

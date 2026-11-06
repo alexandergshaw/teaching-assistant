@@ -27,3 +27,8 @@ export function repoGradeAdmissionMode(): "legacy-manual" | "coordinated" | "emb
 export function repoGradeStartupAvailable(mode: ReturnType<typeof repoGradeAdmissionMode>): boolean {
   return (mode === "coordinated" || mode === "embedded-only") && repoGradeDiscoveryEnabled();
 }
+
+/** Enable after the worker and migration have been verified in this environment. */
+export function repoGradeDurableStartupAvailable(mode = repoGradeAdmissionMode()): boolean {
+  return process.env.REPO_GRADE_DURABLE_STARTUP_ENABLED === "true" && repoGradeStartupAvailable(mode);
+}

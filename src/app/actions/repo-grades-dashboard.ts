@@ -2,7 +2,7 @@
 
 import { planRepoGradeCourse, runRepoGradeTarget } from "@/lib/repo-grades-dashboard/runner";
 import { requireAppOwner } from "@/lib/supabase/auth";
-import { repoGradeAdmissionMode, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
+import { repoGradeAdmissionMode, repoGradeDurableStartupAvailable, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
 import { repoGradeDiscoveryEnabled } from "@/lib/repo-grades-dashboard/discovery-mode";
 import { readRepoGradeHistoryForOwner, REPO_GRADE_HISTORY_PAGE_SIZE } from "@/lib/repo-grades-dashboard/ledger";
 import {
@@ -24,7 +24,7 @@ function validCourseId(courseId: unknown): courseId is string {
 }
 
 function startupAvailable(mode = repoGradeAdmissionMode()) {
-  return repoGradeStartupAvailable(mode);
+  return repoGradeStartupAvailable(mode) && !repoGradeDurableStartupAvailable(mode);
 }
 
 const STARTUP_PREVIEW_TARGET_LIMIT = 50;

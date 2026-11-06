@@ -11,6 +11,8 @@ import { runDispatchBoundaryCases } from "./repo-grades-dispatch-boundary-postgr
 import { runRubricPreparationCases } from "./repo-grades-rubric-preparation-postgres.mjs";
 import { runStartupRetryCases } from "./repo-grades-startup-retry-postgres.mjs";
 
+import { runAutomaticRepoGradeCases } from "./repo-grades-automatic-postgres.mjs";
+
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
   "20260713000000_create_course_hub.sql",
@@ -32,6 +34,8 @@ const preparationRetryMigrationFile = "20261106053623_repo_grade_preparation_exp
 const startupRetryMigrationFile = "20261106061811_repo_grade_startup_retry_not_started.sql";
 const policyUpdateMigrationFile = "20261106122943_repo_grade_preparation_policy_update.sql";
 const coordinatedStartupMigrationFile = "20261106150707_repo_grade_coordinated_startup.sql";
+
+const automaticMigrationFile = "20261106181056_repo_grade_automatic_runs.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -229,6 +233,10 @@ async function main() {
     console.log("PASS: rubric preparation migration rollback, privileges and PostgreSQL transaction cases completed.");
     await runStartupRetryCases({ owner, worker });
     console.log("PASS: startup retry reclaims only work that did not acquire a grade attempt.");
+    const automaticMigration = readFileSync(new URL(`../../supabase/migrations/${automaticMigrationFile}`, import.meta.url), "utf8");
+    await owner.query(`begin; ${automaticMigration} commit;`);
+    await runAutomaticRepoGradeCases({ owner, worker, contender });
+    console.log("PASS: durable startup privileges, concurrent enqueue, worker fencing, interruption and stop.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

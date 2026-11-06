@@ -6,13 +6,17 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
 import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
-import { useRepoGradesEmbeddedPilot, useRepoGradesStartupActivation } from "./startup-activation";
+import { useRepoGradesDurableStartupActivation, useRepoGradesEmbeddedPilot, useRepoGradesStartupActivation } from "./startup-activation";
 import { serverRepoGradesStartupAdapter } from "./startup-adapter";
 import { disabledRepoGradesStartupAdapter } from "./startup-coordinator";
 import type { RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
 import { STARTUP_STATUS } from "./startup-table";
 import { useRepoGradesStartup } from "./useRepoGradesStartup";
 
+import { RepoGradesAutomaticStatus } from "./RepoGradesAutomaticStatus";
+import { useRepoGradesAutomatic } from "./useRepoGradesAutomatic";
+
+const AutomaticContext = createContext<ReturnType<typeof useRepoGradesAutomatic> | null>(null);
 const StartupContext = createContext<ReturnType<typeof useRepoGradesStartup> | null>(null);
 const MANUAL_PAUSE = "Manual repository grading is paused while the Embedded pilot is selected.";
 
@@ -45,9 +49,13 @@ const PREPARATION_TEXT: Record<RepoGradesStartupPreparation["status"], string> =
 
 export function RepoGradesStartup({ children }: { children: ReactNode }) {
   const { user, loading, accessDecision } = useSupabase();
-  const startupEnabled = useRepoGradesStartupActivation() && isOwnerDecision(accessDecision);
+  const owner = isOwnerDecision(accessDecision);
+  const durable = useRepoGradesDurableStartupActivation() && owner;
+  const startupEnabled = useRepoGradesStartupActivation() && owner && !durable;
   const startupAdapter = startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter;
-  const startup = useRepoGradesStartup(loading ? null : user?.id ?? null, startupAdapter);
+  const accountId = loading ? null : user?.id ?? null;
+  const startup = useRepoGradesStartup(accountId, startupAdapter);
+  const automatic = useRepoGradesAutomatic(durable ? accountId : null);
   return (
     <StartupContext.Provider value={startup}>
       <p role="status" aria-atomic="true" style={visuallyHidden}>
@@ -55,7 +63,7 @@ export function RepoGradesStartup({ children }: { children: ReactNode }) {
         {startup.progress.previousBatch?.courses.length ? " Previous batch status is available in Repo Grades." : ""}
         {startup.progress.recoverableResults?.length ? " Feedback is available to copy in Repo Grades during this session." : ""}
       </p>
-      {children}
+      <AutomaticContext.Provider value={durable ? automatic : null}>{children}</AutomaticContext.Provider>
     </StartupContext.Provider>
   );
 }
@@ -64,16 +72,28 @@ export function RepoGradesStartup({ children }: { children: ReactNode }) {
 export function useRepoGradesStartupHistoryRevision(accountId: string, courseId: string): number {
   const { user, loading } = useSupabase();
   const progress = useContext(StartupContext)?.progress;
-  if (loading || user?.id !== accountId || !progress || progress.phase === "checking" || progress.phase === "processing") return 0;
+  const automatic = useContext(AutomaticContext)?.status;
+  if (loading || user?.id !== accountId) return 0;
+  if (automatic?.status === "loaded") {
+    const course = automatic.run?.courses.find((entry) => entry.courseId === courseId);
+    return course?.counts.reduce((total, { state, count }) =>
+      total + (state === "queued" || state === "running" ? 0 : count), 0) ?? 0;
+  }
+  if (!progress || progress.phase === "checking" || progress.phase === "processing") return 0;
   return progress.historyRevisionByCourse?.get(courseId) ?? 0;
 }
 
 export function RepoGradesStartupStatus() {
   const startup = useContext(StartupContext);
+  const automatic = useContext(AutomaticContext);
   const pilotEnabled = useRepoGradesEmbeddedPilot();
   const headingId = useId();
   const stopHintId = useId();
   const progress = startup?.progress;
+  if (automatic) return <>
+    <RepoGradesAutomaticStatus automatic={automatic} />
+    {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
+  </>;
   if (!startup || !progress || progress.phase === "unavailable") {
     return <Alert severity={pilotEnabled ? "warning" : "info"} role="status">
       {PHASE_TEXT.unavailable} {pilotEnabled && MANUAL_PAUSE}

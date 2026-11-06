@@ -3,7 +3,7 @@ import type { previewRepoGradeStartupPlanAction } from "@/app/actions/repo-grade
 import type { RepoGradePreparationDiagnostic } from "@/lib/repo-grades-dashboard/preparation-runtime";
 
 type Operation = "readiness" | "courses" | "discovery" | "history" | "evaluation" | "stop"
-  | "batch_read" | "batch_seal" | "batch_close" | "preview";
+  | "batch_read" | "batch_seal" | "batch_close" | "preview" | "background";
 type Outcome = "success" | "unavailable" | "incomplete" | "request-failed" | "failed" | "unknown" | "blocked"
   | "disabled" | "not-configured" | "embedded-profile-required";
 type PreviewResult = Awaited<ReturnType<typeof previewRepoGradeStartupPlanAction>> | { status: "request-failed" };

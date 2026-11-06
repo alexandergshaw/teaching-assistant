@@ -1,0 +1,72 @@
+import { describe, expect, it, vi } from "vitest";
+import { createAutomaticRepoGradeWorker } from "./automatic-worker";
+import { repoGradeStartupKey } from "./scheduler";
+import type { RepoGradeLedgerObservation, RepoGradeStartupTarget } from "./scheduler";
+
+const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn() }));
+vi.mock("./runner", () => ({ planRepoGradeCourse: mocks.plan, runRepoGradeTarget: mocks.evaluate }));
+vi.mock("./startup-history", () => ({ readRepoGradeStartupHistory: mocks.history }));
+vi.mock("./preparation-runtime", () => ({
+  prepareEmbeddedRepoGradeStartupProfile: vi.fn(), prepareRepoGradeStartupProfile: vi.fn(),
+}));
+
+describe("durable repository grading discovery", () => {
+  it("queues only unseen targets and keeps prior failures and unconfirmed attempts visible after reopening", async () => {
+    const work = { phase: "discovering", runId: "run", accountId: "owner", courseId: "course" } as const;
+    const repo = "Org/Student";
+    const sha = "a".repeat(40);
+    const observations: Record<string, RepoGradeLedgerObservation> = {
+      unseen: "never-attempted", failure: "failed", partial: "partial", uncertain: "unknown",
+      active: "claimed", completed: "succeeded", noSubmission: "no-submission",
+    };
+    mocks.plan.mockResolvedValue({
+      accountId: work.accountId, courseId: work.courseId, courseConfig: { github_org: "Org" },
+      discovery: { status: "scanned", enumerationComplete: true, repos: [
+        { status: "ready", repo, sourceCommit: sha, sourceRef: "main", folders: Object.keys(observations) },
+      ] },
+    });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), observations[target.folder]])));
+
+    const result = await createAutomaticRepoGradeWorker("coordinated")(work);
+    expect(result).toMatchObject({ state: "scanned", targets: expect.any(Array) });
+    if (!("targets" in result)) throw new Error("Expected a discovery completion");
+    expect(Object.fromEntries(result.targets.map(({ folder, state }) => [folder, state ?? "queued"]))).toEqual({
+      unseen: "queued", failure: "failed", partial: "partial", uncertain: "unknown", active: "busy",
+      completed: "already-processed", noSubmission: "already-processed",
+    });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
+  it("preserves the exact unsettled feedback for bounded owner recovery", async () => {
+    const work = {
+      phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "assignment", ref: "main", sha: "a".repeat(40),
+    } as const;
+    mocks.plan.mockResolvedValue({ folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    const unretainedResult = { score: 10, feedback: "Feedback with \u0000", rubric: [], sections: {} };
+    mocks.evaluate.mockResolvedValue({ status: "unknown", unretainedResult });
+    const result = await createAutomaticRepoGradeWorker("coordinated")(work);
+    expect(result).toMatchObject({ state: "unknown", reason: "feedback-recovery-available" });
+    if (!("recovery" in result) || !result.recovery) throw new Error("Expected an encoded recovery record");
+    expect(JSON.parse(Buffer.from(result.recovery, "base64").toString("utf8"))).toMatchObject({
+      status: "unknown", unretainedResult, target: { accountId: work.accountId, sha: work.sha },
+    });
+  });
+
+  it("passes only an explicit rubric retry selector through to durable storage", async () => {
+    const work = {
+      phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "assignment", ref: "main", sha: "a".repeat(40),
+    } as const;
+    mocks.plan.mockResolvedValue({ folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    const preparationRetry = { key: "b".repeat(64), generation: "c".repeat(64) };
+    mocks.evaluate.mockResolvedValue({ status: "explicit-retry-required", preparationRetry });
+    expect(await createAutomaticRepoGradeWorker("coordinated")(work)).toEqual({
+      state: "blocked", reason: "explicit-retry-required", preparationRetry,
+    });
+  });
+});

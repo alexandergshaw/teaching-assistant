@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/run-repo-grades",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/run-schedules",
       "schedule": "*/10 * * * *"
     }

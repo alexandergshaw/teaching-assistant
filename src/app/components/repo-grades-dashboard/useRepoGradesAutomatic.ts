@@ -3,13 +3,26 @@
 import { useEffect, useRef, useState } from "react";
 import {
   enqueueRepoGradeAutomaticRunAction, readRepoGradeAutomaticRecoveryAction, readRepoGradeAutomaticStatusAction,
-  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticEnabledAction, stopRepoGradeAutomaticRunAction,
+  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticScheduleAction,
+  startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
 } from "@/app/actions/repo-grade-automatic";
 import type { AutomaticRepoGradeRun, AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { recordRepoGradesStartup } from "./startup-diagnostics";
 
 const POLL_MS = 5_000;
 const unavailable = { status: "unavailable" } as const;
+
+function recordControl(
+  operation: "background_preference" | "background_schedule" | "background_retry" | "background_recovery" | "background_start" | "background_stop",
+  outcome: "success" | "failed" | "unavailable" | "unchanged",
+  startedAt: number,
+) {
+  try {
+    recordRepoGradesStartup(operation, outcome, startedAt);
+  } catch {
+    // A local diagnostics failure must not affect an authorized operation.
+  }
+}
 
 export function automaticRepoGradeRunActive(run: AutomaticRepoGradeRun | null | undefined) {
   return run?.phase === "discovering" || run?.phase === "grading";
@@ -18,7 +31,8 @@ export function automaticRepoGradeRunActive(run: AutomaticRepoGradeRun | null | 
 export function useRepoGradesAutomatic(accountId: string | null) {
   const [current, setCurrent] = useState<{ accountId: string; status: AutomaticRepoGradeStatus }>();
   const [pendingAccount, setPendingAccount] = useState<string>();
-  const controller = useRef<{ update: (request: () => Promise<AutomaticRepoGradeStatus>) => Promise<void> }>(null);
+  const [control, setControl] = useState<{ accountId: string; action: "start" | "stop"; changed: boolean }>();
+  const controller = useRef<{ update: (request: () => Promise<AutomaticRepoGradeStatus>) => Promise<AutomaticRepoGradeStatus | undefined> }>(null);
 
   useEffect(() => {
     if (!accountId) return;
@@ -45,10 +59,15 @@ export function useRepoGradesAutomatic(accountId: string | null) {
         }
       }
       setCurrent({ accountId, status });
+      const readAgain = () => void update(() => readRepoGradeAutomaticStatusAction(accountId));
       if (status.status === "unavailable" || automaticRepoGradeRunActive(run)
-        || run?.courses.some((course) => course.counts.some(({ state }) => state === "running"))) {
-        timer = setTimeout(() => void update(() => readRepoGradeAutomaticStatusAction(accountId)), POLL_MS);
+        || run?.settling) {
+        timer = setTimeout(readAgain, POLL_MS);
+      } else if (status.status === "loaded" && status.schedule) {
+        const untilDue = Date.parse(status.schedule.nextAt) - Date.now();
+        timer = setTimeout(readAgain, Math.max(POLL_MS, Math.min(untilDue, 30_000)));
       }
+      return status;
     };
 
     controller.current = { update };
@@ -60,11 +79,21 @@ export function useRepoGradesAutomatic(accountId: string | null) {
     };
   }, [accountId]);
 
-  async function change(request: (accountId: string) => Promise<AutomaticRepoGradeStatus>) {
+  async function change(
+    request: (accountId: string) => Promise<AutomaticRepoGradeStatus>,
+    diagnostic: "background_preference" | "background_schedule" | "background_start" | "background_stop",
+  ) {
     if (!accountId || !controller.current) return;
     setPendingAccount(accountId);
     try {
-      await controller.current.update(() => request(accountId));
+      const startedAt = performance.now();
+      const status = await controller.current.update(() => request(accountId));
+      if (status) {
+        const outcome = status.status === "unavailable" ? "unavailable"
+          : status.control?.changed === false ? "unchanged" : "success";
+        recordControl(diagnostic, outcome, startedAt);
+        setControl(status.status === "loaded" && status.control ? { accountId, ...status.control } : undefined);
+      }
     } finally {
       setPendingAccount((previous) => previous === accountId ? undefined : previous);
     }
@@ -73,17 +102,31 @@ export function useRepoGradesAutomatic(accountId: string | null) {
   return {
     status: current?.accountId === accountId ? current?.status : undefined,
     pending: pendingAccount === accountId,
-    setEnabled: (enabled: boolean) => change((id) => setRepoGradeAutomaticEnabledAction(id, enabled)),
-    start: () => change(enqueueRepoGradeAutomaticRunAction),
-    stop: (runId: string) => change((id) => stopRepoGradeAutomaticRunAction(id, runId)),
-    readRecovery: (targetId: number) => accountId ? readRepoGradeAutomaticRecoveryAction(accountId, targetId) : Promise.resolve(null),
+    control: control?.accountId === accountId ? control : undefined,
+    setEnabled: (enabled: boolean) => change((id) => setRepoGradeAutomaticEnabledAction(id, enabled), "background_preference"),
+    setSchedule: (time: string | null, zone: string | null) =>
+      change((id) => setRepoGradeAutomaticScheduleAction(id, time, zone), "background_schedule"),
+    start: () => change(startRepoGradeAutomaticRunAction, "background_start"),
+    stop: (runId: string) => change((id) => stopRepoGradeAutomaticRunAction(id, runId), "background_stop"),
+    async readRecovery(targetId: number) {
+      const connection = controller.current;
+      if (!accountId || !connection) return null;
+      const startedAt = performance.now();
+      const result = await readRepoGradeAutomaticRecoveryAction(accountId, targetId).catch(() => null);
+      if (connection === controller.current) recordControl("background_recovery", result === null ? "unavailable" : "success", startedAt);
+      return result;
+    },
     async retryPreparation(targetId: number) {
       const connection = controller.current;
       if (!accountId || !connection) return unavailable;
       setPendingAccount(accountId);
       try {
+        const startedAt = performance.now();
         const result = await retryRepoGradeAutomaticPreparationAction(accountId, targetId).catch(() => unavailable);
-        if (connection === controller.current) await connection.update(() => readRepoGradeAutomaticStatusAction(accountId));
+        if (connection === controller.current) {
+          recordControl("background_retry", result.status === "ready" ? "success" : result.status === "unavailable" ? "unavailable" : "failed", startedAt);
+          await connection.update(() => readRepoGradeAutomaticStatusAction(accountId));
+        }
         return result;
       } finally {
         setPendingAccount((previous) => previous === accountId ? undefined : previous);

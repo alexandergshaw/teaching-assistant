@@ -2,7 +2,8 @@
 
 import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
 import {
-  automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery, readAutomaticRepoGrade,
+  automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery,
+  readAutomaticRepoGrade, saveAutomaticRepoGradeSchedule,
 } from "@/lib/repo-grades-dashboard/automatic-store";
 import type { AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -41,6 +42,34 @@ export async function enqueueRepoGradeAutomaticRunAction(expectedAccountId: unkn
   }
 }
 
+export async function startRepoGradeAutomaticRunAction(expectedAccountId: unknown): Promise<AutomaticRepoGradeStatus> {
+  const accountId = await resolveAccount(expectedAccountId);
+  if (!accountId) return unavailable;
+  try {
+    const changed = await controlAutomaticRepoGrade(accountId, { action: "start" });
+    const status = await readStatus(accountId);
+    return status.status === "loaded" ? { ...status, control: { action: "start", changed } } : status;
+  } catch {
+    return unavailable;
+  }
+}
+
+export async function setRepoGradeAutomaticScheduleAction(
+  expectedAccountId: unknown, time: unknown, zone: unknown,
+): Promise<AutomaticRepoGradeStatus> {
+  const accountId = await resolveAccount(expectedAccountId);
+  if (!accountId) return unavailable;
+  if (!(time === null && zone === null) && (typeof time !== "string" || !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)
+    || typeof zone !== "string" || !/^[A-Za-z_+0-9/-]{1,100}$/.test(zone))) return unavailable;
+  try {
+    if (typeof zone === "string") new Intl.DateTimeFormat("en", { timeZone: zone });
+    if (!await saveAutomaticRepoGradeSchedule(accountId, time as string | null, zone as string | null)) return unavailable;
+    return readStatus(accountId);
+  } catch {
+    return unavailable;
+  }
+}
+
 export async function setRepoGradeAutomaticEnabledAction(expectedAccountId: unknown, enabled: unknown): Promise<AutomaticRepoGradeStatus> {
   const accountId = await resolveAccount(expectedAccountId);
   if (!accountId || typeof enabled !== "boolean") return unavailable;
@@ -56,8 +85,9 @@ export async function stopRepoGradeAutomaticRunAction(expectedAccountId: unknown
   const accountId = await resolveAccount(expectedAccountId);
   if (!accountId || !isAutomaticRepoGradeId(runId)) return unavailable;
   try {
-    await controlAutomaticRepoGrade(accountId, { action: "stop", runId });
-    return readStatus(accountId);
+    const changed = await controlAutomaticRepoGrade(accountId, { action: "stop", runId });
+    const status = await readStatus(accountId);
+    return status.status === "loaded" ? { ...status, control: { action: "stop", changed } } : status;
   } catch {
     return unavailable;
   }

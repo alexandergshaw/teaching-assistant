@@ -1,5 +1,9 @@
+import type { RepoGradeRepositoryCoverage } from "./scheduler";
+
+export type AutomaticRepoGradeSchedule = { time: string; zone: string; nextAt: string };
+
 export type AutomaticRepoGradePreparation = { id: number; label: string; folder: string };
-export type AutomaticRepoGradeRecovery = AutomaticRepoGradePreparation & { repo: string };
+export type AutomaticRepoGradeRecovery = AutomaticRepoGradePreparation & { repo: string; expiresAt: string };
 
 export type AutomaticRepoGradeCourseState = "checking" | "scanned" | "partial" | "not-configured" | "stopped";
 export type AutomaticRepoGradeTargetState = "queued" | "running" | "succeeded" | "no-submission" | "partial"
@@ -8,11 +12,13 @@ export type AutomaticRepoGradeTargetState = "queued" | "running" | "succeeded" |
 export type AutomaticRepoGradeRun = {
   id: string;
   phase: "discovering" | "grading" | "complete" | "incomplete" | "stopped";
+  settling: boolean;
   courses: {
     courseId: string;
     label: string;
     state: AutomaticRepoGradeCourseState;
     reason: string | null;
+    repositories: RepoGradeRepositoryCoverage | null;
     counts: { state: AutomaticRepoGradeTargetState; count: number; reason: string | null }[];
   }[];
 };
@@ -20,7 +26,9 @@ export type AutomaticRepoGradeRun = {
 export type AutomaticRepoGradeStatus = {
   status: "loaded";
   enabled: boolean;
+  schedule: AutomaticRepoGradeSchedule | null;
   run: AutomaticRepoGradeRun | null;
   preparations: AutomaticRepoGradePreparation[];
   recoveries: AutomaticRepoGradeRecovery[];
+  control?: { action: "start" | "stop"; changed: boolean };
 } | { status: "unavailable" };

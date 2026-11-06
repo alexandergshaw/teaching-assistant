@@ -1,4 +1,4 @@
-import type { RepoGradeStartupTarget } from "@/lib/repo-grades-dashboard/scheduler";
+import type { RepoGradeRepositoryCoverage, RepoGradeStartupTarget } from "@/lib/repo-grades-dashboard/scheduler";
 import type { RepoGradePreparationDiagnostic } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import type { RepoGradePreparationRetry } from "@/lib/repo-grades-dashboard/preparation-ledger";
 import type { RepoGradeFeedbackField, RepoGradeResultRecord } from "@/lib/supabase/types.repo-grades-dashboard";
@@ -21,11 +21,7 @@ export type CourseStartupState =
   | "not-started"
   | "not-configured";
 
-export type StartupRepositoryCoverage = Readonly<{
-  checked: number;
-  found: number;
-  enumerationComplete: boolean;
-}>;
+export type StartupRepositoryCoverage = RepoGradeRepositoryCoverage;
 
 export type CourseStartupProgress = Readonly<{
   courseId: string;

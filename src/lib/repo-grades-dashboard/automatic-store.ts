@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import type { AutomaticRepoGradeCourseState, AutomaticRepoGradeStatus, AutomaticRepoGradeTargetState } from "./automatic-status";
 
 import type { RepoGradePreparationRetry } from "./preparation-ledger";
+import type { RepoGradeRepositoryCoverage } from "./scheduler";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string };
@@ -14,6 +15,7 @@ type StagedSelector = Selector & {
 };
 type DiscoveryCompletion = {
   state: Exclude<AutomaticRepoGradeCourseState, "checking" | "stopped">; reason?: string; targets: StagedSelector[];
+  repositories?: RepoGradeRepositoryCoverage;
 };
 type TargetCompletion = {
   state: Exclude<AutomaticRepoGradeTargetState, "queued" | "running" | "stopped">;
@@ -38,7 +40,7 @@ export function isAutomaticRepoGradeId(value: unknown): value is string {
 }
 
 export async function controlAutomaticRepoGrade(accountId: string,
-  control: { action: "enqueue" } | { action: "preference"; enabled: boolean } | { action: "stop"; runId: string },
+  control: { action: "enqueue" | "start" } | { action: "preference"; enabled: boolean } | { action: "stop"; runId: string },
 ) {
   return await rpc("repo_grade_automatic_control", {
     p_user_id: accountId,
@@ -56,6 +58,7 @@ export async function readAutomaticRepoGrade(accountId: string): Promise<Omit<Ex
       || !Array.isArray(result.run.courses)))) throw new Error("Invalid automatic repository grading status");
   return {
     enabled: result.enabled,
+    schedule: result.schedule,
     run: result.run,
     preparations: result.preparations,
     recoveries: result.recoveries,
@@ -78,13 +81,14 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
 }
 
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
-  return await rpc("repo_grade_automatic_finish", {
+  const discovery = "targets" in result;
+  return await rpc(discovery ? "repo_grade_automatic_finish_discovery" : "repo_grade_automatic_finish", {
     p_run_id: work.runId,
     p_lease: lease,
     p_course_id: work.courseId,
     p_state: result.state,
     p_reason: result.reason ?? null,
-    ...("targets" in result ? { p_targets: result.targets } : {
+    ...(discovery ? { p_targets: result.targets, p_repositories: result.repositories ?? null } : {
       p_preparation_key: result.preparationRetry?.key ?? null,
       p_preparation_generation: result.preparationRetry?.generation ?? null,
       p_recovery: result.recovery ?? null,
@@ -110,4 +114,16 @@ export async function automaticPreparationRetry(
   if (!record(result) || !isAutomaticRepoGradeId(result.courseId) || typeof result.folder !== "string"
     || typeof result.key !== "string" || typeof result.generation !== "string") return null;
   return { courseId: result.courseId, folder: result.folder, key: result.key, generation: result.generation };
+}
+
+export async function saveAutomaticRepoGradeSchedule(accountId: string, time: string | null, zone: string | null) {
+  return await rpc("repo_grade_automatic_set_schedule", { p_user_id: accountId, p_time: time, p_zone: zone }) === true;
+}
+
+export async function enqueueDueAutomaticRepoGrades() {
+  const result = await rpc("repo_grade_automatic_enqueue_due", {});
+  if (!record(result) || typeof result.accepted !== "number" || typeof result.failed !== "number") {
+    throw new Error("Invalid automatic repository grading wakeup");
+  }
+  return { accepted: result.accepted, failed: result.failed };
 }

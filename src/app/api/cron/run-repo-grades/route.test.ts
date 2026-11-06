@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(), finish: vi.fn(), getUserById: vi.fn(), resolve: vi.fn(), runAsOwner: vi.fn(), worker: vi.fn(),
-  mode: vi.fn(), enabled: vi.fn(),
+  mode: vi.fn(), enabled: vi.fn(), enqueueDue: vi.fn(),
 }));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({
   repoGradeAdmissionMode: mocks.mode, repoGradeDurableStartupAvailable: mocks.enabled,
 }));
 vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
-  claimAutomaticRepoGrade: mocks.claim, finishAutomaticRepoGrade: mocks.finish,
+  claimAutomaticRepoGrade: mocks.claim, finishAutomaticRepoGrade: mocks.finish, enqueueDueAutomaticRepoGrades: mocks.enqueueDue,
 }));
 vi.mock("@/lib/repo-grades-dashboard/automatic-worker", () => ({ createAutomaticRepoGradeWorker: () => mocks.worker }));
 vi.mock("@/lib/supabase/owner-context", () => ({
@@ -31,6 +31,7 @@ describe("durable repository grading worker route", () => {
     vi.stubEnv("CRON_SECRET", "server-only-test-secret");
     mocks.mode.mockReturnValue("coordinated");
     mocks.enabled.mockReturnValue(true);
+    mocks.enqueueDue.mockResolvedValue({ accepted: 0, failed: 0 });
     mocks.claim.mockResolvedValueOnce(work).mockResolvedValue(null);
     mocks.finish.mockResolvedValue(true);
     mocks.getUserById.mockResolvedValue({ data: { user: { id: accountId, email: "owner@example.test", email_confirmed_at: "verified" } } });
@@ -46,6 +47,7 @@ describe("durable repository grading worker route", () => {
     vi.stubEnv("CRON_SECRET", undefined);
     expect((await GET(request("Bearer server-only-test-secret"))).status).toBe(500);
     expect(mocks.claim).not.toHaveBeenCalled();
+    expect(mocks.enqueueDue).not.toHaveBeenCalled();
   });
 
   it("keeps worker work disabled during a dark rollout", async () => {
@@ -53,16 +55,26 @@ describe("durable repository grading worker route", () => {
     const response = await GET(request("Bearer server-only-test-secret"));
     expect(await response.json()).toEqual({ status: "disabled" });
     expect(mocks.claim).not.toHaveBeenCalled();
+    expect(mocks.enqueueDue).not.toHaveBeenCalled();
   });
 
   it("uses the stored account and fences settlement with the same random lease", async () => {
     const response = await GET(request("Bearer server-only-test-secret"));
-    expect(await response.json()).toEqual({ status: "ok", handled: 1 });
+    expect(await response.json()).toEqual({ status: "ok", handled: 1, scheduled: { accepted: 0, failed: 0 } });
     expect(mocks.getUserById).toHaveBeenCalledWith(accountId);
     expect(mocks.resolve).toHaveBeenCalledWith(accountId, "owner@example.test", true);
     expect(mocks.worker).toHaveBeenCalledWith(work);
     const [lease] = mocks.claim.mock.calls[0];
     expect(mocks.finish).toHaveBeenCalledWith(work, lease, { state: "scanned", targets: [] });
+  });
+
+  it("processes queued work even when scheduled wakeup failed", async () => {
+    mocks.enqueueDue.mockRejectedValue(new Error("schedule unavailable"));
+    const response = await GET(request("Bearer server-only-test-secret"));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ status: "schedule-unavailable", handled: 1, scheduled: { accepted: 0, failed: 1 } });
+    expect(mocks.finish).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueDue.mock.invocationCallOrder[0]).toBeLessThan(mocks.claim.mock.invocationCallOrder[0]);
   });
 
   it("keeps the work from running when the account no longer owns the app", async () => {

@@ -5,6 +5,21 @@ import type { runRepoGradeTarget } from "./runner";
 // Mirrors the coordinated ledger limit. Only the ledger can admit work across callers.
 const LOCAL_CAPACITY = 3;
 
+export type RepoGradeRepositoryCoverage = Readonly<{ checked: number; found: number; enumerationComplete: boolean }>;
+
+export function repoGradeRepositoryCoverage(
+  discovery: Extract<RepoGradeDiscovery, { status: "scanned" }>,
+): RepoGradeRepositoryCoverage {
+  const found = new Set<string>();
+  const incomplete = new Set<string>();
+  for (const { repo, status } of discovery.repos) {
+    const key = repo.toLowerCase();
+    found.add(key);
+    if (status !== "ready") incomplete.add(key);
+  }
+  return { checked: found.size - incomplete.size, found: found.size, enumerationComplete: discovery.enumerationComplete };
+}
+
 export type RepoGradeStartupScope = Readonly<{
   accountId: string;
   // A fresh token per opening, remount, or account change, including A -> B -> A.

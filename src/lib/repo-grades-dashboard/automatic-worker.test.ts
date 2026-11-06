@@ -29,7 +29,10 @@ describe("durable repository grading discovery", () => {
       new Map(targets.map((target) => [repoGradeStartupKey(target), observations[target.folder]])));
 
     const result = await createAutomaticRepoGradeWorker("coordinated")(work);
-    expect(result).toMatchObject({ state: "scanned", targets: expect.any(Array) });
+    expect(result).toMatchObject({
+      state: "scanned", targets: expect.any(Array),
+      repositories: { checked: 1, found: 1, enumerationComplete: true },
+    });
     if (!("targets" in result)) throw new Error("Expected a discovery completion");
     expect(Object.fromEntries(result.targets.map(({ folder, state }) => [folder, state ?? "queued"]))).toEqual({
       unseen: "queued", failure: "failed", partial: "partial", uncertain: "unknown", active: "busy",
@@ -48,7 +51,7 @@ describe("durable repository grading discovery", () => {
     const unretainedResult = { score: 10, feedback: "Feedback with \u0000", rubric: [], sections: {} };
     mocks.evaluate.mockResolvedValue({ status: "unknown", unretainedResult });
     const result = await createAutomaticRepoGradeWorker("coordinated")(work);
-    expect(result).toMatchObject({ state: "unknown", reason: "feedback-recovery-available" });
+    expect(result).toMatchObject({ state: "unknown", reason: "feedback-retention-unconfirmed" });
     if (!("recovery" in result) || !result.recovery) throw new Error("Expected an encoded recovery record");
     expect(JSON.parse(Buffer.from(result.recovery, "base64").toString("utf8"))).toMatchObject({
       status: "unknown", unretainedResult, target: { accountId: work.accountId, sha: work.sha },

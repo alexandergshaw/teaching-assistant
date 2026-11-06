@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createRepoGradeStartupSchedule, repoGradeStartupKey } from "./scheduler";
+import { createRepoGradeStartupSchedule, repoGradeRepositoryCoverage, repoGradeStartupKey } from "./scheduler";
 import { prepareEmbeddedRepoGradeStartupProfile, prepareRepoGradeStartupProfile } from "./preparation-runtime";
 import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
@@ -24,17 +24,19 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       const { discovery } = plan;
       if (discovery.status === "not-configured") return { state: "not-configured", targets: [] };
       if (discovery.status === "blocked") return { state: "partial", reason: discovery.reason, targets: [] };
-      if (!discovery.enumerationComplete) return { state: "partial", reason: "enumeration-incomplete", targets: [] };
+      const repositories = repoGradeRepositoryCoverage(discovery);
+      if (!discovery.enumerationComplete) return { state: "partial", reason: "enumeration-incomplete", targets: [], repositories };
       const schedule = createRepoGradeStartupSchedule({ accountId, generation: runId }, [{
         accountId, courseId, organization: plan.courseConfig.github_org, discovery,
       }], new Map(), false);
-      if (schedule.work.size > 1000) return { state: "partial", reason: "target-limit", targets: [] };
+      if (schedule.work.size > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
       const targets = [...schedule.work.values()].map(({ target }) => target);
       const history = targets.length ? await readRepoGradeStartupHistory(accountId, courseId, targets) : new Map();
-      if (!history) return { state: "partial", reason: "history-unavailable", targets: [] };
+      if (!history) return { state: "partial", reason: "history-unavailable", targets: [], repositories };
       const bounded = targets.filter(({ folder, sourceRef }) => folder.length <= 512 && sourceRef.length <= 255);
       const incompleteSource = discovery.repos.find(({ status }) => status !== "ready");
       return {
+        repositories,
         state: incompleteSource || bounded.length !== targets.length ? "partial" : "scanned",
         reason: incompleteSource && "reason" in incompleteSource ? incompleteSource.reason
           : bounded.length !== targets.length ? "invalid-source" : undefined,
@@ -80,7 +82,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
         return { state: outcome.status, reason: "feedback-recovery-limit" };
       }
       return {
-        state: outcome.status, reason: "feedback-recovery-available",
+        state: outcome.status, reason: "feedback-retention-unconfirmed",
         recovery: Buffer.from(payload, "utf8").toString("base64"),
       };
     }

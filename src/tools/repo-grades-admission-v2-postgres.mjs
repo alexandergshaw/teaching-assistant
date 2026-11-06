@@ -12,6 +12,7 @@ import { runRubricPreparationCases } from "./repo-grades-rubric-preparation-post
 import { runStartupRetryCases } from "./repo-grades-startup-retry-postgres.mjs";
 
 import { runAutomaticRepoGradeCases } from "./repo-grades-automatic-postgres.mjs";
+import { runAutomaticRepoGradeScheduleCases } from "./repo-grades-automatic-schedule-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -36,6 +37,7 @@ const policyUpdateMigrationFile = "20261106122943_repo_grade_preparation_policy_
 const coordinatedStartupMigrationFile = "20261106150707_repo_grade_coordinated_startup.sql";
 
 const automaticMigrationFile = "20261106181056_repo_grade_automatic_runs.sql";
+const automaticScheduleMigrationFile = "20261106182023_repo_grade_automatic_schedule.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -237,6 +239,12 @@ async function main() {
     await owner.query(`begin; ${automaticMigration} commit;`);
     await runAutomaticRepoGradeCases({ owner, worker, contender });
     console.log("PASS: durable startup privileges, concurrent enqueue, worker fencing, interruption and stop.");
+    const automaticScheduleMigration = readFileSync(
+      new URL(`../../supabase/migrations/${automaticScheduleMigrationFile}`, import.meta.url), "utf8",
+    );
+    await owner.query(`begin; ${automaticScheduleMigration} commit;`);
+    await runAutomaticRepoGradeScheduleCases({ owner, worker });
+    console.log("PASS: durable schedule isolation, due wakeup, DST, coverage and recovery expiry.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

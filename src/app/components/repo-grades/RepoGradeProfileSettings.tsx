@@ -44,7 +44,7 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
   return (
     <details className={styles.profileSettings}>
       <summary>Automatic grading profiles</summary>
-      <p>Save settings for one folder in this course. Automatic grading at startup is currently unavailable.</p>
+      <p>Save settings for one folder in this course. Automatic checks use the matching folder profile when a run starts.</p>
       <form className={styles.dashboard} onSubmit={(event) => {
         event.preventDefault();
         void openFolder(path);

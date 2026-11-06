@@ -1,5 +1,6 @@
 import {
   createRepoGradeStartupSchedule,
+  repoGradeRepositoryCoverage,
   reserveNextRepoGradeStartupTarget,
   settleRepoGradeStartupTarget,
   stopRepoGradeStartupSchedule,
@@ -65,17 +66,6 @@ function discoveryState(discovery: Inventory["discovery"]): CourseStartupState {
   if (!discovery.enumerationComplete) return "unknown";
   if (discovery.repos.some((repo) => repo.status !== "ready")) return "partial";
   return "succeeded";
-}
-
-function repositoryCoverage(discovery: Extract<Inventory["discovery"], { status: "scanned" }>): StartupRepositoryCoverage {
-  const found = new Set<string>();
-  const incomplete = new Set<string>();
-  for (const { repo, status } of discovery.repos) {
-    const key = repo.toLowerCase();
-    found.add(key);
-    if (status !== "ready") incomplete.add(key);
-  }
-  return { checked: found.size - incomplete.size, found: found.size, enumerationComplete: discovery.enumerationComplete };
 }
 
 function evaluationDiagnostic(outcome: Outcome): Parameters<Diagnostic>[1] {
@@ -310,7 +300,7 @@ export function startRepoGradesStartup(
       if (stopped) return;
       discoveries.set(course.courseId, discovery);
       if (discovery.status === "scanned") {
-        repositoryCoverageByCourse.set(course.courseId, repositoryCoverage(discovery));
+        repositoryCoverageByCourse.set(course.courseId, repoGradeRepositoryCoverage(discovery));
       }
       report();
     }

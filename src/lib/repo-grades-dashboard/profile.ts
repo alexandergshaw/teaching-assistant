@@ -28,6 +28,12 @@ export type RepoGradeRubricReceipt = ProfileScope & Readonly<{
   profileFingerprint: string;
 }>;
 
+export function isEmbeddedRepoGradeStartupProfile(profile: RepoGradeProfile): boolean {
+  return profile.provider === "embedded" && profile.rubricPolicy === "manual"
+    && !!profile.rubric.trim() && !!profile.instructions.trim()
+    && !profile.useReadmeInstructions && !profile.runCode && profile.targetBranch === null;
+}
+
 const SETTINGS = [
   "sourceRef", "targetBranch", "instructions", "rubric", "useReadmeInstructions",
   "applyNamingDeduction", "runCode",

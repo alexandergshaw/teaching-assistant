@@ -92,6 +92,7 @@ describe("server-backed startup runtime", () => {
     expect(closeRepoGradeStartupBatchAction).toHaveBeenCalledExactlyOnceWith(accountId, generation);
     expect(observer).toHaveBeenLastCalledWith({
       phase: "incomplete",
+      historyRevisionByCourse: new Map([["first", 1], ["second", 1]]),
       courses: [
         { courseId: "first", label: "first", states: [{ state: "succeeded", count: 2 }] },
         { courseId: "second", label: "second", states: [{ state: "succeeded", count: 1 }] },
@@ -115,6 +116,7 @@ describe("server-backed startup runtime", () => {
     const observer = vi.fn();
     await startRepoGradesStartup(scope, serverRepoGradesStartupAdapter, observer).done;
     expect(observer).toHaveBeenLastCalledWith({
+      historyRevisionByCourse: new Map([["first", 1]]),
       phase: "incomplete", courses: [{ courseId: "first", label: "first", states: [
         { state: "unknown", count: 1 }, { state: "failed", count: 1 }, { state: "succeeded", count: 1 },
       ] }],
@@ -247,6 +249,7 @@ describe("server-backed startup runtime", () => {
     expect(runRepoGradeStartupTargetAction).toHaveBeenCalledExactlyOnceWith(accountId, "first", repo, "active", sourceRef, commit, generation);
     expect(observer).toHaveBeenLastCalledWith({
       phase: "stopped",
+      historyRevisionByCourse: new Map([["first", 1]]),
       courses: [{ courseId: "first", label: "first", states: [{ state: "unknown", count: 1 }, { state: "stopped", count: 1 }] }],
       recoverableResults: [{ ...evaluation, target: { accountId, courseId: "first", repo, sourceRef, sha: commit, folder: "active" } }],
     });

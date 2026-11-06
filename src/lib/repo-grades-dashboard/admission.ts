@@ -15,7 +15,7 @@ type ManualRequest = Extract<RepoGradeClaimRequest, { mode: "manual" }>;
 type AutomaticRequest = Exclude<RepoGradeClaimRequest, ManualRequest>;
 type Evaluation<T, Settlement> = { value: T; settlement: Settlement };
 type AdmissionFailure = RepoGradeClaimStatus | "runtime-unavailable" | "storage-unavailable" | "unknown"
-  | "pre-dispatch-failed" | "sandbox-refused";
+  | "pre-dispatch-failed" | "sandbox-refused" | "manual-paused";
 type AdmissionResult<T> = { status: "completed"; value: T } | { status: AdmissionFailure };
 type BeforeDispatch = NonNullable<LlmExecutionPolicy["beforeDispatch"]>;
 type Evaluate<T, Settlement> = (beforeDispatch?: BeforeDispatch) => Promise<Evaluation<T, Settlement>>;
@@ -30,10 +30,13 @@ export async function runWithRepoGradeAdmission<T>(
   request: RepoGradeClaimRequest, evaluate: Evaluate<T, RepoGradeAutomaticSettlement | RepoGradeManualSettlement>,
 ): Promise<AdmissionResult<T>> {
   const mode = repoGradeAdmissionMode();
+  if (mode === "embedded-only" && request.mode === "manual") return { status: "manual-paused" };
   if (mode === "legacy-manual" && request.mode === "manual") {
     return { status: "completed", value: (await evaluate()).value };
   }
-  if (mode !== "coordinated") return { status: "runtime-unavailable" };
+  if (mode !== "coordinated" && !(mode === "embedded-only" && request.mode === "automatic")) {
+    return { status: "runtime-unavailable" };
+  }
 
   let admission: Awaited<ReturnType<typeof claimRepoGrade>>;
   try {
@@ -50,6 +53,7 @@ export async function runWithRepoGradeAdmission<T>(
   let dispatchAllowed = false;
   let evaluating = true;
   const beforeDispatch: BeforeDispatch = async (signal) => {
+    if (mode === "embedded-only") throw new Error("External grading dispatch is disabled for the Embedded startup pilot.");
     signal.throwIfAborted();
     if (!evaluating) throw new Error("Repository grading evaluation ended.");
     if (!dispatch) {
@@ -106,6 +110,8 @@ export type ManualRepoGradeExecution = {
   markKnownFailure: () => void;
 };
 
+export const EMBEDDED_STARTUP_MANUAL_PAUSE = "Manual repository grading is paused during the Embedded startup pilot.";
+
 export async function runManualRepoGrade<T extends { run: { results: Array<{ ungraded?: { kind: string } }> } } | { error: string } | { noSubmission: true }>(
   repo: string, evaluate: (execution?: ManualRepoGradeExecution) => Promise<T>,
 ): Promise<T | { error: string }> {
@@ -150,6 +156,7 @@ export async function runManualRepoGrade<T extends { run: { results: Array<{ ung
     return { value, settlement: { outcome } };
   });
   if (result.status === "completed") return result.value;
+  if (result.status === "manual-paused") return { error: EMBEDDED_STARTUP_MANUAL_PAUSE };
   if (result.status === "busy") return { error: "Repository grading is already in progress or awaiting reconciliation." };
   if (result.status === "capacity") return { error: "Your repository grading capacity is currently full." };
   if (result.status === "pre-dispatch-failed") return { error: "Repository grading failed before dispatch." };

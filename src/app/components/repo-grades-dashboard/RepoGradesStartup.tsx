@@ -33,6 +33,7 @@ const STATE_TEXT: Record<CourseStartupState, string> = {
   failed: "Failed",
   unknown: "Status unknown",
   blocked: "Blocked",
+  "embedded-profile-required": "Blocked by Embedded profile requirements",
   busy: "Already claimed",
   "already-processed": "Already processed",
   stopped: "Stopped before starting",
@@ -73,6 +74,14 @@ export function RepoGradesStartup({ children }: { children: ReactNode }) {
   );
 }
 
+/** Refresh course history after a batch, scoped to the currently signed-in account. */
+export function useRepoGradesStartupHistoryRevision(accountId: string, courseId: string): number {
+  const { user, loading } = useSupabase();
+  const progress = useContext(StartupContext)?.progress;
+  if (loading || user?.id !== accountId || !progress || progress.phase === "checking" || progress.phase === "processing") return 0;
+  return progress.historyRevisionByCourse?.get(courseId) ?? 0;
+}
+
 export function RepoGradesStartupStatus() {
   const startup = useContext(StartupContext);
   const headingId = useId();
@@ -85,6 +94,9 @@ export function RepoGradesStartupStatus() {
     <section aria-labelledby={headingId}>
       <h2 id={headingId}>Startup repository checks</h2>
       <p>{PHASE_TEXT[progress.phase]}</p>
+      {progress.courses.some(({ states }) => states.some(({ state }) => state === "embedded-profile-required")) && (
+        <p>The Embedded pilot requires a saved Embedded profile with a fixed rubric and instructions. Turn off README instructions, code execution, and target branch checks for that profile.</p>
+      )}
       <button type="button" aria-disabled={!canStop} aria-describedby={stopHintId} onClick={() => {
         if (canStop) startup.stop?.();
       }}>

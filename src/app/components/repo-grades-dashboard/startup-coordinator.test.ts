@@ -73,6 +73,24 @@ describe("Repo Grades app startup coordinator", () => {
     ]);
   });
 
+  it("reports a blocked Embedded profile separately and scopes settlement revisions to the course", async () => {
+    resetSessionDiagnosticLogForTests(new Date().toISOString());
+    const fake = setup([owned("one"), owned("two")]);
+    fake.runTarget
+      .mockResolvedValueOnce({ status: "embedded-profile-required" })
+      .mockResolvedValueOnce({ status: "succeeded" });
+    const updates: RepoGradesStartupProgress[] = [];
+    await startRepoGradesStartup(scope, fake.adapter, (progress) => updates.push(progress)).done;
+    expect(updates.at(-1)?.courses.map((course) => course.states)).toEqual([
+      [{ state: "embedded-profile-required", count: 1 }],
+      [{ state: "succeeded", count: 1 }],
+    ]);
+    expect(updates.at(-1)?.historyRevisionByCourse).toEqual(new Map([["one", 1], ["two", 1]]));
+    expect(readSessionDiagnosticLogState().entries).toEqual(expect.arrayContaining([expect.objectContaining({
+      operation: "repo_grades_startup_evaluation", cause: "embedded-profile-required", outcome: "failure",
+    })]));
+  });
+
   it("reports per-class discovery, pending work, and running settlements after stop", async () => {
     const fake = setup([owned("one"), owned("mapping-only", "")]);
     fake.discoverCourse.mockResolvedValue(scanned("one", ["a", "b", "c", "d"]));

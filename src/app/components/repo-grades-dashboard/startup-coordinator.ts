@@ -80,6 +80,8 @@ function evaluationDiagnostic(outcome: Outcome): Parameters<Diagnostic>[1] {
     case "unknown":
     case "storage-unavailable":
       return "unknown";
+    case "embedded-profile-required":
+      return outcome;
     default:
       return "blocked";
   }
@@ -112,6 +114,7 @@ export function startRepoGradesStartup(
   let startupFinished = false;
   let retryPending = false;
   let previousBatch: RepoGradesStartupProgress["previousBatch"];
+  const historyRevisionByCourse = new Map<string, number>();
   const startedAt = performance.now();
 
   function report() {
@@ -124,7 +127,10 @@ export function startRepoGradesStartup(
         case "queued": status = stopped ? "stopped" : "queued"; break;
         case "claimed": status = "busy"; break;
         case "terminal": status = "already-processed"; break;
-        case "blocked": status = state.reason === "history-unavailable" ? "unknown" : "blocked"; break;
+        case "blocked":
+          status = state.reason === "history-unavailable" ? "unknown"
+            : state.reason === "embedded-profile-required" ? state.reason : "blocked";
+          break;
         default: status = state.status;
       }
       counts.set(status, (counts.get(status) ?? 0) + 1);
@@ -132,6 +138,7 @@ export function startRepoGradesStartup(
     }
     onProgress({
       phase: stopped ? "stopped" : phase,
+      ...(historyRevisionByCourse.size ? { historyRevisionByCourse: new Map(historyRevisionByCourse) } : {}),
       ...(recoverableResults.length ? { recoverableResults: [...recoverableResults] } : {}),
       ...(preparations.size ? {
         preparations: [...preparations.values()].map(({ progress }) => progress),
@@ -322,6 +329,7 @@ export function startRepoGradesStartup(
       const { status, unretainedResult, feedbackRetention, preparationDiagnostic } = evaluation;
       if (attached && preparationDiagnostic) recordRepoGradesStartupPreparation(preparationDiagnostic);
       const { target } = reservation;
+      historyRevisionByCourse.set(target.courseId, (historyRevisionByCourse.get(target.courseId) ?? 0) + 1);
       if (unretainedResult) recoverableResults.push({
         status, unretainedResult, ...(feedbackRetention && { feedbackRetention }), target,
       });

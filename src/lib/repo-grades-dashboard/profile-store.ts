@@ -94,8 +94,8 @@ async function readProfile(scope: CourseFolder, cohortId: string | null, expecte
   if (typeof result !== "object" || !("profile" in result) || !("receipt" in result)) {
     throw new Error("Invalid repository grading profile read response");
   }
-  const startupDefault = "startupDefault" in result ? result.startupDefault : false;
-  if (typeof startupDefault !== "boolean") throw new Error("Invalid repository grading profile origin");
+  const startupDefault = "startupDefault" in result ? result.startupDefault : undefined;
+  if (startupDefault !== undefined && typeof startupDefault !== "boolean") throw new Error("Invalid repository grading profile origin");
   return { profile: validateProfile(owner.id, scope, result.profile), receipt: result.receipt, startupDefault };
 }
 

@@ -13,7 +13,7 @@ import { requireAppOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
 import { studentRepoName } from "@/lib/student-repo-names";
 import { fetchJUnitSummary, testWorkflowYaml } from "@/lib/github-test-workflow";
-import { repoGradeAdmissionMode, runManualRepoGrade, type ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
+import { EMBEDDED_STARTUP_MANUAL_PAUSE, repoGradeAdmissionMode, runManualRepoGrade, type ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
 import { getGeminiInterRequestDelayMs, getGeminiMaxSubmissions } from "@/lib/gemini";
 import { sleep } from "@/lib/grade/utils";
 
@@ -643,7 +643,9 @@ export async function gradeReposAction(
   try {
     await requireAppOwner();
     const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
-    if (repoGradeAdmissionMode() === "legacy-manual") {
+    const mode = repoGradeAdmissionMode();
+    if (mode === "embedded-only") return { error: EMBEDDED_STARTUP_MANUAL_PAUSE };
+    if (mode === "legacy-manual") {
       return await evaluateRepoGradeBatch(repos, assignmentInstructions, rubric, provider, pathPrefix, runCode);
     }
 

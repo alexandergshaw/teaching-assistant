@@ -5,7 +5,7 @@ import type { RepoGradePreparationDiagnostic } from "@/lib/repo-grades-dashboard
 type Operation = "readiness" | "courses" | "discovery" | "history" | "evaluation" | "stop"
   | "batch_read" | "batch_seal" | "batch_close" | "preview";
 type Outcome = "success" | "unavailable" | "incomplete" | "request-failed" | "failed" | "unknown" | "blocked"
-  | "disabled" | "not-configured";
+  | "disabled" | "not-configured" | "embedded-profile-required";
 type PreviewResult = Awaited<ReturnType<typeof previewRepoGradeStartupPlanAction>> | { status: "request-failed" };
 type PreviewDetail = {
   discoveryOutcome: "complete" | "incomplete" | "blocked" | "not-configured";

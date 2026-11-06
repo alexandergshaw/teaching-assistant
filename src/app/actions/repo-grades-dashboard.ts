@@ -6,7 +6,7 @@ import { repoGradeAdmissionMode } from "@/lib/repo-grades-dashboard/admission-mo
 import { repoGradeDiscoveryEnabled } from "@/lib/repo-grades-dashboard/discovery-mode";
 import { readRepoGradeHistoryForOwner, REPO_GRADE_HISTORY_PAGE_SIZE } from "@/lib/repo-grades-dashboard/ledger";
 import {
-  prepareRepoGradeStartupProfile, type RepoGradePreparationDiagnostic,
+  prepareEmbeddedRepoGradeStartupProfile, prepareRepoGradeStartupProfile, type RepoGradePreparationDiagnostic,
 } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import {
   createRepoGradeStartupSchedule, repoGradeStartupKey, type RepoGradeHistoryObservation,
@@ -23,8 +23,8 @@ function validCourseId(courseId: unknown): courseId is string {
   return typeof courseId === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(courseId);
 }
 
-function startupAvailable() {
-  return repoGradeAdmissionMode() === "coordinated" && repoGradeDiscoveryEnabled();
+function startupAvailable(mode = repoGradeAdmissionMode()) {
+  return (mode === "coordinated" || mode === "embedded-only") && repoGradeDiscoveryEnabled();
 }
 
 const STARTUP_PREVIEW_TARGET_LIMIT = 50;
@@ -156,7 +156,8 @@ export async function runRepoGradeStartupTargetAction(
   if (owner.id !== expectedAccountId || !validCourseId(courseId)) return { status: "forbidden" } as const;
   if (typeof repo !== "string" || typeof folder !== "string" || typeof sourceRef !== "string"
     || typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) return { status: "ungraded" } as const;
-  if (!startupAvailable()) {
+  const mode = repoGradeAdmissionMode();
+  if (!startupAvailable(mode)) {
     return { status: "runtime-unavailable" } as const;
   }
   if (!validCourseId(batchId)) return { status: "forbidden" } as const;
@@ -183,12 +184,15 @@ export async function runRepoGradeStartupTargetAction(
 
     // Return unretained feedback to the authorized caller for session recovery.
     const diagnostics: { preparationDiagnostic?: RepoGradePreparationDiagnostic } = {};
+    const expectedSourceRef = plan.folderSources.get(target.folder) ?? null;
     const evaluation = await runRepoGradeTarget(plan, target, {
       startupBatchId,
-      loadPreparedProfile: (scope) => prepareRepoGradeStartupProfile(
-        scope, plan.discovery, plan.folderSources.get(target.folder) ?? null, target, plan.courseConfig, plan.courseKindBasis,
-        (metric) => { diagnostics.preparationDiagnostic = metric; },
-      ),
+      loadPreparedProfile: (scope) => mode === "embedded-only"
+        ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedSourceRef)
+        : prepareRepoGradeStartupProfile(
+          scope, plan.discovery, expectedSourceRef, target, plan.courseConfig, plan.courseKindBasis,
+          (metric) => { diagnostics.preparationDiagnostic = metric; },
+        ),
     });
     return { ...evaluation, ...diagnostics };
   }
@@ -203,7 +207,8 @@ export async function runRepoGradeStartupTargetAction(
     // or grading. After preflight, preserve observed or uncertain outcomes.
     let durableStatus: Parameters<typeof finishStartupTarget>[2] = preflightIncomplete ? "not-started" : "unknown";
     if (status === "terminal" || status === "succeeded" || status === "no-submission") durableStatus = "already-processed";
-    if (status === "forbidden" || status === "ungraded" || status === "runtime-unavailable") durableStatus = "not-started";
+    if (status === "forbidden" || status === "ungraded" || status === "runtime-unavailable"
+      || status === "embedded-profile-required") durableStatus = "not-started";
     if (status === "failed") durableStatus = "failed";
     const recorded = await finishStartupTarget(batchId, target, durableStatus).catch(() => false);
     if (!recorded && !("unretainedResult" in evaluation)) return { status: "storage-unavailable" } as const;
@@ -229,7 +234,7 @@ export async function retryRepoGradePreparationAction(
   if (!owner || owner.id !== expectedAccountId || !validCourseId(courseId)
     || !isRepoGradeProfileFolder(folder) || folder.length > 512
     || !isPreparationDigest(key) || !isPreparationDigest(generation)) return result("forbidden");
-  if (!startupAvailable()) return result("retry-unavailable");
+  if (repoGradeAdmissionMode() !== "coordinated" || !repoGradeDiscoveryEnabled()) return result("retry-unavailable");
   try {
     const plan = await planRepoGradeCourse(owner.id, courseId.toLowerCase());
     if (!plan) return result("forbidden");

@@ -14,6 +14,7 @@ export type CourseStartupState =
   | "failed"
   | "unknown"
   | "blocked"
+  | "embedded-profile-required"
   | "busy"
   | "already-processed"
   | "stopped"
@@ -29,6 +30,7 @@ export type CourseStartupProgress = Readonly<{
 export type RepoGradesStartupProgress = Readonly<{
   phase: "unavailable" | "checking" | "processing" | "complete" | "incomplete" | "stopped";
   courses: readonly CourseStartupProgress[];
+  historyRevisionByCourse?: ReadonlyMap<string, number>;
   previousBatch?: Readonly<{ active: boolean; courses: readonly CourseStartupProgress[] }>;
   recoverableResults?: readonly RepoGradesStartupRecovery[];
   preparations?: readonly RepoGradesStartupPreparation[];

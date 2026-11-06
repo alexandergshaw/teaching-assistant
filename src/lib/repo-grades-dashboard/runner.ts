@@ -15,7 +15,7 @@ import type {
 import { discoverRepoGradeSources, type RepoGradeDiscovery } from "./discovery";
 import { repoGradeDiscoveryEnabled } from "./discovery-mode";
 import { repoGradeAdmissionMode, runWithRepoGradeAdmission } from "./admission";
-import { restoreRepoGradeProfile, restoreRepoGradeRubric, type RepoGradeProfile } from "./profile";
+import { isEmbeddedRepoGradeStartupProfile, restoreRepoGradeProfile, restoreRepoGradeRubric, type RepoGradeProfile } from "./profile";
 import { readCurrentRepoGradeProfilesForOwner } from "./profile-store";
 import type { PreparedRepoGradeReadme, RepoGradePreparationFailure } from "./preparation-runtime";
 import type { RepoGradeCourseKindBasis } from "./preparation-ledger";
@@ -75,7 +75,7 @@ type AutomaticRuntime = {
     receipt: unknown;
     preparedReadme?: PreparedRepoGradeReadme;
     preparation?: RepoGradePreparedProvenance;
-  } | RepoGradePreparationFailure | null>;
+  } | RepoGradePreparationFailure | { status: "embedded-profile-required" } | null>;
   evaluatePinned?: (input: PinnedInput) => Promise<PinnedEvaluation>;
 };
 
@@ -127,7 +127,7 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
 
 type RunOutcome = RepoGradeAutomaticSettlement["outcome"] | RepoGradeClaimStatus
   | RepoGradePreparationFailure["status"]
-  | "ungraded" | "runtime-unavailable" | "unsupported-target-branch";
+  | "ungraded" | "runtime-unavailable" | "unsupported-target-branch" | "embedded-profile-required";
 
 type UnsettledEvaluation = { feedbackRetention?: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord };
 type RunResult =
@@ -229,7 +229,8 @@ export async function runRepoGradeTarget(
   }
   const plannedRef = plan.folderSources.get(folder) ?? null;
   if (plannedRef !== null && plannedRef !== sourceRef) return { status: "configuration-changed" };
-  if (!runtime || repoGradeAdmissionMode() !== "coordinated") return { status: "runtime-unavailable" };
+  const mode = repoGradeAdmissionMode();
+  if (!runtime || (mode !== "coordinated" && mode !== "embedded-only")) return { status: "runtime-unavailable" };
 
   let prepared: Awaited<ReturnType<AutomaticRuntime["loadPreparedProfile"]>>;
   try {
@@ -245,6 +246,7 @@ export async function runRepoGradeTarget(
     || profile.courseId !== plan.courseId || profile.folder !== folder) {
     return { status: "profile-unavailable" };
   }
+  if (mode === "embedded-only" && !isEmbeddedRepoGradeStartupProfile(profile)) return { status: "embedded-profile-required" };
   // The pinned evaluator currently skips the manual merge-target checks.
   if (profile.targetBranch) return { status: "unsupported-target-branch" };
   if (profile.sourceRef !== plannedRef) return { status: "configuration-changed" };
@@ -275,6 +277,7 @@ export async function runRepoGradeTarget(
     return { value, settlement };
   });
   if (admission.status === "completed") return admission.value;
+  if (admission.status === "manual-paused") return { status: "runtime-unavailable" };
   if (admission.status === "pre-dispatch-failed" || admission.status === "sandbox-refused") return { status: "failed" };
   if (admission.status === "unknown" && unsettled) {
     return { status: "unknown", ...unsettled };

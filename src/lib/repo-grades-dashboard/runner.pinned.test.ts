@@ -218,6 +218,34 @@ describe("admitted pinned repository evaluator", () => {
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
+  it.each([false, true])("grades with the real Embedded evaluator without a dispatch permit when settlement acknowledgement is lost=%s", async (lostAcknowledgement) => {
+    vi.mocked(repoGradeAdmissionMode).mockReturnValue("embedded-only");
+    const fetcher = fetchRepo();
+    const runtime = preparedRuntime({
+      rubric: "Source file (10 points): Submit a .py file.",
+      instructions: "Submit a Python source file.",
+      useReadmeInstructions: false,
+      runCode: false,
+    }, { provider: "embedded", model: "embedded-deterministic", graderVersion: grader.graderVersion });
+    if (lostAcknowledgement) vi.mocked(settleRepoGrade).mockRejectedValueOnce(new Error("Lost response"));
+
+    expect((await runRepoGradeTarget(plan, target, runtime)).status).toBe(lostAcknowledgement ? "unknown" : "succeeded");
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls.length).toBeGreaterThan(0);
+    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, expect.objectContaining({
+      outcome: "succeeded", inputsComplete: true, result: expect.objectContaining({ score: 100 }),
+    }));
+  });
+
+  it("rejects a Gemini profile even when an Embedded pilot caller supplies a prepared cohort", async () => {
+    vi.mocked(repoGradeAdmissionMode).mockReturnValue("embedded-only");
+    const fetcher = fetchRepo();
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "embedded-profile-required" });
+    expect(claimRepoGrade).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([429, 504])("dispatches a single model attempt for HTTP %i and settles by certainty", async (status) => {
     const fetcher = fetchRepo({ modelResponse: () => new Response(null, { status }) });
     const expected = status === 429 ? "failed" : "unknown";

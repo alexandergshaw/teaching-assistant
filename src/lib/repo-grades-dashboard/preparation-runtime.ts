@@ -8,7 +8,7 @@ import { getRepoGraderIdentity } from "./grader-identity";
 import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import { captureRepoGradePreparationPolicy, generatePreparedRepoGradeRubric, type RepoGradeRubricGenerator } from "./preparation-generator";
 import type { RepoGradePreparationCapture, RepoGradePreparationInput } from "./preparation-input";
-import { captureRepoGradeProfile, resolveRepoGradeRubric, type RepoGradeProfile } from "./profile";
+import { captureRepoGradeProfile, isEmbeddedRepoGradeStartupProfile, resolveRepoGradeRubric, type RepoGradeProfile } from "./profile";
 import { freezeRepoGradeRubric, readCurrentRepoGradeStartupProfile } from "./profile-store";
 import {
   beginRepoGradePreparation, bootstrapRepoGradePreparation, claimRepoGradePreparation, finishRepoGradePreparation,
@@ -118,6 +118,19 @@ async function prepareGeminiRubric(
   const receipt = generation.status === "ready" && boundary.state === "started"
     ? resolveRepoGradeRubric(profile, generation.rubric) : null;
   return finishRepoGradePreparation(profile, admission.claim, receipt ? { outcome: "succeeded", receipt } : { outcome: "failed" });
+}
+
+/** The pilot freezes a saved rubric. It has no rubric generator or README input path. */
+export async function prepareEmbeddedRepoGradeStartupProfile(
+  scope: Scope, expectedSourceRef: RepoGradeProfile["sourceRef"],
+): Promise<PreparedRepoGradeProfile | { status: "embedded-profile-required" | "configuration-changed" } | null> {
+  const saved = await readCurrentRepoGradeStartupProfile(scope, scope.accountId);
+  if (!saved || saved.startupDefault !== false || !isEmbeddedRepoGradeStartupProfile(saved.profile)) {
+    return { status: "embedded-profile-required" };
+  }
+  const { profile } = saved;
+  if (profile.sourceRef !== expectedSourceRef) return { status: "configuration-changed" };
+  return freezeRepoGradeRubric(profile, cohortId(profile.configurationFingerprint));
 }
 
 /** Only call from the gated server runner with its owned, pinned inventory. */

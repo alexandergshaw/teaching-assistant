@@ -46,6 +46,37 @@ afterEach(() => {
 });
 
 describe("repository grading admission", () => {
+  it("requires an explicit Embedded pilot selection and pauses untracked manual requests", async () => {
+    const actual = await vi.importActual<typeof import("./admission-mode")>("./admission-mode");
+    vi.mocked(repoGradeAdmissionMode).mockImplementation(actual.repoGradeAdmissionMode);
+    vi.stubEnv("REPO_GRADE_ADMISSION_MODE", undefined);
+    expect(repoGradeAdmissionMode()).toBe("legacy-manual");
+    vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "embedded-only");
+    expect(repoGradeAdmissionMode()).toBe("embedded-only");
+    const evaluate = vi.fn();
+    await expect(runManualRepoGrade(manual.repo, evaluate)).resolves.toEqual({
+      error: "Manual repository grading is paused during the Embedded startup pilot.",
+    });
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(claimRepoGrade).not.toHaveBeenCalled();
+  });
+
+  it("never issues an external dispatch permit in the Embedded pilot", async () => {
+    vi.mocked(repoGradeAdmissionMode).mockReturnValue("embedded-only");
+    const claim = { mode: "automatic", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    const dispatch = vi.fn();
+    await expect(runWithRepoGradeAdmission(automatic, async (beforeDispatch) => {
+      await beforeDispatch!(new AbortController().signal);
+      dispatch();
+      return complete();
+    })).resolves.toEqual({ status: "pre-dispatch-failed" });
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
+  });
+
   it("keeps the actual coordinated mode unavailable even when explicitly configured", async () => {
     const actual = await vi.importActual<typeof import("./admission-mode")>("./admission-mode");
     vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");

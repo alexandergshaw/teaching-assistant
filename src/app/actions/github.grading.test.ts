@@ -97,6 +97,16 @@ vi.mock("@/lib/research/rubric-bank", () => ({
 
 const { gradeReposAction } = await import("./github");
 
+it("pauses manual bulk grading before ingestion when the Embedded startup pilot is selected", async () => {
+  vi.mocked(repoGradeAdmissionMode).mockReturnValue("embedded-only");
+  await expect(gradeReposAction([{ repoRef: "org/repo" }], "Instructions", "Rubric")).resolves.toEqual({
+    error: "Manual repository grading is paused during the Embedded startup pilot.",
+  });
+  expect(ingestRepo).not.toHaveBeenCalled();
+  expect(claimRepoGrade).not.toHaveBeenCalled();
+  expect(gradeEntries).not.toHaveBeenCalled();
+});
+
 function file(path: string, content: string, truncated = false) {
   return { path, content, truncated };
 }

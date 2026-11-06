@@ -618,8 +618,8 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         title="Repo Grades"
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
-      <RepoGradeReservationRecovery />
       <RepoGradesGithubQuota />
+      <RepoGradeReservationRecovery />
       <RepoGradeCourseFilters
         courses={courses}
         courseId={uiState.courseId}

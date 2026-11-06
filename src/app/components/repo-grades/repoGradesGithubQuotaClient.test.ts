@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as diagnostics from "@/lib/session-diagnostic-log";
-import { checkRepoGradesGithubQuota } from "./repoGradesGithubQuotaClient";
+import { checkRepoGradesGithubQuota, githubQuotaNextCheckAt, githubQuotaSnapshotIsStale } from "./repoGradesGithubQuotaClient";
 
 const ACCOUNT = "private-account";
 const TOKEN = "private-token";
@@ -17,7 +17,7 @@ const entry = {
   durationMs: 40,
 };
 const snapshot = {
-  status: "observed", limit: 5_000, remaining: 87, observedAtMs: NOW.getTime() - 5_000,
+  status: "observed" as const, limit: 5_000, remaining: 87, observedAtMs: NOW.getTime() - 5_000,
   resetAtMs: NOW.getTime() + 300_000, staleAtMs: NOW.getTime() + 55_000,
 };
 const fetchQuota = vi.fn<typeof fetch>();
@@ -74,7 +74,13 @@ describe("Repo Grades quota diagnostics", () => {
 
   it("records an unavailable outcome without including an upstream error body", async () => {
     fetchQuota.mockResolvedValueOnce(Response.json({ error: `${REPO} ${TOKEN}` }, { status: 503 }));
-    expect(await check()).toMatchObject({ result: { status: "unavailable" } });
+    expect(await check()).toMatchObject({ result: { status: "unavailable" }, accessDenied: false });
+    expectDiagnostic("failure", "unavailable");
+  });
+
+  it("distinguishes lost access from a temporary quota failure", async () => {
+    fetchQuota.mockResolvedValueOnce(Response.json({ status: "unavailable" }, { status: 403 }));
+    expect(await check()).toMatchObject({ result: { status: "unavailable" }, accessDenied: true });
     expectDiagnostic("failure", "unavailable");
   });
 
@@ -98,5 +104,27 @@ describe("Repo Grades quota diagnostics", () => {
     fetchQuota.mockResolvedValueOnce(Response.json(snapshot));
     vi.spyOn(diagnostics, "recordSessionDiagnosticEntry").mockImplementationOnce(() => { throw new Error("writer failed"); });
     expect(await check()).toMatchObject({ result: snapshot });
+  });
+});
+
+describe("Repo Grades quota refresh timing", () => {
+  it("rechecks at reset when exhausted even though the displayed observation becomes stale earlier", () => {
+    const exhausted = { ...snapshot, remaining: 0 };
+    expect(githubQuotaSnapshotIsStale(exhausted, exhausted.staleAtMs)).toBe(true);
+    expect(githubQuotaNextCheckAt(exhausted, exhausted.staleAtMs)).toBe(exhausted.resetAtMs);
+  });
+
+  it("refreshes an available count when it expires, or at an earlier reset", () => {
+    const resetAtMs = NOW.getTime() + 15_000;
+    expect(githubQuotaNextCheckAt(snapshot, NOW.getTime())).toBe(snapshot.staleAtMs);
+    expect(githubQuotaNextCheckAt({ ...snapshot, resetAtMs }, NOW.getTime())).toBe(resetAtMs);
+  });
+
+  it("backs off failed or expired responses and leaves throttles for a manual check", () => {
+    const checkedAtMs = snapshot.resetAtMs;
+    expect(githubQuotaNextCheckAt({ ...snapshot, remaining: 0 }, checkedAtMs)).toBe(checkedAtMs + 60_000);
+    expect(githubQuotaNextCheckAt({ status: "unavailable" }, checkedAtMs)).toBe(checkedAtMs + 60_000);
+    expect(githubQuotaNextCheckAt({ status: "throttled" }, checkedAtMs)).toBeNull();
+    expect(githubQuotaNextCheckAt({ status: "not-configured" }, checkedAtMs)).toBeNull();
   });
 });

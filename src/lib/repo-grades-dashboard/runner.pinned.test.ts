@@ -215,13 +215,25 @@ describe("admitted pinned repository evaluator", () => {
     expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
   });
 
-  it("still authorizes the pinned tree on warm reuse without another archive or file download", async () => {
+  it("authorizes the pinned tree on each grade and reuses the archive for 30 minutes", async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const thirtyMinutes = 30 * 60_000;
     const fetcher = fetchRepo();
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+
     fetcher.mockClear();
+    clock.mockReturnValue(start + thirtyMinutes - 1);
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, modelUrl,
+    ]);
+
+    fetcher.mockClear();
+    clock.mockReturnValue(start + thirtyMinutes);
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl, modelUrl,
     ]);
   });
 

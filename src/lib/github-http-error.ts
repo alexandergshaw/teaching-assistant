@@ -60,6 +60,14 @@ export class GithubHttpError extends Error {
   }
 }
 
+/** A confirmed GitHub limit during a grading file read or its active cooldown. */
+export class GithubGradeSourceRateLimitError extends Error {
+  constructor() {
+    super("GitHub rate-limited repository grading source reads.");
+    this.name = "GithubGradeSourceRateLimitError";
+  }
+}
+
 /**
  * Narrows an unknown caught value to a GithubHttpError, or null when it is
  * anything else (a network failure, a thrown string, an error from a

@@ -54,7 +54,8 @@ describe("automatic gradebook blockers", () => {
       { repo: "school/one", folder: "Lab", source_ref: "work", state: "blocked", reason: "configuration-changed" },
       { repo: "school/two", folder: "Lab", source_ref: "main", state: "blocked", reason: "Private upstream error", recovery: "not visible" },
       { repo: "school/three", folder: "Lab", source_ref: "main", state: "embedded-profile-required", reason: null },
-    ], count: 3 });
+      { repo: "school/four", folder: "Lab", source_ref: "main", state: "partial", reason: "grading-source-rate-limited" },
+    ], count: 4 });
     const result = await readRepoGradeAutomaticBlocksAction(owner, course);
     expect(runQuery.select).toHaveBeenCalledWith("id,created_at,repo_grade_automatic_courses!inner(state,reason)");
     expect(runQuery.eq.mock.calls).toEqual([["user_id", owner], ["repo_grade_automatic_courses.course_id", course]]);
@@ -62,7 +63,7 @@ describe("automatic gradebook blockers", () => {
     expect(runQuery.limit).toHaveBeenCalledWith(1);
     expect(courseQuery.eq.mock.calls).toEqual([["id", course], ["user_id", owner]]);
     expect(targetQuery.eq.mock.calls).toEqual([["run_id", run], ["course_id", course]]);
-    expect(targetQuery.in).toHaveBeenCalledWith("state", ["blocked", "embedded-profile-required"]);
+    expect(targetQuery.in).toHaveBeenCalledWith("state", ["blocked", "embedded-profile-required", "partial"]);
     expect(result).toEqual({
       status: "loaded",
       run: { id: run, startedAt, discoveryExplanation: expect.stringContaining("GitHub denied access") },
@@ -70,6 +71,7 @@ describe("automatic gradebook blockers", () => {
         { repo: "school/one", folder: "Lab", sourceRef: "work", runStartedAt: startedAt, explanation: expect.stringContaining("saved grading settings changed") },
         { repo: "school/two", folder: "Lab", sourceRef: "main", runStartedAt: startedAt, explanation: "The worker did not provide a recognized reason." },
         { repo: "school/three", folder: "Lab", sourceRef: "main", runStartedAt: startedAt, explanation: expect.stringContaining("Save an Embedded grading profile") },
+        { repo: "school/four", folder: "Lab", sourceRef: "main", runStartedAt: startedAt, partial: true, explanation: expect.stringContaining("GitHub rate-limited the worker") },
       ],
     });
   });

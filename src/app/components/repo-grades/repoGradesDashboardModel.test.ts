@@ -118,12 +118,12 @@ describe("class repository results", () => {
     ]);
   });
 
-  it("shows a background block under the confirmed student and exact assignment without changing a saved score", () => {
+  it("shows background blocks and partials under the confirmed student and exact assignment without changing a saved score", () => {
     const block = { repo: "ORG/ALICE", folder: "Lab", sourceRef: "work", explanation: "The grading branch changed." };
     const results = new Map<string, RepoGradeSavedResult>();
     const score = attempt(1, "org/alice", "Lab", 85);
     addRepoGradeSavedPage(results, [score, attempt(2, "org/alice", "lab", 80)]);
-    const bob = { ...block, repo: "org/bob" };
+    const bob = { ...block, repo: "org/bob", partial: true as const, explanation: "The submission exceeded the input limit." };
     const matrix = buildRepoGradeMatrix([], {}, results, [], [],
       [{ id: "1", name: "Alice" }, { id: "2", name: "Bob" }],
       [{ repo: "org/alice", canvasUserId: "1", student: "Alice" }, { repo: "org/bob", canvasUserId: "2", student: "Bob" }],

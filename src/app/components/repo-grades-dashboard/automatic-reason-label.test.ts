@@ -9,6 +9,11 @@ it.each([
   ["profile-unavailable", "This record has no more specific reason"],
   ["explicit-retry-required", "Use Retry rubric preparation"],
   ["prior-attempt", "Check the repository grading history"],
+  ["digest-truncated", "limit for collecting repository files"],
+  ["file-fetch-failed", "read or verify every required submission file"],
+  ["grading-input-truncated", "grading model's input limit"],
+  ["grading-source-rate-limited", "GitHub rate-limited the worker"],
+  ["unsupported-submission", "files the repository grader cannot read"],
 ])("explains %s with a specific message", (reason, expected) => {
   expect(automaticReasonLabel(reason)).toContain(expected);
 });

@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { SCOPED_BUDGET } from "./github.digest";
+import { GithubGradeSourceRateLimitError } from "./github-http-error";
+import { classifyGithubFailure } from "./github-rate-limit";
 import { validateGithubOwnerRepo } from "./github-ref-name";
 import { githubRestHeaders, isGithubCommitSha } from "./github.repos";
 import { GradeArchiveLimitError, indexGradeArchive, isGradeBlob, verifyGradeArchiveFiles, verifyGradeBlob, type GradeArchive } from "./github-grade-archive-zip";
@@ -17,7 +19,7 @@ const SOURCE_READ_TIMEOUT_MS = 40_000;
 const DIRECT_BLOB_COUNT = 2;
 const MAX_FALLBACK_BYTES = 8 * 1024 * 1024;
 const cache = new Map<string, { archive: GradeArchive | null; expires: number }>();
-const retryAfterByCredential = new Map<string, number>();
+const retryAfterByCredential = new Map<string, { retryAt: number; confirmedUntil: number }>();
 let cacheBytes = 0;
 
 function unavailable(): never {
@@ -29,9 +31,13 @@ function cancel(body: { cancel(): Promise<unknown> } | null) {
 }
 
 function checkCooldown(credential: string) {
-  const retryAt = retryAfterByCredential.get(credential);
-  if (retryAt === undefined) return;
-  if (retryAt > Date.now()) return unavailable();
+  const cooldown = retryAfterByCredential.get(credential);
+  if (!cooldown) return;
+  const now = Date.now();
+  if (cooldown.retryAt > now) {
+    if (cooldown.confirmedUntil > now) throw new GithubGradeSourceRateLimitError();
+    return unavailable();
+  }
   retryAfterByCredential.delete(credential);
 }
 
@@ -44,14 +50,24 @@ function observeQuota(response: Response, credential: string) {
   if (remaining !== "0" && response.status !== 403 && response.status !== 429
     && !(response.status === 503 && retryAfter !== null)) return;
   const now = Date.now();
+  const throttled = classifyGithubFailure(response.status, response.headers, now).kind === "rate-limited";
   const reset = Number(response.headers.get("x-ratelimit-reset")) * 1_000;
   const retryAt = retryAfter && /^\d+$/.test(retryAfter) ? now + Number(retryAfter) * 1_000
     : Date.parse(retryAfter ?? "");
   const supplied = Math.max(remaining === "0" && Number.isFinite(reset) ? reset : 0, Number.isFinite(retryAt) ? retryAt : 0);
-  retryAfterByCredential.set(credential, Math.max(retryAfterByCredential.get(credential) ?? 0, supplied > now ? supplied : now + 60_000));
+  const previous = retryAfterByCredential.get(credential);
+  const retryAtMs = supplied > now ? supplied : now + 60_000;
+  retryAfterByCredential.set(credential, {
+    retryAt: Math.max(previous?.retryAt ?? 0, retryAtMs),
+    confirmedUntil: Math.max(previous?.confirmedUntil ?? 0, throttled || remaining === "0" ? retryAtMs : 0),
+  });
   if (retryAfterByCredential.size > MAX_CACHE_ENTRIES * 2) {
     const oldest = retryAfterByCredential.keys().next().value;
     if (oldest !== undefined) retryAfterByCredential.delete(oldest);
+  }
+  if (throttled) {
+    cancel(response.body);
+    throw new GithubGradeSourceRateLimitError();
   }
 }
 

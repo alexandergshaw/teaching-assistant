@@ -91,9 +91,9 @@ export function RepoGradeResultDetails({ repo, folder, editableEdit, scanStatus 
   const resultLabel = `${repo.name} / ${folder || "Repository root"}`;
   return (
     <>
-      {cell?.automaticBlocks?.map(({ sourceRef, explanation, runStartedAt }) => (
+      {cell?.automaticBlocks?.map(({ sourceRef, explanation, runStartedAt, partial }) => (
         <Typography component="p" variant="body2" key={JSON.stringify([sourceRef, explanation])} sx={{ overflowWrap: "anywhere" }}>
-          <strong>Automatic grading blocked</strong> on {sourceRef}
+          <strong>{partial ? "Automatic grading incomplete" : "Automatic grading blocked"}</strong> on {sourceRef}
           {runStartedAt && <> (run started <time dateTime={runStartedAt}>{new Date(runStartedAt).toLocaleString()}</time>)</>}.
           {" "}{explanation}
         </Typography>

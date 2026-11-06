@@ -129,7 +129,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       case "embedded-profile-required":
         return { state: outcome.status };
       case "partial":
-        return { state: "partial", reason: outcome.feedbackRetention ? "feedback-not-retained" : undefined };
+        return { state: "partial", reason: outcome.feedbackRetention ? "feedback-not-retained" : outcome.reason };
       case "profile-unavailable":
         return { state: "blocked", reason: profileFailure ?? outcome.status };
       default:

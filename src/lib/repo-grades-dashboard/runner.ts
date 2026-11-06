@@ -1,8 +1,10 @@
 import "server-only";
 
 import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
+import { asGithubHttpError, GithubGradeSourceRateLimitError } from "@/lib/github-http-error";
+import { classifyGithubFailure } from "@/lib/github-rate-limit";
 import { isGithubCommitSha } from "@/lib/github.repos";
-import { evaluateRepoGrade, type RepoGradeResponse } from "@/lib/repo-grade-evaluator";
+import { evaluateRepoGrade, type RepoGradePartialReason, type RepoGradeResponse } from "@/lib/repo-grade-evaluator";
 import { createGradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import type { LlmExecutionPolicy } from "@/lib/llm";
 import { parseEarnedPossibleScore } from "@/lib/grade/parsing";
@@ -129,7 +131,14 @@ async function evaluatePinnedRepoGrade(input: PinnedInput): Promise<PinnedEvalua
     }
     return response;
   } catch (error) {
-    if (!dispatched) return { knownFailure: true };
+    if (!dispatched) {
+      const http = asGithubHttpError(error);
+      if (error instanceof GithubGradeSourceRateLimitError
+        || (http && classifyGithubFailure(http.status, http.headers, Date.now()).kind === "rate-limited")) {
+        return { error: "GitHub rate-limited repository source reads.", partial: true, sourceCommit, reason: "grading-source-rate-limited" };
+      }
+      return { knownFailure: true };
+    }
     throw error;
   }
 }
@@ -141,12 +150,13 @@ type RunOutcome = RepoGradeAutomaticSettlement["outcome"] | RepoGradeClaimStatus
 type UnsettledEvaluation = { feedbackRetention?: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord };
 type RunResult =
   | {
-      status: RunOutcome;
+      status: Exclude<RunOutcome, "partial">;
       feedbackRetention?: never;
       unretainedResult?: never;
       preparationRetry?: RepoGradePreparationFailure["preparationRetry"];
     }
-  | { status: "partial"; feedbackRetention: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord }
+  | { status: "partial"; reason?: RepoGradePartialReason; feedbackRetention?: never; unretainedResult?: never }
+  | { status: "partial"; reason?: never; feedbackRetention: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord }
   | ({ status: "unknown" } & UnsettledEvaluation);
 
 function classifyEvaluation(
@@ -159,13 +169,15 @@ function classifyEvaluation(
   if ("knownFailure" in response) return { status: "failed", settlement: { outcome: "failed" } };
   if ("error" in response) {
     return response.partial && response.sourceCommit === sourceCommit
-      ? { status: "partial", settlement: { outcome: "partial" } }
+      ? { status: "partial", reason: response.reason, settlement: { outcome: "partial" } }
       : { status: "unknown", settlement: { outcome: "unknown" } };
   }
   if (response.sourceCommit !== sourceCommit || response.fullName !== repo) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
   }
-  if (response.digestTruncated !== false) return { status: "partial", settlement: { outcome: "partial" } };
+  if (response.digestTruncated !== false) {
+    return { status: "partial", reason: response.digestTruncated ? "digest-truncated" : undefined, settlement: { outcome: "partial" } };
+  }
   if (profile.useReadmeInstructions && !response.readmePath && !profile.instructions) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
   }
@@ -179,7 +191,9 @@ function classifyEvaluation(
   if (response.run.results.length !== 1 || !grade) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
   }
-  if (grade.submissionTruncated) return { status: "partial", settlement: { outcome: "partial" } };
+  if (grade.submissionTruncated) {
+    return { status: "partial", reason: "grading-input-truncated", settlement: { outcome: "partial" } };
+  }
   if (isUngraded(grade)) {
     return grade.ungraded.kind === "not-attempted"
       ? { status: "ungraded", settlement: { outcome: "failed" } }

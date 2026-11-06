@@ -4,6 +4,7 @@ import { boundSubmissionInventory, type SubmissionFileInventory } from "./grade/
 import { getRepo, getRepoCommitTree } from "./github.repos";
 import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "./github.files";
 import { ghFetch } from "./github.repos";
+import { GithubGradeSourceRateLimitError } from "./github-http-error";
 import { encodeRefSegment } from "./github-ref-name";
 
 // Text/code file extensions worth feeding to a model. Broad on purpose - a
@@ -375,8 +376,9 @@ export async function ingestRepo(
     } else {
       try {
         verifiedFiles = await archiveReader(toRead, signal);
-      } catch {
+      } catch (error) {
         signal?.throwIfAborted();
+        if (error instanceof GithubGradeSourceRateLimitError) throw error;
         fetchErrorCount = toRead.length;
         truncated = true;
         toRead = [];

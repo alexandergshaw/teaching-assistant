@@ -24,6 +24,10 @@ function branchNoteFor(check: BranchMergeCheck): string | null {
   return check.status === "not-merged" ? describeBranchMergeNote(check) : null;
 }
 
+export type RepoGradePartialReason =
+  | "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated"
+  | "unsupported-submission" | "grading-source-rate-limited";
+
 export type RepoGradeResponse =
   | {
       run: GradingRun;
@@ -64,7 +68,7 @@ export type RepoGradeResponse =
       /** Typed merge-check outcome (graded ref = typed target, else the default branch). */
       branchMergeCheck?: BranchMergeCheck;
     }
-  | (ManualRepoGradeError & { partial?: true; sourceCommit?: string; reason?: "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated" | "unsupported-submission" });
+  | (ManualRepoGradeError & { partial?: true; sourceCommit?: string; reason?: RepoGradePartialReason });
 
 type RepoGradeExecution = ManualRepoGradeExecution & {
   automaticGrader?: RepoGraderIdentity & { accountId: string };

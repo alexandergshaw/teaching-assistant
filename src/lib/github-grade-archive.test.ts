@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { indexGradeArchive, verifyGradeArchiveFiles } from "./github-grade-archive-zip";
 import { makePinnedArchiveReader } from "./github-grade-archive";
+import { GithubGradeSourceRateLimitError } from "./github-http-error";
 
 const sha = "a".repeat(40);
 const prefix = "school-student-shortsha";
@@ -88,8 +89,9 @@ describe("pinned grading archive transport", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     const reader = makePinnedArchiveReader({ accountId: "cooldown-test", owner: "school", repo: "student", sha });
-    await expect(reader(files)).rejects.toThrow();
-    await expect(reader(files)).rejects.toThrow();
+    const expected = status === 429 ? GithubGradeSourceRateLimitError : "The pinned GitHub repository archive could not be read.";
+    await expect(reader(files)).rejects.toThrow(expected);
+    await expect(reader(files)).rejects.toThrow(expected);
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual(location === "api" ? [apiUrl] : [apiUrl, download]);
   });
 

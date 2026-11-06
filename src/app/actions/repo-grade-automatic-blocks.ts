@@ -1,7 +1,7 @@
 "use server";
 
 import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
-import type { AutomaticRepoGradeBlocks } from "@/lib/repo-grades-dashboard/automatic-blocks";
+import { AUTOMATIC_GRADE_DETAIL_STATES, type AutomaticRepoGradeBlocks } from "@/lib/repo-grades-dashboard/automatic-blocks";
 import { automaticReasonLabel } from "@/lib/repo-grades-dashboard/automatic-reason-label";
 import { isAutomaticRepoGradeId } from "@/lib/repo-grades-dashboard/automatic-store";
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -9,7 +9,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 const unavailable = { status: "unavailable" } as const;
 
-/** The gradebook can only read blockers from the latest run that included the owner's class. */
+/** The gradebook can only read target problems from the latest run that included the owner's class. */
 export async function readRepoGradeAutomaticBlocksAction(
   expectedAccountId: unknown, courseId: unknown,
 ): Promise<AutomaticRepoGradeBlocks> {
@@ -34,11 +34,11 @@ export async function readRepoGradeAutomaticBlocksAction(
     if (!runCourse || !Number.isFinite(Date.parse(startedAt))) return unavailable;
 
     // The worker stages at most 1,000 targets per course. Treat a lower API
-    // row cap as unavailable instead of silently hiding some blocked targets.
+    // row cap as unavailable instead of silently hiding some target reasons.
     const { data, count, error } = await client.from("repo_grade_automatic_targets")
       .select("repo,folder,source_ref,state,reason", { count: "exact" })
       .eq("run_id", run.data.id).eq("course_id", courseId)
-      .in("state", ["blocked", "embedded-profile-required"]).order("id").limit(1000).retry(false);
+      .in("state", AUTOMATIC_GRADE_DETAIL_STATES).order("id").limit(1000).retry(false);
     if (error || !data || data.length !== count) return unavailable;
 
     return {
@@ -51,6 +51,7 @@ export async function readRepoGradeAutomaticBlocksAction(
       targets: data.map(({ repo, folder, source_ref, state, reason }) => ({
         repo, folder, sourceRef: source_ref,
         explanation: automaticReasonLabel(state === "embedded-profile-required" ? state : reason),
+        ...(state === "partial" && { partial: true as const }),
         runStartedAt: startedAt,
       })),
     };

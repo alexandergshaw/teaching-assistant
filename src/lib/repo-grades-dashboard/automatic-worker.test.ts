@@ -163,8 +163,11 @@ describe("durable repository grading discovery", () => {
       new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
     const preparationRetry = { key: "b".repeat(64), generation: "c".repeat(64) };
     mocks.evaluate.mockResolvedValue({ status: "explicit-retry-required", preparationRetry });
-    expect(await createAutomaticRepoGradeWorker("coordinated")(work, "lease")).toEqual({
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    expect(await worker(work, "lease")).toEqual({
       state: "blocked", reason: "explicit-retry-required", preparationRetry,
     });
+    mocks.evaluate.mockResolvedValue({ status: "partial", reason: "grading-source-rate-limited" });
+    expect(await worker(work, "lease")).toEqual({ state: "partial", reason: "grading-source-rate-limited" });
   });
 });

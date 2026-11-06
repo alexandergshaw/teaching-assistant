@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as repoGradeEvaluator from "@/lib/repo-grade-evaluator";
+import { GithubGradeSourceRateLimitError } from "@/lib/github-http-error";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { repoGradeAdmissionMode } from "./admission-mode";
 import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
@@ -214,8 +216,31 @@ describe("repository grading dashboard runner", () => {
       .mockResolvedValueOnce({ ...graded, digestTruncated: true });
     await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "no-submission" });
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "no-submission", inputsComplete: true });
-    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "partial" });
+    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "partial", reason: "digest-truncated" });
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "partial" });
+  });
+
+  it("settles a source throttle with a safe reason before dispatch", async () => {
+    const { runtime } = fixture();
+    const evaluate = vi.spyOn(repoGradeEvaluator, "evaluateRepoGrade")
+      .mockRejectedValueOnce(new GithubGradeSourceRateLimitError());
+    try {
+      await expect(runRepoGradeTarget(plan, target, { loadPreparedProfile: runtime.loadPreparedProfile }))
+        .resolves.toEqual({ status: "partial", reason: "grading-source-rate-limited" });
+      expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "partial" });
+      expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+    } finally {
+      evaluate.mockRestore();
+    }
+  });
+
+  it("only retains a pinned partial reason for the admitted source commit", async () => {
+    const { runtime } = fixture();
+    const error = { error: "An internal source read detail", partial: true as const, reason: "file-fetch-failed" as const };
+    runtime.evaluatePinned.mockResolvedValueOnce({ ...error, sourceCommit: sha })
+      .mockResolvedValueOnce({ ...error, sourceCommit: "b".repeat(40) });
+    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "partial", reason: error.reason });
+    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "unknown" });
   });
 
   it("settles an ambiguous evaluator response as unknown with a single dispatch", async () => {

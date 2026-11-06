@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { previewRepoGradeStartupPlanAction } from "@/app/actions/repo-grades-dashboard";
+import { loadRepoGradesStartupPreview } from "./startup-preview-client";
 import styles from "../repo-grades/repo-grades-dashboard.module.css";
 
-type Result = Awaited<ReturnType<typeof previewRepoGradeStartupPlanAction>>;
+type Result = Awaited<ReturnType<typeof loadRepoGradesStartupPreview>>;
 type Preview = Extract<Result, { status: "preview" }>;
 type TargetState = Preview["targets"][number]["state"];
 
@@ -48,8 +48,7 @@ export function RepoGradesStartupPreview({ accountId, courseId }: { accountId: s
 
   function loadPreview() {
     startTransition(async () => {
-      const preview = await previewRepoGradeStartupPlanAction(courseId, accountId)
-        .catch(() => ({ status: "course-unavailable" } as const));
+      const preview = await loadRepoGradesStartupPreview(courseId, accountId);
       setResult(preview);
     });
   }

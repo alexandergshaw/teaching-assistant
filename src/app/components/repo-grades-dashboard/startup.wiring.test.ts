@@ -40,8 +40,11 @@ describe("Repo Grades startup wiring", () => {
     expect(dashboard).toMatch(/user && isOwnerDecision\(accessDecision\) && \([\s\S]*?<RepoGradesStartupPreview key=\{JSON.stringify\(\[user.id, courseId\]\)\} accountId=\{user.id\} courseId=\{courseId\}/);
     const preview = source("./RepoGradesStartupPreview.tsx");
     expect(preview).toContain("onClick={loadPreview}");
-    expect(preview).toContain("previewRepoGradeStartupPlanAction(courseId, accountId)");
+    expect(preview).toContain("loadRepoGradesStartupPreview(courseId, accountId)");
     expect(preview).not.toMatch(/useEffect|runRepoGrade|BatchAction|StartupTargetAction/);
+    const client = source("./startup-preview-client.ts");
+    expect(client).toContain("previewRepoGradeStartupPlanAction(courseId, accountId)");
+    expect(client).not.toMatch(/runRepoGrade|BatchAction|StartupTargetAction/);
   });
 
   it("keeps a live region outside the tab and wires a focusable, guarded native stop button", () => {

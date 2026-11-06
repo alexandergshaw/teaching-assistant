@@ -9,6 +9,7 @@ import { runSettlementCases } from "./repo-grades-admission-v2-postgres-settleme
 import { runCrossRefClaimCases } from "./repo-grades-claim-cross-ref-postgres.mjs";
 import { runDispatchBoundaryCases } from "./repo-grades-dispatch-boundary-postgres.mjs";
 import { runRubricPreparationCases } from "./repo-grades-rubric-preparation-postgres.mjs";
+import { runStartupRetryCases } from "./repo-grades-startup-retry-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -26,7 +27,9 @@ const migrationFiles = [
 const draftSchema = "repo_grade_admission_private";
 const dispatchMigrationFile = "20261106035612_repo_grade_dispatch_boundary.sql";
 const preparationMigrationFile = "20261106043419_repo_grade_rubric_preparation_admission.sql";
+const startupMigrationFile = "20261106051231_repo_grade_startup_batch.sql";
 const preparationRetryMigrationFile = "20261106053623_repo_grade_preparation_explicit_retry.sql";
+const startupRetryMigrationFile = "20261106061811_repo_grade_startup_retry_not_started.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -146,6 +149,10 @@ async function main() {
   const preparationRetryMigration = readFileSync(
     new URL(`../../supabase/migrations/${preparationRetryMigrationFile}`, import.meta.url), "utf8",
   );
+  const startupMigration = readFileSync(new URL(`../../supabase/migrations/${startupMigrationFile}`, import.meta.url), "utf8");
+  const startupRetryMigration = readFileSync(
+    new URL(`../../supabase/migrations/${startupRetryMigrationFile}`, import.meta.url), "utf8",
+  );
   const sessions = [];
   async function connect() {
     const session = openPsql(options);
@@ -207,11 +214,15 @@ async function main() {
     assert.equal(await owner.query(preparationAbsent), "t", "Preparation schema survived rollback in the writing session.");
     assert.equal(await witness.query(preparationAbsent), "t", "Preparation schema survived rollback in a separate session.");
     await owner.query(`begin; ${preparationMigration} commit;`);
+    await owner.query(`begin; ${startupMigration} commit;`);
     await owner.query(`begin; ${preparationRetryMigration} rollback;`);
     assert.equal(await witness.query("select to_regclass('public.repo_grade_preparation_history') is null;"), "t");
     await owner.query(`begin; ${preparationRetryMigration} commit;`);
     await runRubricPreparationCases({ owner, worker, contender, witness, waitForBlock });
     console.log("PASS: rubric preparation migration rollback, privileges and PostgreSQL transaction cases completed.");
+    await owner.query(`begin; ${startupRetryMigration} commit;`);
+    await runStartupRetryCases({ owner, worker });
+    console.log("PASS: startup retries only recapture definitively not-started work.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

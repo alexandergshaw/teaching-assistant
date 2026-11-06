@@ -121,8 +121,8 @@ begin
   select * into course from public.course_hub c where c.id = p_course_id and c.user_id = p_user_id for share;
   if not found or nullif(btrim(course.github_org), '') is null
     or p_course_kind_basis is distinct from jsonb_build_array(course.name, course.course_kind)
-    or case when course.course_kind in ('coding', 'applied') then course.course_kind <> p_course_kind
-      else p_course_kind <> 'coding' end
+    or (case when course.course_kind in ('coding', 'applied') then course.course_kind <> p_course_kind
+      else p_course_kind <> 'coding' end)
     or p_course_config is distinct from jsonb_build_object(
       'github_org', course.github_org, 'repos', course.repos, 'rubric_name', course.rubric_name,
       'rubric_data', course.rubric_data, 'repo_module_pairing', course.repo_module_pairing, 'student_repos', course.student_repos
@@ -493,7 +493,7 @@ begin
   if prep.state = 'unknown' then return jsonb_build_object('status', 'unknown'); end if;
   -- A failure reported before begin must never release a reservation for
   -- which another worker already received the single-use dispatch permit.
-  if prep.state <> case when p_outcome = 'failed-before-dispatch' then 'prepared' else 'started' end or not exists (
+  if prep.state <> (case when p_outcome = 'failed-before-dispatch' then 'prepared' else 'started' end) or not exists (
     select 1 from public.repo_grade_preparation_reservations r where r.id = p_id and r.user_id = p_user_id
   ) then return jsonb_build_object('status', 'stale'); end if;
   perform 1 from public.course_hub c where c.id = prep.course_id and c.user_id = p_user_id for share;

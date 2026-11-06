@@ -66,7 +66,8 @@ test("the preparation migration uses the guarded harness and shares the grade di
   assert.doesNotMatch(reservation ?? "", /course_id|token|references public\./);
   assert.match(migration, /count\(\*\) from public\.repo_grade_reservations[\s\S]*count\(\*\) from public\.repo_grade_preparation_reservations/);
   assert.match(migration, /t\.repo = p_repo and t\.source_ref = p_source_ref and t\.source_sha = p_source_sha/);
-  assert.match(migration, /prep\.state <> case when p_outcome = 'failed-before-dispatch' then 'prepared' else 'started' end/);
+  assert.match(migration, /or \(case when course\.course_kind in \('coding', 'applied'\) then course\.course_kind <> p_course_kind\s+else p_course_kind <> 'coding' end\)/);
+  assert.match(migration, /prep\.state <> \(case when p_outcome = 'failed-before-dispatch' then 'prepared' else 'started' end\)/);
   assert.match(migration, /'rubricFingerprint', public\.repo_grade_preparation_rubric_fingerprint\(p_receipt ->> 'rubric'\)/);
 });
 

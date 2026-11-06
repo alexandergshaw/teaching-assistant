@@ -33,7 +33,7 @@
 // actual post payload for the whole column - never a hand-rolled re-check of
 // the same conditions, so the reason text shown here and the column post
 // button's real postability can never disagree (AC5 item 28).
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import TextField from "@mui/material/TextField";
 // B4 (ux-audit-grading.md): the per-cell Post button used to be a plain
 // pageStyles.linkButton, styled identically to the harmless "Grade" and
@@ -186,6 +186,8 @@ export default function RepoGradeCellControl({
   folderPaused,
   onPostOne,
 }: RepoGradeCellControlProps) {
+  const gradeButtonRef = useRef<HTMLButtonElement>(null);
+  const gradeNoteId = useId();
   // docs/grading-results-file-viewer-acceptance-criteria.md: whether this
   // cell's "Browse files" panel is open. Local state only - the panel shows
   // ONLY edit.submittedFiles (what THIS grading call actually read), never a
@@ -373,13 +375,53 @@ export default function RepoGradeCellControl({
       ? edit.retainedResults.at(-1)?.source.submissionTruncated ? "partial" : "succeeded"
       : edit.generatedScore != null ? edit.submissionTruncated ? "partial" : "succeeded" : "not-started");
   const mayControl = stage === "paused" || stage === "queued";
-  const gradeLabel = stage === "queued" ? "Pause" : stage === "paused" ? "Resume"
-    : stage === "running" ? "Grading" : stage === "stopped" ? "Stopped" : "Start grade";
+  const gradeLabel = stage === "queued" ? "Pause grade" : stage === "paused" ? "Resume grade" : "Start grade";
   const gradeDisabled = stage === "running" || stage === "stopped" || (stage === "paused" && folderPaused);
+  const gradeNote = stage === "running" ? "Already started and will finish."
+    : stage === "paused" && folderPaused ? "The folder queue is paused." : null;
   const cellName = `${row.repo} / ${column.folder || "Repository root"}`;
 
   return (
     <div className={styles.cellControl}>
+      <div className={styles.manualGradeControls} role="group" aria-label={`Manual grading: ${cellName}`}>
+        <div className={styles.gradeActions}>
+          {(!hasSavedResult || status !== "not-started") && (
+            <span role={queueState === undefined ? "status" : undefined}>
+              {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
+              {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
+              <RepoGradeStatusChip status={status} active={stage === "running"} />
+            </span>
+          )}
+          <Button
+            ref={gradeButtonRef}
+            type="button"
+            size="small"
+            variant="outlined"
+            aria-label={`${gradeLabel}: ${cellName}`}
+            aria-disabled={gradeDisabled}
+            aria-describedby={gradeNote ? gradeNoteId : undefined}
+            sx={{ '&[aria-disabled="true"]': { color: "text.disabled", borderColor: "action.disabled" } }}
+            onClick={() => {
+              if (gradeDisabled) return;
+              if (stage === "queued") onControlGrade("pause");
+              else if (stage === "paused") onControlGrade("resume");
+              else onGrade();
+            }}
+          >
+            {gradeLabel}
+          </Button>
+          {mayControl && (
+            <Button type="button" size="small" variant="outlined" color="error" aria-label={`Stop queued grade: ${cellName}`}
+              onClick={() => {
+                gradeButtonRef.current?.focus();
+                onControlGrade("stop");
+              }}>
+              Stop queued grade
+            </Button>
+          )}
+        </div>
+        {gradeNote && <span id={gradeNoteId} className={styles.postReason}>{gradeNote}</span>}
+      </div>
       <div className={styles.cellInputs}>
         <div className={styles.scoreRow}>
           {/* Repo Grades UI consistency audit item #5 - adopts MUI TextField
@@ -414,42 +456,6 @@ export default function RepoGradeCellControl({
             Not merged to target branch
           </span>
         )}
-      </div>
-      <div className={styles.cellActions}>
-        {(!hasSavedResult || status !== "not-started") && (
-          <span role={queueState === undefined ? "status" : undefined}>
-            {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
-            {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
-            <RepoGradeStatusChip status={status} active={stage === "running"} />
-          </span>
-        )}
-        <Button
-          type="button"
-          size="small"
-          aria-label={`${gradeLabel}: ${cellName}`}
-          aria-disabled={gradeDisabled}
-          sx={{ '&[aria-disabled="true"]': { color: "text.disabled" } }}
-          onClick={() => {
-            if (gradeDisabled) return;
-            if (stage === "queued") onControlGrade("pause");
-            else if (stage === "paused") onControlGrade("resume");
-            else onGrade();
-          }}
-        >
-          {gradeLabel}
-        </Button>
-        {mayControl && (
-          <Button type="button" size="small" color="error" aria-label={`Stop grade: ${cellName}`}
-            onClick={(event) => {
-              const primary = event.currentTarget.previousElementSibling;
-              if (primary instanceof HTMLElement) primary.focus();
-              onControlGrade("stop");
-            }}>
-            Stop
-          </Button>
-        )}
-        {stage === "running" && <span className={styles.postReason}>This request will finish once started.</span>}
-        {stage === "paused" && folderPaused && <span className={styles.postReason}>Resume the folder to continue.</span>}
       </div>
       <CopyStatus copied={copiedKey !== null} failed={copyFailed} />
       <FeedbackDisclosure compact title="Details" label={`Grade details: ${cellName}`}>

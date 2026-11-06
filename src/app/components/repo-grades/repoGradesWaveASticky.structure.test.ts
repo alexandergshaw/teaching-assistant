@@ -263,13 +263,14 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
   it("AC-12: header-row polish - top-aligned th with visible grading and disclosed posting", () => {
     expect(ruleBlock(CSS, ".grid thead th")).toMatch(/vertical-align:\s*top/);
     expect(CSS).not.toContain(".columnHeaderFolder");
-    expect(ruleBlock(CSS, ".columnHeaderActions")).toMatch(/display:\s*flex/);
+    expect(ruleBlock(CSS, ".gradeActions")).toMatch(/display:\s*flex/);
     const grid = read("RepoGradesGrid.tsx");
-    const open = grid.indexOf("<div className={styles.columnHeaderActions}>");
+    const open = grid.indexOf("<div className={styles.gradeActions}>");
     expect(open).toBeGreaterThan(-1);
     const close = grid.indexOf("</div>", open);
     const wrapped = grid.slice(open, close);
     expect(wrapped).toContain("onGradeColumn(column.folder)");
+    expect(wrapped).toContain('onControlGradeColumn(column.folder, "stop")');
     expect(wrapped).not.toContain("onPostColumn(column, pointsPossible)");
     const options = sliceBetween(grid, '<FeedbackDisclosure compact title="Folder options"', "</FeedbackDisclosure>");
     expect(options).toContain("onPostColumn(column, pointsPossible)");

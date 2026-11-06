@@ -36,6 +36,7 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
+import { useId, useRef } from "react";
 import { Button, Checkbox, Link, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
 import { FeedbackDisclosure } from "./RepoDashboardFeedback";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
@@ -262,6 +263,8 @@ function ColumnHeaderControls({
   sort: RepoGradeSortState;
   onSortChange: (next: RepoGradeSortState) => void;
 }) {
+  const gradeButtonRef = useRef<HTMLButtonElement>(null);
+  const queueStatusId = useId();
   // Scoped exactly as index.tsx's post handler scopes it - see this file's
   // header comment on AC5 item 28. Counting every row while a selection
   // governs posting would claim "Post 30 grade(s)" and then post four.
@@ -315,9 +318,10 @@ function ColumnHeaderControls({
   const queue = gradingThisColumn ? bulkQueue : null;
   const canControl = !!queue?.waiting && queue.folderState !== "stopping";
   const command = queue?.folderState === "paused" ? "resume" : "pause";
-  const gradeAllLabel = canControl ? (command === "resume" ? "Resume folder" : "Pause folder")
-    : gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : gradeLabel;
-  const gradeDisabled = (bulkRunning && !canControl) || (bulkRunning && !gradingThisColumn) || (!bulkRunning && !gradeTargetCount);
+  const gradeAllLabel = canControl ? (command === "resume" ? "Resume folder queue" : "Pause folder queue")
+    : gradingThisColumn ? "Folder run in progress" : gradeLabel;
+  const gradeDisabled = bulkRunning ? !canControl : gradeTargetCount === 0;
+  const folderName = column.folder || "Repository root";
 
   // N4 items 11/13: this column's own sort - a click toggles ascending/
   // descending on THIS folder's score via toggleRepoGradeSort's "folder"
@@ -339,41 +343,46 @@ function ColumnHeaderControls({
         {label}
       </TableSortLabel>
       {column.folder && column.folder !== label && <span className={dashboardStyles.matrixMeta}>{column.folder}</span>}
-      {queue && (
-        <span className={styles.postReason}>
-          {queue.folderState === "paused" ? "Paused. " : queue.folderState === "stopping" ? "Stopping. " : ""}
-          {bulkProgress?.done ?? 0} of {bulkProgress?.total ?? 0} finished.
-          {queue.running > 0 && ` ${queue.running} in progress will finish.`}
-          {queue.waiting > 0 && ` ${queue.waiting} waiting.`}
-          {queue.stopped > 0 && ` ${queue.stopped} stopped.`}
-        </span>
-      )}
-      <div className={styles.columnHeaderActions}>
-        <Button
-          type="button"
-          variant="contained"
-          size="small"
-          aria-label={canControl ? `${gradeAllLabel}: ${column.folder}` : gradeAllLabel}
-          aria-disabled={gradeDisabled}
-          sx={{ '&[aria-disabled="true"]': { color: "text.disabled", bgcolor: "action.disabledBackground" } }}
-          onClick={() => {
-            if (gradeDisabled) return;
-            if (canControl) onControlGradeColumn(column.folder, command);
-            else onGradeColumn(column.folder);
-          }}
-        >
-          {gradeAllLabel}
-        </Button>
-        {canControl && (
-          <Button type="button" size="small" color="error" aria-label={`Stop folder: ${column.folder}`}
-            onClick={(event) => {
-              const primary = event.currentTarget.previousElementSibling;
-              if (primary instanceof HTMLElement) primary.focus();
-              onControlGradeColumn(column.folder, "stop");
-            }}>
-            Stop folder
+      <div className={styles.manualGradeControls} role="group" aria-label={`Manual folder grading: ${folderName}`}>
+        <span className={styles.manualGradeLabel}>Manual grading</span>
+        <div className={styles.gradeActions}>
+          <Button
+            ref={gradeButtonRef}
+            type="button"
+            variant="contained"
+            size="small"
+            aria-label={gradingThisColumn ? `${gradeAllLabel}: ${folderName}` : gradeAllLabel}
+            aria-describedby={gradingThisColumn ? queueStatusId : undefined}
+            aria-disabled={gradeDisabled}
+            sx={{ '&[aria-disabled="true"]': { color: "text.disabled", bgcolor: "action.disabledBackground" } }}
+            onClick={() => {
+              if (gradeDisabled) return;
+              if (canControl) onControlGradeColumn(column.folder, command);
+              else onGradeColumn(column.folder);
+            }}
+          >
+            {gradeAllLabel}
           </Button>
-        )}
+          {canControl && (
+            <Button type="button" size="small" variant="outlined" color="error" aria-label={`Stop queued grades: ${folderName}`}
+              onClick={() => {
+                gradeButtonRef.current?.focus();
+                onControlGradeColumn(column.folder, "stop");
+              }}>
+              Stop queued grades
+            </Button>
+          )}
+        </div>
+        <span id={queueStatusId} className={styles.postReason} role="status">
+          {gradingThisColumn && <>
+            {queue?.folderState === "paused" && "Folder queue paused. "}
+            {queue?.folderState === "stopping" && "Folder queue stopped. "}
+            {bulkProgress && `${bulkProgress.done} of ${bulkProgress.total} finished.`}
+            {!!queue?.waiting && ` ${queue.waiting} waiting.`}
+            {!!queue?.running && ` ${queue.running} in progress will finish.`}
+            {!!queue?.stopped && ` ${queue.stopped} stopped before starting.`}
+          </>}
+        </span>
       </div>
       <FeedbackDisclosure compact title="Folder options" label={`Folder options: ${column.folder}`}>
         <Select native size="small" fullWidth

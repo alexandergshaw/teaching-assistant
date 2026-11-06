@@ -28,7 +28,8 @@ describe("grading action seams are wired at the call sites that complete each op
     it(`${site.file} times ${site.action} as ${site.operation} (x${site.count})`, () => {
       const src = read(site.file);
       const wrapper = site.wrapper ?? "timeGradingAction";
-      expect(src).toMatch(new RegExp(`import [{] ${wrapper} [}] from "[./]+/(grading/)?gradingActionSeam"`));
+      const namedImports = src.matchAll(/import\s+\{([^}]+)\}\s+from\s+"[./]+\/(?:grading\/)?gradingActionSeam"/g);
+      expect([...namedImports].some((entry) => entry[1].split(",").some((name) => name.trim() === wrapper))).toBe(true);
       const opArg = site.wrapper ? "" : `"${site.operation}", `;
       const wrapped = src.split(`${wrapper}(${opArg}() => ${site.action}(`).length - 1;
       expect(wrapped).toBe(site.count);

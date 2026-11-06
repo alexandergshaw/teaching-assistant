@@ -13,7 +13,7 @@
 // something other than what was graded is the exact failure this whole
 // feature exists to avoid, so this panel renders ONLY `submittedFiles` - the
 // content the grader actually read - never a live re-fetch.
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import dynamic from "next/dynamic";
 import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "../../page.module.css";
@@ -44,6 +44,7 @@ export type SubmittedFilesPanelProps = {
    * for the full rationale. */
   submissionTruncated?: boolean;
   onClose: () => void;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
 };
 
 // Duplicated from GradingResults.tsx's handleDownloadFile rather than
@@ -75,12 +76,12 @@ function downloadFile(file: SubmittedFile) {
  * job, reached from the row's own Preview button - this panel is for
  * browsing everything at once, text content only.
  */
-export default function SubmittedFilesPanel({ student, files, submissionTruncated, onClose }: SubmittedFilesPanelProps) {
+export default function SubmittedFilesPanel({ student, files, submissionTruncated, onClose, restoreFocusRef }: SubmittedFilesPanelProps) {
   const [selectedName, setSelectedName] = useState(files[0]?.name ?? "");
   const selectedFile = files.find((f) => f.name === selectedName) ?? files[0];
 
   return (
-    <ModalShell label={`Files for ${student}`} onDismiss={onClose}>
+    <ModalShell label={`Files for ${student}`} onDismiss={onClose} restoreFocusRef={restoreFocusRef}>
       <div className={styles.previewHeader}>
         <div>
           <p className={styles.previewMeta}>Student: {student}</p>

@@ -126,7 +126,7 @@ describe("class repository results wiring", () => {
     expect(grid).toContain("hasSavedResult={!!repo.cells.get(folder)?.saved}");
     expect(cellControl).toContain('(!hasSavedResult || status !== "not-started")');
     expect(cellControl).toContain('placeholder={hasSavedResult ? "Browser score" : "Score"}');
-    expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?\}\s*<Button[\s\S]*?else onGrade\(\);/);
+    expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?\}\s*<RepoGradeActionsMenu[\s\S]*?<MenuItem key="grade"[\s\S]*?else onGrade\(\);/);
   });
 
   it("keeps the retained editor isolated with its course guard and separately keyed modal", () => {

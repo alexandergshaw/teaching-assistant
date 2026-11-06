@@ -408,8 +408,7 @@
 }
 
 /* AC5 items 25-26 - one column header's folder name, Canvas assignment
-   picker, and bulk Post/Re-post button, stacked so a header cell reads
-   top-to-bottom rather than needing extra horizontal width per column. */
+   picker, and bulk actions, stacked so a header cell reads top-to-bottom. */
 .columnHeader {
   display: flex;
   flex-direction: column;
@@ -420,22 +419,19 @@
   font-weight: 600;
 }
 
-.manualGradeControls {
+.actionHeading {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  padding-inline-end: 34px;
 }
 
-.manualGradeLabel {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.gradeActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
+.actionHeading .actionTrigger {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
 }
 
 /* N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
@@ -469,6 +465,7 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 170px;
+  width: 100%;
   white-space: normal;
 }
 
@@ -499,13 +496,6 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.cellActions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
 }
 
 /* The three feedback boxes (RowFeedbackBoxes.tsx, reused unchanged from

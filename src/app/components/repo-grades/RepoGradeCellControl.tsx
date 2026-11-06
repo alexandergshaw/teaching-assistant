@@ -20,7 +20,7 @@
 // asked to render one, and `folderPresent: true` below is always correct
 // for exactly that reason).
 //
-// Grading is gated behind the "Grade" button's onClick only - never called on
+// Grading is gated behind the Grade menu item's onClick only - never called on
 // render or from an effect (REGRESSION entries 98 and 101: per-item LLM
 // billing and network cost on render is the failure mode those entries exist
 // to prevent). repoGrades.wiring.test.ts's canary-paired callSitesGatedByClick
@@ -34,15 +34,10 @@
 // the same conditions, so the reason text shown here and the column post
 // button's real postability can never disagree (AC5 item 28).
 import { useId, useRef, useState } from "react";
+import { Collapse, ListItemText, MenuItem, Select } from "@mui/material";
 import TextField from "@mui/material/TextField";
-// B4 (ux-audit-grading.md): the per-cell Post button used to be a plain
-// pageStyles.linkButton, styled identically to the harmless "Grade" and
-// "Browse files" buttons beside it, even though it is the only one of the
-// three that writes to a live Canvas gradebook. Raised to the same MUI
-// weight RepoGradesGrid.tsx's own column-level Post button already uses for
-// this exact action.
-import { Button, Select } from "@mui/material";
-import { CopyStatus, FeedbackDisclosure, useFeedbackCopy } from "./RepoDashboardFeedback";
+import { CopyStatus, useFeedbackCopy } from "./RepoDashboardFeedback";
+import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
 import type { RepoGradeQueueCommand, RepoGradeQueueState } from "./repoGradeQueue";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
@@ -186,8 +181,9 @@ export default function RepoGradeCellControl({
   folderPaused,
   onPostOne,
 }: RepoGradeCellControlProps) {
-  const gradeButtonRef = useRef<HTMLButtonElement>(null);
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   const gradeNoteId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   // docs/grading-results-file-viewer-acceptance-criteria.md: whether this
   // cell's "Browse files" panel is open. Local state only - the panel shows
   // ONLY edit.submittedFiles (what THIS grading call actually read), never a
@@ -376,52 +372,95 @@ export default function RepoGradeCellControl({
       : edit.generatedScore != null ? edit.submissionTruncated ? "partial" : "succeeded" : "not-started");
   const mayControl = stage === "paused" || stage === "queued";
   const gradeLabel = stage === "queued" ? "Pause grade" : stage === "paused" ? "Resume grade" : "Start grade";
-  const gradeDisabled = stage === "running" || stage === "stopped" || (stage === "paused" && folderPaused);
+  const gradeDisabled = stage === "running" || stage === "stopped" || (stage === "paused" && !!folderPaused);
   const gradeNote = stage === "running" ? "Already started and will finish."
     : stage === "paused" && folderPaused ? "The folder queue is paused." : null;
   const cellName = `${row.repo} / ${column.folder || "Repository root"}`;
 
   return (
     <div className={styles.cellControl}>
-      <div className={styles.manualGradeControls} role="group" aria-label={`Manual grading: ${cellName}`}>
-        <div className={styles.gradeActions}>
-          {(!hasSavedResult || status !== "not-started") && (
-            <span role={queueState === undefined ? "status" : undefined}>
-              {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
-              {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
-              <RepoGradeStatusChip status={status} active={stage === "running"} />
-            </span>
-          )}
-          <Button
-            ref={gradeButtonRef}
-            type="button"
-            size="small"
-            variant="outlined"
-            aria-label={`${gradeLabel}: ${cellName}`}
-            aria-disabled={gradeDisabled}
-            aria-describedby={gradeNote ? gradeNoteId : undefined}
-            sx={{ '&[aria-disabled="true"]': { color: "text.disabled", borderColor: "action.disabled" } }}
-            onClick={() => {
-              if (gradeDisabled) return;
-              if (stage === "queued") onControlGrade("pause");
-              else if (stage === "paused") onControlGrade("resume");
-              else onGrade();
-            }}
-          >
-            {gradeLabel}
-          </Button>
-          {mayControl && (
-            <Button type="button" size="small" variant="outlined" color="error" aria-label={`Stop queued grade: ${cellName}`}
+      <div className={styles.actionHeading}>
+        {(!hasSavedResult || status !== "not-started") && (
+          <span role={queueState === undefined ? "status" : undefined}>
+            {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
+            {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
+            <RepoGradeStatusChip status={status} active={stage === "running"} />
+          </span>
+        )}
+        <RepoGradeActionsMenu label={`Grade actions: ${cellName}`} triggerRef={actionsTriggerRef}
+          onClose={() => setConfirmFirstPost(null)}>
+          {(close) => [
+            <MenuItem key="grade" disabled={gradeDisabled} aria-label={`${gradeLabel}: ${cellName}`}
+              aria-describedby={gradeNote ? gradeNoteId : undefined}
               onClick={() => {
-                gradeButtonRef.current?.focus();
-                onControlGrade("stop");
+                close();
+                if (stage === "queued") onControlGrade("pause");
+                else if (stage === "paused") onControlGrade("resume");
+                else onGrade();
               }}>
-              Stop queued grade
-            </Button>
-          )}
-        </div>
-        {gradeNote && <span id={gradeNoteId} className={styles.postReason}>{gradeNote}</span>}
+              {gradeLabel}
+            </MenuItem>,
+            mayControl && (
+              <MenuItem key="stop" sx={{ color: "error.main" }} aria-label={`Stop queued grade: ${cellName}`}
+                onClick={() => {
+                  close();
+                  onControlGrade("stop");
+                }}>
+                Stop queued grade
+              </MenuItem>
+            ),
+            onPostOne && (
+              <MenuItem key="post" disabled={postButtonDisabled}
+                onClick={() => {
+                  if (isFirstPost && !firstPostArmed) {
+                    setConfirmFirstPost(firstPostSignature);
+                    return;
+                  }
+                  close();
+                  onPostOne();
+                }}>
+                <ListItemText
+                  primary={isFirstPost && firstPostArmed ? "Confirm post" : postButtonLabel}
+                  secondary={isFirstPost && firstPostArmed ? "This writes to the live Canvas gradebook."
+                    : postability.postable ? postScoreDescription : postability.reason}
+                />
+              </MenuItem>
+            ),
+            <MenuItem key="details" onClick={() => {
+              setDetailsOpen(!detailsOpen);
+              close();
+            }}>
+              {detailsOpen ? "Hide grade details" : "Show grade details"}
+            </MenuItem>,
+            edit.submittedFiles.length > 0 && (
+              <MenuItem key="files" aria-label={`Browse the ${column.folder} files for ${row.repo}`}
+                onClick={() => close(() => setFilesOpen(true))}>
+                Browse files ({edit.submittedFiles.length})
+              </MenuItem>
+            ),
+            edit.submittedFiles.length > 0 && (
+              <MenuItem key="run" disabled={manualRunning} onClick={() => {
+                setDetailsOpen(true);
+                close();
+                void handleRunCode();
+              }}>
+                {manualRunning ? "Running..." : "Run"}
+              </MenuItem>
+            ),
+            displayedCodeRun && !displayedCodeRun.error && (
+              <MenuItem key="output" onClick={() => {
+                if (!codeRunOpen) setDetailsOpen(true);
+                setCodeRunOpen(!codeRunOpen);
+                close();
+              }}>
+                {codeRunOpen ? "Hide output" : "Show output"}
+              </MenuItem>
+            ),
+          ]}
+        </RepoGradeActionsMenu>
       </div>
+      {gradeNote && <span id={gradeNoteId} className={styles.postReason}>{gradeNote}</span>}
+      {manualRunning && <span className={styles.postReason} role="status">Running code…</span>}
       <div className={styles.cellInputs}>
         <div className={styles.scoreRow}>
           {/* Repo Grades UI consistency audit item #5 - adopts MUI TextField
@@ -458,7 +497,7 @@ export default function RepoGradeCellControl({
         )}
       </div>
       <CopyStatus copied={copiedKey !== null} failed={copyFailed} />
-      <FeedbackDisclosure compact title="Details" label={`Grade details: ${cellName}`}>
+      <Collapse in={detailsOpen} timeout={0} sx={{ width: "100%" }}>
           <RowFeedbackBoxes
             student={row.repo}
             edit={feedbackEdit}
@@ -537,7 +576,7 @@ export default function RepoGradeCellControl({
           <div className={styles.codeRunSummary}>
             <div className={styles.codeRunControls}>
               <label htmlFor={`repo-grade-run-entry-${row.repo}-${column.folder}`} className={pageStyles.previewMeta}>
-                Run
+                Entry point
               </label>
               <Select native size="small"
                 value={entryPointChoice}
@@ -554,16 +593,6 @@ export default function RepoGradeCellControl({
                   </option>
                 ))}
               </Select>
-              <Button
-                type="button"
-                size="small"
-                disabled={manualRunning}
-                onClick={() => {
-                  void handleRunCode();
-                }}
-              >
-                {manualRunning ? "Running..." : "Run"}
-              </Button>
             </div>
             {displayedCodeRun && (
               <>
@@ -586,11 +615,6 @@ export default function RepoGradeCellControl({
                           displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
                         }`}
                 </span>
-                {!displayedCodeRun.error && (
-                  <Button type="button" size="small" onClick={() => setCodeRunOpen((v) => !v)}>
-                    {codeRunOpen ? "Hide output" : "Show output"}
-                  </Button>
-                )}
                 {codeRunOpen && !displayedCodeRun.error && (
                   <div className={styles.codeRunOutput}>
                     <p className={pageStyles.previewMeta}>
@@ -625,56 +649,7 @@ export default function RepoGradeCellControl({
             )}
           </div>
         )}
-          <div className={styles.cellActions}>
-          {onPostOne && (
-            <Button
-              type="button"
-              variant="contained"
-              size="small"
-              disabled={postButtonDisabled}
-              onClick={() => {
-                // B4: the first post from a never-attempted cell requires an
-                // arming click before it can reach Canvas - a retry/re-post
-                // (isFirstPost false) stays the existing one-click action.
-                if (isFirstPost && !firstPostArmed) {
-                  setConfirmFirstPost(firstPostSignature);
-                  return;
-                }
-                setConfirmFirstPost(null);
-                onPostOne();
-              }}
-            >
-              {isFirstPost && firstPostArmed ? "Confirm post" : postButtonLabel}
-            </Button>
-          )}
-          {/* docs/grading-results-file-viewer-acceptance-criteria.md: only
-              rendered once this cell HAS files to show - a graded cell whose
-              digest genuinely carried none, or a cell never graded, has
-              nothing this button could open. Reuses SubmittedFilesPanel.tsx
-              unchanged (see this file's import comment) - the panel itself
-              already carries F3's truncation-honesty notices. */}
-          {edit.submittedFiles.length > 0 && (
-            <Button
-              type="button"
-              size="small"
-              aria-label={`Browse the ${column.folder} files for ${row.repo}`}
-              onClick={() => {
-                setFilesOpen(true);
-              }}
-            >
-              Browse files ({edit.submittedFiles.length})
-            </Button>
-          )}
-          {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
-          {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
-          {/* B4: matches the column-level Post button's own confirm wording
-              ("This writes to the live gradebook") for the same reason it is
-              armed there - the click below is about to write to Canvas. */}
-          {isFirstPost && firstPostArmed && (
-            <span className={styles.postReason}>This writes to the live Canvas gradebook.</span>
-          )}
-          </div>
-      </FeedbackDisclosure>
+      </Collapse>
       {expandedField && (
         <FeedbackExpandModal
           student={row.repo}
@@ -691,6 +666,7 @@ export default function RepoGradeCellControl({
           files={edit.submittedFiles}
           submissionTruncated={edit.submissionTruncated}
           onClose={() => setFilesOpen(false)}
+          restoreFocusRef={actionsTriggerRef}
         />
       )}
       {edit.gradeError && (

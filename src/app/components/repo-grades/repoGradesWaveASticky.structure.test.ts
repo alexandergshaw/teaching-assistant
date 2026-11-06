@@ -260,22 +260,19 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(W_INDEX).toMatch(/slotProps=\{\{ input: \{ className: styles\.headerInput, "aria-label": "Target branch \(merged to\)"/);
   });
 
-  it("AC-12: header-row polish - top-aligned th with visible grading and disclosed posting", () => {
+  it("AC-12: header actions share a top-right menu while progress stays visible", () => {
     expect(ruleBlock(CSS, ".grid thead th")).toMatch(/vertical-align:\s*top/);
     expect(CSS).not.toContain(".columnHeaderFolder");
-    expect(ruleBlock(CSS, ".gradeActions")).toMatch(/display:\s*flex/);
+    expect(ruleBlock(CSS, ".actionHeading .actionTrigger")).toMatch(/inset-inline-end:\s*0/);
     const grid = read("RepoGradesGrid.tsx");
-    const open = grid.indexOf("<div className={styles.gradeActions}>");
-    expect(open).toBeGreaterThan(-1);
-    const close = grid.indexOf("</div>", open);
-    const wrapped = grid.slice(open, close);
-    expect(wrapped).toContain("onGradeColumn(column.folder)");
-    expect(wrapped).toContain('onControlGradeColumn(column.folder, "stop")');
-    expect(wrapped).not.toContain("onPostColumn(column, pointsPossible)");
-    const options = sliceBetween(grid, '<FeedbackDisclosure compact title="Folder options"', "</FeedbackDisclosure>");
-    expect(options).toContain("onPostColumn(column, pointsPossible)");
+    const menu = sliceBetween(grid, "<RepoGradeActionsMenu", "</RepoGradeActionsMenu>");
+    expect(menu).toContain("onGradeColumn(column.folder)");
+    expect(menu).toContain('onControlGradeColumn(column.folder, "stop")');
+    expect(menu).toContain("onPostColumn(column, pointsPossible)");
+    expect(menu).toContain("secondary={gradingThisColumn ? null : rubricDescription}");
+    const options = sliceBetween(grid, "<Collapse in={folderOptionsOpen}", "</Collapse>");
     expect(options).toContain('"aria-label": `Canvas assignment for the ${column.folder} column`');
-    expect(grid).toContain("<span className={styles.postReason}>{rubricDescription}</span>");
+    expect(grid.indexOf('role="status"')).toBeGreaterThan(grid.indexOf("</RepoGradeActionsMenu>"));
     expect(grid).not.toContain("<span className={pageStyles.fieldHint}>Select</span>");
   });
 

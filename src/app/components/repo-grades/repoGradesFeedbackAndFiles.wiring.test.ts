@@ -306,6 +306,7 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "LinkUsernamesRosterSection.tsx",
   "RepoBindingControl.tsx",
   "RepoDashboardFeedback.tsx",
+  "RepoGradeActionsMenu.tsx",
   "RepoGradeCellControl.tsx",
   "RepoGradeCourseFilters.tsx",
   "RepoGradePreparationPolicySettings.tsx",

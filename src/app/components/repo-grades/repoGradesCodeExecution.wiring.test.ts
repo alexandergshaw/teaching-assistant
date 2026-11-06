@@ -376,7 +376,7 @@ describe("index.tsx threads runCodeScoring from uiState to the controls, the gra
 
 describe("RepoGradesGrid.tsx shows the SpeedGrader-skip disclosure next to the rubric description, the same pre-post-disclosure primitive", () => {
   it("renders the disclosure only when codeScoringDisclosure is true", () => {
-    expect(gridSource).toContain("{codeScoringDisclosure && (");
+    expect(gridSource).toContain('primary={busy ? "Posting…" : postLabel} secondary={codeScoringDisclosure');
   });
 
   it("the disclosure names both facts: it moves the total, and it will not appear as its own SpeedGrader line", () => {

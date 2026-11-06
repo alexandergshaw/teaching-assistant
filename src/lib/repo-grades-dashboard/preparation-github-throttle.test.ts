@@ -14,6 +14,16 @@ describe("preparation GitHub throttle classification", () => {
         .toEqual({ retryAtMs: 1_045_000, primary: false });
       expect(preparationGithubThrottle(403, new Headers())).toBeUndefined();
       expect(preparationGithubThrottle(403, new Headers({ "x-ratelimit-remaining": "10" }))).toBeUndefined();
+      expect(preparationGithubThrottle(403, new Headers({ "x-ratelimit-remaining": "10", "retry-after": "45" }))?.rateLimit)
+        .toEqual({ retryAtMs: 1_045_000, primary: false });
+      expect(preparationGithubThrottle(403, new Headers({ "retry-after": "Thu, 01 Jan 1970 00:20:00 GMT" }))?.rateLimit)
+        .toEqual({ retryAtMs: 1_200_000, primary: false });
+      expect(preparationGithubThrottle(403, new Headers({ "retry-after": "0" }))?.rateLimit)
+        .toEqual({ retryAtMs: null, primary: false });
+      expect(preparationGithubThrottle(403, new Headers({ "retry-after": "1.5" }))).toBeUndefined();
+      expect(preparationGithubThrottle(403, new Headers({ "retry-after": "invalid" }))).toBeUndefined();
+      expect(preparationGithubThrottle(403, new Headers({ "retry-after": "999999999999999999999999" }))).toBeUndefined();
+      expect(preparationGithubThrottle(404, new Headers({ "retry-after": "45" }))).toBeUndefined();
     } finally { clock.mockRestore(); }
   });
 });

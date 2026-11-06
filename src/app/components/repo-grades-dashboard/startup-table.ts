@@ -1,6 +1,6 @@
 import type { CourseStartupProgress, CourseStartupState, StartupRepositoryCoverage } from "./startup-progress";
 
-type StatusTone = "danger" | "warning" | "accent" | "success" | "neutral";
+export type StatusTone = "danger" | "warning" | "accent" | "success" | "neutral";
 
 export const STARTUP_STATUS: Record<CourseStartupState, { label: string; tone: StatusTone }> = {
   failed: { label: "Failed", tone: "danger" },

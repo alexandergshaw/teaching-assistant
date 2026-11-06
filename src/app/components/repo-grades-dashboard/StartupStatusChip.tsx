@@ -1,4 +1,5 @@
 import { Chip, SvgIcon } from "@mui/material";
+import type { StatusTone } from "./startup-table";
 
 const icons = {
   danger: "M9 9l6 6m0-6-6 6M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
@@ -6,14 +7,19 @@ const icons = {
   accent: "M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   success: "m8 12 3 3 5-6m5 3a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   neutral: "M8 12h8m5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  organization: "M3 21h18M5 21V4h10v17m0-10h4v10M9 8h2m-2 4h2m-2 4h2",
 } as const;
 
-export function StartupStatusChip({ label, tone }: { label: string; tone: keyof typeof icons }) {
+export function StartupStatusChip({ label, tone, icon = tone }: {
+  label: string;
+  tone: StatusTone;
+  icon?: keyof typeof icons;
+}) {
   return (
     <Chip size="small" variant="outlined" label={label}
       icon={
         <SvgIcon aria-hidden="true" focusable="false">
-          <path d={icons[tone]} fill="none" stroke="currentColor" strokeWidth={2}
+          <path d={icons[icon]} fill="none" stroke="currentColor" strokeWidth={2}
             strokeLinecap="round" strokeLinejoin="round" />
         </SvgIcon>
       }

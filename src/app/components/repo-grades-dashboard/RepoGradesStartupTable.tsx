@@ -66,7 +66,9 @@ export function RepoGradesStartupTable({ courses, headingId }: {
                     {orderStartupStatuses(course.states).map(({ state, count }) => {
                       const { label: statusLabel, tone } = STARTUP_STATUS[state];
                       const label = state === "succeeded" ? "Graded" : statusLabel;
-                      return <StartupStatusChip key={state} tone={tone} label={count ? `${label} (${count})` : label} />;
+                      return <StartupStatusChip key={state} tone={tone}
+                        icon={state === "not-configured" ? "organization" : undefined}
+                        label={count ? `${label} (${count})` : label} />;
                     })}
                   </Stack>
                 </TableCell>

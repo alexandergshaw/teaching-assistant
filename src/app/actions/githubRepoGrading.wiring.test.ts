@@ -35,8 +35,9 @@ function readSource(relativePath: string): string {
     .replace(/\/\/.*$/gm, "");
 }
 
-const GITHUB_REPOS = readSource("src/app/actions/github-repos.ts");
+const REPO_GRADE_EVALUATOR = readSource("src/lib/repo-grade-evaluator.ts");
 const GITHUB = readSource("src/app/actions/github.ts");
+const REPO_GRADE_ENTRY = readSource("src/lib/repo-grade-entry.ts");
 
 describe("F3: previewTruncated is read from the computed fact, never hardcoded false", () => {
   it("canary: the regressed literal is detected by a simple substring check", () => {
@@ -49,9 +50,10 @@ describe("F3: previewTruncated is read from the computed fact, never hardcoded f
     expect(fixed).not.toContain("previewTruncated: false");
   });
 
-  it("github-repos.ts's repoDigestToEmbeddedEntry no longer hardcodes previewTruncated: false", () => {
-    expect(GITHUB_REPOS).not.toContain("previewTruncated: false");
-    expect(GITHUB_REPOS).toContain("previewTruncated: file.truncated");
+  it("the single-repo evaluator imports a mapper that preserves file truncation", () => {
+    expect(REPO_GRADE_EVALUATOR).toContain('import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";');
+    expect(REPO_GRADE_ENTRY).not.toContain("previewTruncated: false");
+    expect(REPO_GRADE_ENTRY).toContain("previewTruncated: file.truncated");
   });
 
   it("github.ts's repoDigestToEmbeddedEntry no longer hardcodes previewTruncated: false", () => {
@@ -71,13 +73,13 @@ describe("F2: the LLM-graded repo path reuses repoDigestToEmbeddedEntry instead 
     expect(fixed).not.toMatch(/submittedFiles:\s*\[\]/);
   });
 
-  it("github-repos.ts's gradeRepoAction (per-cell, LLM path) no longer hardcodes submittedFiles: []", () => {
-    expect(GITHUB_REPOS).not.toMatch(/submittedFiles:\s*\[\]/);
+  it("the single-repo evaluator (per-cell, LLM path) no longer hardcodes submittedFiles: []", () => {
+    expect(REPO_GRADE_EVALUATOR).not.toMatch(/submittedFiles:\s*\[\]/);
     // `gradedDigest`, not `digest`, since the fix for the README-graded-as-
     // submission defect (github.digest.ts's excludeInstructionsFromDigest) -
     // grading must read the digest with the instructions file excluded, not
     // the raw ingest result.
-    expect(GITHUB_REPOS).toMatch(/const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry\(gradedDigest\);/);
+    expect(REPO_GRADE_EVALUATOR).toMatch(/const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry\(gradedDigest\);/);
   });
 
   it("github.ts's gradeReposAction (bulk, LLM path) no longer hardcodes submittedFiles: []", () => {

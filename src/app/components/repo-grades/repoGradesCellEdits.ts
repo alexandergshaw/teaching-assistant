@@ -53,7 +53,31 @@ import type { CodeRunResult } from "@/lib/code-runner";
 import { composeOverallCommentLocal, type FeedbackField } from "../grading-results/gradingResultsHelpers";
 import type { BranchMergeStatus } from "@/lib/repo-grade-merge-check";
 
+export type RepoGradeFeedbackDraft = Pick<RepoGradeCellEdit,
+  "score" | "comment" | "strengths" | "improvements" | "resubmitNotice">;
+
+export interface RetainedRepoGradeSource extends Readonly<RepoGradeFeedbackDraft> {
+  readonly generatedScore: string | null;
+  readonly generatedComment: string | null;
+  readonly rubricAreas: readonly Readonly<RubricAreaResult>[];
+  readonly submissionTruncated: boolean;
+  readonly mergeStatus: BranchMergeStatus | null;
+  readonly mergeFoundOnBranch: string | null;
+}
+
+export interface RetainedRepoGradeResult {
+  readonly id: string;
+  readonly source: RetainedRepoGradeSource;
+  readonly draft: RepoGradeFeedbackDraft | null;
+}
+
+export const LEGACY_REPO_GRADE_RESULT_ID = "legacy-conflict";
+
 export interface RepoGradeCellEdit {
+  /** Session revision used to protect instructor edits during grading. */
+  draftRevision?: number;
+  /** Completed evaluations held separately from the current postable draft. */
+  retainedResults?: readonly RetainedRepoGradeResult[];
   /** Raw, editable score text - typed directly, or seeded by a grading call. */
   score: string;
   /** The composed feedback text actually posted to Canvas
@@ -211,6 +235,87 @@ export function applyRepoGradeFeedbackFieldEdit(
 export type RepoGradeCellEditsByRepo = Readonly<Record<string, Readonly<Record<string, RepoGradeCellEdit>>>>;
 
 export const EMPTY_REPO_GRADE_CELL_EDITS: RepoGradeCellEditsByRepo = {};
+
+/** Explicit projection shared by live completions and browser storage. */
+export function projectRepoGradeFeedbackDraft(edit: Readonly<RepoGradeFeedbackDraft>): RepoGradeFeedbackDraft {
+  return {
+    score: edit.score,
+    comment: edit.comment,
+    strengths: edit.strengths,
+    improvements: edit.improvements,
+    resubmitNotice: edit.resubmitNotice,
+  };
+}
+
+export function snapshotRetainedRepoGradeSource(edit: RetainedRepoGradeSource): RetainedRepoGradeSource {
+  return Object.freeze({
+    ...projectRepoGradeFeedbackDraft(edit),
+    generatedScore: edit.generatedScore,
+    generatedComment: edit.generatedComment,
+    rubricAreas: Object.freeze(edit.rubricAreas.map(({ area, score, comment }) => Object.freeze({ area, score, comment }))),
+    submissionTruncated: edit.submissionTruncated,
+    mergeStatus: edit.mergeStatus,
+    mergeFoundOnBranch: edit.mergeFoundOnBranch,
+  });
+}
+
+export function applyRetainedRepoGradeDraftEdit(
+  edits: RepoGradeCellEditsByRepo,
+  repo: string,
+  folder: string,
+  expected: Pick<RetainedRepoGradeResult, "id" | "source">,
+  field: keyof RepoGradeFeedbackDraft,
+  value: string,
+): RepoGradeCellEditsByRepo {
+  const retainedResults = edits[repo]?.[folder]?.retainedResults;
+  if (!retainedResults) return edits;
+  const result = retainedResults.find(({ id }) => id === expected.id);
+  if (!result || result.source !== expected.source) return edits;
+  const current = result.draft ?? result.source;
+  if (current[field] === value) return edits;
+
+  const draft = { ...projectRepoGradeFeedbackDraft(current), [field]: value };
+  if (field !== "score" && field !== "comment") {
+    draft.comment = composeOverallCommentLocal(draft.strengths, draft.improvements, draft.resubmitNotice);
+  }
+  return setRepoGradeCellEdit(edits, repo, folder, {
+    retainedResults: retainedResults.map((item) => item === result ? { ...item, draft } : item),
+  });
+}
+
+export type RepoGradeCompletionPatch = Partial<Omit<RepoGradeCellEdit, "retainedResults">>;
+
+export function applyRepoGradeCompletion(
+  edits: RepoGradeCellEditsByRepo,
+  repo: string,
+  folder: string,
+  startingRevision: number,
+  patch: RepoGradeCompletionPatch,
+): RepoGradeCellEditsByRepo {
+  const current = getRepoGradeCellEdit(edits, repo, folder);
+  const conflicts = patch.generatedScore != null && (
+    (current.draftRevision ?? 0) !== startingRevision || startingRevision > 0 ||
+    (!!patch.submissionTruncated && current.generatedScore !== null) ||
+    current.score !== (current.generatedScore ?? "") ||
+    current.comment !== (current.generatedComment ?? "")
+  );
+  if (!conflicts) return setRepoGradeCellEdit(edits, repo, folder, patch);
+
+  const retainedResults = current.retainedResults ?? [];
+  const usedIds = new Set(retainedResults.map(({ id }) => id));
+  let index = 1;
+  while (usedIds.has(`local:${index}`)) index += 1;
+  const retained: RetainedRepoGradeResult = {
+    id: `local:${index}`,
+    source: snapshotRetainedRepoGradeSource({ ...defaultRepoGradeCellEdit(), ...patch }),
+    draft: null,
+  };
+  return setRepoGradeCellEdit(edits, repo, folder, {
+    grading: false,
+    gradeError: null,
+    retainedResults: [...retainedResults, retained],
+  });
+}
 
 /** Reads one cell's edit state, defaulting to `defaultRepoGradeCellEdit()`
  * when this exact (repo, folder) pair has never been written. Never throws -

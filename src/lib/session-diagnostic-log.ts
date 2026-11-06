@@ -100,7 +100,7 @@ const COVERAGE_BY_SURFACE: Readonly<Record<SessionDiagnosticSurface, string>> = 
   diagnostics:
     "Listing courses, listing a course's Canvas import jobs, loading those jobs' progress objects, cancelling a migration job, and the owner's LMS connectivity tests.",
   grading:
-    "Grading: the main grading tab's whole-run grade (zip and Canvas), chat grading (run header, submission preparation, each submission graded, Canvas assignment details), repo grading (one repository or a cohort, and rubric generation from a repo), deriving an assignment checklist, posting grades back to Canvas and posting drafted grades - each operation's outcome and elapsed time as seen by the browser.",
+    "Grading: the main grading tab's whole-run grade (zip and Canvas), chat grading (run header, submission preparation, each submission graded, Canvas assignment details), repo grading (one repository or a cohort, and rubric generation from a repo), deriving an assignment checklist, posting grades back to Canvas and posting drafted grades - each operation's outcome and elapsed time as seen by the browser. Repository evaluation history reads, automatic repository grading profile reads and saves, manual folder-run outcomes, and repository feedback clipboard writes, browser draft saves and discards, and browser or durable restores record duration and outcome with bounded counts or fixed categories. Startup repository checks and explicit rubric preparation retries record duration and bounded outcomes. No grading profile contents, feedback, scores or repository, folder or account identifiers are logged.",
   messaging:
     "Live student messaging: each finished or stopped send batch is recorded as three counts only (messages accepted by Canvas, refused by Canvas, and with unconfirmed delivery), with enumerated outcome codes and no student names, subjects or message text. A page closed mid-batch cannot record; the send ledger is the durable record.",
 };
@@ -209,7 +209,9 @@ export function sanitizeSessionDiagnosticDetail(raw: unknown): SessionDiagnostic
       out[key] = rounded;
     } else if (typeof value === "boolean") {
       out[key] = value;
-    } else if (typeof value === "string" && DETAIL_STRING.test(value)) {
+    } else if (typeof value === "string" && (
+      DETAIL_STRING.test(value) || (key === "copyTarget" && value === "resubmitNotice")
+    )) {
       out[key] = value;
     } else {
       continue;

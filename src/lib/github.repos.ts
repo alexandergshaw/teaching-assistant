@@ -2,7 +2,8 @@
 
 import { checkGithubReadDeadline, readBoundedResponse, GithubReadLimitError, type GithubBoundedReadContext } from "./github-bounded-read";
 import { GithubHttpError } from "./github-http-error";
-import { validateGithubOwnerRepo } from "./github-ref-name";
+import { encodeRefSegment, validateGithubOwnerRepo } from "./github-ref-name";
+import type { RepoTreeResult } from "./github.files";
 
 const API = "https://api.github.com";
 
@@ -27,19 +28,34 @@ function ghError(status: number, detail: string): string {
   return `GitHub request failed (HTTP ${status})${message ? `: ${message}` : ""}.`;
 }
 
-async function ghFetch(path: string, init?: RequestInit, bounded?: GithubBoundedReadContext, responseCap = 1_000_000): Promise<Response> {
+export type GithubRepoRequestOptions = Pick<RequestInit, "signal"> & {
+  beforeRequest?: () => void;
+  observeResponse?: (response: Response) => void;
+};
+
+type GithubRequestInit = RequestInit & GithubRepoRequestOptions;
+
+export function githubRestHeaders() {
+  return {
+    Authorization: `Bearer ${githubToken()}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+async function ghFetch(path: string, { beforeRequest, observeResponse, ...init }: GithubRequestInit = {}, bounded?: GithubBoundedReadContext, responseCap = 1_000_000): Promise<Response> {
   if (bounded) { checkGithubReadDeadline(bounded); if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid GitHub API path"); }
+  beforeRequest?.();
   const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {
     ...init,
     ...(bounded ? { redirect: "manual" as const, signal: bounded.controller.signal } : {}),
     headers: {
-      Authorization: `Bearer ${githubToken()}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...init?.headers,
+      ...githubRestHeaders(),
+      ...init.headers,
     },
   });
   if (bounded && res.status >= 300 && res.status < 400) { await res.body?.cancel(); throw new GithubReadLimitError("redirect"); }
+  observeResponse?.(res);
   if (!res.ok) {
     // GithubHttpError, not Error: the MESSAGE is unchanged (still whatever
     // ghError produces), so every existing caller that reads err.message or
@@ -55,7 +71,7 @@ async function ghFetch(path: string, init?: RequestInit, bounded?: GithubBounded
   return res;
 }
 
-const ghJson = async <T>(path: string, init?: RequestInit, bounded?: GithubBoundedReadContext): Promise<T> => {
+const ghJson = async <T>(path: string, init?: GithubRequestInit, bounded?: GithubBoundedReadContext): Promise<T> => {
   const res = await ghFetch(path, init, bounded);
   return bounded ? JSON.parse(await readBoundedResponse(res, bounded, 1_000_000)) as T : res.json() as Promise<T>;
 };
@@ -150,18 +166,81 @@ export async function listOwnedOrgs(): Promise<string[]> {
 
 /** Repos in an org (optionally filtered to names starting with `prefix`). */
 export async function listOrgRepos(org: string, prefix?: string): Promise<GithubRepo[]> {
+  return (await listOrgRepoPageWindow(org, prefix, false)).repos;
+}
+
+/** Report when the listing reaches the request cap, even if filtering hid it. */
+export async function listOrgReposWithCoverage(org: string, prefix?: string, options?: GithubRepoRequestOptions) {
+  if (!validateGithubOwnerRepo(org, "repo")) throw new Error("Invalid GitHub organization.");
+  return listOrgRepoPageWindow(org, prefix, true, options);
+}
+
+async function listOrgRepoPageWindow(
+  org: string, prefix: string | undefined, strict: boolean, options?: GithubRepoRequestOptions,
+) {
   const needle = prefix?.trim().toLowerCase();
   const out: GithubRepo[] = [];
+  const seen = new Set<string>();
+  let malformed = false;
   for (let page = 1; page <= 10; page += 1) {
-    const repos = await ghJson<RawRepo[]>(`/orgs/${org}/repos?per_page=100&sort=full_name&page=${page}`);
+    const repos = await ghJson<RawRepo[]>(`/orgs/${org}/repos?per_page=100&sort=full_name&page=${page}`,
+      strict ? { ...options, cache: "no-store" } : undefined);
     for (const r of repos) {
-      if (!r.name || !r.owner?.login) continue;
+      if (!r?.name || !r.owner?.login) {
+        malformed = true;
+        continue;
+      }
       if (needle && !r.name.toLowerCase().startsWith(needle)) continue;
-      out.push(mapRepo(r));
+      const repo = mapRepo(r);
+      if (strict) {
+        repo.defaultBranch = r.default_branch ?? "";
+        const key = repo.fullName.toLowerCase();
+        if (seen.has(key)) {
+          malformed = true;
+          continue;
+        }
+        seen.add(key);
+      }
+      out.push(repo);
     }
-    if (repos.length < 100) break;
+    if (repos.length < 100) return { repos: out, complete: !malformed };
   }
-  return out;
+  return { repos: out, complete: false };
+}
+
+export function isGithubCommitSha(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{40}$/i.test(value);
+}
+
+/** Capture a mutable source ref once, before making any grading input reads. */
+export async function resolveRepoSourceCommit(
+  owner: string, repo: string, sourceRef: string, options?: GithubRepoRequestOptions,
+): Promise<string> {
+  const commit = await ghJson<{ sha?: string }>(
+    `/repos/${owner}/${repo}/commits/${encodeRefSegment(sourceRef)}`, { ...options, cache: "no-store" });
+  if (!isGithubCommitSha(commit.sha)) throw new Error("GitHub did not return a source commit.");
+  return commit.sha;
+}
+
+/** Read the Git tree object named by this exact commit's Git object. */
+export async function getRepoCommitTree(
+  owner: string, repo: string, sourceCommit: string, options?: GithubRepoRequestOptions,
+): Promise<RepoTreeResult> {
+  if (!isGithubCommitSha(sourceCommit)) throw new Error("A full GitHub commit SHA is required.");
+  const base = `/repos/${owner}/${repo}/git`;
+  const sha = sourceCommit.toLowerCase();
+  const commit = await ghJson<{ sha?: string; tree?: { sha?: string } }>(`${base}/commits/${sha}`, options);
+  const treeSha = commit.tree?.sha;
+  if (commit.sha !== sha || !isGithubCommitSha(treeSha)) throw new Error("GitHub did not return the pinned commit tree.");
+
+  const data = await ghJson<{ sha?: string; tree?: RepoTreeResult["entries"]; truncated?: boolean }>(
+    `${base}/trees/${treeSha}?recursive=1`, options);
+  if (data.sha !== treeSha || !Array.isArray(data.tree) || typeof data.truncated !== "boolean") {
+    throw new Error("GitHub did not return a complete tree response.");
+  }
+  const entries = data.tree.filter((entry) => typeof entry?.path === "string" && entry.path !== "" &&
+    (entry.type === "tree" || (entry.type === "blob" && Number.isSafeInteger(entry.size) && entry.size >= 0)));
+  return { entries, truncated: data.truncated || entries.length !== data.tree.length };
 }
 
 /** A repo's branch names (default branch first) plus which one is the default. */

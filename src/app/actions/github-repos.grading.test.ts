@@ -23,7 +23,9 @@
 // pure and already has its own dedicated test file) so this test proves the
 // two modules are actually wired together correctly, not just each in
 // isolation.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as admissionMode from "@/lib/repo-grades-dashboard/admission-mode";
+import { claimRepoGrade } from "@/lib/repo-grades-dashboard/ledger";
 
 const ingestRepo = vi.fn();
 const generateRubric = vi.fn();
@@ -45,6 +47,7 @@ const listBranches = vi.fn();
 const getRepoTreeWithMeta = vi.fn();
 
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
+vi.mock("@/lib/repo-grades-dashboard/ledger", () => ({ claimRepoGrade: vi.fn(), settleRepoGrade: vi.fn() }));
 
 vi.mock("@/lib/github", async (importOriginal) => {
   // Partial mock: everything gradeRepoAction actually calls that hits the
@@ -95,6 +98,18 @@ vi.mock("@/lib/research/rubric-bank", () => ({
 }));
 
 const { gradeRepoAction } = await import("./github-repos");
+
+afterEach(() => vi.restoreAllMocks());
+
+it("keeps a manual repository grade outside the evaluator when the shared reservation is busy", async () => {
+  vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
+  vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "busy" });
+  await expect(gradeRepoAction("org/student", "Instructions", "", "gemini", undefined, "module_01"))
+    .resolves.toEqual({ error: "Repository grading is already in progress or awaiting reconciliation." });
+  expect(claimRepoGrade).toHaveBeenCalledExactlyOnceWith({ mode: "manual", repo: "org/student" });
+  expect(ingestRepo).not.toHaveBeenCalled();
+  expect(gradeEntries).not.toHaveBeenCalled();
+});
 
 function file(path: string, content: string) {
   return { path, content, truncated: false };
@@ -282,5 +297,25 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
     expectGradedZero(result);
     expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
     expect(buildEmbeddedRubric).not.toHaveBeenCalled();
+  });
+});
+
+describe("gradeRepoAction - compiler auto-run control", () => {
+  it("threads the Repo Grades checkbox value into LLM grading options", async () => {
+    ingestRepo.mockResolvedValue(digestOf([file("module_02/main.py", "print(1)")]));
+
+    await gradeRepoAction("org/student-repo", "Do the assignment.", "", "gemini", undefined, "module_02", false, false);
+
+    expect(gradeEntries).toHaveBeenCalledOnce();
+    expect((gradeEntries.mock.calls[0] as unknown[])[5]).toMatchObject({ autoRunCode: false });
+  });
+
+  it("enables compiler execution in LLM grading when the checkbox is on", async () => {
+    ingestRepo.mockResolvedValue(digestOf([file("module_02/main.py", "print(1)")]));
+
+    await gradeRepoAction("org/student-repo", "Do the assignment.", "", "gemini", undefined, "module_02", false, true);
+
+    expect(gradeEntries).toHaveBeenCalledOnce();
+    expect((gradeEntries.mock.calls[0] as unknown[])[5]).toMatchObject({ autoRunCode: true });
   });
 });

@@ -8,6 +8,12 @@ import {
   getGeminiThinkingLevel,
   getGeminiMinOutputTokens,
 } from "./gemini";
+import {
+  collectInteractionsText,
+  findInteractionsFinishReason,
+  findInteractionsImage,
+  type InteractionsResponseBody,
+} from "./llm-interactions-response";
 import { redactSensitiveText } from "./lms-generation/generation-diag";
 
 /**
@@ -62,6 +68,30 @@ export interface LlmRequest {
   webSearch?: boolean;
 }
 
+/** Server-owned budget for model work that cannot safely replay a dispatch. */
+export interface LlmExecutionPolicy {
+  readonly deadlineMs: number;
+  readonly signal?: AbortSignal;
+  readonly beforeDispatch?: (signal: AbortSignal) => Promise<void>;
+  readonly pinnedGemini?: Readonly<{
+    model: string;
+    onDispatch: () => void;
+    /** Config already normalized when the caller captured the request identity. */
+    generationConfig?: Readonly<Record<string, unknown>>;
+  }>;
+  /** Require a single text candidate or an explicit prompt block. */
+  readonly strictTextResponseMaxBytes?: number;
+  /** Require a single text candidate with a known finish reason or a confirmed prompt block. */
+  readonly requireTerminalTextResponse?: boolean;
+}
+
+export class LlmOutcomeUnknownError extends Error {
+  constructor() {
+    super("The model request may have completed, but its outcome is unknown.");
+    this.name = "LlmOutcomeUnknownError";
+  }
+}
+
 /**
  * True for Gemini 3.x model names (gemini-3, gemini-3-flash,
  * gemini-3.1-flash-lite, gemini-3.1-pro-preview, ...), false for gemini-2.5.x,
@@ -77,6 +107,14 @@ export interface GeminiTuning {
   allowLowTemperature: boolean;
   thinkingLevel?: string;
   minOutputTokens: number;
+}
+
+export function getGeminiGenerationTuning(): GeminiTuning {
+  return {
+    allowLowTemperature: getGeminiAllowLowTemperature(),
+    thinkingLevel: getGeminiThinkingLevel(),
+    minOutputTokens: getGeminiMinOutputTokens(),
+  };
 }
 
 /**
@@ -205,9 +243,11 @@ export interface LlmUsage {
  * actually succeeded took," not "how long this invocation took including
  * throttling."
  */
+type LlmFailure = { ok: false; status: number; body: string; outcome?: "unknown" };
+
 export type LlmResult =
   | { ok: true; text: string; sources?: Source[]; finishReason?: string; usage?: LlmUsage; elapsedMs?: number }
-  | { ok: false; status: number; body: string };
+  | LlmFailure;
 
 /**
  * Result of an image-generation call (generateGeminiImage). Three shapes,
@@ -384,8 +424,13 @@ export type BoundedLlmCallOptions = { deadlineMs: number; signal?: AbortSignal; 
 export async function callLlm(
   req: LlmRequest,
   provider: LlmProvider = DEFAULT_PROVIDER,
-  bounded?: BoundedLlmCallOptions
+  policy?: BoundedLlmCallOptions | LlmExecutionPolicy
 ): Promise<LlmResult> {
+  const bounded = policy && "responseByteLimit" in policy ? policy : undefined;
+  const execution = policy && !("responseByteLimit" in policy) ? policy : undefined;
+  if (execution?.pinnedGemini && provider !== "gemini") {
+    return { ok: false, status: 0, body: "Configured model provider changed before dispatch." };
+  }
   // Generic text generation always uses Gemini. The Course Engine ("other")
   // provider does not implement this generic interface — it is wired per-feature
   // at the action level (schedule / lecture / materials). Any call that reaches
@@ -393,7 +438,7 @@ export async function callLlm(
   // Gemini rather than failing.
   void provider;
   if (bounded && (provider !== "gemini" || req.webSearch)) return { ok: false, status: 0, body: "Unsupported evidence provider or tool selection." };
-  return callGemini(req, bounded);
+  return callGemini(req, bounded, execution);
 }
 
 // Transport hardening. Features such as lecture-plan generation fan out many
@@ -450,6 +495,142 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
   return exp + Math.floor(Math.random() * 400);
 }
 
+type GenerateContentResult = { ok: true; data: unknown } | LlmFailure;
+
+// These response codes explicitly reject the request. A gateway timeout or
+// server error can arrive after the model accepted it.
+const REFUSED_MODEL_STATUS = new Set([400, 401, 403, 404, 413, 415, 422, 429]);
+const MAX_ABORT_DELAY_MS = 2_147_483_647;
+
+function modelOutcomeUnknown(status: number): LlmFailure {
+  return { ok: false, status, body: "Model outcome unknown.", outcome: "unknown" };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasGeminiResponseEnvelope(data: unknown): boolean {
+  if (!isJsonObject(data)) return false;
+  const { candidates, promptFeedback } = data;
+  if (candidates === undefined || (Array.isArray(candidates) && candidates.length === 0)) {
+    return isJsonObject(promptFeedback) && typeof promptFeedback.blockReason === "string";
+  }
+  if (!Array.isArray(candidates) || !isJsonObject(candidates[0])) return false;
+
+  const { content, finishReason } = candidates[0];
+  if (content === undefined) return typeof finishReason === "string";
+  if (!isJsonObject(content)) return false;
+  const { parts } = content;
+  if (parts === undefined) return typeof finishReason === "string";
+  return Array.isArray(parts) && parts.every((part: unknown) =>
+    isJsonObject(part) && (part.text === undefined || typeof part.text === "string")
+  );
+}
+
+function hasStrictGeminiTextEnvelope(data: unknown): boolean {
+  if (!hasGeminiResponseEnvelope(data) || !isJsonObject(data) || Object.hasOwn(data, "error")) return false;
+  const { candidates, promptFeedback } = data;
+  if (promptFeedback !== undefined && !isJsonObject(promptFeedback)) return false;
+  if (!Array.isArray(candidates) || candidates.length === 0) return true;
+  if (candidates.length !== 1 || (isJsonObject(promptFeedback) && Object.hasOwn(promptFeedback, "blockReason"))) return false;
+  const { content } = candidates[0];
+  return content?.parts === undefined || content.parts.every((part: Record<string, unknown>) =>
+    typeof part.text === "string" && (part.thought === undefined || part.thought === false)
+    && (part.thoughtSignature === undefined || typeof part.thoughtSignature === "string")
+    && Object.keys(part).every((key) => key === "text" || key === "thought" || key === "thoughtSignature")
+  );
+}
+
+const GEMINI_PROMPT_BLOCK_REASONS = new Set(["SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY"]);
+const GEMINI_TEXT_FINISH_REASONS = new Set([
+  "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "LANGUAGE", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+  "MALFORMED_FUNCTION_CALL", "IMAGE_SAFETY",
+]);
+
+function hasTerminalGeminiTextEnvelope(data: unknown): boolean {
+  if (!hasStrictGeminiTextEnvelope(data) || !isJsonObject(data)) return false;
+  const { candidates, promptFeedback } = data;
+  if (Array.isArray(candidates) && candidates.length === 1) {
+    return GEMINI_TEXT_FINISH_REASONS.has(candidates[0].finishReason);
+  }
+  return isJsonObject(promptFeedback) && typeof promptFeedback.blockReason === "string"
+    && GEMINI_PROMPT_BLOCK_REASONS.has(promptFeedback.blockReason);
+}
+
+async function readBoundedGeminiJson(response: Response, limit: number, signal: AbortSignal): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const bytes = new Uint8Array(limit);
+  let length = 0;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length)));
+      if (value.byteLength > limit - length) throw new Error("Gemini response exceeds its byte limit.");
+      bytes.set(value, length);
+      length += value.byteLength;
+    }
+  } catch (error) {
+    cancel();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+}
+
+async function postGenerateContentOnce(
+  url: string,
+  request: RequestInit,
+  execution: LlmExecutionPolicy,
+): Promise<GenerateContentResult> {
+  const remaining = execution.deadlineMs - Date.now();
+  if (
+    !Number.isSafeInteger(remaining) ||
+    remaining <= 0 ||
+    remaining > MAX_ABORT_DELAY_MS ||
+    execution.signal?.aborted
+  ) {
+    return { ok: false, status: 0, body: "Model request stopped before dispatch." };
+  }
+
+  const deadline = AbortSignal.timeout(remaining);
+  const signal = execution.signal ? AbortSignal.any([deadline, execution.signal]) : deadline;
+  if (execution.beforeDispatch) {
+    await execution.beforeDispatch(signal);
+    if (signal.aborted) return { ok: false, status: 0, body: "Model request stopped before dispatch." };
+  }
+  execution.pinnedGemini?.onDispatch();
+  try {
+    const response = await fetch(url, { ...request, signal, redirect: "error" });
+    if (REFUSED_MODEL_STATUS.has(response.status)) {
+      // The status is sufficient. Discard the provider body and its contents.
+      void response.body?.cancel().catch(() => undefined);
+      return { ok: false, status: response.status, body: "Model request refused." };
+    }
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      return modelOutcomeUnknown(response.status);
+    }
+    const limit = execution.strictTextResponseMaxBytes;
+    const data: unknown = limit === undefined ? await response.json() : await readBoundedGeminiJson(response, limit, signal);
+    const validEnvelope = execution.requireTerminalTextResponse
+      ? hasTerminalGeminiTextEnvelope(data)
+      : limit === undefined ? hasGeminiResponseEnvelope(data) : hasStrictGeminiTextEnvelope(data);
+    return validEnvelope
+      ? { ok: true, data }
+      : modelOutcomeUnknown(response.status);
+  } catch {
+    // A local abort or lost response cannot establish provider termination.
+    return modelOutcomeUnknown(0);
+  }
+}
+
 /**
  * Shared low-level transport for a Gemini `:generateContent` call: builds the
  * URL, retries rate-limit/5xx/network failures with backoff (see the block
@@ -465,10 +646,17 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
 async function postGenerateContent(
   model: string,
   body: string,
-  bounded?: BoundedLlmCallOptions
-): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
+  bounded?: BoundedLlmCallOptions,
+  execution?: LlmExecutionPolicy,
+): Promise<GenerateContentResult> {
   const apiKey = getGeminiApiKey();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  };
+  if (execution) return postGenerateContentOnce(url, request, execution);
 
   if (bounded) {
     const context = createGithubBoundedReadContext(bounded.deadlineMs, bounded.responseByteLimit);
@@ -496,11 +684,7 @@ async function postGenerateContent(
 
     let response: Response;
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
+      response = await fetch(url, request);
     } catch (err) {
       if (isAbortError(err)) {
         // Our own deadline fired (or a caller cancelled this call). This is
@@ -533,7 +717,7 @@ async function postGenerateContent(
   return lastResult;
 }
 
-async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions): Promise<LlmResult> {
+async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions, execution?: LlmExecutionPolicy): Promise<LlmResult> {
   // Y6 (docs/reply-resource-search-yield-acceptance-criteria.md): a
   // webSearch request may use a different model - the lite default is the
   // most tool-shy tier for actually deciding to run Google Search (see
@@ -544,6 +728,11 @@ async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions): Pro
   // getGeminiSearchModel() falls back to getGeminiModel(), so every request
   // is byte-identical to before this existed.
   const model = req.webSearch ? getGeminiSearchModel() : getGeminiModel();
+  if (execution?.pinnedGemini && (
+    model !== execution.pinnedGemini.model || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(model)
+  )) {
+    return { ok: false, status: 0, body: "Configured model changed or is invalid before dispatch." };
+  }
 
   // Gemini 3 generation config normalization. Two vendor facts drive this:
   // (1) Google's Gemini 3 guide recommends leaving temperature at its 1.0
@@ -557,13 +746,16 @@ async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions): Pro
   // once, rather than at each of the ~78 call sites that set generationConfig
   // — see normalizeGenerationConfig in this file and the getGemini* tuning
   // getters in gemini.ts. Non-Gemini-3 models pass through unchanged.
-  const generationConfig = normalizeGenerationConfig(req.generationConfig, model, {
-    allowLowTemperature: getGeminiAllowLowTemperature(),
-    thinkingLevel: getGeminiThinkingLevel(),
-    minOutputTokens: getGeminiMinOutputTokens(),
-  }) ?? (bounded ? {} : undefined);
-
-  if (bounded && generationConfig) generationConfig.maxOutputTokens = Math.min(typeof generationConfig.maxOutputTokens === "number" ? generationConfig.maxOutputTokens : bounded.hardOutputTokenCap, bounded.hardOutputTokenCap, req.generationConfig?.maxOutputTokens ?? bounded.hardOutputTokenCap);
+  const generationConfig = execution?.pinnedGemini?.generationConfig
+    ?? normalizeGenerationConfig(req.generationConfig, model, getGeminiGenerationTuning())
+    ?? (bounded ? {} : undefined);
+  if (bounded && generationConfig) {
+    generationConfig.maxOutputTokens = Math.min(
+      typeof generationConfig.maxOutputTokens === "number" ? generationConfig.maxOutputTokens : bounded.hardOutputTokenCap,
+      bounded.hardOutputTokenCap,
+      req.generationConfig?.maxOutputTokens ?? bounded.hardOutputTokenCap,
+    );
+  }
 
   const body = JSON.stringify({
     contents: req.contents,
@@ -582,7 +774,7 @@ async function callGemini(req: LlmRequest, bounded?: BoundedLlmCallOptions): Pro
   // every 200 response already — nothing extra is requested here, and the
   // measurement costs zero.
   const startedAt = Date.now();
-  const result = await postGenerateContent(model, body, bounded);
+  const result = await postGenerateContent(model, body, bounded, execution);
   const elapsedMs = Date.now() - startedAt;
   if (!result.ok) {
     return result;
@@ -699,99 +891,6 @@ async function postInteraction(
   }
 
   return lastResult;
-}
-
-/** One content block inside an `interactions` response step. */
-interface InteractionsContentBlock {
-  type?: string;
-  data?: string;
-  mime_type?: string;
-  text?: string;
-}
-
-/** One step inside an `interactions` response's `steps` array. */
-interface InteractionsStep {
-  type?: string;
-  content?: InteractionsContentBlock[];
-  stop_reason?: string;
-  finish_reason?: string;
-}
-
-/** Shape of a Gemini `interactions` response body (image generation). */
-interface InteractionsResponseBody {
-  steps?: InteractionsStep[];
-  output_image?: { data?: string; mime_type?: string };
-  stop_reason?: string;
-  finish_reason?: string;
-}
-
-/**
- * Find the generated image in an `interactions` response: the `output_image`
- * convenience property first (documented as the fast path), falling back to
- * scanning every step's `content` array for the first `type: "image"` block —
- * matching the response shape's own two-places-the-same-data documentation.
- */
-function findInteractionsImage(
-  data: InteractionsResponseBody
-): { data: string; mimeType: string } | undefined {
-  if (typeof data.output_image?.data === "string" && data.output_image.data) {
-    return { data: data.output_image.data, mimeType: data.output_image.mime_type || "image/png" };
-  }
-
-  for (const step of data.steps ?? []) {
-    for (const block of step.content ?? []) {
-      if (block.type === "image" && typeof block.data === "string" && block.data) {
-        return { data: block.data, mimeType: block.mime_type || "image/png" };
-      }
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Collect every non-image content block's text across all steps. When the
- * model refuses or safety-blocks a prompt instead of returning an image, the
- * `interactions` schema's documented example only shows the success shape
- * (an image block) — there is no documented dedicated "refusal" field. The
- * defensible reading, matching how the legacy `:generateContent` shape put a
- * refusal's explanation in a text part alongside/instead of the image part,
- * is that a refusing `model_output` step's `content` array carries a `text`
- * block explaining why instead of an `image` block. This is what
- * describeEmptyLlmImage surfaces to the instructor as the real refusal
- * reason, so it is preferred over a generic message whenever present.
- */
-function collectInteractionsText(data: InteractionsResponseBody): string {
-  const texts: string[] = [];
-  for (const step of data.steps ?? []) {
-    for (const block of step.content ?? []) {
-      if (block.type !== "image" && typeof block.text === "string" && block.text) {
-        texts.push(block.text);
-      }
-    }
-  }
-  return texts.join("");
-}
-
-/**
- * Best-effort finish/stop reason from an `interactions` response, checked at
- * both the top level and per-step since the documented example does not show
- * where (or whether) this schema surfaces one — unlike collectInteractionsText
- * above, whose text (when present) is the primary, always-real signal
- * describeEmptyLlmImage surfaces, this is only the fallback used when no text
- * is present at all, so an absent value here still degrades to the existing
- * bare "did not return an image" message rather than a wrong one.
- */
-function findInteractionsFinishReason(data: InteractionsResponseBody): string | undefined {
-  if (typeof data.stop_reason === "string" && data.stop_reason) return data.stop_reason;
-  if (typeof data.finish_reason === "string" && data.finish_reason) return data.finish_reason;
-
-  for (const step of data.steps ?? []) {
-    if (typeof step.stop_reason === "string" && step.stop_reason) return step.stop_reason;
-    if (typeof step.finish_reason === "string" && step.finish_reason) return step.finish_reason;
-  }
-
-  return undefined;
 }
 
 /**

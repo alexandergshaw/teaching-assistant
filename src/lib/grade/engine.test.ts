@@ -28,11 +28,13 @@ vi.mock("../code-runner", () => ({
 }));
 
 import { callLlm } from "../llm";
+import { runSubmittedCode } from "../code-runner";
 import { gradeEntries } from "./engine";
 import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "./types";
 import { SUBMISSION_FRAMING_HEADER } from "./prompts";
 
 const mockCallLlm = vi.mocked(callLlm);
+const mockRunSubmittedCode = vi.mocked(runSubmittedCode);
 
 function entry(overrides: Partial<StudentSubmissionEntry> = {}): StudentSubmissionEntry {
   return {
@@ -52,6 +54,29 @@ const OK_RESPONSE_TEXT = JSON.stringify({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("gradeEntries - compiler auto-run preference", () => {
+  it("skips compiler service execution when explicitly disabled", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+    await gradeEntries(
+      [entry({ submittedFiles: [{ name: "main.py", extension: "py", previewContent: "print(1)" } as never] })],
+      "Grade it.", "Grade for correctness.", "gemini", null, { autoRunCode: false }
+    );
+    expect(mockRunSubmittedCode).not.toHaveBeenCalled();
+  });
+
+  it("runs supported submitted code by default", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+    mockRunSubmittedCode.mockResolvedValueOnce({
+      language: "python", files: ["main.py"], ran: true, exitCode: 0, stdout: "1", stderr: "",
+    });
+    await gradeEntries(
+      [entry({ submittedFiles: [{ name: "main.py", extension: "py", previewContent: "print(1)" } as never] })],
+      "Grade it.", "Grade for correctness.", "gemini"
+    );
+    expect(mockRunSubmittedCode).toHaveBeenCalledOnce();
+  });
 });
 
 // C1.2 / C2.7: truncation of the merged submission (per getGeminiMaxCharsPerSubmission,

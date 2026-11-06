@@ -46,6 +46,7 @@
 // react-hooks/set-state-in-effect rule (AGENTS memory:
 // set-state-in-effect-idiom.md) never applies to this file.
 import { useRef, useState } from "react";
+import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { gradeRepoAction } from "@/app/actions";
 import type { LlmProvider } from "@/lib/llm";
 import type { GradeResult } from "@/lib/grade/types";
@@ -74,9 +75,11 @@ import {
 // it directly; item 16's guarantee (both grading paths share the one
 // resolver) is unchanged, only WHO calls it and WHEN moved.
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
-import { timeGradingAction } from "../grading/gradingActionSeam";
+import { gradingActionNowMs, timeGradingAction } from "../grading/gradingActionSeam";
 
 export interface UseRepoGradesBulkGradeParams {
+  scope?: object;
+  isCurrent?: () => boolean;
   /** Grading provider, from the view's existing useLlmProvider(). */
   provider: LlmProvider;
   instructions: string;
@@ -201,9 +204,14 @@ export interface UseRepoGradesBulkGradeResult {
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
   const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, targetBranch, onCellUpdate, onAnnounce } = params;
-  const runLockRef = useRef(false);
-  const [runningFolder, setRunningFolder] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const { scope, isCurrent = () => true } = params;
+  const runLockRef = useRef(new Set<object | undefined>());
+  const [display, setDisplay] = useState<{
+    scope: object | undefined; folder: string | null; done: number; total: number;
+  } | null>(null);
+  const setProgress = ({ done, total }: { done: number; total: number }) => {
+    if (isCurrent()) setDisplay((value) => value?.scope === scope && value ? { ...value, done, total } : value);
+  };
 
   const runBulkGrade = async (
     plan: BulkGradePlan,
@@ -213,12 +221,20 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     // comment above for why a live ref read, not captured state, is what
     // makes this a real refusal rather than a race. `null` means "refused,
     // no run happened" (A16 wave 3, ruling W3-1(d)).
-    if (runLockRef.current) return null;
-    runLockRef.current = true;
-    setRunningFolder(plan.targets[0]?.folder ?? null);
-    setProgress({ done: 0, total: plan.targets.length });
+    if (!isCurrent() || runLockRef.current.has(scope)) return null;
+    const started = gradingActionNowMs();
+    runLockRef.current.add(scope);
+    setDisplay({ scope, folder: plan.targets[0]?.folder ?? null, done: 0, total: plan.targets.length });
     try {
-      return await gradeBulkPlan(plan, await resolveRubric());
+      const resolved = await resolveRubric();
+      if (!isCurrent()) {
+        recordFolderRun(started, plan, "blocked", "stale_scope");
+        return null;
+      }
+      return await gradeBulkPlan(plan, resolved, started);
+    } catch (error) {
+      recordFolderRun(started, plan, "failed", "unknown");
+      throw error;
     } finally {
       // Released on EVERY exit - a rejecting rubric fetch (backlog row A27,
       // mutant M1 in docs/a26-a27-scope.md section 8) or a rejecting
@@ -229,9 +245,8 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // reject in practice (see D-5 in docs/a26-a27-scope.md for the one
       // named, accepted exception) - this `finally` is what makes that
       // "not expected" a guarantee rather than a hope.
-      runLockRef.current = false;
-      setRunningFolder(null);
-      setProgress(null);
+      runLockRef.current.delete(scope);
+      if (isCurrent()) setDisplay(null);
     }
   };
 
@@ -240,7 +255,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
    * closing over them, and no longer holding the lock itself - `runBulkGrade`
    * above is now the ONE place that claims and releases it, over the rubric
    * fetch AND this entire pool. */
-  const gradeBulkPlan = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<readonly GradeResult[]> => {
+  const gradeBulkPlan = async (plan: BulkGradePlan, resolved: ResolvedRubric, started: number): Promise<readonly GradeResult[]> => {
     const targets = plan.targets;
 
     const outcomes: BulkGradeOutcome[] = [];
@@ -258,6 +273,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
      * should receive - see runBulkGrade's own header note on `sharedRubric`
      * for why that is not always the instructor's raw `rubric` field. */
     const gradeOneTarget = async (target: BulkGradeTarget, rubricArg: string): Promise<{ rubricUsed: string | null }> => {
+      if (!isCurrent()) return { rubricUsed: null };
       onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
       // P3 (backlog row A27, docs/a26-a27-scope.md section 6): a rejected
       // call - transport, not gradeRepoAction's own body, which never throws
@@ -278,6 +294,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         runCodeScoring,
         applyNamingDeduction
       )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
+      if (!isCurrent()) return { rubricUsed: null };
 
       if ("error" in result) {
         onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });
@@ -312,9 +329,15 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // `provisionalOutcome.detail` as exactly `first.ungraded.message`, the
       // GRADING_FAILURE_PREFIX-prefixed text.
       const provisionalOutcome = bulkGradeOutcomeFromRun(target, result.run.results, "");
+      runResults.push(...result.run.results);
+      outcomes.push(provisionalOutcome);
+      if (provisionalOutcome.status === "failed") {
+        onCellUpdate(target.repo, target.folder, { grading: false, gradeError: provisionalOutcome.detail });
+        return { rubricUsed: result.rubric };
+      }
       onCellUpdate(target.repo, target.folder, {
         grading: false,
-        gradeError: provisionalOutcome.status === "failed" ? provisionalOutcome.detail : null,
+        gradeError: null,
         mergeStatus: result.branchMergeCheck?.status ?? null,
         mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
         score,
@@ -351,7 +374,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // (REGRESSION entries 356/357/359) - the files THIS call actually
         // read, matching index.tsx's handleGradeCell exactly.
         submittedFiles: first?.submittedFiles ?? [],
-        submissionTruncated: first?.submissionTruncated ?? false,
+        submissionTruncated: !!result.digestTruncated || !!first?.submissionTruncated,
         // See useRepoGradesGradingActions.ts's handleGradeCell for why this
         // is copied at all (it was the one GradeResult field the per-cell
         // path dropped) - matched here so a bulk-graded cell and a
@@ -364,10 +387,6 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // bulkGradeOutcomeFromRun is the one place that turns this return into
       // an outcome, so that case is classified "failed" instead of the
       // literal "graded" this line used to write unconditionally.
-      outcomes.push(bulkGradeOutcomeFromRun(target, result.run.results, ""));
-      // A16 wave 3: pushes onto the run's trends collector above. A direct
-      // statement, following both early-return branches - never nested.
-      runResults.push(...result.run.results);
       return { rubricUsed: result.rubric };
     };
 
@@ -431,7 +450,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     // which is what bounds the in-flight request count - see the module
     // header comment for why this shape (over Promise.all) is required.
     const runWorker = async (): Promise<void> => {
-      for (;;) {
+      while (isCurrent()) {
         const index = cursor;
         cursor += 1;
         if (index >= targets.length) return;
@@ -444,12 +463,39 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     const workerCount = Math.min(BULK_GRADE_CONCURRENCY, Math.max(targets.length - cursor, 0));
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
-    onAnnounce(bulkGradeSummaryLine(outcomes, plan));
+    if (isCurrent()) {
+      const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
+      recordFolderRun(started, plan, failed === 0 ? "success" : failed === outcomes.length ? "failed" : "partial",
+        failed ? "target_failed" : "none", outcomes.length, failed);
+      onAnnounce(bulkGradeSummaryLine(outcomes, plan));
+    } else {
+      recordFolderRun(started, plan, "blocked", "stale_scope", outcomes.length);
+    }
     // The lock, `runningFolder` and `progress` reset is runBulkGrade's own
     // `finally` now (above) - it has to cover a rejecting rubric fetch too,
     // which never reaches this function at all, so it cannot live here.
     return runResults;
   };
 
-  return { runningFolder, progress, runBulkGrade };
+  const visible = display?.scope === scope ? display : null;
+  return {
+    runningFolder: visible?.folder ?? null,
+    progress: visible ? { done: visible.done, total: visible.total } : null,
+    runBulkGrade,
+  };
+}
+
+function recordFolderRun(
+  started: number, plan: BulkGradePlan, outcome: "success" | "failed" | "partial" | "blocked",
+  failureCategory: "none" | "target_failed" | "unknown" | "stale_scope", finished = 0, failed = 0,
+) {
+  recordSessionDiagnosticEntry({
+    at: new Date().toISOString(),
+    surface: "grading",
+    operation: "repo_grade_folder_run",
+    label: "Grade repository folder across the class",
+    outcome: outcome === "success" ? "success" : "failure",
+    durationMs: Math.min(3_600_000, Math.max(0, Math.round(performance.now() - started))),
+    detail: { outcome, failureCategory, targetCount: plan.targets.length, skipCount: plan.skipped.length, finishedCount: finished, failedCount: failed },
+  });
 }

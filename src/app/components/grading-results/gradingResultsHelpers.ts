@@ -252,6 +252,14 @@ export interface FeedbackFieldMeta {
   emptyCopyFallback: string;
 }
 
+export const OVERALL_FEEDBACK_META: FeedbackFieldMeta = {
+  fieldLabel: "Overall feedback",
+  descriptorLower: "overall feedback",
+  descriptorCapitalized: "Overall feedback",
+  copyTitle: "Copy Overall Feedback",
+  emptyCopyFallback: "No overall feedback provided.",
+};
+
 export const FEEDBACK_FIELD_META: Record<FeedbackField, FeedbackFieldMeta> = {
   strengths: {
     fieldLabel: "What Went Well",

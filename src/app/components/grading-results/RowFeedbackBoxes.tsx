@@ -53,9 +53,9 @@ export interface RowFeedbackBoxesProps {
   student: string;
   edit: FeedbackBoxesEdit;
   copiedKey: string | null;
-  onCopy: (key: string, value: string) => Promise<void>;
+  onCopy: (key: string, value: string, target: FeedbackField | "all") => Promise<void>;
   onChangeField: (field: FeedbackField, value: string) => void;
-  onExpand: (field: FeedbackField) => void;
+  onExpand: (field: FeedbackField, trigger: HTMLButtonElement) => void;
   /**
    * Prefixes every accessible name with this text ahead of the descriptor -
    * "Copy the ${namePrefix} ${descriptor} for ${student}" instead of the
@@ -70,6 +70,7 @@ export interface RowFeedbackBoxesProps {
    * repo-grades caller, which passes `column.folder` here).
    */
   namePrefix?: string;
+  keepCopyLabel?: boolean;
 }
 
 /**
@@ -90,14 +91,13 @@ export function RowFeedbackBoxes({
   onChangeField,
   onExpand,
   namePrefix,
+  keepCopyLabel,
 }: RowFeedbackBoxesProps) {
   const allKey = `${student}-all-feedback`;
   const allCopied = copiedKey === allKey;
   const copyAllLabel = namePrefix ? `Copy all ${namePrefix} feedback for ${student}` : `Copy all feedback for ${student}`;
-  // The clipboard text joins the three boxes with a BLANK LINE rather than
-  // copying the space-joined `overall` - see copyAllFeedbackText. Only the
-  // clipboard shape changes here; what is stored and posted to an LMS is
-  // untouched.
+  // Clipboard formatting joins feedback sections with a blank line and
+  // falls back to the overall comment if all sections are empty.
 
   return (
     <div>
@@ -105,8 +105,8 @@ export function RowFeedbackBoxes({
         <Button
           variant="text"
           size="small"
-          onClick={() => onCopy(allKey, copyAllFeedbackText(edit))}
-          aria-label={allCopied ? "Copied" : copyAllLabel}
+          onClick={() => onCopy(allKey, copyAllFeedbackText(edit), "all")}
+          aria-label={allCopied && !keepCopyLabel ? "Copied" : copyAllLabel}
           sx={{ textTransform: "none", minWidth: 0, p: "var(--space-1) var(--space-1)" }}
         >
           {allCopied ? "Copied" : "Copy all feedback"}
@@ -130,12 +130,12 @@ export function RowFeedbackBoxes({
             <IconButton
               size="small"
               title={copied ? "Copied" : meta.copyTitle}
-              aria-label={copied ? "Copied" : copyLabel}
-              onClick={() => onCopy(key, formatFeedback(edit[field] || meta.emptyCopyFallback))}
+              aria-label={copied && !keepCopyLabel ? "Copied" : copyLabel}
+              onClick={() => onCopy(key, formatFeedback(edit[field] || meta.emptyCopyFallback), field)}
             >
               <CopyIcon />
             </IconButton>
-            <IconButton size="small" title="Expand feedback" aria-label={expandLabel} onClick={() => onExpand(field)}>
+            <IconButton size="small" title="Expand feedback" aria-label={expandLabel} onClick={(event) => onExpand(field, event.currentTarget)}>
               <ExpandIcon />
             </IconButton>
             <TextField
@@ -143,7 +143,7 @@ export function RowFeedbackBoxes({
               label={meta.fieldLabel}
               value={edit[field]}
               onChange={(event) => onChangeField(field, event.target.value)}
-              aria-label={fieldAriaLabel}
+              slotProps={{ htmlInput: { "aria-label": fieldAriaLabel } }}
               placeholder={field === "resubmitNotice" ? "No resubmission note - full credit" : undefined}
               fullWidth
               size="small"

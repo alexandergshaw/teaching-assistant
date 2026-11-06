@@ -55,10 +55,12 @@ export async function getRepoTree(owner: string, repo: string, ref?: string): Pr
 }
 
 /** Read one file's text content (raw). */
-export async function getFileText(owner: string, repo: string, path: string, ref?: string, bounded?: GithubBoundedReadContext, byteCap = 300_000): Promise<string> {
+export async function getFileText(owner: string, repo: string, path: string, ref?: string, options?: GithubBoundedReadContext | AbortSignal, byteCap = 300_000): Promise<string> {
+  const bounded = options && "controller" in options ? options : undefined;
+  const signal = options && "aborted" in options ? options : undefined;
   const res = await ghFetch(
     `/repos/${owner}/${repo}/contents/${encodePath(path)}${ref && ref.trim() ? `?ref=${encodeRefSegment(ref)}` : ""}`,
-    { headers: { Accept: "application/vnd.github.raw" } }, bounded, byteCap
+    { headers: { Accept: "application/vnd.github.raw" }, ...(signal && { signal }) }, bounded, byteCap
   );
   return bounded ? readBoundedResponse(res, bounded, byteCap) : res.text();
 }

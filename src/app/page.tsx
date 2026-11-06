@@ -23,6 +23,7 @@ import PowerPointTemplates from "./components/powerpoint-templates";
 import DocumentTemplates from "./components/document-templates";
 import AnnouncementsSubTab from "./components/announcements/AnnouncementsSubTab";
 import RepoGradesTab from "./components/repo-grades";
+import { RepoGradesStartup, RepoGradesStartupStatus } from "./components/repo-grades-dashboard/RepoGradesStartup";
 import CourseIntelTab from "./components/course-intel";
 import SuccessTrackingTab from "./components/live-messaging/SuccessTrackingTab";
 import OneOffTasksTab from "./components/one-off-tasks/OneOffTasksTab";
@@ -477,6 +478,7 @@ export default function Home() {
       />
       <WorkflowScheduleWatcher onRunScheduled={handleWorkflowScheduled} />
       <WorkflowTriggerWatcher onRunScheduled={handleWorkflowScheduled} />
+      <RepoGradesStartup>
       <main className={styles.page}>
       <div
         ref={(el) => {
@@ -758,6 +760,7 @@ export default function Home() {
                     the only conditional surface in this block. */}
                 {manualView === "grading" && gradingView === "repos" && (
                   <TabShell>
+                    <RepoGradesStartupStatus />
                     <RepoGradesTab />
                   </TabShell>
                 )}
@@ -939,6 +942,7 @@ export default function Home() {
         />
       )}
       </main>
+      </RepoGradesStartup>
     </>
   );
 }

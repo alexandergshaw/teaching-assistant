@@ -433,13 +433,13 @@ export default function RepoGradesControls({
                   onChange={(e) => onRunCodeScoringChange(e.target.checked)}
                 />
               }
-              label="Score code execution (deterministic engine only)"
+              label="Auto-run submitted code before grading"
             />
             <p className={styles.fieldHint}>
-              When on, grading runs each repo&apos;s code in the sandbox and adds a &quot;Code runs&quot; criterion to
-              the score - only on the deterministic engine (the LLM engine already always runs code and folds it
-              into its judgment). This changes scores, so it defaults off. Canvas&apos;s SpeedGrader rubric has no
-              matching criterion, so this line will not appear there even though it still moves the posted total.
+              When on, supported source files run through the configured compiler/interpreter service and the
+              result is included in grading. The deterministic engine also scores its &quot;Code runs&quot; criterion,
+              which can change the total; Canvas&apos;s SpeedGrader rubric has no matching criterion. Source is
+              sent to that external execution service. This setting is off by default.
             </p>
           </div>
           <div className={styles.field}>

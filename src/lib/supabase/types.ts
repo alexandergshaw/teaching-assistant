@@ -1,6 +1,7 @@
 // Generated Supabase types live here. Replace this with output from:
 //   npx supabase gen types typescript --project-id <id> --schema public > src/lib/supabase/types.ts
 
+import type { RepoGradeAttemptReceiptRow } from "./types.repo-grades-dashboard";
 import type {
   InstitutionDirectoryProfileRow,
   InstitutionDirectoryProfileInsert,
@@ -613,6 +614,36 @@ export interface Database {
         Row: Expand<WorkflowDefsRow>;
         Insert: Expand<WorkflowDefsInsert>;
         Update: Expand<WorkflowDefsUpdate>;
+        Relationships: [];
+      };
+      repo_grade_attempts: {
+        Row: RepoGradeAttemptReceiptRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      repo_grade_current_profiles: {
+        Row: { user_id: string; course_id: string; folder: string; configuration_fingerprint: string };
+        Insert: never;
+        Update: never;
+        Relationships: [{
+          foreignKeyName: "repo_grade_current_profiles_course_id_user_id_folder_confi_fkey";
+          columns: ["course_id", "user_id", "folder", "configuration_fingerprint"];
+          isOneToOne: false;
+          referencedRelation: "repo_grade_profile_versions";
+          referencedColumns: ["course_id", "user_id", "folder", "configuration_fingerprint"];
+        }];
+      };
+      repo_grade_profile_versions: {
+        Row: { user_id: string; course_id: string; folder: string; configuration_fingerprint: string; profile: Json };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      repo_grade_preparation_policies: {
+        Row: { user_id: string; course_id: string; folder: string; course_kind: string; prompt_parser_version: string };
+        Insert: never;
+        Update: never;
         Relationships: [];
       };
       workflow_run_steps: {

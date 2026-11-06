@@ -3,6 +3,7 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
 import { getAppUserWithTimeout, ensureAppUserRowExists } from "./app-users";
+import { REPO_FEEDBACK_READINESS_PATH, REPO_FEEDBACK_SESSION_PATH } from "./repo-feedback-readiness-contract";
 import {
   resolveAccess,
   isPublicPath,
@@ -194,11 +195,12 @@ export async function updateSession(request: NextRequest) {
    * without also inheriting `response`'s own stale (or, on the very first
    * call, entirely client-supplied) request-header snapshot.
    */
-  const finalize = (decision: AccessDecision | null): NextResponse => {
+  const finalize = (decision: AccessDecision | null, omitCookies = false): NextResponse => {
     const headers = new Headers(request.headers);
     // Unconditional: a client-supplied value must never survive, whether or
     // not this call goes on to stamp a real decision in its place.
     headers.delete(ACCESS_DECISION_HEADER);
+    if (omitCookies) headers.delete("cookie");
     if (decision) {
       headers.set(ACCESS_DECISION_HEADER, decision);
     }
@@ -208,6 +210,17 @@ export async function updateSession(request: NextRequest) {
     }
     return finalResponse;
   };
+
+  const { pathname } = request.nextUrl;
+  if (request.method === "POST" && pathname === REPO_FEEDBACK_READINESS_PATH &&
+    request.nextUrl.href === `${request.nextUrl.origin}${REPO_FEEDBACK_READINESS_PATH}`) {
+    return finalize(null, true);
+  }
+  if (request.method === "POST" && pathname === REPO_FEEDBACK_SESSION_PATH) {
+    // This handler authenticates its own bearer session. Cookie refresh must
+    // not replace or veto that identity before the handler runs.
+    return finalize(null);
+  }
 
   const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -245,7 +258,6 @@ export async function updateSession(request: NextRequest) {
   // /auth, /api/cron, /api/triggers, and /api/github/webhook (the addition
   // that fixes REGRESSION 398 point B3: without it, GitHub's push webhook
   // was 307-redirected to /login before its own HMAC verifier ever ran).
-  const { pathname } = request.nextUrl;
   if (isPublicPath(pathname)) {
     // No decision is computed on this path - see ACCESS_DECISION_HEADER's own
     // comment for why a spoofed header reaching /login untouched used to be a

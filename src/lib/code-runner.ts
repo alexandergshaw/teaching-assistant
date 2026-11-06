@@ -32,6 +32,7 @@ export { languageForExtension, CODE_RUN_TIMEOUT_MS, CODE_RUN_OUTPUT_CAP_CHARS };
  * as a named alias here so every existing caller/import of `CodeFileInput`
  * from this module keeps working unchanged. */
 export type CodeFileInput = CodeRunCandidate;
+type BeforeSandboxDispatch = (signal: AbortSignal) => Promise<void>;
 
 /** The outcome of running one student's code. */
 export interface CodeRunResult {
@@ -275,6 +276,18 @@ interface WandboxResponse {
   program_error?: string;
 }
 
+const SANDBOX_REFUSAL_STATUSES = new Set([401, 403, 429]);
+
+export class SandboxExecutionRefusedError extends Error {
+  constructor() {
+    super("The sandbox declined the code execution request.");
+  }
+}
+
+function nonblankSignal(signal: unknown): boolean {
+  return typeof signal === "string" && signal.trim() !== "";
+}
+
 /**
  * Run files via the Wandbox compile API. Wandbox names its main source file
  * "prog.<ext>", so extra files ride along in codes[] under their real names;
@@ -284,7 +297,9 @@ interface WandboxResponse {
 async function runViaWandbox(
   language: string,
   files: CodeRunSelectionFile[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  beforeDispatch?: BeforeSandboxDispatch,
+  onDispatch?: () => void,
 ): Promise<CodeRunResult> {
   const compiler = await resolveWandboxCompiler(language, signal);
 
@@ -327,7 +342,7 @@ async function runViaWandbox(
       ? extraFiles.filter((f) => /\.(c|cc|cpp|cxx)$/i.test(f.name)).map((f) => f.name)
       : [];
 
-  const res = await fetch(`${WANDBOX_URL}/compile.json`, {
+  const request: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -338,11 +353,25 @@ async function runViaWandbox(
       stdin: "",
     }),
     signal,
-  });
+    ...(beforeDispatch && { redirect: "error" }),
+  };
+  if (beforeDispatch) {
+    signal.throwIfAborted();
+    await beforeDispatch(signal);
+    signal.throwIfAborted();
+    onDispatch?.();
+  }
+  const res = await fetch(`${WANDBOX_URL}/compile.json`, request);
   if (!res.ok) {
+    if (beforeDispatch && SANDBOX_REFUSAL_STATUSES.has(res.status)) throw new SandboxExecutionRefusedError();
     throw new Error(`Wandbox returned ${res.status}`);
   }
   const result = (await res.json()) as WandboxResponse;
+  const terminalStatus = typeof result?.status === "string" && /^-?\d+$/.test(result.status)
+    && Number.isSafeInteger(Number(result.status));
+  if (beforeDispatch && !terminalStatus && !nonblankSignal(result?.signal)) {
+    throw new Error("Sandbox response did not establish an execution outcome.");
+  }
 
   const parsedStatus =
     result.status !== undefined && result.status !== "" ? parseInt(result.status, 10) : NaN;
@@ -369,36 +398,37 @@ interface PistonFile {
   content: string;
 }
 
+interface PistonStage {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  signal: string | null;
+  output: string;
+}
+
 interface PistonResponse {
-  language: string;
-  version: string;
-  run: {
-    stdout: string;
-    stderr: string;
-    code: number | null;
-    signal: string | null;
-    output: string;
-  };
-  compile?: {
-    stdout: string;
-    stderr: string;
-    code: number | null;
-    output: string;
-  };
+  run?: PistonStage;
+  compile?: PistonStage;
+}
+
+function pistonOutcomeIsTerminal(result: PistonResponse): boolean {
+  const { run, compile } = result ?? {};
+  return Number.isSafeInteger(run?.code) || nonblankSignal(run?.signal)
+    || (Number.isSafeInteger(compile?.code) && compile?.code !== 0)
+    || nonblankSignal(compile?.signal);
 }
 
 /**
  * Resolve a runtime version and execute `runFiles` (already the runner's
  * exact file list, per code-run-selection.ts) via Piston, falling back to
- * Wandbox on a whitelist/rate-limit rejection. Always returns a
- * CodeRunResult - a timeout or any other network failure is reported through
- * `error`/`timedOut`, never thrown, matching this module's "degrade, never
- * abort" contract.
+ * Wandbox on a whitelist/rate-limit rejection. Coordinated calls propagate
+ * sandbox errors so admission can distinguish refusals from uncertain work.
  */
 async function executeRunFiles(
   dominantLanguage: string,
   runFiles: CodeRunSelectionFile[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  beforeDispatch?: BeforeSandboxDispatch,
 ): Promise<CodeRunResult> {
   let version: string;
   try {
@@ -421,6 +451,11 @@ async function executeRunFiles(
     content: f.content,
   }));
 
+  if (beforeDispatch) {
+    signal.throwIfAborted();
+    await beforeDispatch(signal);
+    signal.throwIfAborted();
+  }
   let result: PistonResponse;
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -437,19 +472,28 @@ async function executeRunFiles(
         stdin: "",
       }),
       signal,
+      ...(beforeDispatch && { redirect: "error" }),
     });
 
     if (!res.ok) {
       // Auth (the public API is whitelist-only since 2026-02-15) and
       // rate-limit failures get a second chance on the keyless Wandbox API.
-      if (res.status === 401 || res.status === 403 || res.status === 429) {
+      if (SANDBOX_REFUSAL_STATUSES.has(res.status)) {
         const pistonMessage =
           res.status === 429
             ? "Piston rate-limited the request (429)."
             : `Piston rejected the request (${res.status}): the public emkc.org API is whitelist-only. Set PISTON_API_KEY if whitelisted, or point PISTON_API_URL at a self-hosted Piston instance.`;
+        let wandboxDispatched = false;
         try {
-          return await runViaWandbox(dominantLanguage, runFiles, signal);
+          return await runViaWandbox(dominantLanguage, runFiles, signal, beforeDispatch, () => {
+            wandboxDispatched = true;
+          });
         } catch (fallbackErr) {
+          if (beforeDispatch) {
+            // Piston refused. Failed fallback preparation cannot have executed anything.
+            if (!wandboxDispatched) throw new SandboxExecutionRefusedError();
+            throw fallbackErr;
+          }
           // Reported directly here, not re-thrown to the outer catch below -
           // re-throwing would wrap this in a fresh plain Error, and the
           // outer catch's own isTimeoutError check would then always read
@@ -477,7 +521,11 @@ async function executeRunFiles(
     }
 
     result = (await res.json()) as PistonResponse;
+    if (beforeDispatch && !pistonOutcomeIsTerminal(result)) {
+      throw new Error("Sandbox response did not establish an execution outcome.");
+    }
   } catch (err) {
+    if (beforeDispatch) throw err;
     const timedOut = isTimeoutError(err);
     const message = timedOut
       ? `Code execution timed out after ${CODE_RUN_TIMEOUT_MS / 1000}s (a fixed budget so grading can still finish within the platform's request limit) - the result was not available in time.`
@@ -498,12 +546,12 @@ async function executeRunFiles(
 
   // Step 5: Parse response into CodeRunResult.
   const compileOutput = result.compile?.output || result.compile?.stderr;
-  const exitCode = result.run.code ?? null;
-  const stdout = result.run.stdout ?? "";
-  const stderr = result.run.stderr ?? "";
+  const exitCode = result.run?.code ?? null;
+  const stdout = result.run?.stdout ?? "";
+  const stderr = result.run?.stderr ?? "";
 
-  const compiledSuccessfully = !result.compile || result.compile.code === 0;
-  const ranSuccessfully = result.run.code === 0 && !result.run.signal;
+  const compiledSuccessfully = !result.compile || (result.compile.code === 0 && !result.compile.signal);
+  const ranSuccessfully = result.run?.code === 0 && !result.run.signal;
   const ran = compiledSuccessfully && ranSuccessfully;
 
   return {
@@ -542,8 +590,9 @@ function finalizeCodeRunResult(
 
 /**
  * Run the dominant language's files via Piston (falling back to Wandbox).
- * Return null if no valid code files are present. Always returns a result on
- * error - including a timeout - never throws.
+ * Return null if no valid code files are present. Legacy calls return a result
+ * on execution errors, including timeouts. Coordinated calls propagate errors
+ * so the caller can distinguish known refusals from uncertain outcomes.
  *
  * `requestedEntryPoint`, when given, is the per-row Run control's instructor
  * override (docs for this feature, request 2) - passed straight through to
@@ -556,7 +605,8 @@ function finalizeCodeRunResult(
  */
 export async function runSubmittedCode(
   files: CodeFileInput[],
-  requestedEntryPoint?: string
+  requestedEntryPoint?: string,
+  beforeDispatch?: BeforeSandboxDispatch,
 ): Promise<CodeRunResult | null> {
   const selection = selectCodeRunFiles(files, requestedEntryPoint);
   if (selection.requestedEntryPointError) {
@@ -583,7 +633,7 @@ export async function runSubmittedCode(
   // reasoning documented on CODE_RUN_TIMEOUT_MS in code-run-selection.ts.
   const signal = AbortSignal.timeout(CODE_RUN_TIMEOUT_MS);
 
-  const raw = await executeRunFiles(selection.language, selection.runFiles, signal);
+  const raw = await executeRunFiles(selection.language, selection.runFiles, signal, beforeDispatch);
   return finalizeCodeRunResult(raw, selection.entryPoint, selection.skipped);
 }
 
@@ -614,23 +664,26 @@ export interface CodeRunnableEntry {
  * CODE_RUN_CONCURRENCY above) and stash the result on the entry so the
  * embedded deterministic engine (gradeEntriesEmbedded, src/lib/embedded-
  * grader/index.ts) can score it without doing any network itself. Entries
- * with no runnable code get `codeRun: null`. One entry's failure never blocks
- * another - runSubmittedCode never throws (it returns a `{ error }`-carrying
- * result, including on a timeout), so there is nothing here to catch.
+ * with no runnable code get `codeRun: null`. Legacy calls attach per-entry
+ * failures as results. Coordinated calls propagate failures to admission.
  *
  * Moved here from grading.ts (a private, unexported helper there) so
  * github-repos.ts's and github.ts's embedded repo-grading branches can call
  * the SAME function grading.ts's Canvas/zip embedded paths already used,
  * rather than each hand-rolling their own copy of this worker-pool loop.
  */
-export async function attachCodeRuns<T extends CodeRunnableEntry>(entries: T[]): Promise<void> {
+export async function attachCodeRuns<T extends CodeRunnableEntry>(
+  entries: T[], beforeDispatch?: BeforeSandboxDispatch,
+): Promise<void> {
   let cursor = 0;
   const runWorker = async (): Promise<void> => {
     for (;;) {
       const index = cursor;
       cursor += 1;
       if (index >= entries.length) return;
-      entries[index].codeRun = await runSubmittedCode(entries[index].submittedFiles);
+      entries[index].codeRun = beforeDispatch
+        ? await runSubmittedCode(entries[index].submittedFiles, undefined, beforeDispatch)
+        : await runSubmittedCode(entries[index].submittedFiles);
     }
   };
   const workerCount = Math.min(CODE_RUN_CONCURRENCY, entries.length);

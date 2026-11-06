@@ -1,6 +1,5 @@
 // RG-PERSIST-RESULTS (W5): source-structure pins for the wiring that no
-// component render can check (restore placement, persist guard, Discard
-// control + confirm) and the one-home rule for the storage key (M4).
+// component render can check (control reachability and confirmation) and the one-home rule for the storage key.
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
@@ -29,39 +28,14 @@ function walk(dir: string, out: string[]): string[] {
   return out;
 }
 
-describe("restore wiring (index.tsx)", () => {
-  it("the course-change branch restores saved cells for the current course", () => {
-    const branchStart = indexSource.indexOf("if (uiState.courseId !== cellStateResetForCourse) {");
-    expect(branchStart).toBeGreaterThan(-1);
-    const branch = indexSource.slice(branchStart, branchStart + 900);
-    expect(branch).toContain("loadRepoGradeCells(uiState.courseId)");
-    expect(branch).toContain("setCellEdits(restoredEdits)");
-    expect(branch).not.toContain("setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS)");
-  });
-
-  it("persists from an effect that returns early until the restore has run", () => {
-    const callIdx = indexSource.indexOf("persistRepoGradeCells(uiState.courseId, cellEdits)");
-    expect(callIdx).toBeGreaterThan(-1);
-    const effectStart = indexSource.lastIndexOf("useEffect(() => {", callIdx);
-    const head = indexSource.slice(effectStart, callIdx);
-    expect(head).toContain("if (cellStateResetForCourse !== uiState.courseId) return;");
-  });
-
-  it("the stale 'never persisted' justification is gone", () => {
-    expect(readFileSync(join(DIR, "index.tsx"), "utf8")).not.toContain("never persisted to localStorage");
-  });
-});
-
 describe("Discard control (M3)", () => {
-  it("the handler confirms before clearing, and a control calls it", () => {
+  it("confirms before requesting discard for the visible scope", () => {
     const start = indexSource.indexOf("const handleDiscardSavedResults = () => {");
-    expect(start).toBeGreaterThan(-1);
-    const body = indexSource.slice(start, start + 700);
-    const confirmIdx = body.indexOf("if (!window.confirm(");
-    const clearIdx = body.indexOf("clearRepoGradeCells(uiState.courseId)");
-    expect(confirmIdx).toBeGreaterThan(-1);
-    expect(body).toMatch(/if \(!window\.confirm\([^\n]*\)\) return;/);
-    expect(clearIdx).toBeGreaterThan(confirmIdx);
+    const end = indexSource.indexOf("\n  };", start);
+    const body = indexSource.slice(start, end);
+    const confirmAt = body.indexOf("if (!window.confirm(");
+    expect(confirmAt).toBeGreaterThan(-1);
+    expect(body.indexOf("drafts.discard(cellDraft.scope)")).toBeGreaterThan(confirmAt);
     expect(indexSource).toContain("onClick={handleDiscardSavedResults}");
     expect(indexSource).toContain("Discard saved results for this course");
   });

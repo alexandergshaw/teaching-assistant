@@ -6,7 +6,7 @@ import {
   getGeminiMaxOutputTokens,
   getGeminiMaxSubmissions,
 } from "../gemini";
-import { callLlm, type LlmPart, type LlmProvider, type BoundedLlmCallOptions } from "../llm";
+import { callLlm, LlmOutcomeUnknownError, type BoundedLlmCallOptions, type LlmExecutionPolicy, type LlmPart, type LlmProvider } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
 import {
   RESUBMIT_NOTICE,
@@ -92,7 +92,7 @@ async function scoreAxis(
   // multi-submission recording; a fixed-wording note confines the model to it.
   videoGradeWindowSec?: RecordingWindow,
   callSink?: GradeCallSink,
-  evidenceOptions?: GradingRunOptions,
+  executionOptions?: GradingRunOptions,
   repositoryInventories?: SubmissionFileInventory[]
 ): Promise<AxisScore> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
@@ -126,7 +126,7 @@ async function scoreAxis(
     ),
   ];
 
-  if (evidenceOptions?.evidenceContext && (parts.reduce((sum, part) => sum + ("text" in part ? part.text.length : 0), 0) > getGeminiMaxCharsPerSubmission() || new TextEncoder().encode(JSON.stringify(parts)).byteLength > 3.5 * 1024 * 1024)) throw new GradeCallError("Combined evidence prompt exceeds its budget.", "model unparseable");
+  if (executionOptions?.evidenceContext && (parts.reduce((sum, part) => sum + ("text" in part ? part.text.length : 0), 0) > getGeminiMaxCharsPerSubmission() || new TextEncoder().encode(JSON.stringify(parts)).byteLength > 3.5 * 1024 * 1024)) throw new GradeCallError("Combined evidence prompt exceeds its budget.", "model unparseable");
 
   const result = await callLlm(
     {
@@ -134,12 +134,13 @@ async function scoreAxis(
       generationConfig: { temperature: 0.2, maxOutputTokens },
     },
     provider,
-    evidenceOptions?.modelCallOptions
+    executionOptions?.modelCallOptions ?? executionOptions?.modelExecution
   );
 
   if (!result.ok) {
-    console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
     callSink?.recordCall({ status: result.status });
+    if (result.outcome === "unknown") throw new LlmOutcomeUnknownError();
+    console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
     throw new GradeCallError(normalizeGeminiError(result.status, result.body), gradeFailureClassForStatus(result.status));
   }
   callSink?.recordCall({
@@ -160,8 +161,8 @@ async function scoreAxis(
       result.finishReason
     );
   }
-  if (evidenceOptions?.evidenceContext) {
-    const strict = parseRepositoryProposalOutput(result.text, evidenceOptions.evidenceContext.criteria, evidenceOptions.evidenceContext.allowedEvidenceIds);
+  if (executionOptions?.evidenceContext) {
+    const strict = parseRepositoryProposalOutput(result.text, executionOptions.evidenceContext.criteria, executionOptions.evidenceContext.allowedEvidenceIds);
     if (!strict.ok || (commentSplit && !strict.value.separateStrengths)) throw new GradeCallError("Repository proposal output was incomplete.", "model unparseable");
     return { ...strict.value, strengths: commentSplit ? strict.value.separateStrengths! : strict.value.overallComment, improvements: commentSplit ? [strict.value.overallComment, strict.value.improvements].filter(Boolean).join("\n\n") : strict.value.improvements };
   }
@@ -241,10 +242,10 @@ async function gradeSubmission(
   commentSplit = false,
   videoGradeWindowSec?: RecordingWindow,
   callSink?: GradeCallSink,
-  evidenceOptions?: GradingRunOptions,
+  executionOptions?: GradingRunOptions,
   repositoryInventories?: SubmissionFileInventory[]
 ): Promise<GradedResult> {
-  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, evidenceOptions, repositoryInventories);
+  const axis = await scoreAxis(systemPrompt, studentName, content, provider, inlineFiles, codeRun, submittedFiles, commentSplit, videoGradeWindowSec, callSink, executionOptions, repositoryInventories);
   const derivedTotal = deriveTotalScore(axis.modelTotalScore, axis.rubricAreas);
   return finalizeGrade(studentName, axis.rubricAreas, derivedTotal, axis.strengths, axis.improvements, pointsPossible);
 }
@@ -289,8 +290,9 @@ async function gradeDiscussionAxes(a: {
   videoGradeWindowSec?: RecordingWindow;
   pointsPossible: number | null;
   callSink?: GradeCallSink;
+  modelExecution?: LlmExecutionPolicy;
 }): Promise<GradedResult> {
-  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink);
+  const initial = await scoreAxis(a.initialPrompt, a.student, a.initialText, a.provider, a.inlineFiles, a.codeRun, a.submittedFiles, a.commentSplit, a.videoGradeWindowSec, a.callSink, { modelExecution: a.modelExecution });
 
   if (a.replyPrompt === null) {
     const total = deriveTotalScore(initial.modelTotalScore, initial.rubricAreas);
@@ -305,7 +307,7 @@ async function gradeDiscussionAxes(a: {
   let replyStrengths = "";
   let replyImprovements = "";
   if (a.replyCount > 0 && a.replyText !== null) {
-    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink);
+    const reply = await scoreAxis(a.replyPrompt, a.student, a.replyText, a.provider, [], null, a.submittedFiles, a.commentSplit, undefined, a.callSink, { modelExecution: a.modelExecution });
     replyAreas = reply.rubricAreas;
     replyStrengths = reply.strengths;
     replyImprovements = reply.improvements;
@@ -328,6 +330,8 @@ export interface GradingRunOptions {
   readonly executionPolicy?: "evidence-only";
   readonly evidenceContext?: { criteria: readonly RubricCriterion[]; allowedEvidenceIds: readonly string[]; provenance: string };
   readonly modelCallOptions?: BoundedLlmCallOptions;
+  /** Opt-in server budget for grading model requests with ambiguous outcomes. */
+  readonly modelExecution?: LlmExecutionPolicy;
   /** Absolute epoch-ms. The loop refuses to START a student at or past this.
    *  Undefined on the attended browser path, which keeps today's behaviour.
    *  A forged/too-generous value can only make the run do LESS work, so
@@ -354,6 +358,9 @@ export interface GradingRunOptions {
   readonly applyLengthDeduction?: boolean;
   /** Minimum word shortfall that permits a length deduction; absent keeps legacy policy. */
   readonly lengthDeductionThresholdWords?: number;
+  /** Opt out of automatic compiler/interpreter execution for submitted code.
+   * Unset preserves the established behavior. */
+  readonly autoRunCode?: boolean;
   /** A37: the grading surface, stamped onto each not-attempted row so the
    *  review table can name a surface-specific action. Display-copy only. */
   readonly source?: GradingSource;
@@ -422,7 +429,7 @@ async function gradeStudentEntries(
   pointsPossible: number | null = null,
   options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec, callSink } = options;
+  const { deadlineMs, commentSplit, harshness, feedbackWordTarget, source, videoGradeWindowSec, callSink, modelExecution } = options;
   const namingDeduction = options.applyNamingDeduction ?? true;
   const lengthDeduction = options.applyLengthDeduction ?? false;
   const maxSubmissions = getGeminiMaxSubmissions();
@@ -505,8 +512,12 @@ async function gradeStudentEntries(
     ];
 
     // Run any code the student submitted (returns null with no network when there
-    // is nothing runnable). Never throws.
-    const codeRun = evidenceOnly ? null : precomputedCodeRun ?? (await runSubmittedCode(submittedFiles));
+    // is nothing runnable). A coordinated dispatch propagates an uncertain
+    // sandbox outcome so the reservation stays fenced.
+    const codeRun = evidenceOnly ? null : precomputedCodeRun ?? (options.autoRunCode === false ? null
+      : modelExecution?.beforeDispatch
+        ? await runSubmittedCode(submittedFiles, undefined, modelExecution.beforeDispatch)
+        : await runSubmittedCode(submittedFiles));
 
     try {
       const result = initialTrunc
@@ -526,6 +537,7 @@ async function gradeStudentEntries(
             videoGradeWindowSec,
             pointsPossible,
             callSink,
+            modelExecution,
           })
         : await gradeSubmission(
             evidencePrompt,
@@ -539,7 +551,7 @@ async function gradeStudentEntries(
             commentSplit === true,
             videoGradeWindowSec,
             callSink,
-            evidenceOnly ? options : undefined,
+            options,
             repositoryInventories
           );
       results.push({
@@ -553,6 +565,7 @@ async function gradeStudentEntries(
         submissionTruncated,
       });
     } catch (error) {
+      if (modelExecution && error instanceof LlmOutcomeUnknownError) throw error;
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
       callSink?.recordFailure(error instanceof GradeCallError ? error.failureClass : "unclassified");

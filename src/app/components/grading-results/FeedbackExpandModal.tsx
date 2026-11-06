@@ -13,16 +13,18 @@
 // the `edits` map's shape or fallback rules - the caller already has that
 // logic (`edits[student] ?? blankRowEdit()`) for its own other renders.
 import TextField from "@mui/material/TextField";
+import type { RefObject } from "react";
 import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
-import { FEEDBACK_FIELD_META, type FeedbackBoxesEdit, type FeedbackField } from "./gradingResultsHelpers";
+import { FEEDBACK_FIELD_META, OVERALL_FEEDBACK_META, type FeedbackBoxesEdit, type FeedbackField } from "./gradingResultsHelpers";
 
-export interface FeedbackExpandModalProps {
+export interface FeedbackExpandModalProps<Field extends keyof FeedbackBoxesEdit = FeedbackField> {
   student: string;
-  field: FeedbackField;
+  field: Field;
   edit: FeedbackBoxesEdit;
-  onChange: (field: FeedbackField, value: string) => void;
+  onChange: (field: Field, value: string) => void;
   onClose: () => void;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   /** Same as RowFeedbackBoxes.tsx's own `namePrefix` prop - see that file's
    * doc comment. Repo Grades passes the folder column name here so this
    * modal's own label/aria-label stay consistent with the inline boxes'
@@ -31,11 +33,13 @@ export interface FeedbackExpandModalProps {
   namePrefix?: string;
 }
 
-export function FeedbackExpandModal({ student, field, edit, onChange, onClose, namePrefix }: FeedbackExpandModalProps) {
-  const meta = FEEDBACK_FIELD_META[field];
+export function FeedbackExpandModal<Field extends keyof FeedbackBoxesEdit>({
+  student, field, edit, onChange, onClose, namePrefix, restoreFocusRef,
+}: FeedbackExpandModalProps<Field>) {
+  const meta = field === "overall" ? OVERALL_FEEDBACK_META : FEEDBACK_FIELD_META[field as FeedbackField];
   const label = namePrefix ? `${namePrefix} ${meta.descriptorLower} for ${student}` : `${meta.descriptorCapitalized} for ${student}`;
   return (
-    <ModalShell label={label} onDismiss={onClose}>
+    <ModalShell label={label} onDismiss={onClose} restoreFocusRef={restoreFocusRef}>
       <div className={styles.previewHeader}>
         <div>
           <p className={styles.previewMeta}>Student: {student}</p>
@@ -49,7 +53,7 @@ export function FeedbackExpandModal({ student, field, edit, onChange, onClose, n
         multiline
         value={edit[field]}
         onChange={(event) => onChange(field, event.target.value)}
-        aria-label={`${label} (expanded)`}
+        slotProps={{ htmlInput: { "aria-label": `${label} (expanded)` } }}
         fullWidth
         size="small"
         minRows={12}

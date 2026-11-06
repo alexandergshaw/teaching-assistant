@@ -1,24 +1,26 @@
 // RG-PERSIST-RESULTS (W5): the persist/restore mapper leaf. Oracles come from
 // docs/repo-grades-persist-results-test-notes.md (FR-1..FR-7, M3 pure half).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   RELOAD_INTERRUPTED_POST_MESSAGE,
   RESULTS_PERSIST_ERROR,
   clearRepoGradeCellsIn,
   describeRestoredRepoGradeCells,
-  evictToBudget,
   loadRepoGradeCellsFrom,
+  readRepoGradeCellsFrom,
   parseStoredCells,
   persistRepoGradeCellsTo,
   restoreRepoGradeCells,
   toPersisted,
-  type PersistedCellsByCourse,
-  type PersistedRepoGradeCell,
   type RepoGradeCellsStorage,
 } from "./repoGradesResultsStore";
 import {
+  applyRepoGradeCompletion,
   defaultRepoGradeCellEdit,
   getRepoGradeCellEdit,
+  LEGACY_REPO_GRADE_RESULT_ID,
+  projectRepoGradeFeedbackDraft,
+  snapshotRetainedRepoGradeSource,
   type RepoGradeCellEdit,
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
@@ -240,70 +242,79 @@ describe("FR-5: tolerant, prototype-safe parse", () => {
   });
 });
 
-describe("FR-6: byte budget, oldest-first eviction, quota retry", () => {
-  function blobOf(n: number, commentLen: number): PersistedCellsByCourse {
-    const folders: Record<string, PersistedRepoGradeCell> = {};
-    for (let i = 0; i < n; i += 1) {
-      const at = `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`;
-      folders[`w${i}`] = toPersisted({ ...defaultRepoGradeCellEdit(), score: "1", comment: "x".repeat(commentLen) }, at);
-    }
-    return { c1: { "org/r": folders } };
-  }
-
-  it("evicts the oldest cells first when over budget", () => {
-    const blob = blobOf(10, 1000);
-    const total = JSON.stringify(blob).length;
-    const out = evictToBudget(blob, Math.floor(total * 0.55));
-    const survivors = Object.keys(out.c1["org/r"]);
-    expect(survivors.length).toBeGreaterThan(0);
-    expect(survivors.length).toBeLessThan(10);
-    const dropped = Object.keys(blob.c1["org/r"]).filter((k) => !survivors.includes(k));
-    const newestDropped = Math.max(...dropped.map((k) => Number(k.slice(1))));
-    const oldestSurvivor = Math.min(...survivors.map((k) => Number(k.slice(1))));
-    expect(oldestSurvivor).toBeGreaterThan(newestDropped);
-  });
-
-  it("keeps everything when under budget", () => {
-    const blob = blobOf(10, 10);
-    expect(Object.keys(evictToBudget(blob).c1["org/r"]).length).toBe(10);
-  });
-
-  it("enforces the real budget through the persist path, keeping the newest cells", () => {
+describe("FR-6: storage refusals preserve saved results", () => {
+  it("refuses an over-budget replacement for the same course without changing the old value", () => {
     const storage = fakeStorage();
     const big = (tag: string): Partial<RepoGradeCellEdit> => ({ score: tag, comment: tag.repeat(450_000) });
     persistRepoGradeCellsTo(storage, KEY, "c1", editsOf([["org/r", "a", big("A")]]), "2026-01-01T00:00:00.000Z");
     persistRepoGradeCellsTo(storage, KEY, "c1", editsOf([["org/r", "a", big("A")], ["org/r", "b", big("B")]]), "2026-01-02T00:00:00.000Z");
-    persistRepoGradeCellsTo(
+    const prior = storage.data[KEY];
+    const writes = storage.writes;
+    expect(persistRepoGradeCellsTo(
       storage,
       KEY,
       "c1",
       editsOf([["org/r", "a", big("A")], ["org/r", "b", big("B")], ["org/r", "c", big("C")]]),
       "2026-01-03T00:00:00.000Z"
-    );
-    const kept = Object.keys(parseStoredCells(storage.data[KEY]).c1["org/r"]).sort();
-    expect(kept).toContain("c");
-    expect(kept).not.toContain("a");
-    expect(storage.data[KEY].length).toBeLessThan(1_100_000);
+    )).toMatch(/storage limit/);
+    expect(storage.data[KEY]).toBe(prior);
+    expect(storage.writes).toBe(writes);
   });
 
-  it("evicts 25% and retries once on QuotaExceededError, then succeeds with no error", () => {
+  it("keeps the outcome independent of a failing diagnostics callback", () => {
     const storage = fakeStorage();
-    let calls = 0;
-    const original = storage.setItem.bind(storage);
-    storage.setItem = (k: string, v: string) => {
-      calls += 1;
-      if (calls === 1) throw quotaError();
-      original(k, v);
-    };
-    const edits = editsOf(Array.from({ length: 8 }, (_, i): [string, string, Partial<RepoGradeCellEdit>] => ["org/r", `w${i}`, { score: String(i + 1) }]));
-    const error = persistRepoGradeCellsTo(storage, KEY, "c1", edits, "2026-10-04T00:00:00.000Z");
-    expect(error).toBeNull();
-    expect(calls).toBe(2);
-    const stored = parseStoredCells(storage.data[KEY]);
-    expect(Object.keys(stored.c1["org/r"]).length).toBe(6);
+    const edits = editsOf([["org/r", "w1", { score: "9" }]]);
+    const report = vi.fn();
+    report.mockImplementation(() => { throw new Error("Diagnostic logger failed"); });
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", edits, "t", report)).toBeNull();
+    expect(loadRepoGradeCellsFrom(storage, KEY, "c1")).toEqual(edits);
+    storage.setItem = () => { throw quotaError(); };
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", edits, "t", report)).toBe(RESULTS_PERSIST_ERROR);
+    expect(report).toHaveBeenCalledTimes(2);
   });
 
-  it("surfaces a fixed, content-free error after a second failure and never throws", () => {
+  it("distinguishes empty, corrupt, and denied restores and keeps unreadable data intact", () => {
+    const storage = fakeStorage();
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toMatchObject({ outcome: "success", affectedResultCount: 0 });
+    storage.data[KEY] = "private invalid record";
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toMatchObject({
+      outcome: "failed", failureCategory: "invalid_stored_data",
+    });
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", {}, "t")).toMatch(/invalid/);
+    expect(storage.data[KEY]).toBe("private invalid record");
+    storage.getItem = () => { throw new DOMException("private message", "SecurityError"); };
+    expect(readRepoGradeCellsFrom(storage, KEY, "c1").result).toEqual({
+      outcome: "denied", failureCategory: "permission_denied",
+    });
+  });
+
+  it("round-trips repeated results and a separate draft with exact feedback", () => {
+    const storage = fakeStorage();
+    const candidate = "Candidate\nhttps://example.test/help";
+    const current = editsOf([["org/r", "w1", {
+      comment: "Instructor draft",
+      draftRevision: 2,
+    }]]);
+    const completion = { ...fullEdit(), generatedScore: "0/10", generatedComment: candidate, comment: candidate, strengths: candidate };
+    const once = applyRepoGradeCompletion(current, "org/r", "w1", 2, completion);
+    const twice = applyRepoGradeCompletion(once, "org/r", "w1", 2, completion);
+    const cell = twice["org/r"].w1;
+    const retainedResults = cell.retainedResults?.map((entry) => entry.id === "local:1"
+      ? { ...entry, draft: { ...projectRepoGradeFeedbackDraft(entry.source), comment: "Separate draft\n" } }
+      : entry);
+    const edits = editsOf([["org/r", "w1", { ...cell, retainedResults }]]);
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", edits, "t")).toBeNull();
+    const loaded = loadRepoGradeCellsFrom(storage, KEY, "c1");
+    expect(loaded).toEqual(edits);
+    const restored = loaded["org/r"].w1.retainedResults;
+    expect(restored?.map(({ id }) => id)).toEqual(["local:1", "local:2"]);
+    expect(Object.isFrozen(restored?.[0].source.rubricAreas[0])).toBe(true);
+    expect(storage.data[KEY]).not.toContain("ZZMK_");
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", loaded, "later", undefined, edits)).toBeNull();
+    expect(parseStoredCells(storage.data[KEY]).c1["org/r"].w1.at).toBe("t");
+  });
+
+  it("surfaces a fixed, content-free quota error without throwing", () => {
     const storage = fakeStorage();
     storage.setItem = () => {
       throw quotaError();
@@ -338,6 +349,66 @@ describe("FR-7: the persist error is a fixed literal", () => {
     expect(RESULTS_PERSIST_ERROR).toBe(
       "Saved grading results could not be stored (browser storage is full). Your work is still here for this session but may not survive a reload."
     );
+  });
+});
+
+describe("legacy retained conflict migration", () => {
+  const repo = "org/r";
+  const main = toPersisted({ ...defaultRepoGradeCellEdit(), score: "6/10", comment: "Current draft" }, "t");
+  const legacy = toPersisted(fullEdit(), "");
+  const source = snapshotRetainedRepoGradeSource(legacy);
+  const canonical = { id: LEGACY_REPO_GRADE_RESULT_ID, source, draft: { ...projectRepoGradeFeedbackDraft(source), score: "7/10" } };
+  const withLegacy = (fields: Record<string, unknown>) => JSON.stringify({
+    c1: { [repo]: { w1: { ...main, conflictingGrade: legacy, ...fields } } },
+  });
+
+  it("converts the old conflict on read and writes only the reserved canonical entry on a later save", () => {
+    const raw = withLegacy({});
+    const storage = fakeStorage({ [KEY]: raw });
+    const result = readRepoGradeCellsFrom(storage, KEY, "c1");
+    expect(result.notice).toBeNull();
+    expect(result.edits[repo].w1).toMatchObject({
+      score: "6/10", comment: "Current draft",
+      retainedResults: [{ id: LEGACY_REPO_GRADE_RESULT_ID, source, draft: null }],
+    });
+    expect(storage.data[KEY]).toBe(raw);
+    expect(storage.writes).toBe(0);
+    const after = applyRepoGradeCompletion(result.edits, repo, "w1", 0, fullEdit());
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", after, "later")).toBeNull();
+    expect(storage.data[KEY]).not.toContain("conflictingGrade");
+    expect(loadRepoGradeCellsFrom(storage, KEY, "c1")[repo].w1.retainedResults?.map(({ id }) => id))
+      .toEqual([LEGACY_REPO_GRADE_RESULT_ID, "local:1"]);
+  });
+
+  it("reuses an exact coexisting canonical source and keeps its separate draft", () => {
+    const { generatedScore, ...otherSourceFields } = source;
+    const reordered = { generatedScore, ...otherSourceFields };
+    const storage = fakeStorage({ [KEY]: withLegacy({ retainedResults: [{ ...canonical, source: reordered }] }) });
+    const result = readRepoGradeCellsFrom(storage, KEY, "c1");
+    expect(result.notice).toBeNull();
+    expect(result.edits[repo].w1.retainedResults).toEqual([canonical]);
+    expect(storage.writes).toBe(0);
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", result.edits, "later")).toBeNull();
+    expect(loadRepoGradeCellsFrom(storage, KEY, "c1")[repo].w1.retainedResults).toEqual([canonical]);
+  });
+
+  it.each([
+    ["mismatched source", { retainedResults: [{ ...canonical, source: { ...source, comment: "Mismatch" } }] }],
+    ["duplicate IDs", { retainedResults: [canonical, canonical] }],
+    ["nested legacy conflict", { conflictingGrade: { ...legacy, conflictingGrade: legacy } }],
+    ["nested canonical draft", { retainedResults: [{ ...canonical, draft: { ...canonical.draft, retainedResults: [] } }] }],
+    ["malformed source", { retainedResults: [{ ...canonical, source: { ...source, rubricAreas: [{ comment: 1 }] } }] }],
+  ])("blocks save and discard for %s while leaving the current draft readable", (_case, fields) => {
+    const raw = withLegacy(fields);
+    const storage = fakeStorage({ [KEY]: raw });
+    const result = readRepoGradeCellsFrom(storage, KEY, "c1");
+    expect(result.edits[repo].w1.comment).toBe("Current draft");
+    expect(result.result).toMatchObject({ outcome: "partial", failureCategory: "invalid_stored_data" });
+    expect(persistRepoGradeCellsTo(storage, KEY, "c1", result.edits, "later")).toMatch(/invalid/);
+    expect(clearRepoGradeCellsIn(storage, KEY, "c1").result).toMatchObject({ outcome: "blocked", failureCategory: "invalid_stored_data" });
+    expect(storage.data[KEY]).toBe(raw);
+    expect(storage.writes).toBe(0);
+    expect(storage.removes).toBe(0);
   });
 });
 

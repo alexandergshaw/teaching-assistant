@@ -24,7 +24,8 @@
 // async body that awaits before any setState. This file only reads that
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useSupabase } from "@/context/SupabaseProvider";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
@@ -66,11 +67,9 @@ import {
   setRepoGradeAssignmentMapping,
   type RepoGradeAssignmentMap,
 } from "./repoGradesAssignmentMapping";
-import {
-  EMPTY_REPO_GRADE_CELL_EDITS,
-  type RepoGradeCellEditsByRepo,
-} from "./repoGradesCellEdits";
-import { describeRestoredRepoGradeCells } from "./repoGradesResultsStore";
+import { EMPTY_REPO_GRADE_CELL_EDITS } from "./repoGradesCellEdits";
+import { createRepoGradesDraftController } from "./repoGradesDraftController";
+import RepoGradesDashboard from "./RepoGradesDashboard";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
 import { visibleRepoRows } from "./repoGradesVisibleRows";
@@ -109,6 +108,11 @@ const LINK_GITHUB_USERNAMES_STEP_LABEL = "Link GitHub usernames to roster";
 const NO_GRADE_SET: ReadonlySet<string> = new Set();
 
 export default function RepoGradesTab() {
+  const { user, loading } = useSupabase();
+  return !loading && user ? <AccountRepoGradesTab key={user.id} accountId={user.id} /> : null;
+}
+
+function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
   const [provider] = useLlmProvider();
 
@@ -179,13 +183,24 @@ export default function RepoGradesTab() {
   // purely from the roster table before anything is actually saved. That is
   // intended - the same "suggested first, confirm second" honesty this view
   // already applies to a live Canvas link.
-  // ---- per-cell editable state (AC4 items 20-21). Graded results persist per
-  // course (RG-PERSIST-RESULTS W5, localStorage (key lives in repoGradesUiState), swept
-  // on sign-out); submittedFiles/codeExecution do NOT - they return only by
-  // re-grading. Restored in the `cellStateResetForCourse` block below, and
-  // declared ABOVE `sortedRows` because the folder-sort reads live scores
-  // (N4 item 13). -----------------------------------------------------------
-  const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
+  const [drafts] = useState(() => createRepoGradesDraftController(accountId, {
+    restore: loadRepoGradeCells,
+    save: (courseId, edits, expected) => persistRepoGradeCells(courseId, edits, "current", expected),
+    discard: clearRepoGradeCells,
+  }));
+  const selectedCourseId = course?.id ?? null;
+  const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot, () => null);
+  const cellDraft = draftSnapshot?.courseId === selectedCourseId ? draftSnapshot : null;
+  const cellEdits = cellDraft?.edits ?? EMPTY_REPO_GRADE_CELL_EDITS;
+  const cellScope = cellDraft?.scope ?? null;
+  useLayoutEffect(() => () => drafts.reset(), [drafts]);
+  useLayoutEffect(() => {
+    if (selectedCourseId) drafts.select(selectedCourseId);
+    else drafts.leave();
+  }, [drafts, selectedCourseId]);
+  useEffect(() => {
+    if (cellDraft?.saveDue) void drafts.save(cellDraft.scope);
+  }, [drafts, cellDraft]);
   const model = scan ? buildRepoGradeGridModel(scan.repos, roster, effectiveStudentRepos, uiState.orgPrefix) : null;
   // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N5 item
   // 17: `cellEdits`/`model.columns` let sortRepoGradeRows sort by a folder
@@ -471,59 +486,19 @@ export default function RepoGradesTab() {
   };
 
   const [postSummary, setPostSummary] = useState("");
-  const [cellStateResetForCourse, setCellStateResetForCourse] = useState<string | null>(null);
-  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
-  const [persistError, setPersistError] = useState<string | null>(null);
-  if (uiState.courseId !== cellStateResetForCourse) {
-    setCellStateResetForCourse(uiState.courseId);
-    const restoredEdits = loadRepoGradeCells(uiState.courseId);
-    setCellEdits(restoredEdits);
-    setRestoredNotice(describeRestoredRepoGradeCells(restoredEdits));
+  const [controlsCourseId, setControlsCourseId] = useState<string | null>(null);
+  if (uiState.courseId !== controlsCourseId) {
+    setControlsCourseId(uiState.courseId);
     setPostSummary("");
-    // U1.5/U1.6 - folded in here rather than a separate branch, per this
-    // feature's own design note above: this block IS index.tsx's "the course
-    // changed" trigger already (it resets cellEdits/postSummary
-    // together for the identical reason). The folder restore's OTHER
-    // trigger - the scan settling, above near `model` - runs EARLIER in this
-    // file's top-to-bottom render order, so if both could ever fire in the
-    // SAME render, this course-switch write runs LAST and is authoritative
-    // for what is displayed starting next render. In practice the two never
-    // act on stale data in the same render: `model` only ever reflects the
-    // CURRENT `uiState.courseId` (useRepoGradesData's scanKey embeds it), so
-    // a courseId change nulls `model` synchronously in THIS SAME render
-    // (scanMatches becomes false against the new scanKey) - the scan-settle
-    // branch above therefore sees `model === null` and does nothing until a
-    // later render, by which point this reset has already run.
     setSelectedFolder(loadFolderSelection(uiState.courseId));
     setFolderDropNotice(null);
     setTargetBranch(loadTargetBranch(uiState.courseId));
   }
 
-  // Graded results persist from an effect guarded by the restore-ran check
-  // (`cellStateResetForCourse !== courseId`): the restore branch above runs
-  // during render and is what makes the two equal, so this effect cannot fire
-  // with the untouched default and overwrite real stored data before it has
-  // been read. The error is surfaced after an await so no setState is
-  // synchronous in the effect.
-  useEffect(() => {
-    if (cellStateResetForCourse !== uiState.courseId) return;
-    const error = persistRepoGradeCells(uiState.courseId, cellEdits);
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (!cancelled) setPersistError(error);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cellEdits, uiState.courseId, cellStateResetForCourse]);
-
   const handleDiscardSavedResults = () => {
+    if (!cellDraft || cellDraft.savePending) return;
     if (!window.confirm("Discard all saved grading results for this course? Graded scores and feedback on screen will be cleared. This cannot be undone.")) return;
-    clearRepoGradeCells(uiState.courseId);
-    setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
-    setRestoredNotice(null);
-    setPostSummary("Saved results discarded for this course.");
+    setPostSummary(drafts.discard(cellDraft.scope) ? "Saved results discarded for this course." : "");
   };
 
   // Rubric picker (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
@@ -556,6 +531,8 @@ export default function RepoGradesTab() {
   // the codebase's 1000-line cap - see that hook's own header comment for
   // the full rationale and the exact param surface.
   const {
+    isCurrent: isCurrentCellScope,
+    handleRetainedDraftChange,
     handleScoreChange,
     handleFeedbackFieldChange,
     handleGradeCell,
@@ -567,9 +544,11 @@ export default function RepoGradesTab() {
     bulkProgress,
     trendsEntry,
   } = useRepoGradesGradingActions({
+    cellScope,
+    isCellScopeCurrent: () => drafts.isCurrent(cellScope),
     rows: sortedRows,
     cellEdits,
-    setCellEdits,
+    setCellEdits: (update) => drafts.edit(cellScope, update),
     selected,
     instructions: uiState.instructions,
     resolveRubricForColumn: rubricSource.resolveRubricForColumn,
@@ -721,6 +700,23 @@ export default function RepoGradesTab() {
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
 
+      {course && cellDraft && (
+        <RepoGradesDashboard
+          key={course.id}
+          courseId={course.id}
+          cellEdits={cellEdits}
+          scan={scan}
+          scanLoading={scanLoading}
+          scanFailed={scanError !== null}
+          hasRepoPrefix={!!uiState.orgPrefix.trim()}
+          gradeRows={sortedRows}
+          gradeColumns={columnsWithMapping}
+          grading={{ handleGradeCell, handleGradeColumn, handleScoreChange, handleFeedbackFieldChange, bulkRunningFolder }}
+          onRetainedDraftChange={handleRetainedDraftChange}
+          isCurrentCellScope={isCurrentCellScope}
+        />
+      )}
+
       {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
           comment near the top of this file): LinkUsernamesPanel.tsx already
           prints the literal "No repos are confirmed-bound to a roster student
@@ -830,7 +826,7 @@ export default function RepoGradesTab() {
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
       >
-      {model && (
+      {model && cellDraft && (
         <RepoGradesGrid
           columns={displayedColumns}
           rows={displayedRows}
@@ -868,11 +864,15 @@ export default function RepoGradesTab() {
       )}
       </RepoGradesStickyHeader>
 
-      {course && (
+      {cellDraft && (
         <div>
-          {restoredNotice && <p className={pageStyles.fieldHint}>{restoredNotice}</p>}
-          {persistError && <p className={pageStyles.fieldHint} role="status">{persistError}</p>}
-          <button type="button" className={pageStyles.linkButton} onClick={handleDiscardSavedResults}>
+          {cellDraft.restoredNotice && <p className={pageStyles.fieldHint}>{cellDraft.restoredNotice}</p>}
+          {(cellDraft.discardNotice || cellDraft.saveNotice) && (
+            <p className={pageStyles.fieldHint} role="status">
+              {[cellDraft.discardNotice, cellDraft.saveNotice].filter(Boolean).join(" ")}
+            </p>
+          )}
+          <button type="button" className={pageStyles.linkButton} disabled={cellDraft.savePending} onClick={handleDiscardSavedResults}>
             Discard saved results for this course
           </button>
         </div>

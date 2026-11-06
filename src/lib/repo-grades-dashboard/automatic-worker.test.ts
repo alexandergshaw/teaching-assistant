@@ -190,4 +190,20 @@ describe("durable repository grading discovery", () => {
     mocks.evaluate.mockResolvedValue({ status: "partial", reason: "grading-source-rate-limited" });
     expect(await worker(work, "lease")).toEqual({ state: "partial", reason: "grading-source-rate-limited" });
   });
+
+  it("passes a never-dispatched throttle claim to the atomic cooldown transition", async () => {
+    const work = {
+      phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "assignment", ref: "main", sha: "a".repeat(40), retryGithubRateLimits: true,
+    } as const;
+    const claim = { mode: "automatic", generation: 7, token: "token" } as const;
+    mocks.plan.mockResolvedValue({ folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    mocks.evaluate.mockResolvedValue({ status: "deferred-source-throttle", claim });
+    await expect(createAutomaticRepoGradeWorker("coordinated")(work, "lease")).resolves.toEqual({
+      state: "github-throttled", rateLimit: { retryAtMs: null, primary: false }, claim,
+    });
+    expect(mocks.evaluate.mock.calls[0][2]).toMatchObject({ deferSourceThrottle: true });
+  });
 });

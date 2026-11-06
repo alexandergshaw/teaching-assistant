@@ -99,6 +99,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const expectedRef = plan.folderSources.get(target.folder) ?? null;
     let profileFailure: RepoGradeProfilePreparationFailure | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
+      deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
         : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
@@ -126,6 +127,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       return { state: "blocked", reason: outcome.status, preparationRetry: outcome.preparationRetry };
     }
     switch (outcome.status) {
+      case "deferred-source-throttle":
+        return { state: "github-throttled", rateLimit: confirmedGradeSourceCooldown() ?? { retryAtMs: null, primary: false }, claim: outcome.claim };
       case "terminal": return { state: "already-processed" };
       case "succeeded":
       case "no-submission":

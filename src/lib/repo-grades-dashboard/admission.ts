@@ -6,7 +6,7 @@ import { SandboxExecutionRefusedError } from "@/lib/code-runner";
 import { createGradeCallSink, type GradeCallSink } from "@/lib/grade/grade-item-diagnostic";
 import { BoundedRubricRefusalError } from "@/lib/grade/rubric";
 import { beginRepoGradeDispatch, claimRepoGrade, settleRepoGrade } from "./ledger";
-import type { RepoGradeAutomaticSettlement, RepoGradeClaimRequest, RepoGradeManualSettlement } from "./state";
+import type { RepoGradeAutomaticSettlement, RepoGradeClaim, RepoGradeClaimRequest, RepoGradeManualSettlement } from "./state";
 import { repoGradeAdmissionMode } from "./admission-mode";
 
 export { repoGradeAdmissionMode } from "./admission-mode";
@@ -16,7 +16,8 @@ type AutomaticRequest = Exclude<RepoGradeClaimRequest, ManualRequest>;
 type Evaluation<T, Settlement> = { value: T; settlement: Settlement };
 type AdmissionFailure = RepoGradeClaimStatus | "runtime-unavailable" | "storage-unavailable" | "unknown"
   | "pre-dispatch-failed" | "sandbox-refused" | "manual-paused";
-type AdmissionResult<T> = { status: "completed"; value: T } | { status: AdmissionFailure };
+type AdmissionResult<T> = { status: "completed"; value: T } | { status: AdmissionFailure }
+  | { status: "deferred-pre-dispatch"; claim: RepoGradeClaim & { mode: "automatic" | "retry" } };
 type BeforeDispatch = NonNullable<LlmExecutionPolicy["beforeDispatch"]>;
 type Evaluate<T, Settlement> = (beforeDispatch?: BeforeDispatch) => Promise<Evaluation<T, Settlement>>;
 
@@ -24,10 +25,11 @@ export function runWithRepoGradeAdmission<T>(
   request: ManualRequest, evaluate: Evaluate<T, RepoGradeManualSettlement>,
 ): Promise<AdmissionResult<T>>;
 export function runWithRepoGradeAdmission<T>(
-  request: AutomaticRequest, evaluate: Evaluate<T, RepoGradeAutomaticSettlement>,
+  request: AutomaticRequest, evaluate: Evaluate<T, RepoGradeAutomaticSettlement>, deferWhen?: (value: T) => boolean,
 ): Promise<AdmissionResult<T>>;
 export async function runWithRepoGradeAdmission<T>(
   request: RepoGradeClaimRequest, evaluate: Evaluate<T, RepoGradeAutomaticSettlement | RepoGradeManualSettlement>,
+  deferWhen?: (value: T) => boolean,
 ): Promise<AdmissionResult<T>> {
   const mode = repoGradeAdmissionMode();
   if (mode === "embedded-only" && request.mode === "manual") return { status: "manual-paused" };
@@ -86,6 +88,11 @@ export async function runWithRepoGradeAdmission<T>(
     else if (!dispatchAllowed && !(error instanceof LlmOutcomeUnknownError)) knownFailure = "pre-dispatch-failed";
   } finally {
     evaluating = false;
+  }
+  // The queue may atomically release this claim only if dispatch was never
+  // requested. The database independently verifies its prepared state.
+  if (evaluation && claim.mode !== "manual" && !dispatch && deferWhen?.(evaluation.value)) {
+    return { status: "deferred-pre-dispatch", claim };
   }
   const settlement = evaluation?.settlement ?? { outcome: knownFailure ? "failed" : "unknown" } as const;
   try {

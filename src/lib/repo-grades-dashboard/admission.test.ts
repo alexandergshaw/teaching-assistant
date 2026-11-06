@@ -46,6 +46,26 @@ afterEach(() => {
 });
 
 describe("repository grading admission", () => {
+  it("leaves a confirmed pre-dispatch throttle for atomic queue release", async () => {
+    const claim = { mode: "automatic", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    const evaluation = { value: "throttle", settlement: { outcome: "partial" } as const };
+    await expect(runWithRepoGradeAdmission(automatic, async () => evaluation, (value) => value === "throttle"))
+      .resolves.toEqual({ status: "deferred-pre-dispatch", claim });
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+    expect(settleRepoGrade).not.toHaveBeenCalled();
+  });
+
+  it("never releases a claim after a dispatch request even if the result says throttle", async () => {
+    const claim = { mode: "automatic", token: "server", generation: 7 } as const;
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim });
+    vi.mocked(settleRepoGrade).mockResolvedValue(true);
+    await expect(runWithRepoGradeAdmission(automatic, async (beforeDispatch) => {
+      await beforeDispatch!(new AbortController().signal);
+      return { value: "throttle", settlement: { outcome: "partial" } as const };
+    }, (value) => value === "throttle")).resolves.toEqual({ status: "completed", value: "throttle" });
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "partial" });
+  });
   it("pauses untracked manual requests only when the selected Embedded pilot can start", async () => {
     const actual = await vi.importActual<typeof import("./admission-mode")>("./admission-mode");
     vi.mocked(repoGradeAdmissionMode).mockImplementation(actual.repoGradeAdmissionMode);

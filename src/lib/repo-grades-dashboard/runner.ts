@@ -25,7 +25,7 @@ import type { RepoGradeCourseKindBasis } from "./preparation-ledger";
 import type { RepoGradeStartupTarget } from "./scheduler";
 import {
   unretainedRepoGradeFeedbackField, validRepoGradeCohortId,
-  type RepoGradeAutomaticSettlement, type RepoGradePreparedProvenance,
+  type RepoGradeAutomaticSettlement, type RepoGradeClaim, type RepoGradePreparedProvenance,
 } from "./state";
 
 const COURSE_COLUMNS = "github_org, repos, rubric_name, rubric_data, repo_module_pairing, student_repos, name, course_kind";
@@ -78,6 +78,7 @@ type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 
 type AutomaticRuntime = {
   startupBatchId?: string;
+  deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;
   }): Promise<{
@@ -149,6 +150,7 @@ type RunOutcome = RepoGradeAutomaticSettlement["outcome"] | RepoGradeClaimStatus
 
 type UnsettledEvaluation = { feedbackRetention?: RepoGradeFeedbackField; unretainedResult: RepoGradeResultRecord };
 type RunResult =
+  | { status: "deferred-source-throttle"; claim: RepoGradeClaim & { mode: "automatic" | "retry" } }
   | {
       status: Exclude<RunOutcome, "partial">;
       feedbackRetention?: never;
@@ -165,7 +167,7 @@ function classifyEvaluation(
   repo: string,
   profile: RepoGradeProfile,
   rubric: string,
-): RunResult & { settlement: RepoGradeAutomaticSettlement } {
+): Exclude<RunResult, { status: "deferred-source-throttle" }> & { settlement: RepoGradeAutomaticSettlement } {
   if ("knownFailure" in response) return { status: "failed", settlement: { outcome: "failed" } };
   if ("error" in response) {
     return response.partial && response.sourceCommit === sourceCommit
@@ -298,8 +300,9 @@ export async function runRepoGradeTarget(
       unsettled = { unretainedResult: settlement.result };
     }
     return { value, settlement };
-  });
+  }, runtime.deferSourceThrottle ? (value) => value.status === "partial" && value.reason === "grading-source-rate-limited" : undefined);
   if (admission.status === "completed") return admission.value;
+  if (admission.status === "deferred-pre-dispatch") return { status: "deferred-source-throttle", claim: admission.claim };
   if (admission.status === "manual-paused") return { status: "runtime-unavailable" };
   if (admission.status === "pre-dispatch-failed" || admission.status === "sandbox-refused") return { status: "failed" };
   if (admission.status === "unknown" && unsettled) {

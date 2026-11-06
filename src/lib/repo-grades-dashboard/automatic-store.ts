@@ -8,6 +8,7 @@ import { restoreAutomaticRepoGradeSnapshot, type AutomaticRepoGradeSnapshot } fr
 import type { RepoGradePreparationRetry } from "./preparation-ledger";
 import type { RepoGradeRepositoryCoverage } from "./scheduler";
 import { parseAutomaticRepoGradeSchedule, type AutomaticRepoGradeScheduleDraft } from "./automatic-schedule";
+import type { RepoGradeClaim } from "./state";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
@@ -28,7 +29,7 @@ type TargetCompletion = {
   recovery?: string;
 };
 export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion
-  | { state: "github-throttled"; rateLimit: DiscoveryRateLimit };
+  | { state: "github-throttled"; rateLimit: DiscoveryRateLimit; claim?: RepoGradeClaim & { mode: "automatic" | "retry" } };
 
 async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
   const { data, error } = await createServiceClient().rpc(name, args).retry(false).abortSignal(AbortSignal.timeout(10_000));
@@ -152,6 +153,14 @@ export function automaticRepoGradeEvidenceStore(
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
   if (result.state === "github-throttled") {
     const { retryAtMs, primary } = result.rateLimit;
+    if (result.claim) {
+      if (work.phase !== "grading" || result.claim.mode !== "automatic") return false;
+      return await rpc("repo_grade_automatic_retry_prepared_throttle", {
+        p_user_id: work.accountId, p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
+        p_generation: result.claim.generation, p_token: result.claim.token,
+        p_retry_at: retryAtMs === null ? null : new Date(retryAtMs).toISOString(), p_primary_limit: primary,
+      }) === true;
+    }
     return await rpc("repo_grade_automatic_finish_github_throttle", {
       p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
       p_discovering: work.phase === "discovering",

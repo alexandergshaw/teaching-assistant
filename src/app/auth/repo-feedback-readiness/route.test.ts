@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readRepoFeedbackReadiness } from "@/lib/supabase/repo-feedback-readiness";
-import { REPO_FEEDBACK_READINESS_POLICY, type RepoFeedbackReadiness } from "@/lib/supabase/repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_READINESS_POLICY, type RepoFeedbackReadiness } from "@/lib/repo-feedback-readiness-contract";
 import { POST } from "./route";
 
 vi.mock("@/lib/supabase/repo-feedback-readiness", () => ({ readRepoFeedbackReadiness: vi.fn() }));

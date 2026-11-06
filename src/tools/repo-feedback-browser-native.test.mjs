@@ -43,7 +43,7 @@ const requestHelpers = loadSource("../lib/supabase/repo-feedback-request.ts", (s
   assert.equal(specifier, "server-only");
   return {};
 });
-const contract = loadSource("../lib/supabase/repo-feedback-readiness-contract.ts");
+const contract = loadSource("../lib/repo-feedback-readiness-contract.ts");
 let verified = 0;
 const sessionRoute = loadSource("../app/auth/repo-feedback-session/route.ts", (specifier) => {
   if (specifier === "@/lib/supabase/repo-feedback-request") return requestHelpers;
@@ -56,7 +56,7 @@ const sessionRoute = loadSource("../app/auth/repo-feedback-session/route.ts", (s
 });
 const readinessRoute = loadSource("../app/auth/repo-feedback-readiness/route.ts", (specifier) => {
   if (specifier === "@/lib/supabase/repo-feedback-request") return requestHelpers;
-  if (specifier === "@/lib/supabase/repo-feedback-readiness-contract") return contract;
+  if (specifier === "@/lib/repo-feedback-readiness-contract") return contract;
   assert.equal(specifier, "@/lib/supabase/repo-feedback-readiness");
   return { readRepoFeedbackReadiness: () => ({
     origin: "https://feedback-native.example.test",

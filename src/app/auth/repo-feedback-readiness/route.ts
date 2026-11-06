@@ -1,5 +1,5 @@
 import { readRepoFeedbackReadiness } from "@/lib/supabase/repo-feedback-readiness";
-import { REPO_FEEDBACK_READINESS_PATH } from "@/lib/supabase/repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_READINESS_PATH } from "@/lib/repo-feedback-readiness-contract";
 import { hasEmptyFeedbackBody, isSameOriginFeedbackRequest } from "@/lib/supabase/repo-feedback-request";
 
 const NO_STORE = { "Cache-Control": "no-store" };

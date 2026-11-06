@@ -2,7 +2,7 @@
 
 import type { SupabaseAuthObserver } from "../context/supabase-auth-observer";
 import { createRepoFeedbackPrivateAuth } from "./repo-feedback-private-auth";
-import { REPO_FEEDBACK_SESSION_PATH } from "./supabase/repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_SESSION_PATH } from "./repo-feedback-readiness-contract";
 
 const CHANNEL = "repo-feedback-revocation-v1";
 const REVOKE = "revoke";

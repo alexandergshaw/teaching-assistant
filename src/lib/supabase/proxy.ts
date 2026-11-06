@@ -3,7 +3,7 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
 import { getAppUserWithTimeout, ensureAppUserRowExists } from "./app-users";
-import { REPO_FEEDBACK_READINESS_PATH, REPO_FEEDBACK_SESSION_PATH } from "./repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_READINESS_PATH, REPO_FEEDBACK_SESSION_PATH } from "../repo-feedback-readiness-contract";
 import {
   resolveAccess,
   isPublicPath,

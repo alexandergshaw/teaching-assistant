@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AuthClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRepoFeedbackPasswordChallenge } from "./repo-feedback-password";
-import { readyResponse } from "./repo-feedback-readiness.test-fixture";
+import { readyResponse } from "./supabase/repo-feedback-readiness.test-fixture";
 
 const PROJECT = "https://isolated.example";
 const BASELINE = {

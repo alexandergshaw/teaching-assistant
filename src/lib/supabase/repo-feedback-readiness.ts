@@ -6,7 +6,7 @@ import {
   REPO_FEEDBACK_MAX_OBSERVATION_AGE_MS,
   REPO_FEEDBACK_READINESS_POLICY,
   type RepoFeedbackReadiness,
-} from "./repo-feedback-readiness-contract";
+} from "../repo-feedback-readiness-contract";
 
 type TrustedPolicy = Readonly<{
   audience: string;

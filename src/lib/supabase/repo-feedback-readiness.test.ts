@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { evaluateRepoFeedbackReadiness, readRepoFeedbackReadiness } from "./repo-feedback-readiness";
-import { REPO_FEEDBACK_MAX_OBSERVATION_AGE_MS, REPO_FEEDBACK_READINESS_POLICY } from "./repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_MAX_OBSERVATION_AGE_MS, REPO_FEEDBACK_READINESS_POLICY } from "../repo-feedback-readiness-contract";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const NOW = 1_800_000_000_000;

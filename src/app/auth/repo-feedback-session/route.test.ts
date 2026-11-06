@@ -2,7 +2,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 import { readRepoFeedbackReadiness } from "@/lib/supabase/repo-feedback-readiness";
-import { REPO_FEEDBACK_READINESS_POLICY } from "@/lib/supabase/repo-feedback-readiness-contract";
+import { REPO_FEEDBACK_READINESS_POLICY } from "@/lib/repo-feedback-readiness-contract";
 
 vi.mock("@/lib/supabase/repo-feedback-readiness", () => ({ readRepoFeedbackReadiness: vi.fn() }));
 

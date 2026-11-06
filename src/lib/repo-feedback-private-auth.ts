@@ -2,7 +2,7 @@
 
 import { createRepoFeedbackAuthority } from "../app/components/repo-grades/repoFeedbackIdb";
 import { createRepoFeedbackIdbAdapter } from "../app/components/repo-grades/repoFeedbackIdbAdapter";
-import { createRepoFeedbackPasswordChallenge } from "./supabase/repo-feedback-password";
+import { createRepoFeedbackPasswordChallenge } from "./repo-feedback-password";
 
 const MAX_TIMER_DELAY = 2_147_483_647;
 

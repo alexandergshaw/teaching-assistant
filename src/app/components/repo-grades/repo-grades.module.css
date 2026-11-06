@@ -10,7 +10,9 @@
    working-header tier and the table, so both sticky tiers share this scroll
    context (max-height idiom: tasks/TasksGrid.module.css). */
 .stickyShell {
+  position: relative;
   max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 120px);
+  min-width: 0;
   overflow: auto;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
@@ -173,9 +175,16 @@
 }
 
 .grid {
+  --rg-student-width: 14rem;
   width: 100%;
-  border-collapse: collapse;
+  /* Saved-only columns must have the same room as columns with controls. */
+  min-width: calc(var(--rg-student-width) + var(--rg-assignment-count) * 20rem);
+  table-layout: fixed;
   font-size: var(--font-size-md);
+}
+
+.studentTrack {
+  width: var(--rg-student-width);
 }
 
 .grid th,
@@ -208,11 +217,6 @@
 
 .grid tbody tr:last-child > * {
   border-bottom: none;
-}
-
-.grid .studentColumn {
-  width: 14rem;
-  min-width: 12rem;
 }
 
 .repoIdentity {
@@ -259,7 +263,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  min-width: 220px;
   white-space: normal;
 }
 
@@ -346,6 +349,7 @@
 }
 
 .unboundPicker select {
+  max-width: 100%;
   padding: var(--space-1) var(--space-1);
   border: 1px solid var(--field-border);
   border-radius: var(--radius-xs);
@@ -414,9 +418,12 @@
   flex-direction: column;
   gap: var(--space-1);
   align-items: flex-start;
-  min-width: 190px;
   white-space: normal;
   font-weight: 600;
+}
+
+.columnHeader > .postReason:empty {
+  position: absolute;
 }
 
 .actionHeading {
@@ -436,24 +443,30 @@
   inset-inline-end: 0;
 }
 
-/* N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
-   every sortable column header's clickable control: a plain reset button so
-   it reads as part of the header text, not as a separate form control, with
-   `.grid button:focus-visible` (below) already giving it a visible focus
-   ring like every other button in this table. */
-.sortHeaderButton {
-  display: inline-flex;
+/* Keep the MUI sort arrow beside the title, even in the stacked controls. */
+.grid .sortHeaderButton {
+  flex-direction: row;
   align-items: center;
   gap: var(--space-1);
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
   font: inherit;
   font-weight: 600;
-  color: inherit;
-  cursor: pointer;
+  line-height: 1.35;
   text-align: left;
+  max-width: 100%;
+}
+
+.columnTitle {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.columnFolder {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sortHeaderButton:hover {
@@ -627,51 +640,9 @@
   font-weight: 600;
 }
 
-/* ── Reflow at half-screen width (B1, B3, B4, B5, B6, B2 partial) ─────────
-   Strategy chosen: collapse each row to a stacked card, following
-   page.module.css:1956-1965's `.automationRunsRow` precedent - NOT
-   page.module.css:1880-1893's `.libRow` precedent, which sheds
-   lower-priority columns. This grid has no lower-priority column to shed:
-   every assignment column is a live grading/posting control an instructor
-   may need for any student, so hiding one to save width would hide
-   functionality, not just a label. The two strategies are not mixed. Repo
-   name and binding state satisfy B3's "must remain visible" requirement for
-   free - they are simply the first two fields rendered in every card, no
-   extra rule needed to keep them there.
-
-   Breakpoint: 700px, reused rather than adding a 14th value (B5). This is
-   the one existing value shared by BOTH directly relevant in-repo
-   precedents at once: TasksGrid.module.css:956 (the sticky-header un-stick
-   the rule below mirrors, for B4) and page.module.css:1956 itself (the
-   card-collapse strategy this block follows, for B3) - so one breakpoint
-   both matches precedent and avoids the un-stick and the reflow triggering
-   at two different, uncoordinated widths. It also happens to land close to
-   half of a common ~1366-1440px laptop viewport, which is what "half-width
-   window" means for this ~1350px-floor table in practice.
-
-   Accessibility (required disclosure): stacking a table row's cells
-   vertically is not achievable while keeping display: table-row / table-cell
-   - that is a hard limit of the table layout algorithm, not a choice made
-   here, so this DOES change the computed display of <table>/<thead>/<tbody>/
-   <tr>/<th>/<td> away from their table-implied values at this width. Some
-   browsers derive accessible-tree roles from computed display for table
-   elements, so RepoGradesGrid.tsx now sets role="table" (already present),
-   role="rowgroup" on <thead>/<tbody>, role="row" on every <tr>,
-   role="columnheader" on every <th> (alongside the existing scope="col"),
-   and role="cell" on every <td>, unconditionally - these match the elements'
-   own implicit ARIA roles one-for-one, so they are a no-op at full width
-   (B6) and become load-bearing only here, where computed display no longer
-   guarantees the same roles on its own. Header-to-column association
-   therefore survives via explicit role/scope rather than via CSS layout.
-   The <thead> row is intentionally NOT display:none, unlike
-   `.automationRunsHead` - unlike that table's plain text header, this
-   grid's column headers hold a live Canvas-assignment <select> and a Post
-   button (B2), so hiding them would hide controls, not just labels. Because
-   the un-stuck header no longer sits directly above a scrolled-past card's
-   cells, .cellColumnLabel above adds a small, aria-hidden, per-cell folder
-   name so a sighted user can still tell which assignment a field belongs to
-   without re-hearing it via assistive tech, which already has the real
-   header association. */
+/* At the existing narrow breakpoint, stack rows as cards and keep the
+   header controls visible. Explicit roles and scope preserve the table
+   associations when CSS changes the elements' native display. */
 @media (max-width: 700px) {
   /* B4 - un-stick, following TasksGrid.module.css:956's own WCAG 2.2
      SC 1.4.10 (Reflow) precedent: a sticky header stops helping once the
@@ -686,11 +657,24 @@
      their table-group displays together with tr/th/td - leaving any one of
      them as a table-* display while its siblings change produces undefined,
      inconsistent layout, not a graceful partial reflow. */
-  .grid,
+  table.grid,
   .grid thead,
   .grid tbody {
     display: block;
     width: 100%;
+    min-width: 0;
+  }
+
+  .grid colgroup {
+    display: none;
+  }
+
+  .columnTitle {
+    -webkit-line-clamp: unset;
+  }
+
+  .columnFolder {
+    white-space: normal;
   }
 
   .grid thead tr {
@@ -740,11 +724,6 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     margin-bottom: var(--space-1);
-  }
-
-  .grid .studentColumn {
-    width: 100%;
-    min-width: 0;
   }
 
   /* B2 - every control in the column header and the binding picker must be

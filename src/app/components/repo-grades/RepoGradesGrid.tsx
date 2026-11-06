@@ -34,7 +34,7 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
-import { useId, useState } from "react";
+import { useId, useState, type CSSProperties } from "react";
 import { Checkbox, Collapse, Link, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
 import { FeedbackDisclosure } from "./RepoDashboardFeedback";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
@@ -333,12 +333,11 @@ function ColumnHeaderControls({
           active={folderSortActive}
           direction={folderSortActive ? sort.direction : "asc"}
           className={styles.sortHeaderButton}
-          sx={{ font: "inherit", fontWeight: 600 }}
           onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", column.folder))}
           aria-label={`Sort by ${label} score`}
-          title="Sort by browser percentage when available, then saved percentage"
+          title={`${label} — sort by browser percentage when available, then saved percentage`}
         >
-          {label}
+          <span className={styles.columnTitle}>{label}</span>
         </TableSortLabel>
         <RepoGradeActionsMenu label={`Folder actions: ${folderName}`}>
           {(close) => [
@@ -378,7 +377,9 @@ function ColumnHeaderControls({
           ]}
         </RepoGradeActionsMenu>
       </div>
-      {column.folder && column.folder !== label && <span className={dashboardStyles.matrixMeta}>{column.folder}</span>}
+      {column.folder && column.folder !== label && (
+        <span className={`${dashboardStyles.matrixMeta} ${styles.columnFolder}`} title={column.folder}>{column.folder}</span>
+      )}
       <span id={queueStatusId} className={styles.postReason} role="status">
         {gradingThisColumn && <>
           {queue?.folderState === "paused" && "Folder queue paused. "}
@@ -456,7 +457,12 @@ export default function RepoGradesGrid({
   }
 
   return (
-    <Table size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment" aria-busy={loading}>
+    <Table size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment"
+      aria-busy={loading} style={{ "--rg-assignment-count": visibleColumns.length } as CSSProperties}>
+      <colgroup>
+        <col className={styles.studentTrack} />
+        {visibleColumns.length > 0 && <col span={visibleColumns.length} />}
+      </colgroup>
       <TableHead role="rowgroup">
         <TableRow role="row">
           <TableCell component="th" scope="col" role="columnheader" className={styles.studentColumn}
@@ -498,10 +504,11 @@ export default function RepoGradesGrid({
                   />
                 ) : (
                   <TableSortLabel component="button" active={folderSortActive} direction={folderSortActive ? sort.direction : "asc"}
+                    className={styles.sortHeaderButton}
                     aria-label={`Sort by ${label} score`}
-                    title="Sort by browser percentage when available, then saved percentage"
+                    title={`${label} — sort by browser percentage when available, then saved percentage`}
                     onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", folder))}>
-                    {label}
+                    <span className={styles.columnTitle}>{label}</span>
                   </TableSortLabel>
                 )}
               </TableCell>

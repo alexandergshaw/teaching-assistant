@@ -23,9 +23,8 @@ describe("discoverRepoGradeSources", () => {
         return Response.json([repo("lab-01"), repo("lab-02"), repo("lab-03"), repo("other")]);
       }
       if (url.endsWith("/commits/grade%2Fsource")) {
-        return url.includes("lab-03") ? Response.json({ message: "Resource not accessible" }, { status: 403 }) : Response.json({ sha });
+        return url.includes("lab-03") ? Response.json({ message: "Resource not accessible" }, { status: 403 }) : Response.json({ sha, commit: { tree: { sha: treeSha } } });
       }
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
       if (url.endsWith(`/git/trees/${treeSha}?recursive=1`)) {
         return Response.json({
           sha: treeSha, truncated: url.includes("lab-02"),
@@ -46,13 +45,13 @@ describe("discoverRepoGradeSources", () => {
       ],
     });
     expect(fetcher.mock.calls.some(([url]) => url.includes("/other/"))).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(6); // Listing, three branch lookups, and two pinned trees.
   });
 
   it("resolves each default branch instead of guessing main", async () => {
     const fetcher = vi.fn(async (url: string) => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) return Response.json([repo("lab"), repo("no-branch", "")]);
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       if (url.endsWith(`/git/trees/${treeSha}?recursive=1`)) return Response.json({ sha: treeSha, truncated: false, tree: [] });
       throw new Error(`Unexpected GitHub URL ${url}`);
     });
@@ -67,6 +66,107 @@ describe("discoverRepoGradeSources", () => {
     expect(fetcher).toHaveBeenCalledWith(`${root}/repos/classroom/lab/commits/default-source`, expect.objectContaining({ cache: "no-store" }));
   });
 
+  it.each([undefined, {}, { sha: "../untrusted" }])("rejects a malformed commit tree pointer %j", async (tree) => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo("lab")]);
+      return Response.json({ sha, commit: { tree } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({
+      status: "scanned", enumerationComplete: true, repos: [
+        { status: "blocked", repo: "classroom/lab", sourceRef: "default-source", sourceCommit: sha, reason: "unavailable" },
+      ],
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses a validated tree only after live ref resolution and reapplies current folder settings", async () => {
+    const scope = { accountId: "tree-reuse-account", organization: "classroom" };
+    const movedSha = "c".repeat(40);
+    const movedTreeSha = "d".repeat(40);
+    let liveCommit = sha;
+    let liveTree = treeSha;
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo("lab")]);
+      if (url.includes("/commits/")) return Response.json({ sha: liveCommit, commit: { tree: { sha: liveTree } } });
+      return Response.json({
+        sha: liveTree, truncated: false,
+        tree: [{ type: "blob", path: "lab/solution.py", size: 20 }],
+      });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({
+      repos: [{ sourceCommit: sha, folders: ["lab"] }],
+    });
+    liveCommit = movedSha;
+    await expect(discoverRepoGradeSources({ ...scope, folderSources: new Map([["lab", "alternate"]]) })).resolves.toMatchObject({
+      repos: [
+        { sourceCommit: movedSha, sourceRef: "default-source", folders: [] },
+        { sourceCommit: movedSha, sourceRef: "alternate", folders: ["lab"] },
+      ],
+    });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/commits/"))).toHaveLength(3);
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(1);
+
+    liveTree = movedTreeSha;
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({
+      repos: [{ sourceCommit: movedSha, folders: ["lab"] }],
+    });
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining(`/git/trees/${movedTreeSha}?`), expect.anything());
+  });
+
+  it("isolates cached trees by account, credential and repo and requires live access", async () => {
+    const scope = { accountId: "tree-access-account", organization: "classroom" };
+    let liveRepo = "lab";
+    let denied = false;
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo(liveRepo)]);
+      if (url.includes("/commits/")) return denied
+        ? Response.json({ message: "Resource not accessible" }, { status: 403 })
+        : Response.json({ sha, commit: { tree: { sha: treeSha } } });
+      return Response.json({ sha: treeSha, truncated: false, tree: [] });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await discoverRepoGradeSources(scope);
+    await discoverRepoGradeSources({ ...scope, accountId: "another-tree-access-account" });
+    vi.stubEnv("GITHUB_TOKEN", "rotated-token");
+    await discoverRepoGradeSources(scope);
+    liveRepo = "another-lab";
+    await discoverRepoGradeSources(scope);
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(4);
+
+    denied = true;
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({
+      repos: [{ status: "blocked", reason: "access-denied" }],
+    });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(4);
+  });
+
+  it("retries incomplete trees and respects a live throttle even with a warm tree", async () => {
+    const scope = { accountId: "tree-throttle-account", organization: "classroom" };
+    let truncated = true;
+    let limited = false;
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo("lab")]);
+      if (url.includes("/commits/")) return Response.json({ sha, commit: { tree: { sha: treeSha } } }, {
+        headers: limited ? { "x-ratelimit-remaining": "0" } : {},
+      });
+      return Response.json({ sha: treeSha, truncated, tree: [] });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({ repos: [{ status: "partial" }] });
+    truncated = false;
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({ repos: [{ status: "ready" }] });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(2);
+
+    limited = true;
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({
+      repos: [{ status: "blocked", reason: "rate-limited" }],
+    });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(2);
+  });
+
   it("includes alternate-only folders and resolves a shared ref once per repo", async () => {
     const alternateRef = "work/source";
     const alternateSha = "c".repeat(40);
@@ -78,10 +178,8 @@ describe("discoverRepoGradeSources", () => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) {
         return Response.json([repo("lab"), repo("other", alternateRef)]);
       }
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
-      if (url.endsWith("/commits/work%2Fsource")) return Response.json({ sha: alternateSha });
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
-      if (url.endsWith(`/git/commits/${alternateSha}`)) return Response.json({ sha: alternateSha, tree: { sha: alternateTree } });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
+      if (url.endsWith("/commits/work%2Fsource")) return Response.json({ sha: alternateSha, commit: { tree: { sha: alternateTree } } });
       const pinnedTree = url.includes(alternateTree) ? alternateTree : treeSha;
       const folders = pinnedTree === alternateTree ? ["only-alternate", "shared", "unconfigured"] : ["shared", "still-default"];
       if (url.endsWith(`/git/trees/${pinnedTree}?recursive=1`)) {
@@ -118,11 +216,9 @@ describe("discoverRepoGradeSources", () => {
     const folderSources = new Map([["override-failed", failedRef], ["override-truncated", truncatedRef]]);
     const fetcher = vi.fn(async (url: string) => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) return Response.json([repo("lab")]);
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       if (url.endsWith("/commits/missing")) return new Response(null, { status: 404 });
-      if (url.endsWith("/commits/large")) return Response.json({ sha: truncatedSha });
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
-      if (url.endsWith(`/git/commits/${truncatedSha}`)) return Response.json({ sha: truncatedSha, tree: { sha: truncatedTree } });
+      if (url.endsWith("/commits/large")) return Response.json({ sha: truncatedSha, commit: { tree: { sha: truncatedTree } } });
       if (url.includes("/git/trees/")) {
         const truncated = url.includes(truncatedTree);
         return Response.json({
@@ -184,8 +280,7 @@ describe("discoverRepoGradeSources", () => {
         return Response.json([repo("lab-1"), ...Array.from({ length: 99 }, (_, index) => repo(`other-${index}`))]);
       }
       if (url.includes("&page=2")) return Response.json([repo("OTHER-0")]);
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       return Response.json({ sha: treeSha, truncated: false, tree: [{ path: "lab/main.py", type: "blob", size: 5 }] });
     });
     vi.stubGlobal("fetch", fetcher);
@@ -194,14 +289,14 @@ describe("discoverRepoGradeSources", () => {
         { status: "ready", repo: "classroom/lab-1", sourceRef: "default-source", sourceCommit: sha, folders: ["lab"] },
       ],
     });
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it("rejects a redirected pinned request and never exposes its location or falls back to legacy", async () => {
     const fetcher = vi.fn(async (url: string, init: RequestInit) => {
       expect(init.redirect).toBe("manual");
       if (url.includes("/orgs/")) return Response.json([repo("lab")]);
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       return new Response(null, { status: 301, headers: { location: "https://redirect.invalid/?private=value" } });
     });
     vi.stubGlobal("fetch", fetcher);
@@ -227,8 +322,7 @@ describe("discoverRepoGradeSources", () => {
   ])("keeps a malformed or duplicate recursive tree entry partial (%j)", async (entry) => {
     const fetcher = vi.fn(async (url: string) => {
       if (url.includes("/orgs/")) return Response.json([repo("lab")]);
-      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       return Response.json({ sha: treeSha, truncated: false, tree: [validTreeEntry, entry] });
     });
     vi.stubGlobal("fetch", fetcher);
@@ -240,17 +334,16 @@ describe("discoverRepoGradeSources", () => {
   });
 
   it("caps total GitHub requests and marks every unscanned repo/ref pair as incomplete", async () => {
-    const repos = Array.from({ length: 61 }, (_, index) => repo(`lab-${index}`));
+    const repos = Array.from({ length: 81 }, (_, index) => repo(`lab-${index}`));
     const fetcher = vi.fn(async (url: string) => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) return Response.json(repos);
-      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
       if (url.endsWith(`/git/trees/${treeSha}?recursive=1`)) {
         return Response.json({
           sha: treeSha, truncated: false,
           tree: ["default-folder", "alternate-folder"].map((folder) => ({ type: "blob", size: 20, path: `${folder}/main.py` })),
         });
       }
-      return Response.json({ sha });
+      return Response.json({ sha, commit: { tree: { sha: treeSha } } });
     });
     vi.stubGlobal("fetch", fetcher);
 
@@ -293,15 +386,12 @@ describe("discoverRepoGradeSources", () => {
     const fetcher = vi.fn(async (url: string) => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) return Response.json(repos);
       if (url.endsWith("/lab-0/commits/default-source")) return throttle.promise;
-      if (url.endsWith("/lab-1/commits/default-source") || url.endsWith("/lab-2/commits/default-source")) {
-        return Response.json({ sha });
-      }
-      if (url.endsWith(`/lab-1/git/commits/${sha}`)) return outstandingCommit.promise;
-      if (url.endsWith(`/lab-2/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      if (url.endsWith("/lab-1/commits/default-source")) return outstandingCommit.promise;
+      if (url.endsWith("/lab-2/commits/default-source")) return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       if (url.endsWith(`/lab-2/git/trees/${treeSha}?recursive=1`)) return outstandingTree.promise;
       if (url.endsWith("/commits/default-source")) {
         await outstandingRefs.promise;
-        return Response.json({ sha });
+        return Response.json({ sha, commit: { tree: { sha: treeSha } } });
       }
       throw new Error(`Unexpected GitHub URL ${url}`);
     });
@@ -309,7 +399,7 @@ describe("discoverRepoGradeSources", () => {
     const pending = discoverRepoGradeSources({
       organization: "classroom", folderSources: new Map([["override", "alt"]]),
     });
-    const startedRequests = DEFAULT_TREE_SCAN_CONCURRENCY + 4; // Listing, initial refs, two commit objects, one tree.
+    const startedRequests = DEFAULT_TREE_SCAN_CONCURRENCY + 2; // Listing, initial refs, one tree.
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(startedRequests));
 
     const body = new ReadableStream({ cancel: () => headersObserved.resolve() });
@@ -317,7 +407,7 @@ describe("discoverRepoGradeSources", () => {
     throttle.resolve(limited);
     await headersObserved.promise;
     outstandingRefs.resolve();
-    outstandingCommit.resolve(Response.json({ sha, tree: { sha: treeSha } }));
+    outstandingCommit.resolve(Response.json({ sha, commit: { tree: { sha: treeSha } } }));
     outstandingTree.resolve(Response.json({
       sha: treeSha, truncated: false,
       tree: ["override", "unrelated"].map((folder) => ({ type: "blob", size: 20, path: `${folder}/main.py` })),

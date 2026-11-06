@@ -211,7 +211,7 @@ it("discloses partial coverage and hides course settings in the dormant preview"
   vi.mocked(discoverRepoGradeSources).mockResolvedValue(discovery);
   await expect(planRepoGradeCourseAction(courseId))
     .resolves.toEqual({ status: "planned", discovery, execution: "runtime-unavailable", preview: { history: "not-read", targets: [] } });
-  expect(discoverRepoGradeSources).toHaveBeenCalledExactlyOnceWith({ organization: "school", folderSources: new Map() });
+  expect(discoverRepoGradeSources).toHaveBeenCalledExactlyOnceWith({ accountId: account.id, organization: "school", folderSources: new Map() });
   expect(from).not.toHaveBeenCalled();
 });
 

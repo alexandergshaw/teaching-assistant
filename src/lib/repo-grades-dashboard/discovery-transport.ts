@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { githubRestHeaders } from "@/lib/github.repos";
 
 const API_ORIGIN = "https://api.github.com";
@@ -65,6 +66,8 @@ export function createDiscoveryTransport() {
   let bytes = 0;
   let throttled: ThrottleStop | undefined;
   let stopped: AbortStop | undefined;
+  let headers: ReturnType<typeof githubRestHeaders> | undefined;
+  let credentialScope: string | undefined;
 
   function notifyFenceChanged() {
     fenceChanged.resolve();
@@ -168,7 +171,7 @@ export function createDiscoveryTransport() {
       if (requests >= MAX_REQUESTS) fail("request-budget-exhausted");
       const url = new URL(path, API_ORIGIN);
       if (url.origin !== API_ORIGIN || url.username || url.password) fail("unavailable");
-      const headers = githubRestHeaders();
+      headers ??= githubRestHeaders();
       // No await between admission, charging, and starting the network request.
       requests += 1;
       const pending = fetch(url.href, {
@@ -213,5 +216,14 @@ export function createDiscoveryTransport() {
     }
   }
 
-  return { getJson, dispose: () => timeout.removeEventListener("abort", expire) };
+  function treeCacheScope() {
+    checkActive();
+    if (throttled || fences.size) return undefined;
+    // The transport uses the same headers for the live ref and pinned tree.
+    headers ??= githubRestHeaders();
+    credentialScope ??= createHash("sha256").update(headers.Authorization).digest("hex");
+    return credentialScope;
+  }
+
+  return { getJson, checkActive, treeCacheScope, dispose: () => timeout.removeEventListener("abort", expire) };
 }

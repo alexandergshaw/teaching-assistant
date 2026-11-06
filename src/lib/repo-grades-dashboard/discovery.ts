@@ -14,6 +14,10 @@ type DiscoveryRepo = { owner: string; name: string; fullName: string; defaultBra
 const MAX_DISCOVERY_SOURCE_ROWS = 4_000;
 const MAX_ORG_PAGES = 10;
 const ORG_PAGE_SIZE = 100;
+const MAX_CACHED_TREES = 512;
+const MAX_CACHED_FOLDERS = 256;
+const MAX_CACHED_FOLDER_BYTES = 16 * 1024;
+const cachedFolders = new Map<string, readonly string[]>();
 
 export type RepoGradeSourceRow =
   | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[] }
@@ -74,7 +78,7 @@ function requireSha(value: unknown): string {
   return value.toLowerCase();
 }
 
-function readFolders(value: unknown, treeSha: string, includesFolder: (folder: string) => boolean): string[] | null {
+function readFolders(value: unknown, treeSha: string): string[] | null {
   const tree = record(value);
   if (!tree || requireSha(tree.sha) !== treeSha || !Array.isArray(tree.tree) || typeof tree.truncated !== "boolean") {
     throw new DiscoveryTransportError("unavailable");
@@ -95,7 +99,17 @@ function readFolders(value: unknown, treeSha: string, includesFolder: (folder: s
       paths.push(path);
     } else return null;
   }
-  return assignmentFolderPathsFromTree(paths).filter(includesFolder);
+  return assignmentFolderPathsFromTree(paths);
+}
+
+function rememberFolders(key: string, folders: readonly string[]) {
+  if (folders.length > MAX_CACHED_FOLDERS
+    || folders.reduce((bytes, folder) => bytes + Buffer.byteLength(folder), 0) > MAX_CACHED_FOLDER_BYTES) return;
+  cachedFolders.set(key, folders);
+  if (cachedFolders.size > MAX_CACHED_TREES) {
+    const oldest = cachedFolders.keys().next().value;
+    if (oldest !== undefined) cachedFolders.delete(oldest);
+  }
 }
 
 async function readSource(
@@ -103,20 +117,32 @@ async function readSource(
   sourceRef: string,
   includesFolder: (folder: string) => boolean,
   request: DiscoveryRequest,
+  accountId: string | undefined,
 ): Promise<RepoGradeSourceRow> {
   if (!sourceRef) return { status: "blocked", repo, sourceRef, reason: "invalid-source" };
   let sourceCommit: string | undefined;
   try {
     const base = `/repos/${owner}/${name}` as const;
-    sourceCommit = await request.getJson(`${base}/commits/${encodeRefSegment(sourceRef)}`, (value) => requireSha(record(value)?.sha));
-    const treeSha = await request.getJson(`${base}/git/commits/${sourceCommit}`, (value) => {
-      const commit = record(value);
-      if (requireSha(commit?.sha) !== sourceCommit) throw new DiscoveryTransportError("unavailable");
-      return requireSha(record(commit?.tree)?.sha);
+    const commit = await request.getJson(`${base}/commits/${encodeRefSegment(sourceRef)}`, (value) => {
+      const response = record(value);
+      return { sha: requireSha(response?.sha), tree: record(record(response?.commit)?.tree)?.sha };
     });
-    const folders = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => readFolders(value, treeSha, includesFolder));
+    sourceCommit = commit.sha;
+    const treeSha = requireSha(commit.tree);
+    // GitHub has just authorized a read of this repository's live ref and
+    // resolved its immutable tree. Reuse only complete, validated projections.
+    const credential = accountId && request.treeCacheScope();
+    const cacheKey = credential && JSON.stringify([accountId, credential, repo, treeSha]);
+    let folders = cacheKey ? cachedFolders.get(cacheKey) : undefined;
+    if (!folders) {
+      const loaded = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => readFolders(value, treeSha));
+      if (cacheKey && loaded) rememberFolders(cacheKey, loaded);
+      folders = loaded ?? undefined;
+    }
     if (!folders) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
-    return { status: "ready", repo, sourceRef, sourceCommit, folders };
+    const selectedFolders = folders.filter(includesFolder);
+    request.checkActive();
+    return { status: "ready", repo, sourceRef, sourceCommit, folders: selectedFolders };
   } catch (error) {
     return { status: "blocked", repo, sourceRef, sourceCommit, reason: classifyFailure(error) };
   }
@@ -125,6 +151,7 @@ async function readSource(
 /** Pass only an owned course's server-resolved scope and saved folder refs. */
 export async function discoverRepoGradeSources(scope: {
   organization: string | null;
+  accountId?: string;
   prefix?: string;
   sourceRef?: string;
   folderSources?: ReadonlyMap<string, string | null>;
@@ -156,7 +183,9 @@ export async function discoverRepoGradeSources(scope: {
       // Scan refs within a repo sequentially to preserve the existing request
       // concurrency bound. Folder overrides are exact and never fall back.
       for (const ref of new Set([fallbackRef, ...configuredRefs])) {
-        rows.push(await readSource(item, ref, (folder) => (scope.folderSources?.get(folder) ?? fallbackRef) === ref, request));
+        rows.push(await readSource(
+          item, ref, (folder) => (scope.folderSources?.get(folder) ?? fallbackRef) === ref, request, scope.accountId,
+        ));
       }
       return { repo: item.fullName.toLowerCase(), fallbackRef, rows };
     });

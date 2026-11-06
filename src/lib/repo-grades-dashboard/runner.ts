@@ -54,7 +54,7 @@ export async function planRepoGradeCourse(accountId: string, courseId: string): 
     return { accountId, courseId, courseConfig, discovery, folderSources: new Map(), courseKindBasis };
   }
   const folderSources = await readCurrentRepoGradeProfilesForOwner(accountId, courseId);
-  const discovery = await discoverRepoGradeSources({ organization, folderSources });
+  const discovery = await discoverRepoGradeSources({ accountId, organization, folderSources });
   return { accountId, courseId, courseConfig, discovery, folderSources, courseKindBasis };
 }
 

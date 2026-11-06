@@ -78,6 +78,9 @@ export async function runAutomaticRepoGradeScheduleCases({ owner, worker }) {
     assert.equal(await set("null", "null"), "t");
     assert.equal((await status()).schedule, null);
     assert.equal(await worker.query(`select public.repo_grade_automatic_control('${ownerId}', 'start');`), "t");
+    const manuallyStarted = (await status()).run;
+    assert.equal(await worker.query(`select public.repo_grade_automatic_control(
+      '${ownerId}', 'stop', null, '${manuallyStarted.id}');`), "t");
   } finally {
     await worker.query("reset role;");
   }

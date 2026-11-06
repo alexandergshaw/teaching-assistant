@@ -13,6 +13,7 @@ import { runStartupRetryCases } from "./repo-grades-startup-retry-postgres.mjs";
 
 import { runAutomaticRepoGradeCases } from "./repo-grades-automatic-postgres.mjs";
 import { runAutomaticRepoGradeScheduleCases } from "./repo-grades-automatic-schedule-postgres.mjs";
+import { runAutomaticRepoGradeCutoverCases } from "./repo-grades-automatic-cutover-postgres.mjs";
 
 const migrationFiles = [
   "20260710000000_create_course_syllabi.sql",
@@ -38,6 +39,7 @@ const coordinatedStartupMigrationFile = "20261106150707_repo_grade_coordinated_s
 
 const automaticMigrationFile = "20261106181056_repo_grade_automatic_runs.sql";
 const automaticScheduleMigrationFile = "20261106182023_repo_grade_automatic_schedule.sql";
+const automaticCutoverMigrationFile = "20261106184758_repo_grade_automatic_startup_cutover.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -245,6 +247,12 @@ async function main() {
     await owner.query(`begin; ${automaticScheduleMigration} commit;`);
     await runAutomaticRepoGradeScheduleCases({ owner, worker });
     console.log("PASS: durable schedule isolation, due wakeup, DST, coverage and recovery expiry.");
+    const automaticCutoverMigration = readFileSync(
+      new URL(`../../supabase/migrations/${automaticCutoverMigrationFile}`, import.meta.url), "utf8",
+    );
+    await owner.query(`begin; ${automaticCutoverMigration} commit;`);
+    await runAutomaticRepoGradeCutoverCases({ owner, worker, contender, witness, waitForBlock });
+    console.log("PASS: inherited startup preference and exclusive browser-to-durable handoff.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

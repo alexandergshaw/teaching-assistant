@@ -13,6 +13,7 @@ export type AutomaticRepoGradeRun = {
   id: string;
   phase: "discovering" | "grading" | "complete" | "incomplete" | "stopped";
   settling: boolean;
+  waitingForBrowserStartup: boolean;
   courses: {
     courseId: string;
     label: string;

@@ -47,7 +47,8 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
           onChange={(_, enabled) => void setEnabled(enabled)} />}
       />
       <p id={preferenceHintId}>Turning this off affects future openings. The daily schedule is configured separately.</p>
-      <p role="status">{run?.phase === "stopped" && run.settling ? "Scheduling stopped. The worker is finishing the current task."
+      <p role="status">{run?.waitingForBrowserStartup ? "Waiting for the previous startup check to finish. You can close this page."
+        : run?.phase === "stopped" && run.settling ? "Scheduling stopped. The worker is finishing the current task."
         : run ? PHASE_TEXT[run.phase] : "No automatic run has started."}</p>
       {control?.changed === false && <p role="status">{control.action === "start"
         ? "No new run started. The worker already has a run queued or finishing."

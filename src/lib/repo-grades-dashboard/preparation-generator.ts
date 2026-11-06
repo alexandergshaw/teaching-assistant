@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { CourseKind } from "@/lib/course-kind";
+import { courseKindFromCourseName, type CourseKind } from "@/lib/course-kind";
 import { RUBRIC_DEDUCTION_TIERS } from "@/lib/grade/rubric-tiers";
 import { callLlm, getGeminiGenerationTuning, normalizeGenerationConfig, type LlmExecutionPolicy } from "@/lib/llm";
 
@@ -52,6 +52,20 @@ export type RepoGradeRubricGenerator = Readonly<{
 type GeneratorExecution = Pick<LlmExecutionPolicy, "deadlineMs" | "signal"> & Readonly<{
   beforeDispatch: () => Promise<void>;
 }>;
+
+export type RepoGradeCourseKindBasis = readonly [name: string | null, kind: string | null];
+
+/** Resolve the same deployed policy for both startup and owner review. */
+export function captureRepoGradePreparationPolicy(model: string, basis: RepoGradeCourseKindBasis) {
+  const [name, kind] = basis;
+  const courseKind = kind === "coding" || kind === "applied" ? kind : courseKindFromCourseName(name ?? "");
+  if (!courseKind) return { status: "course-kind-required" } as const;
+  const generator = captureRepoGradeRubricGenerator(model, courseKind);
+  if (!generator) return { status: "generator-unavailable" } as const;
+  const basisDigest = createHash("sha256").update(JSON.stringify(basis)).digest("hex");
+  const version = `${generator.promptParserVersion}:${generator.generationConfigFingerprint}:${basisDigest}`;
+  return { status: "ready", generator, version } as const;
+}
 type GenerationResult =
   | Readonly<{ status: "ready"; rubric: string }>
   | Readonly<{ status: "failed"; reason: "invalid-input" | "not-dispatched" | "model-refused" | "invalid-output" }>

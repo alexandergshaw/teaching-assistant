@@ -1,8 +1,9 @@
-import { readRepoGradeProfileAction, saveRepoGradeProfileAction } from "@/app/actions/repo-grade-profiles";
+import { readRepoGradeProfileAction, reviewRepoGradePreparationPolicyAction, saveRepoGradeProfileAction } from "@/app/actions/repo-grade-profiles";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 
 export type ProfileReadResult = Awaited<ReturnType<typeof readRepoGradeProfileAction>> | { status: "request-failed" };
 type ProfileSaveResult = Awaited<ReturnType<typeof saveRepoGradeProfileAction>> | { status: "request-failed" };
+export type PolicyReviewResult = Awaited<ReturnType<typeof reviewRepoGradePreparationPolicyAction>> | { status: "request-failed" };
 export type SavedProfile = Extract<ProfileReadResult, { status: "loaded" }>["profile"];
 
 export type ProfileDraft = Pick<SavedProfile, "provider" | "instructions" | "rubric" | "useReadmeInstructions" | "applyNamingDeduction" | "runCode">
@@ -21,8 +22,15 @@ export function profileDraft(profile: SavedProfile | null): ProfileDraft {
   };
 }
 
+const PROFILE_OPERATION = {
+  read: "Read automatic repository grading profile",
+  save: "Save automatic repository grading profile",
+  policy_preview: "Preview repository rubric preparation policy",
+  policy_apply: "Update repository rubric preparation policy",
+};
+
 async function measureProfileRequest<T extends { status: string }>(
-  kind: "read" | "save",
+  kind: keyof typeof PROFILE_OPERATION,
   request: () => Promise<T>,
 ): Promise<T | { status: "request-failed" }> {
   const started = performance.now();
@@ -33,13 +41,13 @@ async function measureProfileRequest<T extends { status: string }>(
     result = { status: "request-failed" };
   }
   const status = result.status;
-  const succeeded = status === "loaded" || status === "not-configured" || status === "saved";
+  const succeeded = ["loaded", "not-configured", "saved", "preview", "current", "updated"].includes(status);
   try {
     recordSessionDiagnosticEntry({
       at: new Date().toISOString(),
       surface: "grading",
       operation: `repo_grade_profile_${kind}`,
-      label: kind === "read" ? "Read automatic repository grading profile" : "Save automatic repository grading profile",
+      label: PROFILE_OPERATION[kind],
       outcome: succeeded ? "success" : "failure",
       durationMs: Math.min(3_600_000, Math.max(0, Math.round(performance.now() - started))),
       ...(succeeded ? {} : { cause: status }),
@@ -48,6 +56,13 @@ async function measureProfileRequest<T extends { status: string }>(
     // Diagnostics are independent of profile storage.
   }
   return result;
+}
+
+export function reviewRepoGradePreparationPolicy(
+  courseId: string, folder: string, expectedPreview?: string,
+): Promise<PolicyReviewResult> {
+  return measureProfileRequest(expectedPreview === undefined ? "policy_preview" : "policy_apply",
+    () => reviewRepoGradePreparationPolicyAction(courseId, folder, expectedPreview));
 }
 
 export function loadRepoGradeProfile(courseId: string, folder: string): Promise<ProfileReadResult> {

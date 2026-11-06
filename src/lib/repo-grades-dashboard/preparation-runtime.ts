@@ -1,14 +1,12 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
-import { courseKindFromCourseName } from "@/lib/course-kind";
 import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import { getGeminiApiKey } from "@/lib/gemini";
 import type { RepoGradeCourseConfig } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeDiscovery } from "./discovery";
 import { getRepoGraderIdentity } from "./grader-identity";
 import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
-import { captureRepoGradeRubricGenerator, generatePreparedRepoGradeRubric, type RepoGradeRubricGenerator } from "./preparation-generator";
+import { captureRepoGradePreparationPolicy, generatePreparedRepoGradeRubric, type RepoGradeRubricGenerator } from "./preparation-generator";
 import type { RepoGradePreparationCapture, RepoGradePreparationInput } from "./preparation-input";
 import { captureRepoGradeProfile, resolveRepoGradeRubric, type RepoGradeProfile } from "./profile";
 import { freezeRepoGradeRubric, readCurrentRepoGradeStartupProfile } from "./profile-store";
@@ -174,9 +172,9 @@ async function prepareRepoGradeStartupRubric(
   if (bootstrap) {
     const { courseKindBasis } = bootstrap;
     if (!courseKindBasis) return { status: "course-kind-required" };
-    const [name, kind] = courseKindBasis;
-    const courseKind = kind === "coding" || kind === "applied" ? kind : courseKindFromCourseName(name ?? "");
-    if (!courseKind) return { status: "course-kind-required" };
+    const policy = captureRepoGradePreparationPolicy(model, courseKindBasis);
+    if (policy.status === "course-kind-required") return { status: policy.status };
+    if (policy.status !== "ready") return null;
     const activeGrader = getRepoGraderIdentity("gemini");
     if (activeGrader.model !== model || activeGrader.graderVersion !== graderVersion) return null;
     try {
@@ -184,10 +182,8 @@ async function prepareRepoGradeStartupRubric(
     } catch {
       return null;
     }
-    generator = captureRepoGradeRubricGenerator(model, courseKind);
-    if (!generator) return null;
-    const basisDigest = createHash("sha256").update(JSON.stringify(courseKindBasis)).digest("hex");
-    promptParserVersion = `${generator.promptParserVersion}:${generator.generationConfigFingerprint}:${basisDigest}`;
+    generator = policy.generator;
+    promptParserVersion = policy.version;
   }
   const evidence = await composeRepoGradePreparationEvidence({
     configuration: {

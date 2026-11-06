@@ -65,6 +65,8 @@ const manualGrade = (repo) => `select public.repo_grade_claim('${user}', null, '
 async function checkPrivileges(owner) {
   const signatures = [
     "repo_grade_bootstrap_preparation(uuid,uuid,text,jsonb,jsonb,text,text,text,jsonb)",
+    "repo_grade_preparation_policy_snapshot(uuid,uuid,text)",
+    "repo_grade_update_preparation_policy(uuid,uuid,text,uuid,text,text,text)",
     "repo_grade_claim_preparation(uuid,uuid,text,jsonb,text,text,text,jsonb)",
     "repo_grade_claim_preparation(uuid,uuid,text,jsonb,text,text,text,jsonb,text)",
     "repo_grade_begin_preparation(uuid,uuid,uuid)",
@@ -98,7 +100,7 @@ export async function runRubricPreparationCases({ owner, worker, contender, witn
         'configurationFingerprint', '${fingerprint}', 'provider', 'gemini', 'model', '${model}',
         'graderVersion', '${grader}', 'rubricPolicy', 'generate', 'runCode', false, 'targetBranch', null,
         'useReadmeInstructions', false, 'instructions', ${json(instructions)} #>> '{}')
-    from public.course_hub c cross join (values ('project'), ('cap'), ('unknown'), ('failed'), ('failed-before')) f(folder)
+    from public.course_hub c cross join (values ('project'), ('cap'), ('unknown'), ('failed'), ('failed-before'), ('policy')) f(folder)
     where c.id in ('${course}', '${secondCourse}');
     insert into public.repo_grade_current_profiles (course_id, user_id, folder, configuration_fingerprint)
       select course_id, user_id, folder, configuration_fingerprint from public.repo_grade_profile_versions
@@ -126,13 +128,19 @@ export async function runRubricPreparationCases({ owner, worker, contender, witn
       provider: "gemini", model, graderVersion: grader, rubric: "", rubricPolicy: "generate",
       sourceRef: null, targetBranch: null, instructions: "", runCode: false, useReadmeInstructions: true, applyNamingDeduction: true,
     };
-    const bootstrap = (rawBasis, expected = "null", ownerId = user) => `select public.repo_grade_bootstrap_preparation(
+    const bootstrap = (rawBasis, expected = "null", ownerId = user, version = startupVersion) => `select public.repo_grade_bootstrap_preparation(
       '${ownerId}', '${course}', 'bootstrap', ${config(course)}, ${json(rawBasis)}, 'coding',
-      '${startupVersion}', ${expected}, ${json(defaultProfile)});`;
+      '${version}', ${expected}, ${json(defaultProfile)});`;
     assert.equal(await worker.query(bootstrap(["Wrong Course", null])), "f");
     assert.equal(await worker.query(bootstrap(basis, "null", otherUser)), "f");
     assert.equal(await worker.query(bootstrap(basis)), "t");
     assert.equal(await worker.query(bootstrap(basis)), "f");
+    assert.equal(await worker.query(bootstrap(basis, `'${fingerprint}'`)), "t");
+    const renamed = ["Advanced Programming", null];
+    const renamedVersion = `repo-grade-gemini-rubric-v1:${"e".repeat(64)}:${hash(JSON.stringify(renamed))}`;
+    await owner.query(`update public.course_hub set name = 'Advanced Programming' where id = '${course}';`);
+    assert.equal(await worker.query(bootstrap(renamed, `'${fingerprint}'`, user, renamedVersion)), "f");
+    await owner.query(`update public.course_hub set name = 'Intro to Programming' where id = '${course}';`);
     assert.equal(await worker.query(bootstrap(basis, `'${fingerprint}'`)), "t");
     const readDefault = `select public.repo_grade_read_profile('${user}', '${course}', 'bootstrap', null)`;
     assert.equal((await get(worker, readDefault)).startupDefault, true);
@@ -143,6 +151,34 @@ export async function runRubricPreparationCases({ owner, worker, contender, witn
     assert.equal((await get(worker, readDefault)).startupDefault, false);
     assert.equal(await worker.query(bootstrap(basis, `'${fingerprint}'`)), "t");
     await owner.query(`update public.course_hub set rubric_name = null where id = '${course}';`);
+
+    const policySnapshot = `select public.repo_grade_preparation_policy_snapshot('${user}', '${course}', 'policy');`;
+    const originalPolicy = await get(worker, policySnapshot);
+    const updatePolicy = (account = user, version = startupVersion) => `select public.repo_grade_update_preparation_policy(
+      '${account}', '${course}', 'policy', '${originalPolicy.revision}', '${fingerprint}', 'coding', '${version}');`;
+    assert.equal(await worker.query(updatePolicy(otherUser)), "conflict");
+    assert.equal(await worker.query(updatePolicy(user, renamedVersion)), "conflict");
+    await worker.query("begin isolation level read committed;");
+    const policyPrep = await get(worker, claimPreparation("policy"));
+    assert.equal(policyPrep.status, "claimed");
+    const racingUpdate = contender.query(updatePolicy());
+    void racingUpdate.catch(() => {});
+    await waitForBlock(contenderPid, workerPid);
+    await worker.query("commit;");
+    assert.equal(await racingUpdate, "busy");
+    assert(Number(await worker.query(`select ${beginPreparation(policyPrep)};`)) > 0);
+    assert.equal(await worker.query(updatePolicy()), "busy");
+    assert.deepEqual(await get(worker, policySnapshot), originalPolicy);
+    assert.equal((await get(worker, finishPreparation(policyPrep, "policy", "succeeded", receipt("policy")))).status, "succeeded");
+    assert.equal(await worker.query(updatePolicy()), "updated");
+    assert.equal(await worker.query(updatePolicy()), "conflict");
+    const replacedPolicy = await get(worker, policySnapshot);
+    assert.equal(replacedPolicy.version, startupVersion);
+    assert.notEqual(replacedPolicy.revision, originalPolicy.revision);
+    assert.deepEqual((await get(worker, `select public.repo_grade_read_profile('${user}', '${course}', 'policy', '${policyPrep.cohortId}');`)).receipt,
+      receipt("policy"));
+    assert.deepEqual(await get(worker, claimPreparation("policy")), { status: "configuration-changed" });
+
     for (const rpc of ["repo_grade_claim", "repo_grade_claim_tracked"]) {
       assert.deepEqual(await get(worker, claimGrade(rpc, oldCohort)), { status: "configuration-changed" });
     }

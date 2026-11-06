@@ -2,6 +2,7 @@
 
 import { validateGithubOwnerRepo } from "@/lib/github-ref-name";
 import { getRepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
+import { reviewRepoGradePreparationPolicy } from "@/lib/repo-grades-dashboard/preparation-policy";
 import { captureRepoGradeProfile, type RepoGradeProfile } from "@/lib/repo-grades-dashboard/profile";
 import { readCurrentRepoGradeProfile, saveRepoGradeProfile } from "@/lib/repo-grades-dashboard/profile-store";
 import { requireAppOwner } from "@/lib/supabase/auth";
@@ -79,6 +80,20 @@ export async function saveRepoGradeProfileAction(
       sourceRef, targetBranch, instructions, rubric, useReadmeInstructions, applyNamingDeduction, runCode,
     }, grader, expectedConfigurationFingerprint);
     return profile ? { status: "saved", profile: profileView(profile) } as const : { status: "conflict" } as const;
+  } catch {
+    return { status: "storage-unavailable" } as const;
+  }
+}
+
+export async function reviewRepoGradePreparationPolicyAction(courseId: unknown, folder: unknown, expectedPreview?: unknown) {
+  const owner = await requireAppOwner();
+  const scope = parseScope(courseId, folder);
+  if (!scope) return { status: "invalid-scope" } as const;
+  if (expectedPreview !== undefined && (typeof expectedPreview !== "string" || !/^[0-9a-f]{64}$/.test(expectedPreview))) {
+    return { status: "conflict" } as const;
+  }
+  try {
+    return await reviewRepoGradePreparationPolicy({ accountId: owner.id, ...scope }, expectedPreview);
   } catch {
     return { status: "storage-unavailable" } as const;
   }

@@ -4,6 +4,7 @@ import {
   type ProfileDraft, type ProfileReadResult, type SavedProfile,
 } from "./repoGradesProfileClient";
 import type { RepoGradeColumn } from "./repoGradesRows";
+import RepoGradePreparationPolicySettings from "./RepoGradePreparationPolicySettings";
 import pageStyles from "../../page.module.css";
 import styles from "./repo-grades-dashboard.module.css";
 
@@ -62,11 +63,12 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
       </form>
       {load && !result && <p role="status">Loading profile for {load.folder}.</p>}
       {result && !profileReady && <p role="alert">{PROFILE_ERROR[result.status]}</p>}
-      {load && profileReady && (
-        <ProfileForm key={load.request} courseId={courseId} folder={load.folder}
+      {load && profileReady && <div key={load.request}>
+        <ProfileForm courseId={courseId} folder={load.folder}
           initialProfile={result.status === "loaded" ? result.profile : null}
           reload={() => void openFolder(load.folder)} />
-      )}
+        <RepoGradePreparationPolicySettings courseId={courseId} folder={load.folder} />
+      </div>}
     </details>
   );
 }
@@ -85,8 +87,9 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
   const [status, setStatus] = useState<SaveStatus>(null);
   const saving = useRef(false);
   const [rubricError, setRubricError] = useState(false);
+  const [generateRubric, setGenerateRubric] = useState(initialProfile?.rubricPolicy === "generate");
   const savingProfile = status === "saving";
-  const requireRubric = baseline?.rubricPolicy !== "generate";
+  const existingEmbeddedGenerator = baseline?.provider === "embedded" && baseline.rubricPolicy === "generate";
 
   function updateDraft(changes: Partial<ProfileDraft>) {
     setDraft((current) => ({ ...current, ...changes }));
@@ -96,14 +99,14 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving.current || status === "conflict") return;
-    if (requireRubric && !draft.rubric.trim()) {
+    if (!generateRubric && !draft.rubric.trim()) {
       setRubricError(true);
       return;
     }
 
     saving.current = true;
     setStatus("saving");
-    const result = await saveRepoGradeProfile(courseId, folder, draft, baseline);
+    const result = await saveRepoGradeProfile(courseId, folder, generateRubric ? { ...draft, rubric: "" } : draft, baseline);
     saving.current = false;
     if (result.status === "saved") {
       setBaseline(result.profile);
@@ -122,7 +125,9 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
         <div className={pageStyles.field}>
           <label htmlFor={`${id}-provider`}>Grading provider</label>
           <select id={`${id}-provider`} value={draft.provider} onChange={(event) => {
-            updateDraft({ provider: event.currentTarget.value === "embedded" ? "embedded" : "gemini" });
+            const provider = event.currentTarget.value === "embedded" ? "embedded" : "gemini";
+            if (provider === "embedded" && !existingEmbeddedGenerator) setGenerateRubric(false);
+            updateDraft({ provider });
           }}>
             <option value="gemini">Gemini</option>
             <option value="embedded">Embedded grader</option>
@@ -139,16 +144,23 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
           <textarea id={`${id}-instructions`} value={draft.instructions} required={!draft.useReadmeInstructions}
             onChange={(event) => updateDraft({ instructions: event.currentTarget.value })} />
         </div>
-        <div className={pageStyles.field}>
+        {(draft.provider === "gemini" || existingEmbeddedGenerator) && <label>
+          <input type="checkbox" checked={generateRubric} onChange={(event) => {
+            setGenerateRubric(event.currentTarget.checked);
+            setRubricError(false);
+            if (status !== "conflict") setStatus(null);
+          }} />
+          {" "}Generate the rubric from the assignment instructions
+        </label>}
+        {!generateRubric && <div className={pageStyles.field}>
           <label htmlFor={`${id}-rubric`}>Saved grading rubric</label>
-          <textarea id={`${id}-rubric`} value={draft.rubric} required={requireRubric} aria-invalid={rubricError || undefined}
-            aria-describedby={`${id}-rubric-hint`} onChange={(event) => {
+          <textarea id={`${id}-rubric`} value={draft.rubric} required aria-invalid={rubricError || undefined}
+            onChange={(event) => {
               setRubricError(false);
               updateDraft({ rubric: event.currentTarget.value });
             }} />
-          <p id={`${id}-rubric-hint`}>Automatic grading requires a saved rubric.</p>
           {rubricError && <p role="alert">Enter a grading rubric for this folder.</p>}
-        </div>
+        </div>}
         <label>
           <input type="checkbox" checked={draft.applyNamingDeduction}
             onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />

@@ -30,6 +30,7 @@ const preparationMigrationFile = "20261106043419_repo_grade_rubric_preparation_a
 const startupMigrationFile = "20261106051231_repo_grade_startup_batch.sql";
 const preparationRetryMigrationFile = "20261106053623_repo_grade_preparation_explicit_retry.sql";
 const startupRetryMigrationFile = "20261106061811_repo_grade_startup_retry_not_started.sql";
+const policyUpdateMigrationFile = "20261106122943_repo_grade_preparation_policy_update.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -218,6 +219,8 @@ async function main() {
     await owner.query(`begin; ${preparationRetryMigration} rollback;`);
     assert.equal(await witness.query("select to_regclass('public.repo_grade_preparation_history') is null;"), "t");
     await owner.query(`begin; ${preparationRetryMigration} commit;`);
+    const policyUpdateMigration = readFileSync(new URL(`../../supabase/migrations/${policyUpdateMigrationFile}`, import.meta.url), "utf8");
+    await owner.query(`begin; ${policyUpdateMigration} commit;`);
     await runRubricPreparationCases({ owner, worker, contender, witness, waitForBlock });
     console.log("PASS: rubric preparation migration rollback, privileges and PostgreSQL transaction cases completed.");
     await owner.query(`begin; ${startupRetryMigration} commit;`);

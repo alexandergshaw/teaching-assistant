@@ -5,13 +5,14 @@ import { isDeepStrictEqual } from "node:util";
 import type { CourseKind } from "@/lib/course-kind";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { RepoGradeCourseConfig } from "@/lib/supabase/types.repo-grades-dashboard";
+import type { RepoGradeCourseKindBasis } from "./preparation-generator";
 import type { RepoGradePreparationCapture } from "./preparation-input";
 import { restoreRepoGradeRubric, type RepoGradeProfile, type RepoGradeRubricReceipt } from "./profile";
 import { readFrozenRepoGradeProfile } from "./profile-store";
 import { validRepoGradeCohortId } from "./state";
 
 type Evidence = Extract<RepoGradePreparationCapture, { status: "ready" }>;
-export type RepoGradeCourseKindBasis = readonly [name: string | null, kind: string | null];
+export type { RepoGradeCourseKindBasis } from "./preparation-generator";
 type Claim = { accountId: string; cohortId: string; token: string; key: string };
 type Finish = { outcome: "succeeded"; receipt: RepoGradeRubricReceipt }
   | { outcome: "failed-before-dispatch" | "failed" | "unknown" };

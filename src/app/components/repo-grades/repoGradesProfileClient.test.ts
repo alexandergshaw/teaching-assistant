@@ -1,13 +1,14 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { readRepoGradeProfileAction, saveRepoGradeProfileAction } from "@/app/actions/repo-grade-profiles";
+import { readRepoGradeProfileAction, reviewRepoGradePreparationPolicyAction, saveRepoGradeProfileAction } from "@/app/actions/repo-grade-profiles";
 import {
   buildSessionDiagnosticLog, formatSessionDiagnosticLogJson,
   readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests,
 } from "@/lib/session-diagnostic-log";
-import { loadRepoGradeProfile, profileDraft, saveRepoGradeProfile, type SavedProfile } from "./repoGradesProfileClient";
+import { loadRepoGradeProfile, profileDraft, reviewRepoGradePreparationPolicy, saveRepoGradeProfile, type SavedProfile } from "./repoGradesProfileClient";
 
 vi.mock("@/app/actions/repo-grade-profiles", () => ({
   readRepoGradeProfileAction: vi.fn(),
+  reviewRepoGradePreparationPolicyAction: vi.fn(),
   saveRepoGradeProfileAction: vi.fn(),
 }));
 
@@ -25,6 +26,30 @@ const existing: SavedProfile = {
 beforeEach(() => {
   vi.resetAllMocks();
   resetSessionDiagnosticLogForTests(AT);
+});
+
+it("records bounded policy preview and apply outcomes without logging scope or policy identifiers", async () => {
+  const preview = "e".repeat(64);
+  vi.mocked(reviewRepoGradePreparationPolicyAction)
+    .mockResolvedValueOnce({ status: "current" })
+    .mockResolvedValueOnce({ status: "updated" })
+    .mockResolvedValueOnce({ status: "busy" })
+    .mockRejectedValueOnce(new Error("private-transport-error"));
+
+  await expect(reviewRepoGradePreparationPolicy(COURSE, FOLDER)).resolves.toEqual({ status: "current" });
+  await expect(reviewRepoGradePreparationPolicy(COURSE, FOLDER, preview)).resolves.toEqual({ status: "updated" });
+  await expect(reviewRepoGradePreparationPolicy(COURSE, FOLDER, preview)).resolves.toEqual({ status: "busy" });
+  await expect(reviewRepoGradePreparationPolicy(COURSE, FOLDER, preview)).resolves.toEqual({ status: "request-failed" });
+  expect(reviewRepoGradePreparationPolicyAction).toHaveBeenLastCalledWith(COURSE, FOLDER, preview);
+  const { entries } = readSessionDiagnosticLogState();
+  expect(entries).toMatchObject([
+    { operation: "repo_grade_profile_policy_preview", outcome: "success", durationMs: expect.any(Number) },
+    { operation: "repo_grade_profile_policy_apply", outcome: "success", durationMs: expect.any(Number) },
+    { operation: "repo_grade_profile_policy_apply", outcome: "failure", cause: "busy" },
+    { operation: "repo_grade_profile_policy_apply", outcome: "failure", cause: "request-failed" },
+  ]);
+  expect(JSON.stringify(entries)).not.toMatch(/private-|Assignments\/ExactCase/);
+  expect(JSON.stringify(entries)).not.toContain(preview);
 });
 
 it("loads the exact course and folder and saves edits against the loaded fingerprint", async () => {

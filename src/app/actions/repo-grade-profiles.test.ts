@@ -2,9 +2,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { getGeminiModel } from "@/lib/gemini";
 import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { readRepoGradeProfileAction, saveRepoGradeProfileAction } from "./repo-grade-profiles";
+import { readRepoGradeProfileAction, reviewRepoGradePreparationPolicyAction, saveRepoGradeProfileAction } from "./repo-grade-profiles";
 
-vi.mock("@/lib/gemini", () => ({ getGeminiModel: vi.fn() }));
+vi.mock("@/lib/gemini", async (original) => ({
+  ...await original<typeof import("@/lib/gemini")>(),
+  getGeminiModel: vi.fn(),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(), createServiceClient: vi.fn() }));
 vi.mock("@/lib/supabase/app-users", async (original) => ({
   ...await original<typeof import("@/lib/supabase/app-users")>(),
@@ -52,7 +55,43 @@ it.each([
   vi.mocked(getAppUser).mockResolvedValue({ ...ownerRow, role });
   await expect(readRepoGradeProfileAction(courseId, folder)).rejects.toThrow(message);
   await expect(saveRepoGradeProfileAction(courseId, folder, {}, null)).rejects.toThrow(message);
+  await expect(reviewRepoGradePreparationPolicyAction(courseId, folder)).rejects.toThrow(message);
   expect(createServiceClient).not.toHaveBeenCalled();
+});
+
+it("previews the deployed policy and binds explicit apply to the reviewed scope and policy revision", async () => {
+  const fingerprint = "b".repeat(64);
+  const revision = "77b39c8c-5805-4f0a-85f9-149c70288810";
+  const snapshot = {
+    model: "server-model", graderVersion: "repo-grader-v1", courseKind: "coding",
+    basis: ["Private course name", "applied"], basisMatches: false, revision,
+    version: "old-policy", profileFingerprint: fingerprint,
+  };
+  const read = vi.fn().mockResolvedValue({ data: snapshot, error: null });
+  const write = vi.fn().mockResolvedValue({ data: "updated", error: null });
+  rpc.mockImplementation((name: string) => ({ retry: name === "repo_grade_preparation_policy_snapshot" ? read : write }));
+  const preview = await reviewRepoGradePreparationPolicyAction(courseId, folder);
+  expect(preview.status).toBe("preview");
+  if (preview.status !== "preview") throw new Error("Expected a policy preview");
+  expect(preview.current).toEqual({ version: "old-policy", courseKind: "coding" });
+  expect(preview.replacement).toEqual({ version: expect.stringMatching(/^repo-grade-gemini-rubric-v1:[0-9a-f]{64}:[0-9a-f]{64}$/), courseKind: "applied" });
+  expect(JSON.stringify(preview)).not.toContain("Private course name");
+  expect(rpc.mock.calls).toEqual([["repo_grade_preparation_policy_snapshot", {
+    p_user_id: owner.id, p_course_id: courseId, p_folder: folder,
+  }]]);
+
+  await expect(reviewRepoGradePreparationPolicyAction(courseId, `${folder}/different`, preview.preview)).resolves.toEqual({ status: "conflict" });
+  read.mockResolvedValueOnce({ data: { ...snapshot, basis: ["Renamed course", "applied"] }, error: null });
+  await expect(reviewRepoGradePreparationPolicyAction(courseId, folder, preview.preview)).resolves.toEqual({ status: "conflict" });
+  read.mockResolvedValueOnce({ data: { ...snapshot, revision: courseId }, error: null });
+  await expect(reviewRepoGradePreparationPolicyAction(courseId, folder, preview.preview)).resolves.toEqual({ status: "conflict" });
+  expect(write).not.toHaveBeenCalled();
+  await expect(reviewRepoGradePreparationPolicyAction(courseId, folder, preview.preview)).resolves.toEqual({ status: "updated" });
+  expect(rpc).toHaveBeenLastCalledWith("repo_grade_update_preparation_policy", {
+    p_user_id: owner.id, p_course_id: courseId, p_folder: folder, p_expected_revision: revision,
+    p_expected_fingerprint: fingerprint, p_course_kind: "applied", p_prompt_parser_version: preview.replacement.version,
+  });
+  expect(write).toHaveBeenCalledExactlyOnceWith(false);
 });
 
 it.each([

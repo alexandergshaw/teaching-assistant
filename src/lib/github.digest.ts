@@ -288,7 +288,11 @@ export function selectDigestFiles(tree: RepoTreeEntry[], opts: SelectDigestFiles
 export async function ingestRepo(
   owner: string,
   repo: string,
-  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number; pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal } = {},
+  opts: {
+    maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number;
+    pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal;
+    readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
+  } = {},
   ref?: string
 ): Promise<RepoDigest> {
   const budget = opts.pathPrefix ? SCOPED_BUDGET : DEFAULT_BUDGET;
@@ -303,7 +307,9 @@ export async function ingestRepo(
     : await getRepo(owner, repo);
   const readRef = sourceCommit ?? (ref || info.defaultBranch);
   const treeResult = sourceCommit !== undefined
-    ? await getRepoCommitTree(owner, repo, sourceCommit, signal && { signal })
+    ? await getRepoCommitTree(owner, repo, sourceCommit, opts.readPinnedFiles
+      ? { signal, cache: "no-store", redirect: "error" }
+      : signal && { signal })
     : await getRepoTreeWithMeta(owner, repo, readRef);
   const { entries: tree, truncated: treeTruncated } = treeResult;
   const folder = opts.pathPrefix?.replace(/\/$/, "");
@@ -358,14 +364,36 @@ export async function ingestRepo(
   // happened above (C2 item 4/5 - the flag must reflect everything dropped).
   let truncated = selection.skipped.size > 0 || selection.skipped.budget > 0 || treeTruncated || !!selection.skipped.unsupported;
 
-  for (const f of sourceCommit !== undefined && (treeTruncated || selection.skipped.unsupported) ? [] : selection.selected) {
+  let toRead = sourceCommit !== undefined && (treeTruncated || selection.skipped.unsupported) ? [] : selection.selected;
+  const archiveReader = sourceCommit !== undefined && opts.readPinnedFiles;
+  let verifiedFiles: ReadonlyMap<string, string> | undefined;
+  if (archiveReader && toRead.length) {
+    // The pinned grader refuses truncation. Don't download or expand a ZIP
+    // when the authoritative inventory already proves the folder won't fit.
+    if (truncated) {
+      toRead = [];
+    } else {
+      try {
+        verifiedFiles = await archiveReader(toRead, signal);
+      } catch {
+        signal?.throwIfAborted();
+        fetchErrorCount = toRead.length;
+        truncated = true;
+        toRead = [];
+      }
+    }
+  }
+
+  for (const f of toRead) {
     let body: string;
     try {
       // GitHub's contents endpoint can dereference a symlink. The grading
       // input contract accepts regular repository files.
       if (sourceCommit !== undefined && f.mode === "120000") throw new Error("Unsupported symlink.");
       signal?.throwIfAborted();
-      body = await getFileText(owner, repo, f.path, readRef, signal);
+      const text = archiveReader ? verifiedFiles?.get(f.path) : await getFileText(owner, repo, f.path, readRef, signal);
+      if (text === undefined) throw new Error("Missing verified repository file.");
+      body = text;
     } catch {
       signal?.throwIfAborted();
       fetchErrorCount += 1;

@@ -224,7 +224,7 @@ export async function resolveRepoSourceCommit(
 
 /** Read the Git tree object named by this exact commit's Git object. */
 export async function getRepoCommitTree(
-  owner: string, repo: string, sourceCommit: string, options?: GithubRepoRequestOptions,
+  owner: string, repo: string, sourceCommit: string, options?: GithubRepoRequestOptions & Pick<RequestInit, "cache" | "redirect">,
 ): Promise<RepoTreeResult> {
   if (!isGithubCommitSha(sourceCommit)) throw new Error("A full GitHub commit SHA is required.");
   const base = `/repos/${owner}/${repo}/git`;

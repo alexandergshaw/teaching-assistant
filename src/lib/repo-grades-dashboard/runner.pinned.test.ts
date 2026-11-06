@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { collectInlineVisualEvidence } from "@/lib/grade/inline-visuals";
@@ -16,7 +18,10 @@ const sha = "a".repeat(40);
 const treeSha = "b".repeat(40);
 const target = { repo: "school/student", folder: "lab", sourceRef: "main", sha };
 const root = "https://api.github.com/repos/school/student";
+const zipballUrl = `${root}/zipball/${sha}`;
+const downloadUrl = `https://codeload.github.com/school/student/legacy.zip/${sha}?token=test-temporary-url`;
 const modelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=test-key`;
+let tokenId = 0;
 const files = {
   readme: { path: "lab/README.md", type: "blob", size: 30, mode: "100644" },
   submission: { path: "lab/main.py", type: "blob", size: 30, mode: "100644" },
@@ -53,17 +58,47 @@ function fetchRepo(options: {
   tree?: Array<(typeof files)[keyof typeof files]>;
   modelResponse?: () => Response;
   failTree?: boolean;
+  omitFromArchive?: string;
+  oversizedArchive?: boolean;
+  throttleAfterBlobs?: number;
 } = {}) {
+  const contents = (path: string) => path === files.readme.path ? options.readme ?? "Print the answer in a loop."
+    : path === files.submission.path ? "print('captured submission')"
+      : path === files.otherFolder.path ? "WRONG_CASE_FOLDER" : `# submission helper ${path}`;
+  const inventory = options.tree ?? [
+    ...Object.values(files),
+    ...Array.from({ length: 7 }, (_, i) => ({ ...files.submission, path: `lab/helpers/h${i}.py` })),
+  ];
+  const tree = inventory.map((file) => {
+    const text = contents(file.path);
+    const size = Buffer.byteLength(text);
+    return { ...file, size, sha: createHash("sha1").update(`blob ${size}\0`).update(text).digest("hex") };
+  });
+  let blobReads = 0;
   const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async (url) => {
+    const blob = tree.find(({ sha }) => url === `${root}/git/blobs/${sha}`);
+    if (blob) {
+      if (options.throttleAfterBlobs !== undefined && blobReads >= options.throttleAfterBlobs) {
+        return new Response(null, { status: 429, headers: { "Retry-After": "60" } });
+      }
+      blobReads += 1;
+      return new Response(contents(blob.path));
+    }
     switch (url) {
       case `${root}/git/commits/${sha}`:
         return options.failTree ? new Response(null, { status: 403 }) : Response.json({ sha, tree: { sha: treeSha } });
       case `${root}/git/trees/${treeSha}?recursive=1`:
-        return Response.json({ sha: treeSha, truncated: false, tree: options.tree ?? Object.values(files) });
-      case `${root}/contents/lab/README.md?ref=${sha}`:
-        return new Response(options.readme ?? "Print the answer in a loop.");
-      case `${root}/contents/lab/main.py?ref=${sha}`:
-        return new Response("print('captured submission')");
+        return Response.json({ sha: treeSha, truncated: false, tree });
+      case zipballUrl:
+        return new Response(null, { status: 302, headers: { Location: downloadUrl } });
+      case downloadUrl: {
+        if (options.oversizedArchive) return new Response(null, { headers: { "Content-Length": String(12 * 1024 * 1024 + 1) } });
+        const archive = new JSZip();
+        for (const file of tree) {
+          if (file.path !== options.omitFromArchive) archive.file(`school-student-${sha.slice(0, 7)}/${file.path}`, contents(file.path));
+        }
+        return new Response(await archive.generateAsync({ type: "arraybuffer", compression: "DEFLATE", platform: "UNIX" }));
+      }
       case modelUrl:
         return options.modelResponse?.() ?? Response.json({
           candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
@@ -81,7 +116,7 @@ function fetchRepo(options: {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("GITHUB_TOKEN", "test-token");
+  vi.stubEnv("GITHUB_TOKEN", `test-token-${tokenId += 1}`);
   vi.stubEnv("GEMINI_API_KEY", "test-key");
   vi.stubEnv("GEMINI_MODEL", model);
   vi.mocked(collectInlineVisualEvidence).mockResolvedValue({ parts: [], documents: [] });
@@ -105,7 +140,7 @@ describe("admitted pinned repository evaluator", () => {
 
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
-      `${root}/contents/lab/README.md?ref=${sha}`, `${root}/contents/lab/main.py?ref=${sha}`, modelUrl,
+      zipballUrl, downloadUrl, modelUrl,
     ]);
     expect(vi.mocked(claimRepoGrade).mock.invocationCallOrder[0]).toBeLessThan(fetcher.mock.invocationCallOrder[0]);
     expect(vi.mocked(beginRepoGradeDispatch).mock.invocationCallOrder[0]).toBeLessThan(fetcher.mock.invocationCallOrder[4]);
@@ -115,9 +150,79 @@ describe("admitted pinned repository evaluator", () => {
     expect(prompt).toContain(frozenRubric);
     expect(prompt).toContain("Print the answer in a loop.");
     expect(prompt).toContain("captured submission");
+    expect(prompt).toContain("lab/helpers/h6.py");
+    expect(prompt).not.toContain("WRONG_CASE_FOLDER");
+    expect(new Headers(fetcher.mock.calls[2][1].headers).has("authorization")).toBe(true);
+    expect(new Headers(fetcher.mock.calls[3][1].headers).has("authorization")).toBe(false);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, expect.objectContaining({
       outcome: "succeeded", inputsComplete: true, result: expect.objectContaining({ score: 80 }),
     }));
+  });
+
+  it("never grades a partial archive or falls back to a Contents request when an expected file is omitted", async () => {
+    const fetcher = fetchRepo({ omitFromArchive: "lab/helpers/h6.py" });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+    ]);
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+    expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "partial" });
+  });
+
+  it("uses a bounded verified blob fallback for a small folder in an oversized repository", async () => {
+    const fetcher = fetchRepo({ tree: [...Object.values(files), { ...files.submission, path: "lab/helper.py" }], oversizedArchive: true });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      ...Array.from({ length: 3 }, () => expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/)), modelUrl,
+    ]);
+  });
+
+  it("grades a folder with more than four files in a large repository from exact pinned blobs", async () => {
+    const fetcher = fetchRepo({ oversizedArchive: true });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      ...Array.from({ length: 9 }, () => expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/)), modelUrl,
+    ]);
+    expect(fetcher.mock.calls.at(-1)?.[1].body).toContain("lab/helpers/h6.py");
+    expect(fetcher.mock.calls.at(-1)?.[1].body).not.toContain("WRONG_CASE_FOLDER");
+  });
+
+  it("does not request an archive or blobs when the folder exceeds the existing file-count limit", async () => {
+    const fetcher = fetchRepo({
+      oversizedArchive: true,
+      tree: Array.from({ length: 201 }, (_, i) => ({ ...files.submission, path: `lab/file-${i}.py` })),
+    });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+    ]);
+  });
+
+  it("stops fallback at the first throttle and honors cooldown on the next evaluation", async () => {
+    const fetcher = fetchRepo({ oversizedArchive: true, throttleAfterBlobs: 1 });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/), expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/),
+    ]);
+    fetcher.mockClear();
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+    ]);
+    expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+  });
+
+  it("still authorizes the pinned tree on warm reuse without another archive or file download", async () => {
+    const fetcher = fetchRepo();
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+    fetcher.mockClear();
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, modelUrl,
+    ]);
   });
 
   it("never starts model work if the dispatch marker response is lost", async () => {
@@ -155,6 +260,10 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo({ tree: [files.submission] });
     const instructions = "Print the answer in a saved assignment.";
     await expect(runRepoGradeTarget(plan, target, preparedRuntime({ instructions }))).resolves.toEqual({ status: "succeeded" });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+      expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/), modelUrl,
+    ]);
     expect(fetcher.mock.calls.find(([url]) => url === modelUrl)?.[1].body).toContain(instructions);
   });
 
@@ -175,7 +284,7 @@ describe("admitted pinned repository evaluator", () => {
       return { parts: [], documents: [] };
     });
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
-    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
@@ -188,7 +297,7 @@ describe("admitted pinned repository evaluator", () => {
       return { parts: [], documents: [] };
     });
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
-    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
@@ -196,7 +305,7 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo();
     await expect(runRepoGradeTarget(plan, target, preparedRuntime({}, { ...grader, graderVersion: "stale" })))
       .resolves.toEqual({ status: "failed" });
-    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     const rejectedFetcher = fetchRepo({ failTree: true });
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
     expect(rejectedFetcher).toHaveBeenCalledOnce();
@@ -214,7 +323,7 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo();
     const runtime = preparedRuntime({}, { ...grader, provider: "embedded" });
     await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "failed" });
-    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
@@ -232,7 +341,7 @@ describe("admitted pinned repository evaluator", () => {
     expect((await runRepoGradeTarget(plan, target, runtime)).status).toBe(lostAcknowledgement ? "unknown" : "succeeded");
     expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
     expect(fetcher.mock.calls.length).toBeGreaterThan(0);
-    expect(fetcher.mock.calls.every(([url]) => url.startsWith(root))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, expect.objectContaining({
       outcome: "succeeded", inputsComplete: true, result: expect.objectContaining({ score: 100 }),
     }));

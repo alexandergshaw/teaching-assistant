@@ -16,6 +16,7 @@ import type { ManualRepoGradeError, ManualRepoGradeExecution } from "@/lib/repo-
 import { getRepoGraderIdentity, type RepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
 import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
+import { makePinnedArchiveReader } from "@/lib/github-grade-archive";
 
 // The not-merged note (null for every other status) that withBranchNote folds
 // into a REAL grade's comment (AC4: the grade is kept, never zeroed).
@@ -66,7 +67,7 @@ export type RepoGradeResponse =
   | (ManualRepoGradeError & { partial?: true; sourceCommit?: string; reason?: "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated" | "unsupported-submission" });
 
 type RepoGradeExecution = ManualRepoGradeExecution & {
-  automaticGrader?: RepoGraderIdentity;
+  automaticGrader?: RepoGraderIdentity & { accountId: string };
   preparedReadme?: PreparedRepoGradeReadme;
 };
 
@@ -88,7 +89,10 @@ export async function evaluateRepoGrade(
   const automaticGrader = execution?.automaticGrader;
   const signal = automaticGrader ? modelExecution?.signal : undefined;
   const digest = sourceCommit
-    ? await ingestRepo(parsed.owner, parsed.repo, { pathPrefix, sourceCommit, ...(signal && { signal }) })
+    ? await ingestRepo(parsed.owner, parsed.repo, {
+      pathPrefix, sourceCommit, ...(signal && { signal }),
+      ...(automaticGrader && { readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
+    })
     : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, targetBranch);
   if (sourceCommit && digest.truncated) {
     execution?.markKnownFailure();

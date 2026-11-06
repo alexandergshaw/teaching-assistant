@@ -2,23 +2,33 @@ import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 import type { RepoFeedbackStorageResult } from "./repoGradesResultsStore";
 
-export type RepoFeedbackCopyTarget = FeedbackField | "all";
+export type RepoFeedbackCopyTarget = FeedbackField | "overall" | "all";
+
+const STORAGE_LABELS = {
+  repo_feedback_draft_save: "Save repository feedback draft",
+  repo_feedback_draft_discard: "Discard repository feedback draft",
+  repo_feedback_restore: "Restore repository feedback",
+};
 
 export function recordRepoFeedbackStorage(
-  operation: "repo_feedback_draft_save" | "repo_feedback_restore",
+  operation: keyof typeof STORAGE_LABELS,
   storageSource: "browser_local" | "durable",
   started: number,
   { outcome, failureCategory, affectedResultCount }: RepoFeedbackStorageResult,
 ) {
-  recordSessionDiagnosticEntry({
-    at: new Date().toISOString(),
-    surface: "grading",
-    operation,
-    label: operation === "repo_feedback_restore" ? "Restore repository feedback" : "Save repository feedback draft",
-    outcome: outcome === "success" ? "success" : "failure",
-    durationMs: Math.min(3_600_000, Math.max(0, Math.round(performance.now() - started))),
-    detail: { outcome, failureCategory, storageSource, ...(affectedResultCount === undefined ? {} : { affectedResultCount }) },
-  });
+  try {
+    recordSessionDiagnosticEntry({
+      at: new Date().toISOString(),
+      surface: "grading",
+      operation,
+      label: STORAGE_LABELS[operation],
+      outcome: outcome === "success" ? "success" : "failure",
+      durationMs: Math.min(3_600_000, Math.max(0, Math.round(performance.now() - started))),
+      detail: { outcome, failureCategory, storageSource, ...(affectedResultCount === undefined ? {} : { affectedResultCount }) },
+    });
+  } catch {
+    // A diagnostic failure cannot change the outcome of reading or writing feedback.
+  }
 }
 
 type CopyResult =
@@ -36,8 +46,10 @@ export async function copyRepoFeedback(
   const started = performance.now();
   let result: CopyResult;
   try {
-    const clipboard = getClipboard();
-    if (!clipboard || typeof clipboard.writeText !== "function") {
+    const clipboard = isCurrent() ? getClipboard() : undefined;
+    if (!isCurrent()) {
+      result = { outcome: "blocked", cause: "stale_scope" };
+    } else if (!clipboard || typeof clipboard.writeText !== "function") {
       result = { outcome: "blocked", cause: "api_unavailable" };
     } else {
       await clipboard.writeText(value);
@@ -48,6 +60,7 @@ export async function copyRepoFeedback(
       ? { outcome: "denied", cause: "permission_denied" }
       : { outcome: "failed", cause: "clipboard_rejected" };
   }
+  // A change after writeText starts invalidates the status, but the browser owns the write.
   if (!isCurrent()) result = { outcome: "blocked", cause: "stale_scope" };
   recordSessionDiagnosticEntry({
     at: new Date().toISOString(),

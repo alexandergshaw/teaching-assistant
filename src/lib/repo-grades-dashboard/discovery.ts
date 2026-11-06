@@ -1,33 +1,19 @@
 import "server-only";
 
 import { mapWithConcurrency } from "@/app/actions/shared";
-import { asGithubHttpError } from "@/lib/github-http-error";
-import { classifyGithubFailure } from "@/lib/github-rate-limit";
-import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
-import {
-  getRepoCommitTree,
-  listOrgReposWithCoverage,
-  resolveRepoSourceCommit,
-  type GithubRepo,
-  type GithubRepoRequestOptions,
-} from "@/lib/github.repos";
+import { encodeRefSegment, normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
+import { isGithubCommitSha } from "@/lib/github.repos";
 import { assignmentFolderPathsFromTree } from "@/lib/repo-assignment-folder-paths";
 import { DEFAULT_TREE_SCAN_CONCURRENCY } from "@/lib/repo-grade-tree-scan";
+import { createDiscoveryTransport, DiscoveryTransportError, type DiscoveryTransportFailure } from "./discovery-transport";
 
-type DiscoveryStop = "rate-limited" | "request-budget-exhausted" | "deadline-exceeded";
-type DiscoveryFailure = DiscoveryStop | "source-set-too-large" | "invalid-scope" | "invalid-source" | "access-denied" | "unavailable";
+type DiscoveryFailure = DiscoveryTransportFailure | "source-set-too-large" | "invalid-scope" | "invalid-source";
+type DiscoveryRequest = ReturnType<typeof createDiscoveryTransport>;
+type DiscoveryRepo = { owner: string; name: string; fullName: string; defaultBranch: string };
 
-// A source needs up to three GitHub requests. Include enumeration in the
-// shared request budget and bound both wall time and skipped-row materialization.
-const MAX_DISCOVERY_REQUESTS = 300;
-const DISCOVERY_DEADLINE_MS = 40_000;
 const MAX_DISCOVERY_SOURCE_ROWS = 4_000;
-
-class StoppedDiscovery extends Error {
-  constructor(readonly reason: DiscoveryStop) {
-    super(reason);
-  }
-}
+const MAX_ORG_PAGES = 10;
+const ORG_PAGE_SIZE = 100;
 
 export type RepoGradeSourceRow =
   | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[] }
@@ -39,36 +25,94 @@ export type RepoGradeDiscovery =
   | { status: "blocked"; reason: DiscoveryFailure | "branch-aware-discovery-disabled" }
   | { status: "scanned"; enumerationComplete: boolean; repos: RepoGradeSourceRow[] };
 
-function classifyFailure(error: unknown, signal: AbortSignal): DiscoveryFailure {
-  if (error instanceof StoppedDiscovery) return error.reason;
-  const http = asGithubHttpError(error);
-  if (!http) return signal.aborted ? "deadline-exceeded" : "unavailable";
-  const verdict = classifyGithubFailure(http.status, http.headers, Date.now());
-  if (http.status === 429 || verdict.kind === "rate-limited"
-    || (http.status === 403 && (http.headers.get("retry-after") !== null || /secondary rate limit/i.test(http.message)))) {
-    return "rate-limited";
+function classifyFailure(error: unknown): DiscoveryFailure {
+  return error instanceof DiscoveryTransportError ? error.reason : "unavailable";
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function readRepo(value: unknown, organization: string): DiscoveryRepo | undefined {
+  const repo = record(value);
+  if (!repo) return;
+  const { name, full_name: fullName, default_branch: defaultBranch } = repo;
+  const owner = record(repo.owner)?.login;
+  if (typeof owner !== "string" || typeof name !== "string" || !validateGithubOwnerRepo(owner, name)
+    || owner.toLowerCase() !== organization.toLowerCase() || fullName !== `${owner}/${name}`
+    || (defaultBranch !== undefined && typeof defaultBranch !== "string")) return;
+  return { owner, name, fullName, defaultBranch: defaultBranch ?? "" };
+}
+
+async function readOrganization(request: DiscoveryRequest, organization: string, prefix?: string) {
+  const repos: DiscoveryRepo[] = [];
+  const seen = new Set<string>();
+  const needle = prefix?.trim().toLowerCase();
+  let malformed = false;
+  for (let page = 1; page <= MAX_ORG_PAGES; page += 1) {
+    const count = await request.getJson(`/orgs/${organization}/repos?per_page=${ORG_PAGE_SIZE}&sort=full_name&page=${page}`, (data) => {
+      if (!Array.isArray(data) || data.length > ORG_PAGE_SIZE) throw new DiscoveryTransportError("unavailable");
+      for (const value of data) {
+        const repo = readRepo(value, organization);
+        const key = repo?.fullName.toLowerCase();
+        if (!repo || !key || seen.has(key)) {
+          malformed = true;
+          continue;
+        }
+        seen.add(key);
+        if (!needle || repo.name.toLowerCase().startsWith(needle)) repos.push(repo);
+      }
+      return data.length;
+    });
+    if (count < ORG_PAGE_SIZE) return { repos, complete: !malformed };
   }
-  if (http.status === 401 || verdict.kind === "forbidden") return "access-denied";
-  return "unavailable";
+  return { repos, complete: false };
+}
+
+function requireSha(value: unknown): string {
+  if (!isGithubCommitSha(value)) throw new DiscoveryTransportError("unavailable");
+  return value.toLowerCase();
+}
+
+function readFolders(value: unknown, treeSha: string, includesFolder: (folder: string) => boolean): string[] | null {
+  const tree = record(value);
+  if (!tree || requireSha(tree.sha) !== treeSha || !Array.isArray(tree.tree) || typeof tree.truncated !== "boolean") {
+    throw new DiscoveryTransportError("unavailable");
+  }
+  if (tree.truncated) return null;
+  const paths: string[] = [];
+  for (const value of tree.tree) {
+    const entry = record(value);
+    if (!entry || typeof entry.path !== "string" || !entry.path) return null;
+    if (entry.type === "tree") paths.push(`${entry.path}/`);
+    else if (entry.type === "blob" && typeof entry.size === "number" && Number.isSafeInteger(entry.size) && entry.size >= 0) {
+      paths.push(entry.path);
+    } else return null;
+  }
+  return assignmentFolderPathsFromTree(paths).filter(includesFolder);
 }
 
 async function readSource(
-  { owner, name, fullName: repo }: GithubRepo,
+  { owner, name, fullName: repo }: DiscoveryRepo,
   sourceRef: string,
   includesFolder: (folder: string) => boolean,
-  request: GithubRepoRequestOptions & { signal: AbortSignal },
+  request: DiscoveryRequest,
 ): Promise<RepoGradeSourceRow> {
   if (!sourceRef) return { status: "blocked", repo, sourceRef, reason: "invalid-source" };
   let sourceCommit: string | undefined;
   try {
-    sourceCommit = await resolveRepoSourceCommit(owner, name, sourceRef, request);
-    const tree = await getRepoCommitTree(owner, name, sourceCommit, request);
-    if (tree.truncated) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
-    const paths = tree.entries.map(({ path, type }) => type === "tree" ? `${path}/` : path);
-    const folders = assignmentFolderPathsFromTree(paths).filter(includesFolder);
+    const base = `/repos/${owner}/${name}` as const;
+    sourceCommit = await request.getJson(`${base}/commits/${encodeRefSegment(sourceRef)}`, (value) => requireSha(record(value)?.sha));
+    const treeSha = await request.getJson(`${base}/git/commits/${sourceCommit}`, (value) => {
+      const commit = record(value);
+      if (requireSha(commit?.sha) !== sourceCommit) throw new DiscoveryTransportError("unavailable");
+      return requireSha(record(commit?.tree)?.sha);
+    });
+    const folders = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => readFolders(value, treeSha, includesFolder));
+    if (!folders) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
     return { status: "ready", repo, sourceRef, sourceCommit, folders };
   } catch (error) {
-    return { status: "blocked", repo, sourceRef, sourceCommit, reason: classifyFailure(error, request.signal) };
+    return { status: "blocked", repo, sourceRef, sourceCommit, reason: classifyFailure(error) };
   }
 }
 
@@ -93,47 +137,27 @@ export async function discoverRepoGradeSources(scope: {
     configuredRefs.add(ref);
   }
 
-  const signal = AbortSignal.timeout(DISCOVERY_DEADLINE_MS);
-  let rateLimited = false;
-  let remainingRequests = MAX_DISCOVERY_REQUESTS;
-  const request = {
-    signal,
-    beforeRequest() {
-      if (rateLimited) throw new StoppedDiscovery("rate-limited");
-      if (signal.aborted) throw new StoppedDiscovery("deadline-exceeded");
-      if (remainingRequests === 0) throw new StoppedDiscovery("request-budget-exhausted");
-      remainingRequests -= 1;
-    },
-    observeResponse({ status, headers }: Response) {
-      if (status === 429 || headers.get("x-ratelimit-remaining") === "0"
-        || (status === 403 && headers.has("retry-after"))) rateLimited = true;
-    },
-  };
-
+  const request = createDiscoveryTransport();
   try {
-    const listing = await listOrgReposWithCoverage(organization, scope.prefix, request);
+    const listing = await readOrganization(request, organization, scope.prefix);
     if (listing.repos.length * (configuredRefs.size + 1) > MAX_DISCOVERY_SOURCE_ROWS) {
       return { status: "blocked", reason: "source-set-too-large" };
     }
     const repos = await mapWithConcurrency(listing.repos, DEFAULT_TREE_SCAN_CONCURRENCY, async (item): Promise<RepoGradeSourceRow[]> => {
-      const { owner, name, fullName: repo, defaultBranch } = item;
-      const fallback = normalizeTargetBranch(override.branch || (typeof defaultBranch === "string" ? defaultBranch : ""));
+      const fallback = normalizeTargetBranch(override.branch || item.defaultBranch);
       const fallbackRef = fallback.ok ? fallback.branch : "";
-      if (!validateGithubOwnerRepo(owner, name) || owner.toLowerCase() !== organization.toLowerCase() || repo !== `${owner}/${name}`) {
-        return [{ status: "blocked", repo, sourceRef: fallbackRef, reason: "invalid-scope" }];
-      }
       const rows: RepoGradeSourceRow[] = [];
       // Scan refs within a repo sequentially to preserve the existing request
       // concurrency bound. Folder overrides are exact and never fall back.
       for (const ref of new Set([fallbackRef, ...configuredRefs])) {
-        const row = await readSource(item, ref, (folder) => (scope.folderSources?.get(folder) ?? fallbackRef) === ref, request);
-        if (row.status === "blocked" && row.reason === "rate-limited") rateLimited = true;
-        rows.push(row);
+        rows.push(await readSource(item, ref, (folder) => (scope.folderSources?.get(folder) ?? fallbackRef) === ref, request));
       }
       return rows;
     });
     return { status: "scanned", enumerationComplete: listing.complete, repos: repos.flat() };
   } catch (error) {
-    return { status: "blocked", reason: classifyFailure(error, signal) };
+    return { status: "blocked", reason: classifyFailure(error) };
+  } finally {
+    request.dispose();
   }
 }

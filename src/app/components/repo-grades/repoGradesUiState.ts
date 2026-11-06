@@ -22,6 +22,7 @@ import {
   clearRepoGradeCellsIn,
   readRepoGradeCellsFrom,
   persistRepoGradeCellsTo,
+  RESULTS_DISCARD_ERROR,
 } from "./repoGradesResultsStore";
 import { recordRepoFeedbackStorage } from "./repoFeedbackClipboard";
 
@@ -398,8 +399,7 @@ export function loadRepoGradeCells(courseId: string, source: "current" | "histor
   }
 }
 
-/** Writes `courseId`'s graded cells. Returns null, or a fixed content-free
- * error string when the browser refused the write twice. */
+/** Writes `courseId`'s graded cells. Returns null or a fixed storage notice. */
 export function persistRepoGradeCells(
   courseId: string, edits: RepoGradeCellEditsByRepo, source: "current" | "history" = "current",
   expected?: RepoGradeCellEditsByRepo,
@@ -419,9 +419,20 @@ export function persistRepoGradeCells(
 }
 
 /** Discards `courseId`'s saved graded cells; other courses are untouched. */
-export function clearRepoGradeCells(courseId: string): void {
-  if (typeof window === "undefined" || !courseId) return;
-  clearRepoGradeCellsIn(localStorage, CELLS_KEY, courseId);
+export function clearRepoGradeCells(courseId: string, source: "current" | "history" = "current"): ReturnType<typeof clearRepoGradeCellsIn> {
+  if (typeof window === "undefined" || !courseId) {
+    return { notice: RESULTS_DISCARD_ERROR, result: { outcome: "blocked", failureCategory: "storage_unavailable" } };
+  }
+  const started = performance.now();
+  const key = source === "history" ? HISTORY_DRAFTS_KEY : CELLS_KEY;
+  let attempt: ReturnType<typeof clearRepoGradeCellsIn>;
+  try {
+    attempt = clearRepoGradeCellsIn(window.localStorage, key, courseId);
+  } catch (error) {
+    attempt = { notice: RESULTS_DISCARD_ERROR, result: classifyRepoFeedbackStorageError(error) };
+  }
+  recordRepoFeedbackStorage("repo_feedback_draft_discard", "browser_local", started, attempt.result);
+  return attempt;
 }
 
 // ---------------------------------------------------------------------------

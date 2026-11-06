@@ -414,10 +414,10 @@ describe("A-3: handleGradeColumn clears trends only after admission and ignores 
 // ---- A-4: the course-switch clear ----
 
 describe("A-4: the course-switch branch clears lastRunCohort", () => {
-  it("setLastRunCohort(null) is a direct child of the `courseId !== columnPostingResetForCourse` if's then-block", () => {
+  it("clears the run cohort in the course and edit-scope reset branch", () => {
     let found = false;
     (function visit(node: Node): void {
-      if (ts.isIfStatement(node) && ts.isBinaryExpression(node.expression) && node.expression.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken && isIdent(node.expression.left, "courseId") && isIdent(node.expression.right, "columnPostingResetForCourse")) {
+      if (ts.isIfStatement(node) && node.expression.getText() === "courseId !== columnPostingResetForCourse || cellScope !== columnPostingScope") {
         const thenStmts = ts.isBlock(node.thenStatement) ? [...node.thenStatement.statements] : [node.thenStatement];
         found = thenStmts.some((s) => ts.isExpressionStatement(s) && ts.isCallExpression(s.expression) && isIdent(s.expression.expression, "setLastRunCohort") && isNullLiteral(s.expression.arguments[0]));
       }
@@ -492,7 +492,8 @@ function isAccountRenderRoot(node: Node | undefined): boolean {
   const choice = mount.parent;
   if (!ts.isConditionalExpression(choice) || choice.whenTrue !== mount) return false;
   if (!isNullLiteral(choice.whenFalse) || choice.condition.getText() !== "!loading && user") return false;
-  if (mount.attributes.properties.length !== 1 || mount.attributes.properties[0].getText() !== "key={user.id}") return false;
+  const attrs = mount.attributes.properties.map((prop) => prop.getText());
+  if (attrs.length !== 2 || !attrs.includes("key={user.id}") || !attrs.includes("accountId={user.id}")) return false;
   const returned = choice.parent;
   if (!ts.isReturnStatement(returned)) return false;
   const entry = enclosingFunction(returned);
@@ -581,7 +582,7 @@ function hidingAttrNames(el: JsxTag): string[] {
 /** The fixture shapes section 13.2 requires as canaries for the mount
  * gate, each expected to fail. */
 const A6_ACCOUNT_ENTRY = `export default function RepoGradesTab() {
-  return !loading && user ? <AccountRepoGradesTab key={user.id} /> : null;
+  return !loading && user ? <AccountRepoGradesTab key={user.id} accountId={user.id} /> : null;
 }`;
 const A6_CANARIES: Array<[string, string]> = [
   [

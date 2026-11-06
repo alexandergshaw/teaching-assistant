@@ -40,11 +40,14 @@ import type { LlmProvider } from "@/lib/llm";
 import {
   applyRepoGradeFeedbackFieldEdit,
   applyRepoGradeCompletion,
+  applyRetainedRepoGradeDraftEdit,
   getRepoGradeCellEdit,
   mergeRepoGradeLiveScores,
   setRepoGradeCellEdit,
-  type RepoGradeCellEdit,
   type RepoGradeCellEditsByRepo,
+  type RepoGradeCompletionPatch,
+  type RepoGradeFeedbackDraft,
+  type RetainedRepoGradeResult,
 } from "./repoGradesCellEdits";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
@@ -74,7 +77,8 @@ import { timeGradingAction } from "../grading/gradingActionSeam";
 import { admitRepoGradeTargets } from "./repoGradesDashboardModel";
 
 export interface UseRepoGradesGradingActionsParams {
-  cellScope: object;
+  cellScope: object | null;
+  isCellScopeCurrent: () => boolean;
   /** The rows currently shown, in display order (index.tsx's sortedRows). */
   rows: readonly RepoGradeRow[];
   cellEdits: RepoGradeCellEditsByRepo;
@@ -111,12 +115,7 @@ export interface UseRepoGradesGradingActionsParams {
   /** The trimmed target branch ("merged to"); undefined when blank, which
    * keeps gradeRepoAction's 5th argument undefined (no branch-merge check). */
   targetBranch?: string;
-  /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
-   * to {} on a course switch, via the SAME render-phase compare-and-adjust
-   * idiom index.tsx's own cellStateResetForCourse branch uses for cellEdits/
-   * postSummary - the two must stay in the same commit so a course
-   * switch can never leave one course's posting-busy flags visible against a
-   * different course's rows. */
+  /** The selected course ID, used to scope grading and class trends. */
   courseId: string;
   /** The selected course, for its name and Canvas URL. Posting is a no-op
    * (both handlers return immediately) while this is null. */
@@ -127,6 +126,14 @@ export interface UseRepoGradesGradingActionsParams {
 }
 
 export interface UseRepoGradesGradingActionsResult {
+  isCurrent: () => boolean;
+  handleRetainedDraftChange: (
+    repo: string,
+    folder: string,
+    expected: Pick<RetainedRepoGradeResult, "id" | "source">,
+    field: keyof RepoGradeFeedbackDraft,
+    value: string,
+  ) => void;
   handleScoreChange: (repo: string, folder: string, score: string) => void;
   /** Replaces the old `handleCommentChange` (REGRESSION entry 355's "comment
    * is no longer independently editable" rule, applied to this surface) -
@@ -157,6 +164,7 @@ export function useRepoGradesGradingActions(
 ): UseRepoGradesGradingActionsResult {
   const {
     cellScope,
+    isCellScopeCurrent,
     rows,
     cellEdits,
     setCellEdits,
@@ -181,24 +189,19 @@ export function useRepoGradesGradingActions(
     currentScope.current = cellScope;
     return () => { currentScope.current = null; };
   }, [cellScope]);
-  const isCurrent = () => currentScope.current === cellScope;
+  const isCurrent = () => cellScope !== null && currentScope.current === cellScope && isCellScopeCurrent();
   const announceGrade = (message: string) => {
     if (isCurrent()) setPostSummary(message);
   };
 
   const [columnPosting, setColumnPosting] = useState<Record<string, boolean>>({});
-  // Same render-phase compare-and-adjust idiom index.tsx's own
-  // cellStateResetForCourse branch uses - never a useEffect (this file must
-  // define none). Runs during the same render as that branch, so both
-  // commits land together and a course switch cannot leave one course's
-  // posting-busy flags visible against another course's rows.
+  // Clear action state when selection changes or a discard replaces its scope.
   const [columnPostingResetForCourse, setColumnPostingResetForCourse] = useState<string | null>(null);
-  // A16 wave 3: lastRunCohort is cleared in the SAME render-phase branch, so
-  // a course switch can never leave one course's trends visible against
-  // another's rows (build-packet branch 7).
+  const [columnPostingScope, setColumnPostingScope] = useState(cellScope);
   const [lastRunCohort, setLastRunCohort] = useState<RepoRunCohort | null>(null);
-  if (courseId !== columnPostingResetForCourse) {
+  if (courseId !== columnPostingResetForCourse || cellScope !== columnPostingScope) {
     setColumnPostingResetForCourse(courseId);
+    setColumnPostingScope(cellScope);
     setColumnPosting({});
     setLastRunCohort(null);
   }
@@ -234,6 +237,13 @@ export function useRepoGradesGradingActions(
       const next = applyRepoGradeFeedbackFieldEdit(current, field, value);
       return setRepoGradeCellEdit(prev, repo, folder, { ...next, draftRevision: (current.draftRevision ?? 0) + 1 });
     });
+  };
+
+  const handleRetainedDraftChange: UseRepoGradesGradingActionsResult["handleRetainedDraftChange"] = (
+    repo, folder, expected, field, value,
+  ) => {
+    if (!isCurrent()) return;
+    setCellEdits((prev) => applyRetainedRepoGradeDraftEdit(prev, repo, folder, expected, field, value));
   };
 
   // AC4 item 21: reuses gradeRepoAction with `folderPath` as the `pathPrefix` -
@@ -457,7 +467,7 @@ export function useRepoGradesGradingActions(
   // header's displayed count and this handler's actual post can never
   // disagree about which rows a selection scopes to.
   const handlePostColumn = async (column: RepoGradeColumn, pointsPossible: number | null) => {
-    if (!course) return;
+    if (!course || !isCurrent()) return;
     const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
     const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
@@ -496,6 +506,7 @@ export function useRepoGradesGradingActions(
     });
 
     const result = await timeGradingAction("post_grades", () => postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade)));
+    if (!isCurrent()) return;
 
     const fanout = fanOutRepoGradePostResult(
       plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
@@ -542,7 +553,7 @@ export function useRepoGradesGradingActions(
   // each cell as RepoGradeCellControl's `onPostOne`. It did not ship switched
   // off - the failure mode docs/REGRESSION.md entry 211 records.
   const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn, pointsPossible: number | null) => {
-    if (!course) return;
+    if (!course || !isCurrent()) return;
     const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
     if (plan.postable.length === 0) {
@@ -561,6 +572,7 @@ export function useRepoGradesGradingActions(
     setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { postStatus: "posting", postMessage: null }));
 
     const result = await timeGradingAction("post_grades", () => postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade)));
+    if (!isCurrent()) return;
 
     const fanout = fanOutRepoGradePostResult(
       plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
@@ -598,7 +610,7 @@ export function useRepoGradesGradingActions(
   // block only supplies its callbacks and builds the plan a click starts it
   // with. buildBulkGradePlan never reads row.binding - do not add a binding
   // check here, that reintroduces the friction this feature removes.
-  const handleBulkCellUpdate = (repo: string, folder: string, patch: Partial<RepoGradeCellEdit>) => {
+  const handleBulkCellUpdate = (repo: string, folder: string, patch: RepoGradeCompletionPatch) => {
     if (!isCurrent()) return;
     const revision = getRepoGradeCellEdit(cellEdits, repo, folder).draftRevision ?? 0;
     setCellEdits((prev) => applyRepoGradeCompletion(prev, repo, folder, revision, patch));
@@ -613,7 +625,7 @@ export function useRepoGradesGradingActions(
     targetBranch,
     onCellUpdate: handleBulkCellUpdate,
     onAnnounce: announceGrade,
-    scope: cellScope,
+    scope: cellScope ?? undefined,
     isCurrent,
   });
 
@@ -677,6 +689,8 @@ export function useRepoGradesGradingActions(
   const trendsEntry = repoRunTrendsEntry(lastRunCohort, courseId);
 
   return {
+    isCurrent,
+    handleRetainedDraftChange,
     handleScoreChange,
     handleFeedbackFieldChange,
     handleGradeCell,

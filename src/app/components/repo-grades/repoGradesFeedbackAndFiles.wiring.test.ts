@@ -323,6 +323,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "index.tsx",
   "linkRepoUsernames.ts",
   "repoFeedbackClipboard.ts",
+  "repoFeedbackIdb.ts",
+  "repoFeedbackIdbAdapter.ts",
   "repoGradePostScore.ts",
   "repoGradeScoreDisplay.ts",
   "repoGradeStudentName.ts",
@@ -334,6 +336,8 @@ const FROZEN_REPO_GRADES_ROOTS = [
   "repoGradesCellEdits.ts",
   "repoGradesCoursePicker.ts",
   "repoGradesDashboardModel.ts",
+  "repoGradesDraftController.ts",
+  "repoGradesDraftSession.ts",
   "repoGradesFolderSelection.ts",
   // RG-SEARCH-STICKY Wave C: the pure grade-set reducer and grade-scope decision.
   "repoGradesGradeSet.ts",

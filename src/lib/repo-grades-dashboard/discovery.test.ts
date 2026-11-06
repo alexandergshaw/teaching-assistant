@@ -23,7 +23,7 @@ describe("discoverRepoGradeSources", () => {
         return Response.json([repo("lab-01"), repo("lab-02"), repo("lab-03"), repo("other")]);
       }
       if (url.endsWith("/commits/grade%2Fsource")) {
-        return url.includes("lab-03") ? new Response(null, { status: 403 }) : Response.json({ sha });
+        return url.includes("lab-03") ? Response.json({ message: "Resource not accessible" }, { status: 403 }) : Response.json({ sha });
       }
       if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
       if (url.endsWith(`/git/trees/${treeSha}?recursive=1`)) {
@@ -155,6 +155,77 @@ describe("discoverRepoGradeSources", () => {
     expect(fetcher).toHaveBeenCalledTimes(10);
   });
 
+  it.each([
+    ["malformed row", [repo("outside-prefix"), null]],
+    ["case-insensitive duplicate", [repo("outside-prefix"), repo("OUTSIDE-PREFIX")]],
+    ["foreign owner", [{ ...repo("outside-prefix"), owner: { login: "other" }, full_name: "other/outside-prefix" }]],
+    ["inconsistent full name", [{ ...repo("outside-prefix"), full_name: "classroom/different" }]],
+  ])("reports incomplete organization coverage for %s before applying the prefix", async (_label, page) => {
+    const fetcher = vi.fn(async () => Response.json(page, { headers: { link: '<https://redirect.invalid/>; rel="next"' } }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom", prefix: "lab-" })).resolves.toEqual({
+      status: "scanned", enumerationComplete: false, repos: [],
+    });
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(`${root}/orgs/classroom/repos?per_page=100&sort=full_name&page=1`, expect.anything());
+  });
+
+  it.each([{}, Array.from({ length: 101 }, (_, index) => repo(`lab-${index}`))])("rejects an invalid organization page", async (page) => {
+    const fetcher = vi.fn(async () => Response.json(page));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({ status: "blocked", reason: "unavailable" });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("marks a duplicate across numbered pages incomplete and retains an independently complete source", async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("&page=1")) {
+        return Response.json([repo("lab-1"), ...Array.from({ length: 99 }, (_, index) => repo(`other-${index}`))]);
+      }
+      if (url.includes("&page=2")) return Response.json([repo("OTHER-0")]);
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
+      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      return Response.json({ sha: treeSha, truncated: false, tree: [{ path: "lab/main.py", type: "blob", size: 5 }] });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom", prefix: "lab-" })).resolves.toEqual({
+      status: "scanned", enumerationComplete: false, repos: [
+        { status: "ready", repo: "classroom/lab-1", sourceRef: "default-source", sourceCommit: sha, folders: ["lab"] },
+      ],
+    });
+    expect(fetcher).toHaveBeenCalledTimes(5);
+  });
+
+  it("rejects a redirected pinned request and never exposes its location or falls back to legacy", async () => {
+    const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+      expect(init.redirect).toBe("manual");
+      if (url.includes("/orgs/")) return Response.json([repo("lab")]);
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
+      return new Response(null, { status: 301, headers: { location: "https://redirect.invalid/?private=value" } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({
+      status: "scanned", enumerationComplete: true, repos: [
+        { status: "blocked", repo: "classroom/lab", sourceRef: "default-source", sourceCommit: sha, reason: "redirect-rejected" },
+      ],
+    });
+    expect(fetcher.mock.calls.map(([url]) => new URL(url).origin)).toEqual([root, root, root]);
+  });
+
+  it.each([null, { type: "blob", path: "lab/main.py", size: -1 }])("keeps a malformed recursive tree partial", async (entry) => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo("lab")]);
+      if (url.endsWith("/commits/default-source")) return Response.json({ sha });
+      if (url.endsWith(`/git/commits/${sha}`)) return Response.json({ sha, tree: { sha: treeSha } });
+      return Response.json({ sha: treeSha, truncated: false, tree: [entry] });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({
+      status: "scanned", enumerationComplete: true, repos: [
+        { status: "partial", repo: "classroom/lab", sourceRef: "default-source", sourceCommit: sha, reason: "tree-truncated" },
+      ],
+    });
+  });
+
   it("caps total GitHub requests and marks every unscanned repo/ref pair as incomplete", async () => {
     const repos = Array.from({ length: 61 }, (_, index) => repo(`lab-${index}`));
     const fetcher = vi.fn(async (url: string) => {
@@ -228,11 +299,8 @@ describe("discoverRepoGradeSources", () => {
     const startedRequests = DEFAULT_TREE_SCAN_CONCURRENCY + 4; // Listing, initial refs, two commit objects, one tree.
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(startedRequests));
 
-    const limited = new Response(null, { status, headers: { [header]: value } });
-    vi.spyOn(limited, "text").mockImplementation(async () => {
-      headersObserved.resolve();
-      return "";
-    });
+    const body = new ReadableStream({ cancel: () => headersObserved.resolve() });
+    const limited = new Response(body, { status, headers: { [header]: value } });
     throttle.resolve(limited);
     await headersObserved.promise;
     outstandingRefs.resolve();
@@ -262,7 +330,7 @@ describe("discoverRepoGradeSources", () => {
     const controller = new AbortController();
     const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
     const fetcher = vi.fn(async (url: string, init: RequestInit) => {
-      expect(init.signal).toBe(controller.signal);
+      expect(init.signal).toBeInstanceOf(AbortSignal);
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) return Response.json([repo("lab")]);
       return new Promise<Response>((_resolve, reject) => {
         init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true });

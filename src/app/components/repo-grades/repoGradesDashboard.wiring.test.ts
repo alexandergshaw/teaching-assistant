@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 const ts = createRequire(import.meta.url)("typescript") as typeof import("typescript");
 const index = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./RepoGradesDashboard.tsx", import.meta.url), "utf8");
+const feedback = readFileSync(new URL("./RepoDashboardFeedback.tsx", import.meta.url), "utf8");
+const gradingActions = readFileSync(new URL("./useRepoGradesGradingActions.ts", import.meta.url), "utf8");
 
 function findCourseDashboardMount(source: string): JsxSelfClosingElement | null {
   const file = ts.createSourceFile("index.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -22,7 +24,7 @@ function findCourseDashboardMount(source: string): JsxSelfClosingElement | null 
   const gate = groupedMount.parent;
   if (!ts.isBinaryExpression(gate) || gate.right !== groupedMount) return null;
   if (gate.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) return null;
-  if (gate.left.getText() !== "course && cellStateResetForCourse === course.id") return null;
+  if (gate.left.getText() !== "course && cellDraft") return null;
   const slot = gate.parent;
   if (!ts.isJsxExpression(slot) || !ts.isJsxFragment(slot.parent)) return null;
   const groupedFragment = slot.parent.parent;
@@ -45,7 +47,7 @@ describe("class repository results wiring", () => {
   });
 
   it("rejects an outer guard that hides the dashboard until a folder is selected", () => {
-    const gate = "{course && cellStateResetForCourse === course.id && (<RepoGradesDashboard />)}";
+    const gate = "{course && cellDraft && (<RepoGradesDashboard />)}";
     const direct = `function AccountRepoGradesTab() { return (<>${gate}</>); }`;
     const guarded = direct.replace(gate, `{currentSelectedFolder !== ALL_FOLDERS && (<>${gate}</>)}`);
     expect(findCourseDashboardMount(direct)).not.toBeNull();
@@ -53,14 +55,13 @@ describe("class repository results wiring", () => {
   });
 
   it("scopes the tab to the account and routes existing grading mutations through the current cell scope", () => {
-    expect(index).toContain("return !loading && user ? <AccountRepoGradesTab key={user.id} /> : null;");
+    expect(index).toContain("return !loading && user ? <AccountRepoGradesTab key={user.id} accountId={user.id} /> : null;");
     const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
     expect(props).toContain("key={course.id}");
     expect(props).toContain("courseId={course.id}");
     expect(dashboard).toContain("courseId={courseId} accountId={user.id}");
-    expect(index).toContain("setCellState({ scope: {}, edits })");
-    expect(index).toContain("setCellEdits(restoredEdits)");
-    expect(index).toContain("setCellEdits: (update) => setCellState((current) => updateRepoGradesCourseEdits(current, cellScope, update))");
+    expect(index).toContain("isCellScopeCurrent: () => drafts.isCurrent(cellScope)");
+    expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");
   });
 
   it("declares table headers and a concise status independent of the scrollable rows", () => {
@@ -85,5 +86,32 @@ describe("class repository results wiring", () => {
     expect(dashboard).toContain("grading.handleScoreChange(repo, folder, score)");
     expect(dashboard).toContain("grading.handleFeedbackFieldChange(repo, folder, field, value)");
     expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost/);
+  });
+
+  it("routes retained edits through the course guard and the separately keyed editor and modal", () => {
+    const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
+    expect(props).toContain("onRetainedDraftChange={handleRetainedDraftChange}");
+    expect(props).toContain("isCurrentCellScope={isCurrentCellScope}");
+    expect(dashboard).toContain("onRetainedDraftChange={onRetainedDraftChange}");
+    expect(gradingActions).toMatch(/const handleRetainedDraftChange[\s\S]*?if \(!isCurrent\(\)\) return;\s*setCellEdits\(\(prev\) => applyRetainedRepoGradeDraftEdit\(prev, repo, folder, expected, field, value\)\)/);
+
+    const editor = feedback.slice(feedback.indexOf("function RetainedDraft("), feedback.indexOf("const RETENTION_LABELS"));
+    expect(feedback).toMatch(/retainedResults\?\.map\(\(result, index\) => \(\s*<RetainedFeedback key=\{result\.id\} result=\{result\}/);
+    expect(feedback).toContain("open && <RetainedDraft");
+    expect(editor).toContain("onDraftChange(repo, folder, result, field, value)");
+    expect(editor).toMatch(/<RowFeedbackBoxes[\s\S]*?onCopy=\{copy\} onChangeField=\{changeFeedback\} onExpand=\{expand\}/);
+    expect(editor).toMatch(/\{expandedField && \(\s*<FeedbackExpandModal[\s\S]*?field=\{expandedField\} edit=\{feedback\}\s*onChange=\{changeFeedback\}[\s\S]*?restoreFocusRef=\{expandTrigger\}/);
+    expect(editor).not.toMatch(/handleGrade|handlePost|\.filter\(/);
+  });
+
+  it("binds retained copy to the committed editor version and rejects stale status", () => {
+    expect(feedback).toContain("JSON.stringify([accountId, courseId, repo, folder, id, score, comment, strengths, improvements, resubmitNotice])");
+    expect(feedback).toContain("props.isCurrentCellScope() && details.current?.open === true");
+    expect(feedback).toContain("props.isAvailable() && details.current?.open === true");
+    expect(feedback).toContain("lifetime.current?.identity === identity");
+    expect(feedback).toContain("lifetime.current === mount");
+    expect(feedback).toContain("lifetime.current = null");
+    expect(feedback).toMatch(/invalidateCopy\(\);\s*onDraftChange/);
+    expect(feedback).toMatch(/await copyRepoFeedback\([^;]*, isCurrent\);\s*if \(!isCurrent\(\)\) return;\s*const success/);
   });
 });

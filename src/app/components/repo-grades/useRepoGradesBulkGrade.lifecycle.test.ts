@@ -228,6 +228,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
   function makeParams(overrides: Partial<UseRepoGradesGradingActionsParams> = {}): UseRepoGradesGradingActionsParams {
     return {
       cellScope,
+      isCellScopeCurrent: () => true,
       rows: ROWS,
       cellEdits: cellEditsState,
       setCellEdits: (updater) => {
@@ -297,7 +298,9 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
     await pending;
     const cell = cellEditsState[ROWS[0].repo]["week-1"];
     expect(cell).toMatchObject({ grading: false, strengths: "Keep newer draft", comment: "Keep newer draft" });
-    expect(cell.conflictingGrade?.generatedScore).toBeTruthy();
+    expect(cell.retainedResults).toEqual([
+      expect.objectContaining({ id: "local:1", source: expect.objectContaining({ generatedScore: expect.any(String) }), draft: null }),
+    ]);
     expect(gradeRepoActionMock).toHaveBeenCalledTimes(first === "single" ? 1 : TARGET_REPOS.length);
   });
 
@@ -311,6 +314,22 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
     await pending;
     expect(gradeRepoActionMock).not.toHaveBeenCalled();
     expect(announceCalls).toEqual([]);
+  });
+
+  it("ignores a late grader completion when the controller revokes the scope before rerender", async () => {
+    const grading = usePendingGradeCalls();
+    let current = true;
+    const render = useTestRenderWith({ isCellScopeCurrent: () => current });
+    const pending = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await flushMicrotasks();
+    expect(gradeRepoActionMock).toHaveBeenCalledTimes(1);
+    const editsBeforeRevocation = cellEditsState;
+    current = false;
+    grading.resolveAll();
+    await pending;
+    expect(cellEditsState).toBe(editsBeforeRevocation);
+    expect(render.isCurrent()).toBe(false);
   });
 
   it("A26: two clicks during a pending rubric fetch must not double every grading call", async () => {

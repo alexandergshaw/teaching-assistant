@@ -5,15 +5,145 @@
 // setRepoGradeCellEdit's spread pattern exist specifically to make that true.
 import { describe, it, expect } from "vitest";
 import {
+  applyRepoGradeCompletion,
   applyRepoGradeFeedbackFieldEdit,
+  applyRetainedRepoGradeDraftEdit,
   defaultRepoGradeCellEdit,
   getRepoGradeCellEdit,
   mergeRepoGradeLiveScores,
   setRepoGradeCellEdit,
   EMPTY_REPO_GRADE_CELL_EDITS,
 } from "./repoGradesCellEdits";
-import { composeOverallCommentLocal } from "../grading-results/gradingResultsHelpers";
+import { composeOverallCommentLocal, copyAllFeedbackText } from "../grading-results/gradingResultsHelpers";
 import type { RepoGradeRow } from "./repoGradesRows";
+
+describe("applyRepoGradeCompletion", () => {
+  const repo = "org/a";
+  const folder = "week-1";
+  const completion = {
+    score: "8/10",
+    generatedScore: "8/10",
+    comment: "Generated feedback",
+    generatedComment: "Generated feedback",
+    strengths: "Generated feedback",
+    grading: false,
+    gradeError: null,
+  };
+
+  it("keeps identical conflicting completions separate and preserves the entire current draft", () => {
+    let edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, {
+      score: "7/10", comment: "Instructor draft", draftRevision: 1, postStatus: "posted",
+    });
+    edits = setRepoGradeCellEdit(edits, repo, "week-2", { score: "4/10" });
+    edits = setRepoGradeCellEdit(edits, "org/b", folder, { score: "5/10" });
+    const first = applyRepoGradeCompletion(edits, repo, folder, 0, completion);
+    const second = applyRepoGradeCompletion(first, repo, folder, 0, completion);
+    const { retainedResults, ...draft } = second[repo][folder];
+    expect(draft).toEqual(edits[repo][folder]);
+    expect(retainedResults).toMatchObject([
+      { id: "local:1", source: { generatedScore: "8/10", comment: "Generated feedback" }, draft: null },
+      { id: "local:2", source: { generatedScore: "8/10", comment: "Generated feedback" }, draft: null },
+    ]);
+    expect(first[repo][folder].retainedResults).toEqual([retainedResults?.[0]]);
+    expect(second[repo]["week-2"]).toBe(edits[repo]["week-2"]);
+    expect(second["org/b"]).toBe(edits["org/b"]);
+  });
+
+  it("preserves retained results across ordinary success and allocates the first unused cell-local ID", () => {
+    const initial = applyRepoGradeCompletion(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, 0, completion);
+    const truncated = { ...completion, submissionTruncated: true };
+    let edits = applyRepoGradeCompletion(initial, repo, folder, 0, truncated);
+    edits = applyRepoGradeCompletion(edits, repo, folder, 0, truncated);
+    const retained = edits[repo][folder].retainedResults?.slice(1);
+    edits = setRepoGradeCellEdit(edits, repo, folder, { retainedResults: retained });
+    const updated = applyRepoGradeCompletion(edits, repo, folder, 0, { ...completion, score: "9/10", generatedScore: "9/10" });
+    expect(updated[repo][folder].score).toBe("9/10");
+    expect(updated[repo][folder].retainedResults).toBe(retained);
+    expect(applyRepoGradeCompletion(updated, repo, folder, 0, truncated)[repo][folder].retainedResults?.map(({ id }) => id))
+      .toEqual(["local:2", "local:1"]);
+  });
+
+  it("clones and deeply freezes source rubric data without freezing the grading payload", () => {
+    const rubricAreas = [{ area: "Structure", score: "2/2", comment: "Original rubric" }];
+    const edited = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, { draftRevision: 1 });
+    const saved = applyRepoGradeCompletion(edited, repo, folder, 0, { ...completion, rubricAreas });
+    const source = saved[repo][folder].retainedResults?.[0].source;
+    expect(source?.rubricAreas).not.toBe(rubricAreas);
+    expect(source?.rubricAreas[0]).not.toBe(rubricAreas[0]);
+    expect(Object.isFrozen(source)).toBe(true);
+    expect(Object.isFrozen(source?.rubricAreas)).toBe(true);
+    expect(Object.isFrozen(source?.rubricAreas[0])).toBe(true);
+    rubricAreas[0].comment = "Changed payload";
+    expect(source?.rubricAreas[0].comment).toBe("Original rubric");
+  });
+
+  it("edits two retained drafts independently, preserving the postable draft and frozen sources", () => {
+    const postable = {
+      ...defaultRepoGradeCellEdit(), score: "7/10", comment: "Instructor draft",
+      draftRevision: 1, postStatus: "posted" as const, postMessage: "Posted",
+    };
+    const initial = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, postable);
+    const rubricAreas = [{ area: "Structure", score: "2/2", comment: "Original rubric" }];
+    const once = applyRepoGradeCompletion(initial, repo, folder, 0, { ...completion, rubricAreas });
+    const twice = applyRepoGradeCompletion(once, repo, folder, 0, completion);
+    const [first, second] = twice[repo][folder].retainedResults!;
+    const updatedScore = applyRetainedRepoGradeDraftEdit(twice, repo, folder, first, "score", "9/10");
+    const updatedComment = applyRetainedRepoGradeDraftEdit(updatedScore, repo, folder, first, "comment", "Reviewed");
+    const updatedStrengths = applyRetainedRepoGradeDraftEdit(updatedComment, repo, folder, first, "strengths", "Clear");
+    const updatedImprovements = applyRetainedRepoGradeDraftEdit(updatedStrengths, repo, folder, first, "improvements", "Add tests");
+    const updatedNotice = applyRetainedRepoGradeDraftEdit(updatedImprovements, repo, folder, first, "resubmitNotice", "Resubmit");
+    const updatedBoth = applyRetainedRepoGradeDraftEdit(updatedNotice, repo, folder, second, "comment", "Other");
+    const { retainedResults, ...active } = updatedBoth[repo][folder];
+
+    expect(active).toEqual(postable);
+    expect(updatedComment[repo][folder].retainedResults?.[0].draft?.comment).toBe("Reviewed");
+    expect(retainedResults).toMatchObject([
+      { id: first.id, draft: { score: "9/10", comment: "Clear Add tests Resubmit", strengths: "Clear", improvements: "Add tests", resubmitNotice: "Resubmit" } },
+      { id: second.id, draft: { score: "8/10", comment: "Other", strengths: "Generated feedback" } },
+    ]);
+    expect(retainedResults?.[0].source).toBe(first.source);
+    expect(retainedResults?.[1].source).toBe(second.source);
+    expect(first.source.rubricAreas).toEqual(rubricAreas);
+    expect(updatedScore[repo][folder].retainedResults?.[1]).toBe(second);
+    expect(first.draft).toBeNull();
+    expect(second.draft).toBeNull();
+  });
+
+  it("uses the existing combined copy format for edited sections and falls back to overall-only feedback", () => {
+    const initial = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, { draftRevision: 1 });
+    const retained = applyRepoGradeCompletion(initial, repo, folder, 0, { ...completion, strengths: "" });
+    const [result] = retained[repo][folder].retainedResults!;
+    const reviewed = applyRetainedRepoGradeDraftEdit(retained, repo, folder, result, "comment", "Overall only");
+    const reviewedDraft = reviewed[repo][folder].retainedResults![0].draft!;
+    expect(copyAllFeedbackText({ ...reviewedDraft, overall: reviewedDraft.comment })).toBe("Overall only");
+
+    const sectionEdit = applyRetainedRepoGradeDraftEdit(reviewed, repo, folder, result, "strengths", "Clear");
+    const improvementEdit = applyRetainedRepoGradeDraftEdit(sectionEdit, repo, folder, result, "improvements", "Add tests");
+    const draft = improvementEdit[repo][folder].retainedResults![0].draft!;
+    expect(draft.comment).toBe("Clear Add tests");
+    expect(copyAllFeedbackText({ ...draft, overall: draft.comment })).toBe("Clear\n\nAdd tests");
+
+    const manualOverall = applyRetainedRepoGradeDraftEdit(improvementEdit, repo, folder, result, "comment", "Manual overall");
+    const manualDraft = manualOverall[repo][folder].retainedResults![0].draft!;
+    expect(manualDraft.comment).toBe("Manual overall");
+    expect(copyAllFeedbackText({ ...manualDraft, overall: manualDraft.comment })).toBe("Clear\n\nAdd tests");
+  });
+
+  it("rejects missing and recycled identities even when an equal result has the same local ID", () => {
+    const initial = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, repo, folder, { draftRevision: 1 });
+    const previous = applyRepoGradeCompletion(initial, repo, folder, 0, completion);
+    const replaced = applyRepoGradeCompletion(initial, repo, folder, 0, completion);
+    const oldResult = previous[repo][folder].retainedResults![0];
+    const newResult = replaced[repo][folder].retainedResults![0];
+
+    expect(oldResult).toEqual(newResult);
+    expect(applyRetainedRepoGradeDraftEdit(replaced, repo, folder, oldResult, "score", "10/10")).toBe(replaced);
+    expect(applyRetainedRepoGradeDraftEdit(replaced, repo, folder, { ...newResult, id: "missing" }, "score", "10/10")).toBe(replaced);
+    expect(applyRetainedRepoGradeDraftEdit(replaced, "another-repo", folder, newResult, "score", "10/10")).toBe(replaced);
+    expect(applyRetainedRepoGradeDraftEdit(replaced, repo, "another-folder", newResult, "score", "10/10")).toBe(replaced);
+    expect(applyRetainedRepoGradeDraftEdit(replaced, repo, folder, newResult, "score", newResult.source.score)).toBe(replaced);
+  });
+});
 
 describe("getRepoGradeCellEdit", () => {
   it("returns the default state for a cell that has never been written", () => {

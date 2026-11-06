@@ -1,0 +1,217 @@
+import "server-only";
+
+import { githubRestHeaders } from "@/lib/github.repos";
+
+const API_ORIGIN = "https://api.github.com";
+const MAX_REQUESTS = 300;
+const DEADLINE_MS = 40_000;
+const MAX_SUCCESS_BYTES = 8 * 1024 * 1024;
+const MAX_ERROR_BYTES = 16 * 1024;
+const MAX_AGGREGATE_BYTES = 32 * 1024 * 1024;
+
+type ThrottleStop = "rate-limited" | "throttle-unconfirmed";
+type AbortStop = ThrottleStop | "deadline-exceeded" | "body-budget-exhausted";
+export type DiscoveryTransportFailure = AbortStop | "request-budget-exhausted" | "redirect-rejected"
+  | "response-too-large" | "access-denied" | "unavailable";
+
+export class DiscoveryTransportError extends Error {
+  constructor(readonly reason: DiscoveryTransportFailure) {
+    super(reason);
+  }
+}
+
+function fail(reason: DiscoveryTransportFailure): never {
+  throw new DiscoveryTransportError(reason);
+}
+
+function cancelWithoutWaiting(body: { cancel(): Promise<void> } | null) {
+  try {
+    void body?.cancel().catch(() => undefined);
+  } catch {
+    // Cleanup must not change the request's outcome or extend its deadline.
+  }
+}
+
+async function untilAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  const interrupted = Promise.withResolvers<never>();
+  const abort = () => interrupted.reject(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  try {
+    return await Promise.race([interrupted.promise, pending]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+function parseJson(bytes: Uint8Array): unknown {
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
+}
+
+function errorMessage(value: unknown): string {
+  if (value && typeof value === "object" && "message" in value && typeof value.message === "string"
+    && value.message.trim()) return value.message;
+  return fail("throttle-unconfirmed");
+}
+
+export function createDiscoveryTransport() {
+  const deadlineAt = performance.now() + DEADLINE_MS;
+  const timeout = AbortSignal.timeout(DEADLINE_MS);
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const fences = new Set<symbol>();
+  let fenceChanged = Promise.withResolvers<void>();
+  let requests = 0;
+  let bytes = 0;
+  let throttled: ThrottleStop | undefined;
+  let stopped: AbortStop | undefined;
+
+  function notifyFenceChanged() {
+    fenceChanged.resolve();
+    fenceChanged = Promise.withResolvers<void>();
+  }
+
+  function latchThrottle(reason: ThrottleStop) {
+    if (throttled === "rate-limited" || throttled === reason) return;
+    throttled = reason;
+    notifyFenceChanged();
+  }
+
+  function abortAll(reason: AbortStop) {
+    stopped ??= reason;
+    controller.abort();
+  }
+
+  function expire() {
+    if (fences.size && !throttled) latchThrottle("throttle-unconfirmed");
+    abortAll(throttled ?? "deadline-exceeded");
+  }
+
+  function checkActive() {
+    if (!stopped && (timeout.aborted || performance.now() >= deadlineAt)) expire();
+    if (stopped) fail(stopped);
+  }
+
+  timeout.addEventListener("abort", expire, { once: true });
+
+  async function readBody(response: Response, limit: number): Promise<Uint8Array> {
+    const reader = response.body?.getReader();
+    let buffer = new Uint8Array(0);
+    if (!reader) return buffer;
+    let used = 0;
+    let finished = false;
+    try {
+      while (true) {
+        checkActive();
+        const { done, value } = await untilAbort(reader.read(), signal);
+        if (done) {
+          finished = true;
+          return buffer.subarray(0, used);
+        }
+        // Charge delivered chunks before either per-response rejection or retention.
+        bytes += value.byteLength;
+        if (bytes > MAX_AGGREGATE_BYTES) abortAll("body-budget-exhausted");
+        checkActive();
+        const needed = used + value.byteLength;
+        if (needed > limit) fail("response-too-large");
+        if (needed > buffer.length) {
+          const expanded = new Uint8Array(Math.min(limit, Math.max(needed, buffer.length * 2)));
+          expanded.set(buffer);
+          buffer = expanded;
+        }
+        buffer.set(value, used);
+        used = needed;
+      }
+    } finally {
+      if (!finished) cancelWithoutWaiting(reader);
+      reader.releaseLock();
+    }
+  }
+
+  async function classifyForbidden(response: Response): Promise<never> {
+    const fence = Symbol();
+    fences.add(fence);
+    try {
+      let message: string;
+      try {
+        const body = await readBody(response, MAX_ERROR_BYTES);
+        checkActive();
+        message = errorMessage(parseJson(body));
+        checkActive();
+      } catch {
+        // The response could have been a throttle even when its body is unavailable.
+        checkActive();
+        latchThrottle("throttle-unconfirmed");
+        return fail(throttled ?? "throttle-unconfirmed");
+      }
+      const limited = /\brate[\s-]+limit\b|\babuse detection\b/i.test(message);
+      checkActive();
+      if (limited) {
+        latchThrottle("rate-limited");
+        return fail("rate-limited");
+      }
+      return fail("access-denied");
+    } finally {
+      fences.delete(fence);
+      notifyFenceChanged();
+    }
+  }
+
+  async function getJson<T>(path: `/${string}`, validate: (value: unknown) => T): Promise<T> {
+    try {
+      while (fences.size && !throttled) {
+        checkActive();
+        await untilAbort(fenceChanged.promise, signal);
+      }
+      if (throttled) fail(throttled);
+      checkActive();
+      if (requests >= MAX_REQUESTS) fail("request-budget-exhausted");
+      const url = new URL(path, API_ORIGIN);
+      if (url.origin !== API_ORIGIN || url.username || url.password) fail("unavailable");
+      const headers = githubRestHeaders();
+      // No await between admission, charging, and starting the network request.
+      requests += 1;
+      const pending = fetch(url.href, {
+        method: "GET", redirect: "manual", cache: "no-store", headers, signal,
+      }).then((response) => {
+        if (signal.aborted) cancelWithoutWaiting(response.body);
+        return response;
+      });
+      const response = await untilAbort(pending, signal);
+      try {
+        checkActive();
+      } catch (error) {
+        cancelWithoutWaiting(response.body);
+        throw error;
+      }
+
+      const { status } = response;
+      const limited = status === 429 || /^-?0+$/.test(response.headers.get("x-ratelimit-remaining")?.trim() ?? "")
+        || (status === 403 && response.headers.has("retry-after"));
+      if (limited) latchThrottle("rate-limited");
+      if ((status >= 300 && status < 400) || response.type === "opaqueredirect" || response.redirected) {
+        cancelWithoutWaiting(response.body);
+        return fail("redirect-rejected");
+      }
+      if (limited && !response.ok) {
+        cancelWithoutWaiting(response.body);
+        return fail("rate-limited");
+      }
+      if (status === 403) return await classifyForbidden(response);
+      const body = await readBody(response, response.ok ? MAX_SUCCESS_BYTES : MAX_ERROR_BYTES);
+      checkActive();
+      if (!response.ok) return fail(status === 401 ? "access-denied" : "unavailable");
+      const value = parseJson(body);
+      checkActive();
+      const result = validate(value);
+      checkActive();
+      return result;
+    } catch (error) {
+      checkActive();
+      if (error instanceof DiscoveryTransportError) throw error;
+      return fail("unavailable");
+    }
+  }
+
+  return { getJson, dispose: () => timeout.removeEventListener("abort", expire) };
+}

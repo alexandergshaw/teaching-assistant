@@ -34,14 +34,20 @@ export type GithubRepoRequestOptions = Pick<RequestInit, "signal"> & {
 
 type GithubRequestInit = RequestInit & GithubRepoRequestOptions;
 
+export function githubRestHeaders() {
+  return {
+    Authorization: `Bearer ${githubToken()}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
 async function ghFetch(path: string, { beforeRequest, observeResponse, ...init }: GithubRequestInit = {}): Promise<Response> {
   beforeRequest?.();
   const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${githubToken()}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
+      ...githubRestHeaders(),
       ...init.headers,
     },
   });

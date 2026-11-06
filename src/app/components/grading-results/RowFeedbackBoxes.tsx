@@ -96,10 +96,8 @@ export function RowFeedbackBoxes({
   const allKey = `${student}-all-feedback`;
   const allCopied = copiedKey === allKey;
   const copyAllLabel = namePrefix ? `Copy all ${namePrefix} feedback for ${student}` : `Copy all feedback for ${student}`;
-  // The clipboard text joins the three boxes with a BLANK LINE rather than
-  // copying the space-joined `overall` - see copyAllFeedbackText. Only the
-  // clipboard shape changes here; what is stored and posted to an LMS is
-  // untouched.
+  // Clipboard formatting joins feedback sections with a blank line and
+  // falls back to the overall comment if all sections are empty.
 
   return (
     <div>
@@ -145,7 +143,7 @@ export function RowFeedbackBoxes({
               label={meta.fieldLabel}
               value={edit[field]}
               onChange={(event) => onChangeField(field, event.target.value)}
-              aria-label={fieldAriaLabel}
+              slotProps={{ htmlInput: { "aria-label": fieldAriaLabel } }}
               placeholder={field === "resubmitNotice" ? "No resubmission note - full credit" : undefined}
               fullWidth
               size="small"

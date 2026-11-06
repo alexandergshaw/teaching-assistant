@@ -9,7 +9,7 @@ import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import type { UseRepoGradesGradingActionsResult } from "./useRepoGradesGradingActions";
 import styles from "./repo-grades-dashboard.module.css";
 
-// Kept off while retention and conflict-result controls remain unresolved.
+// Kept off pending verification and activation approval.
 const dashboardFeedbackEnabled = false;
 
 export default function RepoGradesDashboard({
@@ -22,6 +22,8 @@ export default function RepoGradesDashboard({
   gradeRows,
   gradeColumns,
   grading,
+  onRetainedDraftChange,
+  isCurrentCellScope,
 }: {
   cellEdits: RepoGradeCellEditsByRepo;
   scan: OrgRepoTreesResult | null;
@@ -33,6 +35,8 @@ export default function RepoGradesDashboard({
   gradeColumns: readonly RepoGradeColumn[];
   grading: Pick<UseRepoGradesGradingActionsResult, "handleGradeCell" | "handleGradeColumn" |
     "handleScoreChange" | "handleFeedbackFieldChange" | "bulkRunningFolder">;
+  onRetainedDraftChange: UseRepoGradesGradingActionsResult["handleRetainedDraftChange"];
+  isCurrentCellScope: UseRepoGradesGradingActionsResult["isCurrent"];
 }) {
   const headingId = useId();
   const { user } = useSupabase();
@@ -122,6 +126,8 @@ export default function RepoGradesDashboard({
                       {edit?.gradeError && <p role="alert">Grading did not return a usable result.</p>}
                       {dashboardFeedbackEnabled && folder !== null && edit && (
                         <RepoDashboardFeedback repo={repo} folder={folder} edit={edit}
+                          accountId={user?.id ?? ""} courseId={courseId} isCurrentCellScope={isCurrentCellScope}
+                          onRetainedDraftChange={onRetainedDraftChange}
                           onScoreChange={(score) => grading.handleScoreChange(repo, folder, score)}
                           onFeedbackChange={(field, value) => grading.handleFeedbackFieldChange(repo, folder, field, value)} />
                       )}

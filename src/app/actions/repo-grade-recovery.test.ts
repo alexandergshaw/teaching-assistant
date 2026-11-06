@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { requireAppOwner } from "@/lib/supabase/auth";
-import { createServiceClient } from "@/lib/supabase/server";
+import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { readRepoGradeReservationsAction, recoverUnstartedRepoGradeReservationsAction } from "./repo-grade-recovery";
 
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn() }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(), createServiceClient: vi.fn() }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: vi.fn(),
+}));
 
 const accountId = "owner";
+const owner = { id: accountId, email: "owner@example.test" };
+const ownerRow: AppUserRow = {
+  ...owner, displayName: null, status: "active", role: "owner", approvedAt: null, approvedBy: null,
+  createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+  statusChangedAt: null, statusChangedBy: null, roleGrantedBy: null,
+};
 const from = vi.fn();
 const rpc = vi.fn();
 const writeResponse = vi.fn();
@@ -33,7 +42,13 @@ beforeEach(() => {
   from.mockImplementation((table) => table === "repo_grade_reservations" ? reservations : attempts);
   rpc.mockReturnValue({ retry: writeResponse });
   vi.mocked(createServiceClient).mockReturnValue({ from, rpc } as never);
-  vi.mocked(requireAppOwner).mockResolvedValue({ id: accountId, email: "owner@example.test" });
+  vi.mocked(createClient).mockResolvedValue({
+    auth: {
+      getUser: async () => ({ data: { user: owner }, error: null }),
+      mfa: { getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal1", nextLevel: "aal1" } }) },
+    },
+  } as never);
+  vi.mocked(getAppUser).mockResolvedValue(ownerRow);
 });
 
 afterEach(() => {
@@ -55,9 +70,9 @@ function attempt(generation: number, dispatch_state: "prepared" | "started" | nu
 it("checks owner access and the current account before reading or releasing reservations", async () => {
   await expect(readRepoGradeReservationsAction("other-account")).resolves.toEqual({ status: "unavailable" });
   await expect(recoverUnstartedRepoGradeReservationsAction("other-account")).resolves.toEqual({ status: "unavailable" });
-  vi.mocked(requireAppOwner).mockRejectedValue(new Error("Owner required"));
-  await expect(readRepoGradeReservationsAction(accountId)).rejects.toThrow("Owner required");
-  await expect(recoverUnstartedRepoGradeReservationsAction(accountId)).rejects.toThrow("Owner required");
+  vi.mocked(getAppUser).mockResolvedValue({ ...ownerRow, role: "instructor" });
+  await expect(readRepoGradeReservationsAction(accountId)).rejects.toThrow("limited to the workspace owner");
+  await expect(recoverUnstartedRepoGradeReservationsAction(accountId)).rejects.toThrow("limited to the workspace owner");
   expect(createServiceClient).not.toHaveBeenCalled();
 });
 

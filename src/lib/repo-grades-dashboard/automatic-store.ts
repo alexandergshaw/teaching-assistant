@@ -2,12 +2,14 @@ import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/server";
 import type { AutomaticRepoGradeCourseState, AutomaticRepoGradeStatus, AutomaticRepoGradeTargetState } from "./automatic-status";
+import type { DiscoveryRateLimit } from "./discovery-transport";
 
 import type { RepoGradePreparationRetry } from "./preparation-ledger";
 import type { RepoGradeRepositoryCoverage } from "./scheduler";
+import { parseAutomaticRepoGradeSchedule, type AutomaticRepoGradeScheduleDraft } from "./automatic-schedule";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
-type ClaimScope = { runId: string; accountId: string; courseId: string };
+type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
 export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering" }) | (ClaimScope & Selector & { phase: "grading" });
 type StagedSelector = Selector & {
   state?: Extract<AutomaticRepoGradeTargetState, "already-processed" | "busy" | "failed" | "partial" | "unknown">;
@@ -23,7 +25,8 @@ type TargetCompletion = {
   preparationRetry?: RepoGradePreparationRetry;
   recovery?: string;
 };
-export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion;
+export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion
+  | { state: "github-throttled"; rateLimit: DiscoveryRateLimit };
 
 async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
   const { data, error } = await createServiceClient().rpc(name, args).retry(false).abortSignal(AbortSignal.timeout(10_000));
@@ -51,14 +54,26 @@ export async function controlAutomaticRepoGrade(accountId: string,
 }
 
 export async function readAutomaticRepoGrade(accountId: string): Promise<Omit<Extract<AutomaticRepoGradeStatus, { status: "loaded" }>, "status">> {
-  const result = await rpc("repo_grade_automatic_status", { p_user_id: accountId });
+  const result = await rpc("repo_grade_automatic_status_with_github_retry", { p_user_id: accountId });
   if (!record(result) || typeof result.enabled !== "boolean"
+    || typeof result.githubRetryEnabled !== "boolean"
+    || (result.githubRetryAt !== null && (typeof result.githubRetryAt !== "string" || !Number.isFinite(Date.parse(result.githubRetryAt))))
     || !Array.isArray(result.preparations) || !Array.isArray(result.recoveries)
     || (result.run !== null && (!record(result.run) || !isAutomaticRepoGradeId(result.run.id)
       || !Array.isArray(result.run.courses)))) throw new Error("Invalid automatic repository grading status");
+  // The previous migration returned a daily schedule without a kind field.
+  const rawSchedule = result.schedule;
+  const draft = record(rawSchedule) && parseAutomaticRepoGradeSchedule({
+    ...rawSchedule, kind: rawSchedule.kind ?? "daily",
+  });
+  const schedule = draft && record(rawSchedule) && typeof rawSchedule.nextAt === "string"
+    && Number.isFinite(Date.parse(rawSchedule.nextAt)) ? { ...draft, nextAt: rawSchedule.nextAt } : null;
+  if (rawSchedule != null && !schedule) throw new Error("Invalid automatic repository grading schedule");
   return {
     enabled: result.enabled,
-    schedule: result.schedule,
+    githubRetryEnabled: result.githubRetryEnabled,
+    githubRetryAt: result.githubRetryAt,
+    schedule,
     run: result.run,
     preparations: result.preparations,
     recoveries: result.recoveries,
@@ -71,7 +86,10 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
   if (record(result) && result.phase === "advanced") return "advanced";
   if (!record(result) || !isAutomaticRepoGradeId(result.runId) || !isAutomaticRepoGradeId(result.accountId)
     || !isAutomaticRepoGradeId(result.courseId)) throw new Error("Invalid automatic repository grading claim");
-  const scope = { runId: result.runId, accountId: result.accountId, courseId: result.courseId };
+  const scope = {
+    runId: result.runId, accountId: result.accountId, courseId: result.courseId,
+    retryGithubRateLimits: result.retryGithubRateLimits === true,
+  };
   if (result.phase === "discovering") return { ...scope, phase: result.phase };
   if (result.phase === "grading" && typeof result.repo === "string" && typeof result.folder === "string"
     && typeof result.ref === "string" && typeof result.sha === "string" && /^[0-9a-f]{40}$/.test(result.sha)) {
@@ -81,6 +99,15 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
 }
 
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
+  if (result.state === "github-throttled") {
+    const { retryAtMs, primary } = result.rateLimit;
+    return await rpc("repo_grade_automatic_finish_github_throttle", {
+      p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
+      p_discovering: work.phase === "discovering",
+      p_retry_at: retryAtMs === null ? null : new Date(retryAtMs).toISOString(),
+      p_primary_limit: primary,
+    }) === true;
+  }
   const discovery = "targets" in result;
   return await rpc(discovery ? "repo_grade_automatic_finish_discovery" : "repo_grade_automatic_finish", {
     p_run_id: work.runId,
@@ -94,6 +121,10 @@ export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lea
       p_recovery: result.recovery ?? null,
     }),
   }) === true;
+}
+
+export async function saveAutomaticRepoGradeGithubRetry(accountId: string, enabled: boolean) {
+  return await rpc("repo_grade_automatic_set_github_retry", { p_user_id: accountId, p_enabled: enabled }) === true;
 }
 
 export async function readAutomaticRecovery(accountId: string, targetId: number) {
@@ -116,8 +147,15 @@ export async function automaticPreparationRetry(
   return { courseId: result.courseId, folder: result.folder, key: result.key, generation: result.generation };
 }
 
-export async function saveAutomaticRepoGradeSchedule(accountId: string, time: string | null, zone: string | null) {
-  return await rpc("repo_grade_automatic_set_schedule", { p_user_id: accountId, p_time: time, p_zone: zone }) === true;
+export async function saveAutomaticRepoGradeSchedule(accountId: string, schedule: AutomaticRepoGradeScheduleDraft | null) {
+  if (schedule?.kind === "interval") {
+    return await rpc("repo_grade_automatic_set_interval", {
+      p_user_id: accountId, p_count: schedule.count, p_unit: schedule.unit,
+    }) === true;
+  }
+  return await rpc("repo_grade_automatic_set_schedule", {
+    p_user_id: accountId, p_time: schedule?.time ?? null, p_zone: schedule?.zone ?? null,
+  }) === true;
 }
 
 export async function enqueueDueAutomaticRepoGrades() {

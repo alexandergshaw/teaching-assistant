@@ -163,8 +163,20 @@ describe("discoverRepoGradeSources", () => {
     limited = true;
     await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({
       repos: [{ status: "blocked", reason: "rate-limited" }],
+      rateLimit: { primary: false, retryAtMs: null },
     });
     expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(2);
+  });
+
+  it("propagates a primary rate limit from organization enumeration", async () => {
+    const resetSeconds = Math.floor(Date.now() / 1_000) + 600;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetSeconds) },
+    })));
+    await expect(discoverRepoGradeSources({ organization: "classroom" })).resolves.toEqual({
+      status: "blocked", reason: "rate-limited", rateLimit: { primary: true, retryAtMs: resetSeconds * 1_000 },
+    });
   });
 
   it("includes alternate-only folders and resolves a shared ref once per repo", async () => {

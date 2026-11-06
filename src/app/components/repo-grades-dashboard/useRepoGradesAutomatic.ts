@@ -3,17 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import {
   enqueueRepoGradeAutomaticRunAction, readRepoGradeAutomaticRecoveryAction, readRepoGradeAutomaticStatusAction,
-  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticScheduleAction,
+  retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticGithubRetryAction,
+  setRepoGradeAutomaticScheduleAction,
   startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
 } from "@/app/actions/repo-grade-automatic";
 import type { AutomaticRepoGradeRun, AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
+import type { AutomaticRepoGradeScheduleDraft } from "@/lib/repo-grades-dashboard/automatic-schedule";
 import { recordRepoGradesStartup } from "./startup-diagnostics";
 
 const POLL_MS = 5_000;
 const unavailable = { status: "unavailable" } as const;
 
 function recordControl(
-  operation: "background_preference" | "background_schedule" | "background_retry" | "background_recovery" | "background_start" | "background_stop",
+  operation: "background_preference" | "background_schedule" | "background_retry" | "background_recovery" | "background_start"
+    | "background_stop" | "background_github_retry",
   outcome: "success" | "failed" | "unavailable" | "unchanged",
   startedAt: number,
 ) {
@@ -48,12 +51,14 @@ export function useRepoGradesAutomatic(accountId: string | null) {
       const status = await request().catch(() => unavailable);
       if (!active || attempt !== revision) return;
       const run = status.status === "loaded" ? status.run : null;
-      const diagnostic = [run?.id, run?.phase, status.status].join(":");
+      const retryAt = status.status === "loaded" ? status.githubRetryAt : null;
+      const diagnostic = [run?.id, run?.phase, status.status, retryAt].join(":");
       if (diagnostic !== lastDiagnostic) {
         lastDiagnostic = diagnostic;
         try {
           const outcome = status.status === "unavailable" ? "unavailable" : run?.phase === "incomplete" ? "incomplete" : "success";
-          recordRepoGradesStartup("background", outcome, startedAt, run?.courses.length);
+          recordRepoGradesStartup(retryAt ? "background_github_cooldown" : "background",
+            retryAt ? "blocked" : outcome, startedAt, run?.courses.length);
         } catch {
           // The session diagnostic must not interrupt the durable status view.
         }
@@ -81,7 +86,7 @@ export function useRepoGradesAutomatic(accountId: string | null) {
 
   async function change(
     request: (accountId: string) => Promise<AutomaticRepoGradeStatus>,
-    diagnostic: "background_preference" | "background_schedule" | "background_start" | "background_stop",
+    diagnostic: "background_preference" | "background_schedule" | "background_start" | "background_stop" | "background_github_retry",
   ) {
     if (!accountId || !controller.current) return;
     setPendingAccount(accountId);
@@ -104,8 +109,10 @@ export function useRepoGradesAutomatic(accountId: string | null) {
     pending: pendingAccount === accountId,
     control: control?.accountId === accountId ? control : undefined,
     setEnabled: (enabled: boolean) => change((id) => setRepoGradeAutomaticEnabledAction(id, enabled), "background_preference"),
-    setSchedule: (time: string | null, zone: string | null) =>
-      change((id) => setRepoGradeAutomaticScheduleAction(id, time, zone), "background_schedule"),
+    setGithubRetry: (enabled: boolean) =>
+      change((id) => setRepoGradeAutomaticGithubRetryAction(id, enabled), "background_github_retry"),
+    setSchedule: (schedule: AutomaticRepoGradeScheduleDraft | null) =>
+      change((id) => setRepoGradeAutomaticScheduleAction(id, schedule), "background_schedule"),
     start: () => change(startRepoGradeAutomaticRunAction, "background_start"),
     stop: (runId: string) => change((id) => stopRepoGradeAutomaticRunAction(id, runId), "background_stop"),
     async readRecovery(targetId: number) {

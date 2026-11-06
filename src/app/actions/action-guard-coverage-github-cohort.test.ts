@@ -335,6 +335,7 @@ const GITHUB_FILES = new Set([
   "actions/messaging-outlook.ts",
   "actions/messaging.ts",
   "actions/repo-grade-profiles.ts",
+  "actions/repo-grade-automatic.ts",
   "actions/repo-grades-dashboard.ts",
   "actions/repo-grades.ts",
   "actions/selection-chat-context.ts",

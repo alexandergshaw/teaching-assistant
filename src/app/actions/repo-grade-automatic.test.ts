@@ -1,36 +1,91 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
+import { createClient } from "@/lib/supabase/server";
 import {
-  setRepoGradeAutomaticScheduleAction, startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
+  setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
+  startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
 } from "./repo-grade-automatic";
 
-const mocks = vi.hoisted(() => ({ owner: vi.fn(), control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn() }));
-vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: mocks.owner }));
+const mocks = vi.hoisted(() => ({ control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/supabase/app-users", async (original) => ({
+  ...await original<typeof import("@/lib/supabase/app-users")>(),
+  getAppUser: vi.fn(),
+}));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeDurableStartupAvailable: () => true }));
 vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   controlAutomaticRepoGrade: mocks.control, readAutomaticRepoGrade: mocks.read,
+  saveAutomaticRepoGradeGithubRetry: mocks.saveGithubRetry,
   saveAutomaticRepoGradeSchedule: mocks.saveSchedule, isAutomaticRepoGradeId: (id: unknown) => typeof id === "string",
 }));
 vi.mock("./repo-grades-dashboard", () => ({ retryRepoGradePreparationAction: vi.fn() }));
 
+const owner = { id: "owner", email: "owner@example.test" };
+const ownerRow: AppUserRow = {
+  ...owner, displayName: null, status: "active", role: "owner", approvedAt: null, approvedBy: null,
+  createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+  statusChangedAt: null, statusChangedBy: null, roleGrantedBy: null,
+};
+
 describe("owner automatic grading controls", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.owner.mockResolvedValue({ id: "owner" });
+    vi.mocked(createClient).mockResolvedValue({
+      auth: {
+        getUser: async () => ({ data: { user: owner }, error: null }),
+        mfa: { getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal1", nextLevel: "aal1" } }) },
+      },
+    } as never);
+    vi.mocked(getAppUser).mockResolvedValue(ownerRow);
     mocks.read.mockResolvedValue({ enabled: false, schedule: null, preparations: [], recoveries: [], run: null });
     mocks.saveSchedule.mockResolvedValue(true);
   });
 
+  it("persists a GitHub retry preference only for the active owner and a boolean choice", async () => {
+    expect(await setRepoGradeAutomaticGithubRetryAction("foreign", true)).toEqual({ status: "unavailable" });
+    expect(await setRepoGradeAutomaticGithubRetryAction("owner", "true")).toEqual({ status: "unavailable" });
+    vi.mocked(getAppUser).mockResolvedValueOnce({ ...ownerRow, role: "instructor" });
+    expect(await setRepoGradeAutomaticGithubRetryAction("owner", true)).toEqual({ status: "unavailable" });
+    expect(mocks.saveGithubRetry).not.toHaveBeenCalled();
+    mocks.saveGithubRetry.mockResolvedValue(true);
+    expect((await setRepoGradeAutomaticGithubRetryAction("owner", true)).status).toBe("loaded");
+    expect(mocks.saveGithubRetry).toHaveBeenCalledWith("owner", true);
+  });
+
   it("keeps schedule edits scoped to the current owner", async () => {
-    expect(await setRepoGradeAutomaticScheduleAction("foreign", "08:30", "America/Chicago")).toEqual({ status: "unavailable" });
+    const daily = { kind: "daily", time: "08:30", zone: "America/Chicago" };
+    const interval = { kind: "interval", count: 2, unit: "days" };
+    expect(await setRepoGradeAutomaticScheduleAction("foreign", interval)).toEqual({ status: "unavailable" });
     expect(mocks.saveSchedule).not.toHaveBeenCalled();
-    expect((await setRepoGradeAutomaticScheduleAction("owner", "08:30", "America/Chicago")).status).toBe("loaded");
-    expect(mocks.saveSchedule).toHaveBeenCalledWith("owner", "08:30", "America/Chicago");
+    for (const schedule of [daily, interval, null]) {
+      expect((await setRepoGradeAutomaticScheduleAction("owner", schedule)).status).toBe("loaded");
+      expect(mocks.saveSchedule).toHaveBeenLastCalledWith("owner", schedule);
+    }
   });
 
   it("rejects invalid or partial schedule values before storage", async () => {
-    expect(await setRepoGradeAutomaticScheduleAction("owner", "24:00", "UTC")).toEqual({ status: "unavailable" });
-    expect(await setRepoGradeAutomaticScheduleAction("owner", null, "UTC")).toEqual({ status: "unavailable" });
+    for (const schedule of [
+      { kind: "daily", time: "24:00", zone: "UTC" },
+      { kind: "daily", time: null, zone: "UTC" },
+      { kind: "daily", time: "08:00", zone: "Unknown/Zone" },
+      { kind: "interval", count: 1.5, unit: "hours" },
+      { kind: "interval", count: 0, unit: "days" },
+      { kind: "interval", count: 31, unit: "days" },
+      { kind: "interval", count: 721, unit: "hours" },
+      { kind: "interval", count: 1, unit: "months" },
+      { kind: "interval", count: "2", unit: "hours" },
+    ]) {
+      expect(await setRepoGradeAutomaticScheduleAction("owner", schedule)).toEqual({ status: "unavailable" });
+    }
     expect(mocks.saveSchedule).not.toHaveBeenCalled();
+  });
+
+  it("reports a refused or failed interval write without claiming the new schedule is saved", async () => {
+    const schedule = { kind: "interval", count: 3, unit: "hours" };
+    mocks.saveSchedule.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error("connection failed"));
+    expect(await setRepoGradeAutomaticScheduleAction("owner", schedule)).toEqual({ status: "unavailable" });
+    expect(await setRepoGradeAutomaticScheduleAction("owner", schedule)).toEqual({ status: "unavailable" });
+    expect(mocks.read).not.toHaveBeenCalled();
   });
 
   it("reports a start or stop rejected by the queue as unchanged", async () => {

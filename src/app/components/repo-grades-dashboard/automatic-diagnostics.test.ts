@@ -8,10 +8,13 @@ describe("automatic repo grading control diagnostics", () => {
   it.each([
     ["background_preference", "success"],
     ["background_schedule", "success"],
+    ["background_schedule", "unavailable"],
     ["background_start", "unchanged"],
     ["background_stop", "unavailable"],
     ["background_retry", "failed"],
     ["background_recovery", "success"],
+    ["background_github_retry", "success"],
+    ["background_github_cooldown", "blocked"],
   ] as const)("records %s with a fixed outcome and no identifiers or payloads", (operation, outcome) => {
     recordRepoGradesStartup(operation, outcome, performance.now());
     const label = `repo_grades_startup_${operation}`;

@@ -5,7 +5,7 @@ import { encodeRefSegment, normalizeTargetBranch, validateGithubOwnerRepo } from
 import { isGithubCommitSha } from "@/lib/github.repos";
 import { assignmentFolderPathsFromTree } from "@/lib/repo-assignment-folder-paths";
 import { DEFAULT_TREE_SCAN_CONCURRENCY } from "@/lib/repo-grade-tree-scan";
-import { createDiscoveryTransport, DiscoveryTransportError, type DiscoveryTransportFailure } from "./discovery-transport";
+import { createDiscoveryTransport, DiscoveryTransportError, type DiscoveryRateLimit, type DiscoveryTransportFailure } from "./discovery-transport";
 
 type DiscoveryFailure = DiscoveryTransportFailure | "source-set-too-large" | "invalid-scope" | "invalid-source";
 type DiscoveryRequest = ReturnType<typeof createDiscoveryTransport>;
@@ -26,8 +26,8 @@ export type RepoGradeSourceRow =
 
 export type RepoGradeDiscovery =
   | { status: "not-configured" }
-  | { status: "blocked"; reason: DiscoveryFailure | "branch-aware-discovery-disabled" }
-  | { status: "scanned"; enumerationComplete: boolean; repos: RepoGradeSourceRow[]; defaultSourceRefs?: Record<string, string> };
+  | { status: "blocked"; reason: DiscoveryFailure | "branch-aware-discovery-disabled"; rateLimit?: DiscoveryRateLimit }
+  | { status: "scanned"; enumerationComplete: boolean; repos: RepoGradeSourceRow[]; defaultSourceRefs?: Record<string, string>; rateLimit?: DiscoveryRateLimit };
 
 function classifyFailure(error: unknown): DiscoveryFailure {
   return error instanceof DiscoveryTransportError ? error.reason : "unavailable";
@@ -189,14 +189,19 @@ export async function discoverRepoGradeSources(scope: {
       }
       return { repo: item.fullName.toLowerCase(), fallbackRef, rows };
     });
+    const repos = scans.flatMap(({ rows }) => rows);
+    const rateLimit = request.rateLimit();
     return {
-      status: "scanned", enumerationComplete: listing.complete, repos: scans.flatMap(({ rows }) => rows),
+      status: "scanned", enumerationComplete: listing.complete, repos,
+      ...(rateLimit && { rateLimit }),
       ...(configuredRefs.size > 0 && {
         defaultSourceRefs: Object.fromEntries(scans.map(({ repo, fallbackRef }) => [repo, fallbackRef])),
       }),
     };
   } catch (error) {
-    return { status: "blocked", reason: classifyFailure(error) };
+    const reason = classifyFailure(error);
+    const rateLimit = reason === "rate-limited" ? request.rateLimit() : undefined;
+    return { status: "blocked", reason, ...(rateLimit && { rateLimit }) };
   } finally {
     request.dispose();
   }

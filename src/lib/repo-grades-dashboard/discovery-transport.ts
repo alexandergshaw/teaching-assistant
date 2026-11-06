@@ -9,8 +9,10 @@ const DEADLINE_MS = 40_000;
 const MAX_SUCCESS_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_BYTES = 16 * 1024;
 const MAX_AGGREGATE_BYTES = 32 * 1024 * 1024;
+const MAX_RETRY_TIMESTAMP_MS = Date.UTC(9999, 11, 31);
 
 type ThrottleStop = "rate-limited" | "throttle-unconfirmed";
+export type DiscoveryRateLimit = { retryAtMs: number | null; primary: boolean };
 type AbortStop = ThrottleStop | "deadline-exceeded" | "body-budget-exhausted";
 export type DiscoveryTransportFailure = AbortStop | "request-budget-exhausted" | "redirect-rejected"
   | "response-too-large" | "access-denied" | "unavailable";
@@ -55,6 +57,15 @@ function errorMessage(value: unknown): string {
   return fail("throttle-unconfirmed");
 }
 
+function headerMilliseconds(headers: Headers, name: string): number | null {
+  const value = headers.get(name);
+  return value && /^\d+$/.test(value) ? Math.min(Number(value) * 1_000, MAX_RETRY_TIMESTAMP_MS) : null;
+}
+
+function isQuotaEmpty(headers: Headers) {
+  return /^-?0+$/.test(headers.get("x-ratelimit-remaining")?.trim() ?? "");
+}
+
 export function createDiscoveryTransport() {
   const deadlineAt = performance.now() + DEADLINE_MS;
   const timeout = AbortSignal.timeout(DEADLINE_MS);
@@ -65,6 +76,7 @@ export function createDiscoveryTransport() {
   let requests = 0;
   let bytes = 0;
   let throttled: ThrottleStop | undefined;
+  let rateLimit: DiscoveryRateLimit | undefined;
   let stopped: AbortStop | undefined;
   let headers: ReturnType<typeof githubRestHeaders> | undefined;
   let credentialScope: string | undefined;
@@ -74,7 +86,16 @@ export function createDiscoveryTransport() {
     fenceChanged = Promise.withResolvers<void>();
   }
 
-  function latchThrottle(reason: ThrottleStop) {
+  function latchThrottle(reason: ThrottleStop, response?: Response) {
+    if (reason === "rate-limited" && response) {
+      const now = Date.now();
+      const reset = isQuotaEmpty(response.headers) ? headerMilliseconds(response.headers, "x-ratelimit-reset") : null;
+      const primary = reset !== null && reset > now;
+      const retryAfter = headerMilliseconds(response.headers, "retry-after");
+      const retryAt = retryAfter === null ? 0 : Math.min(now + retryAfter, MAX_RETRY_TIMESTAMP_MS);
+      const retryAtMs = Math.max(primary ? reset : 0, retryAt, rateLimit?.retryAtMs ?? 0) || null;
+      rateLimit = { retryAtMs, primary: primary || rateLimit?.primary === true };
+    }
     if (throttled === "rate-limited" || throttled === reason) return;
     throttled = reason;
     notifyFenceChanged();
@@ -150,7 +171,7 @@ export function createDiscoveryTransport() {
       const limited = /\brate[\s-]+limit\b|\babuse detection\b/i.test(message);
       checkActive();
       if (limited) {
-        latchThrottle("rate-limited");
+        latchThrottle("rate-limited", response);
         return fail("rate-limited");
       }
       return fail("access-denied");
@@ -189,9 +210,9 @@ export function createDiscoveryTransport() {
       }
 
       const { status } = response;
-      const limited = status === 429 || /^-?0+$/.test(response.headers.get("x-ratelimit-remaining")?.trim() ?? "")
+      const limited = status === 429 || isQuotaEmpty(response.headers)
         || (status === 403 && response.headers.has("retry-after"));
-      if (limited) latchThrottle("rate-limited");
+      if (limited) latchThrottle("rate-limited", response);
       if ((status >= 300 && status < 400) || response.type === "opaqueredirect" || response.redirected) {
         cancelWithoutWaiting(response.body);
         return fail("redirect-rejected");
@@ -225,5 +246,5 @@ export function createDiscoveryTransport() {
     return credentialScope;
   }
 
-  return { getJson, checkActive, treeCacheScope, dispose: () => timeout.removeEventListener("abort", expire) };
+  return { getJson, checkActive, treeCacheScope, rateLimit: () => rateLimit, dispose: () => timeout.removeEventListener("abort", expire) };
 }

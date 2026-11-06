@@ -100,6 +100,26 @@ describe("discovery-only GitHub transport", () => {
     await expect(initial).resolves.toEqual([]);
   });
 
+  it("captures the later of a primary quota reset and Retry-After", async () => {
+    const now = Date.now();
+    const resetSeconds = Math.floor(now / 1_000) + 30;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetSeconds), "retry-after": "60" },
+    })));
+    await expect(transport.getJson(endpoint, identity)).rejects.toMatchObject({ reason: "rate-limited" });
+    expect(transport.rateLimit()).toEqual({ primary: true, retryAtMs: expect.any(Number) });
+    expect(transport.rateLimit()?.retryAtMs).toBeGreaterThanOrEqual(now + 60_000);
+  });
+
+  it("ignores a primary reset header when the quota has not run out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ message: "Secondary rate limit" }, {
+      status: 403, headers: { "x-ratelimit-remaining": "33", "x-ratelimit-reset": "1800000000" },
+    })));
+    await expect(transport.getJson(endpoint, identity)).rejects.toMatchObject({ reason: "rate-limited" });
+    expect(transport.rateLimit()).toEqual({ primary: false, retryAtMs: null });
+  });
+
   it.each([
     ["Resource not accessible", "access-denied", 3],
     ["You exceeded a secondary rate limit", "rate-limited", 2],

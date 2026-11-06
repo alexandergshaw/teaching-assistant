@@ -1,6 +1,7 @@
 import type { RepoGradeRepositoryCoverage } from "./scheduler";
+import type { AutomaticRepoGradeScheduleDraft } from "./automatic-schedule";
 
-export type AutomaticRepoGradeSchedule = { time: string; zone: string; nextAt: string };
+export type AutomaticRepoGradeSchedule = AutomaticRepoGradeScheduleDraft & { nextAt: string };
 
 export type AutomaticRepoGradePreparation = { id: number; label: string; folder: string };
 export type AutomaticRepoGradeRecovery = AutomaticRepoGradePreparation & { repo: string; expiresAt: string };
@@ -27,6 +28,8 @@ export type AutomaticRepoGradeRun = {
 export type AutomaticRepoGradeStatus = {
   status: "loaded";
   enabled: boolean;
+  githubRetryEnabled: boolean;
+  githubRetryAt: string | null;
   schedule: AutomaticRepoGradeSchedule | null;
   run: AutomaticRepoGradeRun | null;
   preparations: AutomaticRepoGradePreparation[];

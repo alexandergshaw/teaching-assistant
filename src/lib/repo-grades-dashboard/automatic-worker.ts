@@ -19,6 +19,16 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const key = [runId, courseId].join(":");
     if (!plans.has(key)) plans.set(key, await planRepoGradeCourse(accountId, courseId));
     const plan = plans.get(key);
+    const discovery = plan?.discovery;
+    const incompleteDueToRateLimit = discovery?.status === "blocked" ? discovery.reason === "rate-limited"
+      : discovery?.status === "scanned" && discovery.repos.some((row) => row.status === "blocked" && row.reason === "rate-limited");
+    if (work.retryGithubRateLimits && discovery && discovery.status !== "not-configured"
+      && (incompleteDueToRateLimit || (work.phase === "grading" && discovery.rateLimit))) {
+      // Rediscover after the cooldown. No rubric preparation or evaluation
+      // has started on this lease, so the same queue item may safely retry.
+      plans.delete(key);
+      return { state: "github-throttled", rateLimit: discovery.rateLimit ?? { retryAtMs: null, primary: false } };
+    }
     if (work.phase === "discovering") {
       if (!plan) return { state: "partial", reason: "course-unavailable", targets: [] };
       const { discovery } = plan;

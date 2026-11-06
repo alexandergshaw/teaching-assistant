@@ -19,7 +19,8 @@ const PHASE_TEXT = {
 export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType<typeof useRepoGradesAutomatic> }) {
   const headingId = useId();
   const preferenceHintId = useId();
-  const { status, pending, control, setEnabled, setSchedule, start, stop, readRecovery, retryPreparation } = automatic;
+  const githubRetryHintId = useId();
+  const { status, pending, control, setEnabled, setGithubRetry, setSchedule, start, stop, readRecovery, retryPreparation } = automatic;
   const [retryMessage, setRetryMessage] = useState("");
   const recoveries = useLiveRecoveries(status?.status === "loaded" ? status.recoveries : EMPTY_RECOVERIES);
   if (!status || status.status === "unavailable") {
@@ -46,8 +47,19 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
           slotProps={{ input: { "aria-describedby": preferenceHintId } }}
           onChange={(_, enabled) => void setEnabled(enabled)} />}
       />
-      <p id={preferenceHintId}>Turning this off affects future openings. The daily schedule is configured separately.</p>
-      <p role="status">{run?.waitingForBrowserStartup ? "Waiting for the previous startup check to finish. You can close this page."
+      <p id={preferenceHintId}>Turning this off affects future openings. The background schedule is configured separately.</p>
+      <Stack>
+        <FormControlLabel
+          label="Retry automatically when the GitHub API limit resets"
+          control={<Switch checked={status.githubRetryEnabled} disabled={pending}
+            slotProps={{ input: { "aria-describedby": githubRetryHintId } }}
+            onChange={(_, enabled) => void setGithubRetry(enabled)} />}
+        />
+        <p id={githubRetryHintId}>When GitHub limits requests, the background worker waits and resumes the same run.
+          Turning this off ends a run that is waiting for GitHub.</p>
+      </Stack>
+      <p role="status">{status.githubRetryAt ? `GitHub rate limit reached. The worker can retry at ${new Date(status.githubRetryAt).toLocaleString()}. You can close this page.`
+        : run?.waitingForBrowserStartup ? "Waiting for the previous startup check to finish. You can close this page."
         : run?.phase === "stopped" && run.settling ? "Scheduling stopped. The worker is finishing the current task."
         : run ? PHASE_TEXT[run.phase] : "No automatic run has started."}</p>
       {control?.changed === false && <p role="status">{control.action === "start"

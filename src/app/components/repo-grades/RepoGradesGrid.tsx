@@ -457,7 +457,7 @@ export default function RepoGradesGrid({
   }
 
   return (
-    <Table size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment"
+    <Table stickyHeader size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment"
       aria-busy={loading} style={{ "--rg-assignment-count": visibleColumns.length } as CSSProperties}>
       <colgroup>
         <col className={styles.studentTrack} />

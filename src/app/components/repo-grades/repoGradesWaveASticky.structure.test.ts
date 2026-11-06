@@ -67,9 +67,10 @@ describe("Wave A CSS: the sticky shell", () => {
     expect(unbounded).toEqual([]);
   });
 
-  it("W-A2: .gridWrap is a plain wrapper, not a scroll container", () => {
-    const block = ruleBlock(CSS, ".gridWrap");
+  it("W-A2: the table shares the sticky shell's scroll container", () => {
+    const block = ruleBlock(CSS, ".grid");
     expect(block).not.toMatch(/overflow(-x|-y)?\s*:\s*(auto|scroll)/);
+    expect(read("RepoGradesGrid.tsx")).not.toMatch(/<TableContainer/);
   });
 
   it("W-A3: .stickyWorkingHeader is a left/top-pinned opaque top tier", () => {
@@ -77,7 +78,7 @@ describe("Wave A CSS: the sticky shell", () => {
     expect(block).toMatch(/position\s*:\s*sticky/);
     expect(block).toMatch(/(^|[\s;{])top\s*:\s*0\b/);
     expect(block).toMatch(/(^|[\s;{])left\s*:\s*0\b/);
-    expect(block).toMatch(/z-index\s*:\s*3\b/);
+    expect(block).toMatch(/z-index\s*:\s*4\b/);
     expect(block).toMatch(/background\s*:\s*var\(/);
   });
 
@@ -220,9 +221,9 @@ describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
 
   it("AC-W3-2: Refresh keeps focus and refuses to restart an in-flight scan", () => {
     const node = rescanProp();
-    expect(node).toContain("aria-disabled={scanLoading}");
+    expect(node).toContain("aria-disabled={scanLoading || saved.pending}");
     expect(node).not.toMatch(/\sdisabled=/);
-    expect(node).toMatch(/onClick=\{\(\) => \{ if \(!scanLoading\) reloadScan\(\); \}\}/);
+    expect(node).toMatch(/onClick=\{\(\) => \{\s*if \(scanLoading \|\| saved\.pending\) return;\s*if \(!missingOrg\) reloadScan\(\);\s*if \(ownerId\) saved\.refresh\(\);/);
   });
 
   it("AC-W3-3: the Refresh button and its props are gone from RepoGradesControls and its call", () => {

@@ -42,7 +42,7 @@ import TextField from "@mui/material/TextField";
 // weight RepoGradesGrid.tsx's own column-level Post button already uses for
 // this exact action.
 import { Button, Select } from "@mui/material";
-import { FeedbackDisclosure } from "./RepoDashboardFeedback";
+import { CopyStatus, FeedbackDisclosure, useFeedbackCopy } from "./RepoDashboardFeedback";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
 import type { RepoGradeQueueCommand, RepoGradeQueueState } from "./repoGradeQueue";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
@@ -87,6 +87,7 @@ import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 import { RowFeedbackBoxes } from "../grading-results/RowFeedbackBoxes";
 import { FeedbackExpandModal } from "../grading-results/FeedbackExpandModal";
 import type { FeedbackBoxesEdit, FeedbackField } from "../grading-results/gradingResultsHelpers";
+import { copyAllFeedbackText } from "../grading-results/gradingResultsHelpers";
 // docs/grading-results-file-viewer-acceptance-criteria.md, brought to this
 // surface after it shipped on GradingResults.tsx first (REGRESSION entries
 // 356/357/359): browsing a graded cell's own files, reusing
@@ -133,6 +134,7 @@ export interface RepoGradeCellControlProps {
   row: RepoGradeRow;
   column: RepoGradeColumn;
   edit: RepoGradeCellEdit;
+  hasSavedResult: boolean;
   /** The mapped Canvas assignment's own points value, or null when unknown
    * (no mapping yet, or the assignment carries no points value) -
    * RepoGradesGrid.tsx's pointsPossibleForColumn, the SAME value its column
@@ -175,6 +177,7 @@ export default function RepoGradeCellControl({
   row,
   column,
   edit,
+  hasSavedResult,
   pointsPossible,
   onScoreChange,
   onFeedbackFieldChange,
@@ -244,14 +247,7 @@ export default function RepoGradeCellControl({
       setCodeRunOpen(true);
     }
   };
-  // docs/grading-results-feedback-boxes-acceptance-criteria.md: the
-  // RowFeedbackBoxes/FeedbackExpandModal copy state and expand-modal state
-  // this cell owns, mirroring GithubGradingPanel.tsx's own copiedKey/onCopy
-  // pair (the SAME "await the write, then clear after 1.5s" idiom, not a
-  // second one) since GradingResults.tsx's own copiedKey lives one level up
-  // from RowFeedbackBoxes there too - one cell here plays the same role one
-  // results-table row does there.
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // The expanded feedback editor stays scoped to this repo and folder.
   const [expandedField, setExpandedField] = useState<FeedbackField | null>(null);
   // B4 (ux-audit-grading.md): the FIRST post from this cell needs a confirm -
   // a retry (postStatus "error") or a deliberate re-post (postStatus
@@ -263,11 +259,6 @@ export default function RepoGradeCellControl({
   // criteria.md B5), so a changed score both re-enters "first post" AND
   // changes `firstPostSignature` below, disarming any stale arm twice over.
   const [confirmFirstPost, setConfirmFirstPost] = useState<string | null>(null);
-  const handleCopyFeedback = async (key: string, value: string) => {
-    await navigator.clipboard.writeText(value);
-    setCopiedKey(key);
-    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
-  };
   // The minimal shape both reused components read (gradingResultsHelpers.ts's
   // FeedbackBoxesEdit) - `overall` maps to this surface's `comment` (still
   // the field that actually posts to Canvas; RowFeedbackBoxes only reads
@@ -278,6 +269,10 @@ export default function RepoGradeCellControl({
     improvements: edit.improvements,
     resubmitNotice: edit.resubmitNotice,
   };
+  const { copy: handleCopyFeedback, copiedKey, failed: copyFailed } = useFeedbackCopy(
+    JSON.stringify([row.repo, column.folder, feedbackEdit]),
+  );
+  const copyAll = copyAllFeedbackText(feedbackEdit);
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
   const scorePostability = repoGradePostability({
@@ -401,14 +396,14 @@ export default function RepoGradeCellControl({
             size="small"
             slotProps={{
               htmlInput: {
+                "aria-label": `${column.folder || "Repository root"} browser score for ${row.repo}`,
                 inputMode: "decimal",
                 style: { padding: "var(--space-1) var(--space-2)", fontVariantNumeric: "tabular-nums" },
               },
             }}
             value={edit.score}
             onChange={(e) => onScoreChange(e.target.value)}
-            aria-label={`${column.folder} score for ${row.repo}`}
-            placeholder="Score"
+            placeholder={hasSavedResult ? "Browser score" : "Score"}
             sx={{ width: 84 }}
           />
           {scorePercent && <span className={styles.scorePercent}>{scorePercent}</span>}
@@ -423,10 +418,13 @@ export default function RepoGradeCellControl({
         )}
       </div>
       <div className={styles.cellActions}>
-        <span role={queueState === undefined ? "status" : undefined}>
-          {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
-          <RepoGradeStatusChip status={status} active={stage === "running"} />
-        </span>
+        {(!hasSavedResult || status !== "not-started") && (
+          <span role={queueState === undefined ? "status" : undefined}>
+            {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
+            {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
+            <RepoGradeStatusChip status={status} active={stage === "running"} />
+          </span>
+        )}
         <Button
           type="button"
           size="small"
@@ -454,7 +452,14 @@ export default function RepoGradeCellControl({
         )}
         {stage === "running" && <span className={styles.postReason}>This request will finish once started.</span>}
         {stage === "paused" && folderPaused && <span className={styles.postReason}>Resume the folder to continue.</span>}
+        {copyAll.trim() && (
+          <Button type="button" size="small" aria-label={`Copy feedback: ${cellName}`}
+            onClick={() => void handleCopyFeedback("all", copyAll, "all")}>
+            {copiedKey === "all" ? "Copied" : "Copy feedback"}
+          </Button>
+        )}
       </div>
+      {copyAll.trim() && <CopyStatus copied={copiedKey !== null} failed={copyFailed} />}
       <FeedbackDisclosure compact title="Details" label={`Grade details: ${cellName}`}>
           <RowFeedbackBoxes
             student={row.repo}
@@ -464,7 +469,12 @@ export default function RepoGradeCellControl({
             onChangeField={onFeedbackFieldChange}
             onExpand={(field) => setExpandedField(field)}
             namePrefix={column.folder}
+            showCopyAll={false}
           />
+        {edit.submissionTruncated && <span className={styles.postReason}>Submission truncated</span>}
+        {edit.rubricAreas.length > 0 && edit.generatedScore !== null && edit.score !== edit.generatedScore && (
+          <span className={styles.postReason}>Rubric scores are from the generated result ({edit.generatedScore}).</span>
+        )}
         {edit.rubricAreas.length > 0 && (
           <div className={styles.rubricBreakdown}>
             {edit.rubricAreas.map((area, index) => {

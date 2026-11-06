@@ -31,34 +31,37 @@ const INDEX = withoutLineComments(read("index.tsx"));
 const HEADER = withoutLineComments(read("RepoGradesStickyHeader.tsx"));
 
 describe("Wave B display-only: grid-internal split", () => {
-  it("the grid takes BOTH rows and bodyRows", () => {
+  it("the grid takes both plan rows and visible gradebook rows", () => {
     const props = slice(GRID, "export default function RepoGradesGrid({", "}: RepoGradesGridProps");
     expect(props).toMatch(/\brows,/);
-    expect(props).toMatch(/\bbodyRows,/);
+    expect(props).toMatch(/\bgradebookRows,/);
   });
 
-  it("the tbody maps bodyRows (the query reaches the body)", () => {
-    expect(GRID).toMatch(/<tbody[^>]*>\s*\{\s*bodyRows\.map\(/);
+  it("the table body maps gradebookRows (the query reaches the body)", () => {
+    expect(GRID).toMatch(/<TableBody[^>]*>\s*\{\s*gradebookRows\.map\(/);
   });
 
   it("the column header keeps the query-free rows and never reads bodyRows", () => {
     const header = slice(GRID, "<ColumnHeaderControls", "/>");
     expect(header).toMatch(/rows=\{rows\}/);
-    expect(header).not.toMatch(/rows=\{bodyRows\}/);
+    expect(header).not.toMatch(/rows=\{(?:bodyRows|gradebookRows)\}/);
   });
 });
 
 describe("Wave B display-only: index wiring keeps plan inputs query-free", () => {
-  it("the grid gets rows={displayedRows} (plan) and a bodyRows prop, never rows={bodyRows}", () => {
+  it("the grid gets rows={displayedRows} for plans and gradebookRows for display", () => {
     const grid = slice(INDEX, "<RepoGradesGrid", "/>");
     expect(grid).toMatch(/rows=\{displayedRows\}/);
-    expect(grid).toMatch(/bodyRows=\{bodyRows\}/);
-    expect(grid).not.toMatch(/\brows=\{bodyRows\}/);
+    expect(grid).toMatch(/gradebookRows=\{gradebookRows\}/);
+    expect(grid).not.toMatch(/\brows=\{(?:bodyRows|gradebookRows)\}/);
+    const gradebook = slice(INDEX, "const gradebookRows =", ";");
+    expect(gradebook).toContain("bodyRows");
+    expect(gradebook).toContain("uiState.searchQuery");
   });
 
   it("the plan inputs keep rows={displayedRows} and never rows: bodyRows", () => {
     expect(INDEX).toMatch(/rows=\{displayedRows\}/);
-    expect(INDEX).not.toMatch(/rows:\s*bodyRows/);
+    expect(INDEX).not.toMatch(/rows:\s*(?:bodyRows|gradebookRows)/);
   });
 
   it("displayedRows is query-free by construction", () => {

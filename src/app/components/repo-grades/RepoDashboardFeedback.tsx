@@ -24,7 +24,7 @@ import { loadRepoGradeCells, persistRepoGradeCells } from "./repoGradesUiState";
 import type { UseRepoGradesGradingActionsResult } from "./useRepoGradesGradingActions";
 import styles from "./repo-grades-dashboard.module.css";
 
-function useFeedbackCopy(version: string, isAvailable?: () => boolean, source?: RetainedRepoGradeResult["source"]) {
+export function useFeedbackCopy(version: string, isAvailable?: () => boolean, source?: RetainedRepoGradeResult["source"]) {
   const [identity, setIdentity] = useState({ version, source });
   const [status, setStatus] = useState<{ key: string; success: boolean } | null>(null);
   const lifetime = useRef<{ identity: typeof identity } | null>(null);
@@ -71,7 +71,7 @@ function useFeedbackCopy(version: string, isAvailable?: () => boolean, source?: 
   return { copy, isActive, invalidateCopy, copiedKey: status?.success ? status.key : null, failed: status?.success === false };
 }
 
-function CopyStatus({ copied, failed }: { copied: boolean; failed: boolean }) {
+export function CopyStatus({ copied, failed }: { copied: boolean; failed: boolean }) {
   return (
     <p role="status">
       {copied ? "Copied" : failed ? "Could not copy to the clipboard. Select the feedback text to copy it manually." : ""}
@@ -95,7 +95,7 @@ export function FeedbackDisclosure({ title, label, expanded, onExpand, children,
       sx={compact ? { width: "100%", bgcolor: "transparent", "&::before": { display: "none" } } : undefined}>
       <AccordionSummary id={`${id}-summary`} aria-controls={`${id}-content`} aria-label={label ?? title}
         expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}
-        sx={compact ? { px: 0, minHeight: 28, "& .MuiAccordionSummary-content": { my: 0 } } : undefined}>
+        sx={compact ? { pl: 0, pr: 0.5, minHeight: 28, "& .MuiAccordionSummary-content": { my: 0 } } : undefined}>
         {title}
       </AccordionSummary>
       <AccordionDetails sx={compact ? { px: 0, pt: 1 } : undefined}>{children}</AccordionDetails>

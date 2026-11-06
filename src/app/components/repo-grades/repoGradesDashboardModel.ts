@@ -4,7 +4,10 @@ import { suggestRepoStudentBindings, type RepoBindingRosterEntry } from "@/lib/r
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import { getRepoGradeCellEdit, type RepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import type { RepoGradeColumn } from "./repoGradesRows";
+import { ALL_FOLDERS } from "./repoGradesFolderSelection";
+import { scorePercentValue } from "./repoGradeScoreDisplay";
+import { matchesRepoGradeQuery } from "./repoGradesSearch";
+import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState } from "./repoGradesRows";
 
 export type RepoGradesDashboardDiscovery =
   | "Found in scan"
@@ -148,17 +151,6 @@ type MatrixRepository = {
 
 type MatrixStudent = { key: string; name: string | null; repos: MatrixRepository[] };
 
-export function filterRepoGradeMatrixRows<T extends Pick<MatrixStudent, "name"> & { repos: readonly { name: string }[] }>(
-  rows: readonly T[], query: string,
-): readonly T[] {
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return rows;
-  return rows.filter(({ name, repos }) => {
-    const searchable = [name, ...repos.map((repo) => repo.name)].join(" ").toLowerCase();
-    return terms.every((term) => searchable.includes(term));
-  });
-}
-
 function hasLocalResult(edit: RepoGradeCellEdit): boolean {
   return !!(edit.score.trim() || edit.comment.trim() || edit.strengths.trim()
     || edit.improvements.trim() || edit.resubmitNotice.trim() || edit.rubricAreas.length
@@ -245,4 +237,61 @@ export function buildRepoGradeMatrix(
   });
   const rows = [...students.values()].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   return { columns, rows: [...rows, ...unlinked] };
+}
+
+export type RepoGradeMatrix = ReturnType<typeof buildRepoGradeMatrix>;
+
+/** Display selection only. An undiscovered repository can still have results,
+ * but only a visible, scanned row may carry operational controls. A student's
+ * group sorts by its first repository after sorting the group's repositories. */
+export function visibleRepoGradebookRows(
+  matrix: RepoGradeMatrix,
+  scannedRows: readonly RepoGradeRow[],
+  bodyRows: readonly RepoGradeRow[],
+  selectedFolder: string,
+  query: string,
+  selectionFiltered: boolean,
+  sort: RepoGradeSortState,
+) {
+  const scanned = new Map(scannedRows.map((row) => [row.repo.toLowerCase(), row]));
+  const visible = new Map(bodyRows.map((row, rank) => [row.repo.toLowerCase(), { row, rank }]));
+  const allFolders = selectedFolder === ALL_FOLDERS;
+  const sortFolder = sort.field === "folder" && (allFolders || selectedFolder === sort.folder) ? sort.folder : undefined;
+  const scoreForSort = (repo: MatrixRepository | undefined) => {
+    if (!repo || sortFolder === undefined) return null;
+    const cell = repo.cells.get(sortFolder);
+    return scorePercentValue(cell?.local?.score ?? "") ?? cell?.saved?.scored?.score ?? null;
+  };
+  const compareScores = (left: MatrixRepository | undefined, right: MatrixRepository | undefined) => {
+    const a = scoreForSort(left);
+    const b = scoreForSort(right);
+    if (a === b) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return (sort.direction === "asc" ? 1 : -1) * (a - b);
+  };
+  return matrix.rows.flatMap((student) => {
+    let rank = Infinity;
+    const repos = student.repos.flatMap<MatrixRepository & { active?: RepoGradeRow }>((repo) => {
+      const key = repo.name.toLowerCase();
+      const active = visible.get(key);
+      if (active) {
+        rank = Math.min(rank, active.rank);
+        return [{ ...repo, active: active.row }];
+      }
+      const cell = repo.cells.get(selectedFolder);
+      const hasResult = !!(cell?.local || cell?.retained?.length || cell?.saved);
+      const scannedRow = scanned.get(key);
+      const operational = scannedRow && (allFolders || scannedRow.cells[selectedFolder]?.status === "ungraded");
+      if (selectionFiltered || operational || (!allFolders && !hasResult)
+        || !matchesRepoGradeQuery(query, [student.name ?? "Unlinked repository", repo.name])) return [];
+      return [repo];
+    }).sort((a, b) => {
+      const left = visible.get(a.name.toLowerCase())?.rank ?? Infinity;
+      const right = visible.get(b.name.toLowerCase())?.rank ?? Infinity;
+      return compareScores(a, b) || (left === right ? 0 : left - right);
+    });
+    if (!repos.length && (student.repos.length || selectionFiltered || !allFolders || !matchesRepoGradeQuery(query, [student.name]))) return [];
+    return [{ ...student, repos, rank }];
+  }).sort((a, b) => compareScores(a.repos[0], b.repos[0]) || (a.rank === b.rank ? 0 : a.rank - b.rank));
 }

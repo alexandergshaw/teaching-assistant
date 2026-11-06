@@ -28,9 +28,11 @@ import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } fro
 import { Accordion, AccordionDetails, AccordionSummary, CircularProgress, InputBase } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { isOwnerDecision } from "@/lib/access";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
+import { useRepoGradesStartupHistoryRevision } from "../repo-grades-dashboard/RepoGradesStartup";
 import RepoGradesGithubQuota from "./RepoGradesGithubQuota";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
@@ -76,9 +78,11 @@ import {
 import { EMPTY_REPO_GRADE_CELL_EDITS } from "./repoGradesCellEdits";
 import { createRepoGradesDraftController } from "./repoGradesDraftController";
 import RepoGradesDashboard from "./RepoGradesDashboard";
+import { buildRepoGradeMatrix, buildRepoGradesDashboard, visibleRepoGradebookRows } from "./repoGradesDashboardModel";
+import { useRepoGradeMatrixResults } from "./useRepoGradeMatrixResults";
 import RepoGradesGrid from "./RepoGradesGrid";
 import RepoGradesStickyHeader from "./RepoGradesStickyHeader";
-import { visibleRepoRows } from "./repoGradesVisibleRows";
+import { selectionFilterSummary, visibleRepoRows } from "./repoGradesVisibleRows";
 import { toggleRepoInGradeSet } from "./repoGradesGradeSet";
 import RepoGradesGradeSetTypeahead from "./RepoGradesGradeSetTypeahead";
 import RepoGradesFolderPicker from "./RepoGradesFolderPicker";
@@ -119,6 +123,7 @@ export default function RepoGradesTab() {
 }
 
 function AccountRepoGradesTab({ accountId }: { accountId: string }) {
+  const { accessDecision } = useSupabase();
   const setupId = useId();
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
   const [provider] = useLlmProvider();
@@ -197,6 +202,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     discard: clearRepoGradeCells,
   }));
   const selectedCourseId = course?.id ?? null;
+  const ownerId = selectedCourseId && isOwnerDecision(accessDecision) ? accountId : null;
+  const historyRevision = useRepoGradesStartupHistoryRevision(ownerId ?? "", selectedCourseId ?? "");
+  const saved = useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision);
   const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot, () => null);
   const cellDraft = draftSnapshot?.courseId === selectedCourseId ? draftSnapshot : null;
   const cellEdits = cellDraft?.edits ?? EMPTY_REPO_GRADE_CELL_EDITS;
@@ -427,6 +435,18 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   // RG-SEARCH-STICKY Wave B: the search query narrows ONLY the table body.
   // `displayedRows` above stays query-free and feeds every plan surface.
   const bodyRows = visibleRepoRows(displayedRows, uiState.searchQuery, showAll ? NO_GRADE_SET : selected);
+  const matrix = buildRepoGradeMatrix(
+    buildRepoGradesDashboard(cellEdits, scan),
+    cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos,
+  );
+  const selectionFiltered = selectionFilterSummary({
+    folderScopedCount: displayedRows.length,
+    selectedShownCount: displayedRows.filter(({ repo }) => selected.has(repo)).length,
+    showAll,
+  })?.mode === "filtered";
+  const gradebookRows = visibleRepoGradebookRows(
+    matrix, sortedRows, bodyRows, currentSelectedFolder, uiState.searchQuery, selectionFiltered, uiState.sort,
+  );
   const folderMissingCount =
     currentSelectedFolder === ALL_FOLDERS
       ? 0
@@ -717,22 +737,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
 
-      {course && cellDraft && (
-        <RepoGradesDashboard
-          key={course.id}
-          courseId={course.id}
-          cellEdits={cellEdits}
-          scan={scan}
-          scanLoading={scanLoading}
-          scanFailed={scanError !== null}
-          hasRepoPrefix={!!uiState.orgPrefix.trim()}
-          gradeColumns={columnsWithMapping}
-          assignments={assignments}
-          roster={roster}
-          studentRepos={course.studentRepos}
-        />
-      )}
-
       {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
           comment near the top of this file): LinkUsernamesPanel.tsx already
           prints the literal "No repos are confirmed-bound to a roster student
@@ -806,11 +810,15 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           (the column header below it owns Grade/Post) and the grid. */}
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
-        rescanControl={course && !missingOrg ? (
-          <Button type="button" size="small" aria-disabled={scanLoading}
-            startIcon={scanLoading ? <CircularProgress size={16} color="inherit" aria-hidden="true" /> : undefined}
-            onClick={() => { if (!scanLoading) reloadScan(); }}>
-            {scanLoading ? "Scanning GitHub…" : "Refresh"}
+        rescanControl={course && (!missingOrg || ownerId) ? (
+          <Button type="button" size="small" aria-disabled={scanLoading || saved.pending}
+            startIcon={scanLoading || saved.pending ? <CircularProgress size={16} color="inherit" aria-hidden="true" /> : undefined}
+            onClick={() => {
+              if (scanLoading || saved.pending) return;
+              if (!missingOrg) reloadScan();
+              if (ownerId) saved.refresh();
+            }}>
+            {scanLoading ? "Scanning GitHub…" : saved.pending ? "Loading saved results…" : "Refresh gradebook"}
           </Button>
         ) : null}
         folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
@@ -837,11 +845,12 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         gradeSetControl={model ? <RepoGradesGradeSetTypeahead rows={displayedRows} selected={selected} onToggleRepo={toggleSelected} onClearSelection={() => { setSelected(new Set()); persistSelectedRepoIds(new Set()); }} showAll={showAll} onShowAllChange={setShowAll} /> : null}
         onSearchChange={(value) => setUiState((prev) => ({ ...prev, searchQuery: value }))}
       >
-      {model && cellDraft && (
+      {course && cellDraft && (
         <RepoGradesGrid
           columns={displayedColumns}
           rows={displayedRows}
-          bodyRows={bodyRows}
+          resultColumns={matrix.columns}
+          gradebookRows={gradebookRows}
           roster={roster}
           selectedFolder={currentSelectedFolder}
           sort={uiState.sort}
@@ -868,6 +877,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           bulkSelectionOnly={uiState.bulkSelectionOnly}
           scanTruncated={!!scan?.truncated}
           emptyStateMessage={folderEmptyStateMessage}
+          loading={scanLoading || saved.pending}
           // Task B: the disclosure only applies to the embedded engine's own
           // "Code runs" criterion (canvas/grades.ts:88-89 skips any rubric
           // area with no matching Canvas criterion) - the LLM engine never
@@ -877,6 +887,13 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         />
       )}
       </RepoGradesStickyHeader>
+
+      {saved.incomplete && (
+        <p className={pageStyles.fieldHint} role="status">Saved results are incomplete. Older or unavailable attempts may be missing.</p>
+      )}
+      {course && cellDraft && (
+        <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />
+      )}
 
       {cellDraft && (
         <div>

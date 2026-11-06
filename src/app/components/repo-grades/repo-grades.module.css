@@ -16,11 +16,16 @@
   border-radius: var(--radius-md);
 }
 
+.stickyShell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .stickyWorkingHeader {
   position: sticky;
   top: 0;
   left: 0;
-  z-index: 3;
+  z-index: 4;
   background: var(--field-background);
   display: flex;
   flex-wrap: wrap;
@@ -28,10 +33,6 @@
   gap: var(--space-2) var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-soft);
-}
-
-.gridWrap {
-  min-width: 0;
 }
 
 /* One input recipe for the search box and the grade-set typeahead. */
@@ -183,7 +184,7 @@
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid var(--border-soft);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Sticky header, opaque background (AC10). Deliberately sentence-case, not
@@ -205,12 +206,40 @@
   box-shadow: inset 0 -1px 0 var(--border-soft);
 }
 
-.grid tbody tr:last-child td {
+.grid tbody tr:last-child > * {
   border-bottom: none;
 }
 
-.selectHeader {
-  width: 44px;
+.grid .studentColumn {
+  width: 14rem;
+  min-width: 12rem;
+}
+
+.repoIdentity {
+  margin-top: var(--space-1);
+}
+
+.repoIdentityControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.repoIdentityControls :global(.MuiCheckbox-root) {
+  padding: var(--space-1);
+}
+
+@media (min-width: 701px) {
+  .grid .studentColumn {
+    position: sticky;
+    left: 0;
+    background: var(--field-background);
+    z-index: 1;
+  }
+
+  .grid thead .studentColumn {
+    z-index: 3;
+  }
 }
 
 .repoLink {
@@ -686,8 +715,7 @@
     margin-bottom: 0;
   }
 
-  /* B1 - relax nowrap and the fixed-width floor here, not on the base rule
-     (B6 keeps the base rule untouched for full width). */
+  /* Let each cell fill the card and wrap on narrow screens. */
   .grid th,
   .grid td {
     display: block;
@@ -715,19 +743,9 @@
     margin-bottom: var(--space-1);
   }
 
-  /* B2 - the bare "Select" header is clutter atop the card list; visually
-     hidden with the same recipe as .srOnly above (never display: none). The
-     `.grid` prefix beats the `.grid th` width rule. */
-  .grid .selectHeader {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
+  .grid .studentColumn {
+    width: 100%;
+    min-width: 0;
   }
 
   /* B2 - every control in the column header and the binding picker must be

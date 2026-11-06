@@ -5,16 +5,18 @@ import { describe, expect, it } from "vitest";
 
 const ts = createRequire(import.meta.url)("typescript") as typeof import("typescript");
 const index = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+const grid = readFileSync(new URL("./RepoGradesGrid.tsx", import.meta.url), "utf8");
+const cellControl = readFileSync(new URL("./RepoGradeCellControl.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./RepoGradesDashboard.tsx", import.meta.url), "utf8");
 const feedback = readFileSync(new URL("./RepoDashboardFeedback.tsx", import.meta.url), "utf8");
 const gradingActions = readFileSync(new URL("./useRepoGradesGradingActions.ts", import.meta.url), "utf8");
 const filters = readFileSync(new URL("./RepoGradeCourseFilters.tsx", import.meta.url), "utf8");
 
-function findCourseDashboardMount(source: string): JsxSelfClosingElement | null {
+function findCourseDashboardMount(source: string, component = "RepoGradesDashboard"): JsxSelfClosingElement | null {
   const file = ts.createSourceFile("index.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const mounts: JsxSelfClosingElement[] = [];
   function visit(node: Node) {
-    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === "RepoGradesDashboard") mounts.push(node);
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === component) mounts.push(node);
     ts.forEachChild(node, visit);
   }
   visit(file);
@@ -27,8 +29,12 @@ function findCourseDashboardMount(source: string): JsxSelfClosingElement | null 
   if (gate.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) return null;
   if (gate.left.getText() !== "course && cellDraft") return null;
   const slot = gate.parent;
-  if (!ts.isJsxExpression(slot) || !ts.isJsxFragment(slot.parent)) return null;
-  const groupedFragment = slot.parent.parent;
+  if (!ts.isJsxExpression(slot)) return null;
+  const container = slot.parent;
+  const root = ts.isJsxElement(container) && container.openingElement.tagName.getText() === "RepoGradesStickyHeader"
+    && ts.isJsxFragment(container.parent) ? container.parent : container;
+  if (!ts.isJsxFragment(root)) return null;
+  const groupedFragment = root.parent;
   if (!ts.isParenthesizedExpression(groupedFragment)) return null;
   const returned = groupedFragment.parent;
   if (!ts.isReturnStatement(returned) || !ts.isBlock(returned.parent)) return null;
@@ -49,14 +55,13 @@ describe("class repository results wiring", () => {
     expect(index.indexOf("<RepoGradeCourseFilters")).toBeLessThan(index.indexOf("<RepoGradesControls"));
   });
 
-  it("mounts for a restored course outside the manual grid and consumes unfiltered course edits", () => {
-    const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
+  it("shows one gradebook inside the sticky shell for a restored course, even without a scan", () => {
+    const props = findCourseDashboardMount(index, "RepoGradesGrid")?.attributes.properties.map((prop) => prop.getText());
     expect(props).toContain("cellEdits={cellEdits}");
-    expect(props).toContain("scan={scan}");
-    expect(props).toContain("scanFailed={scanError !== null}");
-    expect(index.indexOf("<RepoGradesDashboard")).toBeLessThan(index.indexOf("<RepoGradesStickyHeader"));
-    expect(dashboard).toContain("buildRepoGradesDashboard(cellEdits, scan)");
-    expect(dashboard).toContain("buildRepoGradeMatrix(browserRows, cellEdits, saved.results, gradeColumns, assignments, roster, studentRepos)");
+    expect(props).toContain("resultColumns={matrix.columns}");
+    expect(props).toContain("gradebookRows={gradebookRows}");
+    expect(index.indexOf("<RepoGradesDashboard")).toBeGreaterThan(index.indexOf("</RepoGradesStickyHeader>"));
+    expect(index).toMatch(/buildRepoGradeMatrix\(\s*buildRepoGradesDashboard\(cellEdits, scan\),\s*cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos/);
   });
 
   it("rejects an outer guard that hides the dashboard until a folder is selected", () => {
@@ -78,16 +83,17 @@ describe("class repository results wiring", () => {
     expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");
   });
 
-  it("exposes per-course profile settings to the owner independently of scan success", () => {
-    expect(dashboard).toMatch(/user && isOwnerDecision\(accessDecision\) && \(\s*<>\s*<RepoGradesStartupPreview .* \/>\s*<RepoGradeProfileSettings courseId=\{courseId\} columns=\{gradeColumns\} \/>/);
+  it("exposes per-course profiles and history to the owner independently of scan success", () => {
+    expect(dashboard).toContain("if (!ownerId) return null");
+    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />");
+    expect(dashboard).toMatch(/<FeedbackDisclosure title="Saved evaluation history"[^>]*>\s*\{historyOpen && <RepoGradeHistory/);
   });
 
-  it("declares table headers and a concise status independent of the scrollable rows", () => {
-    expect(dashboard).toMatch(/<TableCell component="th" scope="col">\s*Student\s*<TextField type="search"/);
-    expect(dashboard).toContain('<TableCell component="th" key={folder} scope="col">');
-    expect(dashboard).toContain('<TableCell component="th" scope="row">');
-    expect(dashboard).toContain('role="region" aria-labelledby={headingId} tabIndex={0}');
-    expect(dashboard.indexOf('role="status"')).toBeLessThan(dashboard.indexOf("<TableContainer"));
+  it("declares student row headers and assignment column headers in the working gradebook", () => {
+    expect(grid).toContain('aria-label="Repository gradebook by student and assignment"');
+    expect(grid).toContain('<TableCell component="th" scope="col" role="columnheader" key={folder}');
+    expect(grid).toContain('<TableCell component="th" scope="row" role="rowheader"');
+    expect(dashboard).not.toMatch(/gradebookRows|Repository gradebook by student and assignment/);
   });
 
   it("keeps the earlier scored attempt's partial status separate from the latest attempt", () => {
@@ -95,22 +101,26 @@ describe("class repository results wiring", () => {
     expect(dashboard).toMatch(/scored\.generation !== latest\.generation && scored\.status === "partial" && <> <RepoGradeStatusChip status="partial"/);
   });
 
-  it("shows browser and saved results in a read-only matrix with scoped copying", () => {
-    const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
-    expect(props).toContain("gradeColumns={columnsWithMapping}");
-    expect(props).toContain("assignments={assignments}");
-    expect(props).toContain("roster={roster}");
-    expect(props).toContain("studentRepos={course.studentRepos}");
+  it("joins the existing grading controls and scoped, read-only saved results in the same cell", () => {
     expect(dashboard).toContain("const dashboardFeedbackEnabled = false");
+    expect(grid).toMatch(/<RepoGradeCellControl[\s\S]*?<RepoGradeResultDetails repo=\{repo\} folder=\{folder\}/);
     expect(dashboard).toContain("repo.cells.get(folder)");
+    expect(dashboard).toContain("!editable && cell?.local");
     expect(dashboard).toContain('source="browser"');
     expect(dashboard).toContain('source="saved"');
     expect(dashboard).toContain("cell?.retained?.map");
     expect(dashboard).toContain("rubric={source.rubricAreas}");
-    expect(dashboard).toContain("useRepoGradeMatrixResults(courseId, ownerId, historyRevision)");
-    expect(dashboard).toContain("Saved results are incomplete");
+    expect(index).toContain('useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision)');
+    expect(index).toContain("Saved results are incomplete");
     expect(feedback).toContain('copy("all", copyAllFeedbackText(feedback), "all")');
     expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost|handleGradeCell|handleGradeColumn/);
+  });
+
+  it("suppresses the idle browser grade status beside a saved attempt and leaves manual grading reachable", () => {
+    expect(grid).toContain("hasSavedResult={!!repo.cells.get(folder)?.saved}");
+    expect(cellControl).toContain('(!hasSavedResult || status !== "not-started")');
+    expect(cellControl).toContain('placeholder={hasSavedResult ? "Browser score" : "Score"}');
+    expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?\}\s*<Button[\s\S]*?else onGrade\(\);/);
   });
 
   it("keeps the retained editor isolated with its course guard and separately keyed modal", () => {

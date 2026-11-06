@@ -63,6 +63,12 @@ describe("rowMatchesQuery frozen oracle (5 fixtures x 13 queries)", () => {
       });
     });
   }
+
+  it("matches multiple terms across the student and repository fields", () => {
+    const [, row] = FIXTURES[1];
+    expect(rowMatchesQuery(row, " DOE   octo-org/hw-r2 Jane ")).toBe(true);
+    expect(rowMatchesQuery(row, "Jane octo-org/zeta")).toBe(false);
+  });
 });
 
 function withoutLineComments(src: string): string {

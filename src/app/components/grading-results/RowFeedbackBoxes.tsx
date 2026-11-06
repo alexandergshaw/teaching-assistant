@@ -71,6 +71,7 @@ export interface RowFeedbackBoxesProps {
    */
   namePrefix?: string;
   keepCopyLabel?: boolean;
+  showCopyAll?: boolean;
 }
 
 /**
@@ -92,6 +93,7 @@ export function RowFeedbackBoxes({
   onExpand,
   namePrefix,
   keepCopyLabel,
+  showCopyAll = true,
 }: RowFeedbackBoxesProps) {
   const allKey = `${student}-all-feedback`;
   const allCopied = copiedKey === allKey;
@@ -101,7 +103,7 @@ export function RowFeedbackBoxes({
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      {showCopyAll && <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button
           variant="text"
           size="small"
@@ -111,7 +113,7 @@ export function RowFeedbackBoxes({
         >
           {allCopied ? "Copied" : "Copy all feedback"}
         </Button>
-      </div>
+      </div>}
       {FEEDBACK_FIELDS.map((field) => {
         const meta = FEEDBACK_FIELD_META[field];
         const key = `${student}-${field}`;

@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, filterRepoGradeMatrixRows, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits,
+  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
+import { ALL_FOLDERS } from "./repoGradesFolderSelection";
+import { buildRepoGradeGridModel, DEFAULT_REPO_GRADE_SORT } from "./repoGradesRows";
 
 function scan(foldersByRepo: Record<string, string[] | null>): OrgRepoTreesResult {
   return {
@@ -162,18 +164,52 @@ describe("class repository results", () => {
   });
 });
 
-describe("filterRepoGradeMatrixRows", () => {
-  const rows = [
-    { name: "Alice Ng", repos: [{ name: "class/first-submission" }] },
-    { name: "Bob Stone", repos: [] },
-    { name: null, repos: [{ name: "class/unlinked-student" }] },
-  ];
+describe("visibleRepoGradebookRows", () => {
+  const tree = scan({ "org/a": ["Lab"], "org/b": ["Lab"], "org/missing": [] });
+  const roster = [{ id: "1", name: "Alice" }, { id: "2", name: "Bob" }];
+  const bindings = ["org/a", "org/b", "org/archived", "org/missing"].map((repo) => ({
+    repo, canvasUserId: "1", student: "Alice",
+  }));
+  const results = new Map<string, RepoGradeSavedResult>();
+  addRepoGradeSavedPage(results, [attempt(1, "org/archived", "Lab", 89), attempt(2, "org/missing", "Lab", 70)]);
+  const { rows: scannedRows, columns } = buildRepoGradeGridModel(tree.repos, roster, bindings, "");
+  const matrix = buildRepoGradeMatrix(buildRepoGradesDashboard({}, tree), {}, results, columns, [], roster, bindings);
 
-  it("filters by student name or repository and retains unlinked repositories", () => {
-    expect(filterRepoGradeMatrixRows(rows, "  NG alice ")).toEqual([rows[0]]);
-    expect(filterRepoGradeMatrixRows(rows, "Stone")).toEqual([rows[1]]);
-    expect(filterRepoGradeMatrixRows(rows, "unlinked")).toEqual([rows[2]]);
-    expect(filterRepoGradeMatrixRows(rows, "unmatched")).toEqual([]);
-    expect(filterRepoGradeMatrixRows(rows, "  ")).toBe(rows);
+  it("groups operational and saved-only repos together, keeping scanned payloads in current sort order", () => {
+    const rows = visibleRepoGradebookRows(matrix, scannedRows, [...scannedRows].reverse(), ALL_FOLDERS, "", false, DEFAULT_REPO_GRADE_SORT);
+    expect(rows.map(({ name }) => name)).toEqual(["Alice", "Bob"]);
+    expect(rows[0].repos.map(({ name }) => name)).toEqual(["org/missing", "org/b", "org/a", "org/archived"]);
+    expect(rows[0].repos.slice(0, 3).map(({ active }) => active)).toEqual([...scannedRows].reverse());
+    expect(rows[0].repos.at(-1)?.active).toBeUndefined();
+  });
+
+  it("does not leak searched or unselected operational repos back into the gradebook", () => {
+    const selected = scannedRows.filter(({ repo }) => repo === "org/a");
+    expect(visibleRepoGradebookRows(matrix, scannedRows, selected, "Lab", "", true, DEFAULT_REPO_GRADE_SORT)
+      .flatMap(({ repos }) => repos.map(({ name }) => name))).toEqual(["org/a"]);
+    expect(visibleRepoGradebookRows(matrix, scannedRows, [], ALL_FOLDERS, "Alice org/archived", false, DEFAULT_REPO_GRADE_SORT)
+      .flatMap(({ repos }) => repos.map(({ name }) => name))).toEqual(["org/archived"]);
+    expect(visibleRepoGradebookRows(matrix, scannedRows, [], ALL_FOLDERS, "Bob", false, DEFAULT_REPO_GRADE_SORT)
+      .map(({ name }) => name)).toEqual(["Bob"]);
+  });
+
+  it("shows a saved result for a missing folder in folder scope without giving it grading controls", () => {
+    const bodyRows = scannedRows.filter(({ repo }) => repo === "org/a");
+    const rows = visibleRepoGradebookRows(matrix, scannedRows, bodyRows, "Lab", "Alice", false, DEFAULT_REPO_GRADE_SORT);
+    expect(rows[0].repos.map(({ name, active }) => [name, active?.repo])).toEqual([
+      ["org/a", "org/a"], ["org/missing", undefined], ["org/archived", undefined],
+    ]);
+  });
+
+  it("sorts by the browser percentage when available, falls back to saved results, and keeps empty scores last", () => {
+    const edits = { "org/a": { Lab: edit("2/10") } };
+    const scores = new Map(results);
+    addRepoGradeSavedPage(scores, [attempt(3, "org/a", "Lab", 95)]);
+    const scoredMatrix = buildRepoGradeMatrix(buildRepoGradesDashboard(edits, tree), edits, scores, columns, [], roster, bindings);
+    const visibleRepos = (direction: "asc" | "desc") => visibleRepoGradebookRows(
+      scoredMatrix, scannedRows, scannedRows, "Lab", "", false, { field: "folder", folder: "Lab", direction },
+    )[0].repos.map(({ name }) => name);
+    expect(visibleRepos("asc")).toEqual(["org/a", "org/missing", "org/archived", "org/b"]);
+    expect(visibleRepos("desc")).toEqual(["org/archived", "org/missing", "org/a", "org/b"]);
   });
 });

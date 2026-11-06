@@ -41,7 +41,9 @@ describe("Repo Grades startup wiring", () => {
 
   it("scopes the explicit read-only preview to the owner and selected class", () => {
     const dashboard = source("../repo-grades/RepoGradesDashboard.tsx");
-    expect(dashboard).toMatch(/user && isOwnerDecision\(accessDecision\) && \([\s\S]*?<RepoGradesStartupPreview key=\{JSON.stringify\(\[user.id, courseId\]\)\} accountId=\{user.id\} courseId=\{courseId\}/);
+    expect(dashboard).toContain("const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null");
+    expect(dashboard).toContain("if (!ownerId) return null");
+    expect(dashboard).toContain("<RepoGradesStartupPreview key={JSON.stringify([ownerId, courseId])} accountId={ownerId} courseId={courseId}");
     const preview = source("./RepoGradesStartupPreview.tsx");
     expect(preview).toContain("onClick={loadPreview}");
     expect(preview).toContain("loadRepoGradesStartupPreview(courseId, accountId)");

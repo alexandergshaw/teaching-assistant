@@ -60,7 +60,7 @@ export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gr
   }, [hasHeader]);
 
   return (
-    <div className={styles.stickyShell} ref={shellRef}>
+    <div className={styles.stickyShell} ref={shellRef} role="region" aria-label="Repository gradebook" tabIndex={0}>
       {hasHeader && (
         <div className={styles.stickyWorkingHeader} ref={headerRef}>
           {statusBanner && (

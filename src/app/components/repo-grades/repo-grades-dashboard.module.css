@@ -118,25 +118,6 @@
   border-bottom: 0;
 }
 
-.matrix th,
-.matrix td {
-  min-width: 12rem;
-}
-
-.matrix thead th {
-  z-index: 1;
-}
-
-.matrix th:first-child {
-  position: sticky;
-  left: 0;
-  background: var(--field-background);
-}
-
-.matrix thead th:first-child {
-  z-index: 2;
-}
-
 .matrixMeta {
   display: block;
   color: var(--text-secondary);

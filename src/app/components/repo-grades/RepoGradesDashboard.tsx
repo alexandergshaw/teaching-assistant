@@ -1,18 +1,11 @@
 import { useId, useState } from "react";
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField } from "@mui/material";
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import Button from "@mui/material/Button";
-import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
-import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
-import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
-import type { CourseStudentRepo } from "@/lib/supabase/courses";
-import { useRepoGradesStartupHistoryRevision } from "../repo-grades-dashboard/RepoGradesStartup";
 import { RepoGradesStartupPreview } from "../repo-grades-dashboard/RepoGradesStartupPreview";
-import type { RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import { buildRepoGradeMatrix, buildRepoGradesDashboard, filterRepoGradeMatrixRows, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
+import type { RepoGradeMatrix, RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { useRepoGradeHistory } from "./useRepoGradeHistory";
-import { useRepoGradeMatrixResults } from "./useRepoGradeMatrixResults";
 import { FeedbackDisclosure, RepoDashboardHistoricalFeedback, RepoResultFeedback, type HistoricalFeedbackDraft } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
@@ -23,175 +16,83 @@ import styles from "./repo-grades-dashboard.module.css";
 // The attempt history's separate draft editor stays off pending activation approval.
 const dashboardFeedbackEnabled = false;
 
-export default function RepoGradesDashboard({
-  cellEdits,
-  scan,
-  scanLoading,
-  scanFailed,
-  hasRepoPrefix,
-  courseId,
-  gradeColumns,
-  assignments,
-  roster,
-  studentRepos,
-}: {
-  cellEdits: RepoGradeCellEditsByRepo;
-  scan: OrgRepoTreesResult | null;
-  scanLoading: boolean;
-  scanFailed: boolean;
-  hasRepoPrefix: boolean;
+export default function RepoGradesDashboard({ courseId, gradeColumns }: {
   courseId: string;
   gradeColumns: readonly RepoGradeColumn[];
-  assignments: readonly CanvasAssignmentBrief[];
-  roster: readonly RepoBindingRosterEntry[];
-  studentRepos: readonly CourseStudentRepo[];
 }) {
-  const headingId = useId();
   const { user, accessDecision } = useSupabase();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null;
-  const historyRevision = useRepoGradesStartupHistoryRevision(ownerId ?? "", courseId);
-  const saved = useRepoGradeMatrixResults(courseId, ownerId, historyRevision);
-  const browserRows = buildRepoGradesDashboard(cellEdits, scan);
-  const { columns, rows } = buildRepoGradeMatrix(browserRows, cellEdits, saved.results, gradeColumns, assignments, roster, studentRepos);
-  const searchScope = JSON.stringify([ownerId, courseId]);
-  const [search, setSearch] = useState({ scope: searchScope, value: "" });
-  const query = search.scope === searchScope ? search.value : "";
-  const visibleRows = filterRepoGradeMatrixRows(rows, query);
-  const treeFailures = scan?.repos.filter((repo) => repo.folders === null).length ?? 0;
-
-  let discoverySummary = "GitHub discovery is unavailable.";
-  if (scanLoading) discoverySummary = "";
-  else if (scanFailed) discoverySummary = "GitHub discovery failed.";
-  else if (scan) {
-    const failed = treeFailures ? ` Tree scans failed for ${treeFailures}.` : "";
-    const capped = scan.truncated ? " The repository listing may be truncated." : "";
-    discoverySummary = `GitHub reported ${scan.repos.length} repositories.${failed}${capped}`;
-  }
+  if (!ownerId) return null;
 
   return (
-    <section className={styles.dashboard} aria-labelledby={headingId}>
-      <h2 id={headingId}>Class repository results</h2>
-      <p>Assignments are shown across the table. Results are grouped by confirmed student links. Unlinked repositories appear separately.</p>
-      <p>Browser scores may describe earlier work. Saved evaluations show the evaluated commit.</p>
-      <p>Manual grading and feedback editing are available in the grading table below.</p>
-      <p role="status">
-        {discoverySummary}
-        {hasRepoPrefix && " The current repository prefix limits discovery."}
-        {saved.incomplete && " Saved results are incomplete. Older or unavailable attempts may be missing."}
-      </p>
-      {user && isOwnerDecision(accessDecision) && (
+    <section aria-label="Automatic repository evaluations">
+      <RepoGradesStartupPreview key={JSON.stringify([ownerId, courseId])} accountId={ownerId} courseId={courseId} />
+      <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
+      <FeedbackDisclosure title="Saved evaluation history" expanded={historyOpen} onExpand={setHistoryOpen}>
+        {historyOpen && <RepoGradeHistory courseId={courseId} accountId={ownerId} />}
+      </FeedbackDisclosure>
+    </section>
+  );
+}
+
+export function RepoGradeResultDetails({ repo, folder, editable, hasScanStatus }: {
+  repo: RepoGradeMatrix["rows"][number]["repos"][number];
+  folder: string;
+  editable: boolean;
+  hasScanStatus: boolean;
+}) {
+  const cell = repo.cells.get(folder);
+  return (
+    <>
+      {!editable && cell?.local && (
         <>
-          <RepoGradesStartupPreview key={JSON.stringify([user.id, courseId])} accountId={user.id} courseId={courseId} />
-          <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
+          <p><strong>Browser score {cell.local.score.trim() || "unavailable"}</strong></p>
+          {cell.local.submissionTruncated && <p>Submission truncated</p>}
+          {cell.local.generatedScore !== null && cell.local.score !== cell.local.generatedScore && (
+            <p>Rubric scores are from the generated result ({cell.local.generatedScore}).</p>
+          )}
+          <RepoResultFeedback repo={repo.name} folder={folder} source="browser"
+            feedback={{ overall: cell.local.comment, strengths: cell.local.strengths,
+              improvements: cell.local.improvements, resubmitNotice: cell.local.resubmitNotice }}
+            rubric={cell.local.rubricAreas} />
         </>
       )}
-      {ownerId && (
-        <div>
-          <Button type="button" size="small" aria-disabled={saved.pending}
-            onClick={() => { if (!saved.pending) saved.refresh(); }}>Refresh saved results</Button>
-        </div>
+      {!!cell?.retained?.length && (
+        <FeedbackDisclosure compact title="Retained results"
+          label={`Retained results: ${repo.name} / ${folder || "Repository root"}`}>
+          {cell?.retained?.map(({ id, source, draft }, index) => {
+            const label = `Retained result ${index + 1}`;
+            return (
+              <div key={id} className={styles.matrixResult}>
+                <p><strong>{label} {source.score.trim() || "score unavailable"}</strong></p>
+                {source.submissionTruncated && <p>Submission truncated</p>}
+                <RepoResultFeedback repo={repo.name} folder={folder} source={label}
+                  feedback={{ overall: source.comment, strengths: source.strengths,
+                    improvements: source.improvements, resubmitNotice: source.resubmitNotice }}
+                  rubric={source.rubricAreas} />
+                {draft && (
+                  <>
+                    <p>Draft score {draft.score.trim() || "unavailable"}</p>
+                    <RepoResultFeedback repo={repo.name} folder={folder} source={`${label} draft`}
+                      feedback={{ overall: draft.comment, strengths: draft.strengths,
+                        improvements: draft.improvements, resubmitNotice: draft.resubmitNotice }}
+                      rubric={[]} />
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </FeedbackDisclosure>
       )}
-      <RepoGradesLoadingStatus label={saved.pending ? "Loading saved results for this class…" : null} />
-      {columns.length > 0 && rows.length > 0 ? (
-        <TableContainer className={styles.scroll} role="region" aria-labelledby={headingId} tabIndex={0}
-          aria-busy={saved.pending}>
-          <Table size="small" className={`${styles.table} ${styles.matrix}`} aria-label="Repository results by student and assignment">
-            <TableHead>
-              <TableRow>
-                <TableCell component="th" scope="col">
-                  Student
-                  <TextField type="search" size="small" fullWidth label="Search students or repositories"
-                    value={query} onChange={(event) => setSearch({ scope: searchScope, value: event.target.value })}
-                    sx={{ mt: 1, minWidth: 180 }} />
-                </TableCell>
-                {columns.map(({ folder, label }) => (
-                  <TableCell component="th" key={folder} scope="col">
-                    {label}
-                    {folder && folder !== label && <span className={styles.matrixMeta}>{folder}</span>}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visibleRows.length === 0 && (
-                <TableRow><TableCell colSpan={columns.length + 1}>No students or repositories match your search.</TableCell></TableRow>
-              )}
-              {visibleRows.map(({ key, name, repos }) => (
-                <TableRow key={key}>
-                  <TableCell component="th" scope="row">
-                    {name ?? repos[0]?.name}
-                    <span className={styles.matrixMeta}>
-                      {name ? repos.map(({ name: repo }) => repo).join(", ") || "No linked repository shown" : "Unlinked repository"}
-                    </span>
-                  </TableCell>
-                  {columns.map(({ folder }) => (
-                    <TableCell key={folder}>
-                      {repos.length === 0 && "No linked repository"}
-                      {repos.map((repo) => {
-                        const cell = repo.cells.get(folder);
-                        return (
-                          <div key={repo.name} className={styles.matrixResult}>
-                            {repos.length > 1 && <strong>{repo.name}</strong>}
-                            {cell?.local && (
-                              <>
-                                <p><strong>Browser score {cell.local.score.trim() || "unavailable"}</strong></p>
-                                {cell.local.submissionTruncated && <p>Submission truncated</p>}
-                                {cell.local.generatedScore !== null && cell.local.score !== cell.local.generatedScore && (
-                                  <p>Rubric scores are from the generated result ({cell.local.generatedScore}).</p>
-                                )}
-                                <RepoResultFeedback repo={repo.name} folder={folder} source="browser"
-                                  feedback={{ overall: cell.local.comment, strengths: cell.local.strengths,
-                                    improvements: cell.local.improvements, resubmitNotice: cell.local.resubmitNotice }}
-                                  rubric={cell.local.rubricAreas} />
-                              </>
-                            )}
-                            {!!cell?.retained?.length && (
-                              <FeedbackDisclosure compact title="Retained results"
-                                label={`Retained results: ${repo.name} / ${folder || "Repository root"}`}>
-                                {cell?.retained?.map(({ id, source, draft }, index) => {
-                                  const label = `Retained result ${index + 1}`;
-                                  return (
-                                    <div key={id} className={styles.matrixResult}>
-                                      <p><strong>{label} {source.score.trim() || "score unavailable"}</strong></p>
-                                      {source.submissionTruncated && <p>Submission truncated</p>}
-                                      <RepoResultFeedback repo={repo.name} folder={folder} source={label}
-                                        feedback={{ overall: source.comment, strengths: source.strengths,
-                                          improvements: source.improvements, resubmitNotice: source.resubmitNotice }}
-                                        rubric={source.rubricAreas} />
-                                      {draft && (
-                                        <>
-                                          <p>Draft score {draft.score.trim() || "unavailable"}</p>
-                                          <RepoResultFeedback repo={repo.name} folder={folder} source={`${label} draft`}
-                                            feedback={{ overall: draft.comment, strengths: draft.strengths,
-                                              improvements: draft.improvements, resubmitNotice: draft.resubmitNotice }}
-                                            rubric={[]} />
-                                        </>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </FeedbackDisclosure>
-                            )}
-                            {cell?.grading && <p>Browser grading in progress</p>}
-                            {cell?.gradeFailed && <p>Browser grading failed</p>}
-                            {cell?.saved && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} />}
-                            {!cell?.local && !cell?.retained?.length && !cell?.saved && !cell?.grading && !cell?.gradeFailed && (
-                              <p>{cell?.browser?.discovery === "Found in scan"
-                                ? "No result yet" : cell?.browser?.discovery ?? repo.emptyDiscovery ?? "No result shown"}</p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      ) : !scanLoading && !saved.pending && <p>No assignment folders or repository results to display.</p>}
-      {ownerId && <RepoGradeHistory courseId={courseId} accountId={ownerId} />}
-    </section>
+      {!editable && cell?.grading && <p>Browser grading in progress</p>}
+      {!editable && cell?.gradeFailed && <p>Browser grading failed</p>}
+      {cell?.saved && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} />}
+      {!editable && !hasScanStatus && !cell?.local && !cell?.retained?.length && !cell?.saved && !cell?.grading && !cell?.gradeFailed && (
+        <p>{cell?.browser?.discovery === "Found in scan"
+          ? "No result yet" : cell?.browser?.discovery ?? repo.emptyDiscovery ?? "No result shown"}</p>
+      )}
+    </>
   );
 }
 
@@ -252,7 +153,7 @@ function RepoGradeHistory({ courseId, accountId }: { courseId: string; accountId
   return (
     <section className={styles.dashboard} aria-labelledby={headingId}>
       <h3 id={headingId}>Saved repository evaluations</h3>
-      <p>Automatic attempts are listed newest first, including repositories outside the current GitHub scan. Browser scores and instructor edits appear above.</p>
+      <p>Automatic attempts are listed newest first, including repositories outside the current GitHub scan. The gradebook shows browser scores and instructor edits.</p>
       <RepoGradesLoadingStatus label={pending ? "Loading saved evaluation history…" : null} settledLabel={summary} />
       <div>
         <Button type="button" size="small" aria-disabled={pending || pageNumber === 1} onClick={newer}>Newer attempts</Button>

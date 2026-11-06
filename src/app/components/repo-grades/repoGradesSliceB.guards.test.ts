@@ -75,14 +75,14 @@ describe("name derivation: the name columns are gone, search still reads the one
   const MODULE = "\\./repoGradeStudentName";
   const gridCode = gridSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   const rowsCode = rowsSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-  const theadCode = gridCode.slice(gridCode.indexOf("<thead"), gridCode.indexOf("</thead>"));
+  const theadCode = gridCode.slice(gridCode.indexOf("<TableHead "), gridCode.indexOf("</TableHead>"));
 
   it("repoGradesSearch.ts calls deriveRepoGradeStudentName (the derivation survives for search)", () => {
     expect(usesSharedFunction(searchSource, "deriveRepoGradeStudentName", MODULE)).toBe(true);
   });
 
   it("AC-1: the grid has no First name / Last name / Binding header or body cell", () => {
-    expect(theadCode).toContain('field="repo"');
+    expect(theadCode).toContain('toggleRepoGradeSort(sort, "repo")');
     for (const field of ["firstName", "lastName", "binding"]) {
       expect(theadCode).not.toContain(`field="${field}"`);
     }
@@ -94,17 +94,18 @@ describe("name derivation: the name columns are gone, search still reads the one
     expect(gridCode).not.toContain("deriveRepoGradeStudentName");
   });
 
-  it("AC-1: no fixed cell is left unpaired - exactly the select and repo cells precede the folder columns", () => {
-    const headFixedTh = (theadCode.slice(0, theadCode.indexOf("columns.map")).match(/<th[ >]|<SortableColumnHeader[ >]/g) ?? []).length;
-    const bodyStart = gridCode.indexOf("<tr role=\"row\" key={row.repo}>");
-    const bodyFixedTd = (gridCode.slice(bodyStart, gridCode.indexOf("columns.map", bodyStart)).match(/<td[ >]/g) ?? []).length;
-    expect(headFixedTh).toBe(2);
-    expect(bodyFixedTd).toBe(2);
+  it("pairs one student/repo header with one identity cell before the folder columns", () => {
+    const headFixedTh = (theadCode.slice(0, theadCode.indexOf("visibleColumns.map")).match(/<TableCell /g) ?? []).length;
+    const bodyStart = gridCode.indexOf("<TableRow role=\"row\" key={key}>");
+    const bodyFixedTd = (gridCode.slice(bodyStart, gridCode.indexOf("visibleColumns.map", bodyStart)).match(/<TableCell /g) ?? []).length;
+    expect(headFixedTh).toBe(1);
+    expect(bodyFixedTd).toBe(1);
   });
 
-  it("AC-2: the binding control survives only as an unconfirmed-row <details> inside the Repo cell, never in its own cell", () => {
-    expect(gridCode).toMatch(/row\.binding\.state !== "confirmed" && \(\s*<details>\s*<summary>Bind student<\/summary>\s*<RepoBindingControl /);
-    expect(gridCode).not.toMatch(/<td[^>]*>\s*<RepoBindingControl/);
+  it("AC-2: binding is disclosed for unconfirmed repositories inside the identity cell", () => {
+    expect(gridCode).toMatch(/row\.binding\.state !== "confirmed" && \(\s*<FeedbackDisclosure compact title="Bind student"[^>]*>\s*<RepoBindingControl /);
+    expect(gridCode).toMatch(/<TableCell component="th" scope="row"[\s\S]*?<RepoGradebookIdentity[\s\S]*?<\/TableCell>/);
+    expect(gridCode).not.toMatch(/<TableCell[^>]*>\s*<RepoBindingControl/);
   });
 
   it("AC-4: the sort-field set carries no removed column and nothing in the sort module reads a name derivation", () => {

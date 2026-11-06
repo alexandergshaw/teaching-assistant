@@ -69,7 +69,7 @@ const from = vi.fn();
 const rpc = vi.fn();
 const batchRpc = vi.fn();
 const receiptQuery = {
-  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), order: vi.fn(), limit: vi.fn(), abortSignal: vi.fn(), retry: readReceipts,
+  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), in: vi.fn(), order: vi.fn(), limit: vi.fn(), abortSignal: vi.fn(), retry: readReceipts,
 };
 
 beforeEach(() => {
@@ -95,7 +95,7 @@ beforeEach(() => {
       ? batchRpc(name, args) : rpc(name, args),
   } as never);
   from.mockReturnValue(receiptQuery);
-  for (const method of ["select", "eq", "neq", "order", "limit", "abortSignal"] as const) {
+  for (const method of ["select", "eq", "neq", "in", "order", "limit", "abortSignal"] as const) {
     receiptQuery[method].mockReturnValue(receiptQuery);
   }
   select.mockReturnValue({ eq });
@@ -884,7 +884,6 @@ it("uses compact owner/course history and matches exact discovered targets witho
     receipt(9, { folder: "NoSubmission", status: "partial", mode: "retry" }),
     receipt(8, { folder: "pending", status: "claimed" }),
     receipt(7, { folder: "pending", status: "failed" }),
-    receipt(6, { folder: "current-commit", source_ref: "previous-ref", source_sha: sha }),
     receipt(4, { folder: "Exact-Folder", source_ref: "previous-ref" }),
     receipt(3, { folder: "exact-repo", repo: "school/other", source_ref: "previous-ref" }),
     receipt(2, { folder: "NoSubmission", source_ref: "previous-ref", status: "no-submission" }),
@@ -898,6 +897,7 @@ it("uses compact owner/course history and matches exact discovered targets witho
   );
   expect(receiptQuery.eq.mock.calls).toEqual([["user_id", account.id], ["course_id", courseId]]);
   expect(receiptQuery.neq).toHaveBeenCalledExactlyOnceWith("mode", "manual");
+  expect(receiptQuery.in).toHaveBeenCalledExactlyOnceWith("source_sha", [currentSha]);
   expect(receiptQuery.order).toHaveBeenCalledExactlyOnceWith("generation", { ascending: false });
   expect(readReceipts).toHaveBeenCalledExactlyOnceWith(false);
   expect(result).toMatchObject({ status: "planned", execution: "runtime-unavailable", preview: { history: "complete" } });
@@ -948,6 +948,7 @@ it.each([
   { label: "foreign course", data: [receipt(2), receipt(1, { course_id: "other-course" })], count: 2 },
   { label: "manual attempt", data: [receipt(2), receipt(1, { mode: "manual" })], count: 2 },
   { label: "unrecognized attempt status", data: [receipt(2), receipt(1, { status: "private" })], count: 2 },
+  { label: "unpinned commit", data: [receipt(2), receipt(1, { source_sha: sha })], count: 2 },
   { label: "duplicate generation", data: [receipt(2), receipt(2)], count: 2 },
   { label: "missing body", data: null, count: 0 },
   { label: "missing count", data: [], count: null },

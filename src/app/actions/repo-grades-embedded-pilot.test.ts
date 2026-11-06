@@ -65,7 +65,7 @@ const from = vi.fn();
 const rpc = vi.fn();
 const batchRpc = vi.fn();
 const receiptQuery = {
-  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), order: vi.fn(), limit: vi.fn(), abortSignal: vi.fn(), retry: readReceipts,
+  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), in: vi.fn(), order: vi.fn(), limit: vi.fn(), abortSignal: vi.fn(), retry: readReceipts,
 };
 
 beforeEach(() => {
@@ -91,7 +91,7 @@ beforeEach(() => {
       ? batchRpc(name, args) : rpc(name, args),
   } as never);
   from.mockReturnValue(receiptQuery);
-  for (const method of ["select", "eq", "neq", "order", "limit", "abortSignal"] as const) {
+  for (const method of ["select", "eq", "neq", "in", "order", "limit", "abortSignal"] as const) {
     receiptQuery[method].mockReturnValue(receiptQuery);
   }
   select.mockReturnValue({ eq });

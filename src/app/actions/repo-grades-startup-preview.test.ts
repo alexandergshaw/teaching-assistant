@@ -56,7 +56,7 @@ const rpc = vi.fn();
 const eq = vi.fn();
 const maybeSingle = vi.fn();
 const receiptQuery = {
-  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), order: vi.fn(), limit: vi.fn(), retry: readReceipts,
+  select: vi.fn(), eq: vi.fn(), neq: vi.fn(), in: vi.fn(), order: vi.fn(), limit: vi.fn(), abortSignal: vi.fn(), retry: readReceipts,
 };
 
 beforeEach(() => {
@@ -72,7 +72,7 @@ beforeEach(() => {
   vi.mocked(readCurrentRepoGradeProfilesForOwner).mockResolvedValue(new Map());
   vi.mocked(createServiceClient).mockReturnValue({ from, rpc } as never);
   from.mockReturnValue(receiptQuery);
-  for (const method of ["select", "eq", "neq", "order", "limit"] as const) {
+  for (const method of ["select", "eq", "neq", "in", "order", "limit", "abortSignal"] as const) {
     receiptQuery[method].mockReturnValue(receiptQuery);
   }
   select.mockReturnValue({ eq });
@@ -178,4 +178,35 @@ it("reports an incomplete owner preview without inferring targets or reading his
   });
   expect(from).not.toHaveBeenCalled();
   expect(rpc).not.toHaveBeenCalled();
+});
+
+it("splits pinned history across bounded requests and rejects incomplete later chunks", async () => {
+  const repos = Array.from({ length: 41 }, (_, index) => ({
+    ...source(), repo: `School/Repo-${String(index).padStart(2, "0")}`, sourceCommit: index.toString(16).padStart(40, "0"),
+  }));
+  vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
+  maybeSingle.mockResolvedValue({ data: { github_org: "school" }, error: null });
+  vi.mocked(discoverRepoGradeSources).mockResolvedValue({ status: "scanned", enumerationComplete: true, repos });
+  const last = repos.at(-1)!;
+  const grade = { ...receipt(), repo: last.repo, source_sha: last.sourceCommit };
+  readReceipts.mockResolvedValueOnce({ data: [], count: 0, error: null })
+    .mockResolvedValueOnce({ data: [grade], count: 1, error: null })
+    .mockResolvedValueOnce({ data: [], count: 0, error: null })
+    .mockResolvedValueOnce({ data: [], count: 1, error: null });
+
+  await expect(previewRepoGradeStartupPlanAction(courseId, account.id)).resolves.toMatchObject({
+    status: "preview", history: "complete", targets: expect.arrayContaining([
+      { repo: last.repo, sourceRef: "Main", commit: last.sourceCommit, folder: "assignment", state: { status: "succeeded" } },
+    ]),
+  });
+  const requested = receiptQuery.in.mock.calls.slice(0, 2).flatMap(([, commits]) => commits);
+  expect(requested.toSorted()).toEqual(repos.map((repo) => repo.sourceCommit).toSorted());
+  expect(receiptQuery.in.mock.calls.slice(0, 2).map(([, commits]) => commits.length)).toEqual([40, 1]);
+  expect(receiptQuery.abortSignal.mock.calls[0][0]).toBe(receiptQuery.abortSignal.mock.calls[1][0]);
+
+  await expect(previewRepoGradeStartupPlanAction(courseId, account.id)).resolves.toMatchObject({
+    status: "preview", history: "unknown", targets: expect.arrayContaining([
+      expect.objectContaining({ repo: last.repo, state: { status: "blocked", reason: "history-unavailable" } }),
+    ]),
+  });
 });

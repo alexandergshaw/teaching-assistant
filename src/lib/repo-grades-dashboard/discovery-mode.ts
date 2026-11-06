@@ -1,6 +1,5 @@
 import "server-only";
 
 export function repoGradeDiscoveryEnabled(): boolean {
-  // A GitHub redirect can bypass the discovery request budget.
-  return false;
+  return process.env.REPO_GRADE_DISCOVERY_ENABLED === "true";
 }

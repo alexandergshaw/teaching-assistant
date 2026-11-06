@@ -27,6 +27,30 @@ function startupAvailable() {
   return repoGradeAdmissionMode() === "coordinated" && repoGradeDiscoveryEnabled();
 }
 
+const STARTUP_PREVIEW_TARGET_LIMIT = 50;
+
+/** Read the selected class's plan without a startup batch. */
+export async function previewRepoGradeStartupPlanAction(courseId: unknown, expectedAccountId: unknown) {
+  const owner = await requireAppOwner();
+  if (owner.id !== expectedAccountId || !validCourseId(courseId)) return { status: "course-unavailable" } as const;
+  if (!repoGradeDiscoveryEnabled()) return { status: "discovery-disabled" } as const;
+
+  const plan = await readRepoGradeCoursePlan(owner.id, courseId.toLowerCase());
+  if (plan.status !== "planned") return { status: "course-unavailable" } as const;
+  const { discovery, preview } = plan;
+  return {
+    status: "preview",
+    discovery: discovery.status === "scanned" ? {
+      status: "scanned" as const,
+      enumerationComplete: discovery.enumerationComplete,
+      incompleteSources: discovery.repos.filter((source) => source.status !== "ready").length,
+    } : discovery,
+    history: preview.history,
+    targetCount: preview.targets.length,
+    targets: preview.targets.slice(0, STARTUP_PREVIEW_TARGET_LIMIT),
+  } as const;
+}
+
 /** Check the server's activation gates without starting any course work. */
 export async function readRepoGradeStartupReadinessAction(expectedAccountId: unknown) {
   const owner = await requireAppOwner().catch(() => null);
@@ -78,10 +102,14 @@ export async function planRepoGradeCourseAction(courseId: string, expectedAccoun
   if (batchId !== undefined && (owner.id !== expectedAccountId || !validCourseId(batchId) || !startupAvailable())) {
     return { status: "course-unavailable" } as const;
   }
+  return readRepoGradeCoursePlan(owner.id, courseId.toLowerCase(), batchId);
+}
+
+async function readRepoGradeCoursePlan(accountId: string, courseId: string, batchId?: string) {
   try {
-    const plan = await planRepoGradeCourse(owner.id, courseId.toLowerCase());
+    const plan = await planRepoGradeCourse(accountId, courseId);
     if (!plan) return { status: "course-unavailable" } as const;
-    const scope = { accountId: owner.id, generation: "preview" };
+    const scope = { accountId, generation: "preview" };
     const inventories = [{
       accountId: plan.accountId, courseId: plan.courseId,
       organization: plan.courseConfig.github_org, discovery: plan.discovery,
@@ -89,11 +117,11 @@ export async function planRepoGradeCourseAction(courseId: string, expectedAccoun
     const inventory = createRepoGradeStartupSchedule(scope, inventories, new Map(), false);
     const targets = [...inventory.work.values()].map(({ target }) => target);
     let history: ReadonlyMap<string, RepoGradeHistoryObservation> | null = targets.length
-      ? await readRepoGradeStartupHistory(owner.id, plan.courseId, targets) : null;
+      ? await readRepoGradeStartupHistory(accountId, plan.courseId, targets) : null;
     if (batchId && history) {
       const queued = targets.filter((target) => history?.get(repoGradeStartupKey(target)) === "never-attempted");
       if (queued.length) {
-        const skipped = await stageStartupTargets(owner.id, batchId, plan.courseId, queued)
+        const skipped = await stageStartupTargets(accountId, batchId, plan.courseId, queued)
           .catch(() => null);
         if (!skipped) return { status: "batch-unavailable" } as const;
         const observed = new Map<string, RepoGradeHistoryObservation>(history);

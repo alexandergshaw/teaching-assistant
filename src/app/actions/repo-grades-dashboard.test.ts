@@ -16,7 +16,7 @@ import { captureRepoGradeProfile } from "@/lib/repo-grades-dashboard/profile";
 import { readCurrentRepoGradeProfilesForOwner } from "@/lib/repo-grades-dashboard/profile-store";
 import { evaluateRepoGrade } from "@/lib/repo-grade-evaluator";
 import {
-  closeRepoGradeStartupBatchAction, planRepoGradeCourseAction, readRepoGradeHistoryAction, readRepoGradeStartupBatchAction, readRepoGradeStartupCoursesAction,
+  closeRepoGradeStartupBatchAction, planRepoGradeCourseAction, previewRepoGradeStartupPlanAction, readRepoGradeHistoryAction, readRepoGradeStartupBatchAction, readRepoGradeStartupCoursesAction,
   readRepoGradeStartupReadinessAction, retryRepoGradePreparationAction, runRepoGradeStartupTargetAction,
   sealRepoGradeStartupBatchAction,
 } from "./repo-grades-dashboard";
@@ -74,6 +74,7 @@ const receiptQuery = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", undefined);
   getUser.mockResolvedValue({ data: { user: account }, error: null });
   vi.mocked(createClient).mockResolvedValue({
     auth: {
@@ -114,6 +115,7 @@ it.each([
   getUser.mockResolvedValue({ data: { user }, error: null });
   vi.mocked(getAppUser).mockResolvedValue({ ...ownerRow, role });
   await expect(planRepoGradeCourseAction(courseId)).rejects.toThrow(message);
+  await expect(previewRepoGradeStartupPlanAction(courseId, account.id)).rejects.toThrow(message);
   await expect(runStartupTarget()).rejects.toThrow(message);
   await expect(readRepoGradeHistoryAction(courseId, account.id)).rejects.toThrow(message);
   await expect(readRepoGradeStartupCoursesAction(account.id)).resolves.toEqual({ status: "unknown", reason: "account-unavailable" });
@@ -145,6 +147,7 @@ it("requires both server gates and the expected account for startup readiness", 
 
 it("rejects startup discovery if the account changed before the request", async () => {
   await expect(planRepoGradeCourseAction(courseId, "another-account")).resolves.toEqual({ status: "course-unavailable" });
+  await expect(previewRepoGradeStartupPlanAction(courseId, "another-account")).resolves.toEqual({ status: "course-unavailable" });
   expect(select).not.toHaveBeenCalled();
   expect(from).not.toHaveBeenCalled();
   expect(discoverRepoGradeSources).not.toHaveBeenCalled();
@@ -249,6 +252,68 @@ function discover(...repos: Array<ReturnType<typeof source>>) {
 function runStartupTarget(commit = currentSha, expectedAccountId = account.id) {
   return runRepoGradeStartupTargetAction(expectedAccountId, courseId, "School/Repo", "assignment", "Main", commit, batchId);
 }
+
+it.each([undefined, "false", "TRUE"])("keeps the owner preview off for discovery flag %j", async (flag) => {
+  vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", flag);
+  await expect(previewRepoGradeStartupPlanAction(courseId, account.id)).resolves.toEqual({ status: "discovery-disabled" });
+  expect(select).not.toHaveBeenCalled();
+  expect(discoverRepoGradeSources).not.toHaveBeenCalled();
+  expect(from).not.toHaveBeenCalled();
+});
+
+it("returns a bounded pinned plan and read-only history even when automatic startup is unavailable", async () => {
+  vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
+  vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");
+  const folders = ["assignment", ...Array.from({ length: 50 }, (_, index) => `folder-${index}`)];
+  const blockedSource = { status: "blocked" as const, repo: "School/Other", sourceRef: "Main", reason: "rate-limited" as const };
+  maybeSingle.mockResolvedValue({ data: { github_org: "school", rubric_data: "private" }, error: null });
+  vi.mocked(discoverRepoGradeSources).mockResolvedValue({
+    status: "scanned", enumerationComplete: true, repos: [source(folders), blockedSource],
+  });
+  readReceipts.mockResolvedValue({ data: [receipt(1)], count: 1, error: null });
+
+  const preview = await previewRepoGradeStartupPlanAction(courseId.toUpperCase(), account.id);
+  expect(preview).toMatchObject({
+    status: "preview",
+    discovery: { status: "scanned", enumerationComplete: true, incompleteSources: 1 },
+    history: "complete",
+    targetCount: 51,
+  });
+  if (preview.status !== "preview") throw new Error("Expected a read-only preview");
+  expect(preview.targets).toHaveLength(50);
+  expect(preview.targets[0]).toEqual({
+    repo: "School/Repo", folder: "assignment", sourceRef: "Main", commit: currentSha, state: { status: "succeeded" },
+  });
+  expect(preview.targets[1]?.state).toEqual({ status: "blocked", reason: "runtime-unavailable" });
+  expect(preview.discovery).not.toHaveProperty("repos");
+  expect(JSON.stringify(preview)).not.toContain("private");
+  expect(eq.mock.calls).toEqual([["user_id", account.id], ["id", courseId]]);
+  expect(await readRepoGradeStartupReadinessAction(account.id)).toEqual({ status: "unavailable" });
+  expect(await runStartupTarget()).toEqual({ status: "runtime-unavailable" });
+  expect(batchRpc).not.toHaveBeenCalled();
+  expect(rpc).not.toHaveBeenCalled();
+  expect(claimRepoGrade).not.toHaveBeenCalled();
+  expect(readPinnedRepoGradeReadme).not.toHaveBeenCalled();
+  expect(evaluateRepoGrade).not.toHaveBeenCalled();
+  expect(callLlm).not.toHaveBeenCalled();
+});
+
+it("reports an incomplete owner preview without inferring targets or reading history", async () => {
+  vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
+  maybeSingle.mockResolvedValue({ data: { github_org: "school" }, error: null });
+  vi.mocked(discoverRepoGradeSources).mockResolvedValue({
+    status: "scanned", enumerationComplete: false, repos: [source()],
+  });
+  await expect(previewRepoGradeStartupPlanAction(courseId, account.id)).resolves.toEqual({
+    status: "preview",
+    discovery: { status: "scanned", enumerationComplete: false, incompleteSources: 0 },
+    history: "not-read",
+    targetCount: 0,
+    targets: [],
+  });
+  expect(from).not.toHaveBeenCalled();
+  expect(batchRpc).not.toHaveBeenCalled();
+});
 
 it("preserves earlier unknown and failed work while staging an eligible pinned tail", async () => {
   discover(source(["assignment", "failed", "tail"]));

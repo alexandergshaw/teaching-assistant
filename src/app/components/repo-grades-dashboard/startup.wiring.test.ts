@@ -35,6 +35,15 @@ describe("Repo Grades startup wiring", () => {
     expect(source("./RepoGradesStartup.tsx")).not.toMatch(/app\/actions/);
   });
 
+  it("scopes the explicit read-only preview to the owner and selected class", () => {
+    const dashboard = source("../repo-grades/RepoGradesDashboard.tsx");
+    expect(dashboard).toMatch(/user && isOwnerDecision\(accessDecision\) && \([\s\S]*?<RepoGradesStartupPreview key=\{JSON.stringify\(\[user.id, courseId\]\)\} accountId=\{user.id\} courseId=\{courseId\}/);
+    const preview = source("./RepoGradesStartupPreview.tsx");
+    expect(preview).toContain("onClick={loadPreview}");
+    expect(preview).toContain("previewRepoGradeStartupPlanAction(courseId, accountId)");
+    expect(preview).not.toMatch(/useEffect|runRepoGrade|BatchAction|StartupTargetAction/);
+  });
+
   it("keeps a live region outside the tab and wires a focusable, guarded native stop button", () => {
     const component = source("./RepoGradesStartup.tsx");
     expect(component).toMatch(/role="status" aria-atomic="true"[\s\S]*\{children\}/);

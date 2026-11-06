@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
+import { RepoGradesStartupPreview } from "../repo-grades-dashboard/RepoGradesStartupPreview";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { buildRepoGradesDashboard } from "./repoGradesDashboardModel";
 import { useRepoGradeHistory } from "./useRepoGradeHistory";
@@ -73,7 +74,12 @@ export default function RepoGradesDashboard({
         {scoreCount} {scoreCount === 1 ? "score" : "scores"} shown. {discoverySummary}
       </p>
       {!dashboardFeedbackEnabled && <p>Feedback controls are available in the grading table below.</p>}
-      {user && isOwnerDecision(accessDecision) && <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />}
+      {user && isOwnerDecision(accessDecision) && (
+        <>
+          <RepoGradesStartupPreview key={JSON.stringify([user.id, courseId])} accountId={user.id} courseId={courseId} />
+          <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
+        </>
+      )}
       {dashboardFeedbackEnabled && verified && gradeColumns.length > 0 && (
         <form onSubmit={(event) => {
           event.preventDefault();

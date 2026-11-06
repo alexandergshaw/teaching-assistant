@@ -65,7 +65,7 @@ describe("class repository results wiring", () => {
   });
 
   it("exposes per-course profile settings to the owner independently of scan success", () => {
-    expect(dashboard).toContain("{user && isOwnerDecision(accessDecision) && <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />}");
+    expect(dashboard).toMatch(/user && isOwnerDecision\(accessDecision\) && \(\s*<>\s*<RepoGradesStartupPreview .* \/>\s*<RepoGradeProfileSettings courseId=\{courseId\} columns=\{gradeColumns\} \/>/);
   });
 
   it("declares table headers and a concise status independent of the scrollable rows", () => {

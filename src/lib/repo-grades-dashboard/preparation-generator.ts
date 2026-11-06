@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { courseKindFromCourseName, type CourseKind } from "@/lib/course-kind";
+import type { CourseKind } from "@/lib/course-kind";
 import { RUBRIC_DEDUCTION_TIERS } from "@/lib/grade/rubric-tiers";
 import { callLlm, getGeminiGenerationTuning, normalizeGenerationConfig, type LlmExecutionPolicy } from "@/lib/llm";
 
@@ -57,9 +57,10 @@ export type RepoGradeCourseKindBasis = readonly [name: string | null, kind: stri
 
 /** Resolve the same deployed policy for both startup and owner review. */
 export function captureRepoGradePreparationPolicy(model: string, basis: RepoGradeCourseKindBasis) {
-  const [name, kind] = basis;
-  const courseKind = kind === "coding" || kind === "applied" ? kind : courseKindFromCourseName(name ?? "");
-  if (!courseKind) return { status: "course-kind-required" } as const;
+  const [, kind] = basis;
+  // The default policy allows code only when the assignment requires it.
+  // Keep the stored policy identifier used by the database for an unset kind.
+  const courseKind = kind === "applied" ? "applied" : "coding";
   const generator = captureRepoGradeRubricGenerator(model, courseKind);
   if (!generator) return { status: "generator-unavailable" } as const;
   const basisDigest = createHash("sha256").update(JSON.stringify(basis)).digest("hex");

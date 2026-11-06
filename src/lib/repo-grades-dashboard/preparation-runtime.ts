@@ -185,7 +185,6 @@ async function prepareRepoGradeStartupRubric(
     const { courseKindBasis } = bootstrap;
     if (!courseKindBasis) return { status: "course-kind-required" };
     const policy = captureRepoGradePreparationPolicy(model, courseKindBasis);
-    if (policy.status === "course-kind-required") return { status: policy.status };
     if (policy.status !== "ready") return null;
     const activeGrader = getRepoGraderIdentity("gemini");
     if (activeGrader.model !== model || activeGrader.graderVersion !== graderVersion) return null;

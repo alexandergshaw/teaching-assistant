@@ -437,13 +437,13 @@ it.each([
   expect(evaluateRepoGrade).toHaveBeenCalledTimes(1);
 });
 
-it("refuses model-backed rubric generation when an owned course has no proven kind", async () => {
+it("refuses model-backed rubric generation when the course metadata snapshot is incomplete", async () => {
   vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
   vi.stubEnv("GEMINI_API_KEY", "test-key");
   discover(source());
   readReceipts.mockResolvedValue({ data: [], count: 0, error: null });
   rpc.mockResolvedValueOnce({ data: { profile: savedStartupProfile("", { provider: "gemini", useReadmeInstructions: true }), receipt: null }, error: null });
-  maybeSingle.mockResolvedValue({ data: { github_org: "school", name: "Special Topics", course_kind: null }, error: null });
+  maybeSingle.mockResolvedValue({ data: { github_org: "school", name: "Special Topics" }, error: null });
 
   await expect(runStartupTarget()).resolves.toMatchObject({
     status: "course-kind-required", preparationDiagnostic: { status: "course-kind-required", durationMs: expect.any(Number) },
@@ -731,16 +731,20 @@ it.each([true, false])("distinguishes confirmed provider refusal from uncertain 
   expect(evaluateRepoGrade).not.toHaveBeenCalled();
 });
 
-it("provisions a missing folder profile and policy for an owned programming course with pinned instructions", async () => {
+it.each([
+  ["Intro to Programming", null],
+  ["Special Topics", null],
+  ["Special Topics", "legacy"],
+] as const)("provisions a folder profile from pinned instructions for %s with course kind %s", async (courseName, rawKind) => {
   const { events, fetchModel, courseConfig } = await paidPreparationFixture({
-    missingProfile: true, courseName: "Intro to Programming", rawKind: null,
+    missingProfile: true, courseName, rawKind,
   });
   await expect(runStartupTarget()).resolves.toMatchObject({
     status: "no-submission", preparationDiagnostic: { status: "ready" },
   });
   expect(rpc).toHaveBeenCalledWith("repo_grade_bootstrap_preparation", {
     p_user_id: account.id, p_course_id: courseId, p_folder: "assignment", p_course_config: courseConfig,
-    p_course_kind_basis: ["Intro to Programming", null], p_course_kind: "coding",
+    p_course_kind_basis: [courseName, rawKind], p_course_kind: "coding",
     p_prompt_parser_version: expect.stringMatching(/^repo-grade-gemini-rubric-v1:[a-f0-9]{64}:[a-f0-9]{64}$/),
     p_expected_fingerprint: null,
     p_profile: expect.objectContaining({
@@ -749,6 +753,10 @@ it("provisions a missing folder profile and policy for an owned programming cour
   });
   expect(events.indexOf("repo_grade_bootstrap_preparation")).toBeLessThan(events.indexOf("repo_grade_claim_preparation"));
   expect(fetchModel).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(fetchModel.mock.calls[0][1].body))).toMatchObject({
+    contents: [{ role: "user", parts: [{ text: "Describe your method and show the findings." }] }],
+    system_instruction: { parts: [{ text: expect.stringContaining("including code where the assignment requires it") }] },
+  });
 });
 
 it.each([{ missingProfile: true }, { startupDefault: true }])("uses pinned assignment instructions despite an unscoped course rubric (%j)", async (origin) => {

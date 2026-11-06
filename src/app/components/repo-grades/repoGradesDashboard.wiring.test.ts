@@ -95,8 +95,21 @@ describe("class repository results wiring", () => {
   });
 
   it("keeps the earlier scored attempt's partial status separate from the latest attempt", () => {
-    expect(dashboard).toContain('Latest saved attempt: <RepoGradeStatusChip status={latest.status');
+    expect(dashboard).toContain('<RepoGradeStatusChip status={latest.status');
     expect(dashboard).toMatch(/scored\.generation !== latest\.generation && scored\.status === "partial" && <> <RepoGradeStatusChip status="partial"/);
+  });
+
+  it("labels an earlier browser score and uses that score's own truncation evidence", () => {
+    expect(dashboard).toContain('earlierBrowserScore ? "Earlier browser score "');
+    expect(dashboard).toMatch(/!editable && cell\?\.local[\s\S]*?\{browserScoreLabel\}\{cell\.local\.score\}[\s\S]*?\{cell\.local\.submissionTruncated && [^>]+>Submission truncated</);
+  });
+
+  it("shows the newest retained result outside its disclosure and copies the immutable generated source", () => {
+    expect(dashboard).toContain("const latestRetained = (editableEdit?.retainedResults ?? cell?.retained)?.at(-1)");
+    expect(dashboard).toContain("const retainedSource = latestRetained?.source");
+    expect(dashboard).toMatch(/Latest retained score \{retainedSource\.score[\s\S]*?<RepoGradeRubricScores areas=\{retainedSource\.rubricAreas\}[\s\S]*?<FeedbackDisclosure compact title="Retained results"/);
+    expect(dashboard).toMatch(/overall: retainedSource\.comment, strengths: retainedSource\.strengths/);
+    expect(dashboard).toMatch(/source="retained" feedback=\{retainedFeedback\} distinguishSource retainedSource=\{latestRetained\.source\}/);
   });
 
   it("joins the existing grading controls and scoped, read-only saved results in the same cell", () => {
@@ -118,7 +131,7 @@ describe("class repository results wiring", () => {
     expect(grid).toContain("editableEdit={editableEdit}");
     expect(dashboard).toContain("const browserEdit = editableEdit ?? cell?.local");
     expect(dashboard).toMatch(/<SavedMatrixResult[\s\S]*?<RepoResultCopy[^>]*source="browser" feedback=\{browserFeedback\}[\s\S]*?<RepoResultCopy[^>]*source="saved" feedback=\{savedFeedback\}/);
-    expect(dashboard.match(/hideCopyAll/g)).toHaveLength(2);
+    expect(dashboard.match(/hideCopyAll/g)).toHaveLength(3);
     expect(cellControl).not.toContain('aria-label={`Copy feedback:');
   });
 
@@ -126,7 +139,7 @@ describe("class repository results wiring", () => {
     expect(grid).toContain("hasSavedResult={!!repo.cells.get(folder)?.saved}");
     expect(cellControl).toContain('(!hasSavedResult || status !== "not-started")');
     expect(cellControl).toContain('placeholder={hasSavedResult ? "Browser score" : "Score"}');
-    expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?\}\s*<RepoGradeActionsMenu[\s\S]*?<MenuItem key="grade"[\s\S]*?else onGrade\(\);/);
+    expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?<RepoGradeActionsMenu[\s\S]*?<MenuItem key="grade"[\s\S]*?else onGrade\(\);/);
   });
 
   it("keeps the retained editor isolated with its course guard and separately keyed modal", () => {

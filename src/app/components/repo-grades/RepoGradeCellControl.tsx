@@ -34,11 +34,13 @@
 // the same conditions, so the reason text shown here and the column post
 // button's real postability can never disagree (AC5 item 28).
 import { useId, useRef, useState } from "react";
-import { Collapse, ListItemText, MenuItem, Select } from "@mui/material";
+import { Collapse, ListItemText, MenuItem, Select, Typography } from "@mui/material";
 import TextField from "@mui/material/TextField";
 import { CopyStatus, useFeedbackCopy } from "./RepoDashboardFeedback";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
+import RepoGradeRubricScores from "./RepoGradeRubricScores";
 import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import { gradeStatusForEdit } from "./repoGradeCellStatus";
 import type { RepoGradeQueueCommand, RepoGradeQueueState } from "./repoGradeQueue";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
 // A13: the live-defect guard - relative path, not the "@/lib/grade" alias:
@@ -366,26 +368,28 @@ export default function RepoGradeCellControl({
     });
 
   const stage = queueState ?? edit.gradeRunStage ?? (edit.grading ? "running" : null);
-  const status = stage ?? edit.gradeAttemptStatus ?? (edit.gradeError ? "failed"
-    : edit.retainedResults?.length
-      ? edit.retainedResults.at(-1)?.source.submissionTruncated ? "partial" : "succeeded"
-      : edit.generatedScore != null ? edit.submissionTruncated ? "partial" : "succeeded" : "not-started");
+  const status = gradeStatusForEdit(edit, stage);
   const mayControl = stage === "paused" || stage === "queued";
   const gradeLabel = stage === "queued" ? "Pause grade" : stage === "paused" ? "Resume grade" : "Start grade";
   const gradeDisabled = stage === "running" || stage === "stopped" || (stage === "paused" && !!folderPaused);
   const gradeNote = stage === "running" ? "Already started and will finish."
     : stage === "paused" && folderPaused ? "The folder queue is paused." : null;
   const cellName = `${row.repo} / ${column.folder || "Repository root"}`;
+  const blankScore = !detailsOpen && !edit.score.trim();
+  const earlierScore = !!edit.score.trim() && edit.generatedScore !== null
+    && status !== "succeeded" && status !== "partial";
 
   return (
     <div className={styles.cellControl}>
       <div className={styles.actionHeading}>
         {(!hasSavedResult || status !== "not-started") && (
           <span role={queueState === undefined ? "status" : undefined}>
-            {hasSavedResult && <span className={styles.postReason}>Browser grade </span>}
             {queueState === undefined && <span className={styles.srOnly}>{cellName}: </span>}
-            <RepoGradeStatusChip status={status} active={stage === "running"} />
+            <RepoGradeStatusChip status={status} active={stage === "running"} source={hasSavedResult ? "Browser" : undefined} />
           </span>
+        )}
+        {!hasSavedResult && status !== "no-submission" && status !== "succeeded" && status !== "partial" && (
+          <Typography variant="caption" color="text.secondary">Folder found</Typography>
         )}
         <RepoGradeActionsMenu label={`Grade actions: ${cellName}`} triggerRef={actionsTriggerRef}
           onClose={() => setConfirmFirstPost(null)}>
@@ -427,7 +431,7 @@ export default function RepoGradeCellControl({
               </MenuItem>
             ),
             <MenuItem key="details" onClick={() => {
-              setDetailsOpen(!detailsOpen);
+              setDetailsOpen((open) => !open);
               close();
             }}>
               {detailsOpen ? "Hide grade details" : "Show grade details"}
@@ -461,8 +465,11 @@ export default function RepoGradeCellControl({
       </div>
       {gradeNote && <span id={gradeNoteId} className={styles.postReason}>{gradeNote}</span>}
       {manualRunning && <span className={styles.postReason} role="status">Running code…</span>}
-      <div className={styles.cellInputs}>
-        <div className={styles.scoreRow}>
+      <div className={styles.cellInputs} data-blank={blankScore && edit.mergeStatus !== "not-merged" ? true : undefined}>
+        {!!edit.score.trim() && !!edit.retainedResults?.length
+          ? <Typography variant="caption" color="text.secondary">Browser draft score</Typography>
+          : earlierScore && <Typography variant="caption" color="text.secondary">Earlier score</Typography>}
+        <div className={styles.scoreRow} data-blank={blankScore || undefined}>
           {/* Repo Grades UI consistency audit item #5 - adopts MUI TextField
               exactly as GradingResults.tsx:664-671 does for the same kind of
               dense per-row score input (`size="small"`, a fixed `sx` width,
@@ -496,8 +503,15 @@ export default function RepoGradeCellControl({
           </span>
         )}
       </div>
-      <CopyStatus copied={copiedKey !== null} failed={copyFailed} />
-      <Collapse in={detailsOpen} timeout={0} sx={{ width: "100%" }}>
+      <RepoGradeRubricScores areas={edit.rubricAreas} label={`Rubric scores: ${cellName}`} />
+      {edit.submissionTruncated && (earlierScore || !!edit.retainedResults?.length) && (
+        <Typography variant="caption" color="text.secondary">Submission truncated</Typography>
+      )}
+      {edit.rubricAreas.length > 0 && edit.generatedScore !== null && edit.score !== edit.generatedScore && (
+        <span className={styles.postReason}>Rubric scores are from the generated result ({edit.generatedScore}).</span>
+      )}
+      <CopyStatus copied={copiedKey !== null} failed={copyFailed} compact />
+      <Collapse in={detailsOpen} timeout={0} unmountOnExit sx={{ width: "100%" }}>
           <RowFeedbackBoxes
             student={row.repo}
             edit={feedbackEdit}
@@ -508,46 +522,15 @@ export default function RepoGradeCellControl({
             namePrefix={column.folder}
             showCopyAll={false}
           />
-        {edit.submissionTruncated && <span className={styles.postReason}>Submission truncated</span>}
-        {edit.rubricAreas.length > 0 && edit.generatedScore !== null && edit.score !== edit.generatedScore && (
-          <span className={styles.postReason}>Rubric scores are from the generated result ({edit.generatedScore}).</span>
+        {edit.submissionTruncated && !earlierScore && !edit.retainedResults?.length && (
+          <span className={styles.postReason}>Submission truncated</span>
         )}
         {edit.rubricAreas.length > 0 && (
-          <div className={styles.rubricBreakdown}>
-            {edit.rubricAreas.map((area, index) => {
-              // B1: computed from THIS area's own score string alone - never
-              // from a rubric's declared points (scaleResultToPoints rescales
-              // every area's numerator AND denominator, and an AI-generated
-              // rubric's declared points are null by construction; see
-              // repoGradeScoreDisplay.ts for the full reasoning). Shown only
-              // when it actually parses - a blank score (engine.ts:212 emits
-              // "" for an area routinely) or an unreadable one shows the raw
-              // text alone, never a fabricated NaN%.
-              const areaPercent = scorePercentValue(area.score) !== null ? formatScorePercent(area.score) : null;
-              return (
-                <div key={`${area.area}-${index}`} className={styles.rubricBreakdownArea}>
-                  <span className={styles.rubricBreakdownName}>{area.area}</span>
-                  <span className={styles.rubricBreakdownScore}>{area.score || "-"}</span>
-                  {areaPercent && <span className={styles.scorePercent}>{areaPercent}</span>}
-                </div>
-              );
-            })}
-            {/* B3: a truthful one-line statement, driven by the SAME
-                repoGradeBreakdownWillPost predicate buildRepoGradePostPlan
-                uses to build the real post payload - never a hand-rolled
-                re-check of the same condition, so this can never say
-                something the actual post does not do. Today this reads "for
-                reference only" for every fresh Repo Grades grade (gradeRepoAction
-                omits pointsPossible, so a fresh fraction score is always
-                rescaled - see this module's own header for the verified
-                chain) - but it is computed, not hardcoded, so it stays
-                truthful if that ever changes. */}
-            <span className={styles.postReason}>
-              {breakdownWillPost
-                ? "This breakdown will be included when this grade posts to Canvas."
-                : "This breakdown is shown for reference only - it does not post to Canvas."}
-            </span>
-          </div>
+          <span className={styles.postReason}>
+            {breakdownWillPost
+              ? "This breakdown will be included when this grade posts to Canvas."
+              : "This breakdown is shown for reference only - it does not post to Canvas."}
+          </span>
         )}
         {/* Item 3 (docs for this feature): gradeRepoAction's LLM branch has been
             running this repo's code in the sandbox and feeding the result into
@@ -682,7 +665,7 @@ export default function RepoGradeCellControl({
               ? "Posted to Canvas"
               : edit.postStatus === "skipped"
                 ? "Not posted - no grade or comment to send"
-                : `Failed: ${edit.postMessage ?? ""}`}
+                : `Canvas post failed: ${edit.postMessage ?? ""}`}
         </span>
       )}
     </div>

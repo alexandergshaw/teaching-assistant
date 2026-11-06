@@ -6,6 +6,7 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import FeedbackExpandModal from "../grading-results/FeedbackExpandModal";
 import RowFeedbackBoxes from "../grading-results/RowFeedbackBoxes";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import {
   copyAllFeedbackText,
   FEEDBACK_FIELDS,
@@ -67,9 +68,9 @@ export function useFeedbackCopy(version: string, isAvailable?: () => boolean, so
   return { copy, isActive, invalidateCopy, copiedKey: status?.success ? status.key : null, failed: status?.success === false };
 }
 
-export function CopyStatus({ copied, failed }: { copied: boolean; failed: boolean }) {
+export function CopyStatus({ copied, failed, compact = false }: { copied: boolean; failed: boolean; compact?: boolean }) {
   return (
-    <p role="status">
+    <p role="status" style={compact && !failed ? visuallyHidden : undefined}>
       {copied ? "Copied" : failed ? "Could not copy to the clipboard. Select the feedback text to copy it manually." : ""}
     </p>
   );
@@ -99,22 +100,25 @@ export function FeedbackDisclosure({ title, label, expanded, onExpand, children,
   );
 }
 
-export function RepoResultCopy({ repo, folder, source, feedback }: {
+export function RepoResultCopy({ repo, folder, source, feedback, distinguishSource, retainedSource }: {
   repo: string;
   folder: string;
-  source: "browser" | "saved";
+  source: "browser" | "saved" | "retained";
   feedback: FeedbackBoxesEdit;
+  distinguishSource: boolean;
+  retainedSource?: RetainedRepoGradeResult["source"];
 }) {
-  const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
-  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([target, feedback]));
+  const label = distinguishSource ? `Copy ${source} feedback` : "Copy feedback";
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([repo, folder, source, feedback]), undefined, retainedSource);
   if (!Object.values(feedback).some((value) => value.trim())) return null;
   return (
     <>
-      <Button type="button" size="small" aria-label={`Copy ${target}`}
+      <Button type="button" size="small" variant="outlined"
+        aria-label={`${copiedKey === "all" ? "Copied" : label}: ${repo}, ${folder || "repository root"}`}
         onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
-        {copiedKey === "all" ? "Copied" : `Copy ${source} feedback`}
+        {copiedKey === "all" ? "Copied" : label}
       </Button>
-      <CopyStatus copied={copiedKey !== null} failed={failed} />
+      <CopyStatus copied={copiedKey !== null} failed={failed} compact />
     </>
   );
 }

@@ -422,7 +422,9 @@
 .actionHeading {
   position: relative;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   width: 100%;
   min-height: 30px;
   padding-inline-end: 34px;
@@ -475,6 +477,11 @@
   gap: var(--space-1);
 }
 
+.cellInputs[data-blank]:not(:focus-within),
+.scoreRow[data-blank]:not(:focus-within) {
+  display: none;
+}
+
 /* U12.48/U12.52 - the score input stays the raw, editable "earned/possible"
    text (that is what actually posts to Canvas - see RepoGradeCellControl.tsx's
    header comment), with a read-only percentage shown beside it so the
@@ -504,36 +511,26 @@
    own inline styles - no CSS Module classes of this file's own are needed
    for them. */
 
-/* JOB A (docs/rubric-criteria-breakdown-acceptance-criteria.md): rubricAreas
-   was already written onto every graded cell (useRepoGradesGradingActions.ts)
-   but never rendered anywhere - this is that rendering. Mirrors
-   DraftedGradesTab's own per-area rows (page.module.css's .draftRubricArea/
-   .draftRubricAreaName/.draftRubricAreaScore) rather than inventing a new
-   visual language for the same kind of data - the app's language for a score
-   is a muted tabular-nums string, never a progress bar. */
+/* Align criterion scores with the gradebook's numeric score readout. */
 .rubricBreakdown {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-1);
+  width: 100%;
+  max-width: 28rem;
 }
 
 .rubricBreakdownArea {
-  display: flex;
-  gap: var(--space-1);
+  gap: var(--space-2);
   align-items: baseline;
-  font-size: var(--font-size-sm);
-  flex-wrap: wrap;
 }
 
 .rubricBreakdownName {
-  font-weight: 600;
-  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .rubricBreakdownScore {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  text-align: end;
+  flex: 0 0 auto;
 }
 
 /* Item 3 (docs for this feature): an execution-influenced grade must be

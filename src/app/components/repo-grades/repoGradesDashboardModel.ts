@@ -6,6 +6,7 @@ import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import { getRepoGradeCellEdit, type RepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
 import { scorePercentValue } from "./repoGradeScoreDisplay";
+import { gradeStatusForEdit } from "./repoGradeCellStatus";
 import { matchesRepoGradeQuery } from "./repoGradesSearch";
 import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState } from "./repoGradesRows";
 
@@ -139,8 +140,7 @@ type MatrixCell = {
   local: RepoGradeCellEdit | null;
   retained: RepoGradeCellEdit["retainedResults"];
   saved: RepoGradeSavedResult | undefined;
-  grading: boolean;
-  gradeFailed: boolean;
+  browserStatus?: ReturnType<typeof gradeStatusForEdit>;
 };
 
 type MatrixRepository = {
@@ -186,13 +186,13 @@ export function buildRepoGradeMatrix(
     const edit = getRepoGradeCellEdit(edits, browser.repo, browser.folder);
     const previous = repo.cells.get(browser.folder);
     const local = hasLocalResult(edit) ? edit : null;
+    const browserStatus = gradeStatusForEdit(edit);
     repo.cells.set(browser.folder, {
       browser: previous?.browser?.discovery === "Found in scan" ? previous.browser : browser,
       local: local ?? previous?.local ?? null,
       retained: edit.retainedResults?.length ? edit.retainedResults : previous?.retained,
       saved: undefined,
-      grading: edit.grading || previous?.grading === true,
-      gradeFailed: !!edit.gradeError || previous?.gradeFailed === true,
+      browserStatus: browserStatus === "not-started" ? previous?.browserStatus : browserStatus,
     });
   }
   for (const saved of savedResults.values()) {
@@ -202,8 +202,8 @@ export function buildRepoGradeMatrix(
     const previous = repo.cells.get(folder);
     repo.cells.set(folder, {
       browser: previous?.browser, local: previous?.local ?? null, saved,
+      browserStatus: previous?.browserStatus,
       retained: previous?.retained,
-      grading: previous?.grading ?? false, gradeFailed: previous?.gradeFailed ?? false,
     });
   }
   for (const { repo, canvasUserId } of studentRepos) {
@@ -280,7 +280,7 @@ export function visibleRepoGradebookRows(
         return [{ ...repo, active: active.row }];
       }
       const cell = repo.cells.get(selectedFolder);
-      const hasResult = !!(cell?.local || cell?.retained?.length || cell?.saved);
+      const hasResult = !!(cell?.local || cell?.browserStatus || cell?.retained?.length || cell?.saved);
       const scannedRow = scanned.get(key);
       const operational = scannedRow && (allFolders || scannedRow.cells[selectedFolder]?.status === "ungraded");
       if (selectionFiltered || operational || (!allFolders && !hasResult)

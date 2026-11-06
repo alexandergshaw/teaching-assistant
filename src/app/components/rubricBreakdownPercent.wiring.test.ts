@@ -20,6 +20,7 @@ function read(relativePath: string): string {
 }
 
 const CELL_CONTROL_SOURCE = read("src/app/components/repo-grades/RepoGradeCellControl.tsx");
+const CELL_RUBRIC_SOURCE = read("src/app/components/repo-grades/RepoGradeRubricScores.tsx");
 const GRADING_RESULTS_SOURCE = read("src/app/components/GradingResults.tsx");
 const DRAFTED_GRADES_SOURCE = read("src/app/components/DraftedGradesTab.tsx");
 
@@ -84,7 +85,8 @@ describe("JOB A: RepoGradeCellControl.tsx renders edit.rubricAreas (a dead capab
   });
 
   it("also renders a per-area percentage via the shared, tested helper - not a reinvented regex", () => {
-    expect(usesFormatScorePercent(CELL_CONTROL_SOURCE)).toBe(true);
+    expect(CELL_CONTROL_SOURCE).toMatch(/<RepoGradeRubricScores\s+areas=\{edit\.rubricAreas\}/);
+    expect(usesFormatScorePercent(CELL_RUBRIC_SOURCE)).toBe(true);
   });
 });
 

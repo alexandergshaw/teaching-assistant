@@ -201,6 +201,14 @@ describe("visibleRepoGradebookRows", () => {
     ]);
   });
 
+  it("keeps a confirmed no-submission result visible in folder scope without an active scan or score", () => {
+    const edits = { "org/archived": { Lab: { ...edit(""), gradeAttemptStatus: "no-submission" as const } } };
+    const archived = buildRepoGradeMatrix(buildRepoGradesDashboard(edits, null), edits, new Map(), columns, [], roster, bindings);
+    const [student] = visibleRepoGradebookRows(archived, [], [], "Lab", "Alice", false, DEFAULT_REPO_GRADE_SORT);
+    expect(student.repos.map(({ name, active }) => [name, active])).toEqual([["org/archived", undefined]]);
+    expect(student.repos[0].cells.get("Lab")).toMatchObject({ browserStatus: "no-submission", local: null });
+  });
+
   it("sorts by the browser percentage when available, falls back to saved results, and keeps empty scores last", () => {
     const edits = { "org/a": { Lab: edit("2/10") } };
     const scores = new Map(results);

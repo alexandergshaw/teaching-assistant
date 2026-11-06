@@ -527,7 +527,7 @@ export default function RepoGradesGrid({
               return (
                 <TableCell role="cell" key={folder}>
                   <span className={styles.cellColumnLabel} aria-hidden="true">{label}</span>
-                  {!repos.length && <span aria-label="No repository result">—</span>}
+                  {!repos.length && <span className={dashboardStyles.matrixMeta}>Submission unknown</span>}
                   {repos.map((repo) => {
                     const row = repo.active;
                     const cell = row?.cells[folder];
@@ -553,7 +553,7 @@ export default function RepoGradesGrid({
                           />
                         ) : cell && cell.status !== "ungraded" && <RepoGradeStatusChip status={cell.status} />}
                         <RepoGradeResultDetails repo={repo} folder={folder}
-                          editableEdit={editableEdit} hasScanStatus={!!cell} />
+                          editableEdit={editableEdit} scanStatus={cell?.status} />
                       </div>
                     );
                   })}

@@ -59,8 +59,9 @@ import {
   scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
 import { resolveGradeScope } from "./repoGradesGradeSet";
-import { buildBulkGradePlan, bulkGradeOutcomeFromRun } from "./repoGradesBulkGrade";
+import { buildBulkGradePlan, bulkGradeOutcomeFromRun, repoGradeAttemptErrorStatus, repoGradeTransportError } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
+import { createRepoGradeQueue, recordRepoGradeQueueCommand, type RepoGradeQueueCommand, type RepoGradeQueueSnapshot } from "./repoGradeQueue";
 // A16 wave 3 (docs/a16-wave3-scope.md section 7): the folder-entry adapter.
 // This hook CALLS both, and holds no condition over either result - see
 // classTrendsFolderEntry.ts's own header for why that placement matters.
@@ -154,6 +155,9 @@ export interface UseRepoGradesGradingActionsResult {
   handleGradeColumn: (folder: string) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
+  bulkQueue: RepoGradeQueueSnapshot | null;
+  controlGradeColumn: (folder: string, command: RepoGradeQueueCommand) => void;
+  controlGradeCell: (repo: string, folder: string, command: RepoGradeQueueCommand) => void;
   /** A16 wave 3: the last "Grade all" run's trends, or null - see
    * classTrendsFolderEntry.ts's repoRunTrendsEntry for the one gate. */
   trendsEntry: GradingRunEntry | null;
@@ -185,9 +189,16 @@ export function useRepoGradesGradingActions(
 
   const currentScope = useRef<object | null>(null);
   const activeTargets = useRef(new Set<string>());
+  const singleQueues = useRef(new Map<string, {
+    scope: object | null; queue: ReturnType<typeof createRepoGradeQueue<string>>;
+  }>());
   useLayoutEffect(() => {
     currentScope.current = cellScope;
-    return () => { currentScope.current = null; };
+    const queues = singleQueues.current;
+    return () => {
+      currentScope.current = null;
+      for (const active of queues.values()) if (active.scope === cellScope) active.queue.close();
+    };
   }, [cellScope]);
   const isCurrent = () => cellScope !== null && currentScope.current === cellScope && isCellScopeCurrent();
   const announceGrade = (message: string) => {
@@ -271,9 +282,17 @@ export function useRepoGradesGradingActions(
       announceGrade("This repository folder is already being graded.");
       return;
     }
+    const key = JSON.stringify([courseId, row.repo, column.folder]);
+    const queue = createRepoGradeQueue([key], (target) => target, isCurrent, ({ cells }) => {
+      const stage = cells.get(key);
+      if (stage === "queued" || stage === "paused" || stage === "stopped") {
+        setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { gradeRunStage: stage }));
+      }
+    });
+    singleQueues.current.set(key, { scope: cellScope, queue });
+    queue.publish();
     try {
     const startingRevision = getRepoGradeCellEdit(cellEdits, row.repo, column.folder).draftRevision ?? 0;
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: true, gradeError: null }));
     // AC item 16: the ONE shared resolver - never re-derive a rubric string
     // from uiState here. `resolveRubricForColumn` never throws (its own
     // contract) and always resolves, so this call never needs a try/catch of
@@ -310,7 +329,11 @@ export function useRepoGradesGradingActions(
     // gradeOneTarget - a rejected call (transport, never gradeRepoAction's
     // own body) becomes an ordinary `{ error }` outcome instead of leaving
     // this cell's `grading: true` set forever.
-    const result = await timeGradingAction("grade_repo", () => gradeRepoAction(
+    const dispatched = await queue.runNext(() => {
+      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, {
+        grading: true, gradeError: null, gradeRunStage: null, gradeAttemptStatus: null,
+      }));
+      return timeGradingAction("grade_repo", () => gradeRepoAction(
       row.repo,
       instructions,
       resolved.text,
@@ -320,10 +343,15 @@ export function useRepoGradesGradingActions(
       useReadmeInstructions,
       runCodeScoring,
       applyNamingDeduction
-    )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
-    if (!isCurrent()) return;
+      )).catch(repoGradeTransportError);
+    });
+    if (!isCurrent() || !dispatched) return;
+    const result = dispatched.value;
     if ("error" in result) {
-      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
+      const attemptStatus = repoGradeAttemptErrorStatus(result);
+      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, {
+        grading: false, gradeError: result.error, gradeAttemptStatus: attemptStatus ?? null,
+      }));
       return;
     }
 
@@ -337,6 +365,7 @@ export function useRepoGradesGradingActions(
         setRepoGradeCellEdit(prev, row.repo, column.folder, {
           grading: false,
           gradeError: null,
+          gradeAttemptStatus: "no-submission",
           mergeStatus: result.branchMergeCheck?.status ?? null,
           mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
         })
@@ -401,6 +430,7 @@ export function useRepoGradesGradingActions(
         // the SAME grading call, never by hand.
         submittedFiles: first?.submittedFiles ?? [],
         submissionTruncated: !!result.digestTruncated || !!first?.submissionTruncated,
+        gradeAttemptStatus: result.digestTruncated || first?.submissionTruncated ? "partial" : "succeeded",
         // Live defect fix (this feature): gradeRepoAction's LLM branch has
         // been running the repo's code in the sandbox since fa057050 wired up
         // real `submittedFiles` for it (engine.ts's gradeStudentEntries
@@ -435,7 +465,15 @@ export function useRepoGradesGradingActions(
       announceGrade(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
     }
     } finally {
+      queue.close();
+      singleQueues.current.delete(key);
       release();
+      if (isCurrent()) {
+        setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, {
+          gradeRunStage: null,
+          ...(queue.stopped().length ? { gradeAttemptStatus: "stopped" } : {}),
+        }));
+      }
     }
   };
 
@@ -616,7 +654,9 @@ export function useRepoGradesGradingActions(
     setCellEdits((prev) => applyRepoGradeCompletion(prev, repo, folder, revision, patch));
   };
 
-  const { runningFolder: bulkRunningFolder, progress: bulkProgress, runBulkGrade } = useRepoGradesBulkGrade({
+  const {
+    runningFolder: bulkRunningFolder, progress: bulkProgress, queue: bulkQueue, controlBulkGrade, runBulkGrade,
+  } = useRepoGradesBulkGrade({
     provider,
     instructions,
     useReadmeInstructions,
@@ -700,6 +740,20 @@ export function useRepoGradesGradingActions(
     handleGradeColumn,
     bulkRunningFolder,
     bulkProgress,
+    bulkQueue,
+    controlGradeColumn: controlBulkGrade,
+    controlGradeCell(repo, folder, command) {
+      const key = JSON.stringify([courseId, repo, folder]);
+      const single = singleQueues.current.get(key);
+      if (single && single.scope === cellScope) {
+        if (single.queue.change(command, key)) {
+          recordRepoGradeQueueCommand("cell", command);
+          if (command === "stop") announceGrade(`${repo} / ${folder}: stopped before grading started.`);
+        }
+      } else {
+        controlBulkGrade(folder, command, repo);
+      }
+    },
     trendsEntry,
   };
 }

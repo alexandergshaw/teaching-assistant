@@ -109,6 +109,9 @@ export interface RepoGradeCellEdit {
   /** The grading call's own error message, or null. Cleared on the next
    * grading attempt or on a successful grade. */
   gradeError: string | null;
+  /** Latest session outcome, even when the new score is retained separately. */
+  gradeAttemptStatus?: "succeeded" | "partial" | "no-submission" | "stopped" | "blocked" | "unknown" | null;
+  gradeRunStage?: "queued" | "paused" | "stopped" | null;
   /** This cell's own post status - "idle" until this SPECIFIC cell has been
    * included in a column post attempt at least once. Distinct from a whole
    * column's aggregate posting state (index.tsx's columnPosting), which
@@ -313,6 +316,7 @@ export function applyRepoGradeCompletion(
   return setRepoGradeCellEdit(edits, repo, folder, {
     grading: false,
     gradeError: null,
+    ...(patch.gradeAttemptStatus !== undefined && { gradeAttemptStatus: patch.gradeAttemptStatus }),
     retainedResults: [...retainedResults, retained],
   });
 }

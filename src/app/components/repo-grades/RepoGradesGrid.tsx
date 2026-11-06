@@ -37,11 +37,14 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
-import Button from "@mui/material/Button";
+import { Button, Select } from "@mui/material";
+import { FeedbackDisclosure } from "./RepoDashboardFeedback";
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeCellControl from "./RepoGradeCellControl";
+import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import type { RepoGradeQueueCommand, RepoGradeQueueSnapshot } from "./repoGradeQueue";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
-import type { RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow, RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
+import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
 import { toggleRepoGradeSort } from "./repoGradesRows";
 import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
@@ -130,14 +133,15 @@ function SortableColumnHeader({
   const active = sort.field === field;
   return (
     <th scope="col" role="columnheader" aria-sort={sortAriaValue(active, sort.direction)}>
-      <button
+      <Button
         type="button"
         className={styles.sortHeaderButton}
+        sx={{ minWidth: 0, p: 0, font: "inherit", fontWeight: 600, color: "inherit", textTransform: "none" }}
         onClick={() => onSortChange(toggleRepoGradeSort(sort, field))}
       >
         <span>{label}</span>
         {active && <SortDirectionGlyph direction={sort.direction} />}
-      </button>
+      </Button>
     </th>
   );
 }
@@ -216,6 +220,9 @@ export interface RepoGradesGridProps {
   /** Progress for the column named by bulkRunningFolder - null whenever no
    * bulk run is in flight for ANY column. */
   bulkProgress: { done: number; total: number } | null;
+  bulkQueue: RepoGradeQueueSnapshot | null;
+  onControlGradeColumn: (folder: string, command: RepoGradeQueueCommand) => void;
+  onControlGradeCell: (repo: string, folder: string, command: RepoGradeQueueCommand) => void;
   /** U1.2/U1.7b - whether a "Grade all" run only covers the checked rows
    * (index.tsx's uiState.bulkSelectionOnly). Threaded down so the button's
    * own resting label can say "N selected" instead of implying it covers
@@ -252,22 +259,6 @@ export interface RepoGradesGridProps {
   codeScoringDisclosure: boolean;
 }
 
-const CELL_STATUS_TEXT: Record<RepoGradeCellStatus, string> = {
-  "missing-folder": "No folder",
-  "scan-error": "Unknown - scan failed",
-  ungraded: "Not graded yet",
-};
-
-function CellStatus({ status }: { status: RepoGradeCellStatus }) {
-  const className =
-    status === "missing-folder"
-      ? styles.cellMissing
-      : status === "scan-error"
-        ? styles.cellScanError
-        : styles.cellUngraded;
-  return <span className={className}>{CELL_STATUS_TEXT[status]}</span>;
-}
-
 /** One column header's assignment picker + bulk Post/Re-post button. Split
  * out of the `<thead>` map purely for readability - it owns no state of its
  * own and makes no decision repoGradesPosting.ts has not already made. */
@@ -283,6 +274,8 @@ function ColumnHeaderControls({
   onGradeColumn,
   bulkRunningFolder,
   bulkProgress,
+  bulkQueue,
+  onControlGradeColumn,
   bulkSelectionOnly,
   scanTruncated,
   rubricDescription,
@@ -301,6 +294,8 @@ function ColumnHeaderControls({
   onGradeColumn: (folder: string) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
+  bulkQueue: RepoGradeQueueSnapshot | null;
+  onControlGradeColumn: (folder: string, command: RepoGradeQueueCommand) => void;
   bulkSelectionOnly: boolean;
   scanTruncated: boolean;
   /** AC item 44 - already-resolved text naming which rubric this column
@@ -368,8 +363,12 @@ function ColumnHeaderControls({
     alreadyAttempted,
     postableCount: plan.postable.length,
   });
-  const gradeAllLabel =
-    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : gradeLabel;
+  const queue = gradingThisColumn ? bulkQueue : null;
+  const canControl = !!queue?.waiting && queue.folderState !== "stopping";
+  const command = queue?.folderState === "paused" ? "resume" : "pause";
+  const gradeAllLabel = canControl ? (command === "resume" ? "Resume folder" : "Pause folder")
+    : gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : gradeLabel;
+  const gradeDisabled = (bulkRunning && !canControl) || (bulkRunning && !gradingThisColumn) || (!bulkRunning && !gradeTargetCount);
 
   // N4 items 11/13: this column's own sort - a click toggles ascending/
   // descending on THIS folder's score via toggleRepoGradeSort's "folder"
@@ -378,44 +377,23 @@ function ColumnHeaderControls({
 
   return (
     <div className={styles.columnHeader}>
-      <button
+      <Button
         type="button"
         className={styles.sortHeaderButton}
+        sx={{ minWidth: 0, p: 0, font: "inherit", fontWeight: 600, color: "inherit", textTransform: "none" }}
         onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", column.folder))}
         aria-label={`Sort by ${column.folder} score`}
       >
         <span>{column.folder}</span>
         {folderSortActive && <SortDirectionGlyph direction={sort.direction} />}
-      </button>
-      <select
-        aria-label={`Canvas assignment for the ${column.folder} column`}
-        value={column.assignmentId ?? ""}
-        onChange={(e) => onAssignmentChange(column.folder, e.target.value || null)}
-      >
-        <option value="">Choose an assignment…</option>
-        {assignments.map((assignment) => (
-          <option key={assignment.id} value={assignment.id}>
-            {assignment.name}
-          </option>
-        ))}
-      </select>
-      {/* AC item 44 - which rubric this column will actually be graded
-          against, for EVERY source, sitting directly above the two
-          dangerous buttons that consume it so an instructor can see it
-          BEFORE clicking Grade or Post rather than only in the log
-          afterwards. Reuses `styles.postReason`, already this grid's "small
-          muted explanatory line inside a header cell" primitive (see the
-          identical class on the not-yet-postable reason in
-          RepoGradeCellControl.tsx). */}
-      <span className={styles.postReason}>{rubricDescription}</span>
-      {/* Task B - same pre-post-disclosure primitive as rubricDescription
-          above, one line down: a "Code runs" criterion moves this column's
-          posted total but will not show as its own line in SpeedGrader (see
-          this component's own doc comment on `codeScoringDisclosure`). */}
-      {codeScoringDisclosure && (
+      </Button>
+      {queue && (
         <span className={styles.postReason}>
-          Code execution is scored into this total, but will not appear as its own line in Canvas&apos;s SpeedGrader
-          rubric.
+          {queue.folderState === "paused" ? "Paused. " : queue.folderState === "stopping" ? "Stopping. " : ""}
+          {bulkProgress?.done ?? 0} of {bulkProgress?.total ?? 0} finished.
+          {queue.running > 0 && ` ${queue.running} in progress will finish.`}
+          {queue.waiting > 0 && ` ${queue.waiting} waiting.`}
+          {queue.stopped > 0 && ` ${queue.stopped} stopped.`}
         </span>
       )}
       <div className={styles.columnHeaderActions}>
@@ -423,26 +401,72 @@ function ColumnHeaderControls({
           type="button"
           variant="contained"
           size="small"
-          aria-label={gradeAllLabel}
-          disabled={bulkRunning}
+          aria-label={canControl ? `${gradeAllLabel}: ${column.folder}` : gradeAllLabel}
+          aria-disabled={gradeDisabled}
+          sx={{ '&[aria-disabled="true"]': { color: "text.disabled", bgcolor: "action.disabledBackground" } }}
           onClick={() => {
-            onGradeColumn(column.folder);
+            if (gradeDisabled) return;
+            if (canControl) onControlGradeColumn(column.folder, command);
+            else onGradeColumn(column.folder);
           }}
         >
           {gradeAllLabel}
         </Button>
-        <Button
-          type="button"
-          variant="outlined"
-          size="small"
-          disabled={busy || plan.postable.length === 0}
-          onClick={() => {
-            onPostColumn(column, pointsPossible);
-          }}
-        >
-          {busy ? "Posting…" : postLabel}
-        </Button>
+        {canControl && (
+          <Button type="button" size="small" color="error" aria-label={`Stop folder: ${column.folder}`}
+            onClick={(event) => {
+              const primary = event.currentTarget.previousElementSibling;
+              if (primary instanceof HTMLElement) primary.focus();
+              onControlGradeColumn(column.folder, "stop");
+            }}>
+            Stop folder
+          </Button>
+        )}
       </div>
+      <FeedbackDisclosure compact title="Folder options" label={`Folder options: ${column.folder}`}>
+        <Select native size="small" fullWidth
+          inputProps={{ "aria-label": `Canvas assignment for the ${column.folder} column` }}
+          value={column.assignmentId ?? ""}
+          onChange={(e) => onAssignmentChange(column.folder, e.target.value || null)}
+        >
+          <option value="">Choose an assignment…</option>
+          {assignments.map((assignment) => (
+            <option key={assignment.id} value={assignment.id}>
+              {assignment.name}
+            </option>
+          ))}
+        </Select>
+        {/* AC item 44 - which rubric this column will actually be graded
+            against, for EVERY source, sitting directly above the two
+            dangerous buttons that consume it so an instructor can see it
+            BEFORE clicking Grade or Post rather than only in the log
+            afterwards. Reuses `styles.postReason`, already this grid's "small
+            muted explanatory line inside a header cell" primitive (see the
+            identical class on the not-yet-postable reason in
+            RepoGradeCellControl.tsx). */}
+        <span className={styles.postReason}>{rubricDescription}</span>
+        {/* Task B - same pre-post-disclosure primitive as rubricDescription
+            above, one line down: a "Code runs" criterion moves this column's
+            posted total but will not show as its own line in SpeedGrader (see
+            this component's own doc comment on `codeScoringDisclosure`). */}
+        {codeScoringDisclosure && (
+          <span className={styles.postReason}>
+            Code execution is scored into this total, but will not appear as its own line in Canvas&apos;s SpeedGrader
+            rubric.
+          </span>
+        )}
+          <Button
+            type="button"
+            variant="outlined"
+            size="small"
+            disabled={busy || plan.postable.length === 0}
+            onClick={() => {
+              onPostColumn(column, pointsPossible);
+            }}
+          >
+            {busy ? "Posting…" : postLabel}
+          </Button>
+      </FeedbackDisclosure>
     </div>
   );
 }
@@ -470,6 +494,9 @@ export default function RepoGradesGrid({
   onGradeColumn,
   bulkRunningFolder,
   bulkProgress,
+  bulkQueue,
+  onControlGradeColumn,
+  onControlGradeCell,
   bulkSelectionOnly,
   scanTruncated,
   emptyStateMessage,
@@ -522,6 +549,8 @@ export default function RepoGradesGrid({
                     onGradeColumn={onGradeColumn}
                     bulkRunningFolder={bulkRunningFolder}
                     bulkProgress={bulkProgress}
+                    bulkQueue={bulkQueue}
+                    onControlGradeColumn={onControlGradeColumn}
                     bulkSelectionOnly={bulkSelectionOnly}
                     scanTruncated={scanTruncated}
                     rubricDescription={describeColumnRubric(column.assignmentId)}
@@ -608,10 +637,13 @@ export default function RepoGradesGrid({
                           onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
                           onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}
                           onGrade={() => onGradeCell(row, column)}
+                          onControlGrade={(command) => onControlGradeCell(row.repo, column.folder, command)}
+                          queueState={bulkRunningFolder === column.folder ? bulkQueue?.cells.get(row.repo) : undefined}
+                          folderPaused={bulkRunningFolder === column.folder && bulkQueue?.folderState === "paused"}
                           onPostOne={() => onPostOneCell(row, column, pointsPossible)}
                         />
                       ) : (
-                        <CellStatus status={cell.status} />
+                        <RepoGradeStatusChip status={cell.status} />
                       )}
                     </td>
                   );

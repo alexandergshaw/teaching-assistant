@@ -84,7 +84,7 @@ describe("Wave B display-only: index wiring keeps plan inputs query-free", () =>
 describe("Wave B search input: placement and wiring", () => {
   it("the input sits inside the working-header tier, before the children", () => {
     const tier = HEADER.indexOf("styles.stickyWorkingHeader");
-    const input = HEADER.indexOf("<input");
+    const input = HEADER.indexOf("<InputBase");
     const kids = HEADER.indexOf("{children}");
     expect(tier).toBeGreaterThan(-1);
     expect(input).toBeGreaterThan(tier);
@@ -94,7 +94,7 @@ describe("Wave B search input: placement and wiring", () => {
   it("the input is bound to the searchQuery prop, reports changes, and has an accessible name", () => {
     expect(HEADER).toMatch(/value=\{\s*searchQuery\s*\}/);
     expect(HEADER).toMatch(/onSearchChange\(/);
-    expect(HEADER).toMatch(/aria-label=["'][^"']*search[^"']*["']/i);
+    expect(HEADER).toMatch(/"aria-label"\s*:\s*["'][^"']*search[^"']*["']/i);
   });
 
   it("the working-header tier is not gated solely on the run bar", () => {

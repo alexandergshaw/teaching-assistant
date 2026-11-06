@@ -24,6 +24,7 @@
 // own `cell`/`row` helpers build them (docs/a26-a27-scope.md section 8: rows
 // come from the emitted shape).
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readSessionDiagnosticLogState, resetSessionDiagnosticLogForTests } from "@/lib/session-diagnostic-log";
 
 const h0 = vi.hoisted(() => {
   const slots: Array<{ value: unknown }> = [];
@@ -70,7 +71,7 @@ vi.mock("@/app/actions", () => ({
 
 import { useRepoGradesGradingActions, type UseRepoGradesGradingActionsParams } from "./useRepoGradesGradingActions";
 import type { RepoGradeCell, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
-import type { RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
+import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import type { ResolvedRubric } from "./useRepoGradesRubricSource";
 import type { RepoBindingSuggestion } from "@/lib/repo-student-bindings";
 import type { Course } from "@/lib/supabase/courses.types";
@@ -213,6 +214,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
 
   beforeEach(() => {
     h0.reset();
+    resetSessionDiagnosticLogForTests("2026-11-06T00:00:00.000Z");
     cellEditsState = {};
     announceCalls = [];
     rubricDeferreds = [];
@@ -282,6 +284,104 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       resolveAll: () => pending.forEach((release) => release()),
     };
   }
+
+  it("pauses a column without dispatching, resumes the same plan, and lets in-flight work finish", async () => {
+    const grading = usePendingGradeCalls();
+    const render = useTestRenderWith({ rows: [...ROWS, row("org/d")] });
+    const run = render.handleGradeColumn("week-1");
+    render.controlGradeColumn("other-week", "pause");
+    expect(useTestRender().bulkQueue?.folderState).toBe("running");
+    render.controlGradeColumn("week-1", "pause");
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await flushMicrotasks();
+    expect(gradeRepoActionMock).not.toHaveBeenCalled();
+    expect(useTestRender().bulkQueue?.cells.get("org/a")).toBe("paused");
+
+    render.controlGradeColumn("week-1", "resume");
+    await flushMicrotasks();
+    expect(gradeRepoActionMock.mock.calls.map(([repo]) => repo)).toEqual(["org/a", "org/b", "org/c"]);
+    render.controlGradeColumn("week-1", "stop");
+    expect(useTestRender().bulkQueue?.cells.get("org/d")).toBe("stopped");
+    expect(useTestRender().bulkQueue?.cells.get("org/a")).toBe("running");
+    grading.resolveAll();
+    await run;
+
+    expect(gradeRepoActionMock).toHaveBeenCalledTimes(3);
+    expect(cellEditsState["org/a"]["week-1"].score).toBe("9");
+    expect(cellEditsState["org/d"]["week-1"].gradeAttemptStatus).toBe("stopped");
+    expect(announceCalls.at(-1)).toContain("1 stopped before grading started");
+    const events = readSessionDiagnosticLogState().entries
+      .filter((entry) => entry.operation === "repo_grade_run_control");
+    expect(events.map((entry) => entry.detail)).toEqual([
+      { scope: "folder", command: "pause" },
+      { scope: "folder", command: "resume" },
+      { scope: "folder", command: "stop" },
+    ]);
+  });
+
+  it("pauses one queued cell while its siblings establish and reuse the shared rubric", async () => {
+    const render = useTestRender();
+    const run = render.handleGradeColumn("week-1");
+    render.controlGradeCell("org/a", "week-1", "pause");
+    rubricDeferreds[0].resolve(resolvedRubric({ text: "", source: "generate" }));
+    await flushMicrotasks();
+    expect(gradeRepoActionMock.mock.calls.map(([repo, , rubric]) => [repo, rubric])).toEqual([
+      ["org/b", ""], ["org/c", "the instructor's picked rubric"],
+    ]);
+    expect(useTestRender().bulkQueue?.cells.get("org/a")).toBe("paused");
+    render.controlGradeCell("org/a", "week-1", "resume");
+    await run;
+    expect(gradeRepoActionMock.mock.calls.at(-1)?.[2]).toBe("the instructor's picked rubric");
+    expect(cellEditsState["org/a"]["week-1"].score).toBe("9");
+  });
+
+  it.each(["single", "folder"] as const)("reports a truncated %s attempt as partial even when the previous score stays active", async (kind) => {
+    cellEditsState = {
+      "org/a": { "week-1": {
+        ...defaultRepoGradeCellEdit(), comment: "Instructor draft", draftRevision: 1,
+      } },
+    };
+    gradeRepoActionMock.mockImplementation(async (repo: string) => ({ ...successResult(repo), digestTruncated: true }));
+    const render = useTestRender();
+    const run = kind === "single" ? render.handleGradeCell(ROWS[0], COLUMNS[0]) : render.handleGradeColumn("week-1");
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await run;
+    expect(cellEditsState["org/a"]["week-1"]).toMatchObject({
+      comment: "Instructor draft", submissionTruncated: false, gradeAttemptStatus: "partial",
+      retainedResults: [{ source: { submissionTruncated: true } }],
+    });
+  });
+
+  it("keeps coordinated admission blocks and uncertain evaluations distinct from ordinary failures", async () => {
+    gradeRepoActionMock.mockImplementation(async (repo: string) => repo.endsWith("/a")
+      ? { error: "Busy.", admissionStatus: "blocked" }
+      : repo.endsWith("/b") ? { error: "Unconfirmed.", admissionStatus: "unknown" } : { error: "Failed." });
+    const render = useTestRender();
+    const run = render.handleGradeColumn("week-1");
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await run;
+    expect(cellEditsState["org/a"]["week-1"].gradeAttemptStatus).toBe("blocked");
+    expect(cellEditsState["org/b"]["week-1"].gradeAttemptStatus).toBe("unknown");
+    expect(cellEditsState["org/c"]["week-1"].gradeAttemptStatus).toBeNull();
+    expect(announceCalls.at(-1)).toBe("No grades were confirmed - 1 failed, 1 blocked, 1 had an unconfirmed outcome.");
+    expect(readSessionDiagnosticLogState().entries.find((entry) => entry.operation === "repo_grade_folder_run")?.detail)
+      .toMatchObject({ failedCount: 1, blockedCount: 1, unknownCount: 1, failureCategory: "unknown" });
+  });
+
+  it("stops a standalone cell during rubric preparation without grading it or its neighbors", async () => {
+    const render = useTestRender();
+    const run = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+    render.controlGradeCell("org/a", "week-1", "pause");
+    rubricDeferreds[0].resolve(resolvedRubric());
+    await flushMicrotasks();
+    expect(gradeRepoActionMock).not.toHaveBeenCalled();
+    expect(cellEditsState["org/a"]["week-1"].gradeRunStage).toBe("paused");
+    render.controlGradeCell("org/a", "week-1", "stop");
+    await run;
+    expect(gradeRepoActionMock).not.toHaveBeenCalled();
+    expect(cellEditsState["org/a"]["week-1"]).toMatchObject({ gradeRunStage: null, gradeAttemptStatus: "stopped" });
+    expect(cellEditsState["org/b"]).toBeUndefined();
+  });
 
   it.each(["single", "folder"] as const)("keeps newer feedback and blocks overlapping grading when %s starts first", async (first) => {
     const grading = usePendingGradeCalls();
@@ -432,7 +532,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
     expect(renderAfter.bulkProgress).toBeNull();
   });
 
-  it("A27a: the rejected repo becomes an ordinary failed outcome - retryable, and the run still announces a summary", async () => {
+  it("A27a: a rejected response is unconfirmed and the run still announces a summary", async () => {
     gradeRepoActionMock.mockImplementation(async (repo: string) => {
       if (repo === "org/b") throw new Error("Failed to fetch");
       return successResult(repo);
@@ -445,10 +545,11 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
 
     const failedEdit = cellEditsState["org/b"]?.["week-1"];
     expect(failedEdit?.grading).toBe(false);
-    expect(failedEdit?.gradeError).toBeTruthy();
+    expect(failedEdit?.gradeAttemptStatus).toBe("unknown");
+    expect(failedEdit?.gradeError).toContain("Check results before retrying.");
 
     expect(announceCalls.length).toBe(1);
-    expect(announceCalls[0]).toBe("Bulk grading finished: 2 graded, 1 failed.");
+    expect(announceCalls[0]).toBe("Bulk grading finished: 2 graded, 1 had an unconfirmed outcome.");
   });
 
   it("A27b: a rejecting rubric fetch itself must not leave the lock or the flag stuck", async () => {
@@ -483,7 +584,8 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
 
     const edit = cellEditsState["org/a"]?.["week-1"];
     expect(edit?.grading).toBe(false);
-    expect(edit?.gradeError).toBeTruthy();
+    expect(edit?.gradeAttemptStatus).toBe("unknown");
+    expect(edit?.gradeError).toContain("Check results before retrying.");
   });
 
   // T-1 (docs/a28-scope.md section 8.1, A28): the agreement table. Drives the
@@ -571,13 +673,13 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
     }> = [
       { name: "M1 (all succeed)", repos: M1_M4_M6_REPOS, impl: implM1, expectedStatus: "Bulk grading finished: 3 graded." },
       { name: "M2 (one { error } return)", repos: M1_M4_M6_REPOS, impl: implM2, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
-      { name: "M3 (one rejected call)", repos: M1_M4_M6_REPOS, impl: implM3, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
+      { name: "M3 (one rejected call)", repos: M1_M4_M6_REPOS, impl: implM3, expectedStatus: "Bulk grading finished: 2 graded, 1 had an unconfirmed outcome." },
       { name: "M4 (one model-failed, success-shaped result)", repos: M1_M4_M6_REPOS, impl: implM4, expectedStatus: "Bulk grading finished: 2 graded, 1 failed." },
       {
         name: "M5 (mixed: ok, error, reject, model-fail, no-submission, zero-area, ok)",
         repos: M5_REPOS,
         impl: implM5,
-        expectedStatus: "Bulk grading finished: 3 graded, 3 failed, 1 had nothing submitted.",
+        expectedStatus: "Bulk grading finished: 3 graded, 2 failed, 1 had an unconfirmed outcome, 1 had nothing submitted.",
       },
       { name: "M6 (every model call fails)", repos: M1_M4_M6_REPOS, impl: implM6, expectedStatus: "Nothing was graded - 3 failed." },
       {

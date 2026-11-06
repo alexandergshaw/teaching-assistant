@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits,
+  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, filterRepoGradeMatrixRows, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
 
@@ -159,5 +159,21 @@ describe("class repository results", () => {
       expect(edits).toBe(previousEdits);
       return current;
     })).toEqual({ scope: returnedSelection, edits: current });
+  });
+});
+
+describe("filterRepoGradeMatrixRows", () => {
+  const rows = [
+    { name: "Alice Ng", repos: [{ name: "class/first-submission" }] },
+    { name: "Bob Stone", repos: [] },
+    { name: null, repos: [{ name: "class/unlinked-student" }] },
+  ];
+
+  it("filters by student name or repository and retains unlinked repositories", () => {
+    expect(filterRepoGradeMatrixRows(rows, "  NG alice ")).toEqual([rows[0]]);
+    expect(filterRepoGradeMatrixRows(rows, "Stone")).toEqual([rows[1]]);
+    expect(filterRepoGradeMatrixRows(rows, "unlinked")).toEqual([rows[2]]);
+    expect(filterRepoGradeMatrixRows(rows, "unmatched")).toEqual([]);
+    expect(filterRepoGradeMatrixRows(rows, "  ")).toBe(rows);
   });
 });

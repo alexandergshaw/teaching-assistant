@@ -149,7 +149,7 @@ describe("REPO-HEADER-VISUAL VH-10 pins", () => {
   });
 
   it("VH-10(b): both header inputs carry the shared .headerInput class", () => {
-    const searchInput = sliceBetween(HEADER, "<input", "/>");
+    const searchInput = sliceBetween(HEADER, "<InputBase", "/>");
     expect(searchInput, "search input (StickyHeader) must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
     const typeaheadInput = sliceBetween(TYPEAHEAD, "<input", "/>");
     expect(typeaheadInput, "typeahead input must carry styles.headerInput").toMatch(/styles\.headerInput\b/);
@@ -253,12 +253,12 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(HEADER).not.toMatch(/>Search</);
     expect(W_INDEX).toMatch(/<span className=\{styles\.headerInputLabel\}>Target branch<\/span>/);
     expect(W_INDEX).not.toMatch(/>Target branch \(merged to\)</);
-    expect(HEADER).toContain('aria-label="Search repositories"');
+    expect(HEADER).toContain('"aria-label": "Search students or repositories to grade"');
     expect(HEADER).toContain('placeholder="Search repos or students"');
     expect(W_INDEX).toMatch(/slotProps=\{\{ input: \{ className: styles\.headerInput, "aria-label": "Target branch \(merged to\)"/);
   });
 
-  it("AC-12: header-row polish - top-aligned th, no folder-name font-size rule, Grade and Post share one actions wrapper", () => {
+  it("AC-12: header-row polish - top-aligned th with visible grading and disclosed posting", () => {
     expect(ruleBlock(CSS, ".grid thead th")).toMatch(/vertical-align:\s*top/);
     expect(CSS).not.toContain(".columnHeaderFolder");
     expect(ruleBlock(CSS, ".columnHeaderActions")).toMatch(/display:\s*flex/);
@@ -268,8 +268,10 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     const close = grid.indexOf("</div>", open);
     const wrapped = grid.slice(open, close);
     expect(wrapped).toContain("onGradeColumn(column.folder)");
-    expect(wrapped).toContain("onPostColumn(column, pointsPossible)");
-    expect(grid).toContain('aria-label={`Canvas assignment for the ${column.folder} column`}');
+    expect(wrapped).not.toContain("onPostColumn(column, pointsPossible)");
+    const options = sliceBetween(grid, '<FeedbackDisclosure compact title="Folder options"', "</FeedbackDisclosure>");
+    expect(options).toContain("onPostColumn(column, pointsPossible)");
+    expect(options).toContain('"aria-label": `Canvas assignment for the ${column.folder} column`');
     expect(grid).toContain("<span className={styles.postReason}>{rubricDescription}</span>");
     expect(grid).not.toContain("<span className={pageStyles.fieldHint}>Select</span>");
   });

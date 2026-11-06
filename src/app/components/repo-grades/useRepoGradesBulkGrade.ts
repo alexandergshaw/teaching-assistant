@@ -36,24 +36,23 @@
 // every worker still writes the per-cell failure state, records an outcome,
 // and moves on to the next index regardless of which layer produced the
 // failure. That per-target isolation is the whole reason this is a pool over
-// a shared cursor rather than one `Promise.all` that a single rejection
+// a shared queue rather than one `Promise.all` that a single rejection
 // could take down.
 //
-// NO useEffect here. runBulkGrade only ever runs from a real onClick (a
-// sibling's button in RepoGradesControls.tsx / RepoGradesGrid.tsx) - every
-// setState below happens either synchronously in response to that click or
-// after an awaited gradeRepoAction call resolves, so eslint's
-// react-hooks/set-state-in-effect rule (AGENTS memory:
-// set-state-in-effect-idiom.md) never applies to this file.
-import { useRef, useState } from "react";
+// Only user actions start a run or control dispatch. The layout cleanup
+// releases paused waiters when their grading scope is replaced.
+import { useLayoutEffect, useRef, useState } from "react";
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { gradeRepoAction } from "@/app/actions";
 import type { LlmProvider } from "@/lib/llm";
 import type { GradeResult } from "@/lib/grade/types";
+import { createRepoGradeQueue, recordRepoGradeQueueCommand, type RepoGradeQueueCommand, type RepoGradeQueueSnapshot } from "./repoGradeQueue";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 import {
   bulkGradeSummaryLine,
   bulkGradeOutcomeFromRun,
+  repoGradeAttemptErrorStatus,
+  repoGradeTransportError,
   BULK_GRADE_CONCURRENCY,
   type BulkGradeOutcome,
   type BulkGradePlan,
@@ -133,22 +132,23 @@ export interface RubricAttemptResult {
  * `onAttempted` fires exactly once per target this function tries, in order,
  * so a caller wiring this into `done`/`setProgress` state gets one increment
  * per completed target with no double counting and no skipped counts.
- * `consumed` tells the caller how many leading targets this function already
- * graded, so its own worker pool can resume at that offset rather than
- * re-grading any of them.
+ * The same queue supplies this prologue and the parallel workers, so each
+ * target is dispatched once even if an instructor pauses or stops it.
  */
 export async function establishSharedRubric(
   targets: readonly BulkGradeTarget[],
   rubric: string,
   attempt: (target: BulkGradeTarget) => Promise<RubricAttemptResult>,
   onAttempted: () => void,
+  runNext?: (attempt: (target: BulkGradeTarget) => Promise<RubricAttemptResult>) => Promise<{ value: RubricAttemptResult } | null>,
 ): Promise<{ sharedRubric: string; consumed: number }> {
   let sharedRubric = rubric;
   let consumed = 0;
   while (consumed < targets.length && sharedRubric.trim() === "") {
-    const target = targets[consumed];
+    const next = runNext ? await runNext(attempt) : { value: await attempt(targets[consumed]) };
+    if (!next) break;
     consumed += 1;
-    const { rubricUsed } = await attempt(target);
+    const { rubricUsed } = next.value;
     if (rubricUsed !== null) sharedRubric = rubricUsed;
     onAttempted();
   }
@@ -163,6 +163,8 @@ export interface UseRepoGradesBulkGradeResult {
   runningFolder: string | null;
   /** "7 of 24" style progress for the running folder, or null. */
   progress: { done: number; total: number } | null;
+  queue: RepoGradeQueueSnapshot | null;
+  controlBulkGrade: (folder: string, command: RepoGradeQueueCommand, repo?: string) => void;
   /** AC item 50 - the hook's own `rubric` param stays removed; the caller no
    * longer resolves the rubric before calling in (docs/a26-a27-scope.md,
    * backlog row A26): it hands in a THUNK instead, built from the SAME
@@ -206,8 +208,16 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
   const { provider, instructions, useReadmeInstructions, runCodeScoring, applyNamingDeduction, targetBranch, onCellUpdate, onAnnounce } = params;
   const { scope, isCurrent = () => true } = params;
   const runLockRef = useRef(new Set<object | undefined>());
+  const activeQueues = useRef(new Map<object | undefined, {
+    folder: string; queue: ReturnType<typeof createRepoGradeQueue<BulkGradeTarget>>;
+  }>());
+  useLayoutEffect(() => {
+    const queues = activeQueues.current;
+    return () => queues.get(scope)?.queue.close();
+  }, [scope]);
   const [display, setDisplay] = useState<{
-    scope: object | undefined; folder: string | null; done: number; total: number;
+    scope: object | undefined; folder: string; done: number; total: number;
+    queue: RepoGradeQueueSnapshot | null;
   } | null>(null);
   const setProgress = ({ done, total }: { done: number; total: number }) => {
     if (isCurrent()) setDisplay((value) => value?.scope === scope && value ? { ...value, done, total } : value);
@@ -224,15 +234,26 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     if (!isCurrent() || runLockRef.current.has(scope)) return null;
     const started = gradingActionNowMs();
     runLockRef.current.add(scope);
-    setDisplay({ scope, folder: plan.targets[0]?.folder ?? null, done: 0, total: plan.targets.length });
+    const folder = plan.targets[0]?.folder ?? "";
+    const queue = createRepoGradeQueue(plan.targets, ({ repo }) => repo, isCurrent, (snapshot) => {
+      setDisplay((value) => value?.scope === scope && value ? { ...value, queue: snapshot } : value);
+    });
+    activeQueues.current.set(scope, { folder, queue });
+    setDisplay({ scope, folder, done: 0, total: plan.targets.length, queue: null });
+    queue.publish();
     try {
       const resolved = await resolveRubric();
       if (!isCurrent()) {
         recordFolderRun(started, plan, "blocked", "stale_scope");
         return null;
       }
-      return await gradeBulkPlan(plan, resolved, started);
+      return await gradeBulkPlan(plan, resolved, started, queue);
     } catch (error) {
+      if (queue.stopped().length === plan.targets.length) {
+        recordFolderRun(started, plan, "blocked", "stopped", 0, 0, plan.targets.length);
+        onAnnounce(`${folder}: stopped before grading started.`);
+        return [];
+      }
       recordFolderRun(started, plan, "failed", "unknown");
       throw error;
     } finally {
@@ -241,12 +262,17 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // gradeBulkPlan must never leave the lock, the displayed
       // `runningFolder`, or `progress` stuck. gradeOneTarget's own `.catch`
       // below (P3) already turns an ordinary rejected grading call into a
-      // normal failed outcome, so gradeBulkPlan itself is not expected to
+      // normal terminal outcome, so gradeBulkPlan itself is not expected to
       // reject in practice (see D-5 in docs/a26-a27-scope.md for the one
       // named, accepted exception) - this `finally` is what makes that
       // "not expected" a guarantee rather than a hope.
+      queue.close();
+      activeQueues.current.delete(scope);
       runLockRef.current.delete(scope);
-      if (isCurrent()) setDisplay(null);
+      if (isCurrent()) {
+        for (const repo of queue.stopped()) onCellUpdate(repo, folder, { gradeAttemptStatus: "stopped" });
+        setDisplay(null);
+      }
     }
   };
 
@@ -255,7 +281,10 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
    * closing over them, and no longer holding the lock itself - `runBulkGrade`
    * above is now the ONE place that claims and releases it, over the rubric
    * fetch AND this entire pool. */
-  const gradeBulkPlan = async (plan: BulkGradePlan, resolved: ResolvedRubric, started: number): Promise<readonly GradeResult[]> => {
+  const gradeBulkPlan = async (
+    plan: BulkGradePlan, resolved: ResolvedRubric, started: number,
+    queue: ReturnType<typeof createRepoGradeQueue<BulkGradeTarget>>,
+  ): Promise<readonly GradeResult[]> => {
     const targets = plan.targets;
 
     const outcomes: BulkGradeOutcome[] = [];
@@ -274,7 +303,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
      * for why that is not always the instructor's raw `rubric` field. */
     const gradeOneTarget = async (target: BulkGradeTarget, rubricArg: string): Promise<{ rubricUsed: string | null }> => {
       if (!isCurrent()) return { rubricUsed: null };
-      onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
+      onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null, gradeAttemptStatus: null });
       // P3 (backlog row A27, docs/a26-a27-scope.md section 6): a rejected
       // call - transport, not gradeRepoAction's own body, which never throws
       // - is mapped onto the SAME `{ error }` shape the "error" branch below
@@ -293,12 +322,15 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         useReadmeInstructions,
         runCodeScoring,
         applyNamingDeduction
-      )).catch((err: unknown) => ({ error: err instanceof Error ? err.message : "Grading failed." }));
+      )).catch(repoGradeTransportError);
       if (!isCurrent()) return { rubricUsed: null };
 
       if ("error" in result) {
-        onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });
-        outcomes.push({ repo: target.repo, folder: target.folder, status: "failed", score: "", detail: result.error });
+        const attemptStatus = repoGradeAttemptErrorStatus(result);
+        onCellUpdate(target.repo, target.folder, {
+          grading: false, gradeError: result.error, gradeAttemptStatus: attemptStatus ?? null,
+        });
+        outcomes.push({ repo: target.repo, folder: target.folder, status: attemptStatus ?? "failed", score: "", detail: result.error });
         return { rubricUsed: null };
       }
 
@@ -312,6 +344,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         onCellUpdate(target.repo, target.folder, {
           grading: false,
           gradeError: null,
+          gradeAttemptStatus: "no-submission",
           mergeStatus: result.branchMergeCheck?.status ?? null,
           mergeFoundOnBranch: result.branchMergeCheck?.foundOnBranch ?? null,
         });
@@ -375,6 +408,7 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // read, matching index.tsx's handleGradeCell exactly.
         submittedFiles: first?.submittedFiles ?? [],
         submissionTruncated: !!result.digestTruncated || !!first?.submissionTruncated,
+        gradeAttemptStatus: result.digestTruncated || first?.submissionTruncated ? "partial" : "succeeded",
         // See useRepoGradesGradingActions.ts's handleGradeCell for why this
         // is copied at all (it was the one GradeResult field the per-cell
         // path dropped) - matched here so a bulk-graded cell and a
@@ -430,7 +464,6 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     // repoGradesRubricPicker.wiring.test.ts pins that this gate moved off the
     // old page-level string.
     let sharedRubric = resolved.text;
-    let cursor = 0;
     if (resolved.text.trim() === "" && targets.length > 0) {
       const prologue = await establishSharedRubric(
         targets,
@@ -440,34 +473,36 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
           done += 1;
           setProgress({ done, total: targets.length });
         },
+        queue.runNext,
       );
       sharedRubric = prologue.sharedRubric;
-      cursor = prologue.consumed;
     }
 
-    // One worker: pulls the next unclaimed target off the shared cursor until
-    // none remain. BULK_GRADE_CONCURRENCY workers run this concurrently below,
-    // which is what bounds the in-flight request count - see the module
-    // header comment for why this shape (over Promise.all) is required.
     const runWorker = async (): Promise<void> => {
       while (isCurrent()) {
-        const index = cursor;
-        cursor += 1;
-        if (index >= targets.length) return;
-        await gradeOneTarget(targets[index], sharedRubric);
+        if (!await queue.runNext((target) => gradeOneTarget(target, sharedRubric))) return;
         done += 1;
         setProgress({ done, total: targets.length });
       }
     };
 
-    const workerCount = Math.min(BULK_GRADE_CONCURRENCY, Math.max(targets.length - cursor, 0));
+    const workerCount = Math.min(BULK_GRADE_CONCURRENCY, Math.max(targets.length - done, 0));
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
     if (isCurrent()) {
       const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
-      recordFolderRun(started, plan, failed === 0 ? "success" : failed === outcomes.length ? "failed" : "partial",
-        failed ? "target_failed" : "none", outcomes.length, failed);
-      onAnnounce(bulkGradeSummaryLine(outcomes, plan));
+      const blocked = outcomes.filter((outcome) => outcome.status === "blocked").length;
+      const unknown = outcomes.filter((outcome) => outcome.status === "unknown").length;
+      const stopped = queue.stopped().length;
+      const issues = failed + blocked + unknown;
+      recordFolderRun(started, plan,
+        stopped ? (outcomes.length ? "partial" : "blocked")
+          : issues === 0 ? "success" : blocked === outcomes.length ? "blocked"
+            : issues === outcomes.length ? "failed" : "partial",
+        stopped ? "stopped" : unknown ? "unknown" : failed ? "target_failed" : blocked ? "admission_blocked" : "none",
+        outcomes.length, failed, stopped, blocked, unknown);
+      onAnnounce(bulkGradeSummaryLine(outcomes, plan) +
+        (stopped ? ` ${stopped} stopped before grading started.` : ""));
     } else {
       recordFolderRun(started, plan, "blocked", "stale_scope", outcomes.length);
     }
@@ -481,13 +516,21 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
   return {
     runningFolder: visible?.folder ?? null,
     progress: visible ? { done: visible.done, total: visible.total } : null,
+    queue: visible?.queue ?? null,
+    controlBulkGrade(folder, command, repo) {
+      const active = activeQueues.current.get(scope);
+      if (active?.folder === folder && active.queue.change(command, repo)) {
+        recordRepoGradeQueueCommand(repo === undefined ? "folder" : "cell", command);
+      }
+    },
     runBulkGrade,
   };
 }
 
 function recordFolderRun(
   started: number, plan: BulkGradePlan, outcome: "success" | "failed" | "partial" | "blocked",
-  failureCategory: "none" | "target_failed" | "unknown" | "stale_scope", finished = 0, failed = 0,
+  failureCategory: "none" | "target_failed" | "unknown" | "stale_scope" | "stopped" | "admission_blocked",
+  finished = 0, failed = 0, stopped = 0, blocked = 0, unknown = 0,
 ) {
   recordSessionDiagnosticEntry({
     at: new Date().toISOString(),
@@ -496,6 +539,6 @@ function recordFolderRun(
     label: "Grade repository folder across the class",
     outcome: outcome === "success" ? "success" : "failure",
     durationMs: Math.min(3_600_000, Math.max(0, Math.round(performance.now() - started))),
-    detail: { outcome, failureCategory, targetCount: plan.targets.length, skipCount: plan.skipped.length, finishedCount: finished, failedCount: failed },
+    detail: { outcome, failureCategory, targetCount: plan.targets.length, skipCount: plan.skipped.length, finishedCount: finished, failedCount: failed, stoppedCount: stopped, blockedCount: blocked, unknownCount: unknown },
   });
 }

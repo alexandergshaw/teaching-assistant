@@ -142,6 +142,16 @@ export function buildBulkGradePlan(input: {
  */
 export const BULK_GRADE_CONCURRENCY = 3;
 
+export function repoGradeTransportError() {
+  return { error: "Grading could not be confirmed. Check results before retrying.", transportUnknown: true } as const;
+}
+
+export function repoGradeAttemptErrorStatus(result: {
+  error: string; transportUnknown?: true; admissionStatus?: "blocked" | "unknown";
+}): "blocked" | "unknown" | undefined {
+  return result.transportUnknown ? "unknown" : result.admissionStatus;
+}
+
 export interface BulkGradeOutcome {
   repo: string;
   folder: string;
@@ -155,7 +165,7 @@ export interface BulkGradeOutcome {
   // model call that failed inside grading, or ran out of budget) - see
   // bulkGradeOutcomeFromRun below, the one place that classification is
   // made.
-  status: "graded" | "failed" | "no-submission";
+  status: "graded" | "failed" | "no-submission" | "blocked" | "unknown";
   /** The score exactly as produced, e.g. "18/20"; "" for a failure or a
    * no-submission outcome. */
   score: string;
@@ -176,16 +186,21 @@ export function bulkGradeSummaryLine(outcomes: readonly BulkGradeOutcome[], plan
   const graded = outcomes.filter((outcome) => outcome.status === "graded").length;
   const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
   const noSubmission = outcomes.filter((outcome) => outcome.status === "no-submission").length;
+  const blocked = outcomes.filter((outcome) => outcome.status === "blocked").length;
+  const unknown = outcomes.filter((outcome) => outcome.status === "unknown").length;
   const skipped = plan.skipped.length;
 
   const parts: string[] = [];
   if (graded > 0) parts.push(`${graded} graded`);
   if (failed > 0) parts.push(`${failed} failed`);
+  if (blocked > 0) parts.push(`${blocked} blocked`);
+  if (unknown > 0) parts.push(`${unknown} had an unconfirmed outcome`);
   if (noSubmission > 0) parts.push(`${noSubmission} had nothing submitted`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
 
   if (graded === 0) {
-    return parts.length > 0 ? `Nothing was graded - ${parts.join(", ")}.` : "Nothing was graded.";
+    const summary = unknown ? "No grades were confirmed" : "Nothing was graded";
+    return parts.length > 0 ? `${summary} - ${parts.join(", ")}.` : `${summary}.`;
   }
   return `Bulk grading finished: ${parts.join(", ")}.`;
 }

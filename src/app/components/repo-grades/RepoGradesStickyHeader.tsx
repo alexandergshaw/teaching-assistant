@@ -10,6 +10,7 @@
 // module); ResizeObserver is a DOM API, not an import. Controls share one 34px
 // band; non-controls (banner, folder notices, grade-set chips/status) render on
 // full-width trailing lines (.headerFullRow, order: 1) after the controls.
+import { InputBase } from "@mui/material";
 import { useEffect, useRef, type ReactNode } from "react";
 import styles from "./repo-grades.module.css";
 
@@ -77,10 +78,11 @@ export default function RepoGradesStickyHeader({ searchQuery, onSearchChange, gr
           {gradeSetControl}
           {targetBranchControl}
           <label className={styles.headerField}>
-            <input
+            <InputBase
               type="search"
-              className={styles.headerInput}
-              aria-label="Search repositories"
+              fullWidth
+              slots={{ root: "span" }}
+              slotProps={{ input: { className: styles.headerInput, "aria-label": "Search students or repositories to grade" } }}
               placeholder="Search repos or students"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}

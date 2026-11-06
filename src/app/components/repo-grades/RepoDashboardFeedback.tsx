@@ -79,9 +79,10 @@ function CopyStatus({ copied, failed }: { copied: boolean; failed: boolean }) {
   );
 }
 
-function FeedbackDisclosure({ title, label, expanded, onExpand, children }: {
+export function FeedbackDisclosure({ title, label, expanded, onExpand, children, compact = false }: {
   title: string;
   label?: string;
+  compact?: boolean;
   expanded?: boolean;
   onExpand?: (expanded: boolean) => void;
   children: ReactNode;
@@ -90,12 +91,14 @@ function FeedbackDisclosure({ title, label, expanded, onExpand, children }: {
   return (
     <Accordion disableGutters elevation={0} expanded={expanded}
       onChange={(_, next) => onExpand?.(next)}
-      slotProps={{ transition: { timeout: 0 } }}>
+      slotProps={{ transition: { timeout: 0 } }}
+      sx={compact ? { width: "100%", bgcolor: "transparent", "&::before": { display: "none" } } : undefined}>
       <AccordionSummary id={`${id}-summary`} aria-controls={`${id}-content`} aria-label={label ?? title}
-        expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}>
+        expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}
+        sx={compact ? { px: 0, minHeight: 28, "& .MuiAccordionSummary-content": { my: 0 } } : undefined}>
         {title}
       </AccordionSummary>
-      <AccordionDetails>{children}</AccordionDetails>
+      <AccordionDetails sx={compact ? { px: 0, pt: 1 } : undefined}>{children}</AccordionDetails>
     </Accordion>
   );
 }

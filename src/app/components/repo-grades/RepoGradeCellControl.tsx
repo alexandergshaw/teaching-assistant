@@ -41,7 +41,10 @@ import TextField from "@mui/material/TextField";
 // three that writes to a live Canvas gradebook. Raised to the same MUI
 // weight RepoGradesGrid.tsx's own column-level Post button already uses for
 // this exact action.
-import Button from "@mui/material/Button";
+import { Button, Select } from "@mui/material";
+import { FeedbackDisclosure } from "./RepoDashboardFeedback";
+import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import type { RepoGradeQueueCommand, RepoGradeQueueState } from "./repoGradeQueue";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
 // A13: the live-defect guard - relative path, not the "@/lib/grade" alias:
 // repoGradesFeedbackAndFiles.wiring.test.ts bans that alias prefix outright
@@ -146,6 +149,9 @@ export interface RepoGradeCellControlProps {
    * "comment is no longer independently editable" rule, applied here). */
   onFeedbackFieldChange: (field: FeedbackField, value: string) => void;
   onGrade: () => void;
+  onControlGrade: (command: RepoGradeQueueCommand) => void;
+  queueState?: RepoGradeQueueState;
+  folderPaused?: boolean;
   /**
    * AC "posting and reflow" A4: posts (or retries/re-posts) THIS cell alone -
    * a one-element-array call, mirroring GradingResults.tsx:363-390's
@@ -173,6 +179,9 @@ export default function RepoGradeCellControl({
   onScoreChange,
   onFeedbackFieldChange,
   onGrade,
+  onControlGrade,
+  queueState,
+  folderPaused,
   onPostOne,
 }: RepoGradeCellControlProps) {
   // docs/grading-results-file-viewer-acceptance-criteria.md: whether this
@@ -365,6 +374,17 @@ export default function RepoGradeCellControl({
       pointsPossible,
     });
 
+  const stage = queueState ?? edit.gradeRunStage ?? (edit.grading ? "running" : null);
+  const status = stage ?? edit.gradeAttemptStatus ?? (edit.gradeError ? "failed"
+    : edit.retainedResults?.length
+      ? edit.retainedResults.at(-1)?.source.submissionTruncated ? "partial" : "succeeded"
+      : edit.generatedScore != null ? edit.submissionTruncated ? "partial" : "succeeded" : "not-started");
+  const mayControl = stage === "paused" || stage === "queued";
+  const gradeLabel = stage === "queued" ? "Pause" : stage === "paused" ? "Resume"
+    : stage === "running" ? "Grading" : stage === "stopped" ? "Stopped" : "Start grade";
+  const gradeDisabled = stage === "running" || stage === "stopped" || (stage === "paused" && folderPaused);
+  const cellName = `${row.repo} / ${column.folder || "Repository root"}`;
+
   return (
     <div className={styles.cellControl}>
       <div className={styles.cellInputs}>
@@ -401,16 +421,249 @@ export default function RepoGradeCellControl({
             Not merged to target branch
           </span>
         )}
-        <RowFeedbackBoxes
-          student={row.repo}
-          edit={feedbackEdit}
-          copiedKey={copiedKey}
-          onCopy={handleCopyFeedback}
-          onChangeField={onFeedbackFieldChange}
-          onExpand={(field) => setExpandedField(field)}
-          namePrefix={column.folder}
-        />
       </div>
+      <div className={styles.cellActions}>
+        <RepoGradeStatusChip status={status} />
+        <Button
+          type="button"
+          size="small"
+          aria-label={`${gradeLabel}: ${cellName}`}
+          aria-disabled={gradeDisabled}
+          sx={{ '&[aria-disabled="true"]': { color: "text.disabled" } }}
+          onClick={() => {
+            if (gradeDisabled) return;
+            if (stage === "queued") onControlGrade("pause");
+            else if (stage === "paused") onControlGrade("resume");
+            else onGrade();
+          }}
+        >
+          {gradeLabel}
+        </Button>
+        {mayControl && (
+          <Button type="button" size="small" color="error" aria-label={`Stop grade: ${cellName}`}
+            onClick={(event) => {
+              const primary = event.currentTarget.previousElementSibling;
+              if (primary instanceof HTMLElement) primary.focus();
+              onControlGrade("stop");
+            }}>
+            Stop
+          </Button>
+        )}
+        {stage === "running" && <span className={styles.postReason}>This request will finish once started.</span>}
+        {stage === "paused" && folderPaused && <span className={styles.postReason}>Resume the folder to continue.</span>}
+      </div>
+      <FeedbackDisclosure compact title="Details" label={`Grade details: ${cellName}`}>
+          <RowFeedbackBoxes
+            student={row.repo}
+            edit={feedbackEdit}
+            copiedKey={copiedKey}
+            onCopy={handleCopyFeedback}
+            onChangeField={onFeedbackFieldChange}
+            onExpand={(field) => setExpandedField(field)}
+            namePrefix={column.folder}
+          />
+        {edit.rubricAreas.length > 0 && (
+          <div className={styles.rubricBreakdown}>
+            {edit.rubricAreas.map((area, index) => {
+              // B1: computed from THIS area's own score string alone - never
+              // from a rubric's declared points (scaleResultToPoints rescales
+              // every area's numerator AND denominator, and an AI-generated
+              // rubric's declared points are null by construction; see
+              // repoGradeScoreDisplay.ts for the full reasoning). Shown only
+              // when it actually parses - a blank score (engine.ts:212 emits
+              // "" for an area routinely) or an unreadable one shows the raw
+              // text alone, never a fabricated NaN%.
+              const areaPercent = scorePercentValue(area.score) !== null ? formatScorePercent(area.score) : null;
+              return (
+                <div key={`${area.area}-${index}`} className={styles.rubricBreakdownArea}>
+                  <span className={styles.rubricBreakdownName}>{area.area}</span>
+                  <span className={styles.rubricBreakdownScore}>{area.score || "-"}</span>
+                  {areaPercent && <span className={styles.scorePercent}>{areaPercent}</span>}
+                </div>
+              );
+            })}
+            {/* B3: a truthful one-line statement, driven by the SAME
+                repoGradeBreakdownWillPost predicate buildRepoGradePostPlan
+                uses to build the real post payload - never a hand-rolled
+                re-check of the same condition, so this can never say
+                something the actual post does not do. Today this reads "for
+                reference only" for every fresh Repo Grades grade (gradeRepoAction
+                omits pointsPossible, so a fresh fraction score is always
+                rescaled - see this module's own header for the verified
+                chain) - but it is computed, not hardcoded, so it stays
+                truthful if that ever changes. */}
+            <span className={styles.postReason}>
+              {breakdownWillPost
+                ? "This breakdown will be included when this grade posts to Canvas."
+                : "This breakdown is shown for reference only - it does not post to Canvas."}
+            </span>
+          </div>
+        )}
+        {/* Item 3 (docs for this feature): gradeRepoAction's LLM branch has been
+            running this repo's code in the sandbox and feeding the result into
+            the grading prompt since commit fa057050 - this is the ONE place an
+            instructor can see that happened and why it may have moved the
+            score. Request 2 (docs for this feature) adds the Run control right
+            above it: "any specified file(s) in a student's folder" defaults to
+            running the chosen ENTRY POINT with its sibling files available
+            (selectCodeRunFiles's own dominant-language grouping - the same
+            logic grading's own automatic run already uses), and the select
+            below lets the instructor override which file that is. Gated on
+            `edit.submittedFiles` (this cell must already be graded once - the
+            files a Run would use are exactly what grading last read), not on
+            `edit.codeExecution`/`edit.grading`, so it is reachable even for a
+            cell graded on the embedded engine with Task B's code-scoring
+            toggle off. Reuses runSubmissionCodeAction - the SAME server action
+            and CodeRunResult shape GradingResults.tsx's/FilePreviewModal.tsx's
+            own Run buttons already call - never a second runner, a second
+            action, or a second output viewer: the summary/output rendering
+            below is the SAME markup (page.module.css's previewMeta/
+            previewNotice/previewContent classes) this file already used for
+            `edit.codeExecution` alone, now reading `displayedCodeRun` (a fresh
+            manual run when one exists, else the grading-time run - see that
+            const's own comment above). */}
+        {edit.submittedFiles.length > 0 && (
+          <div className={styles.codeRunSummary}>
+            <div className={styles.codeRunControls}>
+              <label htmlFor={`repo-grade-run-entry-${row.repo}-${column.folder}`} className={pageStyles.previewMeta}>
+                Run
+              </label>
+              <Select native size="small"
+                value={entryPointChoice}
+                onChange={(e) => setEntryPointChoice(e.target.value)}
+                inputProps={{
+                  id: `repo-grade-run-entry-${row.repo}-${column.folder}`,
+                  "aria-label": `Choose which ${column.folder} file to run for ${row.repo}`,
+                }}
+              >
+                <option value="">Auto-detected entry point</option>
+                {edit.submittedFiles.map((file) => (
+                  <option key={file.name} value={file.name}>
+                    {file.name}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="button"
+                size="small"
+                disabled={manualRunning}
+                onClick={() => {
+                  void handleRunCode();
+                }}
+              >
+                {manualRunning ? "Running..." : "Run"}
+              </Button>
+            </div>
+            {displayedCodeRun && (
+              <>
+                <span className={styles.postReason}>
+                  {/* U12.52-style "never make the instructor guess" rule,
+                      applied here (docs for this feature, request 2's "Always
+                      show WHICH file was executed"): a manual run is labeled as
+                      such so it is never mistaken for what was actually scored
+                      at grading time - manualRun never writes back onto `edit`
+                      (see displayedCodeRun's own comment), so a manual Run can
+                      never itself change a posted score. */}
+                  {manualRun ? "Manual run (for review - does not change the score): " : "Code run: "}
+                  {displayedCodeRun.error
+                    ? displayedCodeRun.timedOut
+                      ? "timed out before the sandbox reported back."
+                      : `could not execute - ${displayedCodeRun.error}`
+                    : displayedCodeRun.neededStdin
+                      ? `${displayedCodeRun.entryPoint ?? "the submission"} found no input available (not scored)`
+                      : `${displayedCodeRun.entryPoint ?? "the submission"} ${
+                          displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
+                        }`}
+                </span>
+                {!displayedCodeRun.error && (
+                  <Button type="button" size="small" onClick={() => setCodeRunOpen((v) => !v)}>
+                    {codeRunOpen ? "Hide output" : "Show output"}
+                  </Button>
+                )}
+                {codeRunOpen && !displayedCodeRun.error && (
+                  <div className={styles.codeRunOutput}>
+                    <p className={pageStyles.previewMeta}>
+                      Ran without errors:{" "}
+                      {displayedCodeRun.neededStdin ? "no input available (not scored)" : displayedCodeRun.ran ? "yes" : "no"}
+                    </p>
+                    {displayedCodeRun.compileOutput && displayedCodeRun.compileOutput.trim() && (
+                      <>
+                        <p className={pageStyles.previewMeta}>Compiler output</p>
+                        <pre className={pageStyles.previewContent}>{displayedCodeRun.compileOutput}</pre>
+                      </>
+                    )}
+                    <p className={pageStyles.previewMeta}>Output (stdout)</p>
+                    <pre className={pageStyles.previewContent}>{displayedCodeRun.stdout || "(none)"}</pre>
+                    {displayedCodeRun.stderr && displayedCodeRun.stderr.trim() && (
+                      <>
+                        <p className={pageStyles.previewMeta}>Errors (stderr)</p>
+                        <pre className={pageStyles.previewContent}>{displayedCodeRun.stderr}</pre>
+                      </>
+                    )}
+                    {displayedCodeRun.filesExcluded && displayedCodeRun.filesExcluded.length > 0 && (
+                      <>
+                        <p className={pageStyles.previewMeta}>Not run</p>
+                        <p className={pageStyles.previewNotice}>
+                          {displayedCodeRun.filesExcluded.map((f) => f.reason).join(" ")}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+          <div className={styles.cellActions}>
+          {onPostOne && (
+            <Button
+              type="button"
+              variant="contained"
+              size="small"
+              disabled={postButtonDisabled}
+              onClick={() => {
+                // B4: the first post from a never-attempted cell requires an
+                // arming click before it can reach Canvas - a retry/re-post
+                // (isFirstPost false) stays the existing one-click action.
+                if (isFirstPost && !firstPostArmed) {
+                  setConfirmFirstPost(firstPostSignature);
+                  return;
+                }
+                setConfirmFirstPost(null);
+                onPostOne();
+              }}
+            >
+              {isFirstPost && firstPostArmed ? "Confirm post" : postButtonLabel}
+            </Button>
+          )}
+          {/* docs/grading-results-file-viewer-acceptance-criteria.md: only
+              rendered once this cell HAS files to show - a graded cell whose
+              digest genuinely carried none, or a cell never graded, has
+              nothing this button could open. Reuses SubmittedFilesPanel.tsx
+              unchanged (see this file's import comment) - the panel itself
+              already carries F3's truncation-honesty notices. */}
+          {edit.submittedFiles.length > 0 && (
+            <Button
+              type="button"
+              size="small"
+              aria-label={`Browse the ${column.folder} files for ${row.repo}`}
+              onClick={() => {
+                setFilesOpen(true);
+              }}
+            >
+              Browse files ({edit.submittedFiles.length})
+            </Button>
+          )}
+          {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
+          {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
+          {/* B4: matches the column-level Post button's own confirm wording
+              ("This writes to the live gradebook") for the same reason it is
+              armed there - the click below is about to write to Canvas. */}
+          {isFirstPost && firstPostArmed && (
+            <span className={styles.postReason}>This writes to the live Canvas gradebook.</span>
+          )}
+          </div>
+      </FeedbackDisclosure>
       {expandedField && (
         <FeedbackExpandModal
           student={row.repo}
@@ -421,215 +674,6 @@ export default function RepoGradeCellControl({
           namePrefix={column.folder}
         />
       )}
-      {edit.rubricAreas.length > 0 && (
-        <div className={styles.rubricBreakdown}>
-          {edit.rubricAreas.map((area, index) => {
-            // B1: computed from THIS area's own score string alone - never
-            // from a rubric's declared points (scaleResultToPoints rescales
-            // every area's numerator AND denominator, and an AI-generated
-            // rubric's declared points are null by construction; see
-            // repoGradeScoreDisplay.ts for the full reasoning). Shown only
-            // when it actually parses - a blank score (engine.ts:212 emits
-            // "" for an area routinely) or an unreadable one shows the raw
-            // text alone, never a fabricated NaN%.
-            const areaPercent = scorePercentValue(area.score) !== null ? formatScorePercent(area.score) : null;
-            return (
-              <div key={`${area.area}-${index}`} className={styles.rubricBreakdownArea}>
-                <span className={styles.rubricBreakdownName}>{area.area}</span>
-                <span className={styles.rubricBreakdownScore}>{area.score || "-"}</span>
-                {areaPercent && <span className={styles.scorePercent}>{areaPercent}</span>}
-              </div>
-            );
-          })}
-          {/* B3: a truthful one-line statement, driven by the SAME
-              repoGradeBreakdownWillPost predicate buildRepoGradePostPlan
-              uses to build the real post payload - never a hand-rolled
-              re-check of the same condition, so this can never say
-              something the actual post does not do. Today this reads "for
-              reference only" for every fresh Repo Grades grade (gradeRepoAction
-              omits pointsPossible, so a fresh fraction score is always
-              rescaled - see this module's own header for the verified
-              chain) - but it is computed, not hardcoded, so it stays
-              truthful if that ever changes. */}
-          <span className={styles.postReason}>
-            {breakdownWillPost
-              ? "This breakdown will be included when this grade posts to Canvas."
-              : "This breakdown is shown for reference only - it does not post to Canvas."}
-          </span>
-        </div>
-      )}
-      {/* Item 3 (docs for this feature): gradeRepoAction's LLM branch has been
-          running this repo's code in the sandbox and feeding the result into
-          the grading prompt since commit fa057050 - this is the ONE place an
-          instructor can see that happened and why it may have moved the
-          score. Request 2 (docs for this feature) adds the Run control right
-          above it: "any specified file(s) in a student's folder" defaults to
-          running the chosen ENTRY POINT with its sibling files available
-          (selectCodeRunFiles's own dominant-language grouping - the same
-          logic grading's own automatic run already uses), and the select
-          below lets the instructor override which file that is. Gated on
-          `edit.submittedFiles` (this cell must already be graded once - the
-          files a Run would use are exactly what grading last read), not on
-          `edit.codeExecution`/`edit.grading`, so it is reachable even for a
-          cell graded on the embedded engine with Task B's code-scoring
-          toggle off. Reuses runSubmissionCodeAction - the SAME server action
-          and CodeRunResult shape GradingResults.tsx's/FilePreviewModal.tsx's
-          own Run buttons already call - never a second runner, a second
-          action, or a second output viewer: the summary/output rendering
-          below is the SAME markup (page.module.css's previewMeta/
-          previewNotice/previewContent classes) this file already used for
-          `edit.codeExecution` alone, now reading `displayedCodeRun` (a fresh
-          manual run when one exists, else the grading-time run - see that
-          const's own comment above). */}
-      {edit.submittedFiles.length > 0 && (
-        <div className={styles.codeRunSummary}>
-          <div className={styles.codeRunControls}>
-            <label htmlFor={`repo-grade-run-entry-${row.repo}-${column.folder}`} className={pageStyles.previewMeta}>
-              Run
-            </label>
-            <select
-              id={`repo-grade-run-entry-${row.repo}-${column.folder}`}
-              value={entryPointChoice}
-              onChange={(e) => setEntryPointChoice(e.target.value)}
-              aria-label={`Choose which ${column.folder} file to run for ${row.repo}`}
-            >
-              <option value="">Auto-detected entry point</option>
-              {edit.submittedFiles.map((file) => (
-                <option key={file.name} value={file.name}>
-                  {file.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className={pageStyles.linkButton}
-              disabled={manualRunning}
-              onClick={() => {
-                void handleRunCode();
-              }}
-            >
-              {manualRunning ? "Running..." : "Run"}
-            </button>
-          </div>
-          {displayedCodeRun && (
-            <>
-              <span className={styles.postReason}>
-                {/* U12.52-style "never make the instructor guess" rule,
-                    applied here (docs for this feature, request 2's "Always
-                    show WHICH file was executed"): a manual run is labeled as
-                    such so it is never mistaken for what was actually scored
-                    at grading time - manualRun never writes back onto `edit`
-                    (see displayedCodeRun's own comment), so a manual Run can
-                    never itself change a posted score. */}
-                {manualRun ? "Manual run (for review - does not change the score): " : "Code run: "}
-                {displayedCodeRun.error
-                  ? displayedCodeRun.timedOut
-                    ? "timed out before the sandbox reported back."
-                    : `could not execute - ${displayedCodeRun.error}`
-                  : displayedCodeRun.neededStdin
-                    ? `${displayedCodeRun.entryPoint ?? "the submission"} found no input available (not scored)`
-                    : `${displayedCodeRun.entryPoint ?? "the submission"} ${
-                        displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
-                      }`}
-              </span>
-              {!displayedCodeRun.error && (
-                <button type="button" className={pageStyles.linkButton} onClick={() => setCodeRunOpen((v) => !v)}>
-                  {codeRunOpen ? "Hide output" : "Show output"}
-                </button>
-              )}
-              {codeRunOpen && !displayedCodeRun.error && (
-                <div className={styles.codeRunOutput}>
-                  <p className={pageStyles.previewMeta}>
-                    Ran without errors:{" "}
-                    {displayedCodeRun.neededStdin ? "no input available (not scored)" : displayedCodeRun.ran ? "yes" : "no"}
-                  </p>
-                  {displayedCodeRun.compileOutput && displayedCodeRun.compileOutput.trim() && (
-                    <>
-                      <p className={pageStyles.previewMeta}>Compiler output</p>
-                      <pre className={pageStyles.previewContent}>{displayedCodeRun.compileOutput}</pre>
-                    </>
-                  )}
-                  <p className={pageStyles.previewMeta}>Output (stdout)</p>
-                  <pre className={pageStyles.previewContent}>{displayedCodeRun.stdout || "(none)"}</pre>
-                  {displayedCodeRun.stderr && displayedCodeRun.stderr.trim() && (
-                    <>
-                      <p className={pageStyles.previewMeta}>Errors (stderr)</p>
-                      <pre className={pageStyles.previewContent}>{displayedCodeRun.stderr}</pre>
-                    </>
-                  )}
-                  {displayedCodeRun.filesExcluded && displayedCodeRun.filesExcluded.length > 0 && (
-                    <>
-                      <p className={pageStyles.previewMeta}>Not run</p>
-                      <p className={pageStyles.previewNotice}>
-                        {displayedCodeRun.filesExcluded.map((f) => f.reason).join(" ")}
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-      <div className={styles.cellActions}>
-        <button
-          type="button"
-          className={pageStyles.linkButton}
-          disabled={edit.grading}
-          onClick={() => {
-            onGrade();
-          }}
-        >
-          {edit.grading ? "Grading…" : "Grade"}
-        </button>
-        {onPostOne && (
-          <Button
-            type="button"
-            variant="contained"
-            size="small"
-            disabled={postButtonDisabled}
-            onClick={() => {
-              // B4: the first post from a never-attempted cell requires an
-              // arming click before it can reach Canvas - a retry/re-post
-              // (isFirstPost false) stays the existing one-click action.
-              if (isFirstPost && !firstPostArmed) {
-                setConfirmFirstPost(firstPostSignature);
-                return;
-              }
-              setConfirmFirstPost(null);
-              onPostOne();
-            }}
-          >
-            {isFirstPost && firstPostArmed ? "Confirm post" : postButtonLabel}
-          </Button>
-        )}
-        {/* docs/grading-results-file-viewer-acceptance-criteria.md: only
-            rendered once this cell HAS files to show - a graded cell whose
-            digest genuinely carried none, or a cell never graded, has
-            nothing this button could open. Reuses SubmittedFilesPanel.tsx
-            unchanged (see this file's import comment) - the panel itself
-            already carries F3's truncation-honesty notices. */}
-        {edit.submittedFiles.length > 0 && (
-          <button
-            type="button"
-            className={pageStyles.linkButton}
-            aria-label={`Browse the ${column.folder} files for ${row.repo}`}
-            onClick={() => {
-              setFilesOpen(true);
-            }}
-          >
-            Browse files ({edit.submittedFiles.length})
-          </button>
-        )}
-        {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
-        {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
-        {/* B4: matches the column-level Post button's own confirm wording
-            ("This writes to the live gradebook") for the same reason it is
-            armed there - the click below is about to write to Canvas. */}
-        {isFirstPost && firstPostArmed && (
-          <span className={styles.postReason}>This writes to the live Canvas gradebook.</span>
-        )}
-      </div>
       {filesOpen && (
         <SubmittedFilesPanel
           student={row.repo}

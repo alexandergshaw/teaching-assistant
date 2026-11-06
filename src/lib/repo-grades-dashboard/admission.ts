@@ -110,11 +110,13 @@ export type ManualRepoGradeExecution = {
   markKnownFailure: () => void;
 };
 
+export type ManualRepoGradeError = { error: string; admissionStatus?: "blocked" | "unknown" };
+
 export const EMBEDDED_STARTUP_MANUAL_PAUSE = "Manual repository grading is paused during the Embedded startup pilot.";
 
 export async function runManualRepoGrade<T extends { run: { results: Array<{ ungraded?: { kind: string } }> } } | { error: string } | { noSubmission: true }>(
   repo: string, evaluate: (execution?: ManualRepoGradeExecution) => Promise<T>,
-): Promise<T | { error: string }> {
+): Promise<T | ManualRepoGradeError> {
   // Legacy ingestion accepts case-insensitive prefixes. Reserve the whole
   // repository so those scopes also conflict with exact automatic folders.
   const result = await runWithRepoGradeAdmission({ mode: "manual", repo }, async (beginDispatch) => {
@@ -156,11 +158,11 @@ export async function runManualRepoGrade<T extends { run: { results: Array<{ ung
     return { value, settlement: { outcome } };
   });
   if (result.status === "completed") return result.value;
-  if (result.status === "manual-paused") return { error: EMBEDDED_STARTUP_MANUAL_PAUSE };
-  if (result.status === "busy") return { error: "Repository grading is already in progress or awaiting reconciliation." };
-  if (result.status === "capacity") return { error: "Your repository grading capacity is currently full." };
+  if (result.status === "manual-paused") return { error: EMBEDDED_STARTUP_MANUAL_PAUSE, admissionStatus: "blocked" };
+  if (result.status === "busy") return { error: "Repository grading is already in progress or awaiting reconciliation.", admissionStatus: "blocked" };
+  if (result.status === "capacity") return { error: "Your repository grading capacity is currently full.", admissionStatus: "blocked" };
   if (result.status === "pre-dispatch-failed") return { error: "Repository grading failed before dispatch." };
   if (result.status === "sandbox-refused") return { error: "The sandbox declined the code execution request." };
-  if (result.status === "unknown") return { error: "Repository grading could not be confirmed. Reconcile the attempt before retrying." };
-  return { error: "Repository grading admission is unavailable." };
+  if (result.status === "unknown") return { error: "Repository grading could not be confirmed. Reconcile the attempt before retrying.", admissionStatus: "unknown" };
+  return { error: "Repository grading admission is unavailable.", admissionStatus: "blocked" };
 }

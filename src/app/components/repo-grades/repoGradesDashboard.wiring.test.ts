@@ -83,11 +83,16 @@ describe("class repository results wiring", () => {
   });
 
   it("declares table headers and a concise status independent of the scrollable rows", () => {
-    expect(dashboard).toContain('<TableCell component="th" scope="col">Student</TableCell>');
+    expect(dashboard).toMatch(/<TableCell component="th" scope="col">\s*Student\s*<TextField type="search"/);
     expect(dashboard).toContain('<TableCell component="th" key={folder} scope="col">');
     expect(dashboard).toContain('<TableCell component="th" scope="row">');
     expect(dashboard).toContain('role="region" aria-labelledby={headingId} tabIndex={0}');
     expect(dashboard.indexOf('role="status"')).toBeLessThan(dashboard.indexOf("<TableContainer"));
+  });
+
+  it("keeps the earlier scored attempt's partial status separate from the latest attempt", () => {
+    expect(dashboard).toContain('Latest saved attempt: <RepoGradeStatusChip status={latest.status');
+    expect(dashboard).toMatch(/scored\.generation !== latest\.generation && scored\.status === "partial" && <> <RepoGradeStatusChip status="partial"/);
   });
 
   it("shows browser and saved results in a read-only matrix with scoped copying", () => {

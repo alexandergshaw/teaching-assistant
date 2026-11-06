@@ -105,7 +105,7 @@ it("keeps a manual repository grade outside the evaluator when the shared reserv
   vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
   vi.mocked(claimRepoGrade).mockResolvedValueOnce({ status: "busy" });
   await expect(gradeRepoAction("org/student", "Instructions", "", "gemini", undefined, "module_01"))
-    .resolves.toEqual({ error: "Repository grading is already in progress or awaiting reconciliation." });
+    .resolves.toEqual({ error: "Repository grading is already in progress or awaiting reconciliation.", admissionStatus: "blocked" });
   expect(claimRepoGrade).toHaveBeenCalledExactlyOnceWith({ mode: "manual", repo: "org/student" });
   expect(ingestRepo).not.toHaveBeenCalled();
   expect(gradeEntries).not.toHaveBeenCalled();

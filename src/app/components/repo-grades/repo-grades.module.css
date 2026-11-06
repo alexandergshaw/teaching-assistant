@@ -421,17 +421,6 @@
   text-decoration: underline;
 }
 
-.columnHeader select {
-  align-self: stretch;
-  padding: var(--space-1) var(--space-1);
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-xs);
-  background: var(--field-background);
-  color: var(--text-primary);
-  font-weight: 400;
-  font-size: var(--font-size-md);
-}
-
 /* AC4 items 20-21 - one cell's editable score/comment plus its Grade action
    and post-status text, rendered by RepoGradeCellControl.tsx. */
 .cellControl {

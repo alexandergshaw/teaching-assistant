@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField } from "@mui/material";
 import Button from "@mui/material/Button";
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -10,11 +10,12 @@ import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import { useRepoGradesStartupHistoryRevision } from "../repo-grades-dashboard/RepoGradesStartup";
 import { RepoGradesStartupPreview } from "../repo-grades-dashboard/RepoGradesStartupPreview";
 import type { RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import { buildRepoGradeMatrix, buildRepoGradesDashboard, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
+import { buildRepoGradeMatrix, buildRepoGradesDashboard, filterRepoGradeMatrixRows, type RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { useRepoGradeHistory } from "./useRepoGradeHistory";
 import { useRepoGradeMatrixResults } from "./useRepoGradeMatrixResults";
-import { RepoDashboardHistoricalFeedback, RepoResultFeedback, type HistoricalFeedbackDraft } from "./RepoDashboardFeedback";
+import { FeedbackDisclosure, RepoDashboardHistoricalFeedback, RepoResultFeedback, type HistoricalFeedbackDraft } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
+import RepoGradeStatusChip from "./RepoGradeStatusChip";
 import type { RepoGradeColumn } from "./repoGradesRows";
 import styles from "./repo-grades-dashboard.module.css";
 
@@ -51,6 +52,10 @@ export default function RepoGradesDashboard({
   const saved = useRepoGradeMatrixResults(courseId, ownerId, historyRevision);
   const browserRows = buildRepoGradesDashboard(cellEdits, scan);
   const { columns, rows } = buildRepoGradeMatrix(browserRows, cellEdits, saved.results, gradeColumns, assignments, roster, studentRepos);
+  const searchScope = JSON.stringify([ownerId, courseId]);
+  const [search, setSearch] = useState({ scope: searchScope, value: "" });
+  const query = search.scope === searchScope ? search.value : "";
+  const visibleRows = filterRepoGradeMatrixRows(rows, query);
   const treeFailures = scan?.repos.filter((repo) => repo.folders === null).length ?? 0;
 
   let discoverySummary = "GitHub discovery is unavailable.";
@@ -90,7 +95,12 @@ export default function RepoGradesDashboard({
           <Table size="small" className={`${styles.table} ${styles.matrix}`} aria-label="Repository results by student and assignment">
             <TableHead>
               <TableRow>
-                <TableCell component="th" scope="col">Student</TableCell>
+                <TableCell component="th" scope="col">
+                  Student
+                  <TextField type="search" size="small" fullWidth label="Search students or repositories"
+                    value={query} onChange={(event) => setSearch({ scope: searchScope, value: event.target.value })}
+                    sx={{ mt: 1, minWidth: 180 }} />
+                </TableCell>
                 {columns.map(({ folder, label }) => (
                   <TableCell component="th" key={folder} scope="col">
                     {label}
@@ -100,7 +110,10 @@ export default function RepoGradesDashboard({
               </TableRow>
             </TableHead>
             <TableBody>
-              {rows.map(({ key, name, repos }) => (
+              {visibleRows.length === 0 && (
+                <TableRow><TableCell colSpan={columns.length + 1}>No students or repositories match your search.</TableCell></TableRow>
+              )}
+              {visibleRows.map(({ key, name, repos }) => (
                 <TableRow key={key}>
                   <TableCell component="th" scope="row">
                     {name ?? repos[0]?.name}
@@ -129,28 +142,33 @@ export default function RepoGradesDashboard({
                                   rubric={cell.local.rubricAreas} />
                               </>
                             )}
-                            {cell?.retained?.map(({ id, source, draft }, index) => {
-                              const label = `Retained result ${index + 1}`;
-                              return (
-                                <div key={id} className={styles.matrixResult}>
-                                  <p><strong>{label} {source.score.trim() || "score unavailable"}</strong></p>
-                                  {source.submissionTruncated && <p>Submission truncated</p>}
-                                  <RepoResultFeedback repo={repo.name} folder={folder} source={label}
-                                    feedback={{ overall: source.comment, strengths: source.strengths,
-                                      improvements: source.improvements, resubmitNotice: source.resubmitNotice }}
-                                    rubric={source.rubricAreas} />
-                                  {draft && (
-                                    <>
-                                      <p>Draft score {draft.score.trim() || "unavailable"}</p>
-                                      <RepoResultFeedback repo={repo.name} folder={folder} source={`${label} draft`}
-                                        feedback={{ overall: draft.comment, strengths: draft.strengths,
-                                          improvements: draft.improvements, resubmitNotice: draft.resubmitNotice }}
-                                        rubric={[]} />
-                                    </>
-                                  )}
-                                </div>
-                              );
-                            })}
+                            {!!cell?.retained?.length && (
+                              <FeedbackDisclosure compact title="Retained results"
+                                label={`Retained results: ${repo.name} / ${folder || "Repository root"}`}>
+                                {cell?.retained?.map(({ id, source, draft }, index) => {
+                                  const label = `Retained result ${index + 1}`;
+                                  return (
+                                    <div key={id} className={styles.matrixResult}>
+                                      <p><strong>{label} {source.score.trim() || "score unavailable"}</strong></p>
+                                      {source.submissionTruncated && <p>Submission truncated</p>}
+                                      <RepoResultFeedback repo={repo.name} folder={folder} source={label}
+                                        feedback={{ overall: source.comment, strengths: source.strengths,
+                                          improvements: source.improvements, resubmitNotice: source.resubmitNotice }}
+                                        rubric={source.rubricAreas} />
+                                      {draft && (
+                                        <>
+                                          <p>Draft score {draft.score.trim() || "unavailable"}</p>
+                                          <RepoResultFeedback repo={repo.name} folder={folder} source={`${label} draft`}
+                                            feedback={{ overall: draft.comment, strengths: draft.strengths,
+                                              improvements: draft.improvements, resubmitNotice: draft.resubmitNotice }}
+                                            rubric={[]} />
+                                        </>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </FeedbackDisclosure>
+                            )}
                             {cell?.grading && <p>Browser grading in progress</p>}
                             {cell?.gradeFailed && <p>Browser grading failed</p>}
                             {cell?.saved && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} />}
@@ -183,35 +201,31 @@ function SavedMatrixResult({ result, repo, folder }: {
   const sections = scored?.feedback_sections;
   return (
     <>
+      <p>Latest saved attempt: <RepoGradeStatusChip status={latest.status === "claimed" ? "running" : latest.status} /></p>
       {scored && (
-        <>
-          <p><strong>Saved score {scored.score}%</strong> <code title={scored.commit}>{scored.commit.slice(0, 12)}</code></p>
-          {scored.status === "partial" && <p>Partial evaluation</p>}
-          {sections && <p>Original score {sections.rawScore}</p>}
-          {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
-          <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
-            feedback={{ overall: scored.feedback ?? "", strengths: sections?.strengths ?? "",
-              improvements: sections?.improvements ?? "", resubmitNotice: sections?.resubmitNotice ?? "" }}
-            rubric={scored.rubric ?? []} />
-        </>
-      )}
-      {latest.generation !== scored?.generation && (
-        <p>Latest saved attempt: {EVALUATION_STATUS[latest.status]} <code title={latest.commit}>{latest.commit.slice(0, 12)}</code>
-          {latest.feedback_retention && ". Feedback exceeded the storage limit."}
+        <p>
+          <strong>{scored.generation === latest.generation ? "Saved score" : "Earlier saved score"} {scored.score}%</strong>
+          {scored.generation !== latest.generation && scored.status === "partial" && <> <RepoGradeStatusChip status="partial" /></>}
         </p>
       )}
+      <FeedbackDisclosure compact title="Saved evaluation details" label={`Saved evaluation details: ${repo} / ${folder || "Repository root"}`}>
+        <p>Latest commit <code title={latest.commit}>{latest.commit.slice(0, 12)}</code></p>
+        {latest.feedback_retention && <p>Latest feedback exceeded the storage limit.</p>}
+        {scored && (
+          <>
+            {scored.generation !== latest.generation && <p>Score from commit <code title={scored.commit}>{scored.commit.slice(0, 12)}</code></p>}
+            {sections && <p>Original score {sections.rawScore}</p>}
+            {scored.feedback !== null && !sections && <p>Saved overall feedback may be shortened.</p>}
+            <RepoResultFeedback key={scored.generation} repo={repo} folder={folder} source="saved"
+              feedback={{ overall: scored.feedback ?? "", strengths: sections?.strengths ?? "",
+                improvements: sections?.improvements ?? "", resubmitNotice: sections?.resubmitNotice ?? "" }}
+              rubric={scored.rubric ?? []} />
+          </>
+        )}
+      </FeedbackDisclosure>
     </>
   );
 }
-
-const EVALUATION_STATUS = {
-  claimed: "Running",
-  succeeded: "Graded",
-  "no-submission": "No submission",
-  partial: "Partial evaluation",
-  failed: "Failed",
-  unknown: "Outcome unknown",
-};
 
 function RepoGradeHistory({ courseId, accountId }: { courseId: string; accountId: string }) {
   const headingId = useId();
@@ -269,7 +283,7 @@ function RepoGradeHistory({ courseId, accountId }: { courseId: string; accountId
                     </TableCell>
                     <TableCell><time dateTime={timestamp}>{timestamp.slice(0, 16).replace("T", " ")}</time></TableCell>
                     <TableCell>
-                      {EVALUATION_STATUS[row.status]}
+                      <RepoGradeStatusChip status={row.status === "claimed" ? "running" : row.status} />
                       {dashboardFeedbackEnabled && <RepoDashboardHistoricalFeedback row={row} draftScope={draftScope} sessionDraft={drafts[draftScope]}
                         onDraftChange={(draft) => setDrafts((current) => ({ ...current, [draftScope]: draft }))} />}
                     </TableCell>

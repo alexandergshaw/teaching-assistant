@@ -1,14 +1,7 @@
 "use client";
 
 import { createContext, useContext, useId, type ReactNode } from "react";
-import Accordion from "@mui/material/Accordion";
-import AccordionDetails from "@mui/material/AccordionDetails";
-import AccordionSummary from "@mui/material/AccordionSummary";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import TextField from "@mui/material/TextField";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, List, ListItem, TextField } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";

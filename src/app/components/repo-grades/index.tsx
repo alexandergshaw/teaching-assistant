@@ -546,6 +546,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     handleGradeColumn,
     bulkRunningFolder,
     bulkProgress,
+    bulkQueue,
+    controlGradeColumn,
+    controlGradeCell,
     trendsEntry,
   } = useRepoGradesGradingActions({
     cellScope,
@@ -809,10 +812,10 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         statusBanner={bulkRunningFolder ? (
           // Visual-only: no role and no aria-live (the postSummary region is the one live region).
           <div className={pageStyles.loadingState}>
-            <span className={pageStyles.spinner} aria-hidden="true" />
+            {bulkQueue?.folderState !== "paused" && <span className={pageStyles.spinner} aria-hidden="true" />}
             <div>
               <p className={pageStyles.loadingTitle}>
-                Grading {bulkProgress ? bulkProgress.done : 0} of {bulkProgress ? bulkProgress.total : 0} in {bulkRunningFolder}...
+                {bulkQueue?.folderState === "paused" ? "Paused" : bulkQueue?.folderState === "stopping" ? "Stopping" : "Grading"} {bulkProgress ? bulkProgress.done : 0} of {bulkProgress ? bulkProgress.total : 0} in {bulkRunningFolder}...
               </p>
             </div>
           </div>
@@ -862,6 +865,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           describeColumnRubric={rubricSource.describeColumn}
           bulkRunningFolder={bulkRunningFolder}
           bulkProgress={bulkProgress}
+          bulkQueue={bulkQueue}
+          onControlGradeColumn={controlGradeColumn}
+          onControlGradeCell={controlGradeCell}
           bulkSelectionOnly={uiState.bulkSelectionOnly}
           scanTruncated={!!scan?.truncated}
           emptyStateMessage={folderEmptyStateMessage}

@@ -148,6 +148,17 @@ type MatrixRepository = {
 
 type MatrixStudent = { key: string; name: string | null; repos: MatrixRepository[] };
 
+export function filterRepoGradeMatrixRows<T extends Pick<MatrixStudent, "name"> & { repos: readonly { name: string }[] }>(
+  rows: readonly T[], query: string,
+): readonly T[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return rows;
+  return rows.filter(({ name, repos }) => {
+    const searchable = [name, ...repos.map((repo) => repo.name)].join(" ").toLowerCase();
+    return terms.every((term) => searchable.includes(term));
+  });
+}
+
 function hasLocalResult(edit: RepoGradeCellEdit): boolean {
   return !!(edit.score.trim() || edit.comment.trim() || edit.strengths.trim()
     || edit.improvements.trim() || edit.resubmitNotice.trim() || edit.rubricAreas.length

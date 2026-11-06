@@ -12,7 +12,7 @@ import { buildRepoNoSubmissionResult, withBranchNote } from "@/lib/grade-zeros";
 import { classifyBranchMergeCheck, describeBranchMergeNote, type BranchMergeCheck } from "@/lib/repo-grade-merge-check";
 import { getGeminiMaxCharsPerSubmission } from "@/lib/gemini";
 import { truncateSubmission } from "@/lib/grade/utils";
-import type { ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
+import type { ManualRepoGradeError, ManualRepoGradeExecution } from "@/lib/repo-grades-dashboard/admission";
 import { getRepoGraderIdentity, type RepoGraderIdentity } from "@/lib/repo-grades-dashboard/grader-identity";
 import type { PreparedRepoGradeReadme } from "@/lib/repo-grades-dashboard/preparation-runtime";
 import { repoDigestToEmbeddedEntry } from "@/lib/repo-grade-entry";
@@ -63,7 +63,7 @@ export type RepoGradeResponse =
       /** Typed merge-check outcome (graded ref = typed target, else the default branch). */
       branchMergeCheck?: BranchMergeCheck;
     }
-  | { error: string; partial?: true; sourceCommit?: string; reason?: "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated" | "unsupported-submission" };
+  | (ManualRepoGradeError & { partial?: true; sourceCommit?: string; reason?: "tree-truncated" | "file-fetch-failed" | "digest-truncated" | "grading-input-truncated" | "unsupported-submission" });
 
 type RepoGradeExecution = ManualRepoGradeExecution & {
   automaticGrader?: RepoGraderIdentity;

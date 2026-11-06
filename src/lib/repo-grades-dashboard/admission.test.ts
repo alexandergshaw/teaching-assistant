@@ -67,7 +67,7 @@ describe("repository grading admission", () => {
     expect(repoGradeAdmissionMode()).toBe("embedded-only");
     const evaluate = vi.fn();
     await expect(runManualRepoGrade(manual.repo, evaluate)).resolves.toEqual({
-      error: "Manual repository grading is paused during the Embedded startup pilot.",
+      error: "Manual repository grading is paused during the Embedded startup pilot.", admissionStatus: "blocked",
     });
     expect(evaluate).not.toHaveBeenCalled();
     expect(claimRepoGrade).not.toHaveBeenCalled();
@@ -249,7 +249,7 @@ describe("repository grading admission", () => {
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "failed" });
     await expect(runManualRepoGrade(manual.repo, async () => {
       throw new LlmOutcomeUnknownError();
-    })).resolves.toEqual({ error: expect.stringContaining("Reconcile") });
+    })).resolves.toEqual({ error: expect.stringContaining("Reconcile"), admissionStatus: "unknown" });
     expect(settleRepoGrade).toHaveBeenLastCalledWith(claim, { outcome: "unknown" });
   });
 
@@ -283,7 +283,10 @@ describe("repository grading admission", () => {
       undefined, undefined, false, false, false, "a".repeat(40), execution,
     ));
 
-    expect(result).toEqual({ error: expect.stringContaining(outcome === "failed" ? "rubric" : "Reconcile") });
+    expect(result).toEqual({
+      error: expect.stringContaining(outcome === "failed" ? "rubric" : "Reconcile"),
+      ...(outcome === "unknown" ? { admissionStatus: "unknown" } : {}),
+    });
     expect(beginRepoGradeDispatch).toHaveBeenCalledExactlyOnceWith(claim);
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome });
     expect(fetchMock).toHaveBeenCalledTimes(1);

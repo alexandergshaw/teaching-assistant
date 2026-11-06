@@ -1,15 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import {
-  readRepoGradeReservationsAction,
-  recoverUnstartedRepoGradeReservationsAction,
-} from "@/app/actions/repo-grade-recovery";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
+import { inspectRepoGradeReservations, releaseExpiredRepoGradeReservations } from "./reservation-recovery-client";
 import styles from "../repo-grades/repo-grades-dashboard.module.css";
 
-type Snapshot = Awaited<ReturnType<typeof readRepoGradeReservationsAction>>;
+type Snapshot = Awaited<ReturnType<typeof inspectRepoGradeReservations>>;
 type Reservation = Extract<Snapshot, { status: "loaded" }>["reservations"][number];
 
 const RESERVATION_STATUS: Record<Reservation["state"], string> = {
@@ -32,8 +29,7 @@ export function RepoGradeReservationRecovery() {
 
   function inspect() {
     startTransition(async () => {
-      const result = await readRepoGradeReservationsAction(accountId)
-        .catch(() => ({ status: "unavailable" } as const));
+      const result = await inspectRepoGradeReservations(accountId);
       setSnapshot(result);
       setNotice(result.status === "loaded" ? "Reservations refreshed." : "Reservations could not be read.");
     });
@@ -41,8 +37,7 @@ export function RepoGradeReservationRecovery() {
 
   function recover() {
     startTransition(async () => {
-      const result = await recoverUnstartedRepoGradeReservationsAction(accountId)
-        .catch(() => ({ status: "outcome-unconfirmed" } as const));
+      const result = await releaseExpiredRepoGradeReservations(accountId);
       setSnapshot(result.status === "checked" ? result.snapshot : null);
       if (result.status === "checked") {
         setNotice(result.snapshot.status === "loaded"

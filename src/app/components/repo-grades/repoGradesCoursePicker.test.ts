@@ -8,7 +8,7 @@
 // default filter over the label this leaf produces, so there is no second
 // predicate to pin.
 import { describe, it, expect } from "vitest";
-import { buildCourseOptions, courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
+import { buildCourseOptions, buildRepoGradeCourseFilters, courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import type { Course } from "@/lib/supabase/courses";
 import { emptyCourseProject } from "@/lib/course-project";
 
@@ -65,6 +65,48 @@ function course(overrides: Partial<Course> & { id: string; name: string }): Cour
     ...overrides,
   };
 }
+
+describe("Repo Grades institution and class filters", () => {
+  const courses = [
+    course({ id: "a", name: "Intro Bio", institution: " State ", term: "Fall", courseCode: "BIO 101" }),
+    course({ id: "b", name: "Intro Bio", institution: "State", term: "Spring", courseCode: "BIO 101" }),
+    course({ id: "c", name: "Intro Bio", institution: "state" }),
+    course({ id: "d", name: "Lab", institution: "Community College" }),
+    course({ id: "e", name: "Independent study", institution: null }),
+    course({ id: "f", name: "Workshop", institution: "   " }),
+  ];
+
+  it("shows only classes from the active institution and preserves exact institution identities", () => {
+    const filters = buildRepoGradeCourseFilters(courses, "", "State");
+    expect(filters.institutions).toHaveLength(4);
+    expect(filters.institutions).toEqual(expect.arrayContaining(["State", "state", "Community College", ""]));
+    expect(filters.activeInstitution).toBe("State");
+    expect(filters.classes).toEqual([
+      { id: "a", label: "Intro Bio (BIO 101 · Fall)" },
+      { id: "b", label: "Intro Bio (BIO 101 · Spring)" },
+    ]);
+  });
+
+  it("shows the selected class's institution even if a different filter was previously chosen", () => {
+    const filters = buildRepoGradeCourseFilters(courses, "c", "State");
+    expect(filters.courseInstitution).toBe("state");
+    expect(filters.activeInstitution).toBe("state");
+    expect(filters.classes).toEqual([{ id: "c", label: "Intro Bio" }]);
+  });
+
+  it("keeps classes without a configured institution reachable by a single group", () => {
+    const filters = buildRepoGradeCourseFilters(courses, "", "");
+    expect(filters.activeInstitution).toBe("");
+    expect(filters.classes.map(({ id }) => id)).toEqual(["e", "f"]);
+  });
+
+  it("handles a stale preferred institution and an empty class list", () => {
+    expect(buildRepoGradeCourseFilters(courses, "", "Old school").activeInstitution).toBe("Community College");
+    expect(buildRepoGradeCourseFilters([], "", "State")).toEqual({
+      institutions: [], courseInstitution: null, activeInstitution: null, classes: [],
+    });
+  });
+});
 
 describe("buildCourseOptions", () => {
   it("uses the course id as the option value, unchanged", () => {

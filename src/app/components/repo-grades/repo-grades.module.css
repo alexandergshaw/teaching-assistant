@@ -775,7 +775,7 @@
    rather than duplicating those rules. */
 /* W4: the parent "Run setup" disclosure that wraps the controls and the link
    panel; same subtle-surface language as .linkPanel. */
-.setupRegion {
+.setupRegion:global(.MuiAccordion-root) {
   margin-top: var(--space-4);
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--card-border);
@@ -783,7 +783,7 @@
   background: var(--surface-subtle);
 }
 
-.setupRegion[open] > summary {
+.setupRegion .disclosureSummary:global(.Mui-expanded) {
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border-soft);
@@ -815,7 +815,7 @@
   transition: transform 0.15s ease;
 }
 
-details[open] > .disclosureSummary::before { transform: rotate(45deg); }
+.disclosureSummary:global(.Mui-expanded)::before, details[open] > .disclosureSummary::before { transform: rotate(45deg); }
 
 .disclosureSummary:hover {
   color: var(--text-secondary);
@@ -833,7 +833,7 @@ details[open] > .disclosureSummary::before { transform: rotate(45deg); }
   color: var(--text-muted);
 }
 
-details[open] > .disclosureSummary .setupSummaryMeta { display: none; }
+.disclosureSummary:global(.Mui-expanded) .setupSummaryMeta { display: none; }
 
 .linkPanel {
   margin-top: var(--space-5);

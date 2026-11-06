@@ -1,6 +1,9 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, List, ListItem } from "@mui/material";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import FeedbackExpandModal from "../grading-results/FeedbackExpandModal";
 import RowFeedbackBoxes from "../grading-results/RowFeedbackBoxes";
 import {
@@ -76,12 +79,89 @@ function CopyStatus({ copied, failed }: { copied: boolean; failed: boolean }) {
   );
 }
 
+function FeedbackDisclosure({ title, label, expanded, onExpand, children }: {
+  title: string;
+  label?: string;
+  expanded?: boolean;
+  onExpand?: (expanded: boolean) => void;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <Accordion disableGutters elevation={0} expanded={expanded}
+      onChange={(_, next) => onExpand?.(next)}
+      slotProps={{ transition: { timeout: 0 } }}>
+      <AccordionSummary id={`${id}-summary`} aria-controls={`${id}-content`} aria-label={label ?? title}
+        expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}>
+        {title}
+      </AccordionSummary>
+      <AccordionDetails>{children}</AccordionDetails>
+    </Accordion>
+  );
+}
+
+export function RepoResultFeedback({ repo, folder, source, feedback, rubric }: {
+  repo: string;
+  folder: string;
+  source: string;
+  feedback: FeedbackBoxesEdit;
+  rubric: readonly Readonly<RepoGradeCellEdit["rubricAreas"][number]>[];
+}) {
+  const hasComment = Object.values(feedback).some((value) => value.trim() !== "");
+  const target = `${source} feedback for ${repo}, ${folder || "repository root"}`;
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([target, feedback]));
+  if (!hasComment && rubric.length === 0) return null;
+  return (
+    <>
+      {hasComment && (
+        <Button type="button" size="small" aria-label={`Copy ${target}`}
+          onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
+          {copiedKey === "all" ? "Copied" : "Copy feedback"}
+        </Button>
+      )}
+      <FeedbackDisclosure title="Rubric and comments" label={`Breakdown and ${target}`}>
+        {rubric.length > 0 && (
+          <List dense>
+            {rubric.map((area, index) => (
+              <ListItem sx={{ display: "list-item" }} key={index}>
+                {area.area} {area.score || "Score unavailable"}
+                {area.comment && <p className={styles.feedbackText}>{area.comment}</p>}
+              </ListItem>
+            ))}
+          </List>
+        )}
+        {feedback.overall && (
+          <>
+            <p className={styles.feedbackText}>{feedback.overall}</p>
+            <Button type="button" size="small" aria-label={`Copy overall ${target}`}
+              onClick={() => void copy("overall", formatFeedback(feedback.overall), "overall")}>
+              {copiedKey === "overall" ? "Copied" : "Copy overall feedback"}
+            </Button>
+          </>
+        )}
+        {FEEDBACK_FIELDS.map((field) => feedback[field] && (
+          <div key={field}>
+            <p>{FEEDBACK_FIELD_META[field].fieldLabel}</p>
+            <p className={styles.feedbackText}>{feedback[field]}</p>
+            <Button type="button" size="small" aria-label={`Copy ${FEEDBACK_FIELD_META[field].descriptorLower} from ${target}`}
+              onClick={() => void copy(field, formatFeedback(feedback[field]), field)}>
+              {copiedKey === field ? "Copied" : `Copy ${FEEDBACK_FIELD_META[field].fieldLabel}`}
+            </Button>
+          </div>
+        ))}
+      </FeedbackDisclosure>
+      {hasComment && <CopyStatus copied={copiedKey !== null} failed={failed} />}
+    </>
+  );
+}
+
 type LocalFeedbackProps = {
   repo: string;
   folder: string;
   edit: RepoGradeCellEdit;
   onScoreChange: (score: string) => void;
   onFeedbackChange: (field: FeedbackField, value: string) => void;
+  isAvailable?: () => boolean;
 };
 
 type DashboardFeedbackProps = LocalFeedbackProps & {
@@ -93,18 +173,15 @@ type DashboardFeedbackProps = LocalFeedbackProps & {
 
 export function RepoDashboardFeedback(props: DashboardFeedbackProps) {
   const [open, setOpen] = useState(false);
-  const details = useRef<HTMLDetailsElement | null>(null);
-  const isAvailable = () => props.isCurrentCellScope() && details.current?.open === true;
+  const openRef = useRef(false);
+  const isAvailable = () => props.isCurrentCellScope() && openRef.current;
   return (
-    <details ref={details} onToggle={(event) => {
-      if (event.target === event.currentTarget) setOpen(event.currentTarget.open);
-    }}>
-      <summary aria-label={`Score and feedback for ${props.repo}, ${props.folder || "repository root"}`}>
-        Score and feedback
-      </summary>
+    <FeedbackDisclosure title="Score and feedback"
+      label={`Score and feedback for ${props.repo}, ${props.folder || "repository root"}`}
+      expanded={open} onExpand={(next) => { openRef.current = next; setOpen(next); }}>
       {open && (
         <>
-          <LocalFeedback {...props} />
+          <LocalFeedback {...props} isAvailable={isAvailable} />
           {props.edit.retainedResults?.map((result, index) => (
             <RetainedFeedback key={result.id} result={result} ordinal={index + 1}
               accountId={props.accountId} courseId={props.courseId} repo={props.repo} folder={props.folder}
@@ -112,11 +189,11 @@ export function RepoDashboardFeedback(props: DashboardFeedbackProps) {
           ))}
         </>
       )}
-    </details>
+    </FeedbackDisclosure>
   );
 }
 
-function LocalFeedback({ repo, folder, edit, onScoreChange, onFeedbackChange }: LocalFeedbackProps) {
+function LocalFeedback({ repo, folder, edit, onScoreChange, onFeedbackChange, isAvailable }: LocalFeedbackProps) {
   const [expandedField, setExpandedField] = useState<FeedbackField | null>(null);
   const expandTrigger = useRef<HTMLButtonElement | null>(null);
   const feedback: FeedbackBoxesEdit = {
@@ -127,16 +204,14 @@ function LocalFeedback({ repo, folder, edit, onScoreChange, onFeedbackChange }: 
   };
   const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([
     feedback, edit.score, edit.generatedScore, edit.generatedComment, edit.rubricAreas,
-  ]));
+  ]), isAvailable);
   const label = folder || "Repository root";
 
   return (
     <div className={styles.feedback}>
-      <label>
-        Score
-        <input aria-label={`${label} score for ${repo}`} inputMode="decimal" value={edit.score}
-          onChange={(event) => onScoreChange(event.target.value)} />
-      </label>
+      <TextField label="Score" size="small" value={edit.score}
+        slotProps={{ htmlInput: { "aria-label": `${label} score for ${repo}`, inputMode: "decimal" } }}
+        onChange={(event) => onScoreChange(event.target.value)} />
       {edit.generatedScore !== null && (
         <p>{edit.score === edit.generatedScore && edit.comment === edit.generatedComment
           ? "Generated result in this browser"
@@ -163,14 +238,14 @@ function LocalFeedback({ repo, folder, edit, onScoreChange, onFeedbackChange }: 
           onChange={onFeedbackChange} onClose={() => setExpandedField(null)} restoreFocusRef={expandTrigger} />
       )}
       {edit.rubricAreas.length > 0 && (
-        <ul>
+        <List dense>
           {edit.rubricAreas.map((area, index) => (
-            <li key={index}>
+            <ListItem sx={{ display: "list-item" }} key={index}>
               {area.area} {area.score}
               <p className={styles.feedbackText}>{area.comment}</p>
-            </li>
+            </ListItem>
           ))}
-        </ul>
+        </List>
       )}
     </div>
   );
@@ -189,16 +264,14 @@ type RetainedFeedbackProps = {
 
 function RetainedFeedback(props: RetainedFeedbackProps) {
   const [open, setOpen] = useState(false);
-  const details = useRef<HTMLDetailsElement | null>(null);
+  const openRef = useRef(false);
   const label = `Retained result ${props.ordinal} for ${props.folder || "repository root"}`;
-  const isAvailable = () => props.isAvailable() && details.current?.open === true;
+  const isAvailable = () => props.isAvailable() && openRef.current;
   return (
-    <details ref={details} onToggle={(event) => {
-      if (event.target === event.currentTarget) setOpen(event.currentTarget.open);
-    }}>
-      <summary aria-label={`${label} in ${props.repo}`}>Retained generated result {props.ordinal}</summary>
+    <FeedbackDisclosure title={`Retained generated result ${props.ordinal}`} label={`${label} in ${props.repo}`}
+      expanded={open} onExpand={(next) => { openRef.current = next; setOpen(next); }}>
       {open && <RetainedDraft {...props} label={label} isAvailable={isAvailable} />}
-    </details>
+    </FeedbackDisclosure>
   );
 }
 
@@ -231,22 +304,18 @@ function RetainedDraft({ accountId, courseId, repo, folder, result, label, isAva
   return (
     <section className={styles.feedback} aria-label={`${label} draft for ${repo}`}>
       <p>Edits here belong to this retained result. Your current grading draft is separate.</p>
-      <label>
-        Score
-        <input aria-label={`${label} score for ${repo}`} inputMode="decimal" value={score}
-          onChange={(event) => change("score", event.target.value)} />
-      </label>
-      <label>
-        Overall feedback
-        <textarea aria-label={`${label} overall feedback for ${repo}`} value={comment}
-          onChange={(event) => changeFeedback("overall", event.target.value)} />
-      </label>
-      <button type="button" aria-label={`Copy ${label} overall feedback for ${repo}`}
+      <TextField label="Score" size="small" value={score}
+        slotProps={{ htmlInput: { "aria-label": `${label} score for ${repo}`, inputMode: "decimal" } }}
+        onChange={(event) => change("score", event.target.value)} />
+      <TextField label="Overall feedback" size="small" multiline minRows={2} fullWidth value={comment}
+        slotProps={{ htmlInput: { "aria-label": `${label} overall feedback for ${repo}` } }}
+        onChange={(event) => changeFeedback("overall", event.target.value)} />
+      <Button type="button" size="small" aria-label={`Copy ${label} overall feedback for ${repo}`}
         onClick={() => copy("overall", formatFeedback(comment || OVERALL_FEEDBACK_META.emptyCopyFallback), "overall")}>
         {copiedKey === "overall" ? "Copied" : "Copy overall feedback"}
-      </button>
-      <button type="button" aria-label={`Expand ${label} overall feedback for ${repo}`}
-        onClick={(event) => expand("overall", event.currentTarget)}>Expand overall feedback</button>
+      </Button>
+      <Button type="button" size="small" aria-label={`Expand ${label} overall feedback for ${repo}`}
+        onClick={(event) => expand("overall", event.currentTarget)}>Expand overall feedback</Button>
       <RowFeedbackBoxes student={repo} namePrefix={label} keepCopyLabel
         edit={feedback} copiedKey={copiedKey} onCopy={copy} onChangeField={changeFeedback} onExpand={expand} />
       <CopyStatus copied={copiedKey !== null} failed={failed} />
@@ -254,8 +323,7 @@ function RetainedDraft({ accountId, courseId, repo, folder, result, label, isAva
         <FeedbackExpandModal student={repo} namePrefix={label} field={expandedField} edit={feedback}
           onChange={changeFeedback} onClose={() => setExpandedField(null)} restoreFocusRef={expandTrigger} />
       )}
-      <details>
-        <summary>Original generated feedback</summary>
+      <FeedbackDisclosure title="Original generated feedback">
         <p>Original generated score {source.generatedScore ?? source.score}</p>
         <p className={styles.feedbackText}>{source.comment}</p>
         {FEEDBACK_FIELDS.map((field) => source[field] && (
@@ -264,10 +332,10 @@ function RetainedDraft({ accountId, courseId, repo, folder, result, label, isAva
             <p className={styles.feedbackText}>{source[field]}</p>
           </div>
         ))}
-        {source.rubricAreas.length > 0 && <ul>{source.rubricAreas.map((area, index) => (
-          <li key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></li>
-        ))}</ul>}
-      </details>
+        {source.rubricAreas.length > 0 && <List dense>{source.rubricAreas.map((area, index) => (
+          <ListItem sx={{ display: "list-item" }} key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></ListItem>
+        ))}</List>}
+      </FeedbackDisclosure>
     </section>
   );
 }
@@ -308,10 +376,8 @@ export function RepoDashboardHistoricalFeedback({ row, draftScope, sessionDraft,
   const copyLabel = sections ? "Copy all historical feedback" : "Copy retained overall feedback";
   const targetName = `${repo}, ${folder || "repository root"}`;
   return (
-    <details onToggle={(event) => { if (event.currentTarget.open) setOpened(true); }}>
-      <summary aria-label={`Historical feedback for ${targetName}`}>
-        Historical feedback
-      </summary>
+    <FeedbackDisclosure title="Historical feedback" label={`Historical feedback for ${targetName}`}
+      onExpand={(expanded) => { if (expanded) setOpened(true); }}>
       {sections ? <p>Original generated score {sections.rawScore}</p> : (
         <p>Individual feedback sections are unavailable in this saved evaluation. Overall and rubric feedback may have been shortened or had links removed.</p>
       )}
@@ -322,17 +388,18 @@ export function RepoDashboardHistoricalFeedback({ row, draftScope, sessionDraft,
           <div key={field}>
             <p>{meta.fieldLabel}</p>
             <p className={styles.feedbackText}>{sections[field]}</p>
-            <button type="button" aria-label={`Copy historical ${meta.descriptorLower} for ${targetName}`}
+            <Button type="button" size="small" aria-label={`Copy historical ${meta.descriptorLower} for ${targetName}`}
               onClick={() => copy(field, formatFeedback(sections[field] || meta.emptyCopyFallback), field)}>
               {copiedKey === field ? "Copied" : `Copy ${meta.fieldLabel}`}
-            </button>
+            </Button>
           </div>
         );
       })}
       {(sections || overall) ? (
         <>
-          <button
+          <Button
             type="button"
+            size="small"
             aria-label={`${copyLabel} for ${targetName}`}
             onClick={() => copy("all", copyAllFeedbackText({
               overall, strengths: sections?.strengths ?? "", improvements: sections?.improvements ?? "",
@@ -340,13 +407,13 @@ export function RepoDashboardHistoricalFeedback({ row, draftScope, sessionDraft,
             }), "all")}
           >
             {copiedKey === "all" ? "Copied" : copyLabel}
-          </button>
+          </Button>
           <CopyStatus copied={copiedKey !== null} failed={failed} />
         </>
       ) : <p>No overall feedback was retained.</p>}
-      {!!rubric?.length && <ul>{rubric.map((area, index) => (
-        <li key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></li>
-      ))}</ul>}
+      {!!rubric?.length && <List dense>{rubric.map((area, index) => (
+        <ListItem sx={{ display: "list-item" }} key={index}>{area.area} {area.score}<p className={styles.feedbackText}>{area.comment}</p></ListItem>
+      ))}</List>}
       {opened && draftScope && <HistoricalDraft scope={draftScope} repo={repo} folder={folder}
         sessionDraft={sessionDraft} onDraftChange={onDraftChange} seed={{
         ...defaultRepoGradeCellEdit(),
@@ -359,7 +426,7 @@ export function RepoDashboardHistoricalFeedback({ row, draftScope, sessionDraft,
         resubmitNotice: sections?.resubmitNotice ?? "",
         rubricAreas: rubric?.map((area) => ({ ...area })) ?? [],
       }} />}
-    </details>
+    </FeedbackDisclosure>
   );
 }
 
@@ -398,7 +465,7 @@ function HistoricalDraft({ scope, repo, folder, seed, sessionDraft, onDraftChang
             onFeedbackChange={(field, value) => save(applyRepoGradeFeedbackFieldEdit(draft, field, value))}
           />
         </>
-      ) : <button type="button" onClick={() => setDraft(seed)}>Start instructor draft</button>}
+      ) : <Button type="button" size="small" onClick={() => setDraft(seed)}>Start instructor draft</Button>}
     </section>
   );
 }

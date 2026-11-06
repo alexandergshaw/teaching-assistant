@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import { buildRepoGradesDashboard, updateRepoGradesCourseEdits } from "./repoGradesDashboardModel";
+import {
+  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits,
+  type RepoGradeSavedAttempt, type RepoGradeSavedResult,
+} from "./repoGradesDashboardModel";
 
 function scan(foldersByRepo: Record<string, string[] | null>): OrgRepoTreesResult {
   return {
@@ -18,6 +21,17 @@ function scan(foldersByRepo: Record<string, string[] | null>): OrgRepoTreesResul
 }
 
 const edit = (score: string) => ({ ...defaultRepoGradeCellEdit(), score });
+
+function attempt(generation: number, repo: string, folder: string, score: number | null): RepoGradeSavedAttempt {
+  return {
+    generation, repo, folder, score,
+    sourceRef: "main", commit: "a".repeat(40), profileFingerprint: "b".repeat(64),
+    status: score === null ? "failed" : "succeeded",
+    claimedAt: "2026-11-06T12:00:00.000Z", settledAt: null,
+    feedback: score === null ? null : `Feedback for ${repo}/${folder}`,
+    feedback_sections: null, feedback_retention: null, rubric: null,
+  };
+}
 
 describe("class repository results", () => {
   it("unions exact repo and folder keys without borrowing scores from another repo or folder", () => {
@@ -63,6 +77,70 @@ describe("class repository results", () => {
       { repo: "org/b", folder: null, score: null, result: "No score shown", discovery: "No folders reported" },
       { repo: "org/c", folder: null, score: null, result: "No score shown", discovery: "Repository tree scan failed" },
     ]);
+  });
+
+  it("groups confirmed repositories by student, keeps suggestions separate, and shows assignments across sources", () => {
+    const edits = { "org/a": { "Lab 1": edit("0/10") } };
+    const browser = buildRepoGradesDashboard(edits, scan({ "org/a": ["Lab 1"], "org/andrew": ["Lab 1"] }));
+    const results = new Map<string, RepoGradeSavedResult>();
+    const zero = attempt(5, "ORG/A", "Lab 1", 0);
+    const historical = attempt(3, "org/old", "Lab 2", 90);
+    addRepoGradeSavedPage(results, [attempt(7, "org/a", "Lab 1", null), zero, historical]);
+    const matrix = buildRepoGradeMatrix(browser, edits, results,
+      [{ folder: "Lab 1", assignmentId: "77" }], [{ id: "77", name: "First lab" }],
+      [{ id: "1", name: "Andrew" }, { id: "2", name: "Lynn" }],
+      [{ repo: "org/a", canvasUserId: "1", student: "Andrew" }, { repo: "org/old", canvasUserId: "1", student: "Andrew" }]);
+
+    expect(matrix.columns).toEqual([{ folder: "Lab 1", label: "First lab" }, { folder: "Lab 2", label: "Lab 2" }]);
+    expect(matrix.rows.map(({ key, name, repos }) => [key, name, repos.map((repo) => repo.name)])).toEqual([
+      ["student:1", "Andrew", ["org/a", "org/old"]],
+      ["student:2", "Lynn", []],
+      ["repo:org/andrew", null, ["org/andrew"]],
+    ]);
+    const [local, old] = matrix.rows[0].repos;
+    expect(local.cells.get("Lab 1")).toMatchObject({ local: { score: "0/10" }, saved: { latest: { generation: 7 }, scored: zero } });
+    expect(local.cells.get("Lab 2")).toBeUndefined();
+    expect(old.cells.get("Lab 2")?.saved?.scored).toEqual(historical);
+  });
+
+  it("keeps older score-bearing results across pages without mixing distinct assignment folders", () => {
+    const results = new Map<string, RepoGradeSavedResult>();
+    const failed = attempt(7, "org/a", "Lab", null);
+    const lowerCaseFolder = attempt(6, "org/a", "lab", 65);
+    const newestScore = attempt(5, "org/a", "Lab", 90);
+    addRepoGradeSavedPage(results, [failed, lowerCaseFolder]);
+    addRepoGradeSavedPage(results, [newestScore, attempt(4, "org/a", "Lab", 80)]);
+    expect([...results.values()]).toEqual([
+      { latest: failed, scored: newestScore },
+      { latest: lowerCaseFolder, scored: lowerCaseFolder },
+    ]);
+  });
+
+  it("keeps retained generated results even when the current browser draft has no score or feedback", () => {
+    const source = { ...edit("9/10"), comment: "Generated feedback" };
+    const retained = { id: "result-1", source, draft: { ...edit("8/10"), comment: "Reviewed feedback" } };
+    const edits = { "org/a": { Lab: { ...edit(""), retainedResults: [retained] } } };
+    const matrix = buildRepoGradeMatrix(buildRepoGradesDashboard(edits, null), edits, new Map(), [], [], [], []);
+    const cell = matrix.rows[0].repos[0].cells.get("Lab");
+    expect(cell?.local).toBeNull();
+    expect(cell?.retained).toEqual([retained]);
+  });
+
+  it("merges confirmed pages with older fallback results across repeated incomplete refreshes", () => {
+    const previous = new Map<string, RepoGradeSavedResult>();
+    const firstRefresh = new Map<string, RepoGradeSavedResult>();
+    const secondRefresh = new Map<string, RepoGradeSavedResult>();
+    const older = attempt(4, "org/older", "Lab", 60);
+    const prior = attempt(5, "org/a", "Lab", 70);
+    const scored = attempt(6, "org/a", "Lab", 90);
+    const latest = attempt(7, "org/a", "Lab", null);
+    addRepoGradeSavedPage(previous, [prior, older]);
+    addRepoGradeSavedPage(firstRefresh, [scored]);
+    addRepoGradeSavedPage(secondRefresh, [latest]);
+    const merged = mergeIncompleteRepoGradeResults(
+      mergeIncompleteRepoGradeResults(previous, firstRefresh), secondRefresh,
+    );
+    expect([...merged.values()]).toEqual([{ latest, scored }, { latest: older, scored: older }]);
   });
 
   it("drops stale callbacks after a switch or return while retaining current edits", () => {

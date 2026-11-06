@@ -64,6 +64,40 @@ export function buildCourseOptions(courses: readonly Course[]): TypeaheadOption[
   });
 }
 
+type CourseFilterOption = Pick<Course, "id" | "name" | "institution" | "courseCode" | "term">;
+
+export function buildRepoGradeCourseFilters(
+  courses: readonly CourseFilterOption[], courseId: string, preferredInstitution: string | null,
+) {
+  const groups = new Map<string, Array<{ id: string; label: string }>>();
+  let courseInstitution: string | null = null;
+  for (const course of courses) {
+    const institution = course.institution?.trim() ?? "";
+    if (course.id === courseId) courseInstitution = institution;
+    const name = course.name.trim() || "Untitled class";
+    const description = [course.courseCode?.trim(), course.term?.trim()].filter(Boolean).join(" · ");
+    const option = { id: course.id, label: description ? `${name} (${description})` : name };
+    const options = groups.get(institution);
+    if (options) options.push(option);
+    else groups.set(institution, [option]);
+  }
+
+  const institutions = [...groups.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a.localeCompare(b);
+  });
+  const activeInstitution = courseInstitution
+    ?? (preferredInstitution !== null && groups.has(preferredInstitution) ? preferredInstitution : institutions[0])
+    ?? null;
+  return {
+    institutions,
+    courseInstitution,
+    activeInstitution,
+    classes: activeInstitution === null ? [] : groups.get(activeInstitution)!,
+  };
+}
+
 /**
  * The single-course default (A7 W2). Returns the course id to select, or null
  * to change nothing. A written id that is still present is returned unchanged;

@@ -8,6 +8,7 @@ const index = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./RepoGradesDashboard.tsx", import.meta.url), "utf8");
 const feedback = readFileSync(new URL("./RepoDashboardFeedback.tsx", import.meta.url), "utf8");
 const gradingActions = readFileSync(new URL("./useRepoGradesGradingActions.ts", import.meta.url), "utf8");
+const filters = readFileSync(new URL("./RepoGradeCourseFilters.tsx", import.meta.url), "utf8");
 
 function findCourseDashboardMount(source: string): JsxSelfClosingElement | null {
   const file = ts.createSourceFile("index.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -37,6 +38,17 @@ function findCourseDashboardMount(source: string): JsxSelfClosingElement | null 
 }
 
 describe("class repository results wiring", () => {
+  it("uses the course setter for class chips and clears the old class on an institution change", () => {
+    expect(index).toMatch(/<RepoGradeCourseFilters\s+courses=\{courses\}\s+courseId=\{uiState.courseId\}\s+onCourseIdChange=\{handleCourseIdChange\}/);
+    expect(index).toMatch(/<RepoGradesControls[\s\S]*?onCourseIdChange=\{handleCourseIdChange\}/);
+    expect(filters).toContain('if (courseId && institution !== courseInstitution) onCourseIdChange("")');
+    expect(filters).toContain("onClick={() => onCourseIdChange(id)}");
+    expect(filters.match(/<Chip[^>]*component="button" type="button"/g)).toHaveLength(2);
+    expect(filters.match(/<FormControl component="fieldset"/g)).toHaveLength(2);
+    expect(filters.match(/<FormLabel component="legend"/g)).toHaveLength(2);
+    expect(index.indexOf("<RepoGradeCourseFilters")).toBeLessThan(index.indexOf("<RepoGradesControls"));
+  });
+
   it("mounts for a restored course outside the manual grid and consumes unfiltered course edits", () => {
     const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
     expect(props).toContain("cellEdits={cellEdits}");
@@ -44,6 +56,7 @@ describe("class repository results wiring", () => {
     expect(props).toContain("scanFailed={scanError !== null}");
     expect(index.indexOf("<RepoGradesDashboard")).toBeLessThan(index.indexOf("<RepoGradesStickyHeader"));
     expect(dashboard).toContain("buildRepoGradesDashboard(cellEdits, scan)");
+    expect(dashboard).toContain("buildRepoGradeMatrix(browserRows, cellEdits, saved.results, gradeColumns, assignments, roster, studentRepos)");
   });
 
   it("rejects an outer guard that hides the dashboard until a folder is selected", () => {
@@ -59,7 +72,8 @@ describe("class repository results wiring", () => {
     const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
     expect(props).toContain("key={course.id}");
     expect(props).toContain("courseId={course.id}");
-    expect(dashboard).toContain("courseId={courseId} accountId={user.id}");
+    expect(dashboard).toContain("const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null");
+    expect(dashboard).toContain("<RepoGradeHistory courseId={courseId} accountId={ownerId}");
     expect(index).toContain("isCellScopeCurrent: () => drafts.isCurrent(cellScope)");
     expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");
   });
@@ -69,34 +83,32 @@ describe("class repository results wiring", () => {
   });
 
   it("declares table headers and a concise status independent of the scrollable rows", () => {
-    expect(dashboard).toContain('<th scope="col">Folder</th>');
-    expect(dashboard).toContain('<th scope="row">{repo}</th>');
+    expect(dashboard).toContain('<TableCell component="th" scope="col">Student</TableCell>');
+    expect(dashboard).toContain('<TableCell component="th" key={folder} scope="col">');
+    expect(dashboard).toContain('<TableCell component="th" scope="row">');
     expect(dashboard).toContain('role="region" aria-labelledby={headingId} tabIndex={0}');
-    expect(dashboard.indexOf('role="status"')).toBeLessThan(dashboard.indexOf("<table"));
+    expect(dashboard.indexOf('role="status"')).toBeLessThan(dashboard.indexOf("<TableContainer"));
   });
 
-  it("keeps dashboard feedback disabled while retaining its verified-target wiring", () => {
+  it("shows browser and saved results in a read-only matrix with scoped copying", () => {
     const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
-    expect(props).toContain("gradeRows={sortedRows}");
     expect(props).toContain("gradeColumns={columnsWithMapping}");
-    expect(props).toContain("grading={{ handleGradeCell, handleGradeColumn, handleScoreChange, handleFeedbackFieldChange, bulkRunningFolder }}");
-    expect(dashboard).toContain("const verified = !!scan && !scanLoading && !scanFailed");
-    expect(dashboard).toContain('verified && discovery === "Found in scan"');
-    expect(dashboard).toContain('row.cells[column.folder]?.status === "ungraded"');
-    expect(dashboard).toContain("grading.handleGradeCell(row, column)");
-    expect(dashboard).toContain("grading.handleGradeColumn(folder)");
+    expect(props).toContain("assignments={assignments}");
+    expect(props).toContain("roster={roster}");
+    expect(props).toContain("studentRepos={course.studentRepos}");
     expect(dashboard).toContain("const dashboardFeedbackEnabled = false");
-    expect(dashboard).toContain("{dashboardFeedbackEnabled && folder !== null && edit && (");
-    expect(dashboard).toContain("grading.handleScoreChange(repo, folder, score)");
-    expect(dashboard).toContain("grading.handleFeedbackFieldChange(repo, folder, field, value)");
-    expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost/);
+    expect(dashboard).toContain("repo.cells.get(folder)");
+    expect(dashboard).toContain('source="browser"');
+    expect(dashboard).toContain('source="saved"');
+    expect(dashboard).toContain("cell?.retained?.map");
+    expect(dashboard).toContain("rubric={source.rubricAreas}");
+    expect(dashboard).toContain("useRepoGradeMatrixResults(courseId, ownerId, historyRevision)");
+    expect(dashboard).toContain("Saved results are incomplete");
+    expect(feedback).toContain('copy("all", copyAllFeedbackText(feedback), "all")');
+    expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost|handleGradeCell|handleGradeColumn/);
   });
 
-  it("routes retained edits through the course guard and the separately keyed editor and modal", () => {
-    const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
-    expect(props).toContain("onRetainedDraftChange={handleRetainedDraftChange}");
-    expect(props).toContain("isCurrentCellScope={isCurrentCellScope}");
-    expect(dashboard).toContain("onRetainedDraftChange={onRetainedDraftChange}");
+  it("keeps the retained editor isolated with its course guard and separately keyed modal", () => {
     expect(gradingActions).toMatch(/const handleRetainedDraftChange[\s\S]*?if \(!isCurrent\(\)\) return;\s*setCellEdits\(\(prev\) => applyRetainedRepoGradeDraftEdit\(prev, repo, folder, expected, field, value\)\)/);
 
     const editor = feedback.slice(feedback.indexOf("function RetainedDraft("), feedback.indexOf("const RETENTION_LABELS"));
@@ -110,8 +122,10 @@ describe("class repository results wiring", () => {
 
   it("binds retained copy to the committed editor version and rejects stale status", () => {
     expect(feedback).toContain("JSON.stringify([accountId, courseId, repo, folder, id, score, comment, strengths, improvements, resubmitNotice])");
-    expect(feedback).toContain("props.isCurrentCellScope() && details.current?.open === true");
-    expect(feedback).toContain("props.isAvailable() && details.current?.open === true");
+    expect(feedback).toContain("props.isCurrentCellScope() && openRef.current");
+    expect(feedback).toContain("props.isAvailable() && openRef.current");
+    expect(feedback).toContain("openRef.current = next; setOpen(next)");
+    expect(feedback).toContain("<AccordionSummary");
     expect(feedback).toContain("lifetime.current?.identity === identity");
     expect(feedback).toContain("lifetime.current === mount");
     expect(feedback).toContain("lifetime.current = null");

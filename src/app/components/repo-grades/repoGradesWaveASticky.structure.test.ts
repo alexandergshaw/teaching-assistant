@@ -215,7 +215,7 @@ describe("REPO-PAGE-OVERHAUL W3: re-scan control in the sticky header", () => {
     expect(W_HEADER).toMatch(/rescanControl\?: ReactNode/);
     expect(sliceBetween(W_HEADER, "styles.stickyWorkingHeader", "{children}")).toContain("{rescanControl}");
     expect(W_INDEX).toContain("<RepoGradesStickyHeader");
-    expect(rescanProp()).toContain("<button");
+    expect(rescanProp()).toContain('<Button type="button"');
   });
 
   it("AC-W3-2: the node is wired to reloadScan and disabled on scanLoading (not dead)", () => {
@@ -241,7 +241,7 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
   });
 
   it("VISUAL-B: the parent summary and the nested Grading settings summary share the .disclosureSummary class, with the bound summary shown collapsed", () => {
-    expect(W_INDEX).toMatch(/<summary className=\{gridStyles\.disclosureSummary\}>/);
+    expect(W_INDEX).toMatch(/<AccordionSummary className=\{gridStyles\.disclosureSummary\}/);
     expect(W_INDEX).toContain("{boundSummary}");
     expect(withoutLineComments(read("RepoGradesControls.tsx"))).toMatch(/<summary className=\{gridStyles\.disclosureSummary\}>Grading settings/);
     expect(ruleBlock(CSS, ".disclosureSummary::before")).toMatch(/border-right/);
@@ -255,7 +255,7 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(W_INDEX).not.toMatch(/>Target branch \(merged to\)</);
     expect(HEADER).toContain('aria-label="Search repositories"');
     expect(HEADER).toContain('placeholder="Search repos or students"');
-    expect(W_INDEX).toContain('aria-label="Target branch (merged to)"');
+    expect(W_INDEX).toMatch(/slotProps=\{\{ input: \{ className: styles\.headerInput, "aria-label": "Target branch \(merged to\)"/);
   });
 
   it("AC-12: header-row polish - top-aligned th, no folder-name font-size rule, Grade and Post share one actions wrapper", () => {
@@ -274,11 +274,11 @@ describe("REPO-PAGE-OVERHAUL W4: Run setup disclosure", () => {
     expect(grid).not.toContain("<span className={pageStyles.fieldHint}>Select</span>");
   });
 
-  it("AC-W4-7: the parent <details> contains BOTH RepoGradesControls and LinkUsernamesPanel", () => {
-    const open = W_INDEX.indexOf("<details");
+  it("AC-W4-7: the parent accordion contains both RepoGradesControls and LinkUsernamesPanel", () => {
+    const open = W_INDEX.indexOf("<Accordion\n");
     const controls = W_INDEX.indexOf("<RepoGradesControls");
     const link = W_INDEX.indexOf("<LinkUsernamesPanel");
-    const close = W_INDEX.indexOf("</details>");
+    const close = W_INDEX.indexOf("</Accordion>");
     expect(open).toBeGreaterThan(-1);
     expect(W_INDEX.slice(open, open + 120)).toContain("setupRegion");
     expect(controls).toBeGreaterThan(open);

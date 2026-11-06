@@ -3,8 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const repo = "synthetic/repository";
 const retained = "Retained result 1 for exercise";
-const disclosure = `summary[aria-label="Score and feedback for ${repo}, exercise"]`;
-const retainedDisclosure = `summary[aria-label="${retained} in ${repo}"]`;
+const disclosure = `button[aria-label="Score and feedback for ${repo}, exercise"]`;
+const retainedDisclosure = `button[aria-label="${retained} in ${repo}"]`;
 const section = `section[aria-label="${retained} draft for ${repo}"]`;
 const overallLabel = `${retained} overall feedback for ${repo}`;
 const expand = `button[aria-label="Expand ${overallLabel}"]`;
@@ -16,7 +16,7 @@ const retainedScore = `input[aria-label="${retained} score for ${repo}"]`;
 const overall = `textarea[aria-label="${overallLabel}"]`;
 const expanded = `textarea[aria-label="${overallLabel} (expanded)"]`;
 const dialog = `[role="dialog"][aria-label="${overallLabel}"]`;
-const original = `${section} details`;
+const original = `${section} button[aria-label="Original generated feedback"]`;
 const status = `${section} [role="status"]`;
 const saveRefusal = "Saved grading results could not be stored. Your work remains available while Repo Grades stays open.";
 const copyFailure = "Could not copy to the clipboard. Select the feedback text to copy it manually.";
@@ -95,16 +95,16 @@ export async function verifyEditor({ send }) {
   const statusText = `${element(status)}?.textContent`;
   const courseTitle = `${element("h1")}?.textContent`;
   const saveStatus = `${element("main > [role=status]")}?.textContent`;
-  const originalText = `${element(original)}?.innerText`;
+  const originalText = `document.getElementById(${element(original)}.getAttribute('aria-controls'))?.innerText`;
   const originalOverall = "Original A overall";
   const editedOverall = "Reviewed \u2014 detail";
   const latestOverall = "Second review";
 
   await expect(courseTitle, "Synthetic course A", "React renders the fixture");
-  await expectAX("DisclosureTriangle", `Score and feedback for ${repo}, exercise`);
+  await expectAX("button", `Score and feedback for ${repo}, exercise`);
   assert.equal(await read(`${element(currentScore)} === null`), true);
   await openRetained();
-  await expectAX("DisclosureTriangle", `${retained} in ${repo}`);
+  await expectAX("button", `${retained} in ${repo}`);
   await expectAX("button", `Expand ${overallLabel}`);
   await expect(`${element(overall)}.value`, originalOverall, "The retained draft starts at its source");
 
@@ -128,8 +128,8 @@ export async function verifyEditor({ send }) {
   await enter(retainedScore, "7");
   await expect(`${element(currentScore)}.value`, "3", "Editing retained score leaves current score alone");
   await expect(`${element(currentStrengths)}.value`, "Current strengths A", "Retained edits leave current sections alone");
-  assert.equal(await read(`${element(currentScore)}.closest('div').innerText.includes('Current A')`), true);
-  await activate(`${original} > summary`);
+  assert.equal(await read(`${element(currentScore)}.closest('[role="region"]').innerText.includes('Current A')`), true);
+  await activate(original);
   assert.match(await read(originalText), /Original generated score 8/);
   assert.match(await read(originalText), /Original A overall/);
   assert.match(await read(originalText), /Original rubric evidence/);

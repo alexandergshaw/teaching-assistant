@@ -24,7 +24,9 @@
 // async body that awaits before any setState. This file only reads that
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, InputBase } from "@mui/material";
+import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
@@ -54,6 +56,7 @@ import {
   shouldPersistFolderDrop,
 } from "./repoGradesFolderSelection";
 import RepoGradesControls from "./RepoGradesControls";
+import RepoGradeCourseFilters from "./RepoGradeCourseFilters";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
@@ -114,8 +117,10 @@ export default function RepoGradesTab() {
 }
 
 function AccountRepoGradesTab({ accountId }: { accountId: string }) {
+  const setupId = useId();
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
   const [provider] = useLlmProvider();
+  const handleCourseIdChange = (courseId: string) => setUiState((prev) => ({ ...prev, courseId }));
 
   useEffect(() => {
     persistRepoGradesUiState(uiState);
@@ -532,8 +537,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   // the codebase's 1000-line cap - see that hook's own header comment for
   // the full rationale and the exact param surface.
   const {
-    isCurrent: isCurrentCellScope,
-    handleRetainedDraftChange,
     handleScoreChange,
     handleFeedbackFieldChange,
     handleGradeCell,
@@ -591,32 +594,37 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
       <RepoGradeReservationRecovery />
+      <RepoGradeCourseFilters
+        courses={courses}
+        courseId={uiState.courseId}
+        onCourseIdChange={handleCourseIdChange}
+      />
 
       {/* W4: one persisted "Run setup" disclosure wrapping BOTH the setup
           controls and the link-usernames panel. Defaults open until every repo
           is bound (!allBound), then collapses; an explicit toggle wins. The
           status banners sit after it so errors stay visible while collapsed. */}
-      <details
+      <Accordion
         className={gridStyles.setupRegion}
-        open={effectiveOpen(uiState.setupOpen, !allBound)}
-        onToggle={(e) => {
-          // Persist only a real user toggle, never a default flipping `open`.
-          if (e.currentTarget.open !== effectiveOpen(uiState.setupOpen, !allBound)) {
-            const value = e.currentTarget.open;
-            setUiState((prev) => ({ ...prev, setupOpen: value }));
-          }
-        }}
+        disableGutters
+        elevation={0}
+        expanded={effectiveOpen(uiState.setupOpen, !allBound)}
+        onChange={(_, value) => setUiState((prev) => ({ ...prev, setupOpen: value }))}
+        slotProps={{ transition: { timeout: 0 } }}
       >
-      <summary className={gridStyles.disclosureSummary}>
+      <AccordionSummary className={gridStyles.disclosureSummary}
+        id={`${setupId}-summary`} aria-controls={`${setupId}-content`}
+        sx={{ minHeight: 0, "& .MuiAccordionSummary-content": { my: 0, alignItems: "center" } }}>
         <span>Run setup</span>
         <span className={gridStyles.setupSummaryMeta}>{boundSummary}</span>
-      </summary>
+      </AccordionSummary>
+      <AccordionDetails sx={{ p: 0 }}>
       <RepoGradesControls
         courses={courses}
         coursesLoading={coursesLoading}
         coursesError={coursesError}
         courseId={uiState.courseId}
-        onCourseIdChange={(value) => setUiState((prev) => ({ ...prev, courseId: value }))}
+        onCourseIdChange={handleCourseIdChange}
         showOrgPrefixFilter={!!course && !missingOrg}
         orgPrefix={uiState.orgPrefix}
         onOrgPrefixChange={(value) => setUiState((prev) => ({ ...prev, orgPrefix: value }))}
@@ -682,7 +690,8 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           boundSummary={boundSummary}
         />
       )}
-      </details>
+      </AccordionDetails>
+      </Accordion>
 
       <RepoGradesStatusBanners
         hasCourse={!!course}
@@ -711,11 +720,10 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           scanLoading={scanLoading}
           scanFailed={scanError !== null}
           hasRepoPrefix={!!uiState.orgPrefix.trim()}
-          gradeRows={sortedRows}
           gradeColumns={columnsWithMapping}
-          grading={{ handleGradeCell, handleGradeColumn, handleScoreChange, handleFeedbackFieldChange, bulkRunningFolder }}
-          onRetainedDraftChange={handleRetainedDraftChange}
-          isCurrentCellScope={isCurrentCellScope}
+          assignments={assignments}
+          roster={roster}
+          studentRepos={course.studentRepos}
         />
       )}
 
@@ -793,9 +801,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       <RepoGradesStickyHeader
         searchQuery={uiState.searchQuery}
         rescanControl={course && !missingOrg ? (
-          <button type="button" className={pageStyles.linkButton} disabled={scanLoading} onClick={() => reloadScan()}>
+          <Button type="button" size="small" disabled={scanLoading} onClick={() => reloadScan()}>
             {scanLoading ? "Scanning..." : "Refresh"}
-          </button>
+          </Button>
         ) : null}
         folderControl={model && model.rows.length > 0 ? <RepoGradesFolderPicker folderOptions={folderCensus.options} folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }} selectedFolder={currentSelectedFolder} onSelectedFolderChange={handleFolderChange} folderDropNotice={folderDropNotice} /> : null}
         statusBanner={bulkRunningFolder ? (
@@ -812,10 +820,11 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         targetBranchControl={
           <label className={styles.headerField}>
             <span className={styles.headerInputLabel}>Target branch</span>
-            <input
+            <InputBase
               type="text"
-              className={styles.headerInput}
-              aria-label="Target branch (merged to)"
+              fullWidth
+              slots={{ root: "span" }}
+              slotProps={{ input: { className: styles.headerInput, "aria-label": "Target branch (merged to)" } }}
               placeholder="Blank = each repo's default branch"
               value={targetBranch}
               onChange={(e) => {
@@ -874,9 +883,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
               {[cellDraft.discardNotice, cellDraft.saveNotice].filter(Boolean).join(" ")}
             </p>
           )}
-          <button type="button" className={pageStyles.linkButton} disabled={cellDraft.savePending} onClick={handleDiscardSavedResults}>
+          <Button type="button" size="small" disabled={cellDraft.savePending} onClick={handleDiscardSavedResults}>
             Discard saved results for this course
-          </button>
+          </Button>
         </div>
       )}
     </>

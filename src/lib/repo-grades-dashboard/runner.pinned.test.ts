@@ -15,9 +15,9 @@ vi.mock("./admission-mode", () => ({ repoGradeAdmissionMode: vi.fn() }));
 
 const model = "gemini-test-version";
 const sha = "a".repeat(40);
-const treeSha = "b".repeat(40);
 const target = { repo: "school/student", folder: "lab", sourceRef: "main", sha };
 const root = "https://api.github.com/repos/school/student";
+const commitUrl = `${root}/git/commits/${sha}`;
 const zipballUrl = `${root}/zipball/${sha}`;
 const downloadUrl = `https://codeload.github.com/school/student/legacy.zip/${sha}?token=test-temporary-url`;
 const modelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=test-key`;
@@ -53,6 +53,39 @@ function preparedRuntime(settings = {}, graderIdentity = grader, preparedReadme?
   })) };
 }
 
+function gitTree(blobs: readonly { path: string; type: string; mode: string; size: number; sha: string }[]) {
+  const directories: { path: string; type: "tree"; mode: "040000"; sha: string }[] = [];
+  const parents = new Map<string, { name: string; mode: string; sha: string }[]>([["", []]]);
+  for (const blob of blobs) {
+    const parts = blob.path.split("/");
+    const name = parts.pop()!;
+    const parent = parts.join("/");
+    for (let depth = 1; depth <= parts.length; depth += 1) {
+      const path = parts.slice(0, depth).join("/");
+      if (!parents.has(path)) parents.set(path, []);
+    }
+    parents.get(parent)!.push({ name, mode: blob.mode, sha: blob.sha });
+  }
+  let rootSha = "";
+  // Descendants were inserted after their parents. Serialize each Git tree
+  // bottom-up so its parent can embed the real directory object hash.
+  for (const [path, children] of [...parents].reverse()) {
+    const bytes = Buffer.concat(children.sort((left, right) => Buffer.compare(
+      Buffer.from(left.mode === "40000" ? `${left.name}/` : left.name),
+      Buffer.from(right.mode === "40000" ? `${right.name}/` : right.name),
+    )).map(({ mode, name, sha }) => Buffer.concat([Buffer.from(`${mode} ${name}\0`), Buffer.from(sha, "hex")])));
+    const sha = createHash("sha1").update(`tree ${bytes.byteLength}\0`).update(bytes).digest("hex");
+    if (path) {
+      directories.push({ path, type: "tree", mode: "040000", sha });
+      const slash = path.lastIndexOf("/");
+      parents.get(slash < 0 ? "" : path.slice(0, slash))!.push({ name: path.slice(slash + 1), mode: "40000", sha });
+    } else {
+      rootSha = sha;
+    }
+  }
+  return { sha: rootSha, truncated: false, tree: [...directories, ...blobs] };
+}
+
 function fetchRepo(options: {
   readme?: string;
   tree?: Array<(typeof files)[keyof typeof files]>;
@@ -69,14 +102,16 @@ function fetchRepo(options: {
     ...Object.values(files),
     ...Array.from({ length: 7 }, (_, i) => ({ ...files.submission, path: `lab/helpers/h${i}.py` })),
   ];
-  const tree = inventory.map((file) => {
+  const blobs = inventory.map((file) => {
     const text = contents(file.path);
     const size = Buffer.byteLength(text);
     return { ...file, size, sha: createHash("sha1").update(`blob ${size}\0`).update(text).digest("hex") };
   });
+  const tree = gitTree(blobs);
+  const treeUrl = `${root}/git/trees/${tree.sha}?recursive=1`;
   let blobReads = 0;
   const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async (url) => {
-    const blob = tree.find(({ sha }) => url === `${root}/git/blobs/${sha}`);
+    const blob = blobs.find(({ sha }) => url === `${root}/git/blobs/${sha}`);
     if (blob) {
       if (options.throttleAfterBlobs !== undefined && blobReads >= options.throttleAfterBlobs) {
         return new Response(null, { status: 429, headers: { "Retry-After": "60" } });
@@ -85,16 +120,16 @@ function fetchRepo(options: {
       return new Response(contents(blob.path));
     }
     switch (url) {
-      case `${root}/git/commits/${sha}`:
-        return options.failTree ? new Response(null, { status: 403 }) : Response.json({ sha, tree: { sha: treeSha } });
-      case `${root}/git/trees/${treeSha}?recursive=1`:
-        return Response.json({ sha: treeSha, truncated: false, tree });
+      case commitUrl:
+        return options.failTree ? new Response(null, { status: 403 }) : Response.json({ sha, tree: { sha: tree.sha } });
+      case treeUrl:
+        return Response.json(tree);
       case zipballUrl:
         return new Response(null, { status: 302, headers: { Location: downloadUrl } });
       case downloadUrl: {
         if (options.oversizedArchive) return new Response(null, { headers: { "Content-Length": String(12 * 1024 * 1024 + 1) } });
         const archive = new JSZip();
-        for (const file of tree) {
+        for (const file of blobs) {
           if (file.path !== options.omitFromArchive) archive.file(`school-student-${sha.slice(0, 7)}/${file.path}`, contents(file.path));
         }
         return new Response(await archive.generateAsync({ type: "arraybuffer", compression: "DEFLATE", platform: "UNIX" }));
@@ -111,7 +146,7 @@ function fetchRepo(options: {
     }
   });
   vi.stubGlobal("fetch", fetcher);
-  return fetcher;
+  return Object.assign(fetcher, { treeUrl });
 }
 
 beforeEach(() => {
@@ -139,7 +174,7 @@ describe("admitted pinned repository evaluator", () => {
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
 
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+      commitUrl, fetcher.treeUrl,
       zipballUrl, downloadUrl, modelUrl,
     ]);
     expect(vi.mocked(claimRepoGrade).mock.invocationCallOrder[0]).toBeLessThan(fetcher.mock.invocationCallOrder[0]);
@@ -163,18 +198,32 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo({ omitFromArchive: "lab/helpers/h6.py" });
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      commitUrl, fetcher.treeUrl, zipballUrl, downloadUrl,
     ]);
     expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "partial" });
   });
 
   it("uses a bounded verified blob fallback for a small folder in an oversized repository", async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const blobRequests = Array.from({ length: 3 }, () => expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/));
     const fetcher = fetchRepo({ tree: [...Object.values(files), { ...files.submission, path: "lab/helper.py" }], oversizedArchive: true });
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
-      ...Array.from({ length: 3 }, () => expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/)), modelUrl,
+      commitUrl, fetcher.treeUrl, zipballUrl, downloadUrl, ...blobRequests, modelUrl,
+    ]);
+
+    fetcher.mockClear();
+    clock.mockReturnValue(start + 59_999);
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([commitUrl, ...blobRequests, modelUrl]);
+
+    fetcher.mockClear();
+    clock.mockReturnValue(start + 60_000);
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      commitUrl, zipballUrl, downloadUrl, ...blobRequests, modelUrl,
     ]);
   });
 
@@ -182,7 +231,7 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo({ oversizedArchive: true });
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("succeeded");
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      commitUrl, fetcher.treeUrl, zipballUrl, downloadUrl,
       ...Array.from({ length: 9 }, () => expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/)), modelUrl,
     ]);
     expect(fetcher.mock.calls.at(-1)?.[1].body).toContain("lab/helpers/h6.py");
@@ -196,7 +245,7 @@ describe("admitted pinned repository evaluator", () => {
     });
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+      commitUrl, fetcher.treeUrl,
     ]);
   });
 
@@ -204,36 +253,40 @@ describe("admitted pinned repository evaluator", () => {
     const fetcher = fetchRepo({ oversizedArchive: true, throttleAfterBlobs: 1 });
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl,
+      commitUrl, fetcher.treeUrl, zipballUrl, downloadUrl,
       expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/), expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/),
     ]);
     fetcher.mockClear();
     expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
-    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
-    ]);
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([commitUrl]);
     expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
   });
 
-  it("authorizes the pinned tree on each grade and reuses the archive for 30 minutes", async () => {
+  it("authorizes the pinned commit on each grade and reuses the verified archive for one hour", async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-    const thirtyMinutes = 30 * 60_000;
+    const oneHour = 60 * 60_000;
     const fetcher = fetchRepo();
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
 
     fetcher.mockClear();
-    clock.mockReturnValue(start + thirtyMinutes - 1);
+    clock.mockReturnValue(start + oneHour - 1);
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, modelUrl,
+      commitUrl, fetcher.treeUrl, modelUrl,
     ]);
 
+    const denied = fetchRepo({ failTree: true });
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "failed" });
+    expect(denied).toHaveBeenCalledExactlyOnceWith(commitUrl, expect.objectContaining({ cache: "no-store" }));
+    expect(new Headers(denied.mock.calls[0][1].headers).has("authorization")).toBe(true);
+
+    vi.stubGlobal("fetch", fetcher);
     fetcher.mockClear();
-    clock.mockReturnValue(start + thirtyMinutes);
+    clock.mockReturnValue(start + oneHour);
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`, zipballUrl, downloadUrl, modelUrl,
+      commitUrl, zipballUrl, downloadUrl, modelUrl,
     ]);
   });
 
@@ -273,7 +326,7 @@ describe("admitted pinned repository evaluator", () => {
     const instructions = "Print the answer in a saved assignment.";
     await expect(runRepoGradeTarget(plan, target, preparedRuntime({ instructions }))).resolves.toEqual({ status: "succeeded" });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${root}/git/commits/${sha}`, `${root}/git/trees/${treeSha}?recursive=1`,
+      commitUrl, fetcher.treeUrl,
       expect.stringMatching(/\/git\/blobs\/[a-f0-9]{40}$/), modelUrl,
     ]);
     expect(fetcher.mock.calls.find(([url]) => url === modelUrl)?.[1].body).toContain(instructions);

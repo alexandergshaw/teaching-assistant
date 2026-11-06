@@ -47,7 +47,7 @@ function fakeGitHub(options: { truncated?: boolean; failReadme?: boolean; files?
       case "https://api.github.com/orgs/org/repos?per_page=100&sort=full_name&page=1":
         return Response.json([{ name: "student", owner: { login: "org" }, full_name: "org/student", default_branch: "source" }]);
       case `${root}/commits/source`:
-        return Response.json({ sha: head });
+        return Response.json({ sha: head, commit: { tree: { sha: tree } } });
       case `${root}/git/commits/${commit}`:
         return Response.json({ sha: commit, tree: { sha: tree } });
       case `${root}/git/trees/${tree}?recursive=1`:

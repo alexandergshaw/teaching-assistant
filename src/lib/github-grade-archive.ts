@@ -10,7 +10,7 @@ import type { RepoTreeEntry } from "./github.files";
 const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024;
 const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 8;
-const ARCHIVE_CACHE_TTL_MS = 30 * 60_000;
+const ARCHIVE_CACHE_TTL_MS = 60 * 60_000;
 const OVERSIZED_ARCHIVE_CACHE_TTL_MS = 60_000;
 const ARCHIVE_TIMEOUT_MS = 15_000;
 const SOURCE_READ_TIMEOUT_MS = 40_000;

@@ -338,7 +338,7 @@ it("rejects stale startup selectors and prior receipts before preparing or admit
   expect(evaluateRepoGrade).not.toHaveBeenCalled();
 });
 
-it("records failed read-only preflight separately from uncertain prior work", async () => {
+it("releases this batch marker after read-only preflight and preserves uncertain prior attempt history", async () => {
   vi.spyOn(admissionMode, "repoGradeAdmissionMode").mockReturnValue("coordinated");
   discover(source());
   vi.mocked(discoverRepoGradeSources).mockRejectedValueOnce(new Error("Discovery unavailable"));
@@ -351,7 +351,7 @@ it("records failed read-only preflight separately from uncertain prior work", as
 
   readReceipts.mockResolvedValueOnce({ data: [receipt(1, { status: "unknown" })], count: 1, error: null });
   await expect(runStartupTarget()).resolves.toEqual({ status: "unknown" });
-  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "unknown" }));
+  expect(batchRpc).toHaveBeenLastCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "not-started" }));
   expect(claimRepoGrade).not.toHaveBeenCalled();
   expect(callLlm).not.toHaveBeenCalled();
 });
@@ -726,7 +726,7 @@ it.each([true, false])("distinguishes confirmed provider refusal from uncertain 
   await expect(runStartupTarget()).resolves.toMatchObject({ status, preparationDiagnostic: { status } });
   expect(fetchModel).toHaveBeenCalledTimes(1);
   expect(rpc).toHaveBeenCalledWith("repo_grade_finish_preparation", expect.objectContaining({ p_outcome: status }));
-  expect(batchRpc).toHaveBeenCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: status }));
+  expect(batchRpc).toHaveBeenCalledWith("repo_grade_finish_startup_target", expect.objectContaining({ p_status: "not-started" }));
   expect(claimRepoGrade).not.toHaveBeenCalled();
   expect(evaluateRepoGrade).not.toHaveBeenCalled();
 });
@@ -751,11 +751,13 @@ it("provisions a missing folder profile and policy for an owned programming cour
   expect(fetchModel).toHaveBeenCalledTimes(1);
 });
 
-it.each([{ missingProfile: true }, { startupDefault: true }])("requires folder scope for a saved course rubric (%j)", async (origin) => {
+it.each([{ missingProfile: true }, { startupDefault: true }])("uses pinned assignment instructions despite an unscoped course rubric (%j)", async (origin) => {
   const { events, fetchModel } = await paidPreparationFixture({ ...origin, courseRubric: "Course rubric" });
-  await expect(runStartupTarget()).resolves.toMatchObject({ status: "rubric-scope-required" });
-  expect(events).toEqual(["repo_grade_read_profile"]);
-  expect(fetchModel).not.toHaveBeenCalled();
+  await expect(runStartupTarget()).resolves.toMatchObject({ status: "no-submission", preparationDiagnostic: { status: "ready" } });
+  expect(events).toContain("repo_grade_bootstrap_preparation");
+  expect(fetchModel).toHaveBeenCalledTimes(1);
+  expect(String(fetchModel.mock.calls[0][1].body)).toContain("Describe your method and show the findings.");
+  expect(String(fetchModel.mock.calls[0][1].body)).not.toContain("Course rubric");
 });
 
 it("preserves an explicit folder profile with a saved course rubric", async () => {

@@ -31,6 +31,7 @@ const startupMigrationFile = "20261106051231_repo_grade_startup_batch.sql";
 const preparationRetryMigrationFile = "20261106053623_repo_grade_preparation_explicit_retry.sql";
 const startupRetryMigrationFile = "20261106061811_repo_grade_startup_retry_not_started.sql";
 const policyUpdateMigrationFile = "20261106122943_repo_grade_preparation_policy_update.sql";
+const coordinatedStartupMigrationFile = "20261106150707_repo_grade_coordinated_startup.sql";
 
 export function connectionOptions(args, env) {
   const [confirmation, host, port, database, user] = args;
@@ -221,11 +222,13 @@ async function main() {
     await owner.query(`begin; ${preparationRetryMigration} commit;`);
     const policyUpdateMigration = readFileSync(new URL(`../../supabase/migrations/${policyUpdateMigrationFile}`, import.meta.url), "utf8");
     await owner.query(`begin; ${policyUpdateMigration} commit;`);
+    await owner.query(`begin; ${startupRetryMigration} commit;`);
+    const coordinatedStartupMigration = readFileSync(new URL(`../../supabase/migrations/${coordinatedStartupMigrationFile}`, import.meta.url), "utf8");
+    await owner.query(`begin; ${coordinatedStartupMigration} commit;`);
     await runRubricPreparationCases({ owner, worker, contender, witness, waitForBlock });
     console.log("PASS: rubric preparation migration rollback, privileges and PostgreSQL transaction cases completed.");
-    await owner.query(`begin; ${startupRetryMigration} commit;`);
     await runStartupRetryCases({ owner, worker });
-    console.log("PASS: startup retries only recapture definitively not-started work.");
+    console.log("PASS: startup retry reclaims only work that did not acquire a grade attempt.");
     console.log("PASS: queue-v2 rollback, effective privileges and PostgreSQL transaction cases completed, including settlement.");
   } finally {
     for (const session of sessions) session.close();

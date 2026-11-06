@@ -15,10 +15,15 @@ export function repoGradeAdmissionMode(): "legacy-manual" | "coordinated" | "emb
       return process.env.REPO_GRADE_EMBEDDED_CUTOVER_CONFIRMED === "true" && repoGradeDiscoveryEnabled()
         ? "embedded-only" : "legacy-manual";
     case "coordinated":
-      // Disabled until known-safe failures and interrupted batch outcomes have
-      // independently verified recovery semantics.
-      return "unavailable";
+      // Old manual requests do not hold the shared reservation. Only enable
+      // coordinated grading after the ledger is deployed and they have drained.
+      return process.env.REPO_GRADE_COORDINATED_CUTOVER_CONFIRMED === "true" && repoGradeDiscoveryEnabled()
+        ? "coordinated" : "legacy-manual";
     default:
       return "unavailable";
   }
+}
+
+export function repoGradeStartupAvailable(mode: ReturnType<typeof repoGradeAdmissionMode>): boolean {
+  return (mode === "coordinated" || mode === "embedded-only") && repoGradeDiscoveryEnabled();
 }

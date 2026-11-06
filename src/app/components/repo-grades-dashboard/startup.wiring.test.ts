@@ -13,9 +13,10 @@ describe("Repo Grades startup wiring", () => {
     expect(home).toMatch(/<RepoGradesStartupStatus \/>\s*<RepoGradesTab \/>/);
     expect(home).toMatch(/<\/main>\s*<\/RepoGradesStartup>/);
     const component = source("./RepoGradesStartup.tsx");
-    expect(source("../../layout.tsx")).toContain('<RepoGradesStartupActivation enabled={repoGradeAdmissionMode() === "embedded-only"}>');
+    expect(source("../../layout.tsx")).toContain('<RepoGradesStartupActivation enabled={repoGradeStartupAvailable(repoGradeMode)} embeddedPilot={repoGradeMode === "embedded-only"}>');
     expect(source("./startup-activation.tsx")).toContain("createContext(false)");
     expect(component).toContain("useRepoGradesStartupActivation() && isOwnerDecision(accessDecision)");
+    expect(component).toContain("const pilotEnabled = useRepoGradesEmbeddedPilot();");
     expect(component).toContain("startupEnabled ? serverRepoGradesStartupAdapter : disabledRepoGradesStartupAdapter");
     expect(component).toContain("useRepoGradesStartup(loading ? null : user?.id ?? null, startupAdapter)");
   });

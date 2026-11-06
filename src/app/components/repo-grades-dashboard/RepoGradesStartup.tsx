@@ -18,7 +18,7 @@ import TextField from "@mui/material/TextField";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
-import { useRepoGradesStartupActivation } from "./startup-activation";
+import { useRepoGradesEmbeddedPilot, useRepoGradesStartupActivation } from "./startup-activation";
 import { serverRepoGradesStartupAdapter } from "./startup-adapter";
 import { disabledRepoGradesStartupAdapter } from "./startup-coordinator";
 import type { CourseStartupState, RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
@@ -100,7 +100,7 @@ export function useRepoGradesStartupHistoryRevision(accountId: string, courseId:
 
 export function RepoGradesStartupStatus() {
   const startup = useContext(StartupContext);
-  const pilotEnabled = useRepoGradesStartupActivation();
+  const pilotEnabled = useRepoGradesEmbeddedPilot();
   const headingId = useId();
   const stopHintId = useId();
   const progress = startup?.progress;

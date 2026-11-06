@@ -89,15 +89,20 @@ describe("repository grading admission", () => {
     expect(settleRepoGrade).toHaveBeenCalledExactlyOnceWith(claim, { outcome: "failed" });
   });
 
-  it("keeps the actual coordinated mode unavailable even when explicitly configured", async () => {
+  it("enables coordinated startup only with discovery and a verified coordinated cutover", async () => {
     const actual = await vi.importActual<typeof import("./admission-mode")>("./admission-mode");
     vi.stubEnv("REPO_GRADE_ADMISSION_MODE", "coordinated");
     vi.mocked(repoGradeAdmissionMode).mockImplementation(actual.repoGradeAdmissionMode);
     const evaluate = vi.fn(async () => complete());
-    expect(actual.repoGradeAdmissionMode()).toBe("unavailable");
+    expect(actual.repoGradeAdmissionMode()).toBe("legacy-manual");
     await expect(runWithRepoGradeAdmission(automatic, evaluate)).resolves.toEqual({ status: "runtime-unavailable" });
     expect(claimRepoGrade).not.toHaveBeenCalled();
     expect(evaluate).not.toHaveBeenCalled();
+    vi.stubEnv("REPO_GRADE_DISCOVERY_ENABLED", "true");
+    expect(actual.repoGradeAdmissionMode()).toBe("legacy-manual");
+    vi.stubEnv("REPO_GRADE_COORDINATED_CUTOVER_CONFIRMED", "true");
+    expect(actual.repoGradeAdmissionMode()).toBe("coordinated");
+    expect(actual.repoGradeStartupAvailable(actual.repoGradeAdmissionMode())).toBe(true);
   });
 
   it("preserves default legacy manual output and refuses automatic work without touching the ledger", async () => {

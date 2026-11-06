@@ -143,9 +143,8 @@ export async function prepareRepoGradeStartupProfile(
   const { accountId, courseId, folder } = scope;
   const saved = await readCurrentRepoGradeStartupProfile({ courseId, folder }, accountId);
   if (retry && !saved) return { status: "retry-unavailable" };
-  if ((!saved || saved.startupDefault) && (courseConfig.rubric_name?.trim() || courseConfig.rubric_data?.trim())) {
-    return { status: "rubric-scope-required" };
-  }
+  // Course attachments have no assignment scope. The automatic default uses
+  // the matching pinned assignment instructions to prepare its own rubric.
   const capture = saved ? { status: "ready" as const, profile: saved.profile }
     : captureRepoGradeProfile(scope, {}, getRepoGraderIdentity("gemini"));
   if (capture.status !== "ready") return null;

@@ -67,7 +67,7 @@ export async function runStartupRetryCases({ owner, worker }) {
       update public.repo_grade_startup_targets set attempt_generation = attempt.generation, unlinked_status = 'not-started'
         from attempt where user_id = '${account}' and batch_id = '${first}' and folder = 'linked';
       insert into public.repo_grade_startup_batches (user_id, id, sealed_at, expires_at, closed_at)
-        values ('${account}', '${older}', clock_timestamp() - interval '1 day', clock_timestamp(), clock_timestamp());
+        values ('${account}', '${older}', clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 minute', clock_timestamp());
       insert into public.repo_grade_startup_targets (user_id, batch_id, course_id, repo, folder, source_ref, source_sha, started_at)
         values ('${account}', '${older}', '${course}', '${repo}', 'old-unknown', 'main', '${sha}', clock_timestamp());
     `);
@@ -88,14 +88,20 @@ export async function runStartupRetryCases({ owner, worker }) {
     assert.equal(await worker.query(seal(second, 3)), "t");
     assert.equal(await worker.query(seal(contender, 1)), "f");
 
+    await owner.query(`update public.repo_grade_startup_batches set expires_at = clock_timestamp() + interval '1 minute'
+      where user_id = '${account}' and id = '${second}';`);
     assert.equal(await worker.query(start(second, "safe", otherRef)), "t");
+    assert.equal(await owner.query(`select expires_at > clock_timestamp() + interval '14 minutes'
+      from public.repo_grade_startup_batches where user_id = '${account}' and id = '${second}';`), "t");
     assert.equal(await worker.query(start(second, "expires", otherRef)), "t");
     assert.equal(await worker.query(finish(second, "expires", "not-started", otherRef)), "t");
     await owner.query(`update public.repo_grade_startup_batches set expires_at = clock_timestamp()
       where user_id = '${account}' and id = '${second}';`);
-    assert.equal(await worker.query(seal(contender, 1)), "f");
-    assert.deepEqual(await staged(third, ["expires", "safe"]), { safe: "unknown" });
-    assert.equal(await worker.query(seal(third, 1)), "t");
+    const expiredClaim = await worker.query(`select public.repo_grade_claim_startup_target(
+      ${targetArgs(second, "safe", otherRef)}, null, null, null, null);`);
+    assert.deepEqual(JSON.parse(expiredClaim), { status: "forbidden" });
+    assert.deepEqual(await staged(third, ["expires", "safe"]), {});
+    assert.equal(await worker.query(seal(third, 2)), "t");
   } finally {
     await worker.query("reset role;");
   }

@@ -145,7 +145,17 @@ export async function runRubricPreparationCases({ owner, worker, contender, witn
     const readDefault = `select public.repo_grade_read_profile('${user}', '${course}', 'bootstrap', null)`;
     assert.equal((await get(worker, readDefault)).startupDefault, true);
     await owner.query(`update public.course_hub set rubric_name = 'A course rubric' where id = '${course}';`);
-    assert.equal(await worker.query(bootstrap(basis, `'${fingerprint}'`)), "f");
+    assert.equal(await worker.query(bootstrap(basis, `'${fingerprint}'`)), "t");
+    const defaultPolicy = await get(worker, `select public.repo_grade_preparation_policy_snapshot(
+      '${user}', '${course}', 'bootstrap');`);
+    assert.equal(defaultPolicy.version, startupVersion);
+    const instructionDigest = hash(instructions);
+    const readmeKey = hash(JSON.stringify([
+      "repo-grade-preparation-v1", user, course, "bootstrap", fingerprint, "readme",
+      instructionDigest, "gemini", model, grader, startupVersion, "coding",
+    ]));
+    assert.equal(await worker.query(`select public.repo_grade_preparation_key(
+      '${user}', '${course}', 'bootstrap', ${config(course)}, '${fingerprint}', '${instructionDigest}');`), readmeKey);
     assert.equal(await worker.query(`select public.repo_grade_save_profile('${user}', '${course}', 'bootstrap',
       '${fingerprint}', '${fingerprint}', ${json(defaultProfile)});`), "t");
     assert.equal((await get(worker, readDefault)).startupDefault, false);

@@ -2,7 +2,7 @@
 
 import { planRepoGradeCourse, runRepoGradeTarget } from "@/lib/repo-grades-dashboard/runner";
 import { requireAppOwner } from "@/lib/supabase/auth";
-import { repoGradeAdmissionMode } from "@/lib/repo-grades-dashboard/admission-mode";
+import { repoGradeAdmissionMode, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
 import { repoGradeDiscoveryEnabled } from "@/lib/repo-grades-dashboard/discovery-mode";
 import { readRepoGradeHistoryForOwner, REPO_GRADE_HISTORY_PAGE_SIZE } from "@/lib/repo-grades-dashboard/ledger";
 import {
@@ -24,7 +24,7 @@ function validCourseId(courseId: unknown): courseId is string {
 }
 
 function startupAvailable(mode = repoGradeAdmissionMode()) {
-  return (mode === "coordinated" || mode === "embedded-only") && repoGradeDiscoveryEnabled();
+  return repoGradeStartupAvailable(mode);
 }
 
 const STARTUP_PREVIEW_TARGET_LIMIT = 50;
@@ -164,7 +164,6 @@ export async function runRepoGradeStartupTargetAction(
   const startupBatchId = batchId;
 
   const target = { accountId: owner.id, courseId: courseId.toLowerCase(), repo, folder, sourceRef, sha: commit };
-  let preflightIncomplete = true;
   async function evaluate() {
     const plan = await planRepoGradeCourse(owner.id, target.courseId);
     if (!plan) return { status: "forbidden" } as const;
@@ -179,7 +178,6 @@ export async function runRepoGradeStartupTargetAction(
     const history = await readRepoGradeStartupHistory(owner.id, plan.courseId, [target]);
     const status = history?.get(repoGradeStartupKey(target));
     if (!status) return { status: "storage-unavailable" } as const;
-    preflightIncomplete = false;
     if (status !== "never-attempted") return { status };
 
     // Return unretained feedback to the authorized caller for session recovery.
@@ -203,13 +201,11 @@ export async function runRepoGradeStartupTargetAction(
     if (!await startStartupTarget(batchId, target)) return { status: "storage-unavailable" } as const;
     const evaluation = await evaluate().catch(() => ({ status: "storage-unavailable" } as const));
     const { status } = evaluation;
-    // Failures in read-only preflight cannot have reached rubric preparation
-    // or grading. After preflight, preserve observed or uncertain outcomes.
-    let durableStatus: Parameters<typeof finishStartupTarget>[2] = preflightIncomplete ? "not-started" : "unknown";
-    if (status === "terminal" || status === "succeeded" || status === "no-submission") durableStatus = "already-processed";
-    if (status === "forbidden" || status === "ungraded" || status === "runtime-unavailable"
-      || status === "embedded-profile-required") durableStatus = "not-started";
-    if (status === "failed") durableStatus = "failed";
+    // This updates only an unlinked marker, under the same lock as grading
+    // admission. A claimed grade keeps its attempt status, even if the
+    // response was lost. Rubric preparation has its own paid-dispatch ledger.
+    const durableStatus = status === "terminal" || status === "succeeded" || status === "no-submission"
+      ? "already-processed" : "not-started";
     const recorded = await finishStartupTarget(batchId, target, durableStatus).catch(() => false);
     if (!recorded && !("unretainedResult" in evaluation)) return { status: "storage-unavailable" } as const;
     return evaluation;

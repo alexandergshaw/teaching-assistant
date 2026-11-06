@@ -14,7 +14,7 @@ import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
 import { ACCESS_DECISION_HEADER } from "@/lib/supabase/proxy";
 import type { AccessDecision } from "@/lib/access";
-import { repoGradeAdmissionMode } from "@/lib/repo-grades-dashboard/admission-mode";
+import { repoGradeAdmissionMode, repoGradeStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
 import { RepoGradesStartupActivation } from "./components/repo-grades-dashboard/startup-activation";
 
 export const metadata: Metadata = {
@@ -150,6 +150,7 @@ export default async function RootLayout({
 }>) {
   const themeBootstrap = `(function(){try{var t=localStorage.getItem("ta-theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="light";}})();`;
   const accessDecision = await readAccessDecisionFromGateHeader();
+  const repoGradeMode = repoGradeAdmissionMode();
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -163,7 +164,7 @@ export default async function RootLayout({
                   <DraftedGradesInboxProvider>
                     <MailInboxProvider>
                       <AccessibilityProvider>
-                        <RepoGradesStartupActivation enabled={repoGradeAdmissionMode() === "embedded-only"}>
+                        <RepoGradesStartupActivation enabled={repoGradeStartupAvailable(repoGradeMode)} embeddedPilot={repoGradeMode === "embedded-only"}>
                           {children}
                         </RepoGradesStartupActivation>
                       </AccessibilityProvider>

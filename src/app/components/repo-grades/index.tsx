@@ -28,6 +28,7 @@ import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "reac
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
+import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
   clearRepoGradeCells,
@@ -589,6 +590,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         title="Repo Grades"
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
+      <RepoGradeReservationRecovery />
 
       {/* W4: one persisted "Run setup" disclosure wrapping BOTH the setup
           controls and the link-usernames panel. Defaults open until every repo

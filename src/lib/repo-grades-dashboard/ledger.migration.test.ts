@@ -16,6 +16,9 @@ const crossRef = readFileSync(new URL(
 const dispatchBoundary = readFileSync(new URL(
   "../../../supabase/migrations/20261106035612_repo_grade_dispatch_boundary.sql", import.meta.url,
 ), "utf8");
+const preparationAdmission = readFileSync(new URL(
+  "../../../supabase/migrations/20261106043419_repo_grade_rubric_preparation_admission.sql", import.meta.url,
+), "utf8");
 const startup = readFileSync(new URL(
   "../../../supabase/migrations/20261106051231_repo_grade_startup_batch.sql", import.meta.url,
 ), "utf8");
@@ -114,6 +117,17 @@ describe("repository grading tracked dispatch migration structure", () => {
     expect(begin).toMatch(/pg_advisory_xact_lock[\s\S]*join public\.repo_grade_reservations r using \(generation, user_id\)[\s\S]*a\.claim_token = p_token[\s\S]*a\.dispatch_state = 'prepared'[\s\S]*for share[\s\S]*remaining_ms <= 0 then return null[\s\S]*set dispatch_state = 'started'/);
     expect(dispatchBoundary).toMatch(/revoke all on function public\.repo_grade_claim_tracked\([^)]+\),\s+public\.repo_grade_begin_dispatch\(uuid, bigint, uuid\) from public, anon, authenticated/);
     expect(dispatchBoundary).toMatch(/grant execute on function public\.repo_grade_claim_tracked\([^)]+\),\s+public\.repo_grade_begin_dispatch\(uuid, bigint, uuid\) to service_role/);
+  });
+
+  it("limits the operator recovery RPC to expired pre-dispatch attempts under the same account lock", () => {
+    const expiry = preparationAdmission.split("create function public.repo_grade_expire_prepared_attempts(")[1]?.split("$$;")[0];
+    expect(expiry).toContain("pg_advisory_xact_lock(pg_catalog.hashtextextended('repo-grade:' || p_user_id::text, 0))");
+    expect(expiry).toContain("where a.user_id = p_user_id and a.dispatch_state = 'prepared'");
+    expect(expiry).toContain("a.status in ('claimed', 'unknown') and a.reconciled_at is null");
+    expect(expiry).toContain("a.claimed_at <= clock_timestamp() - interval '15 minutes'");
+    expect(expiry).toMatch(/returning a\.generation[\s\S]*delete from public\.repo_grade_reservations r using expired e\s+where r\.user_id = p_user_id and r\.generation = e\.generation/);
+    expect(preparationAdmission).toMatch(/revoke all on function[^;]*public\.repo_grade_expire_prepared_attempts\(uuid\)[^;]*from public, anon, authenticated;/);
+    expect(preparationAdmission).toMatch(/grant execute on function[^;]*public\.repo_grade_expire_prepared_attempts\(uuid\)[^;]*to service_role;/);
   });
 });
 

@@ -12,6 +12,7 @@ export type RepoGradeAttemptReceiptRow = {
   mode: "automatic" | "retry" | "manual";
   status: "claimed" | RepoGradeOutcome;
   claimed_at: string;
+  dispatch_state: "prepared" | "started" | null;
 };
 
 export type RepoGradeFeedbackSections = {

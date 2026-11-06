@@ -622,6 +622,12 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      repo_grade_reservations: {
+        Row: { generation: number; user_id: string };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       repo_grade_current_profiles: {
         Row: { user_id: string; course_id: string; folder: string; configuration_fingerprint: string };
         Insert: never;

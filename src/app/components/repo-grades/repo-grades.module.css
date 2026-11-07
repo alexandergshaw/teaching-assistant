@@ -532,7 +532,23 @@
 
 .rubricBreakdownArea {
   gap: var(--space-2);
-  align-items: baseline;
+  align-items: flex-start;
+}
+
+.rubricBreakdownContent {
+  width: 100%;
+  min-width: 0;
+}
+
+.rubricBreakdownHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rubricBreakdownComment {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rubricBreakdownName {

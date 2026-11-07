@@ -6,7 +6,6 @@ import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import { getRepoGradeCellEdit, type RepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
-import { scorePercentValue } from "./repoGradeScoreDisplay";
 import { gradeStatusForEdit } from "./repoGradeCellStatus";
 import { matchesRepoGradeQuery } from "./repoGradesSearch";
 import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState } from "./repoGradesRows";
@@ -278,7 +277,7 @@ export function visibleRepoGradebookRows(
   const scoreForSort = (repo: MatrixRepository | undefined) => {
     if (!repo || sortFolder === undefined) return null;
     const cell = repo.cells.get(sortFolder);
-    return scorePercentValue(cell?.local?.score ?? "") ?? cell?.saved?.scored?.score ?? null;
+    return cell?.saved?.scored?.score ?? null;
   };
   const compareScores = (left: MatrixRepository | undefined, right: MatrixRepository | undefined) => {
     const a = scoreForSort(left);
@@ -298,7 +297,7 @@ export function visibleRepoGradebookRows(
         return [{ ...repo, active: active.row }];
       }
       const cell = repo.cells.get(selectedFolder);
-      const hasResult = !!(cell?.local || cell?.browserStatus || cell?.retained?.length || cell?.saved || cell?.automaticBlocks?.length);
+      const hasResult = !!(cell?.saved || cell?.automaticBlocks?.length);
       const scannedRow = scanned.get(key);
       const operational = scannedRow && (allFolders || scannedRow.cells[selectedFolder]?.status === "ungraded");
       if (selectionFiltered || operational || (!allFolders && !hasResult)

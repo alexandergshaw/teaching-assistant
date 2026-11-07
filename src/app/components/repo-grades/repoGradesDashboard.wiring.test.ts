@@ -11,6 +11,7 @@ const dashboard = readFileSync(new URL("./RepoGradesDashboard.tsx", import.meta.
 const feedback = readFileSync(new URL("./RepoDashboardFeedback.tsx", import.meta.url), "utf8");
 const gradingActions = readFileSync(new URL("./useRepoGradesGradingActions.ts", import.meta.url), "utf8");
 const filters = readFileSync(new URL("./RepoGradeCourseFilters.tsx", import.meta.url), "utf8");
+const targetActions = readFileSync(new URL("./RepoTargetGradeActions.tsx", import.meta.url), "utf8");
 
 function findCourseDashboardMount(source: string, component = "RepoGradesDashboard"): JsxSelfClosingElement | null {
   const file = ts.createSourceFile("index.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -22,7 +23,7 @@ function findCourseDashboardMount(source: string, component = "RepoGradesDashboa
   visit(file);
   if (mounts.length !== 1) return null;
   const [mount] = mounts;
-  const groupedMount = mount.parent;
+  const groupedMount = ts.isJsxFragment(mount.parent) ? mount.parent.parent : mount.parent;
   if (!ts.isParenthesizedExpression(groupedMount)) return null;
   const gate = groupedMount.parent;
   if (!ts.isBinaryExpression(gate) || gate.right !== groupedMount) return null;
@@ -44,6 +45,31 @@ function findCourseDashboardMount(source: string, component = "RepoGradesDashboa
 }
 
 describe("class repository results wiring", () => {
+  it("starts saved cell and assignment grades through the targeted durable queue", () => {
+    expect(index).toContain('targetedGrading.startTargeted(selectedCourseId, folder, repo)');
+    expect(index).toContain('onGradeCell={(row, column) => { void startSavedGrade(column.folder, row.repo); }}');
+    expect(index).toContain('onGradeColumn={(folder) => { void startSavedGrade(folder, null); }}');
+    expect(index).toContain('onGradeTarget={(repo, folder) => { void startSavedGrade(folder, repo); }}');
+    expect(grid).toContain('onGradeTarget(repo.name, folder)');
+    expect(grid).toContain('onGradeColumn(folder)');
+    expect(index).toContain('This assignment or repository is already queued');
+    expect(grid).toContain('"Grade assignment"');
+    expect(targetActions).toContain('Start grading');
+  });
+
+  it("disables root grading and explains the saved worker limitation", () => {
+    expect(grid).toContain('!column.folder || !durableGradeAvailable');
+    expect(grid).toContain('root={!folder}');
+    expect(targetActions).toContain('disabled={root || !available || pending}');
+    expect(targetActions).toContain('Repository root grading is not supported by the background worker.');
+    expect(index).toContain('Repository root assignments are excluded from bulk grading.');
+  });
+  it("prevents grading controls from acting on unavailable queue status", () => {
+    expect(index).toContain('!targetRequests.ready');
+    expect(index).toContain('Displayed request statuses may be out of date; grading controls are disabled until status is restored.');
+    expect(index).toContain('void targetRequests.refresh()');
+    expect(index).toContain('Previously completed or uncertain attempts are not automatically regraded.');
+  });
   it("uses the course setter for class chips and clears the old class on an institution change", () => {
     expect(index).toMatch(/<RepoGradeCourseFilters\s+courses=\{courses\}\s+courseId=\{uiState.courseId\}\s+onCourseIdChange=\{handleCourseIdChange\}/);
     expect(index).toMatch(/<RepoGradesControls[\s\S]*?onCourseIdChange=\{handleCourseIdChange\}/);
@@ -99,44 +125,20 @@ describe("class repository results wiring", () => {
     expect(dashboard).toMatch(/scored\.generation !== latest\.generation && scored\.status === "partial" && <> <RepoGradeStatusChip status="partial"/);
   });
 
-  it("labels an earlier browser score and uses that score's own truncation evidence", () => {
-    expect(dashboard).toContain('earlierBrowserScore ? "Earlier browser score "');
-    expect(dashboard).toMatch(/!editable && cell\?\.local[\s\S]*?\{browserScoreLabel\}\{cell\.local\.score\}[\s\S]*?\{cell\.local\.submissionTruncated && [^>]+>Submission truncated</);
-  });
-
-  it("shows the newest retained result outside its disclosure and copies the immutable generated source", () => {
-    expect(dashboard).toContain("const latestRetained = (editableEdit?.retainedResults ?? cell?.retained)?.at(-1)");
-    expect(dashboard).toContain("const retainedSource = latestRetained?.source");
-    expect(dashboard).toMatch(/Latest retained score \{retainedSource\.score[\s\S]*?<RepoGradeRubricScores areas=\{retainedSource\.rubricAreas\}[\s\S]*?<FeedbackDisclosure compact title="Retained results"/);
-    expect(dashboard).toMatch(/overall: retainedSource\.comment, strengths: retainedSource\.strengths/);
-    expect(dashboard).toMatch(/source="retained" feedback=\{retainedFeedback\} distinguishSource retainedSource=\{latestRetained\.source\}/);
-  });
-
-  it("joins the existing grading controls and scoped, read-only saved results in the same cell", () => {
-    expect(grid).toMatch(/<RepoGradeCellControl[\s\S]*?<RepoGradeResultDetails repo=\{repo\} folder=\{folder\}/);
+  it("shows saved results and copy control without browser results", () => {
+    expect(grid).toContain('<RepoTargetGradeActions');
     expect(dashboard).toContain("repo.cells.get(folder)");
-    expect(dashboard).toContain("!editable && cell?.local");
-    expect(dashboard).toContain('source="browser"');
-    expect(dashboard).toContain('source="saved"');
-    expect(dashboard).toContain("cell?.retained?.map");
-    expect(dashboard).toContain("rubric={source.rubricAreas}");
-    expect(index).toContain('useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision)');
-    expect(index).toContain("Saved results are incomplete");
-    expect(index).toMatch(/\(saved\.hasOlder \|\| saved\.olderComplete\) && \(\s*<Button[^>]+aria-disabled=\{saved.pending \|\| saved.olderComplete\} onClick=\{saved.loadOlder\}/);
-    expect(feedback).toContain('copy("all", copyAllFeedbackText(feedback), "all")');
-    expect(dashboard).not.toMatch(/postCanvasGradesAction|handlePost|handleGradeCell|handleGradeColumn/);
-  });
-
-  it("keeps the browser and saved copy buttons after the cell disclosures", () => {
-    expect(grid).toContain("editableEdit={editableEdit}");
-    expect(dashboard).toContain("const browserEdit = editableEdit ?? cell?.local");
-    expect(dashboard).toMatch(/<SavedMatrixResult[\s\S]*?<RepoResultCopy[^>]*source="browser" feedback=\{browserFeedback\}[\s\S]*?<RepoResultCopy[^>]*source="saved" feedback=\{savedFeedback\}/);
-    expect(dashboard.match(/hideCopyAll/g)).toHaveLength(3);
-    expect(cellControl).not.toContain('aria-label={`Copy feedback:');
+    expect(dashboard).toContain("<SavedMatrixResult");
+    expect(dashboard).toContain('source="saved" feedback={feedback}');
+    expect(dashboard).not.toContain('source="browser"');
+    expect(dashboard).not.toContain("cell?.local");
+    expect(dashboard).not.toContain("cell?.retained");
+    expect(dashboard).toContain("scored.rubric ?? []");
+    expect(grid).toContain('<MenuItem key="post" disabled');
   });
 
   it("suppresses the idle browser grade status beside a saved attempt and leaves manual grading reachable", () => {
-    expect(grid).toContain("hasSavedResult={!!repo.cells.get(folder)?.saved}");
+    expect(grid).toContain('requests={findTargetRequests(targetRequests, targetCourseId, folder, repo.name)}');
     expect(cellControl).toContain('(!hasSavedResult || status !== "not-started")');
     expect(cellControl).toContain('placeholder={hasSavedResult ? "Browser score" : "Score"}');
     expect(cellControl).toMatch(/status !== "not-started"[\s\S]*?<RepoGradeStatusChip[\s\S]*?<RepoGradeActionsMenu[\s\S]*?<MenuItem key="grade"[\s\S]*?else onGrade\(\);/);

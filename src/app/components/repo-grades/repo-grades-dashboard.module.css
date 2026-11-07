@@ -88,6 +88,32 @@
   display: grid;
   justify-items: start;
   gap: var(--space-1);
+  position: relative;
+  width: 100%;
+}
+
+.matrixActions {
+  position: absolute;
+  inset: 0 0 auto auto;
+  z-index: 1;
+}
+
+.matrixActions > div {
+  min-width: 0;
+}
+
+.matrixScoreHead {
+  box-sizing: border-box;
+  min-height: var(--rg-rubric-head, 4.5rem);
+  padding-right: 2.75rem;
+}
+
+.matrixRepoHead {
+  height: 1.5rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .matrixResult + .matrixResult {

@@ -4,7 +4,7 @@ import { repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/ad
 import {
   automaticPreparationRetry, controlAutomaticRepoGrade, isAutomaticRepoGradeId, readAutomaticRecovery,
   readAutomaticRepoGrade, saveAutomaticRepoGradeSchedule,
-  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry, startTargetedAutomaticRepoGrade,
+  saveAutomaticRepoGradeClassQueue, saveAutomaticRepoGradeGithubRetry, startTargetedAutomaticRepoGrade, enqueueBulkAutomaticRepoGrade, enqueueCellsAutomaticRepoGrade,
 } from "@/lib/repo-grades-dashboard/automatic-store";
 import type { AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import { parseAutomaticRepoGradeSchedule } from "@/lib/repo-grades-dashboard/automatic-schedule";
@@ -69,7 +69,52 @@ export async function startRepoGradeTargetedRunAction(
     if (!owner || !name || extra !== undefined || repo.length > 200 || !validateGithubOwnerRepo(owner, name)) return unavailable;
   }
   try {
-    return { status: await startTargetedAutomaticRepoGrade(accountId, courseId, folder, repo) ? "started" : "busy" };
+    const result = await startTargetedAutomaticRepoGrade(accountId, courseId, folder, repo);
+    return { status: result === "queued" ? "started" : result === "already-queued" ? "busy" : "unavailable" };
+  } catch {
+    return unavailable;
+  }
+}
+
+/** Bulk selectors only narrow the server-discovered inventory. */
+export async function startRepoGradeBulkRunAction(
+  expectedAccountId: unknown, courseId: unknown, folders: unknown, repos: unknown,
+): Promise<{ status: "started" | "busy" | "unavailable" }> {
+  const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
+  if (!accountId || !isAutomaticRepoGradeId(courseId)
+    || !(folders === null || (Array.isArray(folders) && folders.length > 0 && folders.length <= 1000
+      && Array.from(folders).every((folder) => isRepoGradeProfileFolder(folder) && folder.length <= 512)))
+    || !(repos === null || (Array.isArray(repos) && repos.length > 0 && repos.length <= 1000
+      && Array.from(repos).every((repo) => {
+        if (typeof repo !== "string" || repo.length > 200) return false;
+        const [owner, name, extra] = repo.split("/");
+        return !!owner && !!name && extra === undefined && validateGithubOwnerRepo(owner, name);
+      })))) return unavailable;
+  try {
+    const result = await enqueueBulkAutomaticRepoGrade(accountId, courseId, folders as string[] | null, repos as string[] | null);
+    return { status: result === "queued" ? "started" : result === "already-queued" ? "busy" : "unavailable" };
+  } catch {
+    return unavailable;
+  }
+}
+
+/** Exact cells are evaluated only after matching the server-discovered inventory. */
+export async function startRepoGradeCellsRunAction(expectedAccountId: unknown, courseId: unknown, cells: unknown)
+  : Promise<{ status: "started" | "busy" | "unavailable" | "too-many" }> {
+  const accountId = resolveAccount(expectedAccountId, await requireAppOwner().catch(() => null));
+  if (!accountId || !isAutomaticRepoGradeId(courseId) || !Array.isArray(cells) || cells.length === 0) return unavailable;
+  if (cells.length > 1000) return { status: "too-many" };
+  const pairs: { folder: string; repo: string }[] = [];
+  for (const cell of cells) {
+    if (!cell || typeof cell !== "object" || !isRepoGradeProfileFolder(cell.folder) || cell.folder.length > 512
+      || typeof cell.repo !== "string" || cell.repo.length > 200) return unavailable;
+    const [owner, name, extra] = cell.repo.split("/");
+    if (!owner || !name || extra !== undefined || !validateGithubOwnerRepo(owner, name)) return unavailable;
+    pairs.push({ folder: cell.folder, repo: cell.repo });
+  }
+  try {
+    const result = await enqueueCellsAutomaticRepoGrade(accountId, courseId, pairs);
+    return { status: result === "queued" ? "started" : result === "already-queued" ? "busy" : "unavailable" };
   } catch {
     return unavailable;
   }

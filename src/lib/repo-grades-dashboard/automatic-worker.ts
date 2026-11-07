@@ -49,8 +49,9 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
         accountId, courseId, organization: plan.courseConfig.github_org, discovery,
       }], new Map(), false);
       const targets = [...schedule.work.values()].map(({ target }) => target).filter((target) =>
-        !work.targetFilter || (target.folder === work.targetFilter.folder
-          && (work.targetFilter.repo === null || target.repo === work.targetFilter.repo)));
+        !work.targetFilter || (work.targetFilter.pairs ? work.targetFilter.pairs.some((pair) => pair.folder === target.folder && pair.repo === target.repo)
+          : ((work.targetFilter.folders === null || work.targetFilter.folders.includes(target.folder))
+            && (work.targetFilter.repos === null || work.targetFilter.repos.includes(target.repo)))));
       if (targets.length > 1000) return { state: "partial", reason: "target-limit", targets: [], repositories };
       if (work.targetFilter && targets.length === 0) return { state: "partial", reason: "target-not-found", targets: [], repositories };
       const bounded = targets.filter(({ folder, sourceRef }) => folder.length <= 512 && sourceRef.length <= 255);

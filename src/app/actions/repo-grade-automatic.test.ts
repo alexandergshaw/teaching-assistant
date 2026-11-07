@@ -3,11 +3,11 @@ import { getAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import { createClient } from "@/lib/supabase/server";
 import {
   setRepoGradeAutomaticClassQueueAction, setRepoGradeAutomaticGithubRetryAction, setRepoGradeAutomaticScheduleAction,
-  startRepoGradeAutomaticRunAction, startRepoGradeTargetedRunAction, stopRepoGradeAutomaticRunAction,
+  startRepoGradeAutomaticRunAction, startRepoGradeTargetedRunAction, startRepoGradeBulkRunAction, startRepoGradeCellsRunAction, stopRepoGradeAutomaticRunAction,
 } from "./repo-grade-automatic";
 
 const mocks = vi.hoisted(() => ({
-  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(), targeted: vi.fn(),
+  control: vi.fn(), read: vi.fn(), saveSchedule: vi.fn(), saveGithubRetry: vi.fn(), saveClassQueue: vi.fn(), targeted: vi.fn(), bulk: vi.fn(), cells: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/app-users", async (original) => ({
@@ -20,6 +20,8 @@ vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   saveAutomaticRepoGradeGithubRetry: mocks.saveGithubRetry,
   saveAutomaticRepoGradeClassQueue: mocks.saveClassQueue,
   startTargetedAutomaticRepoGrade: mocks.targeted,
+  enqueueBulkAutomaticRepoGrade: mocks.bulk,
+  enqueueCellsAutomaticRepoGrade: mocks.cells,
   saveAutomaticRepoGradeSchedule: mocks.saveSchedule, isAutomaticRepoGradeId: (id: unknown) => typeof id === "string",
 }));
 vi.mock("./repo-grades-dashboard", () => ({ retryRepoGradePreparationAction: vi.fn() }));
@@ -46,15 +48,33 @@ describe("owner automatic grading controls", () => {
   });
 
   it("starts only owner-authorized well-formed selected course targets", async () => {
-    mocks.targeted.mockResolvedValue(true);
+    mocks.targeted.mockResolvedValue("queued");
     expect(await startRepoGradeTargetedRunAction("foreign", "course", "lab", null)).toEqual({ status: "unavailable" });
     expect(await startRepoGradeTargetedRunAction("owner", "course", "../lab", null)).toEqual({ status: "unavailable" });
     expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", "bad/repo/extra")).toEqual({ status: "unavailable" });
     expect(mocks.targeted).not.toHaveBeenCalled();
     expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", "org/student")).toEqual({ status: "started" });
     expect(mocks.targeted).toHaveBeenCalledWith("owner", "course", "lab", "org/student");
-    mocks.targeted.mockResolvedValue(false);
+    mocks.targeted.mockResolvedValue("already-queued");
     expect(await startRepoGradeTargetedRunAction("owner", "course", "lab", null)).toEqual({ status: "busy" });
+  });
+
+  it("queues one authorized bulk selection and rejects malformed selections", async () => {
+    mocks.bulk.mockResolvedValue("queued");
+    expect(await startRepoGradeBulkRunAction("foreign", "course", ["lab"], ["org/student"])).toEqual({ status: "unavailable" });
+    expect(await startRepoGradeBulkRunAction("owner", "course", ["../lab"], null)).toEqual({ status: "unavailable" });
+    expect(await startRepoGradeBulkRunAction("owner", "course", ["lab"], ["bad/repo/extra"])).toEqual({ status: "unavailable" });
+    expect(mocks.bulk).not.toHaveBeenCalled();
+    expect(await startRepoGradeBulkRunAction("owner", "course", ["lab", "lab2"], ["org/student"])).toEqual({ status: "started" });
+    expect(mocks.bulk).toHaveBeenCalledWith("owner", "course", ["lab", "lab2"], ["org/student"]);
+  });
+
+  it("queues exact selected cells together without expanding their cross product", async () => {
+    const cells = [{ folder: "lab", repo: "org/one" }, { folder: "other", repo: "org/two" }];
+    mocks.cells.mockResolvedValue("queued");
+    expect(await startRepoGradeCellsRunAction("owner", "course", cells)).toEqual({ status: "started" });
+    expect(mocks.cells).toHaveBeenCalledWith("owner", "course", cells);
+    expect(await startRepoGradeCellsRunAction("owner", "course", Array(1001).fill(cells[0]))).toEqual({ status: "too-many" });
   });
 
   it("persists a GitHub retry preference only for the active owner and a boolean choice", async () => {

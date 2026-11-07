@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(), finish: vi.fn(), getUserById: vi.fn(), resolve: vi.fn(), runAsOwner: vi.fn(), worker: vi.fn(),
-  mode: vi.fn(), enabled: vi.fn(), enqueueDue: vi.fn(),
+  mode: vi.fn(), enabled: vi.fn(), enqueueDue: vi.fn(), promote: vi.fn(),
 }));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({
   repoGradeAdmissionMode: mocks.mode, repoGradeDurableStartupAvailable: mocks.enabled,
 }));
 vi.mock("@/lib/repo-grades-dashboard/automatic-store", () => ({
   claimAutomaticRepoGrade: mocks.claim, finishAutomaticRepoGrade: mocks.finish, enqueueDueAutomaticRepoGrades: mocks.enqueueDue,
+  promoteTargetedAutomaticRepoGrade: mocks.promote,
 }));
 vi.mock("@/lib/repo-grades-dashboard/automatic-worker", () => ({ createAutomaticRepoGradeWorker: () => mocks.worker }));
 vi.mock("@/lib/supabase/owner-context", () => ({
@@ -32,6 +33,7 @@ describe("durable repository grading worker route", () => {
     mocks.mode.mockReturnValue("coordinated");
     mocks.enabled.mockReturnValue(true);
     mocks.enqueueDue.mockResolvedValue({ accepted: 0, failed: 0 });
+    mocks.promote.mockResolvedValue(false);
     mocks.claim.mockResolvedValueOnce(work).mockResolvedValue(null);
     mocks.finish.mockResolvedValue(true);
     mocks.getUserById.mockResolvedValue({ data: { user: { id: accountId, email: "owner@example.test", email_confirmed_at: "verified" } } });
@@ -74,6 +76,7 @@ describe("durable repository grading worker route", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ status: "schedule-unavailable", handled: 1, scheduled: { accepted: 0, failed: 1 } });
     expect(mocks.finish).toHaveBeenCalledTimes(1);
+    expect(mocks.promote.mock.invocationCallOrder[0]).toBeLessThan(mocks.enqueueDue.mock.invocationCallOrder[0]);
     expect(mocks.enqueueDue.mock.invocationCallOrder[0]).toBeLessThan(mocks.claim.mock.invocationCallOrder[0]);
   });
 

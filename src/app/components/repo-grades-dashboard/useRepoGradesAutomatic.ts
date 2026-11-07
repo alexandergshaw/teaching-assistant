@@ -6,7 +6,7 @@ import {
   retryRepoGradeAutomaticPreparationAction, setRepoGradeAutomaticClassQueueAction,
   setRepoGradeAutomaticEnabledAction, setRepoGradeAutomaticGithubRetryAction,
   setRepoGradeAutomaticScheduleAction,
-  startRepoGradeAutomaticRunAction, stopRepoGradeAutomaticRunAction,
+  startRepoGradeAutomaticRunAction, startRepoGradeBulkRunAction, startRepoGradeCellsRunAction, startRepoGradeTargetedRunAction, stopRepoGradeAutomaticRunAction,
 } from "@/app/actions/repo-grade-automatic";
 import type { AutomaticRepoGradeRun, AutomaticRepoGradeStatus } from "@/lib/repo-grades-dashboard/automatic-status";
 import type { AutomaticRepoGradeScheduleDraft } from "@/lib/repo-grades-dashboard/automatic-schedule";
@@ -128,6 +128,45 @@ export function useRepoGradesAutomatic(accountId: string | null) {
       return status?.status === "loaded" && !!status.classQueue;
     },
     start: () => change(startRepoGradeAutomaticRunAction, "background_start"),
+    async startTargeted(courseId: string, folder: string, repo: string | null) {
+      const connection = controller.current;
+      if (!accountId || !connection) return { status: "unavailable" } as const;
+      setPendingAccount(accountId);
+      try {
+        const result = await startRepoGradeTargetedRunAction(accountId, courseId, folder, repo)
+          .catch(() => ({ status: "unavailable" } as const));
+        if (connection === controller.current) await connection.update(() => readRepoGradeAutomaticStatusAction(accountId));
+        return result;
+      } finally {
+        setPendingAccount((previous) => previous === accountId ? undefined : previous);
+      }
+    },
+    async startCells(courseId: string, cells: { folder: string; repo: string }[]) {
+      const connection = controller.current;
+      if (!accountId || !connection) return { status: "unavailable" } as const;
+      setPendingAccount(accountId);
+      try {
+        const result = await startRepoGradeCellsRunAction(accountId, courseId, cells)
+          .catch(() => ({ status: "unavailable" } as const));
+        if (connection === controller.current) await connection.update(() => readRepoGradeAutomaticStatusAction(accountId));
+        return result;
+      } finally {
+        setPendingAccount((previous) => previous === accountId ? undefined : previous);
+      }
+    },
+    async startBulk(courseId: string, folders: string[] | null, repos: string[] | null) {
+      const connection = controller.current;
+      if (!accountId || !connection) return { status: "unavailable" } as const;
+      setPendingAccount(accountId);
+      try {
+        const result = await startRepoGradeBulkRunAction(accountId, courseId, folders, repos)
+          .catch(() => ({ status: "unavailable" } as const));
+        if (connection === controller.current) await connection.update(() => readRepoGradeAutomaticStatusAction(accountId));
+        return result;
+      } finally {
+        setPendingAccount((previous) => previous === accountId ? undefined : previous);
+      }
+    },
     stop: (runId: string) => change((id) => stopRepoGradeAutomaticRunAction(id, runId), "background_stop"),
     async readRecovery(targetId: number) {
       const connection = controller.current;

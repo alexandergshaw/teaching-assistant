@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { repoGradeAdmissionMode, repoGradeDurableStartupAvailable } from "@/lib/repo-grades-dashboard/admission-mode";
-import { claimAutomaticRepoGrade, enqueueDueAutomaticRepoGrades, finishAutomaticRepoGrade, type AutomaticRepoGradeCompletion } from "@/lib/repo-grades-dashboard/automatic-store";
+import { claimAutomaticRepoGrade, enqueueDueAutomaticRepoGrades, finishAutomaticRepoGrade, promoteTargetedAutomaticRepoGrade, type AutomaticRepoGradeCompletion } from "@/lib/repo-grades-dashboard/automatic-store";
 import { createAutomaticRepoGradeWorker } from "@/lib/repo-grades-dashboard/automatic-worker";
 import { resolveImpersonationIdentity, runAsOwner } from "@/lib/supabase/owner-context";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -30,8 +30,10 @@ export async function GET(request: Request) {
   let handled = 0;
   let scheduled = { accepted: 0, failed: 0 };
   try {
+    await promoteTargetedAutomaticRepoGrade();
     scheduled = await enqueueDueAutomaticRepoGrades().catch(() => ({ accepted: 0, failed: 1 }));
     for (let index = 0; index < MAX_CLAIMS_PER_TICK && performance.now() < deadline; index += 1) {
+      await promoteTargetedAutomaticRepoGrade();
       const lease = randomUUID();
       const work = await claimAutomaticRepoGrade(lease);
       if (work === null) break;

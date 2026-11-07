@@ -131,6 +131,8 @@ export interface RepoGradeCellControlProps {
   column: RepoGradeColumn;
   edit: RepoGradeCellEdit;
   hasSavedResult: boolean;
+  savedOnly?: boolean;
+  savedGradeAvailable?: boolean;
   /** The mapped Canvas assignment's own points value, or null when unknown
    * (no mapping yet, or the assignment carries no points value) -
    * RepoGradesGrid.tsx's pointsPossibleForColumn, the SAME value its column
@@ -174,6 +176,8 @@ export default function RepoGradeCellControl({
   column,
   edit,
   hasSavedResult,
+  savedOnly = false,
+  savedGradeAvailable = false,
   pointsPossible,
   onScoreChange,
   onFeedbackFieldChange,
@@ -378,6 +382,20 @@ export default function RepoGradeCellControl({
   const blankScore = !detailsOpen && !edit.score.trim();
   const earlierScore = !!edit.score.trim() && edit.generatedScore !== null
     && status !== "succeeded" && status !== "partial";
+
+  if (savedOnly) return (
+    <div className={styles.cellControl}>
+      <div className={styles.actionHeading}>
+        <RepoGradeActionsMenu label={`Grade actions: ${cellName}`} triggerRef={actionsTriggerRef}>
+          {(close) => [
+            <MenuItem key="grade" disabled={!savedGradeAvailable} onClick={() => { close(); onGrade(); }}>
+              <ListItemText primary="Start saved grade" secondary={!column.folder ? "Repository root grading is not supported by the saved grading worker." : undefined} />
+            </MenuItem>,
+          ]}
+        </RepoGradeActionsMenu>
+      </div>
+    </div>
+  );
 
   return (
     <div className={styles.cellControl}>

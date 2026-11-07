@@ -25,14 +25,16 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, CircularProgress, InputBase } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
-import { useRepoGradesStartupHistoryRevision } from "../repo-grades-dashboard/RepoGradesStartup";
+import { useRepoGradesStartupHistoryRevision, useRepoGradesTargetedGrading } from "../repo-grades-dashboard/RepoGradesStartup";
+import { useRepoGradeTargetRequests, type TargetCommand } from "./useRepoGradeTargetRequests";
+import { gradeSelectionKey, gradeSelectionRectangle, toggleGradeSelection, type GradeSelection } from "./repoGradeSelection";
 import { useRepoGradesAutomaticBlocks } from "../repo-grades-dashboard/useRepoGradesAutomaticBlocks";
 import RepoGradesGithubQuota from "./RepoGradesGithubQuota";
 import { useRepoGradesData } from "./useRepoGradesData";
@@ -205,6 +207,8 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const selectedCourseId = course?.id ?? null;
   const ownerId = selectedCourseId && isOwnerDecision(accessDecision) ? accountId : null;
   const historyRevision = useRepoGradesStartupHistoryRevision(ownerId ?? "", selectedCourseId ?? "");
+  const targetedGrading = useRepoGradesTargetedGrading();
+  const targetRequests = useRepoGradeTargetRequests(ownerId || null);
   const automaticBlocks = useRepoGradesAutomaticBlocks(ownerId, selectedCourseId);
   const saved = useRepoGradeMatrixResults(selectedCourseId ?? "", ownerId, historyRevision);
   const draftSnapshot = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot, () => null);
@@ -449,6 +453,16 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const gradebookRows = visibleRepoGradebookRows(
     matrix, sortedRows, bodyRows, currentSelectedFolder, uiState.searchQuery, selectionFiltered, uiState.sort,
   );
+  const [gradeSelection, setGradeSelection] = useState<{ courseId: string | null; keys: Set<string> }>({ courseId: null, keys: new Set() });
+  const selectedGradeCells = gradeSelection.courseId === selectedCourseId ? gradeSelection.keys : new Set<string>();
+  const visibleFolders = currentSelectedFolder === ALL_FOLDERS ? matrix.columns : matrix.columns.filter(({ folder }) => folder === currentSelectedFolder);
+  const visibleGradeCells = gradebookRows.flatMap(({ repos }) => repos.flatMap(({ name }) => visibleFolders
+    .filter(({ folder }) => !!folder).map(({ folder }) => ({ repo: name, folder }))));
+  const selectedVisibleCells = visibleGradeCells.filter(({ repo, folder }) => selectedGradeCells.has(gradeSelectionKey(repo, folder)));
+  const toggleGradeCells = (targets: GradeSelection[]) => setGradeSelection((previous) => ({
+    courseId: selectedCourseId,
+    keys: toggleGradeSelection(previous.courseId === selectedCourseId ? previous.keys : new Set(), targets),
+  }));
   const folderMissingCount =
     currentSelectedFolder === ALL_FOLDERS
       ? 0
@@ -563,11 +577,9 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const {
     handleScoreChange,
     handleFeedbackFieldChange,
-    handleGradeCell,
     handlePostColumn,
     handlePostOneCell,
     columnPosting,
-    handleGradeColumn,
     bulkRunningFolder,
     bulkProgress,
     bulkQueue,
@@ -594,6 +606,45 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     provider,
     setPostSummary,
   });
+
+  const startSavedGrade = async (folder: string, repo: string | null) => {
+    if (!ownerId || !selectedCourseId || !targetedGrading || !targetRequests.ready) {
+      setPostSummary("Saved repository grading is unavailable.");
+      return;
+    }
+    const result = await targetedGrading.startTargeted(selectedCourseId, folder, repo);
+    await targetRequests.refresh();
+    setPostSummary(result.status === "started"
+      ? "Saved repository grading queued for the background worker. Progress is shown in Startup repository checks; saved results refresh as grading finishes. Previously completed or uncertain attempts are not automatically regraded."
+      : result.status === "busy"
+        ? "This assignment or repository is already queued for grading."
+        : "Saved repository grading could not be started.");
+  };
+
+  const controlTargetGrade = async (id: number, command: TargetCommand) => {
+    if (!targetRequests.ready) {
+      setPostSummary("Grading queue status is unavailable. Retry before changing a request.");
+      return;
+    }
+    if (!await targetRequests.control(id, command)) setPostSummary("The grading request could not be updated. Refresh and try again.");
+  };
+
+  const gradeSelectedCells = async (cells: GradeSelection[]) => {
+    if (!ownerId || !selectedCourseId || !targetedGrading || !targetRequests.ready) return;
+    const rectangle = gradeSelectionRectangle(cells);
+    if (cells.length > 1000) {
+      setPostSummary("Select up to 1,000 cells at a time.");
+      return;
+    }
+    const result = rectangle
+      ? await targetedGrading.startBulk(selectedCourseId, rectangle.folders, rectangle.repos)
+      : await targetedGrading.startCells(selectedCourseId, cells);
+    await targetRequests.refresh();
+    setPostSummary(result.status === "started" ? "Selected grades queued. Previously completed or uncertain attempts are not automatically regraded."
+      : result.status === "busy" ? "This selection is already queued for grading."
+        : result.status === "too-many" ? "Select up to 1,000 cells at a time."
+        : "The selected grades could not be queued.");
+  };
 
   const confirmedCount = model ? model.rows.filter((row) => row.binding.state === "confirmed").length : 0;
   const allBound = !!model && model.rows.length > 0 && confirmedCount === model.rows.length;
@@ -851,6 +902,25 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         pastRunStartedAt={automaticBlocks.pastRunStartedAt} unavailable={automaticBlocks.unavailable}
         reloading={automaticBlocks.reloading} reloadReasons={automaticBlocks.reloadReasons} />
       {course && cellDraft && (
+        <>
+        {targetRequests.unavailable && <Alert severity="warning" action={<Button size="small" onClick={() => { void targetRequests.refresh(); }}>Retry</Button>}>
+          Grading queue status is unavailable. Displayed request statuses may be out of date; grading controls are disabled until status is restored.
+        </Alert>}
+        {ownerId && !targetRequests.ready && !targetRequests.unavailable && <Typography variant="caption" role="status">Loading grading queue…</Typography>}
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }} role="toolbar" aria-label="Gradebook bulk actions">
+          <FormControlLabel label="Select all visible cells" control={<Checkbox size="small"
+            checked={visibleGradeCells.length > 0 && selectedVisibleCells.length === visibleGradeCells.length}
+            indeterminate={selectedVisibleCells.length > 0 && selectedVisibleCells.length < visibleGradeCells.length}
+            disabled={!visibleGradeCells.length} onChange={() => toggleGradeCells(visibleGradeCells)} />} />
+          <Button size="small" disabled={!targetedGrading || !targetRequests.ready || !visibleGradeCells.length || targetedGrading.pending}
+            onClick={() => { void gradeSelectedCells(visibleGradeCells); }}>Grade all visible</Button>
+          <Button size="small" disabled={!targetedGrading || !targetRequests.ready || !selectedVisibleCells.length || targetedGrading.pending}
+            onClick={() => { void gradeSelectedCells(selectedVisibleCells); }}>Grade selected ({selectedVisibleCells.length})</Button>
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+          {visibleFolders.some(({ folder }) => !folder) && "Repository root assignments are excluded from bulk grading. "}
+          Previously completed or uncertain attempts are not automatically regraded.
+        </Typography>
         <RepoGradesGrid
           columns={displayedColumns}
           rows={displayedRows}
@@ -867,12 +937,20 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           cellEdits={cellEdits}
           onScoreChange={handleScoreChange}
           onFeedbackFieldChange={handleFeedbackFieldChange}
-          onGradeCell={handleGradeCell}
+          onGradeCell={(row, column) => { void startSavedGrade(column.folder, row.repo); }}
+          onGradeTarget={(repo, folder) => { void startSavedGrade(folder, repo); }}
           onAssignmentChange={handleAssignmentChange}
           onPostColumn={handlePostColumn}
           onPostOneCell={handlePostOneCell}
           columnPosting={columnPosting}
-          onGradeColumn={handleGradeColumn}
+          onGradeColumn={(folder) => { void startSavedGrade(folder, null); }}
+          durableGradeAvailable={!!targetedGrading && !!ownerId && !!selectedCourseId && targetRequests.ready}
+          durableGradePending={!!targetedGrading?.pending || !targetRequests.ready}
+          targetRequests={targetRequests.requests}
+          targetCourseId={selectedCourseId ?? ""}
+          onControlTarget={(id, command) => { void controlTargetGrade(id, command); }}
+          selectedGradeCells={selectedGradeCells}
+          onToggleGradeCells={toggleGradeCells}
           describeColumnRubric={rubricSource.describeColumn}
           bulkRunningFolder={bulkRunningFolder}
           bulkProgress={bulkProgress}
@@ -890,6 +968,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           // even if the toggle itself is on.
           codeScoringDisclosure={provider === "embedded" && uiState.runCodeScoring}
         />
+        </>
       )}
       </RepoGradesStickyHeader>
 

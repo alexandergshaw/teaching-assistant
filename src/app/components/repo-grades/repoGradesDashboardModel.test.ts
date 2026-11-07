@@ -220,15 +220,14 @@ describe("visibleRepoGradebookRows", () => {
     ]);
   });
 
-  it("keeps a confirmed no-submission result visible in folder scope without an active scan or score", () => {
+  it("does not show a browser-only no-submission result in folder scope", () => {
     const edits = { "org/archived": { Lab: { ...edit(""), gradeAttemptStatus: "no-submission" as const } } };
     const archived = buildRepoGradeMatrix(buildRepoGradesDashboard(edits, null), edits, new Map(), columns, [], roster, bindings);
-    const [student] = visibleRepoGradebookRows(archived, [], [], "Lab", "Alice", false, DEFAULT_REPO_GRADE_SORT);
-    expect(student.repos.map(({ name, active }) => [name, active])).toEqual([["org/archived", undefined]]);
-    expect(student.repos[0].cells.get("Lab")).toMatchObject({ browserStatus: "no-submission", local: null });
+    const students = visibleRepoGradebookRows(archived, [], [], "Lab", "Alice", false, DEFAULT_REPO_GRADE_SORT);
+    expect(students).toEqual([]);
   });
 
-  it("sorts by the browser percentage when available, falls back to saved results, and keeps empty scores last", () => {
+  it("sorts by saved scores even when browser scores differ, and keeps empty scores last", () => {
     const edits = { "org/a": { Lab: edit("2/10") } };
     const scores = new Map(results);
     addRepoGradeSavedPage(scores, [attempt(3, "org/a", "Lab", 95)]);
@@ -236,7 +235,7 @@ describe("visibleRepoGradebookRows", () => {
     const visibleRepos = (direction: "asc" | "desc") => visibleRepoGradebookRows(
       scoredMatrix, scannedRows, scannedRows, "Lab", "", false, { field: "folder", folder: "Lab", direction },
     )[0].repos.map(({ name }) => name);
-    expect(visibleRepos("asc")).toEqual(["org/a", "org/missing", "org/archived", "org/b"]);
-    expect(visibleRepos("desc")).toEqual(["org/archived", "org/missing", "org/a", "org/b"]);
+    expect(visibleRepos("asc")).toEqual(["org/missing", "org/archived", "org/a", "org/b"]);
+    expect(visibleRepos("desc")).toEqual(["org/a", "org/archived", "org/missing", "org/b"]);
   });
 });

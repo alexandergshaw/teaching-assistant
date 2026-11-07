@@ -28,12 +28,17 @@ describe("durable repository grading discovery", () => {
       new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
     const work = { phase: "discovering", runId: "run", accountId: "owner", courseId: "course" } as const;
     const worker = createAutomaticRepoGradeWorker("coordinated");
-    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: null } }, "lease"))
+    expect(await worker({ ...work, targetFilter: { folders: ["lab"], repos: null } }, "lease"))
       .toMatchObject({ state: "scanned", targets: [{ repo: "Org/One", folder: "lab" }, { repo: "Org/Two", folder: "lab" }] });
-    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: "Org/Two" } }, "lease"))
+    expect(await worker({ ...work, targetFilter: { folders: ["lab"], repos: ["Org/Two"] } }, "lease"))
       .toMatchObject({ state: "scanned", targets: [{ repo: "Org/Two", folder: "lab" }] });
-    expect(await worker({ ...work, targetFilter: { folder: "lab", repo: "Org/Other" } }, "lease"))
+    expect(await worker({ ...work, targetFilter: { folders: ["lab"], repos: ["Org/Other"] } }, "lease"))
       .toMatchObject({ state: "partial", reason: "target-not-found", targets: [] });
+    expect(await worker({ ...work, targetFilter: { folders: null, repos: null, pairs: [
+      { folder: "other", repo: "Org/One" }, { folder: "lab", repo: "Org/Two" },
+    ] } }, "lease")).toMatchObject({ state: "scanned", targets: [
+      { repo: "Org/One", folder: "other" }, { repo: "Org/Two", folder: "lab" },
+    ] });
   });
 
   it("keeps a throttled scan in the same run only when retry is enabled", async () => {

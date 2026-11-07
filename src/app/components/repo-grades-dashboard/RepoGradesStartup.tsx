@@ -20,6 +20,10 @@ const AutomaticContext = createContext<ReturnType<typeof useRepoGradesAutomatic>
 const StartupContext = createContext<ReturnType<typeof useRepoGradesStartup> | null>(null);
 const MANUAL_PAUSE = "Manual repository grading is paused while the Embedded pilot is selected.";
 
+export function useRepoGradesTargetedGrading() {
+  return useContext(AutomaticContext);
+}
+
 export function useRepoGradesAutomaticRun(accountId: string | null) {
   const { user, loading } = useSupabase();
   const status = useContext(AutomaticContext)?.status;

@@ -20,6 +20,8 @@ import type { RepoGradeCellEdit, RepoGradeFeedbackDraft, RetainedRepoGradeResult
 import { copyRepoFeedback, type RepoFeedbackCopyTarget } from "./repoFeedbackClipboard";
 import type { UseRepoGradesGradingActionsResult } from "./useRepoGradesGradingActions";
 import styles from "./repo-grades-dashboard.module.css";
+import { repoGradeCopyAllText } from "./repoGradeCopyAll";
+import type { RubricScore } from "./rubricAlignment";
 
 export function useFeedbackCopy(version: string, isAvailable?: () => boolean, source?: RetainedRepoGradeResult["source"]) {
   const [identity, setIdentity] = useState({ version, source });
@@ -100,22 +102,24 @@ export function FeedbackDisclosure({ title, label, expanded, onExpand, children,
   );
 }
 
-export function RepoResultCopy({ repo, folder, source, feedback, distinguishSource, retainedSource }: {
+export function RepoResultCopy({ repo, folder, source, feedback, distinguishSource, retainedSource, rubric = [] }: {
   repo: string;
   folder: string;
   source: "browser" | "saved" | "retained";
   feedback: FeedbackBoxesEdit;
   distinguishSource: boolean;
   retainedSource?: RetainedRepoGradeResult["source"];
+  rubric?: readonly RubricScore[];
 }) {
   const label = distinguishSource ? `Copy ${source} feedback` : "Copy feedback";
-  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([repo, folder, source, feedback]), undefined, retainedSource);
-  if (!Object.values(feedback).some((value) => value.trim())) return null;
+  const { copy, copiedKey, failed } = useFeedbackCopy(JSON.stringify([repo, folder, source, feedback, rubric]), undefined, retainedSource);
+  const text = repoGradeCopyAllText(feedback, rubric);
+  if (!text) return null;
   return (
     <>
       <Button type="button" size="small" variant="outlined"
         aria-label={`${copiedKey === "all" ? "Copied" : label}: ${repo}, ${folder || "repository root"}`}
-        onClick={() => void copy("all", copyAllFeedbackText(feedback), "all")}>
+        onClick={() => void copy("all", text, "all")}>
         {copiedKey === "all" ? "Copied" : label}
       </Button>
       <CopyStatus copied={copiedKey !== null} failed={failed} compact />

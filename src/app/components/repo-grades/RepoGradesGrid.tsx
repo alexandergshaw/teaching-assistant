@@ -34,14 +34,16 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
-import { useId, useState, type CSSProperties } from "react";
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Checkbox, Collapse, Link, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
 import { FeedbackDisclosure } from "./RepoDashboardFeedback";
+import { collectRubricOrder } from "./rubricAlignment";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
-import RepoGradeCellControl from "./RepoGradeCellControl";
-import RepoGradeStatusChip from "./RepoGradeStatusChip";
+import { activeTargetRequests, findTargetRequests, latestTargetRequest, RepoTargetGradeActions, TargetRequestChip, multipleTargetRequestMenuItems } from "./RepoTargetGradeActions";
+import type { TargetCommand, TargetRequest } from "./useRepoGradeTargetRequests";
+import { gradeSelectionKey } from "./repoGradeSelection";
 import type { RepoGradeQueueCommand, RepoGradeQueueSnapshot } from "./repoGradeQueue";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState, SortDirection } from "./repoGradesRows";
@@ -137,6 +139,7 @@ export interface RepoGradesGridProps {
    * patches one of the three feedback boxes for one cell. */
   onFeedbackFieldChange: (repo: string, folder: string, field: FeedbackField, value: string) => void;
   onGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
+  onGradeTarget: (repo: string, folder: string) => void;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   /** U12.52: `pointsPossible` is the SAME value pointsPossibleForColumn just
    * computed for this column's own postable count/plan above it, so the
@@ -158,6 +161,13 @@ export interface RepoGradesGridProps {
    * than one cell at a time. index.tsx builds the plan and runs it; this file
    * only reports the click. */
   onGradeColumn: (folder: string) => void;
+  durableGradeAvailable: boolean;
+  durableGradePending: boolean;
+  targetRequests: TargetRequest[];
+  targetCourseId: string;
+  onControlTarget: (id: number, action: TargetCommand) => void;
+  selectedGradeCells: ReadonlySet<string>;
+  onToggleGradeCells: (targets: { repo: string; folder: string }[]) => void;
   /** The folder currently running a bulk grade, or null when no bulk run is
    * in flight - mirrors columnPosting's per-column busy flag, but ONLY one
    * column can bulk-grade at a time (unlike posting, which tracks every
@@ -218,13 +228,16 @@ function ColumnHeaderControls({
   onAssignmentChange,
   onPostColumn,
   onGradeColumn,
+  durableGradeAvailable,
+  durableGradePending,
+  columnRequests,
+  onControlTarget,
   bulkRunningFolder,
   bulkProgress,
   bulkQueue,
   onControlGradeColumn,
   bulkSelectionOnly,
   scanTruncated,
-  rubricDescription,
   codeScoringDisclosure,
   sort,
   onSortChange,
@@ -239,6 +252,10 @@ function ColumnHeaderControls({
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   onPostColumn: (column: RepoGradeColumn, pointsPossible: number | null) => void;
   onGradeColumn: (folder: string) => void;
+  durableGradeAvailable: boolean;
+  durableGradePending: boolean;
+  columnRequests: TargetRequest[];
+  onControlTarget: (id: number, action: TargetCommand) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
   bulkQueue: RepoGradeQueueSnapshot | null;
@@ -282,7 +299,6 @@ function ColumnHeaderControls({
   // columnPosting), so "is a run in flight at all" and "is THIS column the
   // one running" are two separate checks rather than a single per-folder
   // lookup.
-  const bulkRunning = bulkRunningFolder !== null;
   const gradingThisColumn = bulkRunningFolder === column.folder;
   // U1.2/U9.38 (this file's own header comment on the "grade this column"
   // click) - the resting label must name the folder and a count derived from
@@ -304,7 +320,7 @@ function ColumnHeaderControls({
   // Resting label wording lives in the pure repoGradesRunPlan leaf; the
   // transient overlays (grading progress here, "Posting" on the Post button)
   // stay in this component because they are render state.
-  const { gradeLabel, postLabel } = repoGradesRunPlanLabels({
+  const { postLabel } = repoGradesRunPlanLabels({
     folder: column.folder,
     gradeTargetCount,
     scopedToSelection,
@@ -316,14 +332,15 @@ function ColumnHeaderControls({
   const canControl = !!queue?.waiting && queue.folderState !== "stopping";
   const command = queue?.folderState === "paused" ? "resume" : "pause";
   const gradeAllLabel = canControl ? (command === "resume" ? "Resume folder queue" : "Pause folder queue")
-    : gradingThisColumn ? "Folder run in progress" : gradeLabel;
-  const gradeDisabled = bulkRunning ? !canControl : gradeTargetCount === 0;
+    : gradingThisColumn ? "Folder run in progress" : "Grade assignment";
+  const gradeDisabled = canControl ? false : !column.folder || !durableGradeAvailable || durableGradePending || gradingThisColumn;
   const folderName = column.folder || "Repository root";
 
   // N4 items 11/13: this column's own sort - a click toggles ascending/
   // descending on THIS folder's score via toggleRepoGradeSort's "folder"
   // branch, never a decision made here.
   const folderSortActive = sort.field === "folder" && sort.folder === column.folder;
+  const activeRequests = activeTargetRequests(columnRequests);
 
   return (
     <div className={styles.columnHeader}>
@@ -335,21 +352,25 @@ function ColumnHeaderControls({
           className={styles.sortHeaderButton}
           onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", column.folder))}
           aria-label={`Sort by ${label} score`}
-          title={`${label} — sort by browser percentage when available, then saved percentage`}
+          title={`${label} — sort by saved percentage`}
         >
           <span className={styles.columnTitle}>{label}</span>
         </TableSortLabel>
+        <TargetRequestChip request={activeRequests[0] ?? latestTargetRequest(columnRequests)} />
         <RepoGradeActionsMenu label={`Folder actions: ${folderName}`}>
           {(close) => [
-            <MenuItem key="grade" disabled={gradeDisabled}
+            ...(activeRequests.length ? multipleTargetRequestMenuItems(activeRequests, durableGradeAvailable, durableGradePending, !column.folder,
+              () => onGradeColumn(column.folder), onControlTarget, close) : [<MenuItem key="grade" disabled={gradeDisabled}
               aria-describedby={gradingThisColumn ? queueStatusId : undefined}
               onClick={() => {
                 close();
                 if (canControl) onControlGradeColumn(column.folder, command);
                 else onGradeColumn(column.folder);
               }}>
-              <ListItemText primary={gradeAllLabel} secondary={gradingThisColumn ? null : rubricDescription} />
-            </MenuItem>,
+              <ListItemText primary={gradeAllLabel} secondary={gradingThisColumn ? null : !column.folder
+                ? "Repository root grading is not supported by the saved grading worker."
+                : "Uses saved automatic grading settings for this assignment."} />
+            </MenuItem>]),
             canControl && (
               <MenuItem key="stop" sx={{ color: "error.main" }} aria-label={`Stop queued grades: ${folderName}`}
                 onClick={() => {
@@ -359,7 +380,7 @@ function ColumnHeaderControls({
                 Stop queued grades
               </MenuItem>
             ),
-            <MenuItem key="post" disabled={busy || plan.postable.length === 0}
+            <MenuItem key="post" disabled
               onClick={() => {
                 close();
                 onPostColumn(column, pointsPossible);
@@ -423,26 +444,60 @@ export default function RepoGradesGrid({
   onAcceptBinding,
   assignments,
   cellEdits,
-  onScoreChange,
-  onFeedbackFieldChange,
-  onGradeCell,
+  onGradeTarget,
   onAssignmentChange,
   onPostColumn,
-  onPostOneCell,
   columnPosting,
   onGradeColumn,
+  durableGradeAvailable,
+  durableGradePending,
+  targetRequests,
+  targetCourseId,
+  onControlTarget,
+  selectedGradeCells,
+  onToggleGradeCells,
   bulkRunningFolder,
   bulkProgress,
   bulkQueue,
   onControlGradeColumn,
-  onControlGradeCell,
   bulkSelectionOnly,
   scanTruncated,
   emptyStateMessage,
   loading,
-  describeColumnRubric,
   codeScoringDisclosure,
 }: RepoGradesGridProps) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const items = Array.from(table.querySelectorAll<HTMLElement>("[data-rubric-index]"));
+    const heads = Array.from(table.querySelectorAll<HTMLElement>("[data-rubric-head]"));
+    const itemContent = items.map((item) => item.querySelector<HTMLElement>("[data-rubric-content]"));
+    const headContent = heads.map((head) => head.querySelector<HTMLElement>("[data-rubric-head-content]"));
+    const measure = () => {
+      const headHeight = Math.max(72, ...headContent.map((head) => head?.scrollHeight ?? 0));
+      const update = (name: string, value: string) => {
+        if (table.style.getPropertyValue(name) !== value) table.style.setProperty(name, value);
+      };
+      update("--rg-rubric-head", `${headHeight}px`);
+      const heights = new Map<string, number>();
+      for (const [position, item] of items.entries()) {
+        const index = item.dataset.rubricIndex;
+        if (index !== undefined) heights.set(index, Math.max(heights.get(index) ?? 44, Math.ceil(itemContent[position]?.scrollHeight ?? 0)));
+      }
+      for (const [index, height] of heights) update(`--rg-rubric-${index}`, `${height}px`);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => { frame = null; measure(); });
+    });
+    itemContent.forEach((item) => { if (item) observer.observe(item); });
+    headContent.forEach((head) => { if (head) observer.observe(head); });
+    return () => { observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame); };
+  }, [gradebookRows, gradebookRows.length, resultColumns, resultColumns.length, selectedFolder, loading]);
 
   const operationsByFolder = new Map(columns.map((column) => [column.folder, column]));
   const visibleColumns = selectedFolder === ALL_FOLDERS ? resultColumns
@@ -456,8 +511,20 @@ export default function RepoGradesGrid({
     );
   }
 
-  return (
-    <Table stickyHeader size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment"
+  const rubricOrders = new Map(visibleColumns.map(({ folder }) => {
+    const groups = [];
+    for (const student of gradebookRows) for (const repo of student.repos) {
+      groups.push(repo.cells.get(folder)?.saved?.scored?.rubric ?? []);
+    }
+    return [folder, collectRubricOrder(groups)] as const;
+  }));
+  const hasMultipleRepos = gradebookRows.some((student) => student.repos.length > 1);
+  const displayedRows = gradebookRows.flatMap((student) => student.repos.length
+    ? student.repos.map((repo) => ({ ...student, key: JSON.stringify([student.key, repo.name]), repos: [repo], multipleRepos: student.repos.length > 1 }))
+    : [{ ...student, multipleRepos: false }]);
+
+  return (<>
+    <Table ref={tableRef} stickyHeader size="small" className={styles.grid} role="table" aria-label="Repository gradebook by student and assignment"
       aria-busy={loading} style={{ "--rg-assignment-count": visibleColumns.length } as CSSProperties}>
       <colgroup>
         <col className={styles.studentTrack} />
@@ -474,11 +541,17 @@ export default function RepoGradesGrid({
             </TableSortLabel>
           </TableCell>
           {visibleColumns.map(({ folder, label }) => {
+            const columnTargets = displayedRows.flatMap(({ repos }) => repos.map((repo) => ({ repo: repo.name, folder })));
+            const selectedCount = columnTargets.filter(({ repo }) => selectedGradeCells.has(gradeSelectionKey(repo, folder))).length;
             const column = operationsByFolder.get(folder);
             const folderSortActive = sort.field === "folder" && sort.folder === folder;
             return (
               <TableCell component="th" scope="col" role="columnheader" key={folder}
                 aria-sort={sortAriaValue(folderSortActive, sort.direction)}>
+                <Checkbox size="small" checked={columnTargets.length > 0 && selectedCount === columnTargets.length}
+                  indeterminate={selectedCount > 0 && selectedCount < columnTargets.length} disabled={!folder || columnTargets.length === 0}
+                  onChange={() => onToggleGradeCells(columnTargets)}
+                  slotProps={{ input: { "aria-label": `Select all repositories in ${label}` } }} />
                 {column ? (
                   <ColumnHeaderControls
                     column={column}
@@ -491,25 +564,33 @@ export default function RepoGradesGrid({
                     onAssignmentChange={onAssignmentChange}
                     onPostColumn={onPostColumn}
                     onGradeColumn={onGradeColumn}
+                    durableGradeAvailable={durableGradeAvailable}
+                    durableGradePending={durableGradePending}
+                    columnRequests={findTargetRequests(targetRequests, targetCourseId, folder, null)}
+                    onControlTarget={onControlTarget}
                     bulkRunningFolder={bulkRunningFolder}
                     bulkProgress={bulkProgress}
                     bulkQueue={bulkQueue}
                     onControlGradeColumn={onControlGradeColumn}
                     bulkSelectionOnly={bulkSelectionOnly}
                     scanTruncated={scanTruncated}
-                    rubricDescription={describeColumnRubric(column.assignmentId)}
+                    rubricDescription="Uses saved automatic grading settings for this assignment."
                     codeScoringDisclosure={codeScoringDisclosure}
                     sort={sort}
                     onSortChange={onSortChange}
                   />
                 ) : (
-                  <TableSortLabel component="button" active={folderSortActive} direction={folderSortActive ? sort.direction : "asc"}
+                  <div className={styles.actionHeading}><TableSortLabel component="button" active={folderSortActive} direction={folderSortActive ? sort.direction : "asc"}
                     className={styles.sortHeaderButton}
                     aria-label={`Sort by ${label} score`}
-                    title={`${label} — sort by browser percentage when available, then saved percentage`}
+                    title={`${label} — sort by saved percentage`}
                     onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", folder))}>
                     <span className={styles.columnTitle}>{label}</span>
                   </TableSortLabel>
+                    <RepoTargetGradeActions label={`Folder actions: ${folder || "Repository root"}`}
+                      requests={findTargetRequests(targetRequests, targetCourseId, folder, null)} available={durableGradeAvailable}
+                      pending={durableGradePending} root={!folder} onStart={() => onGradeColumn(folder)} onControl={onControlTarget} />
+                  </div>
                 )}
               </TableCell>
             );
@@ -517,20 +598,26 @@ export default function RepoGradesGrid({
         </TableRow>
       </TableHead>
       <TableBody role="rowgroup">
-        {gradebookRows.map(({ key, name, repos }) => (
+        {displayedRows.map(({ key, name, repos, multipleRepos }) => (
           <TableRow role="row" key={key}>
             <TableCell component="th" scope="row" role="rowheader" className={styles.studentColumn}>
               {name && <strong>{name}</strong>}
               {!repos.length && <span className={dashboardStyles.matrixMeta}>No linked repository</span>}
-              {repos.map((repo) => (
-                <RepoGradebookIdentity key={repo.name} repo={repo.name} row={repo.active} linked={name !== null}
-                  roster={roster} selectedFolder={selectedFolder} selected={selected}
-                  onToggleSelected={onToggleSelected} onAcceptBinding={onAcceptBinding} />
-              ))}
+              {repos.map((repo) => {
+                const rowTargets = visibleColumns.filter(({ folder }) => !!folder).map(({ folder }) => ({ repo: repo.name, folder }));
+                const rowCount = rowTargets.filter(({ folder }) => selectedGradeCells.has(gradeSelectionKey(repo.name, folder))).length;
+                return <div key={repo.name}>
+                  <Checkbox size="small" checked={rowTargets.length > 0 && rowCount === rowTargets.length}
+                    indeterminate={rowCount > 0 && rowCount < rowTargets.length} disabled={!rowTargets.length}
+                    onChange={() => onToggleGradeCells(rowTargets)}
+                    slotProps={{ input: { "aria-label": `Select ${repo.name} for all visible assignments` } }} />
+                  <RepoGradebookIdentity repo={repo.name} row={repo.active} linked={name !== null}
+                    roster={roster} selectedFolder={selectedFolder} selected={selected}
+                    onToggleSelected={onToggleSelected} onAcceptBinding={onAcceptBinding} />
+                </div>;
+              })}
             </TableCell>
             {visibleColumns.map(({ folder, label }) => {
-              const column = operationsByFolder.get(folder);
-              const pointsPossible = column ? pointsPossibleForColumn(column, assignments) : null;
               return (
                 <TableCell role="cell" key={folder}>
                   <span className={styles.cellColumnLabel} aria-hidden="true">{label}</span>
@@ -538,29 +625,22 @@ export default function RepoGradesGrid({
                   {repos.map((repo) => {
                     const row = repo.active;
                     const cell = row?.cells[folder];
-                    const editableEdit = row && column && cell?.status === "ungraded"
-                      ? getRepoGradeCellEdit(cellEdits, row.repo, folder) : undefined;
                     return (
                       <div key={repo.name} className={dashboardStyles.matrixResult}>
-                        {repos.length > 1 && <strong>{repo.name}</strong>}
-                        {row && column && editableEdit ? (
-                          <RepoGradeCellControl
-                            row={row}
-                            column={column}
-                            edit={editableEdit}
-                            hasSavedResult={!!repo.cells.get(folder)?.saved}
-                            pointsPossible={pointsPossible}
-                            onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
-                            onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}
-                            onGrade={() => onGradeCell(row, column)}
-                            onControlGrade={(command) => onControlGradeCell(row.repo, column.folder, command)}
-                            queueState={bulkRunningFolder === column.folder ? bulkQueue?.cells.get(row.repo) : undefined}
-                            folderPaused={bulkRunningFolder === column.folder && bulkQueue?.folderState === "paused"}
-                            onPostOne={() => onPostOneCell(row, column, pointsPossible)}
-                          />
-                        ) : cell && cell.status !== "ungraded" && <RepoGradeStatusChip status={cell.status} />}
+                        {hasMultipleRepos && <div className={dashboardStyles.matrixRepoHead} title={multipleRepos ? repo.name : undefined}>
+                          {multipleRepos && <strong>{repo.name}</strong>}
+                        </div>}
+                        <div className={dashboardStyles.matrixActions}><RepoTargetGradeActions
+                          label={`Grade actions: ${repo.name} / ${folder || "Repository root"}`}
+                          requests={findTargetRequests(targetRequests, targetCourseId, folder, repo.name)}
+                          available={durableGradeAvailable} pending={durableGradePending} root={!folder}
+                          onStart={() => onGradeTarget(repo.name, folder)} onControl={onControlTarget} /></div>
+                        <Checkbox size="small" disabled={!folder}
+                          checked={selectedGradeCells.has(gradeSelectionKey(repo.name, folder))}
+                          onChange={() => onToggleGradeCells([{ repo: repo.name, folder }])}
+                          slotProps={{ input: { "aria-label": `Select ${repo.name} for ${label}` } }} />
                         <RepoGradeResultDetails repo={repo} folder={folder}
-                          editableEdit={editableEdit} scanStatus={cell?.status} />
+                          scanStatus={cell?.status} criterionOrder={rubricOrders.get(folder) ?? []} />
                       </div>
                     );
                   })}
@@ -578,6 +658,7 @@ export default function RepoGradesGrid({
         )}
       </TableBody>
     </Table>
+    </>
   );
 }
 

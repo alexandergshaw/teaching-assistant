@@ -12,7 +12,7 @@ import type { RepoGradeClaim } from "./state";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
-export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering"; targetFilter?: { folder: string; repo: string | null } }) | (ClaimScope & Selector & { phase: "grading" });
+export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering"; targetFilter?: { folders: string[] | null; repos: string[] | null; pairs?: { folder: string; repo: string }[] | null } }) | (ClaimScope & Selector & { phase: "grading" });
 type StagedSelector = Selector & {
   state?: Extract<AutomaticRepoGradeTargetState, "already-processed" | "busy" | "failed" | "partial" | "unknown">;
   reason?: "prior-attempt";
@@ -57,9 +57,23 @@ export async function controlAutomaticRepoGrade(accountId: string,
 }
 
 export async function startTargetedAutomaticRepoGrade(accountId: string, courseId: string, folder: string, repo: string | null) {
-  return await rpc("repo_grade_automatic_start_targeted", {
+  return await rpc("repo_grade_target_request_enqueue", {
     p_user_id: accountId, p_course_id: courseId, p_folder: folder, p_repo: repo,
-  }) === true;
+  });
+}
+
+export async function promoteTargetedAutomaticRepoGrade() {
+  return await rpc("repo_grade_target_request_promote", {}) === true;
+}
+
+export async function enqueueBulkAutomaticRepoGrade(accountId: string, courseId: string, folders: string[] | null, repos: string[] | null) {
+  return rpc("repo_grade_target_request_enqueue_bulk", {
+    p_user_id: accountId, p_course_id: courseId, p_folders: folders, p_repos: repos,
+  });
+}
+
+export async function enqueueCellsAutomaticRepoGrade(accountId: string, courseId: string, pairs: { folder: string; repo: string }[]) {
+  return rpc("repo_grade_target_request_enqueue_cells", { p_user_id: accountId, p_course_id: courseId, p_pairs: pairs });
 }
 
 function parseClassQueue(value: unknown): AutomaticRepoGradeClassQueue | null {
@@ -125,7 +139,14 @@ export async function claimAutomaticRepoGrade(lease: string): Promise<AutomaticR
     if (!record(filter) || !(filter.folder === null || typeof filter.folder === "string")
       || !(filter.repo === null || typeof filter.repo === "string")
       || (filter.folder === null && filter.repo !== null)) throw new Error("Invalid automatic repository grading target filter");
-    return { ...scope, phase: result.phase, ...(filter.folder !== null && { targetFilter: { folder: filter.folder, repo: filter.repo } }) };
+    if (filter.bulk === true) {
+      const validList = (value: unknown) => value === null || (Array.isArray(value) && value.length > 0 && value.length <= 1000 && value.every((entry) => typeof entry === "string"));
+      if (!validList(filter.folders) || !validList(filter.repos)
+        || !(filter.pairs === null || (Array.isArray(filter.pairs) && filter.pairs.length > 0 && filter.pairs.length <= 1000
+          && filter.pairs.every((pair) => record(pair) && typeof pair.folder === "string" && typeof pair.repo === "string")))) throw new Error("Invalid automatic repository grading bulk filter");
+      return { ...scope, phase: result.phase, targetFilter: { folders: filter.folders as string[] | null, repos: filter.repos as string[] | null, pairs: filter.pairs as { folder: string; repo: string }[] | null } };
+    }
+    return { ...scope, phase: result.phase, ...(filter.folder !== null && { targetFilter: { folders: [filter.folder], repos: filter.repo === null ? null : [filter.repo] } }) };
   }
   if (result.phase === "grading" && typeof result.repo === "string" && typeof result.folder === "string"
     && typeof result.ref === "string" && typeof result.sha === "string" && /^[0-9a-f]{40}$/.test(result.sha)) {

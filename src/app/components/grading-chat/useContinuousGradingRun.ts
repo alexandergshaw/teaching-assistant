@@ -38,6 +38,7 @@ import { buildGradeItemDetail, clientFailureClass, resultSignals, type ChatDetai
 import { RECORDING_SPLIT_ENABLED } from "@/lib/grade/constants";
 import type { RecordingSplit, RecordingWindow } from "@/lib/grade/recording-split";
 import { buildSplitEntries, classifyVideoEntry, videoRefOf, type PendingSplit } from "./recordingSplitDriver";
+import { serializeGradeItemWithOfficeSource } from "@/app/components/grading/officeSourceWire";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
@@ -50,7 +51,6 @@ import {
   mergeArrivedResults,
   buildIncrementalRun,
   classifyItemFailure,
-  stripUnneededRawBase64,
   INCREMENTAL_CONCURRENCY,
   type ArrivedItemResult,
   type GradeRunItemRequestBody,
@@ -207,7 +207,7 @@ async function postGradeRunItem(request: GradeRunItemRequestBody, sink?: ItemDia
   const res = await fetch("/api/grade-run-item", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...request, entry: stripUnneededRawBase64(request.entry) }),
+    body: serializeGradeItemWithOfficeSource(request),
   });
   const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string; videoFailure?: unknown; diagnostic?: unknown };
   if (sink) {

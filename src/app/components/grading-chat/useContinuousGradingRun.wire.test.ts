@@ -79,6 +79,24 @@ beforeEach(() => {
 });
 
 describe("useContinuousGradingRun - W3: wire strip + Files-UI restore", () => {
+  it("sends small Office source bytes for server reinspection", async () => {
+    const posted: Array<{ entry: StudentSubmissionEntry }> = [];
+    vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { entry: StudentSubmissionEntry };
+      posted.push(body);
+      return { ok: true, json: async () => ({ sourceIndex: 0, result: { student: "Zed", overallComment: "", strengths: "", improvements: "", resubmitNotice: "", rubricAreas: [], totalScore: "", feedback: "", mergedFileCount: 1, submittedFiles: body.entry.submittedFiles } }) };
+    });
+    try {
+      h0.begin(); let driver = useContinuousGradingRun({ provider: "gemini" });
+      await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+      h0.begin(); driver = useContinuousGradingRun({ provider: "gemini" });
+      const office = { ...file("a.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "QUJDRA=="), documentVisuals: { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] } };
+      prepareChatSubmissionActionMock.mockResolvedValue({ kind: "entries", entries: [{ student: "Zed", content: "c", mergedFileCount: 1, submittedFiles: [office] }], pointsPossible: null });
+      await driver.submit({ kind: "url", url: "https://canvas.example.edu/courses/1/assignments/2" });
+      await flushMicrotasks(); await flushMicrotasks();
+      expect(posted[0].entry.submittedFiles[0].rawBase64).toBe("QUJDRA==");
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("POSTs only visual base64 and restores the full submittedFiles on the result row", async () => {
     const posted: Array<{ entry: StudentSubmissionEntry }> = [];
     vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {

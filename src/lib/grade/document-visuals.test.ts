@@ -22,6 +22,7 @@ import { DOCUMENT_PICTURE_LIMIT, DOCUMENT_PICTURE_BYTE_LIMIT, DOCUMENT_VISUAL_BY
 import { canvasWorkToEntry } from "./extraction";
 import { gradeEntries } from "./engine";
 import { collectInlineVisualEvidence } from "./inline-visuals";
+import { serializeGradeItemWithOfficeSource } from "@/app/components/grading/officeSourceWire";
 import type { StudentSubmissionEntry } from "./types";
 
 // Literal expected PNG bytes, never read back from the implementation.
@@ -131,7 +132,9 @@ describe("coverage and boundaries", () => {
   });
   it("does not trust valid prepared metadata when supplied raw Office bytes are malformed", async () => {
     const entry: StudentSubmissionEntry = { student: "Student", userId: 17, content: "answer", mergedFileCount: 1, submittedFiles: [{ name: "bad.docx", extension: "docx", previewContent: "answer", previewTruncated: false, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", rawBase64: Buffer.from("corrupt").toString("base64"), documentVisuals: { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] } }] };
-    const response = await (await gradePost(request({ ...body(entry), entry }))).json();
+    const wire = JSON.parse(serializeGradeItemWithOfficeSource({ ...body(entry), entry }));
+    expect(wire.entry.submittedFiles[0].rawBase64).toBeDefined();
+    const response = await (await gradePost(request(wire))).json();
     expect(response.result.ungraded.kind).toBe("grading-failed");
     expect(response.diagnostic.visualCoverage).toBe("failed");
     expect(callLlm).not.toHaveBeenCalled();

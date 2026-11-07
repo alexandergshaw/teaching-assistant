@@ -82,6 +82,18 @@
   from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: current setup locks after a session starts and New session discards graded rows.'
   note: 'Owner: coordinator. Implement the named executable acceptance test, including changes during pending work and explicit regrade selection; never silently mix rubric versions.'
   question: null
+- id: 'CHAT-SIMPLIFY-SUBMISSION-MODES'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Simplify chat grading submissions to a single-student or multiple-student choice and file drop.'
+  owns: ['src/app/components/grading-chat', 'src/app/actions/grading-chat-intake.ts', 'src/app/api/grade-submission-zip', 'src/lib/grade/extraction.ts', 'src/app/components/grading-chat/chatSubmissionModeFlow.test.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatSubmissionModeFlow.test.ts src/file-size-ceiling.structure.test.ts'
+  blocked_by: []
+  instrument: 'Exercise the actual one-student and multiple-student selection and file-drop flows: one-student mode groups dropped files as one submission; multiple-student mode classifies supported files and archives, groups attributable work per student, and automatically starts the existing grading flow. Preserve source and identity boundaries; explicitly surface ambiguous identities, unsupported or unreadable files, oversized or partial imports, and recovery without silently dropping work or repeating grading. Cover mixed inputs, duplicate names, resets, and failures; preserve other existing submission, feedback, copy, export and posting workflows. Use suitable Material UI components and verify rendered desktop/mobile, keyboard and focus behavior in a real browser.'
+  from: 'Owner request 2026-11-07 in grading chat: choose whether uploading one or multiple student submissions, drop files in, and have the app handle the rest; current source base 7c05d17c.'
+  note: 'Owner: coordinator. This extends CHAT-STREAMLINE-WORKSPACE with an explicit submission-mode and automatic grouping workflow; coordinate rather than duplicate shared UI. Create the named executable acceptance test, prove no misattribution or silent loss, and do not treat source-only tests as browser verification.'
+  question: null
 - id: 'CHAT-STREAMLINE-WORKSPACE'
   state: 'actionable'
   kind: 'feature'

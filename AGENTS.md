@@ -77,7 +77,17 @@ Before a feature ships, ask what this app does that a chat with an LLM cannot; t
 <!-- END:leverage-question -->
 
 <!-- BEGIN:never-stall-the-loop -->
-# Two rounds, then ask (applies to the MAIN session only)
+# Fix review findings without asking to leave defects
+
+**Owner instruction, 2026-11-07:** When review finds a defect, fix it and
+continue the work. Do not ask the owner to choose between shipping a known
+defect and leaving the feature disabled merely because review found a problem,
+including after two rounds. Continue independent review and required tests.
+Ask only when a genuine missing decision, authorization, or unavailable
+resource prevents safe progress, as required by higher-priority instructions.
+This instruction supersedes the historical two-round escalation rule below.
+
+# Historical two-round rule (superseded)
 
 **Owner rule, given in session 2026-09-23.** Any activity inside the dev loop -
 a scope, an architecture pass, acceptance criteria, test notes, a plan, an RCA,

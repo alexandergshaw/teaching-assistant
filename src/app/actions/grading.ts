@@ -757,7 +757,7 @@ export async function gradeAction(
     if (canvasUrl) {
       const { students: safetyStudents } = await fetchCanvasWork(canvasUrl);
       const videoRefusal = canvasVideoRefusal(safetyStudents);
-      if (videoRefusal && provider !== "gemini") return { run: null, error: videoRefusal };
+      if (videoRefusal && provider === "other") return { run: null, error: videoRefusal };
       // SpeedGrader base URL for per-student deep links in the results table.
       // Best-effort: a failure here must not block grading.
       const speedGraderUrl = await getSpeedGraderUrl(canvasUrl).catch(() => null);
@@ -815,8 +815,9 @@ export async function gradeAction(
         }
         // Grow the rubric bank from human-authored rubrics (fire-and-forget).
         if (rubric.trim()) void rememberRubric(assignmentInstructions, rubric);
-        await attachCodeRuns(entries);
-        const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible);
+        const safeEntries = entries.filter((entry) => !canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]));
+        await attachCodeRuns(safeEntries);
+        const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible, { rejectCanvasVideo: true });
         return {
           run: { ...run, speedGraderUrl },
           error: null,

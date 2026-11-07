@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })), requireUser: vi.fn() }));
-vi.mock("@/lib/canvas", async (original) => ({ ...(await original<typeof import("@/lib/canvas")>()), fetchCanvasWork: vi.fn(), fetchSubmissionDetail: vi.fn() }));
+vi.mock("@/lib/canvas", async (original) => ({ ...(await original<typeof import("@/lib/canvas")>()), fetchCanvasWork: vi.fn(), fetchSubmissionDetail: vi.fn(), fetchAssignmentPointsPossible: vi.fn(async () => 10), getSpeedGraderUrl: vi.fn(async () => null) }));
 vi.mock("@/lib/grade", async (original) => ({ ...(await original<typeof import("@/lib/grade")>()), gradeEntries: vi.fn(), gradeCanvasUrl: vi.fn(), synthesizeFullCreditChecklist: vi.fn(), generateSampleAnswer: vi.fn() }));
+vi.mock("@/lib/code-runner", async (original) => ({ ...(await original<typeof import("@/lib/code-runner")>()), attachCodeRuns: vi.fn(async () => undefined) }));
 vi.mock("@/lib/embedded-grader", async (original) => ({ ...(await original<typeof import("@/lib/embedded-grader")>()), gradeEntriesEmbedded: vi.fn() }));
 import { fetchCanvasWork, fetchSubmissionDetail } from "@/lib/canvas";
 import { gradeEntries, gradeCanvasUrl, synthesizeFullCreditChecklist, generateSampleAnswer } from "@/lib/grade";
 import { gradeEntriesEmbedded } from "@/lib/embedded-grader";
+import { attachCodeRuns } from "@/lib/code-runner";
 import { gradeAction, gradeOneSubmissionAction } from "./grading";
 const work = { student: "Student", userId: 1, text: "written answer", files: [], contributionCount: 1, omittedVideos: [{ name: "demo.mp4", reason: "download failed" }] };
 beforeEach(() => vi.clearAllMocks());
@@ -32,7 +34,43 @@ describe("Canvas action video safety", () => {
     expect(fetchCanvasWork).toHaveBeenCalledTimes(1);
     expect(vi.mocked(gradeCanvasUrl).mock.calls[0]?.[5]).toBe(students);
   });
-  it.each(["embedded", "other"])("refuses a mixed %s whole-run before model fan-out", async (provider) => {
+  it("isolates omitted video by Canvas ID in embedded grading", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/embedded-grader")>("@/lib/embedded-grader");
+    vi.mocked(gradeEntriesEmbedded).mockImplementation(actual.gradeEntriesEmbedded);
+    const healthy = { student: "Student", userId: 2, text: "written answer", files: [], contributionCount: 1 };
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ students: [work, healthy], kind: "assignment", dueAt: null });
+    const form = new FormData();
+    form.set("canvasUrl", "https://test.instructure.com/courses/1/assignments/1");
+    form.set("provider", "embedded");
+    form.set("assignmentInstructions", "Write a short answer.");
+
+    const result = await gradeAction({} as never, form);
+    expect(result.error).toBeFalsy();
+    const rows = result.run!.results;
+    expect(rows[0].ungraded?.canvasUserId).toBe(1);
+    expect(rows[0].ungraded?.kind).toBe("grading-failed");
+    expect(rows[1].userId).toBe(2);
+    expect(rows[1].ungraded).toBeUndefined();
+    expect(rows[0].student).not.toBe(rows[1].student);
+    expect(vi.mocked(attachCodeRuns).mock.calls[0][0]).toEqual([expect.objectContaining({ userId: 2 })]);
+  });
+  it.each([
+    ["omitted video-only", { ...work, text: "" }],
+    ["downloaded video", { ...work, omittedVideos: [], files: [{ name: "demo.mp4", mimeType: "video/mp4", base64: "AAAA" }] }],
+  ])("leaves %s ungraded when there are no healthy students", async (_label, student) => {
+    const actual = await vi.importActual<typeof import("@/lib/embedded-grader")>("@/lib/embedded-grader");
+    vi.mocked(gradeEntriesEmbedded).mockImplementation(actual.gradeEntriesEmbedded);
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ students: [student], kind: "assignment", dueAt: null });
+    const form = new FormData();
+    form.set("canvasUrl", "https://test.instructure.com/courses/1/assignments/1");
+    form.set("provider", "embedded");
+    form.set("assignmentInstructions", "Write a short answer.");
+    const result = await gradeAction({} as never, form);
+    expect(result.run?.results[0].ungraded?.canvasUserId).toBe(1);
+    expect(result.run?.results[0].ungraded?.kind).toBe("grading-failed");
+    expect(vi.mocked(attachCodeRuns).mock.calls[0][0]).toEqual([]);
+  });
+  it.each(["other"])("refuses a mixed %s whole-run before model fan-out", async (provider) => {
     vi.mocked(fetchCanvasWork).mockResolvedValue({ students: [work], kind: "assignment", dueAt: null });
     const form = new FormData();
     form.set("canvasUrl", "https://test.instructure.com/courses/1/assignments/1");

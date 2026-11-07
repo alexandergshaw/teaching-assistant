@@ -61,10 +61,11 @@ beforeEach(() => {
 });
 
 describe("grade-run-item isSubmittedFileInfo: videoRef", () => {
-  it("accepts a well-formed videoRef with no rawBase64 (positive control: it reaches the model seam)", async () => {
+  it("refuses a well-formed staged video when video grading is disabled", async () => {
     const res = await POST(request(videoFile()));
-    expect(res.status).not.toBe(400);
-    expect(mockGrade).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain("demo.mp4");
+    expect(mockGrade).not.toHaveBeenCalled();
   });
 
   it("T14: videoRef + rawBase64 together is 400 and never reaches the model seam", async () => {
@@ -96,6 +97,36 @@ describe("grade-run-item isSubmittedFileInfo: videoRef", () => {
     expect(mockGrade).not.toHaveBeenCalled();
   });
 
+  it("refuses an unstaged Canvas video before calling the model", async () => {
+    const req = request({ name: "demo.mp4", extension: "mp4", previewContent: "No extractable text available for this file.", previewTruncated: false, rawBase64: "AAAA", mimeType: "video/mp4" });
+    const body = await req.json();
+    body.entry.submittedFiles.push({ name: "answer.txt", extension: "txt", previewContent: "Written answer", previewTruncated: false });
+    body.entry.content = "Written answer";
+    req.json = vi.fn(async () => body);
+    const res = await POST(req);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain("demo.mp4");
+    expect(mockGrade).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["extension alone", { name: "submission", extension: "MP4" }],
+    ["padded extension", { name: "submission", extension: " .MP4 " }],
+    ["video MIME with parameters", { name: "submission", extension: "bin", mimeType: " Video/QuickTime ; codecs=foo" }],
+    ["empty filename", { name: "", extension: "mp4" }],
+  ])("refuses unstaged video identified by %s", async (_label, fields) => {
+    const res = await POST(request({ previewContent: "", previewTruncated: false, ...fields }));
+    expect(res.status).toBe(422);
+    expect(mockGrade).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["text", { name: "answer.txt", extension: "txt", mimeType: "text/plain" }],
+    ["image", { name: "image.png", extension: "png", mimeType: "image/png" }],
+  ])("continues grading a %s file", async (_label, fields) => {
+    const res = await POST(request({ previewContent: "", previewTruncated: false, ...fields }));
+    expect(res.status).not.toBe(422);
+    expect(mockGrade).toHaveBeenCalledTimes(1);
+  });
   it("a file WITHOUT videoRef is judged exactly as before (rawBase64 still allowed)", async () => {
     const image = { name: "a.png", extension: "png", previewContent: "[Image file: a.png]", previewTruncated: false, rawBase64: "AAAA", mimeType: "image/png" };
     const res = await POST(request(image));

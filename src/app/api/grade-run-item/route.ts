@@ -7,7 +7,8 @@ import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { gradeEntries } from "@/lib/grade/engine";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
-import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
+import { VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
+import { isVideoName } from "@/lib/grade/video-grading";
 import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
 import { createGeminiFilesClient } from "@/lib/gemini-files";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
@@ -363,6 +364,12 @@ export async function POST(req: NextRequest) {
     const outcome = await raceWithTimeout(
       (async () => {
         const resolved = await resolveEntryLinks(entry);
+        const unhandledStagedVideo = !videoMode && videoFilesOf(resolved)[0];
+        if (unhandledStagedVideo) return { videoUnavailable: { name: unhandledStagedVideo.name } };
+        const unavailableVideo = resolved.submittedFiles.find((file) =>
+          (isVideoName(file.name) || VIDEO_EXTENSIONS.has(file.extension.trim().toLowerCase().replace(/^\./, "")) || (file.mimeType ?? "").split(";", 1)[0].trim().toLowerCase().startsWith("video/")) && !file.videoRef
+        );
+        if (unavailableVideo) return { unavailableVideo: { name: unavailableVideo.name } };
         if (videoMode) {
           const options = { commentSplit, harshness, feedbackWordTarget, applyNamingDeduction, applyLengthDeduction, lengthDeductionThresholdWords, callSink, ...(videoGradeWindowSec ? { videoGradeWindowSec } : {}) };
           const videoOutcome = await withEntryVideos(
@@ -396,6 +403,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: describeError(outcome.error), ...diagnosticFor("route error") }, { status: 502 });
     }
 
+    if (outcome.value.videoUnavailable) {
+      return NextResponse.json(
+        { error: `Video "${outcome.value.videoUnavailable.name || "unnamed file"}" cannot be graded while video grading is unavailable. No grade was produced.`, ...diagnosticFor("route error") },
+        { status: 422 }
+      );
+    }
+    if (outcome.value.unavailableVideo) {
+      return NextResponse.json(
+        { error: `Video "${outcome.value.unavailableVideo.name || "unnamed file"}" could not be prepared for grading. Download it and upload it directly in grading chat.`, ...diagnosticFor("route error") },
+        { status: 422 }
+      );
+    }
     const videoFailure = outcome.value.videoFailure;
     if (videoFailure) {
       return NextResponse.json(

@@ -424,14 +424,14 @@ describe("POST /api/grade-run-item (behavioral, mocked seam)", () => {
       expect(mockResolveEntryLinks.mock.calls[0][0].submissionUrl).toBe(LINK_URL);
     });
 
-    it("I-linkfetch-field: the resolved entry is what is graded, and its linkFetch is stamped onto the result", async () => {
-      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "RESOLVED", linkFetch: "failed" as const }));
+    it.each(["failed", "flagged"] as const)("I-linkfetch-field: the resolved entry is graded and %s is stamped onto the result", async (linkFetch) => {
+      mockResolveEntryLinks.mockImplementationOnce(async (entry) => ({ ...entry, content: "RESOLVED", linkFetch }));
       mockGradeEntries.mockResolvedValueOnce({ results: [{ student: "Alice" }], rubricAreaNames: [], fullCreditChecklist: [] } as never);
       settle();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await POST(jsonRequest({ ...VALID_BODY, entry: { ...VALID_BODY.entry, submissionUrl: LINK_URL } }) as any);
       const body = await res.json();
-      expect(body.result.linkFetch).toBe("failed");
+      expect(body.result.linkFetch).toBe(linkFetch);
       expect(mockGradeEntries.mock.calls[0][0][0].content).toBe("RESOLVED");
     });
 

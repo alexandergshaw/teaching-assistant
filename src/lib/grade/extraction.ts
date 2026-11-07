@@ -54,6 +54,8 @@ import { extractCanvasSubmittedUrl, normalizeSubmittedRepoUrl } from "./canvas-l
 import { planLinkResolution } from "./link-resolution-plan";
 import { fetchGoogleDriveFile } from "./google-drive-content";
 import { classifyGradingUpload, buildSingleFileEntry } from "./single-file-entry";
+import { inlineRepositoryIssue, linkedArchiveIssue, withFoldedContent, withLinkNote } from "./link-evidence";
+export { MAX_ENTRY_CONTENT_CHARS } from "./link-evidence";
 
 /** What one leaf member produced; merged into the result maps in ARCHIVE order. */
 interface LeafOutcome {
@@ -368,6 +370,8 @@ export async function ingestZipEntries(
     entry.repositoryInventories = inventories.length ? inventories : undefined;
     for (const file of folded.flatMap((repo) => repo.files)) if (!entry.submittedFiles.some((existing) => existing.name === file.name && existing.previewContent === file.previewContent)) entry.submittedFiles.push(file);
     if (folded.length === 1) { entry.gradedRepo = folded[0].gradedRepo; entry.gradedRef = folded[0].gradedRef; }
+    const issue = inlineRepositoryIssue(folded);
+    if (issue) { entry.linkFetch = issue.status; entry.repoReadNote = issue.note; }
   }
   const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
   return { entries, attemptedSupportedFiles, failedSupportedFiles, classification, videoOutcomes };
@@ -593,7 +597,7 @@ async function foldGithubRepoContent(url: string): Promise<{
       contentPart: `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`,
       gradedRepo: repoResult.repo,
       gradedRef: repoResult.ref,
-      repoReadNote: null,
+      repoReadNote: repoResult.truncated ? "The linked GitHub repository could not be read completely." : null,
       files,
       inventory: repoResult.inventory,
     };
@@ -732,43 +736,6 @@ function attachDeferredLinkUrls(
   }
 }
 
-/** Matches grade-run-item's incoming content cap; folded content is clamped to it. */
-export const MAX_ENTRY_CONTENT_CHARS = 2_000_000;
-
-function clampEntryContent(entry: StudentSubmissionEntry): StudentSubmissionEntry {
-  if (entry.content.length <= MAX_ENTRY_CONTENT_CHARS) return entry;
-  return { ...entry, content: entry.content.slice(0, MAX_ENTRY_CONTENT_CHARS) };
-}
-
-function withLinkNote(
-  entry: StudentSubmissionEntry,
-  linkFetch: "failed" | "flagged",
-  repoReadNote: string
-): StudentSubmissionEntry {
-  return clampEntryContent({
-    ...entry,
-    content: `${entry.content}\n\n---\n\nNote: ${repoReadNote}`,
-    repoReadNote,
-    linkFetch,
-  });
-}
-
-function withFoldedContent(
-  entry: StudentSubmissionEntry,
-  contentPart: string,
-  files: SubmittedFileInfo[],
-  extra: Partial<StudentSubmissionEntry>
-): StudentSubmissionEntry {
-  return clampEntryContent({
-    ...entry,
-    ...extra,
-    content: `${entry.content}\n\n---\n\n${contentPart}`,
-    submittedFiles: [...entry.submittedFiles, ...files],
-    repoReadNote: null,
-    linkFetch: "ok",
-  });
-}
-
 async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<StudentSubmissionEntry> {
   const url = entry.submissionUrl;
   if (typeof url !== "string" || url.trim().length === 0) return entry;
@@ -785,11 +752,12 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
     if (folded.gradedRepo === null) {
       return { ...withLinkNote(entry, "failed", folded.repoReadNote ?? "Could not read the linked GitHub repository."), repositoryInventories: folded.inventory ? [folded.inventory] : undefined };
     }
-    return withFoldedContent(entry, folded.contentPart, folded.files, {
+    const result = withFoldedContent(entry, folded.contentPart, folded.files, {
       gradedRepo: folded.gradedRepo,
       gradedRef: folded.gradedRef,
       repositoryInventories: folded.inventory ? [folded.inventory] : undefined,
     });
+    return folded.repoReadNote ? withLinkNote(result, "flagged", folded.repoReadNote) : result;
   }
 
   const target = parseGoogleDriveUrl(url);
@@ -823,19 +791,19 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
   }
   // M1 single-entry guard: an archive (or an unreadable file) must never fan
   // several students into this one row (the A44 blend).
+  const issue = linkedArchiveIssue(unreadableArchiveFiles, unavailableArchiveVideos, linked);
   if (linked.length !== 1) {
-    const note = unreadableArchiveFiles > 0 ? `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable) or used as a single submission.` : "the linked Drive file could not be used as a single submission";
-    const videos = unavailableArchiveVideos > 0 ? ` ${unavailableArchiveVideos} video file(s) were not available for grading.` : "";
-    return withLinkNote(entry, unreadableArchiveFiles > 0 ? "failed" : "flagged", `${note}${videos}`);
+    return withLinkNote(entry, issue?.status ?? "flagged", `The linked Drive file could not be used as a single submission.${issue ? ` ${issue.note}` : ""}`);
   }
+  const inventories = [...(entry.repositoryInventories ?? []), ...(linked[0].repositoryInventories ?? [])];
+  if (!isSubmissionFileInventories(inventories)) return withLinkNote(entry, "failed", "Linked repository inventories exceed supported metadata limits.");
   const folded = withFoldedContent(
     entry,
     `Linked Google Drive file (${fetched.name}):\n\n${linked[0].content}`,
     linked[0].submittedFiles,
-    { mergedFileCount: entry.mergedFileCount + linked[0].mergedFileCount }
+    { mergedFileCount: entry.mergedFileCount + linked[0].mergedFileCount, ...(inventories.length ? { repositoryInventories: inventories } : {}) }
   );
-  if (unreadableArchiveFiles > 0) return withLinkNote(folded, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).${unavailableArchiveVideos > 0 ? ` ${unavailableArchiveVideos} video file(s) were not available for grading.` : ""}`);
-  return unavailableArchiveVideos > 0 ? withLinkNote(folded, "flagged", `The linked Drive archive contains ${unavailableArchiveVideos} video file(s) that were not available for grading.`) : folded;
+  return issue ? withLinkNote(folded, issue.status, issue.note) : folded;
 }
 
 /**
@@ -992,5 +960,6 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     gradedRepo,
     gradedRef,
     repoReadNote,
+    ...(repoReadNote ? { linkFetch: gradedRepo ? "flagged" as const : "failed" as const } : {}),
   };
 }

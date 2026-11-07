@@ -108,6 +108,7 @@ function buildRepoUrlEntry(repo: GradableRepoContent): StudentSubmissionEntry {
     repositoryInventories: repo.inventory ? [repo.inventory] : undefined,
     gradedRepo: repo.repo,
     gradedRef: repo.ref,
+    ...(repo.truncated ? { linkFetch: "flagged" as const, repoReadNote: "The GitHub repository could not be read completely." } : {}),
   };
 }
 

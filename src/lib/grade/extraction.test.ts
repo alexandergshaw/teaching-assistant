@@ -26,6 +26,18 @@ beforeEach(() => {
 });
 
 describe("canvasWorkToEntry - submission URL", () => {
+  it("flags a partial GitHub source and retains its readable files", async () => {
+    mockFetchGradableRepoContent.mockResolvedValue({
+      repo: "student/hw1", ref: "abc123", content: "readable code", fileCount: 1, truncated: true,
+      files: [{ path: "main.py", text: "readable code", truncated: false }],
+    });
+    const entry = await canvasWorkToEntry({ student: "Ada", userId: 1, text: "", files: [], contributionCount: 1, submissionUrl: "https://github.com/student/hw1" });
+    expect(entry.linkFetch).toBe("flagged");
+    expect(entry.repoReadNote).toContain("not be read completely");
+    expect(entry.content).toContain("readable code");
+    expect(entry.submittedFiles.some((file) => file.name === "main.py")).toBe(true);
+  });
+
   it("notes the submitted link in content for a URL-only submission (no empty content)", async () => {
     mockFetchGradableRepoContent.mockResolvedValue({ error: "not a github.com repository link." });
     const work: CanvasStudentWork = {

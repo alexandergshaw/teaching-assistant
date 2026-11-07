@@ -56,6 +56,47 @@ beforeEach(() => {
 });
 
 describe("ingestZipEntries - link.html resolution", () => {
+  it("marks an embedded partially read repository as flagged while preserving readable files", async () => {
+    mockFetchRepo.mockResolvedValue({ repo: "o/r", ref: "abc", content: "readable code", fileCount: 1, truncated: true, files: [{ path: "a.py", text: "readable code", truncated: false }] });
+    const zip = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].linkFetch).toBe("flagged");
+    expect(entries[0].repoReadNote).toContain("not be read completely");
+    expect(entries[0].content).toContain("readable code");
+    expect(entries[0].submittedFiles.some((file) => file.name === "a.py")).toBe(true);
+  });
+
+  it("marks an embedded unreadable repository as failed", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const zip = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].linkFetch).toBe("failed");
+    expect(entries[0].repoReadNote).toContain("repository unavailable");
+  });
+
+  it("does not flag a fully read embedded repository", async () => {
+    mockFetchRepo.mockResolvedValue(okRepo("o/r", "complete code"));
+    const zip = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries[0].linkFetch).toBeUndefined();
+    expect(entries[0].content).toContain("complete code");
+  });
+
+  it("gives failed precedence while retaining notes for multiple embedded repositories", async () => {
+    mockFetchRepo.mockImplementation(async (url) => url === GITHUB_GIT
+      ? { repo: "o/r", ref: "abc", content: "partial code", fileCount: 1, truncated: true, files: [{ path: "a.py", text: "partial code", truncated: false }] }
+      : { error: "second repository unavailable" });
+    const zip = await zipOf({ "ada_1_2_one.html": linkHtml(GITHUB_GIT), "ada_1_2_two.html": linkHtml(GITHUB_BLOB) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].linkFetch).toBe("failed");
+    expect(entries[0].repoReadNote).toContain("not be read completely");
+    expect(entries[0].repoReadNote).toContain("second repository unavailable");
+    expect(entries[0].content).toContain("partial code");
+  });
+
   it("REMOVAL: a GitHub link resolves and its code replaces the redirect boilerplate", async () => {
     mockFetchRepo.mockResolvedValue(okRepo("MikeC21006/applied-ai-4-mike-caps", "print('mike code')"));
     const zip = await zipOf({ "mikecaps_12345_67890_link.html": linkHtml(GITHUB_GIT) });
@@ -116,7 +157,9 @@ describe("ingestZipEntries - link.html resolution", () => {
 
     expect(entries).toHaveLength(2);
     expect(entryFor(entries, "mike").content).toContain("Could not read the linked GitHub repository: could not find the repo.");
+    expect(entryFor(entries, "mike").linkFetch).toBe("failed");
     expect(entryFor(entries, "josh").content).toContain("josh ok");
+    expect(entryFor(entries, "josh").linkFetch).toBeUndefined();
   });
 
   it("an unexpected rejection from the fetcher also isolates to that student", async () => {
@@ -240,6 +283,61 @@ describe("ingestZipEntries - deferLinks (BW3 ingest half)", () => {
 });
 
 describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
+  it("propagates an incomplete embedded repository and its inventory through a linked Drive ZIP", async () => {
+    const inventory = { source: "o/r @ abc", scope: { kind: "repository" as const, path: null }, enumerationComplete: false, files: [{ path: "a.py", content: "read" as const }] };
+    const existingInventory = { source: "existing", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [] };
+    mockFetchRepo.mockResolvedValue({ repo: "o/r", ref: "abc", content: "readable code", fileCount: 1, truncated: true, files: [{ path: "a.py", text: "readable code", truncated: false }], inventory });
+    const archive = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT) });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks({ ...linkEntry(DRIVE_FILE_URL), repositoryInventories: [existingInventory] });
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("not be read completely");
+    expect(out.content).toContain("readable code");
+    expect(out.repositoryInventories).toEqual([existingInventory, inventory]);
+  });
+
+  it("does not flag a fully read repository inside a linked Drive ZIP", async () => {
+    mockFetchRepo.mockResolvedValue(okRepo("o/r", "complete code"));
+    const archive = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT) });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("ok");
+    expect(out.content).toContain("complete code");
+  });
+
+  it("reports a failed embedded repository through a linked Drive ZIP", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const archive = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT), "ada_1_2_work.txt": "readable essay" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("repository unavailable");
+    expect(out.content).toContain("readable essay");
+  });
+
+  it("reports nested repository failure together with unreadable and unstaged archive members", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const archive = await zipOf({ "ada_1_2_link.html": linkHtml(GITHUB_GIT), "ada_1_2_broken.docx": "not a document", "ada_1_2_clip.mp4": "video bytes" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.repoReadNote).toContain("1 video file(s) were not available");
+    expect(out.repoReadNote).toContain("repository unavailable");
+  });
+
+  it("flags a partially read GitHub link while preserving readable code", async () => {
+    mockFetchRepo.mockResolvedValue({
+      repo: "owner/repo", ref: "abc123", content: "readable code", fileCount: 1, truncated: true,
+      files: [{ path: "a.py", text: "readable code", truncated: false }],
+    });
+    const out = await resolveEntryLinks(linkEntry(GITHUB_GIT));
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("not be read completely");
+    expect(out.content).toContain("readable code");
+    expect(out.submittedFiles.some((file) => file.name === "a.py")).toBe(true);
+  });
+
   it("I-resolve-at-grade: a GitHub link folds the repo code and records the repo", async () => {
     mockFetchRepo.mockResolvedValue(okRepo("MikeC21006/applied-ai-4-mike-caps", "print('mike code')"));
 
@@ -352,6 +450,31 @@ describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
     expect(out.linkFetch).toBe("failed");
     expect(out.repoReadNote).toContain("1 file(s) unreadable");
     expect(out.content).not.toContain("Ann work");
+    expect(out.content).not.toContain("Bob work");
+  });
+
+  it("preserves nested repository failure on a multi-student linked archive without blending work", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const archive = await zipOf({ "ann_1_2_link.html": linkHtml(GITHUB_GIT), "ann_1_2_work.txt": "Ann work", "bob_3_4_work.txt": "Bob work" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("single submission");
+    expect(out.repoReadNote).toContain("repository unavailable");
+    expect(out.content).not.toContain("Ann work");
+    expect(out.content).not.toContain("Bob work");
+  });
+
+  it("combines multi-student archive failures, unavailable video and nested repository issues", async () => {
+    mockFetchRepo.mockResolvedValue({ repo: "o/r", ref: "abc", content: "partial code", fileCount: 1, truncated: true, files: [{ path: "a.py", text: "partial code", truncated: false }] });
+    const archive = await zipOf({ "ann_1_2_link.html": linkHtml(GITHUB_GIT), "ann_1_2_clip.mp4": "video bytes", "bob_3_4_work.txt": "Bob work", "broken.zip": "not a zip" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.repoReadNote).toContain("1 video file(s) were not available");
+    expect(out.repoReadNote).toContain("not be read completely");
+    expect(out.content).not.toContain("partial code");
     expect(out.content).not.toContain("Bob work");
   });
 

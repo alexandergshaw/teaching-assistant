@@ -293,7 +293,23 @@ describe("prepareChatSubmissionAction - url", () => {
       expect(outcome.entries[0].student).toBe("owner/repo");
       expect(outcome.entries[0].gradedRepo).toBe("owner/repo");
       expect(outcome.entries[0].gradedRef).toBe("abc123");
+      expect(outcome.entries[0].linkFetch).toBeUndefined();
       expect(outcome.pointsPossible).toBeNull();
+    }
+  });
+
+  it("flags a partially read GitHub submission while preserving readable work", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    mockFetchGradableRepoContent.mockResolvedValue({
+      repo: "owner/repo", ref: "abc123", content: "readable code", fileCount: 1, truncated: true,
+      files: [{ path: "a.ts", text: "readable code", truncated: false }],
+    });
+    const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://github.com/owner/repo" }));
+    expect(outcome.kind).toBe("entries");
+    if (outcome.kind === "entries") {
+      expect(outcome.entries[0]).toMatchObject({ linkFetch: "flagged", repoReadNote: expect.stringContaining("not be read completely") });
+      expect(outcome.entries[0].content).toContain("readable code");
+      expect(outcome.entries[0].submittedFiles).toHaveLength(1);
     }
   });
 

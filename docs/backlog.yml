@@ -1,3 +1,15 @@
+- id: 'CHAT-CANVAS-VIDEO-TRANSPORT'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Grade Canvas video attachments through the staged video transport.'
+  owns: ['src/app/actions/grading-chat-intake.ts', 'src/app/api/grade-run-item', 'src/app/components/grading-chat', 'src/lib/grade/extraction.ts', 'src/lib/grade/video-prepare.ts', 'src/lib/grade/video-grade-seam.ts', 'src/lib/canvas/submissions.ts', 'src/lib/canvas/submission-detail.ts', 'src/lib/canvas/discussions.ts', 'src/lib/grade/canvas-video-transport.test.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/grade/canvas-video-transport.test.ts src/app/api/grade-run-item/route.videoseam.test.ts'
+  blocked_by: []
+  instrument: 'Exercise real Canvas attachment intake through staged transport and the grading seam for video-only and mixed submissions; verify every attachment is represented and omissions caused by missing URLs, non-OK responses, retrieval errors, declared or downloaded size above 15 MiB, unsupported or partially staged media are named before model invocation without producing an incomplete grade; a video-only omission produces a visible ungraded student row and mixed text plus omitted video never invokes the model across each upstream skip reason; retries preserve work, ownership and size limits hold, and temporary objects are cleaned up safely. Verify the complete instructor flow in a real browser with an authorized Canvas course and video-grading provider.'
+  from: 'The live grade-run-item refusal at b6b347ab prevents incomplete grading when Canvas video has no staged reference, but the guard only sees attachments represented in the entry. Canvas retrieval in submissions.ts and submission-detail.ts silently skips missing URLs, attachments above 15 MiB, non-OK responses and download errors, while canvasWorkToEntry cannot stage Canvas video attachments.'
+  note: 'Owner: coordinator. The refusal is a safety fallback, not Canvas video support. Create the named executable integration test; keep the existing nonvideo and staged-video paths working. Document and test size, duration, provider and storage limits, partial failures, retries, ownership and cleanup without losing submission evidence. Browser and live-provider verification are separate from source tests.'
+  question: null
 - id: 'CHAT-SAFE-REGRADE-EDITS'
   state: 'actionable'
   kind: 'bug'

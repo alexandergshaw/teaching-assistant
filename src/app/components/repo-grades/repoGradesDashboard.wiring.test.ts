@@ -14,6 +14,15 @@ const filters = readFileSync(new URL("./RepoGradeCourseFilters.tsx", import.meta
 const targetActions = readFileSync(new URL("./RepoTargetGradeActions.tsx", import.meta.url), "utf8");
 const profileSettings = readFileSync(new URL("./RepoGradeProfileSettings.tsx", import.meta.url), "utf8");
 
+it("surfaces setup failures on the collapsed grading settings summary", () => {
+  const summary = index.slice(index.indexOf("<AccordionSummary"), index.indexOf("</AccordionSummary>"));
+  for (const state of ["coursesError", "missingOrg", "scanError", "rosterError", "assignmentsError", "canvasGateBlockedReason", "assignmentsEmpty", "scan?.truncated", "scan?.rateLimit"]) {
+    expect(summary).toContain(state);
+  }
+  expect(summary).toContain('role="status"');
+  expect(summary).toContain("Run setup needs attention");
+});
+
 it("keeps the provider selection usable and disabled during profile saves", () => {
   expect(profileSettings).toMatch(/<TextField select id=\{`\$\{id\}-provider`\}[\s\S]*?disabled=\{savingProfile\}[\s\S]*?event\.target\.value === "embedded"/);
 });
@@ -83,7 +92,7 @@ describe("class repository results wiring", () => {
     expect(filters.match(/<Chip[^>]*component="button" type="button"/g)).toHaveLength(2);
     expect(filters.match(/<FormControl component="fieldset"/g)).toHaveLength(2);
     expect(filters.match(/<FormLabel component="legend"/g)).toHaveLength(2);
-    expect(index.indexOf("<RepoGradeCourseFilters")).toBeLessThan(index.indexOf("<RepoGradesControls"));
+    expect(index.indexOf("<RepoGradesControls")).toBeLessThan(index.indexOf("<RepoGradeCourseFilters"));
   });
 
   it("shows one gradebook inside the sticky shell for a restored course, even without a scan", () => {

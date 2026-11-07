@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useId, type ReactNode } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, List, ListItem, SvgIcon, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, List, ListItem, TextField, Typography } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
@@ -74,6 +74,23 @@ export function useRepoGradesStartupHistoryRevision(accountId: string, courseId:
   return progress.historyRevisionByCourse?.get(courseId) ?? 0;
 }
 
+export function RepoGradesStartupBrief() {
+  const startup = useContext(StartupContext);
+  const automatic = useContext(AutomaticContext);
+  if (!automatic) return <Typography component="span" variant="body2" role="status">{PHASE_TEXT[startup?.progress.phase ?? "unavailable"]}</Typography>;
+  const status = automatic.status;
+  if (!status || status.status === "unavailable") return <Typography component="span" variant="body2" role="status">{status ? "Status unavailable" : "Loading status"}</Typography>;
+  const run = status.run;
+  const phase = status.githubRetryAt ? `GitHub rate limit: retry at ${new Date(status.githubRetryAt).toLocaleString()}`
+    : run?.waitingForBrowserStartup ? "Waiting for a previous startup check"
+    : run ? PHASE_TEXT[run.phase === "discovering" ? "checking" : run.phase === "grading" ? "processing" : run.phase]
+    : "No automatic run has started.";
+  const notices = [automatic.stale && "Status may be out of date", !status.classQueue && "Class queue settings unavailable",
+    status.recoveries.length > 0 && "Feedback recovery available",
+    (status.preparations.length > 0 || run?.courses.some((course) => course.reason || course.counts.some((item) => item.reason))) && "Grading needs attention"].filter(Boolean);
+  return <Typography component="span" variant="body2" role="status">{phase}{notices.map((notice) => ` · ${notice}`).join("")}</Typography>;
+}
+
 export function RepoGradesStartupStatus() {
   const startup = useContext(StartupContext);
   const automatic = useContext(AutomaticContext);
@@ -82,52 +99,19 @@ export function RepoGradesStartupStatus() {
   const stopHintId = useId();
   const progress = startup?.progress;
   if (automatic) {
-    const status = automatic.status;
-    const run = status?.status === "loaded" ? status.run : null;
-    const phase = status?.status === "unavailable" ? "Status unavailable"
-      : !status ? "Loading status"
-      : run ? PHASE_TEXT[run.phase === "discovering" ? "checking" : run.phase === "grading" ? "processing" : run.phase]
-      : "No automatic run has started.";
-    const notices = status?.status === "loaded" ? [
-      automatic.stale && "Status may be out of date",
-      status.githubRetryAt && `GitHub rate limit: retry at ${new Date(status.githubRetryAt).toLocaleString()}`,
-      run?.waitingForBrowserStartup && "Waiting for a previous startup check",
-      !status.classQueue && "Class queue settings unavailable",
-      status.recoveries.length > 0 && "Feedback recovery available",
-      (status.preparations.length > 0 || run?.courses.some((course) => course.reason || course.counts.some((item) => item.reason))) && "Grading needs attention",
-    ].filter(Boolean) : [];
-    return <Accordion disableGutters elevation={0}>
-      <AccordionSummary id={`${headingId}-automatic-summary`} aria-controls={`${headingId}-automatic-content`}
-        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-        <span><Typography component="span" variant="subtitle2">Automatic repository grading</Typography>
-          <Typography component="span" variant="body2" color="text.secondary" role="status"> · {phase}
-            {notices.map((notice) => ` · ${notice}`).join("")}</Typography></span>
-      </AccordionSummary>
-      <AccordionDetails><RepoGradesAutomaticStatus automatic={automatic} />
+    return <section aria-label="Automatic repository grading"><RepoGradesAutomaticStatus automatic={automatic} />
         {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
-      </AccordionDetails>
-    </Accordion>;
+      </section>;
   }
   if (!startup || !progress || progress.phase === "unavailable") {
-    return <Accordion disableGutters elevation={0}>
-      <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-        <Typography variant="subtitle2">Automatic repository grading · Status unavailable</Typography>
-      </AccordionSummary>
-      <AccordionDetails><Alert severity={pilotEnabled ? "warning" : "info"} role="status">
+    return <section aria-label="Automatic repository grading"><Alert severity={pilotEnabled ? "warning" : "info"} role="status">
         {PHASE_TEXT.unavailable} {pilotEnabled && MANUAL_PAUSE}
-      </Alert></AccordionDetails>
-    </Accordion>;
+      </Alert></section>;
   }
 
   const canStop = !!startup.stop && (progress.phase === "checking" || progress.phase === "processing");
   return (
-    <Accordion disableGutters elevation={0}>
-      <AccordionSummary id={`${headingId}-legacy-summary`} aria-controls={`${headingId}-legacy-content`}
-        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-        <span><Typography component="span" variant="subtitle2">Automatic repository grading</Typography>
-          <Typography component="span" variant="body2" color="text.secondary"> · {PHASE_TEXT[progress.phase]}</Typography></span>
-      </AccordionSummary>
-      <AccordionDetails><section aria-labelledby={headingId}>
+    <section aria-labelledby={headingId}>
       <h2 id={headingId}>Startup repository checks</h2>
       <p>{PHASE_TEXT[progress.phase]}</p>
       {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
@@ -168,21 +152,16 @@ export function RepoGradesStartupStatus() {
           })}
         </>
       )}
-    </section></AccordionDetails>
-    </Accordion>
+    </section>
   );
 }
 
 function RecoveryFeedback({ label, entry }: { label: string; entry: RepoGradesStartupRecovery }) {
-  const summaryId = useId();
-  const panelId = useId();
   return (
-    <Accordion>
-      <AccordionSummary id={summaryId} aria-controls={panelId}>{label}</AccordionSummary>
-      <AccordionDetails>
+    <Box component="section">
+      <Typography variant="subtitle2">{label}</Typography>
         <TextField label={`Recovery data for ${label}`} multiline rows={10} fullWidth
           slotProps={{ input: { readOnly: true } }} value={JSON.stringify(entry, null, 2)} />
-      </AccordionDetails>
-    </Accordion>
+    </Box>
   );
 }

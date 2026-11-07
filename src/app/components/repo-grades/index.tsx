@@ -24,15 +24,15 @@
 // async body that awaits before any setState. This file only reads that
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
-import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Chip, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, SvgIcon, Typography } from "@mui/material";
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, SvgIcon, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { RepoGradeReservationRecovery } from "../repo-grades-dashboard/RepoGradeReservationRecovery";
-import { useRepoGradesStartupHistoryRevision, useRepoGradesTargetedGrading } from "../repo-grades-dashboard/RepoGradesStartup";
+import { RepoGradesStartupBrief, RepoGradesStartupStatus, useRepoGradesStartupHistoryRevision, useRepoGradesTargetedGrading } from "../repo-grades-dashboard/RepoGradesStartup";
 import { useRepoGradeTargetRequests, type TargetCommand } from "./useRepoGradeTargetRequests";
 import { gradeSelectionKey, gradeSelectionRectangle, toggleGradeSelection, type GradeSelection } from "./repoGradeSelection";
 import { useRepoGradesAutomaticBlocks } from "../repo-grades-dashboard/useRepoGradesAutomaticBlocks";
@@ -109,7 +109,7 @@ export default function RepoGradesTab() {
 
 function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const { accessDecision } = useSupabase();
-  const setupId = useId();
+
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
   const [provider] = useLlmProvider();
   const handleCourseIdChange = (courseId: string) => setUiState((prev) => ({ ...prev, courseId }));
@@ -207,7 +207,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort, cellEdits, model.columns) : [];
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showAll, setShowAll] = useState(false); // ephemeral show-all override (no ta- key)
-  const [setupExpanded, setSetupExpanded] = useState(false);
+
   // AC4 item 23: the persisted selection is restored (and filtered against
   // currently-valid repo ids) once this course's rows are known, not before -
   // done as a render-phase compare-and-adjust (matching CoursePicker.tsx's
@@ -572,20 +572,20 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         subtitle="Review repository grades and feedback by class."
       />
       <RepoGradesGithubQuota />
-      <RepoGradeReservationRecovery />
-      <RepoGradeCourseFilters
-        courses={courses}
-        courseId={uiState.courseId}
-        onCourseIdChange={handleCourseIdChange}
-      />
-      <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
-        : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
-
-      {(course && cellDraft || trendsEntry) && <Accordion disableGutters elevation={0}>
+      <Accordion disableGutters elevation={0}>
         <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-          <Typography variant="subtitle2">Grading profiles and saved data</Typography>
+          <Stack spacing={0.5}>
+            <Typography variant="subtitle2">Grading settings and status</Typography>
+            <RepoGradesStartupBrief />
+            {(coursesError || missingOrg || scanError || rosterError || assignmentsError || canvasGateBlockedReason || assignmentsEmpty || scan?.truncated || scan?.rateLimit) &&
+              <Typography component="span" variant="body2" color="warning.main" role="status">Run setup needs attention</Typography>}
+          </Stack>
         </AccordionSummary>
-        <AccordionDetails>
+        <AccordionDetails sx={{ display: "grid", gap: 2 }}>
+          <RepoGradesStartupStatus />
+          <RepoGradeReservationRecovery />
+      {(course && cellDraft || trendsEntry) && <Box component="section">
+          <Typography variant="subtitle2">Grading profiles and saved data</Typography>
           {course && cellDraft && <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />}
           {trendsEntry && <div>
             <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
@@ -601,30 +601,10 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
               Discard saved results for this course
             </Button>
           </div>}
-        </AccordionDetails>
-      </Accordion>}
+        </Box>}
 
-      {/* Setup stays collapsed until requested; binding and error notices remain visible. */}
-      <Accordion
-        className={gridStyles.setupRegion}
-        disableGutters
-        elevation={0}
-        expanded={setupExpanded}
-        onChange={(_, value) => setSetupExpanded(value)}
-        slotProps={{ transition: { timeout: 0 } }}
-      >
-      <AccordionSummary className={gridStyles.disclosureSummary}
-        id={`${setupId}-summary`} aria-controls={`${setupId}-content`}
-        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}
-        sx={{ minHeight: 0, "& .MuiAccordionSummary-content": { my: 0, alignItems: "center" } }}>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
-          <Typography variant="subtitle2">Run setup</Typography>
-          {course && <Chip size="small" variant="outlined" label={course.name} />}
-          {(coursesError || missingOrg || scanError || rosterError || assignmentsError || canvasGateBlockedReason || assignmentsEmpty || scan?.truncated || scan?.rateLimit) &&
-            <Chip size="small" color="warning" label="Needs attention" />}
-        </Stack>
-      </AccordionSummary>
-      <AccordionDetails sx={{ display: "grid", gap: 2, p: 2 }}>
+      <Box component="section" sx={{ display: "grid", gap: 2 }}>
+        <Typography variant="subtitle2">Run setup</Typography>
       <RepoGradesControls
         courses={courses}
         coursesLoading={coursesLoading}
@@ -665,8 +645,16 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         rosterLoading={rosterLoading} rosterError={rosterError} assignmentsLoading={assignmentsLoading}
         assignmentsError={assignmentsError} assignmentsEmpty={assignmentsEmpty} scanTruncated={!!scan?.truncated}
         rateLimitMessage={scan?.rateLimit?.message ?? null} />
-      </AccordionDetails>
+      </Box>
+        </AccordionDetails>
       </Accordion>
+      <RepoGradeCourseFilters
+        courses={courses}
+        courseId={uiState.courseId}
+        onCourseIdChange={handleCourseIdChange}
+      />
+      <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
+        : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
 
       {/* AC5 item 31 / U5.20: results are announced through a role="status"
           aria-live="polite" region, matching TasksTab.tsx:717. This is the

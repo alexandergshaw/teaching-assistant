@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Button, Stack, SvgIcon, Typography } from "@mui/material";
+import { Box, Button, Stack, Typography } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { inspectRepoGradeReservations, releaseExpiredRepoGradeReservations } from "./reservation-recovery-client";
@@ -51,9 +51,8 @@ export function RepoGradeReservationRecovery() {
   }
 
   return (
-    <Accordion className={styles.profileSettings} disableGutters>
-      <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>Grading reservation recovery</AccordionSummary>
-      <AccordionDetails>
+    <Box component="section" className={styles.profileSettings}>
+      <Typography variant="subtitle2">Grading reservation recovery</Typography>
       <p>Inspect reservations across this account. Recovery releases only expired attempts that the database confirms never dispatched.</p>
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
         <Button size="small" variant="outlined" onClick={inspect} disabled={pending}>Check reservations</Button>
@@ -70,7 +69,6 @@ export function RepoGradeReservationRecovery() {
           ))}
         </ul>
       )}
-      </AccordionDetails>
-    </Accordion>
+      </Box>
   );
 }

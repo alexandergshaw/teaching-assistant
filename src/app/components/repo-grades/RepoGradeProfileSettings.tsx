@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Autocomplete, Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
+import { Box, Typography, Autocomplete, Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import {
   loadRepoGradeProfile, profileDraft, saveRepoGradeProfile,
   type ProfileDraft, type ProfileReadResult, type SavedProfile,
@@ -42,9 +42,8 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
   const profileReady = result?.status === "loaded" || result?.status === "not-configured";
 
   return (
-    <Accordion className={styles.profileSettings} disableGutters>
-      <AccordionSummary expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}>Automatic grading profiles</AccordionSummary>
-      <AccordionDetails>
+    <Box component="section" className={styles.profileSettings}>
+      <Typography variant="subtitle2">Automatic grading profiles</Typography>
       <p>Save settings for one folder in this course. Automatic checks use the matching folder profile when a run starts.</p>
       <form className={styles.dashboard} onSubmit={(event) => {
         event.preventDefault();
@@ -64,8 +63,7 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
           reload={() => void openFolder(load.folder)} />
         <RepoGradePreparationPolicySettings courseId={courseId} folder={load.folder} />
       </div>}
-      </AccordionDetails>
-    </Accordion>
+      </Box>
   );
 }
 

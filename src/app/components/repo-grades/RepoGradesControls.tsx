@@ -33,14 +33,10 @@
 // exercised by any test, which is exactly why it must contain no logic worth
 // testing.
 import TextField from "@mui/material/TextField";
-import Accordion from "@mui/material/Accordion";
-import AccordionSummary from "@mui/material/AccordionSummary";
-import AccordionDetails from "@mui/material/AccordionDetails";
 import Button from "@mui/material/Button";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import NativeSelect from "@mui/material/NativeSelect";
-import SvgIcon from "@mui/material/SvgIcon";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
@@ -320,8 +316,6 @@ export default function RepoGradesControls({
   onRunCodeScoringChange,
   applyNamingDeduction,
   onApplyNamingDeductionChange,
-  settingsOpen,
-  onSettingsOpenChange,
 }: RepoGradesControlsProps) {
   const rubricSource = parseRepoGradeRubricValue(rubricSourceValue)?.source ?? "generate";
   const hasInstructions = instructions.trim() !== "";
@@ -388,9 +382,8 @@ export default function RepoGradesControls({
       </div>
 
       {showRowDependentFields && (
-        <Accordion expanded={settingsOpen} onChange={(_, expanded) => onSettingsOpenChange(expanded)} disableGutters>
-          <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>Grading settings - {settingsSummary}</AccordionSummary>
-          <AccordionDetails>
+        <section aria-label="Grading settings">
+          <p>Grading settings - {settingsSummary}</p>
           <div className={styles.field}>
             <FormControlLabel
               sx={CHECKBOX_LABEL_SX}
@@ -581,8 +574,7 @@ export default function RepoGradesControls({
               </>
             )}
           </div>
-          </AccordionDetails>
-        </Accordion>
+          </section>
       )}
     </>
   );

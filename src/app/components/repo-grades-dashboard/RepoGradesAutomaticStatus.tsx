@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, FormControlLabel, List, ListItem, ListItemText, Stack, SvgIcon, Switch, TextField, Typography } from "@mui/material";
+import { Box, Alert, Button, FormControlLabel, List, ListItem, ListItemText, Stack, Switch, TextField, Typography } from "@mui/material";
 import type { AutomaticRepoGradeRecovery } from "@/lib/repo-grades-dashboard/automatic-status";
 import { automaticCourseProgress } from "./automatic-course-progress";
 import { automaticReasonLabel } from "@/lib/repo-grades-dashboard/automatic-reason-label";
@@ -62,14 +62,9 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
         <Button type="button" variant="outlined" size="small" disabled={!active || pending}
           onClick={() => { if (run) void stop(run.id); }}>Stop current run</Button>
       </Stack>
-      {recoveries.length > 0 && <Alert severity="warning" role="status">Feedback is available to recover for {recoveries.length} grading {recoveries.length === 1 ? "result" : "results"}. Open grading details to copy it.</Alert>}
-      {(details.length > 0 || status.preparations.length > 0) && <Alert severity="warning" role="status">Some classes need attention. Open grading details for the reasons.</Alert>}
-      <Accordion disableGutters elevation={0}>
-        <AccordionSummary aria-controls={`${headingId}-settings`} id={`${headingId}-settings-summary`}
-          expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-          <Typography>Schedule and class queue</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      {recoveries.length > 0 && <Alert severity="warning" role="status">Feedback is available to recover for {recoveries.length} grading {recoveries.length === 1 ? "result" : "results"}. See grading details below to copy it.</Alert>}
+      {(details.length > 0 || status.preparations.length > 0) && <Alert severity="warning" role="status">Some classes need attention. See grading details below for the reasons.</Alert>}
+      <Box component="section"><Typography variant="subtitle2">Schedule and class queue</Typography>
       <FormControlLabel
         label="Start automatic repository grading when I open the app"
         control={<Switch checked={status.enabled} disabled={pending}
@@ -90,14 +85,8 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
       <AutomaticRepoGradeScheduleControl schedule={status.schedule} pending={pending} save={setSchedule} />
       {status.classQueue && <AutomaticRepoGradeClassQueue queue={status.classQueue} courses={courses} pending={pending}
         save={setClassQueue} />}
-        </AccordionDetails>
-      </Accordion>
-      {(recoveries.length > 0 || details.length > 0 || status.preparations.length > 0 || retryMessage) && <Accordion disableGutters elevation={0}>
-        <AccordionSummary aria-controls={`${headingId}-details`} id={`${headingId}-details-summary`}
-          expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
-          <Typography>Grading details and recovery</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        </Box>
+      {(recoveries.length > 0 || details.length > 0 || status.preparations.length > 0 || retryMessage) && <Box component="section"><Typography variant="subtitle2">Grading details and recovery</Typography>
       {recoveries.length > 0 && (
         <>
           <h3>Feedback recovery</h3>
@@ -122,8 +111,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
         </List>
       )}
       {retryMessage && <Typography role="status" variant="body2">{retryMessage}</Typography>}
-        </AccordionDetails>
-      </Accordion>}
+        </Box>}
     </section>
   );
 }

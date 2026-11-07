@@ -12,15 +12,17 @@ describe("Repo Grades startup wiring", () => {
     expect(component).toContain("Class queue settings unavailable");
     expect(component).toContain("Feedback recovery available");
     expect(component).toContain("Grading needs attention");
-    expect(component).toContain('variant="body2" color="text.secondary" role="status"');
+    expect(component).toContain('variant="body2" role="status"');
   });
   it("mounts the startup lifecycle outside tab content and scopes the unavailable message to Repo Grades", () => {
     const home = source("../../page.tsx");
     const mount = home.indexOf("<RepoGradesStartup>");
     expect(mount).toBeGreaterThan(home.indexOf("<WorkflowTriggerWatcher"));
     expect(mount).toBeLessThan(home.indexOf("<main"));
-    expect(home.match(/<RepoGradesStartupStatus \/>/g)).toHaveLength(1);
-    expect(home).toMatch(/<RepoGradesStartupStatus \/>\s*<RepoGradesTab \/>/);
+    expect(home).not.toContain("<RepoGradesStartupStatus />");
+    const repoTab = source("../repo-grades/index.tsx");
+    expect(repoTab).toContain("<RepoGradesStartupStatus />");
+    expect(repoTab.indexOf('title="Repo Grades"')).toBeLessThan(repoTab.indexOf("<RepoGradesStartupStatus />"));
     expect(home).toMatch(/<\/main>\s*<\/RepoGradesStartup>/);
     const component = source("./RepoGradesStartup.tsx");
     expect(source("../../layout.tsx")).toContain('<RepoGradesStartupActivation enabled={repoGradeStartupAvailable(repoGradeMode)} embeddedPilot={repoGradeMode === "embedded-only"} durable={repoGradeDurableStartupAvailable(repoGradeMode)}>');

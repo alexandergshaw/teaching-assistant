@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Stack, SvgIcon, Typography } from "@mui/material";
+import { Box, Button, Popover, Stack, Typography } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import type { GithubQuotaResult } from "@/lib/github-quota";
@@ -39,6 +39,7 @@ export function RepoGradesGithubQuotaReport({ accountId }: { accountId: string }
   const [attempt, setAttempt] = useState(0);
   const [settled, setSettled] = useState<QuotaCheck & { attempt: number; snapshot: QuotaSnapshot | null }>();
   const [nowMs, setNowMs] = useState(0);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const detailsId = useId();
   const headingId = useId();
   const pending = settled?.attempt !== attempt;
@@ -107,17 +108,17 @@ export function RepoGradesGithubQuotaReport({ accountId }: { accountId: string }
       bgcolor: "var(--card-background)",
       py: "var(--space-1)",
     }}>
-      <Accordion disableGutters elevation={0} sx={{ bgcolor: warning ? "var(--warning-surface)" : undefined }}>
-      <AccordionSummary id={headingId} aria-controls={detailsId}
-        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}
-        sx={{ minHeight: "var(--control-height-md)", "& .MuiAccordionSummary-content": { my: 0 } }}>
+      <Button id={headingId} aria-controls={anchor ? detailsId : undefined} aria-expanded={!!anchor}
+        aria-haspopup="dialog" onClick={(event) => setAnchor(event.currentTarget)}
+        sx={{ textTransform: "none", bgcolor: warning ? "var(--warning-surface)" : undefined }}>
         <span>
           GitHub API: {snapshot ? `${remaining} / ${limit} left${stale ? " (stale)" : ""}` : pending ? "checking" : "quota unknown"}
           {snapshot && <Box component="span" role="timer" sx={{ color: "text.secondary" }}>{` · ${resetTiming(snapshot.resetAtMs, nowMs)}`}</Box>}
         </span>
-      </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={1} sx={{ p: 2, maxWidth: 320, alignItems: "flex-start" }}>
+      </Button>
+      <Popover id={detailsId} open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}>
+        <Stack role="dialog" aria-labelledby={headingId} spacing={1} sx={{ p: 2, maxWidth: 320, alignItems: "flex-start" }}>
           <Typography component="h2" variant="body2" sx={{ fontWeight: 700 }}>GitHub API quota</Typography>
           <Typography variant="body2" role="status">
             {pending ? "Checking GitHub quota." : quotaStatus(result, stale)}
@@ -138,8 +139,7 @@ export function RepoGradesGithubQuotaReport({ accountId }: { accountId: string }
             Refresh GitHub quota
           </Button>
         </Stack>
-      </AccordionDetails>
-      </Accordion>
+      </Popover>
     </Box>
   );
 }

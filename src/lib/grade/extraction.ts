@@ -54,7 +54,7 @@ import { extractCanvasSubmittedUrl, normalizeSubmittedRepoUrl } from "./canvas-l
 import { planLinkResolution } from "./link-resolution-plan";
 import { fetchGoogleDriveFile } from "./google-drive-content";
 import { classifyGradingUpload, buildSingleFileEntry } from "./single-file-entry";
-import { inlineRepositoryIssue, linkedArchiveIssue, withFoldedContent, withLinkNote } from "./link-evidence";
+import { inlineRepositoryIssue, linkedArchiveIssue, mergeLinkIssues, withFoldedContent, withLinkNote, type LinkIssue } from "./link-evidence";
 export { MAX_ENTRY_CONTENT_CHARS } from "./link-evidence";
 
 /** What one leaf member produced; merged into the result maps in ARCHIVE order. */
@@ -345,10 +345,11 @@ export async function ingestZipEntries(
   // it points at, before inference and grouping (runs unconditionally).
   let deferredLinks: Map<string, string> | null = null;
   let inlineRepos = new Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>();
+  let inlineOtherIssues = new Map<string, LinkIssue>();
   if (options?.deferLinks) {
     deferredLinks = deferLinkSubmissions(submissions);
   } else {
-    inlineRepos = await resolveLinkSubmissions(submissions, rawData);
+    ({ repos: inlineRepos, issues: inlineOtherIssues } = await resolveLinkSubmissions(submissions, rawData));
   }
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
@@ -358,11 +359,18 @@ export async function ingestZipEntries(
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
   }
   const foldedByEntry = new Map<StudentSubmissionEntry, Array<Awaited<ReturnType<typeof foldGithubRepoContent>>>>();
+  const issuesByEntry = new Map<StudentSubmissionEntry, LinkIssue[]>();
   for (const [path, folded] of inlineRepos) {
     const parsed = parseSubmissionFileName(path, inferredLookup, zipParents[path]);
     const targets = entries.filter((entry) => parsed.studentDisplay === entry.student && entry.submittedFiles.some((file) => file.name === parsed.citationFileName));
     if (targets.length !== 1) throw new Error("Submitted repository links could not be attributed to a single student.");
     foldedByEntry.set(targets[0], [...(foldedByEntry.get(targets[0]) ?? []), folded]);
+  }
+  for (const [path, issue] of inlineOtherIssues) {
+    const parsed = parseSubmissionFileName(path, inferredLookup, zipParents[path]);
+    const targets = entries.filter((entry) => parsed.studentDisplay === entry.student && entry.submittedFiles.some((file) => file.name === parsed.citationFileName));
+    if (targets.length !== 1) throw new Error("Submitted links could not be attributed to a single student.");
+    issuesByEntry.set(targets[0], [...(issuesByEntry.get(targets[0]) ?? []), issue]);
   }
   for (const [entry, folded] of foldedByEntry) {
     const inventories = folded.flatMap((repo) => repo.inventory ? [repo.inventory] : []);
@@ -371,8 +379,9 @@ export async function ingestZipEntries(
     for (const file of folded.flatMap((repo) => repo.files)) if (!entry.submittedFiles.some((existing) => existing.name === file.name && existing.previewContent === file.previewContent)) entry.submittedFiles.push(file);
     if (folded.length === 1) { entry.gradedRepo = folded[0].gradedRepo; entry.gradedRef = folded[0].gradedRef; }
     const issue = inlineRepositoryIssue(folded);
-    if (issue) { entry.linkFetch = issue.status; entry.repoReadNote = issue.note; }
+    if (issue) issuesByEntry.set(entry, [...(issuesByEntry.get(entry) ?? []), issue]);
   }
+  for (const [entry, issues] of issuesByEntry) { const issue = mergeLinkIssues(issues); if (issue) { entry.linkFetch = issue.status; entry.repoReadNote = issue.note; } }
   const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
   return { entries, attemptedSupportedFiles, failedSupportedFiles, classification, videoOutcomes };
 }
@@ -617,7 +626,7 @@ async function foldGithubRepoContent(url: string): Promise<{
  * Drive is detected but NOT fetched in this wave; any other host is a note
  * with no fetch.
  */
-async function resolveSubmittedLink(url: string, onRepo?: (folded: Awaited<ReturnType<typeof foldGithubRepoContent>>) => void): Promise<string> {
+async function resolveSubmittedLink(url: string, onRepo?: (folded: Awaited<ReturnType<typeof foldGithubRepoContent>>) => void, onUnfetched?: (note: string) => void): Promise<string> {
   const parts = [`Submitted link: ${url}`];
   const normalized = normalizeSubmittedRepoUrl(url);
   if (looksLikeGithubUrl(normalized)) {
@@ -625,10 +634,12 @@ async function resolveSubmittedLink(url: string, onRepo?: (folded: Awaited<Retur
     onRepo?.(folded);
     parts.push(folded.contentPart);
   } else if (parseGoogleDriveUrl(url)) {
+    onUnfetched?.("A Google Drive link inside the archive was not fetched.");
     parts.push(
       `Note: This submission was a link to Google Drive (${url}); automatic fetch of Drive links from a zip is not supported yet.`
     );
   } else {
+    onUnfetched?.("A link inside the archive was not fetched because its host is unsupported.");
     parts.push(`Note: This submission was a link to ${url}; automatic fetch is not supported for this host.`);
   }
   return parts.join("\n\n---\n\n");
@@ -644,8 +655,9 @@ async function resolveSubmittedLink(url: string, onRepo?: (folded: Awaited<Retur
 async function resolveLinkSubmissions(
   submissions: Record<string, string>,
   rawData: Record<string, string>
-): Promise<Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>> {
+): Promise<{ repos: Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>; issues: Map<string, LinkIssue> }> {
   const repos = new Map<string, Awaited<ReturnType<typeof foldGithubRepoContent>>>();
+  const issues = new Map<string, LinkIssue>();
   for (const path of Object.keys(submissions)) {
     const extension = getFileExtension(path);
     if (extension !== "html" && extension !== "htm") continue;
@@ -653,14 +665,15 @@ async function resolveLinkSubmissions(
     if (!url) continue;
     let resolved: string;
     try {
-      resolved = await resolveSubmittedLink(url, (folded) => repos.set(path, folded));
+      resolved = await resolveSubmittedLink(url, (folded) => repos.set(path, folded), (note) => issues.set(path, { status: "flagged", note }));
     } catch (err) {
       resolved = `Submitted link: ${url}\n\n---\n\nNote: Could not resolve the submitted link: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
+      issues.set(path, { status: "failed", note: "A link inside the archive could not be resolved." });
     }
     submissions[path] = resolved;
     delete rawData[path];
   }
-  return repos;
+  return { repos, issues };
 }
 
 /**

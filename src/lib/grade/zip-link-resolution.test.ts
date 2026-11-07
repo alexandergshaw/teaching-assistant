@@ -130,6 +130,8 @@ describe("ingestZipEntries - link.html resolution", () => {
     expect(mockFetchDrive).not.toHaveBeenCalled();
     expect(entries[0].content).toContain("automatic fetch is not supported for this host");
     expect(entries[0].content).toContain("https://evil.example.com/internal/metadata");
+    expect(entries[0].linkFetch).toBe("flagged");
+    expect(entries[0].repoReadNote).toContain("host is unsupported");
   });
 
   it("a Google Drive link is detected, noted, and not fetched in this wave", async () => {
@@ -142,6 +144,42 @@ describe("ingestZipEntries - link.html resolution", () => {
     expect(mockFetchDrive).not.toHaveBeenCalled();
     expect(mockFetchRepo).not.toHaveBeenCalled();
     expect(entries[0].content).toContain("Google Drive");
+    expect(entries[0].linkFetch).toBe("flagged");
+    expect(entries[0].repoReadNote).toContain("Google Drive link inside the archive was not fetched");
+  });
+
+  it("keeps unsupported-link status with the correct student", async () => {
+    mockFetchRepo.mockResolvedValue(okRepo("o/r", "readable code"));
+    const zip = await zipOf({ "ada_1_2_link.html": linkHtml("https://outside.example/work"), "bob_3_4_link.html": linkHtml(GITHUB_GIT) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entryFor(entries, "ada").linkFetch).toBe("flagged");
+    expect(entryFor(entries, "bob").linkFetch).toBeUndefined();
+    expect(entryFor(entries, "bob").content).toContain("readable code");
+  });
+
+  it("keeps failed precedence when another link for the same student is unfetched", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const zip = await zipOf({ "ada_1_2_one.html": linkHtml("https://outside.example/work"), "ada_1_2_two.html": linkHtml(GITHUB_GIT) });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].linkFetch).toBe("failed");
+    expect(entries[0].repoReadNote).toContain("host is unsupported");
+    expect(entries[0].repoReadNote).toContain("repository unavailable");
+  });
+
+  it("keeps a failure explanation visible when several other links are unfetched", async () => {
+    mockFetchRepo.mockResolvedValue({ error: "repository unavailable" });
+    const zip = await zipOf({
+      "ada_1_2_a.html": linkHtml("https://outside.example/a"),
+      "ada_1_2_b.html": linkHtml("https://outside.example/b"),
+      "ada_1_2_c.html": linkHtml("https://outside.example/c"),
+      "ada_1_2_d.html": linkHtml(GITHUB_GIT),
+    });
+    const { entries } = await ingestZipEntries(zip);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].linkFetch).toBe("failed");
+    expect(entries[0].repoReadNote).toContain("repository unavailable");
+    expect(entries[0].repoReadNote).toContain("more submission link(s) need review");
   });
 
   it("a failed fetch isolates to that student; the rest still grade", async () => {
@@ -283,6 +321,17 @@ describe("ingestZipEntries - deferLinks (BW3 ingest half)", () => {
 });
 
 describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
+  it("flags an unfetched inner link in a Drive ZIP while preserving readable work", async () => {
+    const archive = await zipOf({ "ada_1_2_link.html": linkHtml("https://outside.example/work"), "ada_1_2_work.txt": "readable essay" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("host is unsupported");
+    expect(out.content).toContain("readable essay");
+    expect(mockFetchRepo).not.toHaveBeenCalled();
+    expect(mockFetchDrive).toHaveBeenCalledTimes(1);
+  });
+
   it("propagates an incomplete embedded repository and its inventory through a linked Drive ZIP", async () => {
     const inventory = { source: "o/r @ abc", scope: { kind: "repository" as const, path: null }, enumerationComplete: false, files: [{ path: "a.py", content: "read" as const }] };
     const existingInventory = { source: "existing", scope: { kind: "repository" as const, path: null }, enumerationComplete: true, files: [] };

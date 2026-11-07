@@ -9,20 +9,13 @@ const src = join(process.cwd(), "src");
 const directory = join(src, "app/components/grading-chat");
 const source = (name: string) => ts.transpileModule(readFileSync(join(directory, name), "utf8"), { compilerOptions: { removeComments: true, jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext } }).outputText;
 describe("repository staging live caller boundary (source only)", () => {
-  it("mounts in the live panel and keeps state above navigation and confirmed reset", () => {
+  it("does not mount repository evidence in the grading chat panel", () => {
     const panel = source("GradingChatPanel.tsx");
-    expect(scanRuntimeEdges(panel, "GradingChatPanel.tsx").edges.map((edge) => edge.specifier)).toContain("./ChatRepositoryEvidence");
-    expect(panel).toContain("useState(emptyRepositoryEvidence)");
-    expect(panel).toMatch(/<ChatRepositoryEvidence key=\{repositoryEvidenceSession\} evidence=\{repositoryEvidence\} onChange=\{setRepositoryEvidence\}/);
-    const reset = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
-    expect(reset.indexOf("window.confirm")).toBeLessThan(reset.indexOf("return;"));
-    expect(reset.indexOf("return;")).toBeLessThan(reset.indexOf("setRepositoryEvidence(emptyRepositoryEvidence())"));
-    expect(panel.match(/setRepositoryEvidence\(emptyRepositoryEvidence\(\)\)/g)).toHaveLength(1);
-    expect(panel.match(/setRepositoryEvidenceSession\(/g)).toHaveLength(1);
-    expect(reset).toContain("setRepositoryEvidenceSession((session) => session + 1)");
-    expect(source("ChatRepositoryEvidence.tsx")).toContain('useState("")');
+    expect(scanRuntimeEdges(panel, "GradingChatPanel.tsx").edges.map((edge) => edge.specifier)).not.toContain("./ChatRepositoryEvidence");
+    expect(panel).not.toContain("<ChatRepositoryEvidence");
+    expect(panel).not.toContain("setRepositoryEvidence");
   });
-  it("executes the actual reset handler: cancellation preserves the draft key and confirmation changes it", () => {
+  it("executes the actual reset handler only after confirmation", () => {
     const panel = source("GradingChatPanel.tsx");
     const handler = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
     for (const confirmed of [false, true]) {
@@ -30,8 +23,8 @@ describe("repository staging live caller boundary (source only)", () => {
       const effects: string[] = [];
       const run = new Function("window", "driver", "roleIntake", "repositoryProposals", "setRepositoryEvidence", "emptyRepositoryEvidence", "setRepositoryEvidenceSession", "setSubmitError", "setSetupNote", "setSetupExpanded", "dropSessionEpoch", "setVisibleDropEpoch", "directIntake", "setIncludeSetupFiles", "setDirectPreparing", "setPreparing", "setZipPhase", `${handler}; return handleNewSession;`)({ confirm: () => confirmed }, { reset: () => effects.push("driver") }, { cancel: () => effects.push("roles") }, { reset: () => effects.push("proposals") }, () => effects.push("evidence"), () => ({ lines: [], error: null }), (update: (value: number) => number) => { key = update(key); }, () => effects.push("error"), () => effects.push("setup"), () => {}, { current: 0 }, () => {}, { current: { cancel: () => {} } }, () => {}, () => {}, () => {}, () => {});
       run();
-      expect(key).toBe(confirmed ? 8 : 7);
-      expect(effects).toEqual(confirmed ? ["driver", "roles", "proposals", "evidence", "error", "setup"] : []);
+      expect(key).toBe(7);
+      expect(effects).toEqual(confirmed ? ["driver", "error", "setup"] : []);
     }
   });
   it("calls the parser and safe diagnostics without grading controls", () => {

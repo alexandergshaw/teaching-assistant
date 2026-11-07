@@ -37,10 +37,9 @@ describe("actual Panel direct upload router", () => {
     for (const call of h.submit.mock.calls) expect(call[1]).toBe(files.length === 1 ? "One student" : undefined);
     expect(h.busy).toEqual([true, false]); expect(h.intake.isPending()).toBe(false);
   });
-  it("explicit mixed intent stages only and pending preview cannot bypass it", async () => {
-    const h = harness(); h.bindings.includeSetupFiles = true; const files = [file("assignment.txt"), file("rubric.txt"), file("class.zip")];
-    await h.route()(files); expect(h.stage).toHaveBeenCalledWith(files, undefined); expect(h.start).not.toHaveBeenCalled(); expect(h.submit).not.toHaveBeenCalled();
-    h.bindings.includeSetupFiles = false; h.bindings.roleIntake.isPending = () => true; await h.route()([file()]); expect(h.start).not.toHaveBeenCalled(); expect(h.errors.at(-1)).toContain("Finish or cancel");
+  it("routes chosen files as student submissions without staging setup files", async () => {
+    const h = harness(); const files = [file("first.txt"), file("second.txt")];
+    await h.route()(files); expect(h.stage).not.toHaveBeenCalled(); expect(h.start).toHaveBeenCalledOnce(); expect(h.submit).toHaveBeenCalledTimes(2);
   });
   it("holds synchronous admission before awaiting header and snapshots setup", async () => {
     const h = harness(); let finish!: (ready: boolean) => void; h.start.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
@@ -80,7 +79,7 @@ describe("actual Panel direct upload router", () => {
     const bindings = { window: { confirm: () => false }, dropSessionEpoch: { current: 0 }, setVisibleDropEpoch: vi.fn(), directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
       setSetupExpanded: vi.fn(), roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn() };
     actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled(); expect(bindings.dropSessionEpoch.current).toBe(0);
-    bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).toHaveBeenCalledWith(false); expect(reset).toHaveBeenCalledOnce(); expect(bindings.setSetupExpanded).toHaveBeenCalledWith(true); expect(bindings.dropSessionEpoch.current).toBe(1); expect(bindings.setVisibleDropEpoch).toHaveBeenCalledWith(1); expect(h.intake.isPending()).toBe(false);
+    bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).not.toHaveBeenCalled(); expect(reset).toHaveBeenCalledOnce(); expect(bindings.setSetupExpanded).toHaveBeenCalledWith(true); expect(bindings.dropSessionEpoch.current).toBe(1); expect(bindings.setVisibleDropEpoch).toHaveBeenCalledWith(1); expect(h.intake.isPending()).toBe(false);
   });
   it.each(["count", "bytes"])("admits exact %s limits and refuses overflow before header", async (kind) => {
     const h = harness(); const boundary = kind === "count" ? Array.from({ length: ROLE_FILE_LIMIT }, () => file()) : [Object.assign(file(), { })];

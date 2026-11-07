@@ -26,17 +26,10 @@ import RubricProvenance from "../grading-results/RubricProvenance";
 import GeneratedRubricCard from "../grading-results/GeneratedRubricCard";
 import SubmissionClassificationBadge from "../grading/SubmissionClassificationBadge";
 import { ChatComposer } from "./ChatComposer";
-import { ChatRepositoryEvidence } from "./ChatRepositoryEvidence";
-import { ChatRepositoryMappings } from "./ChatRepositoryMappings";
-import { ChatFileRolePreview } from "./ChatFileRolePreview";
-import { useChatFileRoles } from "./useChatFileRoles";
 import { createDirectFileIntake } from "./chatDirectFileIntake";
 import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT, LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX } from "@/lib/grade/length-deduction-policy";
 import { LENGTH_THRESHOLD_ERROR, parseLengthDeductionThreshold, recordLengthDeductionThresholdChange } from "./chatLengthDeduction";
-import { useChatRepositoryProposals } from "./useChatRepositoryProposals";
-import { recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepositoryDiagnostic";
-import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView } from "./ingestLedger";
@@ -278,8 +271,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   }, []);
 
   const [instructions, setInstructions] = useState("");
-  const [repositoryEvidence, setRepositoryEvidence] = useState<RepositoryEvidenceState>(emptyRepositoryEvidence);
-  const [repositoryEvidenceSession, setRepositoryEvidenceSession] = useState(0);
   const [rubric, setRubric] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(null);
@@ -289,7 +280,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const [applyLengthDeduction, setApplyLengthDeduction] = useState(false);
   const [lengthThresholdText, setLengthThresholdText] = useState(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
   const directIntake = useRef(createDirectFileIntake());
-  const [includeSetupFiles, setIncludeSetupFiles] = useState(false);
   const [directPreparing, setDirectPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -298,7 +288,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const sessionRefusalRef = useRef("Set instructions and a rubric before submitting.");
 
   const driver = useContinuousGradingRun({ provider: "gemini", commentSplit: true });
-  const repositoryProposals = useChatRepositoryProposals({ sessionEpoch: driver.runKey, evidence: repositoryEvidence, students: () => driver.repositoryStudents, driver: driver.repositoryAdapter, onSettled: recordRepositoryCollection, onWorkflowSettled: recordRepositoryWorkflow });
   const { supabase, user } = useSupabase();
 
   // Restore the stored harshness after mount (a state initializer would
@@ -350,7 +339,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   }, []);
 
   const changeApplyLengthDeduction = (next: boolean) => {
-    if (sessionReady || driver.headerState === "resolving" || preparing || roleIntake.isPending()) return;
+    if (sessionReady || driver.headerState === "resolving" || preparing) return;
     setApplyLengthDeduction(next);
     persistApplyLengthDeduction(next);
   };
@@ -404,16 +393,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     }
     dropSessionEpoch.current += 1; setVisibleDropEpoch(dropSessionEpoch.current);
     directIntake.current.cancel();
-    setIncludeSetupFiles(false);
     setDirectPreparing(false);
     setPreparing(false);
     setZipPhase(null);
     driver.reset();
     setSetupExpanded(true);
-    roleIntake.cancel();
-    repositoryProposals.reset();
-    setRepositoryEvidence(emptyRepositoryEvidence());
-    setRepositoryEvidenceSession((session) => session + 1);
     setSubmitError(null);
     setSetupNote(null);
   };
@@ -521,7 +505,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitText = (content: string, label: string | undefined) =>
     withPreparing(async () => {
-      if (roleIntake.isPending()) return;
       if (!(await ensureSession())) return;
       const outcome = await driver.submit({ kind: "text", content, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -621,19 +604,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     if (current()) setSubmitError(reasons.length > 0 ? reasons.join(" ") : null);
     return outcomes;
   };
-  const roleIntake = useChatFileRoles({ epoch: driver.runKey, locked: sessionReady, draft: { instructions, rubric },
-    options: { harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
-      lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
-    canStage: !preparing && driver.headerState !== "resolving",
-    start: (setup, current) => ensureSession(undefined, setup, current),
-    submit: async (file, label, current) => (await handleConfirmedFiles([file], label, current))[0],
-    applySetup: (setup) => { setInstructions(setup.instructions); setRubric(setup.rubric); } });
   const handleSubmitFiles = (files: File[], label?: string) => {
-    const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving" || roleIntake.isPending();
-    if (includeSetupFiles && !blocked) {
-      const staged = roleIntake.stage(files, label);
-      return Promise.resolve(files.map(() => staged ? { kind: "staged" as const } : { kind: "refused" as const, reason: "Could not stage files for role review." }));
-    }
+    const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving";
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
@@ -641,12 +613,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   };
   // RECORDING ONE-VS-MANY: resolve the held multi-submission recording.
   const reportSplitOutcome = (outcome: SubmitOutcome) => setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
-  const handleConfirmSplit = () => { if (roleIntake.isPending()) { setSubmitError("Finish or cancel the file preview before grading this recording."); return; } reportSplitOutcome(driver.confirmRecordingSplit()); };
-  const handleRejectSplit = () => { if (roleIntake.isPending()) { setSubmitError("Finish or cancel the file preview before grading this recording."); return; } reportSplitOutcome(driver.rejectRecordingSplit()); };
+  const handleConfirmSplit = () => reportSplitOutcome(driver.confirmRecordingSplit());
+  const handleRejectSplit = () => reportSplitOutcome(driver.rejectRecordingSplit());
 
   const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
-      if (roleIntake.isPending()) return;
       if (!(await ensureSession(url))) return;
       const outcome = await driver.submit({ kind: "url", url, label });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -654,7 +625,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
     withPreparing(async () => {
-      if (roleIntake.isPending()) return { kind: "refused" as const, reason: "Finish or cancel file role review first." };
       if (!(await ensureSession())) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
       const outcome = await driver.submit({ kind: "composite", student, parts });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
@@ -666,7 +636,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   const handleClearInstructions = () => setInstructions("");
   const handleClearRubric = () => setRubric("");
   const handleClearAll = () => {
-    if (sessionReady || driver.headerState === "resolving" || preparing || roleIntake.isPending()) return;
+    if (sessionReady || driver.headerState === "resolving" || preparing) return;
     setInstructions("");
     setRubric("");
     changeLengthThreshold(String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT));
@@ -874,19 +844,19 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
               size="small"
               checked={applyLengthDeduction}
               onChange={(event) => changeApplyLengthDeduction(event.target.checked)}
-              disabled={sessionReady || busy || preparing || roleIntake.pending}
+              disabled={sessionReady || busy || preparing}
             />
           }
           label="Deduct for length"
         />
         <TextField className={chatStyles.thresholdField} size="small" type="text" label="Deduct when at least N words below the minimum"
           value={lengthThresholdText} onChange={(event) => changeLengthThreshold(event.target.value)}
-          disabled={!applyLengthDeduction || sessionReady || busy || preparing || roleIntake.pending}
+          disabled={!applyLengthDeduction || sessionReady || busy || preparing}
           error={applyLengthDeduction && parseLengthDeductionThreshold(lengthThresholdText) === null}
-          helperText={sessionReady || busy ? "Frozen for this session. Start a New session to change it." : roleIntake.pending || preparing ? "Finish or cancel the current intake before changing this setting." : !applyLengthDeduction ? "Enable Deduct for length to set a threshold." : parseLengthDeductionThreshold(lengthThresholdText) === null ? LENGTH_THRESHOLD_ERROR : "Uses only an explicit assignment or rubric minimum; does not change the deduction amount."}
+          helperText={sessionReady || busy ? "Frozen for this session. Start a New session to change it." : preparing ? "Finish or cancel the current intake before changing this setting." : !applyLengthDeduction ? "Enable Deduct for length to set a threshold." : parseLengthDeductionThreshold(lengthThresholdText) === null ? LENGTH_THRESHOLD_ERROR : "Uses only an explicit assignment or rubric minimum; does not change the deduction amount."}
           slotProps={{ htmlInput: { inputMode: "numeric", min: 1, max: LENGTH_DEDUCTION_THRESHOLD_WORDS_MAX, step: 1 } }} />
         {!sessionReady && (instructions !== "" || rubric !== "" || lengthThresholdText !== String(LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT)) && (
-          <Button variant="text" size="small" aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing || roleIntake.pending} onClick={handleClearAll}>
+          <Button variant="text" size="small" aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing} onClick={handleClearAll}>
             Clear all
           </Button>
         )}
@@ -911,7 +881,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
           run={driver.run}
-          repositoryProposals={repositoryProposals.workflow}
           canvasUrl={driver.canvasUrl}
           runKey={driver.runKey}
           editsSurface={driver.runKey}
@@ -955,17 +924,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           })}
         />
 
-        <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
-        <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
-        <FormControlLabel label="Include assignment or rubric files" control={<Checkbox checked={includeSetupFiles} disabled={busy || preparing || roleIntake.pending}
-            onChange={(event) => { if (!directIntake.current.isPending() && !roleIntake.isPending() && !preparing && !busy) setIncludeSetupFiles(event.target.checked); }} />} />
-        <p className={styles.ghMeta}>Unchecked: grade every file as a student submission. Checked: review file roles before grading.</p>
-        <ChatFileRolePreview intake={roleIntake} />
       </div>
       <div className={chatStyles.stickyComposer}>
         <ChatComposer
-          disabled={busy || preparing || roleIntake.pending}
-          reviewFiles={includeSetupFiles}
+          disabled={busy || preparing}
           getSessionEpoch={() => dropSessionEpoch.current}
           sessionEpoch={visibleDropEpoch}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}

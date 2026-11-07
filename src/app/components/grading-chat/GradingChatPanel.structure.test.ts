@@ -603,7 +603,7 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
       expect(source.slice(start, start + 200), name).toContain("withPreparing(");
     }
     expect(source).toMatch(/finally\s*\{\s*setPreparing\(false\)/);
-    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\s*\|\|\s*roleIntake\.pending\}/);
+    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\}/);
   });
 
   it("the grading indicator is driven by OUTSTANDING work (dispatched - completed), not driver.inFlight", () => {
@@ -710,7 +710,7 @@ describe("GradingChatPanel - deduction controls W2: length deduction control and
     const control = source.slice(open, start);
     expect(control).toContain("<Checkbox");
     expect(control).toContain("checked={applyLengthDeduction}");
-    expect(control).toContain("disabled={sessionReady || busy || preparing || roleIntake.pending}");
+    expect(control).toContain("disabled={sessionReady || busy || preparing}");
   });
 
   it("persists under its own key, defaults OFF, and restores in a mount effect", () => {

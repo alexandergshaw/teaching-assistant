@@ -20,7 +20,8 @@ describe("responsive grading chat presentation wiring", () => {
   it("keeps every intake surface in flow, with only the input inside the dock", () => {
     expect(composerContainsOnlyInput(panel)).toBe(true);
     const dock = panel.indexOf("<div className={chatStyles.stickyComposer}>");
-    for (const name of ["LedgerNotice", "RecordingSplitConfirm", "GradingProgress", "ChatRepositoryEvidence", "ChatRepositoryMappings", "ChatFileRolePreview"]) {
+    for (const name of ["LedgerNotice", "RecordingSplitConfirm", "GradingProgress"]) {
+      expect(panel.indexOf("<" + name)).toBeGreaterThan(-1);
       expect(panel.indexOf("<" + name)).toBeLessThan(dock);
     }
     expect(composerContainsOnlyInput('<div className={chatStyles.stickyComposer}><LedgerNotice /><ChatComposer /></div>')).toBe(false);

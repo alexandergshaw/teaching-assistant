@@ -38,7 +38,7 @@ function setupCallback(driver: ReturnType<typeof useContinuousGradingRun>, instr
     sessionRefusalRef: { current: "refused" }, setSubmitError: vi.fn(), setInstructions: vi.fn(), setRubric: vi.fn(), setSetupNote: vi.fn() });
 }
 describe("actual role controller -> Panel setup/transport callbacks -> continuous driver", () => {
-  it.each(["resolving", "ready", "preparing", "role-preview"])("Clear all and length toggle preserve visible/frozen policy during %s", async (mode) => {
+  it.each(["resolving", "ready", "preparing"])("Clear all and length toggle preserve visible/frozen policy during %s", async (mode) => {
     resetSessionDiagnosticLogForTests("2026-10-25T00:00:00Z");
     const ready = { kind: "ok", effectiveRubric: "RUBRIC", rubricFingerprint: "fixed", criteriaNames: [], rubricUsed: "provided" };
     let finish!: (value: typeof ready) => void;
@@ -50,7 +50,6 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     if (mode === "ready") await setupCallback(driver, "Minimum 500 words", "RUBRIC", "25", true)();
     driver = useDriver(); if (mode === "resolving") expect(driver.headerState).toBe("resolving");
     const controller = createChatFileRolesController({ epoch: driver.runKey, locked: false, draft: { instructions: "Minimum 500 words", rubric: "RUBRIC" }, options: { harshness: "balanced", applyNamingDeduction: true, applyLengthDeduction: true, lengthDeductionThresholdWords: 25 }, start: vi.fn(), submit: vi.fn(), applySetup: vi.fn() });
-    if (mode === "role-preview") controller.snapshot().stage([new File(["student"], "student.txt")]);
     const visible = { instructions: "Minimum 500 words", rubric: "RUBRIC", threshold: "25", enabled: true }, persist = vi.fn();
     const change = callback("changeLengthThreshold", { lengthThresholdText: "25", recordLengthDeductionThresholdChange, setLengthThresholdText: (next: string) => { visible.threshold = next; } });
     const bindings = { sessionReady: driver.headerState === "ready", driver, preparing: mode === "preparing", roleIntake: controller.snapshot(),
@@ -60,7 +59,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     expect(visible).toEqual({ instructions: "Minimum 500 words", rubric: "RUBRIC", threshold: "25", enabled: true }); expect(persist).not.toHaveBeenCalled();
     expect(readSessionDiagnosticLogState().entries.filter((entry) => entry.operation === "change_length_deduction_threshold")).toHaveLength(0);
     if (mode === "resolving") { finish(ready); expect(await pending).toBe(true); }
-    if (mode === "preparing" || mode === "role-preview") { controller.snapshot().cancel(); expect(await setupCallback(useDriver(), visible.instructions, visible.rubric, visible.threshold, visible.enabled)()).toBe(true); }
+    if (mode === "preparing") { controller.snapshot().cancel(); expect(await setupCallback(useDriver(), visible.instructions, visible.rubric, visible.threshold, visible.enabled)()).toBe(true); }
     await useDriver().submit({ kind: "text", content: "STUDENT", label: "Student" }); expect(dispatch.mock.calls[0][0]).toMatchObject({ applyLengthDeduction: true, lengthDeductionThresholdWords: 25 });
   });
   it("keeps invalid threshold text visible, records valid actual setting changes and Clear all restores one", () => {
@@ -149,10 +148,11 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
       expect(request.harshness ?? "balanced").toBe("balanced"); expect(request.applyLengthDeduction ?? false).toBe(false);
     }
   });
-  it("blocks competing recording confirmation and cleans a canceled upload before it can submit", async () => {
+  it("confirms recording and cleans a canceled upload before it can submit", async () => {
     const confirmRecordingSplit = vi.fn(() => ({ kind: "accepted", entryCount: 1 })), setSubmitError = vi.fn();
-    const confirm = callback("handleConfirmSplit", { roleIntake: { isPending: () => true }, driver: { confirmRecordingSplit }, setSubmitError, reportSplitOutcome: vi.fn() });
-    confirm(); expect(confirmRecordingSplit).not.toHaveBeenCalled(); expect(setSubmitError).toHaveBeenCalledWith("Finish or cancel the file preview before grading this recording.");
+    const reportSplitOutcome = vi.fn();
+    const confirm = callback("handleConfirmSplit", { driver: { confirmRecordingSplit }, setSubmitError, reportSplitOutcome });
+    confirm(); expect(confirmRecordingSplit).toHaveBeenCalledOnce(); expect(reportSplitOutcome).toHaveBeenCalledWith({ kind: "accepted", entryCount: 1 });
     let finish!: (value: { ok: true; storagePath: string }) => void, current = true;
     const upload = vi.fn(() => new Promise((resolve) => { finish = resolve; })), remove = vi.fn(async () => {}), submit = vi.fn();
     const consume = callback("submitStoragedZip", { user: { id: "owner" }, supabase: { storage: {} }, setZipPhase: vi.fn(), uploadGradingZip: upload, driver: { submit }, deleteGradingZipBestEffort: remove, safeIntake: vi.fn(), recordIntakeGate: vi.fn() });
@@ -209,13 +209,12 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
     driver = useDriver(); await route("CHANGED_ASSIGNMENT")([new File(["LATER"], "later.pdf")]); expect(header).toHaveBeenCalledOnce();
     expect(dispatch.mock.calls.at(-1)?.[0].assignmentInstructions).toBe("FROZEN_ASSIGNMENT");
   });
-  it("pins both loose-file entry points to the shared direct-or-preview router, guards other inputs and retains accessible preview", () => {
-    expect(panel).toContain("useState(false)"); expect(panel).toContain("if (includeSetupFiles && !blocked)"); expect(panel).toContain("Include assignment or rubric files");
-    expect(panel).toContain("roleIntake.stage(files, label)"); expect(panel).toContain("if (files.length > 0) handleSubmitFiles(files)"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
-    expect(panel.match(/if \(roleIntake.isPending\(\)\) return/g)).toHaveLength(3); expect(panel).toContain("disabled={busy || preparing || roleIntake.pending}"); expect(panel).toContain("<ChatFileRolePreview intake={roleIntake}");
-    const ui = readFileSync("src/app/components/grading-chat/ChatFileRolePreview.tsx", "utf8"); expect(ui).toContain("Confirm roles and grade"); expect(ui).toContain("Use setup"); expect(ui).toContain("Cancel file preview"); expect(ui).toContain("readOnly value={intake.resolved.effective[field]}");
-    expect(panel).toContain('label="Deduct when at least N words below the minimum"'); expect(panel).toContain("disabled={!applyLengthDeduction || sessionReady || busy || preparing || roleIntake.pending}");
-    expect(panel).toContain('aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing || roleIntake.pending}');
+  it("routes loose-file entry points directly and removes setup-file review controls", () => {
+    expect(panel).not.toContain("Include assignment or rubric files"); expect(panel).not.toContain("roleIntake.stage");
+    expect(panel).toContain("if (files.length > 0) handleSubmitFiles(files)"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
+    expect(panel).not.toContain("<ChatFileRolePreview"); expect(panel).toContain("disabled={busy || preparing}");
+    expect(panel).toContain('label="Deduct when at least N words below the minimum"'); expect(panel).toContain("disabled={!applyLengthDeduction || sessionReady || busy || preparing}");
+    expect(panel).toContain('aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing}');
     expect(panel).toContain('value={lengthThresholdText}'); expect(panel).toContain('inputMode: "numeric"');
   });
 });

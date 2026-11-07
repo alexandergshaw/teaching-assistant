@@ -56,7 +56,14 @@ describe("actual Panel direct upload router", () => {
     const h = harness(); h.submit.mockRejectedValueOnce(new Error("private"));
     h.submit.mockResolvedValueOnce([{ kind: "refused", reason: "too large" }] as never);
     await h.route()([file("first.pdf"), file("second.pdf"), file("third.pdf")]);
-    expect(h.submit).toHaveBeenCalledTimes(3); expect(h.errors.at(-1)).toContain("first.pdf: File preparation failed"); expect(h.errors.at(-1)).toContain("second.pdf: too large"); expect(h.errors.join()).not.toContain("private");
+    expect(h.submit).toHaveBeenCalledTimes(3); expect(h.errors.at(-1)).toContain("first.pdf: The file's admission could not be confirmed"); expect(h.errors.at(-1)).toContain("second.pdf: too large"); expect(h.errors.join()).not.toContain("private");
+  });
+  it("returns per-file outcomes without treating an uncertain result as a refusal", async () => {
+    const h = harness(); h.submit.mockRejectedValueOnce(new Error("lost response"));
+    h.submit.mockResolvedValueOnce([{ kind: "refused", reason: "unsupported" }] as never);
+    const outcomes = await h.route()([file("a.pdf"), file("b.exe"), file("c.pdf")]);
+    expect(outcomes.map((outcome: { kind: string }) => outcome.kind)).toEqual(["unknown", "refused", "accepted"]);
+    expect(h.submit).toHaveBeenCalledTimes(3);
   });
   it.each(["header", "upload"])("reset invalidates old %s without releasing newer busy/error", async (phase) => {
     const h = harness(); let finish!: () => void;
@@ -70,10 +77,10 @@ describe("actual Panel direct upload router", () => {
   });
   it("confirmed reset cancels; canceled confirmation leaves intent and attempt intact", () => {
     const h = harness(), reset = vi.fn(), cancel = vi.fn(), intent = vi.fn();
-    const bindings = { window: { confirm: () => false }, directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
-      setupRef: { current: null }, roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn() };
-    actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled();
-    bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).toHaveBeenCalledWith(false); expect(reset).toHaveBeenCalledOnce(); expect(h.intake.isPending()).toBe(false);
+    const bindings = { window: { confirm: () => false }, dropSessionEpoch: { current: 0 }, setVisibleDropEpoch: vi.fn(), directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
+      setSetupExpanded: vi.fn(), roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn() };
+    actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled(); expect(bindings.dropSessionEpoch.current).toBe(0);
+    bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).toHaveBeenCalledWith(false); expect(reset).toHaveBeenCalledOnce(); expect(bindings.setSetupExpanded).toHaveBeenCalledWith(true); expect(bindings.dropSessionEpoch.current).toBe(1); expect(bindings.setVisibleDropEpoch).toHaveBeenCalledWith(1); expect(h.intake.isPending()).toBe(false);
   });
   it.each(["count", "bytes"])("admits exact %s limits and refuses overflow before header", async (kind) => {
     const h = harness(); const boundary = kind === "count" ? Array.from({ length: ROLE_FILE_LIMIT }, () => file()) : [Object.assign(file(), { })];

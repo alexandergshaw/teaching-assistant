@@ -26,14 +26,14 @@ describe("responsive grading chat presentation wiring", () => {
     expect(composerContainsOnlyInput('<div className={chatStyles.stickyComposer}><LedgerNotice /><ChatComposer /></div>')).toBe(false);
   });
 
-  it("uses native setup disclosure and limits automatic collapse to the ready transition", () => {
-    expect(panel).toMatch(/<details ref=\{setupRef\}[^>]*open/);
+  it("uses MUI setup disclosure and limits automatic collapse to the ready transition", () => {
+    expect(panel).toContain('<Accordion ref={setupRef} className={chatStyles.setupDisclosure} expanded={setupExpanded}');
     expect(panel).toContain('sessionReady ? "Assignment setup (locked)" : "Assignment setup"');
     expect(panel).toContain("sessionReady && !previousReadyRef.current");
-    expect(panel.indexOf('setup.querySelector("summary")?.focus()')).toBeLessThan(panel.indexOf("setup.open = false"));
+    expect(panel.indexOf('setupSummaryRef.current?.focus()')).toBeLessThan(panel.indexOf("setSetupExpanded(false)"));
     const reset = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
-    expect(reset.indexOf("window.confirm")).toBeLessThan(reset.indexOf("setupRef.current.open = true"));
-    expect(panel.indexOf("{CHAT_SESSION_NOT_SAVED_DISCLOSURE}")).toBeGreaterThan(panel.indexOf("</details>", panel.indexOf("<details ref={setupRef}")));
+    expect(reset.indexOf("window.confirm")).toBeLessThan(reset.indexOf("setSetupExpanded(true)"));
+    expect(panel.indexOf("{CHAT_SESSION_NOT_SAVED_DISCLOSURE}")).toBeGreaterThan(panel.indexOf("</Accordion>", panel.indexOf("<Accordion ref={setupRef}")));
   });
 
   it("turns sticking off for narrow or short viewports and bounds the rendered floor", () => {

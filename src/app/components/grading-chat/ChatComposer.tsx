@@ -31,6 +31,10 @@ import { loadComposerHeight, persistComposerHeight } from "./composerHeight";
 import { buildLmsAssignmentUrlAction } from "@/app/actions/grading-chat-intake";
 import { useLmsSubmissionPicker } from "./useLmsSubmissionPicker";
 import { LMS_ASSIGNMENT_COPY, LMS_COURSE_COPY, LMS_INSTITUTION_COPY, lmsFieldIndication } from "./lmsPickerState";
+import { SubmissionDrop } from "./SubmissionDrop";
+import type { DirectFileOutcome } from "./chatDirectFileIntake";
+import type { SubmitOutcome } from "./useContinuousGradingRun";
+import { submitOneFileGroup } from "./submissionDropRoutes";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -58,10 +62,13 @@ function persistInputMode(mode: InputMode) {
 
 export interface ChatComposerProps {
   readonly disabled: boolean;
+  readonly reviewFiles?: boolean;
+  readonly getSessionEpoch?: () => number;
+  readonly sessionEpoch?: number;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
-  readonly onSubmitFiles: (files: File[], label?: string) => void;
+  readonly onSubmitFiles: (files: File[], label?: string) => Promise<DirectFileOutcome[]>;
   readonly onSubmitUrl: (url: string, label?: string) => void;
-  readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => void;
+  readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => Promise<SubmitOutcome>;
 }
 
 // Tray row text for one pending part. Pure and short: the tray shows what was
@@ -72,7 +79,7 @@ function describePart(part: CompositePartInput): string {
   return `URL: ${part.url}`;
 }
 
-export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
+export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitText, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -280,6 +287,8 @@ export function ChatComposer({ disabled, onSubmitText, onSubmitFiles, onSubmitUr
           : undefined
       }
     >
+      <SubmissionDrop disabled={disabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
+        onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)} />
       <div className={`${styles.ghActions} ${chatStyles.composerRow}`}>
         <SegmentedToggle
           label="Submission type"

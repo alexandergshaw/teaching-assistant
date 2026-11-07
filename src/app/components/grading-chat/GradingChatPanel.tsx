@@ -18,6 +18,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { fetchCanvasMetaAction } from "../../actions/grading";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
+import { Accordion, AccordionSummary, AccordionDetails, Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import GradingResults from "../GradingResults";
@@ -227,31 +228,33 @@ const DIAG_COLUMNS: readonly (readonly [string, string])[] = [
 function RunDiagnostics({ items, copiedKey, onCopy }: { items: readonly ItemDiagnostic[]; copiedKey: string | null; onCopy: GradingChatPanelProps["onCopy"] }) {
   if (items.length === 0) return null;
   return (
-    <details className={styles.generatedRubricCard}>
-      <summary>{summarizeDiagnostics(items)}</summary>
+    <Accordion className={styles.generatedRubricCard}>
+      <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>{summarizeDiagnostics(items)}</AccordionSummary>
+      <AccordionDetails>
       <p className={styles.ghMeta}>Times are in seconds. Copied text uses row numbers, not student names.</p>
       <Button variant="outlined" size="small" onClick={() => void onCopy(COPY_KEY_DIAGNOSTICS, formatDiagnosticsText(items))}>
         {copiedKey === COPY_KEY_DIAGNOSTICS ? "Copied" : "Copy diagnostics"}
       </Button>
       <div className={chatStyles.diagnosticsScroll} role="region" aria-label="Run diagnostics table" tabIndex={0}>
-      <table className={styles.generatedRubricTable}>
-        <thead>
-          <tr>
-            <th>Row</th><th>Outcome</th><th>Server s</th><th>Model s</th>
-            {DIAG_COLUMNS.map(([title]) => <th key={title}>{title}</th>)}
-          </tr>
-        </thead>
-        <tbody>
+      <Table className={styles.generatedRubricTable} size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell component="th" scope="col">Row</TableCell><TableCell component="th" scope="col">Outcome</TableCell><TableCell component="th" scope="col">Server s</TableCell><TableCell component="th" scope="col">Model s</TableCell>
+            {DIAG_COLUMNS.map(([title]) => <TableCell component="th" scope="col" key={title}>{title}</TableCell>)}
+          </TableRow>
+        </TableHead>
+        <TableBody>
           {items.map((d, i) => (
-            <tr key={`${d.sourceIndex}-${i}`}>
-              <td>{d.rowLabel}</td><td>{d.outcome}</td><td>{diagSec(d, "serverMs")}</td><td>{diagSec(d, "modelMs")}</td>
-              {DIAG_COLUMNS.map(([title, key]) => <td key={title}>{diagVal(d, key)}</td>)}
-            </tr>
+            <TableRow key={`${d.sourceIndex}-${i}`}>
+              <TableCell>{d.rowLabel}</TableCell><TableCell>{d.outcome}</TableCell><TableCell>{diagSec(d, "serverMs")}</TableCell><TableCell>{diagSec(d, "modelMs")}</TableCell>
+              {DIAG_COLUMNS.map(([title, key]) => <TableCell key={title}>{diagVal(d, key)}</TableCell>)}
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       </div>
-    </details>
+    </AccordionDetails>
+    </Accordion>
   );
 }
 
@@ -276,7 +279,9 @@ function GradingProgress({ status }: { status: RunStatus | null }) {
 export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingChatPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const sessionActionsRef = useRef<HTMLDivElement>(null);
-  const setupRef = useRef<HTMLDetailsElement>(null);
+  const setupRef = useRef<HTMLDivElement>(null);
+  const setupSummaryRef = useRef<HTMLDivElement>(null);
+  const [setupExpanded, setSetupExpanded] = useState(true);
   const setupFocusedRef = useRef(false);
   const previousReadyRef = useRef(false);
 
@@ -408,12 +413,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   useEffect(() => {
     const setup = setupRef.current;
     if (setup && sessionReady && !previousReadyRef.current) {
-      if (setupFocusedRef.current) setup.querySelector("summary")?.focus();
-      setup.open = false;
+      if (setupFocusedRef.current) setupSummaryRef.current?.focus();
+      setSetupExpanded(false);
     }
     previousReadyRef.current = sessionReady;
   }, [sessionReady]);
 
+  const dropSessionEpoch = useRef(0); const [visibleDropEpoch, setVisibleDropEpoch] = useState(0);
   const handleNewSession = () => {
     if (
       typeof window !== "undefined" &&
@@ -421,13 +427,14 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     ) {
       return;
     }
+    dropSessionEpoch.current += 1; setVisibleDropEpoch(dropSessionEpoch.current);
     directIntake.current.cancel();
     setIncludeSetupFiles(false);
     setDirectPreparing(false);
     setPreparing(false);
     setZipPhase(null);
     driver.reset();
-    if (setupRef.current) setupRef.current.open = true;
+    setSetupExpanded(true);
     roleIntake.cancel();
     repositoryProposals.reset();
     setRepositoryEvidence(emptyRepositoryEvidence());
@@ -438,10 +445,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   // Marks the submit intake (extraction, session start) as in progress so the
   // composer shows busy until the awaits settle, success or failure.
-  const withPreparing = async (work: () => Promise<void>) => {
+  const withPreparing = async <T,>(work: () => Promise<T>): Promise<T> => {
     setPreparing(true);
     try {
-      await work();
+      return await work();
     } finally {
       setPreparing(false);
     }
@@ -648,7 +655,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     applySetup: (setup) => { setInstructions(setup.instructions); setRubric(setup.rubric); } });
   const handleSubmitFiles = (files: File[], label?: string) => {
     const blocked = directIntake.current.isPending() || preparing || driver.headerState === "resolving" || roleIntake.isPending();
-    if (includeSetupFiles && !blocked) { roleIntake.stage(files, label); return; }
+    if (includeSetupFiles && !blocked) {
+      const staged = roleIntake.stage(files, label);
+      return Promise.resolve(files.map(() => staged ? { kind: "staged" as const } : { kind: "refused" as const, reason: "Could not stage files for role review." }));
+    }
     return directIntake.current.run({ files, label, blocked, preparing: (value) => { setDirectPreparing(value); setPreparing(value); }, error: setSubmitError,
       setup: { instructions, rubric, harshness, feedbackWordTarget: coerceFeedbackWordTarget(feedbackLengthText), applyNamingDeduction, applyLengthDeduction,
         lengthDeductionThresholdWords: applyLengthDeduction ? parseLengthDeductionThreshold(lengthThresholdText) ?? NaN : undefined },
@@ -669,10 +679,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
     withPreparing(async () => {
-      if (roleIntake.isPending()) return;
-      if (!(await ensureSession())) return;
+      if (roleIntake.isPending()) return { kind: "refused" as const, reason: "Finish or cancel file role review first." };
+      if (!(await ensureSession())) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
       const outcome = await driver.submit({ kind: "composite", student, parts });
       setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      return outcome;
     });
 
   // Clear controls: uncommitted draft text only, so no confirm. Pre-lock only;
@@ -732,12 +743,13 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           </span>
         )}
       </div>
-      <details ref={setupRef} className={chatStyles.setupDisclosure} open
+      <Accordion ref={setupRef} className={chatStyles.setupDisclosure} expanded={setupExpanded} onChange={(_, expanded) => setSetupExpanded(expanded)}
         onFocusCapture={() => { setupFocusedRef.current = true; }}
         onBlurCapture={(event) => {
           if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setupFocusedRef.current = false;
         }}>
-        <summary>{sessionReady ? "Assignment setup (locked)" : "Assignment setup"}</summary>
+        <AccordionSummary ref={setupSummaryRef} expandIcon={<span aria-hidden="true">+</span>}>{sessionReady ? "Assignment setup (locked)" : "Assignment setup"}</AccordionSummary>
+        <AccordionDetails>
         <div className={chatStyles.setupGrid}>
       {!sessionReady ? (
         <>
@@ -900,7 +912,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         )}
       </div>
 
-      </details>
+        </AccordionDetails>
+      </Accordion>
 
       <div className={chatStyles.sessionBar}>
         <div className={chatStyles.sessionMeta}>
@@ -965,17 +978,17 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
         <ChatRepositoryEvidence key={repositoryEvidenceSession} evidence={repositoryEvidence} onChange={setRepositoryEvidence} />
         <ChatRepositoryMappings key={`mappings-${repositoryEvidenceSession}`} evidence={repositoryEvidence} students={driver.repositoryStudents} proposals={repositoryProposals} />
-        <label>
-          <input type="checkbox" checked={includeSetupFiles} disabled={busy || preparing || roleIntake.pending}
-            onChange={(event) => { if (!directIntake.current.isPending() && !roleIntake.isPending() && !preparing && !busy) setIncludeSetupFiles(event.target.checked); }} />
-          Include assignment or rubric files
-        </label>
+        <FormControlLabel label="Include assignment or rubric files" control={<Checkbox checked={includeSetupFiles} disabled={busy || preparing || roleIntake.pending}
+            onChange={(event) => { if (!directIntake.current.isPending() && !roleIntake.isPending() && !preparing && !busy) setIncludeSetupFiles(event.target.checked); }} />} />
         <p className={styles.ghMeta}>Unchecked: grade every file as a student submission. Checked: review file roles before grading.</p>
         <ChatFileRolePreview intake={roleIntake} />
       </div>
       <div className={chatStyles.stickyComposer}>
         <ChatComposer
           disabled={busy || preparing || roleIntake.pending}
+          reviewFiles={includeSetupFiles}
+          getSessionEpoch={() => dropSessionEpoch.current}
+          sessionEpoch={visibleDropEpoch}
           onSubmitText={handleSubmitText} onSubmitFiles={handleSubmitFiles} onSubmitUrl={handleSubmitUrl}
           onSubmitComposite={handleSubmitComposite}
         />

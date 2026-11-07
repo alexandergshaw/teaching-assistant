@@ -514,7 +514,7 @@ describe("GradingChatPanel - composite W2: tray wiring", () => {
 describe("ChatComposer - composite W2: tray controls and the preserved single-part path", () => {
   it("declares onSubmitComposite and the three single-part callbacks", () => {
     const source = withoutLineComments(read(COMPOSER));
-    expect(source).toMatch(/onSubmitComposite:\s*\(student: string, parts: CompositePartInput\[\]\) => void/);
+    expect(source).toMatch(/onSubmitComposite:\s*\(student: string, parts: CompositePartInput\[\]\) => Promise<SubmitOutcome>/);
     expect(source).toMatch(/onSubmitText:/);
     expect(source).toMatch(/onSubmitFiles:/);
     expect(source).toMatch(/onSubmitUrl:/);
@@ -552,7 +552,7 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
 describe("submission labels: file and url modes carry the optional label", () => {
   it("the composer declares a label field in file mode and in url mode, and threads it into the callbacks", () => {
     const source = withoutLineComments(read(COMPOSER));
-    expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => void/);
+    expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => Promise<DirectFileOutcome\[\]>/);
     expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => void/);
     const fileBlock = source.slice(source.indexOf('mode === "file" && ('), source.indexOf("+ Add part"));
     expect(fileBlock).toContain("chatStyles.composerLabel");
@@ -913,11 +913,12 @@ describe("GradingChatPanel - WD run-diagnostics panel (reachability and copy saf
     expect(src.slice(mount, src.indexOf("/>", mount))).toContain("items={driver.diagnostics}");
   });
 
-  it("renders a collapsed native <details> with a summary line, reusing the existing classes", () => {
+  it("renders a collapsed MUI accordion and semantic diagnostics table", () => {
     const body = fn("RunDiagnostics");
-    expect(body).toContain("<details className={styles.generatedRubricCard}>");
-    expect(body).not.toMatch(/<details[^>]*\sopen/);
-    expect(body).toContain("<summary>{summarizeDiagnostics(items)}</summary>");
+    expect(body).toContain("<Accordion className={styles.generatedRubricCard}>");
+    expect(body).not.toMatch(/<Accordion[^>]*\sexpanded/);
+    expect(body).toContain("{summarizeDiagnostics(items)}</AccordionSummary>");
+    expect(body).toContain('<TableCell component="th" scope="col">');
     expect(body).toContain("styles.generatedRubricTable");
     expect(body).toContain("styles.ghMeta");
     expect(fn("summarizeDiagnostics")).toMatch(/graded, .*needs-retry, avg/);

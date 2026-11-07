@@ -25,7 +25,7 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, SvgIcon, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
@@ -257,6 +257,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showAll, setShowAll] = useState(false); // ephemeral show-all override (no ta- key)
+  const [setupExpanded, setSetupExpanded] = useState(false);
   // AC4 item 23: the persisted selection is restored (and filtered against
   // currently-valid repo ids) once this course's rows are known, not before -
   // done as a render-phase compare-and-adjust (matching CoursePicker.tsx's
@@ -669,7 +670,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       <TabHeader
         eyebrow="Grading"
         title="Repo Grades"
-        subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
+        subtitle="Review repository grades and feedback by class."
       />
       <RepoGradesGithubQuota />
       <RepoGradeReservationRecovery />
@@ -681,22 +682,20 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
 
-      {/* W4: one persisted "Run setup" disclosure wrapping BOTH the setup
-          controls and the link-usernames panel. Defaults open until every repo
-          is bound (!allBound), then collapses; an explicit toggle wins. The
-          status banners sit after it so errors stay visible while collapsed. */}
+      {/* Setup stays collapsed until requested; binding and error notices remain visible. */}
       <Accordion
         className={gridStyles.setupRegion}
         disableGutters
         elevation={0}
-        expanded={effectiveOpen(uiState.setupOpen, !allBound)}
-        onChange={(_, value) => setUiState((prev) => ({ ...prev, setupOpen: value }))}
+        expanded={setupExpanded}
+        onChange={(_, value) => setSetupExpanded(value)}
         slotProps={{ transition: { timeout: 0 } }}
       >
       <AccordionSummary className={gridStyles.disclosureSummary}
         id={`${setupId}-summary`} aria-controls={`${setupId}-content`}
+        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}
         sx={{ minHeight: 0, "& .MuiAccordionSummary-content": { my: 0, alignItems: "center" } }}>
-        <span>Run setup</span>
+        <span>Class setup and linking</span>
         <span className={gridStyles.setupSummaryMeta}>{boundSummary}</span>
       </AccordionSummary>
       <AccordionDetails sx={{ p: 0 }}>
@@ -790,19 +789,11 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
 
-      {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
-          comment near the top of this file): LinkUsernamesPanel.tsx already
-          prints the literal "No repos are confirmed-bound to a roster student
-          yet." sentence when `noConfirmedRows` is true, so this banner does
-          NOT repeat it - it only points at the panel just above and keeps the
-          workflow step's exact label searchable, reframed as "available right
-          here" rather than as an instruction to leave this page. */}
+      {/* Keep the linking action discoverable while setup is collapsed. */}
       {model && noConfirmedRows && (
-        <p className={gridStyles.banner} role="status">
-          The panel above uses the same mechanism the &quot;{LINK_GITHUB_USERNAMES_STEP_LABEL}&quot; workflow step
-          uses - each student&apos;s own Canvas submission, not an inferred match - so there is no need to leave this
-          page to populate bindings.
-        </p>
+        <Alert severity="info" action={<Button size="small" onClick={() => setSetupExpanded(true)}>Open setup</Button>}>
+          No repositories are linked to students yet. {LINK_GITHUB_USERNAMES_STEP_LABEL} is available in class setup.
+        </Alert>
       )}
 
       {/* AC5 item 31 / U5.20: results are announced through a role="status"

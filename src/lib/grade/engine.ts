@@ -1,4 +1,4 @@
-import { canvasVideoRefusal } from "../canvas/omitted-video";
+import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { parseRepositoryProposalOutput } from "./repository-proposal-output";
 import {
@@ -761,6 +761,8 @@ export async function gradeCanvasUrl(
     fetchAssignmentPointsPossible(url),
   ]);
 
+  const identityRefusal = canvasOmissionIdentityRefusal(students);
+  if (identityRefusal) throw new Error(identityRefusal);
   if (students.length === 0) {
     return {
       results: [],

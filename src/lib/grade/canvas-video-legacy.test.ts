@@ -4,6 +4,7 @@ vi.mock("../canvas", () => ({ fetchCanvasWork: vi.fn(), fetchAssignmentPointsPos
 import { callLlm } from "../llm";
 import { fetchCanvasWork, fetchAssignmentPointsPossible } from "../canvas";
 import { gradeCanvasUrl } from "./engine";
+import { extractCanvasEntries } from "./extraction";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -11,6 +12,27 @@ beforeEach(() => {
 });
 
 describe("legacy Canvas grading video safety", () => {
+  it("refuses ambiguous Canvas IDs in chat intake before producing entries", async () => {
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ kind: "assignment", dueAt: null, students: [
+      { student: "A", userId: 1, text: "answer", files: [], contributionCount: 1, omittedAttachments: [{ name: "paper.pdf", reason: "download failed" }] },
+      { student: "B", userId: 1, text: "answer", files: [], contributionCount: 1 },
+    ] });
+    await expect(extractCanvasEntries("https://test.instructure.com/courses/1/assignments/1")).rejects.toThrow("identities");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("isolates an omitted PDF while grading a healthy peer", async () => {
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ kind: "assignment", dueAt: null, students: [
+      { student: "Same Name", userId: 1, text: "written work", files: [], contributionCount: 1, omittedAttachments: [{ name: "paper.pdf", reason: "download failed" }] },
+      { student: "Same Name", userId: 2, text: "answer", files: [], contributionCount: 1 },
+    ] });
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Good", rubricResults: [{ area: "Overall", score: "8/10" }], totalScore: "8/10" }) } as never);
+    const run = await gradeCanvasUrl("https://test.instructure.com/courses/1/assignments/1", "instructions", "rubric", "gemini");
+    expect(run.results[0].ungraded?.canvasUserId).toBe(1);
+    expect(run.results[0].ungraded?.message).toContain("paper.pdf");
+    expect(run.results[1].userId).toBe(2);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(callLlm).mock.calls)).not.toContain("written work");
+  });
   it("does not grade a downloaded video carrying a misleading image filename", async () => {
     vi.mocked(fetchCanvasWork).mockResolvedValue({ kind: "assignment", dueAt: null, students: [{ student: "Blocked", userId: 1, text: "answer", files: [{ name: "upload.png", mimeType: "video/unknown", base64: "AAAA" }], contributionCount: 1 }] });
     const run = await gradeCanvasUrl("https://test.instructure.com/courses/1/assignments/1", "instructions", "rubric", "gemini");

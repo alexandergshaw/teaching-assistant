@@ -105,6 +105,12 @@ describe("grade-run-item isSubmittedFileInfo: videoRef", () => {
     expect(error).not.toContain("\n");
     expect(mockGrade).not.toHaveBeenCalled();
   });
+  it("refuses an omitted nonvideo Canvas attachment before calling the model", async () => {
+    const res = await POST(request({ name: "paper.pdf", extension: "", previewContent: "Attachment unavailable.", previewTruncated: false, mimeType: "application/x-canvas-attachment-unavailable" }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain("paper.pdf");
+    expect(mockGrade).not.toHaveBeenCalled();
+  });
   it("refuses an unstaged Canvas video before calling the model", async () => {
     const req = request({ name: "demo.mp4", extension: "mp4", previewContent: "No extractable text available for this file.", previewTruncated: false, rawBase64: "AAAA", mimeType: "video/mp4" });
     const body = await req.json();

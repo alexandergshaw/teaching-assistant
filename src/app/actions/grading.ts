@@ -1,5 +1,5 @@
 "use server";
-import { canvasVideoRefusal } from "@/lib/canvas/omitted-video";
+import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "@/lib/canvas/omitted-video";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
 import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractSubmissions, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
@@ -756,6 +756,8 @@ export async function gradeAction(
     // deterministic grader gets a synthesized zip; Gemini grades the text/files.
     if (canvasUrl) {
       const { students: safetyStudents } = await fetchCanvasWork(canvasUrl);
+      const identityRefusal = canvasOmissionIdentityRefusal(safetyStudents);
+      if (identityRefusal) return { run: null, error: identityRefusal };
       const videoRefusal = canvasVideoRefusal(safetyStudents);
       if (videoRefusal && provider === "other") return { run: null, error: videoRefusal };
       // SpeedGrader base URL for per-student deep links in the results table.

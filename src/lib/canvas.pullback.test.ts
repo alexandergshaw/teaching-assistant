@@ -189,6 +189,12 @@ describe("listStudents", () => {
 });
 
 describe("fetchSubmissionDetail", () => {
+  it("retains a named nonvideo attachment when its URL is missing", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ id: 50, name: "Assignment" }));
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ user_id: 123, attachments: [{ filename: "paper.pdf" }] }));
+    const result = await fetchSubmissionDetail(TEST_CODE, "999", "50", 123);
+    expect(result.omittedAttachments).toEqual([{ name: "paper.pdf", reason: "missing download URL" }]);
+  });
   it("keeps video detection from the display name after download", async () => {
     mockCanvasFetch.mockResolvedValueOnce(okResult({ id: 50, name: "Assignment" }));
     mockCanvasFetch.mockResolvedValueOnce(okResult({ user_id: 123, attachments: [{ filename: "upload.png", display_name: " demo.MP4 ", url: "https://test.instructure.com/file", "content-type": "image/png" }] }));

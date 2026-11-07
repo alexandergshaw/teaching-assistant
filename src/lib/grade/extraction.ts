@@ -1,3 +1,4 @@
+import { canvasOmissionIdentityRefusal } from "../canvas/omitted-video";
 import { isSubmissionFileInventories, type SubmissionFileInventory } from "./submission-file-inventory";
 import { repoFilesToSubmittedFiles } from "./repo-file-submissions";
 import JSZip from "jszip";
@@ -398,6 +399,8 @@ export async function extractCanvasEntries(
     fetchCanvasWork(url),
     fetchAssignmentPointsPossible(url),
   ]);
+  const identityRefusal = canvasOmissionIdentityRefusal(students);
+  if (identityRefusal) throw new Error(identityRefusal);
   const entries: StudentSubmissionEntry[] = [];
   for (const work of students) {
     entries.push(await canvasWorkToEntry(work));
@@ -966,7 +969,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     student: work.student,
     content: contentParts.join("\n\n---\n\n"),
     mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
-    submittedFiles: [...submittedFiles, ...(work.omittedVideos ?? []).map((video) => ({ name: video.name, extension: "mp4", mimeType: "video/mp4", previewContent: `Video unavailable: ${video.reason}.`, previewTruncated: false }))],
+    submittedFiles: [...submittedFiles, ...(work.omittedVideos ?? []).map((video) => ({ name: video.name, extension: "mp4", mimeType: "video/mp4", previewContent: `Video unavailable: ${video.reason}.`, previewTruncated: false })), ...(work.omittedAttachments ?? []).map((file) => ({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unavailable", previewContent: `Attachment unavailable: ${file.reason}.`, previewTruncated: false }))],
     userId: work.userId,
     submissionUrl: work.submissionUrl ?? null,
     repositoryInventories,

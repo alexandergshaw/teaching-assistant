@@ -13,6 +13,23 @@ const success = (value: unknown) => ({ ok: true as const, status: 200, headers: 
 beforeEach(() => fetchMock.mockReset());
 
 describe("Canvas omitted video intake", () => {
+  it.each([
+    ["missing URL", { filename: "paper.pdf" }, undefined],
+    ["declared oversize", { filename: "paper.pdf", url: "https://test.instructure.com/file", size: 16 * 1024 * 1024 }, undefined],
+    ["non-OK", { filename: "paper.pdf", url: "https://test.instructure.com/file" }, { ok: false, status: 404, headers: {}, body: Buffer.alloc(0) }],
+    ["thrown download", { filename: "paper.pdf", url: "https://test.instructure.com/file" }, "throw"],
+    ["oversize bytes", { filename: "paper.pdf", url: "https://test.instructure.com/file" }, { ok: true, status: 200, headers: {}, body: Buffer.alloc(16 * 1024 * 1024) }],
+  ])("retains a nonvideo-only student after %s", async (_label, attachment, download) => {
+    fetchMock.mockResolvedValueOnce(success([{ user_id: 1, workflow_state: "submitted", user: { name: "Student" }, attachments: [attachment] }]));
+    if (download === "throw") fetchMock.mockRejectedValueOnce(new Error("private detail"));
+    else if (download) fetchMock.mockResolvedValueOnce(download as never);
+    const [student] = await fetchAssignment("https://test.instructure.com", "token", institution, "1", "1");
+    expect(student.omittedAttachments?.[0].name).toBe("paper.pdf");
+    expect(JSON.stringify(student.omittedAttachments)).not.toContain("private detail");
+    const entry = await canvasWorkToEntry(student);
+    expect(entry.submittedFiles).toContainEqual(expect.objectContaining({ name: "paper.pdf", mimeType: "application/x-canvas-attachment-unavailable" }));
+  });
+
   it("bounds and sanitizes names before showing a refusal", () => {
     const refusal = canvasVideoRefusal([{ student: "Student\nhttps://example.com/private", files: [], omittedVideos: [{ name: "demo.mp4", reason: "download failed" }] }]);
     expect(refusal).not.toContain("https://");

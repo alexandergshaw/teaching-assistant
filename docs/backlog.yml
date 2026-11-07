@@ -87,12 +87,48 @@
   kind: 'bug'
   area: 'grading-setup-interaction-cost'
   title: 'Retain pasted text, URLs and composite parts when grading setup or intake refuses the submission.'
-  owns: ['src/app/components/grading-chat/ChatComposer.tsx']
-  verify: null
+  owns: ['src/app/components/grading-chat/ChatComposer.tsx', 'src/app/components/grading-chat/GradingChatPanel.tsx']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatComposerDraftRetention.test.ts'
   blocked_by: []
-  instrument: 'Actual composer callback lifecycle must retain drafts on refused or thrown intake and clear only captured accepted content without erasing newer edits. Verify text, URL and composite parts with deferred results and session reset.'
+  instrument: 'Actual composer callback lifecycle must retain drafts on refused or thrown intake and clear only captured accepted content without erasing newer edits. Verify text, URL and composite parts with deferred results, session reset and partial acceptance without retrying admitted work.'
   from: 'Confirmed during the owner-requested live grading-chat investigation on 2026-10-27.'
   note: 'Owner: coordinator. Existing void callbacks clear local drafts immediately, before setup success is known. Recommended correction is outcome-aware clearing with captured revision guards. This is separate from the published lock recovery and the active direct-upload correction; no implementation is claimed yet.'
+  question: null
+- id: 'CHAT-ZIP-INTAKE-FAILURE-PARITY'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Show skipped and unreadable submissions for every grading-chat ZIP intake path.'
+  owns: ['src/app/actions/grading-chat-intake.ts', 'src/app/components/grading-chat', 'src/lib/grade/extraction.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatZipIntakeFailures.test.ts'
+  blocked_by: []
+  instrument: 'Exercise small uploaded, Google Drive and stored ZIPs with readable and corrupt or unsupported entries; surface named omissions and accurate counts without treating partial evidence as complete, while preserving successful submissions and existing bounds.'
+  from: 'Owner-requested submission scenario audit at 1a6eeaad: small and Drive ZIP paths discard extraction metadata retained by stored ZIP intake.'
+  note: 'Owner: coordinator. Create the executable acceptance test and verify the actual visible ledger in a browser; do not infer parity from storage-path tests.'
+  question: null
+- id: 'CHAT-BATCH-OVERSIZE-ISOLATION'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Keep a single oversized submission from blocking an otherwise gradable batch.'
+  owns: ['src/app/actions/grading-chat-intake.ts', 'src/app/components/grading-chat', 'src/lib/grade/extraction.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatBatchOversizeIsolation.test.ts'
+  blocked_by: []
+  instrument: 'For Canvas and each ZIP transport, grade admissible entries and identify oversized skipped entries; cover mixed and all-oversized batches, and keep an oversized composite as one refused submission. Preserve wire limits and avoid duplicate dispatch on retry.'
+  from: 'Owner-requested submission scenario audit at 1a6eeaad: one oversized entry can refuse the entire batch.'
+  note: 'Owner: coordinator. Create the executable acceptance test and surface recovery without claiming omitted work was graded.'
+  question: null
+- id: 'CHAT-CLIPPED-INTAKE-RECOVERY'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Report queued and omitted submissions accurately when a grading session reaches its limit.'
+  owns: ['src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/grading-chat/GradingChatPanel.tsx']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatClippedIntakeRecovery.test.ts'
+  blocked_by: []
+  instrument: 'Cover delayed dispatch, later failures and partial ZIP, Canvas and split-recording admission: queued is never called graded, omitted work is identifiable and recoverable without duplicate dispatch, and counts distinguish accepted, skipped and completed.'
+  from: 'Owner-requested submission scenario audit at 1a6eeaad: current partial-admission notices claim queued items were graded and do not identify the omitted work.'
+  note: 'Owner: coordinator. Immediate accurate notices are separate from durable automatic resumption tracked by CHAT-RESUMABLE-LARGE-COHORTS; create the executable acceptance test and verify rendered notices.'
   question: null
 - id: 'CHAT-GRADING-DIRECT-STUDENT-UPLOADS'
   state: 'verification'

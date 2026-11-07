@@ -31,15 +31,12 @@ describe("GradingChatPanel - RES-GC-11 disclosure floor", () => {
   });
 });
 
-describe("ChatComposer - RES-GC-UX-3 Send focus retention", () => {
-  it("the Send handler calls .focus() on the composer text field after clearing it", () => {
+describe("ChatComposer - combined text focus retention", () => {
+  it("returns focus after staging text", () => {
     const source = read(COMPOSER);
-    const sendIndex = source.indexOf("const handleSendText");
-    expect(sendIndex, "expected to find handleSendText in ChatComposer.tsx").toBeGreaterThan(-1);
-    const handlerEnd = source.indexOf("};", sendIndex);
-    const handlerBody = source.slice(sendIndex, handlerEnd);
-    expect(handlerBody).toContain("setText(\"\")");
-    expect(handlerBody).toMatch(/textFieldRef\.current\?\.focus\(\)/);
+    const start = source.indexOf("const handleAddTextPart");
+    expect(start).toBeGreaterThan(-1);
+    expect(source.slice(start, source.indexOf("};", start))).toMatch(/textFieldRef\.current\?\.focus\(\)/);
   });
 });
 
@@ -448,17 +445,12 @@ describe("GradingChatPanel - responsive intake: the error stays in normal flow b
   });
 });
 
-describe("ChatComposer - W3 F5: Send stays grouped with the Submission text field", () => {
-  it("the Send IconButton sits inside the text-mode adaptRow that holds the Submission text field", () => {
+describe("ChatComposer - single text submission", () => {
+  it("uses the unified submission area rather than the old text sender", () => {
     const source = withoutLineComments(read(COMPOSER));
-    const labelIdx = source.indexOf('label="Submission text"');
-    expect(labelIdx).toBeGreaterThan(-1);
-    const rowOpen = source.lastIndexOf("chatStyles.composerRow", labelIdx);
-    expect(rowOpen).toBeGreaterThan(-1);
-    const rowClose = source.indexOf("</div>", labelIdx);
-    expect(rowClose).toBeGreaterThan(labelIdx);
-    const slice = source.slice(rowOpen, rowClose);
-    expect(slice).toContain('aria-label="Send submission"');
+    expect(source).toContain("<SubmissionDrop");
+    expect(source).not.toContain('aria-label="Send submission"');
+    expect(source).toContain('label="Text for combined submission"');
   });
 });
 
@@ -529,23 +521,15 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
     expect(source).toMatch(/onSubmitComposite\(student\.trim\(\), parts\)/);
   });
 
-  it("each mode's primary handler still reaches its immediate-submit callback when the tray is empty, and reroutes to add-part when it is not", () => {
+  it("stages text and files in the composite tray and preserves link submission", () => {
     const source = withoutLineComments(read(COMPOSER));
-    const slice = (from: string, to: string) => {
-      const a = source.indexOf(from);
-      expect(a, from).toBeGreaterThan(-1);
-      return source.slice(a, source.indexOf(to, a));
-    };
-    const text = slice("const handleSendText", "const handleAddTextPart");
-    expect(text).toContain("onSubmitText(");
-    expect(text.indexOf("trayActive")).toBeGreaterThan(-1);
-    expect(text.indexOf("handleAddTextPart()")).toBeLessThan(text.indexOf("onSubmitText("));
-    const url = slice("const handleSendUrl", "const handleAddUrlPart");
-    expect(url).toContain("onSubmitUrl(");
-    expect(url.indexOf("handleAddUrlPart()")).toBeLessThan(url.indexOf("onSubmitUrl("));
-    const pick = slice("const handlePickFile", "const handleSendUrl");
-    expect(pick).toContain("onSubmitFiles(files, ");
-    expect(pick).toContain("trayActive");
+    expect(source).toContain('addParts([{ kind: "text", content: text }])');
+    expect(source).toContain('addParts(files.map((file): CompositePartInput => ({ kind: "file", file })))');
+    expect(source).toContain("onSubmitUrl(url.trim(), ");
+    expect(source).toContain("handleAddUrlPart()");
+    expect(source).toContain('event.stopPropagation()');
+    expect(source).toContain('Drop files in the submission area above.');
+    expect(source).not.toContain('<SegmentedToggle');
   });
 });
 
@@ -554,9 +538,6 @@ describe("submission labels: file and url modes carry the optional label", () =>
     const source = withoutLineComments(read(COMPOSER));
     expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => Promise<DirectFileOutcome\[\]>/);
     expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => void/);
-    const fileBlock = source.slice(source.indexOf('mode === "file" && ('), source.indexOf("+ Add part"));
-    expect(fileBlock).toContain("chatStyles.composerLabel");
-    expect(fileBlock).toContain("Label (optional)");
     const urlBlock = source.slice(source.indexOf('mode === "url" && ('));
     expect(urlBlock).toContain("chatStyles.composerLabel");
     expect(urlBlock).toContain("Label (optional)");
@@ -605,13 +586,10 @@ describe("GradingChatPanel - controls #1: clear controls", () => {
     expect(source).toContain("onClick={handleClearAll}");
   });
 
-  it("the composer text field has a Clear control that empties the text", () => {
-    const source = withoutLineComments(read(COMPOSER));
-    expect(source).toContain('aria-label="Clear submission text"');
-    const start = source.indexOf("const handleClearText");
-    expect(start).toBeGreaterThan(-1);
-    expect(source.slice(start, source.indexOf("};", start))).toContain('setText("")');
-    expect(source).toContain("onClick={handleClearText}");
+  it("the unified text area retains its draft on submission refusal", () => {
+    const source = withoutLineComments(read("src/app/components/grading-chat/SubmissionDrop.tsx"));
+    expect(source).toContain('outcome.kind === "refused"');
+    expect(source).toContain('setSubmissionText("")');
   });
 });
 
@@ -790,7 +768,7 @@ describe("GradingChatPanel - feedback length control W2: word-count field and wi
 describe("ChatComposer - record-a-submission: frames become composite parts", () => {
   it("has a Record segment and loadInputMode admits it", () => {
     const source = withoutLineComments(read(COMPOSER));
-    expect(source).toContain('{ value: "record", label: "Record" }');
+    expect(source).toContain('onClick={() => selectMode("record")}');
     expect(source).toMatch(/stored === "record"/);
   });
 

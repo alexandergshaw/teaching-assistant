@@ -31,7 +31,7 @@ describe("ChatComposer - From LMS segment: every reachability hop", () => {
   });
 
   it("the SegmentedToggle has the From LMS option", () => {
-    expect(composer).toContain('{ value: "lms", label: "From LMS" }');
+    expect(composer).toContain('onClick={() => selectMode("lms")}');
   });
 
   it("a mode lms render block exists", () => {

@@ -21,7 +21,9 @@ import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
-import SegmentedToggle from "../ui/SegmentedToggle";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
 import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
@@ -38,13 +40,13 @@ import { submitOneFileGroup } from "./submissionDropRoutes";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
-type InputMode = "text" | "file" | "url" | "record" | "lms";
+type InputMode = "text" | "url" | "record" | "lms";
 
 function loadInputMode(): InputMode {
   if (typeof window === "undefined") return "text";
   try {
     const stored = localStorage.getItem(INPUT_MODE_STORAGE_KEY);
-    if (stored === "text" || stored === "file" || stored === "url" || stored === "record" || stored === "lms") return stored;
+    if (stored === "text" || stored === "url" || stored === "record" || stored === "lms") return stored;
   } catch {
     // Private window / blocked storage: degrade to the default.
   }
@@ -79,7 +81,7 @@ function describePart(part: CompositePartInput): string {
   return `URL: ${part.url}`;
 }
 
-export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitText, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
+export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -87,15 +89,14 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const lms = useLmsSubmissionPicker();
   const [lmsBusy, setLmsBusy] = useState(false);
   const [lmsError, setLmsError] = useState<string | null>(null);
+  const [dropNotice, setDropNotice] = useState(false);
   const textFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   // Composite assembly (docs/grading-chat-composite-scope.md section 7): the
   // tray is empty by default, and while it is empty every mode submits
   // immediately exactly as before. "+ Add part" opts in.
   const [parts, setParts] = useState<CompositePartInput[]>([]);
   const [student, setStudent] = useState("");
-  const addIntentRef = useRef(false);
   const trayActive = parts.length > 0;
 
   const addParts = (added: CompositePartInput[]) => setParts((prev) => [...prev, ...added]);
@@ -149,24 +150,6 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     }
   };
 
-  const handleSendText = () => {
-    if (disabled || !text.trim()) return;
-    if (trayActive) {
-      handleAddTextPart();
-      return;
-    }
-    onSubmitText(text, label.trim() ? label.trim() : undefined);
-    setText("");
-    setLabel("");
-    textFieldRef.current?.focus();
-  };
-
-  const handleClearText = () => {
-    setText("");
-    setLabel("");
-    textFieldRef.current?.focus();
-  };
-
   const handleAddTextPart = () => {
     if (disabled || !text.trim()) return;
     addParts([{ kind: "text", content: text }]);
@@ -178,21 +161,15 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      handleSendText();
+      handleAddTextPart();
     }
   };
 
   const handlePickFile = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    const asParts = addIntentRef.current || trayActive;
-    addIntentRef.current = false;
     if (files.length === 0 || disabled) return;
-    if (asParts) addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
-    else {
-      onSubmitFiles(files, label.trim() ? label.trim() : undefined);
-      setLabel("");
-    }
+    addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
   };
 
   const handleSendUrl = () => {
@@ -235,10 +212,6 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const handleAddPart = () => {
     if (mode === "text") handleAddTextPart();
     else if (mode === "url") handleAddUrlPart();
-    else {
-      addIntentRef.current = true;
-      fileInputRef.current?.click();
-    }
   };
   const addPartDisabled =
     disabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
@@ -252,74 +225,31 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    // A drop on the composer is handled here (tray-aware) and must NOT also
-    // bubble to the panel-level drop target, or it would be submitted twice.
     event.stopPropagation();
-    setIsDragging(false);
     if (disabled) return;
     const files = Array.from(event.dataTransfer.files);
-    if (files.length === 0) return;
-    if (trayActive) addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
-    else {
-      onSubmitFiles(files, label.trim() ? label.trim() : undefined);
-      setLabel("");
-    }
+    if (!files.length) return;
+    if (trayActive) {
+      addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
+      setDropNotice(false);
+    } else setDropNotice(true);
   };
 
   return (
-    <div
-      className={chatStyles.composer}
-      onDragOver={(event) => {
-        if (disabled) return;
-        event.preventDefault();
-        if (!isDragging) setIsDragging(true);
-      }}
-      onDragLeave={(event) => {
-        // Only clear when the pointer leaves the composer, not when it crosses
-        // onto a child element (dragleave fires on every child boundary).
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-        setIsDragging(false);
-      }}
-      onDrop={handleDrop}
-      style={
-        isDragging
-          ? { outline: "2px dashed var(--accent)", outlineOffset: "2px", borderRadius: "var(--radius-sm)" }
-          : undefined
-      }
-    >
+    <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       <SubmissionDrop disabled={disabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
         onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
         onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} />
+      {dropNotice && <span role="status">Drop files in the submission area above.</span>}
+      <Accordion>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>More submission options</AccordionSummary>
+        <AccordionDetails>
       <div className={`${styles.ghActions} ${chatStyles.composerRow}`}>
-        <SegmentedToggle
-          label="Submission type"
-          options={[
-            { value: "text", label: "Text" },
-            { value: "file", label: "File" },
-            { value: "url", label: "URL" },
-            { value: "record", label: "Record" },
-            { value: "lms", label: "From LMS" },
-          ]}
-          value={mode}
-          onChange={selectMode}
-          disabled={disabled}
-        />
-        {mode === "file" && (
-          <>
-            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handlePickFile} disabled={disabled} />
-            <Button variant="outlined" size="small" aria-label="Attach a file" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
-              Add files
-            </Button>
-            <TextField
-              size="small"
-              className={chatStyles.composerLabel}
-              label="Label (optional)"
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              disabled={disabled}
-            />
-          </>
-        )}
+        <Button size="small" aria-pressed={mode === "text"} variant={mode === "text" ? "contained" : "outlined"} onClick={() => selectMode("text")} disabled={disabled}>Combine parts</Button>
+        <Button size="small" aria-pressed={mode === "url"} variant={mode === "url" ? "contained" : "outlined"} onClick={() => selectMode("url")} disabled={disabled}>Add link</Button>
+        <Button size="small" aria-pressed={mode === "record"} variant={mode === "record" ? "contained" : "outlined"} onClick={() => selectMode("record")} disabled={disabled}>Record</Button>
+        <Button size="small" aria-pressed={mode === "lms"} variant={mode === "lms" ? "contained" : "outlined"} onClick={() => selectMode("lms")} disabled={disabled}>From LMS</Button>
+        {mode === "text" && <><input ref={fileInputRef} type="file" multiple hidden onChange={handlePickFile} disabled={disabled} /><Button size="small" onClick={() => fileInputRef.current?.click()} disabled={disabled}>Add files as parts</Button></>}
         <Button variant="text" size="small" aria-label="Add part to composite submission" disabled={addPartDisabled} onClick={handleAddPart}>
           + Add part
         </Button>
@@ -341,7 +271,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
 
       {!trayActive && mode !== "record" && mode !== "lms" && (
         <span className={styles.ghMeta}>
-          One submission can combine files, a link and typed text: fill in a part, click + Add part, then Grade submission.
+          To combine files, text, or a link, add each part and then select Grade submission.
         </span>
       )}
 
@@ -383,8 +313,8 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             className={chatStyles.composerGrow}
             style={composerHeight === null ? undefined : ({ "--composer-floor": `${composerHeight}px` } as CSSProperties)}
             size="small"
-            label="Submission text"
-            placeholder="Paste a student's submission"
+            label="Text for combined submission"
+            placeholder="Paste text to add as a part"
             value={text}
             onChange={(event) => setText(event.target.value)}
             disabled={disabled}
@@ -402,22 +332,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               },
             }}
           />
-          <TextField
-            size="small"
-            className={chatStyles.composerLabel}
-            label="Label (optional)"
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-            disabled={disabled}
-          />
-          <Button variant="outlined" aria-label="Send submission" disabled={disabled || !text.trim()} onClick={handleSendText}>
-            Send
-          </Button>
-          {(text !== "" || label !== "") && (
-            <Button variant="text" size="small" aria-label="Clear submission text" onClick={handleClearText}>
-              Clear
-            </Button>
-          )}
+          <Button variant="outlined" disabled={disabled || !text.trim()} onClick={handleAddTextPart}>Add text part</Button>
         </div>
       )}
 
@@ -568,6 +483,8 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
         </div>
         );
       })()}
+        </AccordionDetails>
+      </Accordion>
     </div>
   );
 }

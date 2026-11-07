@@ -182,7 +182,7 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
         <input ref={picker} type="file" multiple hidden onChange={pick} disabled={busy} />
         <Button size="small" variant="outlined" disabled={busy} onClick={() => picker.current?.click()}>Choose files</Button>
       </Box>
-      <Typography variant="body2">Text and files are graded separately. To combine them into one submission, use Add part below.</Typography>
+      <Typography variant="body2">Text and files are graded separately. To combine them, open More submission options and choose Combine parts.</Typography>
       <TextField label="Submission text" placeholder="Paste a student's submission" multiline minRows={3} value={submissionText} disabled={busy} onChange={(event) => setSubmissionText(event.target.value)} />
       {mode === "many" && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="Submit each student's text separately." />}
       <Box><Button variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>

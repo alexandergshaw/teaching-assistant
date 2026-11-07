@@ -8,10 +8,11 @@ import { asGithubHttpError } from "@/lib/github-http-error";
 import { preparationGithubThrottle } from "./preparation-github-throttle";
 import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import { captureRepoGradePreparationInput } from "./preparation-input";
+import { collectPreparationEvidenceBatch, type RepoGradeEvidenceBatchProgress } from "./preparation-batch";
 
 type Resolver = typeof composeRepoGradePreparationEvidence;
 type Input = Parameters<Resolver>[0];
-type Store = { read(basis: string): Promise<unknown>; write(basis: string, value: unknown): Promise<void> };
+type Store = { read(basis: string): Promise<unknown>; write(basis: string, value: unknown): Promise<void>; readProgress?(basis: string): Promise<unknown> };
 const MAX_EVIDENCE_BYTES = 512 * 1024;
 const INVALID = { status: "blocked", reason: "invalid-instruction-evidence" } as const;
 
@@ -38,7 +39,7 @@ export async function authorizeAutomaticRepoGradeEvidence(repo: string, sha: str
 
 function restore(input: Input, value: unknown) {
   if (!object(value) || value.version !== 1 || typeof value.instructions !== "string" || typeof value.key !== "string"
-    || !Array.isArray(value.rows) || value.rows.length > 100) return INVALID;
+    || !Array.isArray(value.rows) || value.rows.length > 1000) return INVALID;
   const { instructions } = value;
   const readmeEvidence = [];
   for (const row of value.rows as unknown[]) {
@@ -50,6 +51,12 @@ function restore(input: Input, value: unknown) {
   }
   const captured = captureRepoGradePreparationInput({ ...input, readmeEvidence });
   return captured.status === "ready" && captured.key === value.key && captured.instructions === instructions ? captured : INVALID;
+}
+
+export class PreparationEvidenceContinue extends Error {
+  constructor(readonly basis: string, readonly progress: RepoGradeEvidenceBatchProgress) {
+    super("Repository instruction evidence requires another batch");
+  }
 }
 
 /** Save the complete capture, never a target's prepared profile or an
@@ -65,7 +72,18 @@ export function createAutomaticRepoGradeEvidenceResolver(
     const prior = await store.read(basis);
     if (prior !== null) return await authorizeReuse() ? restore(input, prior)
       : { status: "blocked", reason: "readme-read-failed" };
-    const captured = await composeRepoGradePreparationEvidence(input);
+    let captured;
+    if (input.inventory.targets.length > 100 && store.readProgress) {
+      const progress = await store.readProgress(basis);
+      if (progress !== null && (!object(progress) || !Array.isArray(progress.rows)
+        || !progress.rows.every((row: unknown) => object(row) && object(row.target) && object(row.source)))) return INVALID;
+      if (progress !== null && !await authorizeReuse()) return { status: "blocked", reason: "readme-read-failed" };
+      const step = await collectPreparationEvidenceBatch(input, progress as RepoGradeEvidenceBatchProgress | null);
+      if (step.status === "continue") throw new PreparationEvidenceContinue(basis, step.progress);
+      captured = step;
+    } else {
+      captured = await composeRepoGradePreparationEvidence(input);
+    }
     if (captured.status === "ready") {
       const payload = { version: 1, key: captured.key, instructions: captured.instructions, rows: captured.evidence };
       if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_EVIDENCE_BYTES) return INVALID;

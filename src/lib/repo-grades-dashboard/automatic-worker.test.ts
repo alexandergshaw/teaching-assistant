@@ -4,6 +4,7 @@ import { repoGradeStartupKey } from "./scheduler";
 import type { RepoGradeLedgerObservation, RepoGradeStartupTarget } from "./scheduler";
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
 import { prepareRepoGradeStartupProfile } from "./preparation-runtime";
+import { PreparationEvidenceContinue } from "./automatic-evidence";
 
 const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn() }));
 vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
@@ -106,6 +107,23 @@ describe("durable repository grading discovery", () => {
     const worker = createAutomaticRepoGradeWorker("coordinated");
     await expect(worker({ ...work, retryGithubRateLimits: true }, "lease")).resolves.toEqual({ state: "github-throttled", rateLimit });
     await expect(worker(work, "lease")).resolves.toEqual({ state: "blocked", reason: "profile-unavailable" });
+  });
+
+  it("continues incomplete evidence before any evaluation is dispatched", async () => {
+    const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+      repo: "Org/Student", folder: "assignment", ref: "main", sha: "a".repeat(40) } as const;
+    const progress = { version: 1 as const, basis: "a".repeat(64), key: "b".repeat(64), instructions: "text", rows: [] };
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    vi.mocked(prepareRepoGradeStartupProfile).mockRejectedValue(new PreparationEvidenceContinue("c".repeat(64), progress));
+    mocks.evaluate.mockImplementation(async (_plan, _target, runtime) => {
+      try { await runtime.loadPreparedProfile({ accountId: "owner", courseId: "course", folder: "assignment" }); }
+      catch { return { status: "profile-unavailable" }; }
+      throw new Error("Expected pre-dispatch continuation");
+    });
+    await expect(createAutomaticRepoGradeWorker("coordinated")(work, "lease"))
+      .resolves.toEqual({ state: "evidence-continue", basis: "c".repeat(64), progress });
   });
 
   it("defers a known source cooldown before admitting work and resumes the same target when it clears", async () => {

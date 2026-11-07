@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
+import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver, PreparationEvidenceContinue } from "./automatic-evidence";
 import type { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
@@ -35,6 +35,68 @@ describe("run-scoped automatic grading evidence", () => {
         : { status: "absent", target });
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it("resumes 101 pinned repositories across bounded batches and publishes only complete evidence", async () => {
+    const { store } = storage();
+    let progress: unknown = null;
+    const batchingStore = { ...store, readProgress: vi.fn(async () => progress) };
+    const resolve = createAutomaticRepoGradeEvidenceResolver("snapshot", batchingStore, async () => true);
+    const large = { ...input, inventory: { status: "complete" as const, targets: Array.from({ length: 101 }, (_, i) => ({
+      ...first, repo: `student-${i}`,
+    })) } };
+    let result;
+    let continuations = 0;
+    while (!result) {
+      try { result = await resolve(large); } catch (error) {
+        if (!(error instanceof PreparationEvidenceContinue)) throw error;
+        expect(store.write).not.toHaveBeenCalled();
+        progress = JSON.parse(JSON.stringify(error.progress));
+        continuations++;
+      }
+    }
+    expect(result).toMatchObject({ status: "ready", evidence: expect.any(Array) });
+    if (result.status === "ready") expect(result.evidence).toHaveLength(101);
+    expect(continuations).toBe(4);
+    expect(readPinned).toHaveBeenCalledTimes(101);
+    expect(store.write).toHaveBeenCalledTimes(1);
+    expect(await resolve(large)).toEqual(result);
+    expect(readPinned).toHaveBeenCalledTimes(101);
+  });
+
+  it("keeps saved instruction policies on the existing path for more than 100 repositories", async () => {
+    const { store } = storage();
+    const readProgress = vi.fn(async () => null);
+    const resolve = createAutomaticRepoGradeEvidenceResolver("snapshot", { ...store, readProgress }, async () => true);
+    const large = { ...input, instructionPolicy: { kind: "saved" as const, instructions },
+      inventory: { status: "complete" as const, targets: Array.from({ length: 101 }, (_, i) => ({ ...first, repo: `student-${i}` })) } };
+    const result = await resolve(large);
+    expect(result.status).toBe("ready");
+    if (result.status === "ready") expect(result.evidence).toHaveLength(101);
+    expect(readPinned).not.toHaveBeenCalled();
+    expect(readProgress).not.toHaveBeenCalled();
+    expect(store.read).not.toHaveBeenCalled();
+  });
+
+  it("will not resume a partial cohort after access to the running target is lost", async () => {
+    const { store } = storage();
+    let progress: unknown = null;
+    const batchingStore = { ...store, readProgress: vi.fn(async () => progress) };
+    const large = { ...input, inventory: { status: "complete" as const, targets: Array.from({ length: 101 }, (_, i) => ({
+      ...first, repo: `student-${i}`,
+    })) } };
+    try {
+      await createAutomaticRepoGradeEvidenceResolver("snapshot", batchingStore, async () => true)(large);
+      throw new Error("Expected a partial cohort");
+    } catch (error) {
+      if (!(error instanceof PreparationEvidenceContinue)) throw error;
+      progress = error.progress;
+    }
+    expect(readPinned).toHaveBeenCalledTimes(25);
+    await expect(createAutomaticRepoGradeEvidenceResolver("snapshot", batchingStore, async () => false)(large))
+      .resolves.toEqual({ status: "blocked", reason: "readme-read-failed" });
+    expect(readPinned).toHaveBeenCalledTimes(25);
+    expect(store.write).not.toHaveBeenCalled();
+  });
 
   it("validates and reuses complete evidence across worker instances without rereading GitHub", async () => {
     const { store } = storage();

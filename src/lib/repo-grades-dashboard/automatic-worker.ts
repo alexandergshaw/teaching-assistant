@@ -8,7 +8,7 @@ import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
 import { automaticRepoGradeEvidenceStore, isTargetedAutomaticRepoGrade, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
-import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
+import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver, PreparationEvidenceContinue } from "./automatic-evidence";
 import { confirmedGradeSourceCooldown } from "@/lib/github-grade-archive";
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
@@ -109,6 +109,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const expectedRef = plan.folderSources.get(target.folder) ?? null;
     let profileFailure: RepoGradeProfilePreparationFailure | undefined;
     let preparationThrottle: PreparationGithubThrottle | undefined;
+    let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       ...(targeted && { targetedRun: { runId, lease } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,
@@ -122,9 +123,13 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
           ) }),
         }).catch((error: unknown) => {
           if (error instanceof PreparationGithubThrottle) preparationThrottle = error;
+          if (error instanceof PreparationEvidenceContinue) evidenceContinue = error;
           throw error;
         }),
     });
+    if (outcome.status === "profile-unavailable" && evidenceContinue) {
+      return { state: "evidence-continue", basis: evidenceContinue.basis, progress: evidenceContinue.progress };
+    }
     if (outcome.status === "profile-unavailable" && work.retryGithubRateLimits && preparationThrottle) {
       return { state: "github-throttled", rateLimit: preparationThrottle.rateLimit };
     }

@@ -9,6 +9,7 @@ import type { RepoGradePreparationRetry } from "./preparation-ledger";
 import type { RepoGradeRepositoryCoverage } from "./scheduler";
 import { parseAutomaticRepoGradeSchedule, type AutomaticRepoGradeScheduleDraft } from "./automatic-schedule";
 import type { RepoGradeClaim } from "./state";
+import type { RepoGradeEvidenceBatchProgress } from "./preparation-batch";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
@@ -29,6 +30,7 @@ type TargetCompletion = {
   recovery?: string;
 };
 export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion
+  | { state: "evidence-continue"; basis: string; progress: RepoGradeEvidenceBatchProgress }
   | { state: "github-throttled"; rateLimit: DiscoveryRateLimit; claim?: RepoGradeClaim & { mode: "automatic" | "retry" } };
 
 async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -190,10 +192,22 @@ export function automaticRepoGradeEvidenceStore(
         throw new Error("Repository grading evidence unavailable");
       }
     },
+    async readProgress(basis: string) {
+      const result = await rpc("repo_grade_automatic_read_evidence_progress", { ...scope, p_basis: basis });
+      if (!record(result) || !Object.hasOwn(result, "progress")) throw new Error("Repository grading progress unavailable");
+      return result.progress;
+    },
   };
 }
 
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
+  if (result.state === "evidence-continue") {
+    if (work.phase !== "grading") return false;
+    return await rpc("repo_grade_automatic_continue_evidence", {
+      p_run_id: work.runId, p_lease: lease, p_user_id: work.accountId, p_course_id: work.courseId,
+      p_folder: work.folder, p_basis: result.basis, p_progress: result.progress,
+    }) === true;
+  }
   if (result.state === "github-throttled") {
     const { retryAtMs, primary } = result.rateLimit;
     if (result.claim) {

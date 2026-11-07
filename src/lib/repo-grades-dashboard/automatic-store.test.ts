@@ -30,3 +30,14 @@ it("refuses to release a non-automatic claim or discovery work", async () => {
   })).toBe(false);
   expect(mocks.rpc).not.toHaveBeenCalled();
 });
+
+it("settles a preparation batch using the scoped progress transition", async () => {
+  const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+    repo: "org/repo", folder: "lab", ref: "main", sha: "a".repeat(40) } as const;
+  const progress = { version: 1 as const, basis: "a".repeat(64), key: "b".repeat(64), instructions: "text", rows: [] };
+  expect(await finishAutomaticRepoGrade(work, "lease", { state: "evidence-continue", basis: "c".repeat(64), progress })).toBe(true);
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("repo_grade_automatic_continue_evidence", {
+    p_run_id: "run", p_lease: "lease", p_user_id: "owner", p_course_id: "course", p_folder: "lab",
+    p_basis: "c".repeat(64), p_progress: progress,
+  });
+});

@@ -1,11 +1,11 @@
 import { useId, useRef, useState, type FormEvent } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, Autocomplete, Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import {
   loadRepoGradeProfile, profileDraft, saveRepoGradeProfile,
   type ProfileDraft, type ProfileReadResult, type SavedProfile,
 } from "./repoGradesProfileClient";
 import type { RepoGradeColumn } from "./repoGradesRows";
 import RepoGradePreparationPolicySettings from "./RepoGradePreparationPolicySettings";
-import pageStyles from "../../page.module.css";
 import styles from "./repo-grades-dashboard.module.css";
 
 const PROFILE_ERROR = {
@@ -42,24 +42,19 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
   const profileReady = result?.status === "loaded" || result?.status === "not-configured";
 
   return (
-    <details className={styles.profileSettings}>
-      <summary>Automatic grading profiles</summary>
+    <Accordion className={styles.profileSettings} disableGutters>
+      <AccordionSummary expandIcon={<span className={styles.feedbackChevron} aria-hidden="true" />}>Automatic grading profiles</AccordionSummary>
+      <AccordionDetails>
       <p>Save settings for one folder in this course. Automatic checks use the matching folder profile when a run starts.</p>
       <form className={styles.dashboard} onSubmit={(event) => {
         event.preventDefault();
         void openFolder(path);
       }}>
-        <div className={pageStyles.field}>
-          <label htmlFor={`${id}-folder`}>Repository folder path</label>
-          <input id={`${id}-folder`} type="text" list={`${id}-folders`} value={path}
-            onChange={(event) => setPath(event.currentTarget.value)} required autoComplete="off"
-            aria-describedby={`${id}-folder-hint`} />
-          <datalist id={`${id}-folders`}>
-            {columns.map(({ folder }) => <option key={folder} value={folder} />)}
-          </datalist>
-          <p id={`${id}-folder-hint`}>Choose a discovered folder or enter its exact path. Loading a profile replaces unsaved edits.</p>
-        </div>
-        <div><button type="submit">Load folder profile</button></div>
+        <Autocomplete freeSolo options={columns.map(({ folder }) => folder)} inputValue={path}
+          onInputChange={(_, value) => setPath(value)}
+          renderInput={(params) => <TextField {...params} id={`${id}-folder`} label="Repository folder path" required size="small"
+            helperText="Choose a discovered folder or enter its exact path. Loading a profile replaces unsaved edits." />} />
+        <div><Button type="submit" variant="outlined">Load folder profile</Button></div>
       </form>
       {load && !result && <p role="status">Loading profile for {load.folder}.</p>}
       {result && !profileReady && <p role="alert">{PROFILE_ERROR[result.status]}</p>}
@@ -69,7 +64,8 @@ export default function RepoGradeProfileSettings({ courseId, columns }: {
           reload={() => void openFolder(load.folder)} />
         <RepoGradePreparationPolicySettings courseId={courseId} folder={load.folder} />
       </div>}
-    </details>
+      </AccordionDetails>
+    </Accordion>
   );
 }
 
@@ -122,77 +118,55 @@ function ProfileForm({ courseId, folder, initialProfile, reload }: {
       <p role="status">{savingProfile ? "Saving profile." : status === "saved" ? "Profile saved."
         : baseline ? "Saved profile loaded." : "No saved profile for this folder."}</p>
       <fieldset className={styles.profileFields} disabled={savingProfile}>
-        <div className={pageStyles.field}>
-          <label htmlFor={`${id}-provider`}>Grading provider</label>
-          <select id={`${id}-provider`} value={draft.provider} onChange={(event) => {
-            const provider = event.currentTarget.value === "embedded" ? "embedded" : "gemini";
+        <TextField select id={`${id}-provider`} label="Grading provider" size="small" value={draft.provider} disabled={savingProfile} onChange={(event) => {
+            const provider = event.target.value === "embedded" ? "embedded" : "gemini";
             if (provider === "embedded" && !existingEmbeddedGenerator) setGenerateRubric(false);
             updateDraft({ provider });
           }}>
-            <option value="gemini">Gemini</option>
-            <option value="embedded">Embedded grader</option>
-          </select>
-        </div>
-        <div className={pageStyles.field}>
-          <label htmlFor={`${id}-branch`}>Source branch</label>
-          <input id={`${id}-branch`} type="text" value={draft.sourceRef} aria-describedby={`${id}-branch-hint`}
-            onChange={(event) => updateDraft({ sourceRef: event.currentTarget.value })} />
-          <p id={`${id}-branch-hint`}>Leave blank to use each repository&apos;s default branch.</p>
-        </div>
-        <div className={pageStyles.field}>
-          <label htmlFor={`${id}-instructions`}>Saved assignment instructions</label>
-          <textarea id={`${id}-instructions`} value={draft.instructions} required={!draft.useReadmeInstructions}
-            onChange={(event) => updateDraft({ instructions: event.currentTarget.value })} />
-        </div>
-        {(draft.provider === "gemini" || existingEmbeddedGenerator) && <label>
-          <input type="checkbox" checked={generateRubric} onChange={(event) => {
+            <MenuItem value="gemini">Gemini</MenuItem>
+            <MenuItem value="embedded">Embedded grader</MenuItem>
+        </TextField>
+        <TextField id={`${id}-branch`} label="Source branch" size="small" value={draft.sourceRef}
+          helperText="Leave blank to use each repository's default branch."
+          onChange={(event) => updateDraft({ sourceRef: event.currentTarget.value })} />
+        <TextField id={`${id}-instructions`} label="Saved assignment instructions" multiline minRows={3}
+          value={draft.instructions} required={!draft.useReadmeInstructions}
+          onChange={(event) => updateDraft({ instructions: event.currentTarget.value })} />
+        {(draft.provider === "gemini" || existingEmbeddedGenerator) && <FormControlLabel
+          control={<Checkbox checked={generateRubric} disabled={savingProfile} onChange={(event) => {
             setGenerateRubric(event.currentTarget.checked);
             setRubricError(false);
             if (status !== "conflict") setStatus(null);
-          }} />
-          {" "}Generate the rubric from the assignment instructions
-        </label>}
-        {!generateRubric && <div className={pageStyles.field}>
-          <label htmlFor={`${id}-rubric`}>Saved grading rubric</label>
-          <textarea id={`${id}-rubric`} value={draft.rubric} required aria-invalid={rubricError || undefined}
+          }} />} label="Generate the rubric from the assignment instructions" />}
+        {!generateRubric && <TextField id={`${id}-rubric`} label="Saved grading rubric" multiline minRows={3}
+          value={draft.rubric} required error={rubricError} helperText={rubricError ? "Enter a grading rubric for this folder." : undefined}
             onChange={(event) => {
               setRubricError(false);
               updateDraft({ rubric: event.currentTarget.value });
-            }} />
-          {rubricError && <p role="alert">Enter a grading rubric for this folder.</p>}
-        </div>}
-        <label>
-          <input type="checkbox" checked={draft.applyNamingDeduction}
-            onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />
-          {" "}Apply naming deductions
-        </label>
+            }} />}
+        <FormControlLabel control={<Checkbox checked={draft.applyNamingDeduction} disabled={savingProfile}
+          onChange={(event) => updateDraft({ applyNamingDeduction: event.currentTarget.checked })} />} label="Apply naming deductions" />
         <p>Automatic code execution is unavailable.</p>
         {baseline?.runCode && (
-          <label>
-            <input type="checkbox" checked={draft.runCode}
-              onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />
-            {" "}Keep saved code execution opt-in. Clear it to use automatic grading.
-          </label>
+          <FormControlLabel control={<Checkbox checked={draft.runCode} disabled={savingProfile}
+            onChange={(event) => updateDraft({ runCode: event.currentTarget.checked })} />}
+            label="Keep saved code execution opt-in. Clear it to use automatic grading." />
         )}
         {baseline?.targetBranch && (
-          <label>
-            <input type="checkbox" checked={draft.targetBranch !== null}
-              onChange={(event) => updateDraft({ targetBranch: event.currentTarget.checked ? baseline.targetBranch : null })} />
-            {" "}Keep saved merge target <code>{baseline.targetBranch}</code>. Clear it to use automatic grading.
-          </label>
+          <FormControlLabel control={<Checkbox checked={draft.targetBranch !== null} disabled={savingProfile}
+            onChange={(event) => updateDraft({ targetBranch: event.currentTarget.checked ? baseline.targetBranch : null })} />}
+            label={<>Keep saved merge target <code>{baseline.targetBranch}</code>. Clear it to use automatic grading.</>} />
         )}
         {baseline?.useReadmeInstructions && (
-          <label>
-            <input type="checkbox" checked={draft.useReadmeInstructions}
-              onChange={(event) => updateDraft({ useReadmeInstructions: event.currentTarget.checked })} />
-            {" "}Keep saved README instruction mode. Clear it and enter assignment instructions to use automatic grading.
-          </label>
+          <FormControlLabel control={<Checkbox checked={draft.useReadmeInstructions} disabled={savingProfile}
+            onChange={(event) => updateDraft({ useReadmeInstructions: event.currentTarget.checked })} />}
+            label="Keep saved README instruction mode. Clear it and enter assignment instructions to use automatic grading." />
         )}
       </fieldset>
       {saveError && <p role="alert">{saveError}</p>}
       <div>
-        <button type="submit" disabled={savingProfile || status === "conflict"}>Save folder profile</button>
-        {status === "conflict" && <button type="button" onClick={reload}>Reload saved profile and discard edits</button>}
+        <Button type="submit" variant="contained" disabled={savingProfile || status === "conflict"}>Save folder profile</Button>
+        {status === "conflict" && <Button type="button" onClick={reload}>Reload saved profile and discard edits</Button>}
       </div>
     </form>
   );

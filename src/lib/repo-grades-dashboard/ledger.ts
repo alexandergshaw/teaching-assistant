@@ -16,6 +16,7 @@ import {
 
 const DENIED_STATUSES: ReadonlySet<unknown> = new Set<RepoGradeClaimStatus>([
   "terminal", "busy", "capacity", "explicit-retry-required", "forbidden", "configuration-changed",
+  "recovered-succeeded", "recovered-no-submission", "recovered-failed", "recovered-partial", "recovered-unknown",
 ]);
 
 // Matches the fixed LIMIT in repo_grade_history.
@@ -48,6 +49,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   const cohort = automatic ? request.cohort : null;
   const preparation = automatic ? request.preparation : undefined;
   const startupBatchId = automatic ? request.startupBatchId : undefined;
+  const targetedRun = automatic ? request.targetedRun : undefined;
   if (automatic && (!cohort || !validRepoGradeCohortId(cohort.cohortId)
     || cohort.receipt?.accountId !== owner.id || cohort.receipt.courseId !== request.courseId
     || cohort.receipt.folder !== request.folder)) {
@@ -67,7 +69,15 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     p_receipt: cohort?.receipt ?? null,
   };
   let response: unknown;
-  if (startupBatchId) {
+  if (targetedRun) {
+    const { p_mode: mode, ...targetArgs } = args;
+    if (mode !== "retry" || startupBatchId || !validRepoGradeCohortId(targetedRun.runId)
+      || !validRepoGradeCohortId(targetedRun.lease)) return { status: "forbidden" };
+    response = await ledgerRpc("repo_grade_claim_targeted_regrade", {
+      ...targetArgs, p_run_id: targetedRun.runId, p_lease: targetedRun.lease,
+      p_preparation_key: preparation?.key ?? null,
+    }, true);
+  } else if (startupBatchId) {
     const { p_mode: mode, ...startupArgs } = args;
     if (mode !== "automatic" || !validRepoGradeCohortId(startupBatchId)) return { status: "forbidden" };
     response = await ledgerRpc("repo_grade_claim_startup_target", {

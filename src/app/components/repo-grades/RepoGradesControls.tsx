@@ -33,6 +33,14 @@
 // exercised by any test, which is exactly why it must contain no logic worth
 // testing.
 import TextField from "@mui/material/TextField";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import Button from "@mui/material/Button";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import NativeSelect from "@mui/material/NativeSelect";
+import SvgIcon from "@mui/material/SvgIcon";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
@@ -45,7 +53,6 @@ import {
 } from "./repoGradesRubricSource";
 import type { RepoGradeRubricListHint } from "./useRepoGradesRubricSource";
 import styles from "../../page.module.css";
-import gridStyles from "./repo-grades.module.css";
 
 /** One contiguous run of `RepoGradeRubricOption`s sharing the same
  * `<optgroup>` label (or `null` for a top-level option), in the order
@@ -381,15 +388,9 @@ export default function RepoGradesControls({
       </div>
 
       {showRowDependentFields && (
-        <details
-          open={settingsOpen}
-          onToggle={(e) => {
-            // Only a real user toggle is an explicit choice; a default flipping
-            // the open attribute re-fires this event and must not be persisted.
-            if (e.currentTarget.open !== settingsOpen) onSettingsOpenChange(e.currentTarget.open);
-          }}
-        >
-          <summary className={gridStyles.disclosureSummary}>Grading settings - {settingsSummary}</summary>
+        <Accordion expanded={settingsOpen} onChange={(_, expanded) => onSettingsOpenChange(expanded)} disableGutters>
+          <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>Grading settings - {settingsSummary}</AccordionSummary>
+          <AccordionDetails>
           <div className={styles.field}>
             <FormControlLabel
               sx={CHECKBOX_LABEL_SX}
@@ -465,8 +466,9 @@ export default function RepoGradesControls({
                 ? "Assignment instructions (fallback - used only for a repo whose folder has no README)"
                 : "Assignment instructions (used by every \"Grade\" call)"}
             </label>
-            <textarea
+            <TextField
               id="repo-grades-instructions"
+              multiline fullWidth minRows={3} size="small"
               value={instructions}
               onChange={(e) => onInstructionsChange(e.target.value)}
               placeholder="Describe what a folder needs to contain to earn full credit."
@@ -492,9 +494,10 @@ export default function RepoGradesControls({
               MUI without solving the optgroup/ListSubheader keyboard-focus
               problem first. */}
           <div className={styles.field}>
-            <label htmlFor="repo-grades-rubric-source">Rubric source</label>
-            <select
-              id="repo-grades-rubric-source"
+            <FormControl fullWidth variant="standard">
+            <InputLabel htmlFor="repo-grades-rubric-source">Rubric source</InputLabel>
+            <NativeSelect
+              inputProps={{ id: "repo-grades-rubric-source" }}
               value={rubricSourceValue}
               onChange={(e) => onRubricSourceChange(e.target.value)}
             >
@@ -515,7 +518,8 @@ export default function RepoGradesControls({
                   </optgroup>
                 )
               )}
-            </select>
+            </NativeSelect>
+            </FormControl>
             {/* AC item 21 - a stale persisted choice is reported here, next
                 to the control that would let the instructor pick again, not
                 only buried in the log. `role="alert"` matches this file's
@@ -551,10 +555,11 @@ export default function RepoGradesControls({
                 selectedRubricTitle(rubricSourceValue, rubricSourceOptions)
               )}
             </label>
-            <textarea
+            <TextField
               id="repo-grades-rubric"
+              multiline fullWidth minRows={3} size="small"
               value={rubricTextareaValue}
-              readOnly={rubricTextareaReadOnly}
+              slotProps={{ input: { readOnly: rubricTextareaReadOnly } }}
               onChange={(e) => onRubricTextChange(e.target.value)}
               placeholder={describeRubricPlaceholder(
                 parseRepoGradeRubricValue(rubricSourceValue)?.source ?? "generate",
@@ -570,13 +575,14 @@ export default function RepoGradesControls({
             {onRestoreManualRubric && (
               <>
                 <p className={styles.fieldHint}>Your own rubric text was replaced by the resolved rubric.</p>
-                <button type="button" className={styles.linkButton} onClick={() => onRestoreManualRubric()}>
+                <Button type="button" size="small" onClick={() => onRestoreManualRubric()}>
                   Restore my own rubric text
-                </button>
+                </Button>
               </>
             )}
           </div>
-        </details>
+          </AccordionDetails>
+        </Accordion>
       )}
     </>
   );

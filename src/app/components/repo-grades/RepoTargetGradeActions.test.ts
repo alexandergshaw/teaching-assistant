@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTargetRequests, findTargetRequests, latestTargetRequest, multipleTargetRequestMenuItems } from "./RepoTargetGradeActions";
+import { activeTargetRequests, findTargetRequests, latestTargetRequest, multipleTargetRequestMenuItems, visibleTargetRequest } from "./RepoTargetGradeActions";
 import type { TargetRequest } from "./useRepoGradeTargetRequests";
 
 const base: TargetRequest = { id: 1, courseId: "course", folder: "Lab 1", repo: null,
@@ -25,5 +25,13 @@ describe("targeted grading request display", () => {
     expect(items.every((item) => item.props.disabled)).toBe(true);
     const start = multipleTargetRequestMenuItems([], false, true, false, () => {}, () => {}, () => {});
     expect(start[0].props.disabled).toBe(true);
+  });
+  it("hides only redundant completion next to a grade and retains non-success and active status", () => {
+    const complete: TargetRequest = { ...base, id: 2, state: "complete" };
+    const incomplete: TargetRequest = { ...base, id: 3, state: "incomplete" };
+    expect(visibleTargetRequest([complete], true)).toBeUndefined();
+    expect(visibleTargetRequest([complete], false)).toEqual(complete);
+    expect(visibleTargetRequest([incomplete], true)).toEqual(incomplete);
+    expect(visibleTargetRequest([base, complete], true)).toEqual(base);
   });
 });

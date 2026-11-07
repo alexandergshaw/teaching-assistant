@@ -10,6 +10,9 @@
 // on the header's full-width trailing line (.headerFullRow) under the control
 // row rather than stacked under the select, so the select stays on the band.
 import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import NativeSelect from "@mui/material/NativeSelect";
 import pageStyles from "../../page.module.css";
 import styles from "./repo-grades.module.css";
 
@@ -31,12 +34,12 @@ export default function RepoGradesFolderPicker({
   return (
     <>
       <div className={styles.headerField}>
-        <label htmlFor="repo-grades-folder" className={styles.headerInputLabel}>
+        <FormControl fullWidth size="small" variant="standard">
+        <InputLabel htmlFor="repo-grades-folder" shrink>
           Assignment folder to grade
-        </label>
-        <select
-          id="repo-grades-folder"
-          className={styles.headerInput}
+        </InputLabel>
+        <NativeSelect
+          inputProps={{ id: "repo-grades-folder" }}
           value={selectedFolder}
           onChange={(e) => onSelectedFolderChange(e.target.value)}
         >
@@ -46,7 +49,8 @@ export default function RepoGradesFolderPicker({
               {describeFolderOption(option, folderCensus)}
             </option>
           ))}
-        </select>
+        </NativeSelect>
+        </FormControl>
       </div>
       {(folderOptions.length === 0 || folderDropNotice) && (
         <div className={styles.headerFullRow}>

@@ -633,6 +633,7 @@ export default function RepoGradesGrid({
                         <div className={dashboardStyles.matrixActions}><RepoTargetGradeActions
                           label={`Grade actions: ${repo.name} / ${folder || "Repository root"}`}
                           requests={findTargetRequests(targetRequests, targetCourseId, folder, repo.name)}
+                          hasGradedResult={repo.cells.get(folder)?.saved?.latest.status === "succeeded"}
                           available={durableGradeAvailable} pending={durableGradePending} root={!folder}
                           onStart={() => onGradeTarget(repo.name, folder)} onControl={onControlTarget} /></div>
                         <Checkbox size="small" disabled={!folder}

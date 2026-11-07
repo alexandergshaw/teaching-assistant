@@ -41,6 +41,17 @@ beforeEach(() => {
 });
 
 describe("repository grading ledger RPC boundary", () => {
+  it("binds an explicit regrade claim to the exact live run and lease", async () => {
+    rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
+    const targetedRun = { runId: token, lease: token };
+    await expect(claimRepoGrade({ ...automaticRequest, mode: "retry", targetedRun })).resolves.toEqual({
+      status: "claimed", claim: { mode: "retry", generation: 42, token },
+    });
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_targeted_regrade", expect.objectContaining({
+      p_run_id: token, p_lease: token, p_user_id: "owner", p_repo: "org/repo", p_source_sha: automaticRequest.sha,
+    }));
+    expect(rpc.mock.calls[0][1]).not.toHaveProperty("p_mode");
+  });
   it("sends the authorized account and exact automatic plan, preserving root folder identity", async () => {
     rpc.mockResolvedValue({ data: { status: "claimed", generation: 42, token }, error: null });
     await expect(claimRepoGrade(automaticRequest)).resolves.toEqual({

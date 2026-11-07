@@ -12,6 +12,11 @@ const feedback = readFileSync(new URL("./RepoDashboardFeedback.tsx", import.meta
 const gradingActions = readFileSync(new URL("./useRepoGradesGradingActions.ts", import.meta.url), "utf8");
 const filters = readFileSync(new URL("./RepoGradeCourseFilters.tsx", import.meta.url), "utf8");
 const targetActions = readFileSync(new URL("./RepoTargetGradeActions.tsx", import.meta.url), "utf8");
+const profileSettings = readFileSync(new URL("./RepoGradeProfileSettings.tsx", import.meta.url), "utf8");
+
+it("keeps the provider selection usable and disabled during profile saves", () => {
+  expect(profileSettings).toMatch(/<TextField select id=\{`\$\{id\}-provider`\}[\s\S]*?disabled=\{savingProfile\}[\s\S]*?event\.target\.value === "embedded"/);
+});
 
 function findCourseDashboardMount(source: string, component = "RepoGradesDashboard"): JsxSelfClosingElement | null {
   const file = ts.createSourceFile("index.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

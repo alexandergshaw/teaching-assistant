@@ -13,6 +13,7 @@
 // requires the user to press a button naming exactly which student it will
 // bind before onAcceptBinding is ever called.
 import { useState } from "react";
+import { Button, Chip, NativeSelect } from "@mui/material";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeRow } from "./repoGradesRows";
 import { isConfirmableCandidate } from "./repoGradesBindingConfirm";
@@ -46,7 +47,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
   if (row.binding.state === "confirmed") {
     return (
       <div className={styles.bindingCell}>
-        <span className={styles.bindingBadgeConfirmed}>Confirmed</span>
+        <Chip size="small" color="success" variant="outlined" label="Confirmed" />
         <span className={styles.bindingDetail}>
           {row.binding.student ?? "Unnamed student"} - Canvas id {row.binding.canvasUserId}
         </span>
@@ -72,19 +73,19 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
     const candidateConfirmable = isConfirmableCandidate(candidate);
     return (
       <div className={styles.bindingCell}>
-        <span className={styles.bindingBadgeSuggested}>Suggested</span>
+        <Chip size="small" color="info" variant="outlined" label="Suggested" />
         <span className={styles.bindingDetail}>{row.binding.student ?? "Unknown"}</span>
         {candidate && candidateConfirmable && (
-          <button
+          <Button
             type="button"
-            className={pageStyles.linkButton}
+            size="small" variant="text"
             disabled={busy}
             onClick={() => {
               void accept(candidate.canvasUserId, candidate.name);
             }}
           >
             {busy ? "Confirming…" : "Confirm binding"}
-          </button>
+          </Button>
         )}
         {candidate && !candidateConfirmable && (
           <>
@@ -94,8 +95,8 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
               to a roster student by hand below.
             </span>
             <div className={styles.unboundPicker}>
-              <select
-                aria-label={`Bind ${row.repo} to a roster student`}
+              <NativeSelect
+                inputProps={{ "aria-label": `Bind ${row.repo} to a roster student` }}
                 value={pickedRosterId}
                 onChange={(e) => setPickedRosterId(e.target.value)}
                 disabled={busy || roster.length === 0}
@@ -106,10 +107,10 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
                     {student.name}
                   </option>
                 ))}
-              </select>
-              <button
+              </NativeSelect>
+              <Button
                 type="button"
-                className={pageStyles.linkButton}
+                size="small" variant="text"
                 disabled={busy || !pickedRosterId}
                 onClick={() => {
                   const picked = roster.find((student) => student.id === pickedRosterId);
@@ -118,7 +119,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
                 }}
               >
                 {busy ? "Binding…" : "Bind"}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -130,7 +131,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
   if (row.binding.state === "ambiguous") {
     return (
       <div className={styles.bindingCell}>
-        <span className={styles.bindingBadgeAmbiguous}>Ambiguous - {row.binding.candidates.length} matches</span>
+        <Chip size="small" color="warning" variant="outlined" label={`Ambiguous - ${row.binding.candidates.length} matches`} />
         <ul className={styles.candidateList}>
           {row.binding.candidates.map((candidate) => {
             // Same guard as the "suggested" branch above (U9.36): a
@@ -142,16 +143,16 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
               <li key={candidate.canvasUserId} className={styles.candidateItem}>
                 <span className={styles.bindingDetail}>{candidate.name}</span>
                 {candidateConfirmable && (
-                  <button
+                  <Button
                     type="button"
-                    className={pageStyles.linkButton}
+                    size="small" variant="text"
                     disabled={busy}
                     onClick={() => {
                       void accept(candidate.canvasUserId.trim(), candidate.name);
                     }}
                   >
                     Bind to this student
-                  </button>
+                  </Button>
                 )}
                 {!candidateConfirmable && (
                   <span className={styles.postReason}>
@@ -172,11 +173,11 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
   // "unbound" - a manual picker over the full roster (AC2 item 5).
   return (
     <div className={styles.bindingCell}>
-      <span className={styles.bindingBadgeUnbound}>Unbound</span>
+      <Chip size="small" variant="outlined" label="Unbound" />
       {row.binding.student && <span className={styles.bindingDetail}>Stored name: {row.binding.student}</span>}
       <div className={styles.unboundPicker}>
-        <select
-          aria-label={`Bind ${row.repo} to a roster student`}
+        <NativeSelect
+          inputProps={{ "aria-label": `Bind ${row.repo} to a roster student` }}
           value={pickedRosterId}
           onChange={(e) => setPickedRosterId(e.target.value)}
           disabled={busy || roster.length === 0}
@@ -187,10 +188,10 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
               {student.name}
             </option>
           ))}
-        </select>
-        <button
+        </NativeSelect>
+        <Button
           type="button"
-          className={pageStyles.linkButton}
+          size="small" variant="text"
           disabled={busy || !pickedRosterId}
           onClick={() => {
             const picked = roster.find((student) => student.id === pickedRosterId);
@@ -199,7 +200,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
           }}
         >
           {busy ? "Binding…" : "Bind"}
-        </button>
+        </Button>
       </div>
       {error && <span className={pageStyles.error}>{error}</span>}
     </div>

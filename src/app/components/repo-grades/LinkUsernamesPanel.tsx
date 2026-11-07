@@ -69,12 +69,14 @@
 // matching the shape repoGrades.wiring.test.ts reads this folder's other
 // files for.
 import { useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, Button, FormControlLabel, MenuItem, Radio, RadioGroup, TextField } from "@mui/material";
 import { isPostableAssignmentOption, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
 import type { RosterUsernameOverlayResult } from "./rosterUsernameOverlay";
 import { linkUsernamesSummaryLine, type LinkUsernamesOutcome } from "./linkRepoUsernames";
 import type { ConfirmableBindingSummary } from "./repoGradesBindingConfirm";
 import LinkUsernamesRosterSection from "./LinkUsernamesRosterSection";
 import styles from "./repo-grades.module.css";
+import dashboardStyles from "./repo-grades-dashboard.module.css";
 import pageStyles from "../../page.module.css";
 
 type LinkSource = "roster" | "live";
@@ -251,19 +253,14 @@ export default function LinkUsernamesPanel({
 
   return (
     <section className={styles.linkPanel} aria-labelledby="repo-grades-link-heading">
-      <details
-        open={linkPanelOpen}
-        onToggle={(e) => {
-          // Persist only a real user toggle, never a default flipping `open`.
-          if (e.currentTarget.open !== linkPanelOpen) onLinkPanelOpenChange(e.currentTarget.open);
-        }}
-      >
-      <summary style={{ cursor: "pointer" }}>
+      <Accordion expanded={linkPanelOpen} onChange={(_, expanded) => onLinkPanelOpenChange(expanded)} disableGutters>
+      <AccordionSummary expandIcon={<span className={dashboardStyles.feedbackChevron} aria-hidden="true" />}>
         <h3 id="repo-grades-link-heading" className={styles.logTitle} style={{ display: "inline" }}>
           Link GitHub usernames to roster
         </h3>
         <span className={pageStyles.fieldHint}> - {boundSummary}</span>
-      </summary>
+      </AccordionSummary>
+      <AccordionDetails>
 
       {noConfirmedRows && <p className={styles.linkLeadLine}>No repos are confirmed-bound to a roster student yet.</p>}
 
@@ -272,39 +269,11 @@ export default function LinkUsernamesPanel({
         below.
       </p>
 
-      {/* Repo Grades UI consistency audit item #3 - DELIBERATELY LEFT
-          hand-rolled, not converted to a MUI Button pair or ToggleButtonGroup.
-          This pair already implements the WAI-ARIA "radio group" pattern
-          exactly (role="radiogroup" here, role="radio" + aria-checked below)
-          - the canonical pattern for a segmented control where exactly one of
-          two options is always selected. A `Button` pair with
-          `variant={active?"contained":"outlined"}` (this app's usual toggle
-          idiom) would carry no ARIA relationship between the two buttons at
-          all. MUI `ToggleButtonGroup` is closer but uses `aria-pressed` (the
-          "toggle button" pattern), which the ARIA Authoring Practices reserve
-          for independent on/off buttons, not a mutually-exclusive segmented
-          choice - swapping in either replacement would be an accessibility
-          DOWNGRADE from what already renders here, so it stays native. */}
-      <div className={styles.linkSourceToggle} role="radiogroup" aria-label="Where to read GitHub usernames from">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={linkSource === "roster"}
-          className={linkSource === "roster" ? styles.linkSourceButtonActive : styles.linkSourceButton}
-          onClick={() => onLinkSourceChange("roster")}
-        >
-          Usernames already in the course table
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={linkSource === "live"}
-          className={linkSource === "live" ? styles.linkSourceButtonActive : styles.linkSourceButton}
-          onClick={() => onLinkSourceChange("live")}
-        >
-          Read a Canvas assignment&apos;s submissions
-        </button>
-      </div>
+      <RadioGroup row aria-label="Where to read GitHub usernames from" value={linkSource}
+        onChange={(_, value) => onLinkSourceChange(value === "live" ? "live" : "roster")}>
+        <FormControlLabel value="roster" control={<Radio />} label="Usernames already in the course table" />
+        <FormControlLabel value="live" control={<Radio />} label="Read a Canvas assignment's submissions" />
+      </RadioGroup>
 
       {linkSource === "roster" && (
         <LinkUsernamesRosterSection
@@ -332,32 +301,29 @@ export default function LinkUsernamesPanel({
           {liveLinkBlockedReason && <p className={pageStyles.error}>{liveLinkBlockedReason}</p>}
 
           <div className={styles.linkPanelRow}>
-            <label htmlFor="repo-grades-link-assignment" className={styles.linkPanelLabel}>
-              Canvas assignment
-            </label>
-            <select
+            <TextField select size="small" label="Canvas assignment"
               id="repo-grades-link-assignment"
               value={assignmentId}
               onChange={(e) => onAssignmentIdChange(e.target.value)}
               disabled={anyAssignmentListLoading || liveLinkBlockedReason !== null}
             >
-              <option value="">{anyAssignmentListLoading ? "Loading…" : "Choose an assignment…"}</option>
+              <MenuItem value="">{anyAssignmentListLoading ? "Loading…" : "Choose an assignment…"}</MenuItem>
               {assignmentOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <MenuItem key={option.value} value={option.value}>
                   {option.label}
-                </option>
+                </MenuItem>
               ))}
-            </select>
-            <button
+            </TextField>
+            <Button
               type="button"
-              className={pageStyles.linkButton}
+              variant="outlined"
               disabled={linkDisabled}
               onClick={() => {
                 void handleLink();
               }}
             >
               {linkBusy ? "Linking…" : "Link GitHub usernames"}
-            </button>
+            </Button>
           </div>
 
           {/* An export option is a perfectly fine thing to have selected in
@@ -432,9 +398,9 @@ export default function LinkUsernamesPanel({
               Promoted from .linkButton to .submitButton (section 6/7 of the
               acceptance criteria: one of the four consequential actions),
               since it writes a binding a later grade post relies on. */}
-          <button
+          <Button
             type="button"
-            className={pageStyles.submitButton}
+            variant="contained"
             disabled={confirmBusy || confirmableSummary.confirmable === 0}
             onClick={() => {
               void handleConfirmAll();
@@ -445,7 +411,7 @@ export default function LinkUsernamesPanel({
               : `Confirm all ${confirmableSummary.confirmable} suggested binding${
                   confirmableSummary.confirmable === 1 ? "" : "s"
                 }`}
-          </button>
+          </Button>
           {/* Stated up front, not only after a failed click: how many
               suggested rows this action cannot touch, and why - so an
               instructor never sees a confident "Confirm all N" that turns
@@ -468,7 +434,8 @@ export default function LinkUsernamesPanel({
           Confirmed {confirmResult} binding{confirmResult === 1 ? "" : "s"}.
         </p>
       )}
-      </details>
+      </AccordionDetails>
+      </Accordion>
     </section>
   );
 }

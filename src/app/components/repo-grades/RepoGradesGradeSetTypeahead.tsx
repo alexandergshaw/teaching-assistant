@@ -1,14 +1,9 @@
 "use client";
 
-// RG-SEARCH-STICKY Wave C: the grade-set typeahead. Controls WHICH repos get
-// graded by driving the one selection Set owned by index.tsx: it holds no
-// selection state of its own (only transient input text) and persists nothing.
-// Toggling goes through the single onToggleRepo callback, the same handler the
-// grid checkboxes use. When the selection narrows the table it also renders the
-// "Showing N of M" counter with Show-all / Clear controls. Browser-safe imports
-// only. Keyboard and ARIA behaviour is a reading claim (nothing renders in tests).
 import { useState } from "react";
+import Autocomplete from "@mui/material/Autocomplete";
 import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import type { RepoGradeRow } from "./repoGradesRows";
 import { rowMatchesQuery } from "./repoGradesSearch";
 import { selectionFilterSummary } from "./repoGradesVisibleRows";
@@ -27,86 +22,39 @@ export interface RepoGradesGradeSetTypeaheadProps {
 
 export default function RepoGradesGradeSetTypeahead({ rows, selected, onToggleRepo, onClearSelection, showAll, onShowAllChange }: RepoGradesGradeSetTypeaheadProps) {
   const [text, setText] = useState("");
-  const [open, setOpen] = useState(false);
   const chips = rows.filter((row) => selected.has(row.repo));
-  const matches = rows.filter((row) => rowMatchesQuery(row, text)).slice(0, MAX_OPTIONS);
   const summary = selectionFilterSummary({ folderScopedCount: rows.length, selectedShownCount: chips.length, showAll });
-  const listId = "repo-grades-grade-set-listbox";
 
   return (
     <>
-    <div className={styles.gradeSet}>
-      <label className={styles.headerField}>
-        <span className={styles.headerInputLabel}>Grade set</span>
-        <input
-          type="text"
-          role="combobox"
-          aria-label="Choose repositories to grade"
-          aria-expanded={open}
-          aria-controls={listId}
-          aria-autocomplete="list"
-          className={styles.headerInput}
-          placeholder="Add repos to grade (default: all)"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setOpen(true);
+      <div className={styles.gradeSet}>
+        <Autocomplete
+          multiple
+          disableCloseOnSelect
+          options={rows}
+          value={chips}
+          inputValue={text}
+          getOptionLabel={(row) => row.repo}
+          isOptionEqualToValue={(option, value) => option.repo === value.repo}
+          filterOptions={(options, state) => options.filter((row) => rowMatchesQuery(row, state.inputValue)).slice(0, MAX_OPTIONS)}
+          onInputChange={(_, value) => setText(value)}
+          onChange={(_, _values, reason, details) => {
+            if (reason === "clear") onClearSelection();
+            else if (details?.option) onToggleRepo(details.option.repo);
           }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
-            else if (e.key === "Enter" && matches[0]) {
-              e.preventDefault();
-              onToggleRepo(matches[0].repo);
-            }
-          }}
+          noOptionsText="No matching repos"
+          renderInput={(params) => <TextField {...params} size="small" label="Grade set" placeholder="Add repos to grade (default: all)" slotProps={{ ...params.slotProps, htmlInput: { ...params.slotProps.htmlInput, "aria-label": "Choose repositories to grade" } }} />}
         />
-      </label>
-      {open && (
-        <ul id={listId} role="listbox" aria-multiselectable="true" className={styles.gradeSetList}>
-          {matches.length === 0 && <li className={styles.gradeSetOption}>No matching repos</li>}
-          {matches.map((row) => (
-            <li
-              key={row.repo}
-              role="option"
-              aria-selected={selected.has(row.repo)}
-              className={styles.gradeSetOption}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onToggleRepo(row.repo);
-              }}
-            >
-              {selected.has(row.repo) ? "Selected: " : ""}
-              {row.repo}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-    {(chips.length > 0 || summary) && (
-      <div className={styles.headerFullRow}>
-        {chips.map((row) => (
-          <span key={row.repo} className={styles.gradeSetChip}>
-            {row.repo}
-            <button type="button" className={styles.gradeSetChipRemove} aria-label={`Remove ${row.repo} from the grade set`} onClick={() => onToggleRepo(row.repo)}>
-              x
-            </button>
-          </span>
-        ))}
-        {summary && (
+      </div>
+      {summary && (
+        <div className={styles.headerFullRow}>
           <span role="status" className={styles.gradeSetStatus}>
             {summary.counterText}
-            <Button size="small" onClick={() => onShowAllChange(!showAll)}>
-              {summary.primaryActionLabel}
-            </Button>
-            <Button size="small" onClick={onClearSelection}>
-              {summary.secondaryActionLabel}
-            </Button>
+            <Button size="small" onClick={() => onShowAllChange(!showAll)}>{summary.primaryActionLabel}</Button>
+            <Button size="small" onClick={onClearSelection}>{summary.secondaryActionLabel}</Button>
           </span>
-        )}
-      </div>
-    )}
+        </div>
+      )}
     </>
   );
 }

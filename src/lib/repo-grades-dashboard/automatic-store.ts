@@ -165,6 +165,14 @@ export async function readAutomaticRepoGradeSnapshot(work: ClaimScope, lease: st
   return snapshot ? { status: "ready", snapshot } as const : { status: "unavailable" } as const;
 }
 
+/** Only a live worker lease can distinguish explicit requests from startup work. */
+export async function isTargetedAutomaticRepoGrade(work: ClaimScope, lease: string): Promise<boolean | null> {
+  const result = await rpc("repo_grade_automatic_is_targeted", {
+    p_run_id: work.runId, p_user_id: work.accountId, p_lease: lease,
+  });
+  return typeof result === "boolean" ? result : null;
+}
+
 export function automaticRepoGradeEvidenceStore(
   work: Extract<AutomaticRepoGradeWork, { phase: "grading" }>, lease: string,
 ) {
@@ -189,7 +197,7 @@ export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lea
   if (result.state === "github-throttled") {
     const { retryAtMs, primary } = result.rateLimit;
     if (result.claim) {
-      if (work.phase !== "grading" || result.claim.mode !== "automatic") return false;
+      if (work.phase !== "grading") return false;
       return await rpc("repo_grade_automatic_retry_prepared_throttle", {
         p_user_id: work.accountId, p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
         p_generation: result.claim.generation, p_token: result.claim.token,

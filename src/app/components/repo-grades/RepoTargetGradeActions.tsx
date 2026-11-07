@@ -37,6 +37,13 @@ export function latestTargetRequest(requests: readonly TargetRequest[]) {
   return requests[requests.length - 1];
 }
 
+/** A completed request adds no information beside an existing graded result. */
+export function visibleTargetRequest(requests: readonly TargetRequest[], hasGradedResult: boolean) {
+  const active = activeTargetRequests(requests);
+  const latest = active[0] ?? latestTargetRequest(requests);
+  return hasGradedResult && latest?.state === "complete" ? undefined : latest;
+}
+
 export function targetRequestMenuItems(request: TargetRequest | undefined, available: boolean, pending: boolean,
   root: boolean, onStart: () => void, onControl: (id: number, action: TargetCommand) => void, close: () => void) {
   if (!request) return [<MenuItem key="grade" disabled={root || !available || pending} onClick={() => { close(); onStart(); }}>
@@ -70,13 +77,13 @@ export function multipleTargetRequestMenuItems(requests: TargetRequest[], availa
   });
 }
 
-export function RepoTargetGradeActions({ label, requests, available, pending, onStart, onControl, root }: {
+export function RepoTargetGradeActions({ label, requests, available, pending, onStart, onControl, root, hasGradedResult = false }: {
   label: string; requests: TargetRequest[]; available: boolean; pending: boolean;
-  onStart: () => void; onControl: (id: number, action: TargetCommand) => void; root: boolean;
+  onStart: () => void; onControl: (id: number, action: TargetCommand) => void; root: boolean; hasGradedResult?: boolean;
 }) {
   const active = activeTargetRequests(requests);
   return <>
-    {active.length > 1 ? <Chip size="small" label={`${active.length} requests`} color="info" variant="outlined" /> : <TargetRequestChip request={active[0] ?? latestTargetRequest(requests)} />}
+    {active.length > 1 ? <Chip size="small" label={`${active.length} requests`} color="info" variant="outlined" /> : <TargetRequestChip request={visibleTargetRequest(requests, hasGradedResult)} />}
     <RepoGradeActionsMenu label={label}>
       {(close) => multipleTargetRequestMenuItems(active, available, pending, root, onStart, onControl, close)}
     </RepoGradeActionsMenu>

@@ -27,6 +27,7 @@ export type RepoGradeClaimRequest = {
       cohort: RepoGradeCohort;
       preparation?: RepoGradePreparedProvenance;
       startupBatchId?: string;
+      targetedRun?: { runId: string; lease: string };
     }
 );
 

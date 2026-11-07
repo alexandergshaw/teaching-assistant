@@ -63,6 +63,29 @@ beforeEach(() => {
   vi.mocked(settleRepoGrade).mockResolvedValue(true);
 });
 describe("repository grading dashboard runner", () => {
+  it.each([
+    ["recovered-succeeded", "succeeded"],
+    ["recovered-no-submission", "no-submission"],
+    ["recovered-failed", "failed"],
+    ["recovered-partial", "partial"],
+    ["recovered-unknown", "unknown"],
+  ] as const)("preserves %s without dispatching again", async (receipt, expected) => {
+    const { runtime } = fixture();
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: receipt });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, targetedRun: { runId: cohortId, lease: cohortId } }))
+      .resolves.toEqual({ status: expected });
+    expect(runtime.evaluatePinned).not.toHaveBeenCalled();
+    expect(settleRepoGrade).not.toHaveBeenCalled();
+  });
+  it("uses a fenced retry for an explicit saved-grade replacement", async () => {
+    const { runtime } = fixture();
+    const targetedRun = { runId: cohortId, lease: cohortId };
+    const retryClaim = { ...claim, mode: "retry" as const };
+    vi.mocked(claimRepoGrade).mockResolvedValue({ status: "claimed", claim: retryClaim });
+    await expect(runRepoGradeTarget(plan, target, { ...runtime, targetedRun })).resolves.toEqual({ status: "succeeded" });
+    expect(claimRepoGrade).toHaveBeenCalledWith(expect.objectContaining({ mode: "retry", targetedRun, sha }));
+    expect(settleRepoGrade).toHaveBeenCalledWith(retryClaim, expect.objectContaining({ outcome: "succeeded" }));
+  });
   it("blocks an injected runtime in default legacy mode", async () => {
     vi.mocked(repoGradeAdmissionMode).mockReturnValue("legacy-manual");
     const { runtime } = fixture();

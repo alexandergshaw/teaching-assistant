@@ -6,7 +6,7 @@ import {
 } from "./preparation-runtime";
 import { planRepoGradeCourse, runRepoGradeTarget } from "./runner";
 import { readRepoGradeStartupHistory } from "./startup-history";
-import { automaticRepoGradeEvidenceStore, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
+import { automaticRepoGradeEvidenceStore, isTargetedAutomaticRepoGrade, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
 import { confirmedGradeSourceCooldown } from "@/lib/github-grade-archive";
@@ -73,6 +73,9 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
           const { repo, folder, sourceRef, sha } = target;
           const selector = { repo, folder, ref: sourceRef, sha };
           const prior = history.get(repoGradeStartupKey(target));
+          // An explicit request asks for a fresh evaluation, but the database
+          // independently blocks any unresolved prior attempt before dispatch.
+          if (work.targetFilter && prior) return selector;
           switch (prior) {
             case "never-attempted": return selector;
             case "succeeded":
@@ -93,11 +96,13 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     // lease and resumes the same pinned target after the cooldown.
     const cooldown = work.retryGithubRateLimits ? confirmedGradeSourceCooldown() : null;
     if (cooldown) return { state: "github-throttled", rateLimit: cooldown };
+    const targeted = await isTargetedAutomaticRepoGrade(work, lease);
+    if (targeted === null) return { state: "blocked", reason: "targeted-run-unavailable" };
     const target = { accountId, courseId, repo: work.repo, folder: work.folder, sourceRef: work.ref, sha: work.sha };
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));
     if (!prior) return { state: "blocked", reason: "history-unavailable" };
-    if (prior !== "never-attempted") {
+    if (!targeted && prior !== "never-attempted") {
       if (prior === "succeeded" || prior === "no-submission") return { state: "already-processed" };
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
@@ -105,6 +110,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     let profileFailure: RepoGradeProfilePreparationFailure | undefined;
     let preparationThrottle: PreparationGithubThrottle | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
+      ...(targeted && { targetedRun: { runId, lease } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)

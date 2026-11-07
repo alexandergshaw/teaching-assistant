@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, Button, Stack, SvgIcon, Typography } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { inspectRepoGradeReservations, releaseExpiredRepoGradeReservations } from "./reservation-recovery-client";
@@ -50,14 +51,15 @@ export function RepoGradeReservationRecovery() {
   }
 
   return (
-    <details className={styles.profileSettings}>
-      <summary>Grading reservation recovery</summary>
+    <Accordion className={styles.profileSettings} disableGutters>
+      <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>Grading reservation recovery</AccordionSummary>
+      <AccordionDetails>
       <p>Inspect reservations across this account. Recovery releases only expired attempts that the database confirms never dispatched.</p>
-      <div>
-        <button type="button" onClick={inspect} disabled={pending}>Check reservations</button>{" "}
-        <button type="button" onClick={recover} disabled={pending || !canRecover}>Release expired unstarted attempts</button>
-      </div>
-      <p role="status">{pending ? "Checking repository grading reservations." : notice}</p>
+      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
+        <Button size="small" variant="outlined" onClick={inspect} disabled={pending}>Check reservations</Button>
+        <Button size="small" variant="outlined" onClick={recover} disabled={pending || !canRecover}>Release expired unstarted attempts</Button>
+      </Stack>
+      <Typography variant="body2" role="status">{pending ? "Checking repository grading reservations." : notice}</Typography>
       {reservations?.length === 0 && <p>No grading reservations were found.</p>}
       {!!reservations?.length && (
         <ul>
@@ -68,6 +70,7 @@ export function RepoGradeReservationRecovery() {
           ))}
         </ul>
       )}
-    </details>
+      </AccordionDetails>
+    </Accordion>
   );
 }

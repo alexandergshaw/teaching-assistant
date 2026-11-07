@@ -52,6 +52,11 @@ export type RepoGradeHistoryRow = {
 
 export type RepoGradeClaimStatus =
   | "terminal"
+  | "recovered-succeeded"
+  | "recovered-no-submission"
+  | "recovered-failed"
+  | "recovered-partial"
+  | "recovered-unknown"
   | "busy"
   | "capacity"
   | "explicit-retry-required"

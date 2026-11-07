@@ -78,6 +78,7 @@ type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 
 type AutomaticRuntime = {
   startupBatchId?: string;
+  targetedRun?: { runId: string; lease: string };
   deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;
@@ -280,11 +281,12 @@ export async function runRepoGradeTarget(
 
   let unsettled: UnsettledEvaluation | undefined;
   const admission = await runWithRepoGradeAdmission({
-    mode: "automatic", courseId: plan.courseId, courseConfig: plan.courseConfig,
+    mode: runtime.targetedRun ? "retry" : "automatic", courseId: plan.courseId, courseConfig: plan.courseConfig,
     repo: source.repo, folder, sourceRef: source.sourceRef, sha: source.sourceCommit,
     cohort: { cohortId, receipt },
     ...(prepared.preparation && { preparation: prepared.preparation }),
     ...(runtime.startupBatchId && { startupBatchId: runtime.startupBatchId }),
+    ...(runtime.targetedRun && { targetedRun: runtime.targetedRun }),
   }, async (beforeDispatch) => {
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;
     const evaluation = classifyEvaluation(await evaluatePinned({
@@ -302,6 +304,11 @@ export async function runRepoGradeTarget(
     return { value, settlement };
   }, runtime.deferSourceThrottle ? (value) => value.status === "partial" && value.reason === "grading-source-rate-limited" : undefined);
   if (admission.status === "completed") return admission.value;
+  if (admission.status === "recovered-succeeded") return { status: "succeeded" };
+  if (admission.status === "recovered-no-submission") return { status: "no-submission" };
+  if (admission.status === "recovered-failed") return { status: "failed" };
+  if (admission.status === "recovered-partial") return { status: "partial" };
+  if (admission.status === "recovered-unknown") return { status: "unknown" };
   if (admission.status === "deferred-pre-dispatch") return { status: "deferred-source-throttle", claim: admission.claim };
   if (admission.status === "manual-paused") return { status: "runtime-unavailable" };
   if (admission.status === "pre-dispatch-failed" || admission.status === "sandbox-refused") return { status: "failed" };

@@ -5,17 +5,36 @@ import type { RepoGradeLedgerObservation, RepoGradeStartupTarget } from "./sched
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
 import { prepareRepoGradeStartupProfile } from "./preparation-runtime";
 
-const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn() }));
+const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn() }));
 vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
 vi.mock("./runner", () => ({ planRepoGradeCourse: mocks.plan, runRepoGradeTarget: mocks.evaluate }));
-vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore }));
+vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore, isTargetedAutomaticRepoGrade: mocks.targeted }));
 vi.mock("./startup-history", () => ({ readRepoGradeStartupHistory: mocks.history }));
 vi.mock("./preparation-runtime", () => ({
   prepareEmbeddedRepoGradeStartupProfile: vi.fn(), prepareRepoGradeStartupProfile: vi.fn(),
 }));
 
 describe("durable repository grading discovery", () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); });
+
+  it("regrades an explicit target while scheduled work still skips its existing grade", async () => {
+    const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "lab", ref: "main", sha: "a".repeat(40) } as const;
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "succeeded"])));
+    mocks.evaluate.mockResolvedValue({ status: "succeeded" });
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "already-processed" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    mocks.targeted.mockResolvedValue(true);
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
+    expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      targetedRun: { runId: "run", lease: "lease" },
+    }));
+    mocks.targeted.mockResolvedValue(null);
+    await expect(worker(work, "expired-lease")).resolves.toEqual({ state: "blocked", reason: "targeted-run-unavailable" });
+  });
 
   it("limits a targeted run to discovered matching repository folders", async () => {
     const sha = "a".repeat(40);

@@ -118,6 +118,32 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
 });
 
 describe("coverage and boundaries", () => {
+  it("reinspects raw DOCX instead of trusting stale complete visual metadata", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    entry.submittedFiles[0].documentVisuals = { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] };
+    const response = await (await gradePost(request({ ...body(entry), entry }))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(response.diagnostic.visualCoverage).toBe("incomplete");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("does not trust valid prepared metadata when supplied raw Office bytes are malformed", async () => {
+    const entry: StudentSubmissionEntry = { student: "Student", userId: 17, content: "answer", mergedFileCount: 1, submittedFiles: [{ name: "bad.docx", extension: "docx", previewContent: "answer", previewTruncated: false, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", rawBase64: Buffer.from("corrupt").toString("base64"), documentVisuals: { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] } }] };
+    const response = await (await gradePost(request({ ...body(entry), entry }))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(response.diagnostic.visualCoverage).toBe("failed");
+    expect(callLlm).not.toHaveBeenCalled();
+  });  it("reinspects valid raw and prepared Office evidence without duplicating pictures", async () => {
+    const bytes = await fixture("docx");
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    entry.submittedFiles[0].documentVisuals = await prepareDocumentVisuals("docx", bytes);
+    const response = await gradePost(request({ ...body(entry), entry }));
+    expect(response.status).toBe(200);
+    const sent = vi.mocked(callLlm).mock.calls[0][0];
+    expect(sent.contents.flatMap((content) => content.parts).filter((part) => "inlineData" in part)).toHaveLength(1);
+  });
   it.each(["word/document.xml"])("refuses legacy images in %s with alternate prefixes", async (part) => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
     const pict = `<alt:pict><vector:shape><vector:imagedata rel:id="rId1"/></vector:shape></alt:pict>`;

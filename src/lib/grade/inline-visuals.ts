@@ -6,7 +6,7 @@ import type { DocumentVisuals } from "./document-visual-schema";
 import type { SubmittedFileInfo } from "./types";
 export interface InlineVisualPart { name: string; base64: string; mimeType: string }
 export interface CollectedVisuals { parts: InlineVisualPart[]; documents: { file: SubmittedFileInfo; coverage: DocumentVisuals }[] }
-/** Prepared representations win over raw fallback, preventing duplicate pictures. */
+/** Reinspect available Office bytes; prepared-only payloads retain their existing path. */
 export async function collectInlineVisualEvidence(submittedFiles: SubmittedFileInfo[]): Promise<CollectedVisuals> {
   const out: CollectedVisuals = { parts: [], documents: [] };
   let remainingParts = DOCUMENT_PICTURE_LIMIT;
@@ -14,7 +14,9 @@ export async function collectInlineVisualEvidence(submittedFiles: SubmittedFileI
   for (const f of submittedFiles) {
     const kind = f.extension === "docx" || f.extension === "pptx" ? f.extension : f.mimeType ? OFFICE_IMAGE_SOURCE_MIME_TYPES[f.mimeType] : undefined;
     if (f.documentVisuals || kind || (DOCUMENT_EXTENSIONS.has(f.extension) && f.extension !== "pdf")) {
-      let coverage = f.documentVisuals ?? await prepareDocumentVisuals(kind ?? f.extension, f.rawBase64 ? Buffer.from(f.rawBase64, "base64") : undefined, { parts: remainingParts, bytes: remainingBytes });
+      let coverage = kind && f.rawBase64 !== undefined
+        ? await prepareDocumentVisuals(kind, Buffer.from(f.rawBase64, "base64"), { parts: remainingParts, bytes: remainingBytes })
+        : f.documentVisuals ?? await prepareDocumentVisuals(kind ?? f.extension, f.rawBase64 ? Buffer.from(f.rawBase64, "base64") : undefined, { parts: remainingParts, bytes: remainingBytes });
       if (coverage.parts.length && (coverage.parts.length > remainingParts || new TextEncoder().encode(JSON.stringify(coverage)).byteLength > remainingBytes)) {
         coverage = { ...coverage, status: "incomplete", reason: "budget", omitted: coverage.found, parts: [] };
       }

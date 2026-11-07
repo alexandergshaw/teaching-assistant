@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
+import type { SubmitOutcome } from "./useContinuousGradingRun";
 
 type Node = { type: string; props: Record<string, any> };
 const slots: { value: any; deps?: unknown[] }[] = [];
@@ -22,17 +23,43 @@ function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 beforeEach(() => { slots.length = 0; cursor = 0; });
-function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[])) {
+function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 }))) {
   let epoch = 0;
-  const render = () => { cursor = 0; return component({ disabled: false, onOne, onMany, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
+  const render = () => { cursor = 0; return component({ disabled: false, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
   const reset = () => { epoch++; };
-  return { render, find, button, reset, onOne, onMany };
+  return { render, find, button, reset, onOne, onMany, onText };
 }
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("submits named text separately in multiple-student mode and preserves refused text", async () => {
+    const onText = vi.fn().mockResolvedValueOnce({ kind: "refused", reason: "setup incomplete" }).mockResolvedValueOnce({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    const field = (label: string) => nodes(tree).find((n) => n.type === "TextField" && n.props.label === label)!;
+    field("Submission text").props.onChange({ target: { value: "Student work" } }); field("Student for this text").props.onChange({ target: { value: "Alice" } });
+    tree = h.render(); h.button(tree, "Grade text").props.onClick(); await flush(); tree = h.render();
+    expect(onText).toHaveBeenCalledWith("Alice", "Student work"); expect(field("Submission text").props.value).toBe("Student work"); expect(text(tree)).toContain("setup incomplete");
+    h.button(tree, "Grade text").props.onClick(); await flush(); tree = h.render(); expect(field("Submission text").props.value).toBe("");
+  });
+  it("keeps text and requires a results check after a session change during submission", async () => {
+    let finish!: (value: SubmitOutcome) => void; const onText = vi.fn(() => new Promise<SubmitOutcome>((resolve) => { finish = resolve; }));
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "work" } });
+    tree = h.render(); h.button(tree, "Grade text").props.onClick(); h.reset(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.value).toBe("work");
+    expect(h.button(tree, "Grade text").props.disabled).toBe(true); expect(text(tree)).toContain("Check the previous results");
+  });
+  it("retains uncertain text after an exception even if file activity clears the shared error", async () => {
+    const onText = vi.fn().mockRejectedValue(new Error("network")); const h = harness(undefined, undefined, onText); let tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "work" } });
+    tree = h.render(); h.button(tree, "Grade text").props.onClick(); await flush(); tree = h.render();
+    h.find(tree, "input").props.onChange({ target: { files: [work("one.pdf")], value: "x" } }); await flush(); tree = h.render();
+    expect(h.button(tree, "Grade text").props.disabled).toBe(true); expect(text(tree)).toContain("Check the previous results");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.value).toBe("work");
+  });
   it("holds multiple files, confirms the visible suggestion, and allows selecting the same file again", async () => {
     const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
     const input = h.find(tree, "input"), first = work("Alice_101_1_a.pdf"); input.props.onChange({ target: { files: [first], value: "x" } }); await flush();

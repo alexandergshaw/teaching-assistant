@@ -16,6 +16,7 @@ import RadioGroup from "@mui/material/RadioGroup";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import type { DirectFileOutcome } from "./chatDirectFileIntake";
+import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { ROLE_FILE_LIMIT } from "./chatFileRoles";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
 
@@ -27,16 +28,20 @@ export function reconcileRowAfterReset(row: Row): Row {
   return { ...row, state: "uncertain", reason: "The session changed. Check the previous results before retrying." };
 }
 /** File intake stays visible while text, URL, and composite tools remain available. */
-export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onOne, onMany }: {
+export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onOne, onMany, onText }: {
   disabled: boolean;
   reviewFiles?: boolean;
   getSessionEpoch?: () => number;
   sessionEpoch?: number;
   onOne: (student: string, files: File[]) => Promise<DirectFileOutcome>;
   onMany: (files: File[]) => Promise<DirectFileOutcome[]>;
+  onText: (student: string, content: string) => Promise<SubmitOutcome>;
 }) {
   const [mode, setMode] = useState<"one" | "many">("one");
   const [student, setStudent] = useState("");
+  const [textStudent, setTextStudent] = useState("");
+  const [submissionText, setSubmissionText] = useState("");
+  const [textUncertain, setTextUncertain] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -50,11 +55,11 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
     setRows((previous) => previous.map(reconcileRowAfterReset));
   }, [sessionEpoch]);  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    if (!pending && !rows.some((row) => row.state === "ready" || row.state === "refused" || row.state === "identity" || row.state === "uncertain")) return;
+    if (!pending && !submissionText && !rows.some((row) => row.state === "ready" || row.state === "refused" || row.state === "identity" || row.state === "uncertain")) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [pending, rows]);
+  }, [pending, rows, submissionText]);
   const busy = disabled || pending;
   const ready = rows.filter((row) => row.state === "ready" || row.state === "refused");
   const assigned = rows.filter((row) => row.state === "identity" && row.assigned?.trim());
@@ -64,6 +69,23 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
     name, files: suggestedRows.filter((_, index) => suggestions[index] === name),
   }));
   const unresolved = rows.some((row) => row.state === "uncertain");
+
+  async function gradeText() {
+    if (busy || latch.current || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())) return;
+    latch.current = true; setPending(true); setError(null);
+    const epoch = getSessionEpoch?.();
+    try {
+      const outcome = await onText(mode === "one" ? student.trim() : textStudent.trim(), submissionText);
+      if (!alive.current) return;
+      if (getSessionEpoch?.() !== epoch || outcome.kind === "partial" || (outcome.kind === "accepted" && outcome.entryCount !== 1)) {
+        setTextUncertain(true);
+        setError("The text submission status could not be confirmed. Check the previous results before retrying.");
+      } else if (outcome.kind === "refused") setError(outcome.reason);
+      else { setSubmissionText(""); if (mode === "many") setTextStudent(""); }
+    } catch {
+      if (alive.current) { setTextUncertain(true); setError("The text submission status could not be confirmed. Check the results before retrying."); }
+    } finally { latch.current = false; if (alive.current) setPending(false); }
+  }
 
   function addFiles(files: File[]) {
     if (busy || latch.current) { setError("Wait for the current upload to finish, then choose these files again."); return; }
@@ -160,6 +182,11 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
         <input ref={picker} type="file" multiple hidden onChange={pick} disabled={busy} />
         <Button size="small" variant="outlined" disabled={busy} onClick={() => picker.current?.click()}>Choose files</Button>
       </Box>
+      <Typography variant="body2">Text and files are graded separately. To combine them into one submission, use Add part below.</Typography>
+      <TextField label="Submission text" placeholder="Paste a student's submission" multiline minRows={3} value={submissionText} disabled={busy} onChange={(event) => setSubmissionText(event.target.value)} />
+      {mode === "many" && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="Submit each student's text separately." />}
+      <Box><Button variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>
+      {textUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setTextUncertain(false)}>I checked results</Button>}>Check the previous results before retrying this text.</Alert>}
       {error && <Alert severity="warning">{error}</Alert>}
       {rows.some((row) => row.state === "identity") && <Alert severity="info">Assign students to files from any drop. All assigned files with the same name will be graded together when you select Grade assigned files; submit students with identical names separately.</Alert>}
       {suggestions.some(Boolean) && <Alert severity="info">Suggested groups are based on filenames and may combine different students or split one submission. Review the files in each group. To correct a group, enter student names below and use Grade assigned files.</Alert>}

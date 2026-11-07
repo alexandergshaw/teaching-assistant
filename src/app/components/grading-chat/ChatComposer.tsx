@@ -288,7 +288,8 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
       }
     >
       <SubmissionDrop disabled={disabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
-        onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)} />
+        onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
+        onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} />
       <div className={`${styles.ghActions} ${chatStyles.composerRow}`}>
         <SegmentedToggle
           label="Submission type"

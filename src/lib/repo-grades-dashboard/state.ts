@@ -28,6 +28,7 @@ export type RepoGradeClaimRequest = {
       preparation?: RepoGradePreparedProvenance;
       startupBatchId?: string;
       targetedRun?: { runId: string; lease: string };
+      recoveryRun?: { runId: string; lease: string };
     }
 );
 

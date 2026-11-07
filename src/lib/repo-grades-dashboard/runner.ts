@@ -79,6 +79,7 @@ type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 type AutomaticRuntime = {
   startupBatchId?: string;
   targetedRun?: { runId: string; lease: string };
+  recoveryRun?: { runId: string; lease: string };
   deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;
@@ -282,12 +283,13 @@ export async function runRepoGradeTarget(
 
   let unsettled: UnsettledEvaluation | undefined;
   const admission = await runWithRepoGradeAdmission({
-    mode: runtime.targetedRun ? "retry" : "automatic", courseId: plan.courseId, courseConfig: plan.courseConfig,
+    mode: runtime.targetedRun || runtime.recoveryRun ? "retry" : "automatic", courseId: plan.courseId, courseConfig: plan.courseConfig,
     repo: source.repo, folder, sourceRef: source.sourceRef, sha: source.sourceCommit,
     cohort: { cohortId, receipt },
     ...(prepared.preparation && { preparation: prepared.preparation }),
     ...(runtime.startupBatchId && { startupBatchId: runtime.startupBatchId }),
     ...(runtime.targetedRun && { targetedRun: runtime.targetedRun }),
+    ...(runtime.recoveryRun && { recoveryRun: runtime.recoveryRun }),
   }, async (beforeDispatch) => {
     const evaluatePinned = runtime.evaluatePinned ?? evaluatePinnedRepoGrade;
     const evaluation = classifyEvaluation(await evaluatePinned({

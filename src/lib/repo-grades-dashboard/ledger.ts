@@ -50,6 +50,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
   const preparation = automatic ? request.preparation : undefined;
   const startupBatchId = automatic ? request.startupBatchId : undefined;
   const targetedRun = automatic ? request.targetedRun : undefined;
+  const recoveryRun = automatic ? request.recoveryRun : undefined;
   if (automatic && (!cohort || !validRepoGradeCohortId(cohort.cohortId)
     || cohort.receipt?.accountId !== owner.id || cohort.receipt.courseId !== request.courseId
     || cohort.receipt.folder !== request.folder)) {
@@ -69,7 +70,15 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     p_receipt: cohort?.receipt ?? null,
   };
   let response: unknown;
-  if (targetedRun) {
+  if (recoveryRun) {
+    const { p_mode: mode, ...targetArgs } = args;
+    if (mode !== "retry" || targetedRun || startupBatchId || !validRepoGradeCohortId(recoveryRun.runId)
+      || !validRepoGradeCohortId(recoveryRun.lease)) return { status: "forbidden" };
+    response = await ledgerRpc("repo_grade_claim_prepared_recovery", {
+      ...targetArgs, p_run_id: recoveryRun.runId, p_lease: recoveryRun.lease,
+      p_preparation_key: preparation?.key ?? null,
+    }, true);
+  } else if (targetedRun) {
     const { p_mode: mode, ...targetArgs } = args;
     if (mode !== "retry" || startupBatchId || !validRepoGradeCohortId(targetedRun.runId)
       || !validRepoGradeCohortId(targetedRun.lease)) return { status: "forbidden" };

@@ -21,6 +21,26 @@ vi.mock("./preparation-runtime", () => ({
 describe("durable repository grading discovery", () => {
   beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); mocks.authorize.mockResolvedValue(true); });
 
+  it("queues a prepared partial and uses the fenced recovery claim only for that state", async () => {
+    const sha = "a".repeat(40);
+    const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+      repo: "Org/Student", folder: "lab", ref: "main", sha } as const;
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    let prior: RepoGradeLedgerObservation = "recoverable-partial";
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), prior])));
+    mocks.evaluate.mockResolvedValue({ status: "succeeded" });
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
+    expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      recoveryRun: { runId: "run", lease: "lease" },
+    }));
+    mocks.evaluate.mockClear();
+    prior = "partial";
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "partial", reason: "prior-attempt" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
+
   it("settles a targeted prior grade as verified empty without rubric or model work", async () => {
     const sha = "a".repeat(40), work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
       repo: "Org/Student", folder: "lab", ref: "main", sha } as const;

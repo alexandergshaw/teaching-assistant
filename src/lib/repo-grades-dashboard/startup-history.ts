@@ -7,7 +7,7 @@ import { repoGradeStartupKey, type RepoGradeLedgerObservation, type RepoGradeSta
 const MAX_RECEIPTS = 1_000;
 const COMMITS_PER_QUERY = 40;
 const HISTORY_TIMEOUT_MS = 10_000;
-const RECEIPT_COLUMNS = "generation, user_id, course_id, repo, folder, source_ref, source_sha, mode, status, claimed_at";
+const RECEIPT_COLUMNS = "generation, user_id, course_id, repo, folder, source_ref, source_sha, mode, status, dispatch_state, claimed_at";
 const RECEIPT_STATUSES = new Set<RepoGradeAttemptReceiptRow["status"]>([
   "claimed", "succeeded", "no-submission", "partial", "failed", "unknown",
 ]);
@@ -17,12 +17,13 @@ const CLAIM_AGE_LIMIT_MS = 15 * 60 * 1_000;
 
 const OBSERVATION_PRIORITY: Record<RepoGradeLedgerObservation, number> = {
   "never-attempted": 0,
-  failed: 1,
-  partial: 1,
-  claimed: 2,
-  unknown: 3,
-  succeeded: 4,
-  "no-submission": 4,
+  "recoverable-partial": 1,
+  failed: 2,
+  partial: 2,
+  claimed: 3,
+  unknown: 4,
+  succeeded: 5,
+  "no-submission": 5,
 };
 
 // Different refs can resolve to the same immutable work. Keep the exact ref
@@ -76,7 +77,8 @@ export async function readRepoGradeStartupHistory(
         });
         const observed = observationsByCommit.get(key);
         if (observed === undefined) continue;
-        const status = row.status === "claimed" && Date.parse(row.claimed_at) <= staleBefore ? "unknown" : row.status;
+        const status = row.status === "claimed" && Date.parse(row.claimed_at) <= staleBefore ? "unknown"
+          : row.status === "partial" && row.mode === "automatic" && row.dispatch_state === "prepared" ? "recoverable-partial" : row.status;
         // Rows descend by generation, so equal priority keeps the newer receipt.
         if (OBSERVATION_PRIORITY[status] > OBSERVATION_PRIORITY[observed]) observationsByCommit.set(key, status);
       }

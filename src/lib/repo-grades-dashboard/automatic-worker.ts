@@ -85,7 +85,8 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
           // independently blocks any unresolved prior attempt before dispatch.
           if (work.targetFilter && prior) return selector;
           switch (prior) {
-            case "never-attempted": return selector;
+            case "never-attempted":
+            case "recoverable-partial": return selector;
             case "succeeded":
             case "no-submission": return { ...selector, state: "already-processed" };
             case "claimed": return { ...selector, state: "busy", reason: "prior-attempt" };
@@ -110,7 +111,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));
     if (!prior) return { state: "blocked", reason: "history-unavailable" };
-    if (!targeted && prior !== "never-attempted") {
+    if (!targeted && prior !== "never-attempted" && prior !== "recoverable-partial") {
       if (prior === "succeeded" || prior === "no-submission") return { state: "already-processed" };
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
@@ -138,6 +139,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
       ...(targeted && { targetedRun: { runId, lease } }),
+      ...(!targeted && prior === "recoverable-partial" && { recoveryRun: { runId, lease } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)

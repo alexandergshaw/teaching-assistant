@@ -178,6 +178,7 @@ export async function runRepoGradeStartupTargetAction(
     const history = await readRepoGradeStartupHistory(owner.id, plan.courseId, [target]);
     const status = history?.get(repoGradeStartupKey(target));
     if (!status) return { status: "storage-unavailable" } as const;
+    if (status === "recoverable-partial") return { status: "partial" } as const;
     if (status !== "never-attempted") return { status };
 
     // Return unretained feedback to the authorized caller for session recovery.

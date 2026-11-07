@@ -145,7 +145,33 @@ describe("coverage and boundaries", () => {
     const bytes = await zip.generateAsync({ type: "nodebuffer" });
     expect(await prepareDocumentVisuals("docx", bytes)).toMatchObject({ status: "complete", found: 0, omitted: 0 });
   });
-  it("does not refuse an unreferenced orphan header with VML images", async () => {
+  it.each(["header", "footer"])("refuses VML images in an active %s relationship", async (kind) => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t></w:r></w:p><w:sectPr><w:${kind}Reference w:type="default" r:id="rIdSection"/></w:sectPr></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdSection" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}" Target="${kind}1.xml"/></Relationships>`);
+    zip.file(`word/${kind}1.xml`, `<w:${kind === "header" ? "hdr" : "ftr"} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:${kind === "header" ? "hdr" : "ftr"}>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("keeps a text-only active header gradeable", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="h"/></w:sectPr></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="h" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>`);
+    zip.file("word/header1.xml", `<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Course header</w:t></w:r></w:p></w:hdr>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await gradePost(request(body(entry)));
+    expect(response.status).toBe(200);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });  it("fails closed when an active header relationship is missing", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:sectPr><w:headerReference r:id="missing"/></w:sectPr></w:body></w:document>`);
+    const coverage = await prepareDocumentVisuals("docx", await zip.generateAsync({ type: "nodebuffer" }));
+    expect(coverage.status).toBe("failed");
+  });  it("does not refuse an unreferenced orphan header with VML images", async () => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
     zip.file("word/header1.xml", `<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:hdr>`);
     const bytes = await zip.generateAsync({ type: "nodebuffer" });

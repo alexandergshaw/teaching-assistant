@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { SaxesParser } from "saxes";
+import { activeDocxHeaderFooterPaths } from "./document-active-sections";
 import { assertContainerWithinCaps, createZipBudget, declaredSizesOf, readOfficeMember } from "../zip-caps";
 import { DOCUMENT_PICTURE_LIMIT, DOCUMENT_PICTURE_BYTE_LIMIT, DOCUMENT_VISUAL_BYTE_LIMIT, type DocumentVisuals } from "./document-visual-schema";
 
@@ -13,11 +14,11 @@ function countLegacyPictures(xml: string): number {
   let count = 0;
   parser.on("doctype", () => { throw new Error("DTD not supported"); });
   parser.on("opentag", (tag) => {
-    if (tag.uri === "http://schemas.openxmlformats.org/wordprocessingml/2006/main" && tag.local === "pict") active.push(false);
-    else if (active.length && tag.uri === "urn:schemas-microsoft-com:vml" && (tag.local === "imagedata" || (tag.local === "fill" && Object.values(tag.attributes).some((attr) => (attr.local === "type" && attr.value.toLowerCase() === "frame") || (attr.uri === "http://schemas.openxmlformats.org/officeDocument/2006/relationships" && attr.local === "id") || ["src", "href", "relid"].includes(attr.local.toLowerCase()))))) active[active.length - 1] = true;
+    if (["http://schemas.openxmlformats.org/wordprocessingml/2006/main", "http://purl.oclc.org/ooxml/wordprocessingml/main"].includes(tag.uri) && tag.local === "pict") active.push(false);
+    else if (active.length && tag.uri === "urn:schemas-microsoft-com:vml" && (tag.local === "imagedata" || (tag.local === "fill" && Object.values(tag.attributes).some((attr) => (attr.local === "type" && attr.value.toLowerCase() === "frame") || (["http://schemas.openxmlformats.org/officeDocument/2006/relationships", "http://purl.oclc.org/ooxml/officeDocument/relationships"].includes(attr.uri) && attr.local === "id") || ["src", "href", "relid"].includes(attr.local.toLowerCase()))))) active[active.length - 1] = true;
   });
   parser.on("closetag", (tag) => {
-    if (tag.uri === "http://schemas.openxmlformats.org/wordprocessingml/2006/main" && tag.local === "pict" && active.pop()) count++;
+    if (["http://schemas.openxmlformats.org/wordprocessingml/2006/main", "http://purl.oclc.org/ooxml/wordprocessingml/main"].includes(tag.uri) && tag.local === "pict" && active.pop()) count++;
   });
   parser.write(xml).close();
   return count;
@@ -42,7 +43,14 @@ export async function prepareDocumentVisuals(extension: string, bytes?: Buffer, 
       const base = name.slice(0, name.lastIndexOf("/"));
       const rels = await read(`${base}/_rels/${name.slice(name.lastIndexOf("/") + 1)}.rels`);
       const drawings = xml.match(extension === "docx" ? /<w:drawing\b[\s\S]*?<\/w:drawing>/g : /<p:pic\b[\s\S]*?<\/p:pic>/g) ?? [];
-      const legacyPictures = extension === "docx" ? countLegacyPictures(xml) : 0;
+      if (extension === "docx") {
+        for (const path of activeDocxHeaderFooterPaths(xml, rels)) {
+          const section = await read(path);
+          if (section === null) throw new Error("Missing section part");
+          const omitted = countLegacyPictures(section);
+          if (omitted) { out.found += omitted; out.omitted += omitted; out.status = "incomplete"; out.reason = "unsupported-image"; }
+        }
+      }      const legacyPictures = extension === "docx" ? countLegacyPictures(xml) : 0;
       if (legacyPictures) { out.found += legacyPictures; out.omitted += legacyPictures; out.status = "incomplete"; out.reason = "unsupported-image"; }
       for (const drawing of drawings) {
         out.found++;

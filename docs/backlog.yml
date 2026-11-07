@@ -1,3 +1,75 @@
+- id: 'CHAT-SAFE-REGRADE-EDITS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Keep instructor edits and the existing grade until a replacement regrade is reviewed and accepted.'
+  owns: ['src/app/components/GradingResults.tsx', 'src/app/components/grading-results', 'src/app/components/grading-chat/useContinuousGradingRun.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-results/chatRegradeRetention.test.ts'
+  blocked_by: []
+  instrument: 'Exercise actual regrade request and result callbacks: refused, failed, interrupted and pending work preserve existing score, comments and posted state; a successful candidate remains separate until explicitly accepted; acceptance updates the intended row once.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingResults.tsx handleRegradeRow clears edits before dispatch.'
+  note: 'Owner: coordinator. Preserve existing review and posting safeguards. The named regression test must be created as an executable acceptance oracle; do not close this row on source-only assertions.'
+  question: null
+- id: 'CHAT-INCOMPLETE-EVIDENCE-REVIEW'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Prevent unreviewed posting of grades made from unfetched links or incomplete submission evidence.'
+  owns: ['src/app/components/grading-chat', 'src/app/components/GradingResults.tsx', 'src/lib/grade/postable.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatIncompleteEvidenceReview.test.ts'
+  blocked_by: []
+  instrument: 'Carry row-specific link-fetch and truncation provenance into displayed and posted grades; require explicit instructor review or a successful source retry before posting an affected row. Cover mixed complete and incomplete batches without leaking work between students.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingChatPanel.tsx reports link-note grading while grade/postable.ts does not inspect evidence completeness.'
+  note: 'Owner: coordinator. The named executable acceptance test must be created; verify actual posting callbacks and visible failure/recovery states, not only a pure helper.'
+  question: null
+- id: 'CHAT-DURABLE-ASSIGNMENT-SESSIONS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Save and resume assignment-scoped grading chat sessions, results and instructor edits.'
+  owns: ['src/app/components/grading-chat', 'src/app/components/GradingResults.tsx', 'src/app/api/grade-run-item', 'supabase/migrations']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatDurableSession.test.ts'
+  blocked_by: []
+  instrument: 'Restore the correct signed-in user and assignment setup, queued items, completed results and edits after reload; recover an interrupted run without repeat paid dispatch, cross-account access or silent loss; surface uncertain work and storage failures.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingChatPanel.tsx declares sessions and rows are held in memory only.'
+  note: 'Owner: coordinator. Establish retention, authorization and crash-safe dispatch semantics before enabling persistence. The named executable acceptance test must be created; a real browser and database concurrency check are separate instruments.'
+  question: null
+- id: 'CHAT-RESUMABLE-LARGE-COHORTS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Grade larger classes in bounded resumable batches under one assignment session.'
+  owns: ['src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/api/grade-run-item']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatLargeCohort.test.ts'
+  blocked_by: ['CHAT-DURABLE-ASSIGNMENT-SESSIONS']
+  instrument: 'An intake larger than the existing per-session limit is processed in bounded batches without silently dropping submissions; accepted, skipped, failed and completed counts remain accurate across reload and retry, with no duplicate dispatch.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: useContinuousGradingRun.ts defines the session entry limit and explains overflow requires a new session.'
+  note: 'Owner: coordinator. Do not merely remove the safety cap. Create the named executable acceptance test and exercise interruption at batch boundaries.'
+  question: null
+- id: 'CHAT-VERSIONED-ASSIGNMENT-SETUP'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Allow assignment setup corrections without discarding existing grading results.'
+  owns: ['src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/GradingResults.tsx']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatVersionedSetup.test.ts'
+  blocked_by: ['CHAT-DURABLE-ASSIGNMENT-SESSIONS', 'CHAT-SAFE-REGRADE-EDITS']
+  instrument: 'Freeze and version each admitted grading configuration, show which version produced each grade, preserve old results and edits on setup change, and regrade only instructor-selected submissions using the new version.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: current setup locks after a session starts and New session discards graded rows.'
+  note: 'Owner: coordinator. Implement the named executable acceptance test, including changes during pending work and explicit regrade selection; never silently mix rubric versions.'
+  question: null
+- id: 'CHAT-STREAMLINE-WORKSPACE'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Reduce setup and intake clutter so submissions, progress and feedback stay within easy reach.'
+  owns: ['src/app/components/grading-chat/GradingChatPanel.tsx', 'src/app/components/grading-chat/ChatComposer.tsx', 'src/app/components/grading-chat/grading-chat.module.css']
+  verify: 'npm.cmd run test:paths -- src/app/components/grading-chat/chatWorkspaceFlow.test.ts'
+  blocked_by: []
+  instrument: 'Use a compact Material UI setup summary, contextual file-role and repository controls, and visible run progress while preserving all intake modes, grading, review, copy, export and posting actions; verify keyboard, focus and desktop/mobile rendering in a real browser.'
+  from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingChatPanel.tsx opens setup by default and renders auxiliary controls above the composer.'
+  note: 'Owner: coordinator. Browser access was unavailable during the source audit, so verify the live layout before final placement and do not treat source-only tests as rendered evidence. Create the named executable acceptance test.'
+  question: null
 - id: 'CHAT-ARCHIVE-IMAGE-ONLY-DOCUMENTS'
   state: 'actionable'
   kind: 'bug'

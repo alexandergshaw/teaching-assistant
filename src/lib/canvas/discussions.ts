@@ -114,6 +114,7 @@ export interface CanvasStudentWork {
   text: string;
   /** Uploaded files (assignment submissions). Empty for discussions. */
   files: Array<{ name: string; base64: string; mimeType: string }>;
+  omittedVideos?: import("./omitted-video").OmittedCanvasVideo[];
   /** Posts/replies for discussions; 1 for an assignment submission. */
   contributionCount: number;
   /** Number of top-level initial posts, set only by fetchDiscussion (shape-only;

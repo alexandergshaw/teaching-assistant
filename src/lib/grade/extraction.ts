@@ -917,7 +917,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
   for (const file of work.files) {
     const extension = getFileExtension(file.name);
 
-    if (IMAGE_EXTENSIONS.has(extension)) {
+    if (IMAGE_EXTENSIONS.has(extension) && !file.mimeType.trim().toLowerCase().startsWith("video/")) {
       const mimeType = GEMINI_IMAGE_MIME_TYPES.has(file.mimeType)
         ? file.mimeType
         : getMimeType(extension);
@@ -966,7 +966,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     student: work.student,
     content: contentParts.join("\n\n---\n\n"),
     mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
-    submittedFiles,
+    submittedFiles: [...submittedFiles, ...(work.omittedVideos ?? []).map((video) => ({ name: video.name, extension: "mp4", mimeType: "video/mp4", previewContent: `Video unavailable: ${video.reason}.`, previewTruncated: false }))],
     userId: work.userId,
     submissionUrl: work.submissionUrl ?? null,
     repositoryInventories,

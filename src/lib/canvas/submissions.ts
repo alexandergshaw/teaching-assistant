@@ -7,6 +7,7 @@ import { canvasError, htmlToText, parseNextLink, type CanvasInstitution } from "
 import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 import { canvasGet } from "../canvas-fetch-response";
 import type { CanvasStudentWork } from "./discussions";
+import { canvasAttachmentMime, noteOmittedCanvasVideo, type OmittedCanvasVideo } from "./omitted-video";
 
 // ============================================================================
 // The canvasFetch adapter migration - see src/lib/canvas-fetch-response.ts's
@@ -125,9 +126,11 @@ export async function fetchAssignment(
       rawUrl && submissionType !== "on_paper" && submissionType !== "none" ? rawUrl : null;
 
     const files: CanvasStudentWork["files"] = [];
+    const omittedVideos: OmittedCanvasVideo[] = [];
     for (const attachment of submission.attachments ?? []) {
-      if (!attachment.url) continue;
+      if (!attachment.url) { noteOmittedCanvasVideo(omittedVideos, attachment, "missing download URL"); continue; }
       if (typeof attachment.size === "number" && attachment.size > MAX_ATTACHMENT_BYTES) {
+        noteOmittedCanvasVideo(omittedVideos, attachment, "attachment exceeds the download size limit");
         continue;
       }
       try {
@@ -138,24 +141,25 @@ export async function fetchAssignment(
         // just that attachment rather than the whole fetch.
         const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
         const fileRes = await canvasGet(safeAttachmentUrl, token);
-        if (!fileRes.ok) continue;
+        if (!fileRes.ok) { noteOmittedCanvasVideo(omittedVideos, attachment, "download failed"); continue; }
         const buffer = await fileRes.arrayBuffer();
-        if (buffer.byteLength > MAX_ATTACHMENT_BYTES) continue;
+        if (buffer.byteLength > MAX_ATTACHMENT_BYTES) { noteOmittedCanvasVideo(omittedVideos, attachment, "attachment exceeds the download size limit"); continue; }
         files.push({
           name: attachment.filename || attachment.display_name || `attachment-${attachment.id ?? files.length}`,
           base64: Buffer.from(buffer).toString("base64"),
-          mimeType: attachment["content-type"] || "application/octet-stream",
+          mimeType: canvasAttachmentMime(attachment),
         });
       } catch {
+        noteOmittedCanvasVideo(omittedVideos, attachment, "download failed");
         // Skip an attachment that cannot be downloaded rather than failing.
       }
     }
 
-    if (!text && files.length === 0 && !submittedUrl) {
+    if (!text && files.length === 0 && omittedVideos.length === 0 && !submittedUrl) {
       continue;
     }
 
-    students.push({ student, userId, text, files, contributionCount: 1, submissionUrl: submittedUrl });
+    students.push({ student, userId, text, files, omittedVideos, contributionCount: 1, submissionUrl: submittedUrl });
   }
 
   students.sort((a, b) => a.student.localeCompare(b.student));

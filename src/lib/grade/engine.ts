@@ -1,3 +1,4 @@
+import { canvasVideoRefusal } from "../canvas/omitted-video";
 import type { SubmissionFileInventory } from "./submission-file-inventory";
 import { parseRepositoryProposalOutput } from "./repository-proposal-output";
 import {
@@ -491,6 +492,11 @@ async function gradeStudentEntries(
       ? initialTrunc.truncated || (replyTrunc?.truncated ?? false)
       : contentTruncated;
 
+    const canvasVideo = options.source === "canvas" ? canvasVideoRefusal([{ student, files: submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]) : null;
+    if (canvasVideo) {
+      results.push(buildUngradedRow(limitedEntries[i], { kind: "grading-failed", sourceIndex: i, student, canvasUserId: userId, message: canvasVideo }));
+      continue;
+    }
     const visuals = await collectInlineVisualEvidence(submittedFiles);
     const affected = visuals.documents.filter(d => (d.file.extension === "docx" || d.file.extension === "pptx") && (d.coverage.status === "incomplete" || d.coverage.status === "failed"));
     if (visuals.documents.length) callSink?.recordVisuals?.({
@@ -744,13 +750,14 @@ export async function gradeCanvasUrl(
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini",
-  options: GradingRunOptions = {}
+  options: GradingRunOptions = {},
+  prefetchedStudents?: import("../canvas").CanvasStudentWork[]
 ): Promise<GradingRun> {
   const { fetchCanvasWork, fetchAssignmentPointsPossible } = await import("../canvas");
   const { canvasWorkToEntry, disambiguateCanvasEntries } = await import("./extraction");
 
   const [{ students }, pointsPossible] = await Promise.all([
-    fetchCanvasWork(url),
+    prefetchedStudents ? Promise.resolve({ students: prefetchedStudents }) : fetchCanvasWork(url),
     fetchAssignmentPointsPossible(url),
   ]);
 
@@ -778,6 +785,6 @@ export async function gradeCanvasUrl(
     rubric,
     provider,
     pointsPossible,
-    options
+    { ...options, source: "canvas" }
   );
 }

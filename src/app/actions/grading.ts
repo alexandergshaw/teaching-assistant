@@ -1,4 +1,5 @@
 "use server";
+import { canvasVideoRefusal } from "@/lib/canvas/omitted-video";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
 import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractSubmissions, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
@@ -611,6 +612,8 @@ export async function gradeOneSubmissionAction(
     await requireAppOwner();
     const c = code.trim().toUpperCase();
     const submission = await fetchSubmissionDetail(c, courseId, assignmentId, userId);
+    const videoRefusal = canvasVideoRefusal([submission]);
+    if (videoRefusal) return { error: videoRefusal };
     const meta = await fetchCanvasMeta(submission.canvasUrl);
     const instructions = meta.description || submission.assignmentName;
 
@@ -752,15 +755,16 @@ export async function gradeAction(
     // submission (kind auto-detected from the URL). Routes by provider — the
     // deterministic grader gets a synthesized zip; Gemini grades the text/files.
     if (canvasUrl) {
+      const { students: safetyStudents } = await fetchCanvasWork(canvasUrl);
+      const videoRefusal = canvasVideoRefusal(safetyStudents);
+      if (videoRefusal && provider !== "gemini") return { run: null, error: videoRefusal };
       // SpeedGrader base URL for per-student deep links in the results table.
       // Best-effort: a failure here must not block grading.
       const speedGraderUrl = await getSpeedGraderUrl(canvasUrl).catch(() => null);
 
       if (provider === "other") {
-        const [{ students }, pointsPossible] = await Promise.all([
-          fetchCanvasWork(canvasUrl),
-          fetchAssignmentPointsPossible(canvasUrl),
-        ]);
+        const students = safetyStudents;
+        const pointsPossible = await fetchAssignmentPointsPossible(canvasUrl);
         // Everything that came back is already graded (or there is nothing to
         // grade): return an empty run so the UI shows its "nothing left" state
         // instead of sending an empty archive to the engine.
@@ -800,7 +804,8 @@ export async function gradeAction(
           };
         }
 
-        const { entries, pointsPossible } = await extractCanvasEntries(canvasUrl);
+        const entries = disambiguateCanvasEntries(await Promise.all(safetyStudents.map(canvasWorkToEntry)));
+        const pointsPossible = await fetchAssignmentPointsPossible(canvasUrl);
         if (entries.length === 0) {
           return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };
         }
@@ -825,7 +830,7 @@ export async function gradeAction(
       // No rubric synthesis on the Canvas path: grade with whatever rubric was
       // retrieved from Canvas (may be empty), using the instructions otherwise.
       const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-        gradeCanvasUrl(canvasUrl, assignmentInstructions, header.effectiveRubric, provider, { ...gradingRunOptions, source: "canvas" }),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, header.effectiveRubric, provider, { ...gradingRunOptions, source: "canvas" }, safetyStudents),
         synthesizeFullCreditChecklist(assignmentInstructions, header.effectiveRubric, provider),
         generateSampleAnswer(assignmentInstructions, header.effectiveRubric, provider),
       ]);

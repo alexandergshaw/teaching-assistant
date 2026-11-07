@@ -189,6 +189,28 @@ describe("listStudents", () => {
 });
 
 describe("fetchSubmissionDetail", () => {
+  it("keeps video detection from the display name after download", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ id: 50, name: "Assignment" }));
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ user_id: 123, attachments: [{ filename: "upload.png", display_name: " demo.MP4 ", url: "https://test.instructure.com/file", "content-type": "image/png" }] }));
+    mockCanvasFetch.mockResolvedValueOnce({ ok: true, status: 200, headers: {}, body: Buffer.from("video") });
+    const result = await fetchSubmissionDetail(TEST_CODE, "999", "50", 123);
+    expect(result.files[0].mimeType).toBe("video/unknown");
+  });
+  it.each([
+    ["missing URL", { filename: "demo.mp4" }, undefined],
+    ["declared size", { filename: "demo.mp4", url: "https://test.instructure.com/file", size: 16 * 1024 * 1024 }, undefined],
+    ["failed response", { filename: "demo.mp4", url: "https://test.instructure.com/file" }, { ok: false, status: 404, headers: {}, body: Buffer.alloc(0) }],
+    ["download failure", { filename: "demo.mp4", url: "https://test.instructure.com/file" }, "throw"],
+  ])("reports a video omitted due to %s", async (_label, attachment, download) => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ id: 50, name: "Assignment" }));
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ user_id: 123, attachments: [attachment] }));
+    if (download === "throw") mockCanvasFetch.mockRejectedValueOnce(new Error("private detail"));
+    else if (download) mockCanvasFetch.mockResolvedValueOnce(download as never);
+    const result = await fetchSubmissionDetail(TEST_CODE, "999", "50", 123);
+    expect(result.omittedVideos[0].name).toBe("demo.mp4");
+    expect(JSON.stringify(result.omittedVideos)).not.toContain("private detail");
+  });
+
   it("parses body via htmlToText, score/grade/workflowState, and builds canvasUrl + speedGraderUrl", async () => {
     mockCanvasFetch.mockResolvedValueOnce(
       okResult({

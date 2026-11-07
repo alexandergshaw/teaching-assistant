@@ -9,6 +9,7 @@ import { gradeEntries } from "@/lib/grade/engine";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { isVideoName } from "@/lib/grade/video-grading";
+import { safeCanvasLabel } from "@/lib/canvas/omitted-video";
 import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
 import { createGeminiFilesClient } from "@/lib/gemini-files";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
@@ -405,13 +406,13 @@ export async function POST(req: NextRequest) {
 
     if (outcome.value.videoUnavailable) {
       return NextResponse.json(
-        { error: `Video "${outcome.value.videoUnavailable.name || "unnamed file"}" cannot be graded while video grading is unavailable. No grade was produced.`, ...diagnosticFor("route error") },
+        { error: `Video "${safeCanvasLabel(outcome.value.videoUnavailable.name)}" cannot be graded while video grading is unavailable. No grade was produced.`, ...diagnosticFor("route error") },
         { status: 422 }
       );
     }
     if (outcome.value.unavailableVideo) {
       return NextResponse.json(
-        { error: `Video "${outcome.value.unavailableVideo.name || "unnamed file"}" could not be prepared for grading. Download it and upload it directly in grading chat.`, ...diagnosticFor("route error") },
+        { error: `Video "${safeCanvasLabel(outcome.value.unavailableVideo.name)}" could not be prepared for grading. Download it and upload it directly in grading chat.`, ...diagnosticFor("route error") },
         { status: 422 }
       );
     }

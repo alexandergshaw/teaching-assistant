@@ -97,6 +97,14 @@ describe("grade-run-item isSubmittedFileInfo: videoRef", () => {
     expect(mockGrade).not.toHaveBeenCalled();
   });
 
+  it("sanitizes private URLs and control characters in video refusal names", async () => {
+    const res = await POST(request({ name: "https://example.com/private?token=secret\n.mp4", extension: "mp4", previewContent: "", previewTruncated: false, mimeType: "video/mp4" }));
+    expect(res.status).toBe(422);
+    const error = (await res.json()).error as string;
+    expect(error).not.toContain("secret");
+    expect(error).not.toContain("\n");
+    expect(mockGrade).not.toHaveBeenCalled();
+  });
   it("refuses an unstaged Canvas video before calling the model", async () => {
     const req = request({ name: "demo.mp4", extension: "mp4", previewContent: "No extractable text available for this file.", previewTruncated: false, rawBase64: "AAAA", mimeType: "video/mp4" });
     const body = await req.json();

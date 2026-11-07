@@ -25,7 +25,7 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, SvgIcon, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Chip, Checkbox, CircularProgress, FormControlLabel, InputBase, Stack, SvgIcon, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
@@ -66,8 +66,6 @@ import RepoGradeCourseFilters from "./RepoGradeCourseFilters";
 import { courseIdToAutoSelect, effectiveOpen } from "./repoGradesCoursePicker";
 import RepoGradesStatusBanners, { RepoGradesFolderHint } from "./RepoGradesStatusBanners";
 import { RepoGradesColumnProgress, RepoGradesLoadingStatus } from "./RepoGradesLoadingStatus";
-import LinkUsernamesPanel from "./LinkUsernamesPanel";
-import { confirmableBindingSummary, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
 import {
   buildRepoGradeGridModel,
   sortRepoGradeRows,
@@ -102,22 +100,6 @@ import gridStyles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 import styles from "./repo-grades.module.css";
 
-// AC2 item 7 (reframed by this wave): the instructor complaint this wave
-// fixes is that the grid's own empty state used to NAME this workflow step
-// and tell the instructor to go run it on a different screen, instead of
-// putting the mechanism on this page. LinkUsernamesPanel (rendered above the
-// grid below, gated on `course` alone) now IS that mechanism, and its own
-// copy already owns the literal "No repos are confirmed-bound to a roster
-// student yet." empty-state sentence (LinkUsernamesPanel.tsx, gated on the
-// same `noConfirmedRows` value this file computes) - so the banner further
-// below deliberately does NOT repeat that sentence a second time; that
-// surface-ownership decision is called out again at the banner itself. This
-// constant still exists only so the step's exact UI label
-// (steps.course-setup.rosters.ts:35's `name` field) appears verbatim in the
-// banner's own copy too, not a paraphrase - a support-doc or screenshot
-// search for the step's real name should still find this text even though
-// the banner no longer instructs anyone to go run that step elsewhere.
-const LINK_GITHUB_USERNAMES_STEP_LABEL = "Link GitHub usernames to roster";
 const NO_GRADE_SET: ReadonlySet<string> = new Set();
 
 export default function RepoGradesTab() {
@@ -154,21 +136,14 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     // no other signal - see useRepoGradesData.ts's doc comment on this field.
     canvasGateBlockedReason,
     reloadScan,
-    acceptBinding,
     // Renamed from `linkBlockedReason` - it only ever blocked the LIVE
     // Canvas-submissions link below, never the course-table one.
-    liveLinkBlockedReason,
-    linkGithubUsernames,
-    confirmSuggestedBindings,
     // This wave's fix (full explanation at the `model` comment below): the
     // course tile's hand-maintained roster link, folded in as a derived
     // overlay on top of course.studentRepos.
     effectiveStudentRepos,
-    rosterOverlay,
-    linkFromCourseRoster,
     // LinkUsernamesPanel's merged live-Canvas-plus-saved-export assignment
     // options, plus the export list's own loading/error state.
-    assignmentOptions,
     exportAssignmentsLoading,
     exportAssignmentsError,
     // The course's stored-export rubric list - the rubric picker's `export`
@@ -230,31 +205,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
   // this course's actual columns - both threaded straight through, no
   // decision made here.
   const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort, cellEdits, model.columns) : [];
-  // AC2 item 7 sibling: rows currently in the "suggested" binding state - a
-  // link just produced one, or the grid's own name-based guess did, and the
-  // two are indistinguishable here on purpose (confirmSuggestedBindings and
-  // RepoBindingControl.tsx's own per-row "Confirm binding" button treat them
-  // identically). Read off `sortedRows`, not `model.rows`: the count shown to
-  // the instructor and the actual confirm-all payload must both be built from
-  // EXACTLY the rows the grid currently displays, in the order the
-  // instructor sees them - `model.rows`'s order can differ once a sort is
-  // applied, and a batch action should never disagree with what is on screen
-  // when it runs.
-  const suggestedRows = sortedRows.filter((row) => row.binding.state === "suggested");
-  // U9.36/U9.37: not every "suggested" row can safely be confirmed - the
-  // course-table roster link (rosterUsernameOverlay.ts:144-147) produces
-  // suggested rows whose candidate carries no Canvas user id at all, and
-  // confirming one writes a binding that re-derives as UNBOUND on the next
-  // render (repo-student-bindings.ts:156-159). `confirmableBindingSummary`
-  // is the SAME computation `handleConfirmAllSuggested` below partitions
-  // its payload from, so the batch button's label (rendered by
-  // LinkUsernamesPanel) and the write it triggers can never disagree.
-  const suggestedBindingCandidates = suggestedRows.map((row) => ({
-    repo: row.repo,
-    candidate: row.binding.candidates[0],
-  }));
-  const confirmableSummary = confirmableBindingSummary(suggestedBindingCandidates);
-
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showAll, setShowAll] = useState(false); // ephemeral show-all override (no ta- key)
   const [setupExpanded, setSetupExpanded] = useState(false);
@@ -483,53 +433,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
     persistAssignmentMapping(uiState.courseId, next);
   };
 
-  // Forwards useRepoGradesData's own acceptBinding result through unchanged.
-  const handleAcceptBinding = async (repo: string, canvasUserId: string, student: string, username: string | null) => {
-    return await acceptBinding(repo, canvasUserId, student, username);
-  };
-
-  // Linking usernames decides which repos become SUGGESTED bindings (never
-  // confirmed ones - see LinkUsernamesPanel.tsx's header comment on the
-  // "honest two-step"). Forwards useRepoGradesData's own linkGithubUsernames
-  // result UNCHANGED.
-  const handleLinkUsernames = async (assignmentId: string, assignmentName: string) => {
-    return await linkGithubUsernames(assignmentId, assignmentName);
-  };
-
-  // Confirms every currently-suggested row in one write - the "Confirm all"
-  // half of the two-step LinkUsernamesPanel.tsx describes, since linking only
-  // ever produces suggested rows. Built from each row's own top candidate -
-  // the SAME candidate RepoBindingControl.tsx's per-row "Confirm binding"
-  // button would use for that exact row - so a batch confirm can never bind a
-  // repo to a student the per-row control would not also have offered. A row
-  // whose candidate is missing (should not happen for a "suggested" row, but
-  // the type does not guarantee it) is dropped rather than sent as a
-  // malformed binding. The dangerous-count window.confirm for this action
-  // lives in LinkUsernamesPanel.tsx itself, not here - a second confirm here
-  // would double-prompt for the same click.
-  const handleConfirmAllSuggested = async () => {
-    // U9.37: never send a candidate the confirm-binding guard would reject -
-    // partitionConfirmableBindings is the single source of truth for which
-    // rows may be written, shared with RepoBindingControl.tsx's own per-row
-    // guard (U9.36) so the batch path and the single-row path can never
-    // disagree about what counts as confirmable.
-    const { confirmable } = partitionConfirmableBindings(suggestedBindingCandidates);
-    const bindings = confirmable.map((entry) => ({
-      repo: entry.repo,
-      canvasUserId: entry.canvasUserId,
-      student: entry.student,
-    }));
-    return await confirmSuggestedBindings(bindings);
-  };
-
-  // Companion to handleLinkUsernames above, for the OTHER source: applying
-  // usernames already saved in the course table's Roster tile instead of
-  // reading them fresh off Canvas (see the `model` comment above for the
-  // actual fix). Forwards linkFromCourseRoster's result UNCHANGED.
-  const handleLinkFromCourseRoster = async () => {
-    return await linkFromCourseRoster();
-  };
-
   const [postSummary, setPostSummary] = useState("");
   const [controlsCourseId, setControlsCourseId] = useState<string | null>(null);
   if (uiState.courseId !== controlsCourseId) {
@@ -647,11 +550,7 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         : "The selected grades could not be queued.");
   };
 
-  const confirmedCount = model ? model.rows.filter((row) => row.binding.state === "confirmed").length : 0;
-  const allBound = !!model && model.rows.length > 0 && confirmedCount === model.rows.length;
-  const boundSummary = `${confirmedCount} of ${model?.rows.length ?? 0} repos bound`;
   const missingOrg = !!course && !(course.githubOrg ?? "").trim();
-  const noConfirmedRows = !!model && model.rows.length > 0 && model.rows.every((row) => row.binding.state !== "confirmed");
   // U4.19d state (f): the assignments load succeeded, cleanly, with nothing
   // in it - distinct from still-loading, errored, or blocked-by-the-gate,
   // each of which RepoGradesStatusBanners already renders from its own prop.
@@ -695,10 +594,12 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         id={`${setupId}-summary`} aria-controls={`${setupId}-content`}
         expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}
         sx={{ minHeight: 0, "& .MuiAccordionSummary-content": { my: 0, alignItems: "center" } }}>
-        <span>Class setup and linking</span>
-        <span className={gridStyles.setupSummaryMeta}>{boundSummary}</span>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
+          <Typography variant="subtitle2">Run setup</Typography>
+          {course && <Chip size="small" variant="outlined" label={course.name} />}
+        </Stack>
       </AccordionSummary>
-      <AccordionDetails sx={{ p: 0 }}>
+      <AccordionDetails sx={{ display: "grid", gap: 2, p: 2 }}>
       <RepoGradesControls
         courses={courses}
         coursesLoading={coursesLoading}
@@ -734,42 +635,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />
 
-      {/* Instructor complaint this wave fixes: the mechanism used to live only
-          in a workflow step elsewhere in the app, and this exact spot used to
-          just NAME that step and send the instructor to go run it there.
-          LinkUsernamesPanel puts the same mechanism - reading a Canvas
-          assignment's own text submissions, not an inferred name-based guess
-          - directly on this page. Gated on `course` alone (matching
-          the course picker), not on `model && noConfirmedRows` the way
-          the banner beneath it still is: an instructor whose org scan failed
-          or whose org is unset has the LEAST other way to get repos bound, so
-          this is exactly the state the panel must not disappear in. Placed
-          here, above the grid: an instructor who cannot bind anything needs
-          the fix before the table, not under it. */}
-      {course && (
-        <LinkUsernamesPanel
-          assignmentOptions={assignmentOptions}
-          assignmentsLoading={assignmentsLoading}
-          assignmentsError={assignmentsError}
-          exportAssignmentsLoading={exportAssignmentsLoading}
-          exportAssignmentsError={exportAssignmentsError}
-          assignmentId={uiState.linkAssignmentId}
-          onAssignmentIdChange={(id) => setUiState((prev) => ({ ...prev, linkAssignmentId: id }))}
-          linkSource={uiState.linkSource}
-          onLinkSourceChange={(value) => setUiState((prev) => ({ ...prev, linkSource: value }))}
-          liveLinkBlockedReason={liveLinkBlockedReason}
-          rosterOverlay={rosterOverlay}
-          onLinkFromCourseRoster={handleLinkFromCourseRoster}
-          noConfirmedRows={noConfirmedRows}
-          confirmableSummary={confirmableSummary}
-          onLink={handleLinkUsernames}
-          onConfirmAllSuggested={handleConfirmAllSuggested}
-          onAnnounce={setPostSummary}
-          linkPanelOpen={effectiveOpen(uiState.linkPanelOpen, !allBound)}
-          onLinkPanelOpenChange={(value) => setUiState((prev) => ({ ...prev, linkPanelOpen: value }))}
-          boundSummary={boundSummary}
-        />
-      )}
       </AccordionDetails>
       </Accordion>
 
@@ -788,13 +653,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         scanTruncated={!!scan?.truncated}
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />
-
-      {/* Keep the linking action discoverable while setup is collapsed. */}
-      {model && noConfirmedRows && (
-        <Alert severity="info" action={<Button size="small" onClick={() => setSetupExpanded(true)}>Open setup</Button>}>
-          No repositories are linked to students yet. {LINK_GITHUB_USERNAMES_STEP_LABEL} is available in class setup.
-        </Alert>
-      )}
 
       {/* AC5 item 31 / U5.20: results are announced through a role="status"
           aria-live="polite" region, matching TasksTab.tsx:717. This is the
@@ -917,13 +775,11 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           rows={displayedRows}
           resultColumns={matrix.columns}
           gradebookRows={gradebookRows}
-          roster={roster}
           selectedFolder={currentSelectedFolder}
           sort={uiState.sort}
           onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
           selected={selected}
           onToggleSelected={toggleSelected}
-          onAcceptBinding={handleAcceptBinding}
           assignments={assignments}
           cellEdits={cellEdits}
           onScoreChange={handleScoreChange}

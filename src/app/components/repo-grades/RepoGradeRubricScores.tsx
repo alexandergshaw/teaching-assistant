@@ -17,7 +17,7 @@ export default function RepoGradeRubricScores({ areas, label, criterionOrder }: 
         const percent = scorePercentValue(area.score) === null ? null : formatScorePercent(area.score);
         return (
           <ListItem key={index} disableGutters disablePadding className={styles.rubricBreakdownArea} data-rubric-index={index}
-            sx={{ justifyContent: "space-between", minHeight: `var(--rg-rubric-${index}, 2.75rem)` }}>
+            sx={{ alignItems: "flex-start", justifyContent: "space-between", minHeight: `var(--rg-rubric-${index}, 2rem)` }}>
             <Box className={styles.rubricBreakdownContent} data-rubric-content>
               <Box className={styles.rubricBreakdownHeading}>
                 <Typography component="span" variant="body2" className={styles.rubricBreakdownName}>{area.area}</Typography>

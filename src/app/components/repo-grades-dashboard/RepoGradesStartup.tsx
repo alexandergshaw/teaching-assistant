@@ -5,11 +5,10 @@ import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, List, Lis
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
-import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import { useRepoGradesDurableStartupActivation, useRepoGradesEmbeddedPilot, useRepoGradesStartupActivation } from "./startup-activation";
 import { serverRepoGradesStartupAdapter } from "./startup-adapter";
 import { disabledRepoGradesStartupAdapter } from "./startup-coordinator";
-import type { RepoGradesStartupPreparation, RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
+import type { RepoGradesStartupProgress, RepoGradesStartupRecovery } from "./startup-progress";
 import { STARTUP_STATUS } from "./startup-table";
 import { useRepoGradesStartup } from "./useRepoGradesStartup";
 
@@ -37,24 +36,6 @@ const PHASE_TEXT: Record<RepoGradesStartupProgress["phase"], string> = {
   complete: "Startup repository checks have finished.",
   incomplete: "Startup repository checks finished with incomplete results.",
   stopped: "Startup scheduling has stopped. Work already running can still finish.",
-};
-
-const PREPARATION_TEXT: Record<RepoGradesStartupPreparation["status"], string> = {
-  "explicit-retry-required": "This rubric preparation needs an explicit retry.",
-  failed: "Rubric preparation failed.",
-  retrying: "Retrying rubric preparation.",
-  ready: "The rubric is ready for future eligible checks. This startup batch has finished.",
-  busy: "Rubric preparation is already in progress.",
-  capacity: "The preparation limit was reached.",
-  "configuration-changed": "The assignment settings or repository inputs changed.",
-  forbidden: "Access to this rubric preparation could not be verified.",
-  "profile-unavailable": "The current grading profile could not be verified.",
-  "storage-unavailable": "The saved preparation status could not be read.",
-  unknown: "The retry outcome could not be confirmed.",
-  "request-failed": "The retry request could not be confirmed.",
-  "rubric-scope-required": "Save a rubric in the assignment's automatic grading profile before preparing it.",
-  "course-kind-required": "Rubric preparation requires a course kind.",
-  "retry-unavailable": "This retry is no longer available.",
 };
 
 export function RepoGradesStartup({ children }: { children: ReactNode }) {
@@ -126,9 +107,6 @@ export function RepoGradesStartupStatus() {
       </Button>
       <p id={stopHintId}>Stops new startup work. Already-running work can still finish.</p>
       {progress.phase === "complete" && progress.courses.length === 0 && <p>No classes were found.</p>}
-      {progress.courses.length > 0 && (
-        <RepoGradesStartupTable courses={progress.courses} headingId={headingId} />
-      )}
       {!!progress.previousBatch?.courses.length && (
         <>
           <h3>Previous startup batch</h3>
@@ -139,32 +117,6 @@ export function RepoGradesStartupStatus() {
                 {course.label} {course.states.map(({ state, count }) => `${STARTUP_STATUS[state].label} (${count})`).join(", ")}
               </ListItem>
             ))}
-          </List>
-        </>
-      )}
-      {!!progress.preparations?.length && (
-        <>
-          <h3>Rubric preparation</h3>
-          <p>A retry may use a model call to prepare the rubric. Repository grading remains separate.</p>
-          <List dense>
-            {progress.preparations.map((preparation) => {
-              const { courseId, folder, status, canRetry } = preparation;
-              const course = progress.courses.find((entry) => entry.courseId === courseId);
-              const label = `${course?.label ?? "Class"} / ${folder}`;
-              const enabled = progress.preparationRetryAvailable && canRetry;
-              return (
-                <ListItem key={JSON.stringify([courseId, folder])} sx={{ display: "block" }}>
-                  <p>{label}</p>
-                  <p role="status">{PREPARATION_TEXT[status]}</p>
-                  {(canRetry || status === "retrying") && (
-                    <Button type="button" variant="outlined" size="small" aria-label={`Retry rubric preparation for ${label}`} aria-disabled={!enabled}
-                      onClick={() => { if (enabled) void startup.retryPreparation?.(preparation); }}>
-                      Retry rubric preparation
-                    </Button>
-                  )}
-                </ListItem>
-              );
-            })}
           </List>
         </>
       )}

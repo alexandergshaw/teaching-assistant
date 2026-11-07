@@ -2,7 +2,6 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 import { isOwnerDecision } from "@/lib/access";
 import type { FeedbackBoxesEdit } from "../grading-results/gradingResultsHelpers";
-import { RepoGradesStartupPreview } from "../repo-grades-dashboard/RepoGradesStartupPreview";
 import type { RepoGradeMatrix, RepoGradeSavedAttempt, RepoGradeSavedResult } from "./repoGradesDashboardModel";
 import { FeedbackDisclosure, RepoResultCopy, RepoResultFeedback } from "./RepoDashboardFeedback";
 import RepoGradeProfileSettings from "./RepoGradeProfileSettings";
@@ -21,7 +20,6 @@ export default function RepoGradesDashboard({ courseId, gradeColumns }: {
 
   return (
     <section aria-label="Automatic repository evaluations">
-      <RepoGradesStartupPreview key={JSON.stringify([ownerId, courseId])} accountId={ownerId} courseId={courseId} />
       <RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />
     </section>
   );
@@ -69,7 +67,7 @@ export function RepoGradeResultDetails({ repo, folder, scanStatus, criterionOrde
   };
   return <>
     <div className={styles.matrixScoreHead} data-rubric-head>
-      <Box data-rubric-head-content>
+      <Box data-rubric-head-content className={styles.matrixScoreContent}>
         {cell?.saved && <SavedMatrixResult result={cell.saved} repo={repo.name} folder={folder} feedback={feedback} showSource={false} part="score" />}
         {!cell?.saved && scanStatus && scanStatus !== "ungraded" && <RepoGradeStatusChip status={scanStatus} />}
       </Box>

@@ -73,39 +73,11 @@ function findMatchingBraceEnd(text: string, openBraceIdx: number): number {
 // persisted something, mirroring the same rule this file already proves for
 // handleAcceptBinding via its own "ok" in result guard.
 
-describe("index.tsx renders LinkUsernamesPanel above the grid, wired to the view's single aria-live region", () => {
-  it("renders <LinkUsernamesPanel and routes its outcomes through onAnnounce={setPostSummary} - never a second live region", () => {
-    expect(indexSource).toContain("<LinkUsernamesPanel");
-    expect(indexSource).toContain("onAnnounce={setPostSummary}");
-  });
-
-  it("gates the panel on `course` alone, never on `model && noConfirmedRows`, which would hide it exactly when an instructor has the least other way to bind repos (a failed scan or an unset org)", () => {
-    const panelIdx = indexSource.indexOf("<LinkUsernamesPanel");
-    expect(panelIdx).toBeGreaterThan(-1);
-    // Structural bound, not a fixed character window: a fixed 60-character
-    // backward slice measured only ~38 characters of headroom against the
-    // real file at the time of this fix, and the JSX comment immediately
-    // above this gate (explaining exactly why it is gated on `course` alone)
-    // is itself long enough that growing it by a sentence would push the
-    // gate out of a fixed-size window and fail this test for a reason
-    // unrelated to the wiring it checks - precisely the risk another agent
-    // editing index.tsx's surrounding comments right now would trip.
-    // lastIndexOf has no such limit; requiring that ONLY whitespace sits
-    // between the gate's closing "(" and the tag (rather than requiring the
-    // gate to fall within an arbitrary N characters of it) is what actually
-    // proves this gate - not some other, unrelated "{course && (" earlier in
-    // the file - is the one immediately wrapping <LinkUsernamesPanel.
-    const gateMarker = "{course && (";
-    const gateIdx = indexSource.lastIndexOf(gateMarker, panelIdx);
-    expect(gateIdx).toBeGreaterThan(-1);
-    const between = indexSource.slice(gateIdx + gateMarker.length, panelIdx);
-    expect(between.trim()).toBe("");
-  });
-});
-
-describe("the no-confirmed-rows banner points at the on-page panel instead of instructing the reader to run a separate workflow step (instructor complaint fix)", () => {
-  it("still contains the workflow step's exact UI label, so a support-doc or screenshot search for the step's real name still finds this text", () => {
-    expect(indexSource).toContain("Link GitHub usernames to roster");
+describe("repo grading omits student binding controls", () => {
+  it("does not render either class-level or per-repository binding controls", () => {
+    expect(indexSource).not.toContain("<LinkUsernamesPanel");
+    expect(indexSource).not.toContain("No repositories are linked to students yet.");
+    expect(gridSource).not.toContain("<RepoBindingControl");
   });
 
   it("no longer tells the reader to go RUN the step - the old \"Running the ... workflow step is the reliable way to populate bindings\" sentence is gone", () => {

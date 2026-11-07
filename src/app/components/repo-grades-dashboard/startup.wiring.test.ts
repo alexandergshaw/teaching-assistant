@@ -39,18 +39,11 @@ describe("Repo Grades startup wiring", () => {
     expect(source("./RepoGradesStartup.tsx")).not.toMatch(/app\/actions/);
   });
 
-  it("scopes the explicit read-only preview to the owner and selected class", () => {
+  it("keeps owner-scoped profile controls without the startup preview", () => {
     const dashboard = source("../repo-grades/RepoGradesDashboard.tsx");
-    expect(dashboard).toContain("const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null");
     expect(dashboard).toContain("if (!ownerId) return null");
-    expect(dashboard).toContain("<RepoGradesStartupPreview key={JSON.stringify([ownerId, courseId])} accountId={ownerId} courseId={courseId}");
-    const preview = source("./RepoGradesStartupPreview.tsx");
-    expect(preview).toContain("onClick={loadPreview}");
-    expect(preview).toContain("loadRepoGradesStartupPreview(courseId, accountId)");
-    expect(preview).not.toMatch(/useEffect|runRepoGrade|BatchAction|StartupTargetAction/);
-    const client = source("./startup-preview-client.ts");
-    expect(client).toContain("previewRepoGradeStartupPlanAction(courseId, accountId)");
-    expect(client).not.toMatch(/runRepoGrade|BatchAction|StartupTargetAction/);
+    expect(dashboard).toContain("<RepoGradeProfileSettings courseId={courseId} columns={gradeColumns} />");
+    expect(dashboard).not.toContain("RepoGradesStartupPreview");
   });
 
   it("keeps a live region outside the tab and wires focusable, guarded Material UI controls", () => {
@@ -65,29 +58,22 @@ describe("Repo Grades startup wiring", () => {
     expect(component).toContain("value={JSON.stringify(entry, null, 2)}");
   });
 
-  it("shows sortable, keyboard-operable status labels only in the existing startup table", () => {
-    const component = source("./RepoGradesStartup.tsx");
-    const table = source("./RepoGradesStartupTable.tsx");
-    expect(component).toContain("<RepoGradesStartupTable courses={progress.courses} headingId={headingId} />");
-    expect(table).toContain('<Table size="small" aria-labelledby={headingId} aria-describedby={classQueue?.descriptionId}>');
-    expect(table).toContain('<TableCell component="th" scope="row">{course.label}</TableCell>');
-    expect(table).toContain('sortDirection={active ? sort.direction : false}');
-    expect(table).toContain('<TableSortLabel component="button" type="button" active={active}');
-    expect(table).toContain("nextStartupTableSort(current, id)");
-    expect(table).toContain("(sort ? sortStartupCourses(courses, sort) : courses).map");
-    expect(table).toContain("orderStartupStatuses(course.states).map");
-    expect(table).toContain("{course.repositories && (");
-    expect(table).toContain("{formatStartupRepositoryCoverage(course.repositories)}");
-    expect(table).toContain("Grading targets identified: {targetCount}");
-    expect(table).toContain('label={count ? `${label} (${count})` : label}');
+  it("keeps class queue controls without a grading table", () => {
+    const queue = source("./AutomaticRepoGradeClassQueue.tsx");
+    const status = source("./RepoGradesAutomaticStatus.tsx");
+    expect(queue).toContain('<List dense aria-describedby={hintId}');
+    expect(queue).toContain('aria-label={`Move ${direction < 0 ? "up" : "down"}: ${label}`}');
+    expect(queue).toContain("save(configured ? included : null)");
+    expect(queue).not.toContain("RepoGradesStartupTable");
+    expect(status).not.toContain("RepoGradesStartupTable");
+    expect(status).toContain("<AutomaticRepoGradeScheduleControl");
+    expect(status).toContain("onClick={() => void start()}");
   });
 
-  it("wires an explicit retry button to the current startup lifecycle", () => {
-    const component = source("./RepoGradesStartup.tsx");
-    expect(component).toContain("A retry may use a model call to prepare the rubric. Repository grading remains separate.");
-    expect(component).toContain('<p role="status">{PREPARATION_TEXT[status]}</p>');
-    expect(component).toMatch(/\(canRetry \|\| status === "retrying"\) && \(\s*<Button type="button"/);
-    expect(component).toMatch(/onClick=\{\(\) => \{ if \(enabled\) void startup\.retryPreparation\?\.\(preparation\); \}\}/);
+  it("removes rubric preparation areas from startup status", () => {
+    expect(source("./RepoGradesStartup.tsx")).not.toContain("<h3>Rubric preparation</h3>");
+    expect(source("./RepoGradesAutomaticStatus.tsx")).not.toContain("<h3>Rubric preparation</h3>");
+    expect(source("./RepoGradesAutomaticStatus.tsx")).toContain("await retryPreparation(id)");
     expect(source("./useRepoGradesStartup.ts")).toContain("retryPreparation: run.retryPreparation");
   });
 });

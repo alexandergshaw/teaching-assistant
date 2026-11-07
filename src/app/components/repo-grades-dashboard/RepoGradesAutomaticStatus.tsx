@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useState } from "react";
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, FormControlLabel, List, ListItem, ListItemText, Stack, SvgIcon, Switch, TextField, Typography } from "@mui/material";
-import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import type { AutomaticRepoGradeRecovery } from "@/lib/repo-grades-dashboard/automatic-status";
 import { automaticCourseProgress } from "./automatic-course-progress";
 import { automaticReasonLabel } from "@/lib/repo-grades-dashboard/automatic-reason-label";
@@ -64,7 +63,7 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
           onClick={() => { if (run) void stop(run.id); }}>Stop current run</Button>
       </Stack>
       {recoveries.length > 0 && <Alert severity="warning" role="status">Feedback is available to recover for {recoveries.length} grading {recoveries.length === 1 ? "result" : "results"}. Open grading details to copy it.</Alert>}
-      {(details.length > 0 || status.preparations.length > 0) && <Alert severity="warning" role="status">Some classes or rubric preparations need attention. Open grading details for the reasons.</Alert>}
+      {(details.length > 0 || status.preparations.length > 0) && <Alert severity="warning" role="status">Some classes need attention. Open grading details for the reasons.</Alert>}
       <Accordion disableGutters elevation={0}>
         <AccordionSummary aria-controls={`${headingId}-settings`} id={`${headingId}-settings-summary`}
           expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
@@ -89,38 +88,16 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
           Turning this off ends a run that is waiting for GitHub.</p>
       </Stack>
       <AutomaticRepoGradeScheduleControl schedule={status.schedule} pending={pending} save={setSchedule} />
-      {status.classQueue ? <AutomaticRepoGradeClassQueue queue={status.classQueue} courses={courses} pending={pending}
-        save={setClassQueue} /> : <>
-        {courses.length > 0 && <RepoGradesStartupTable courses={courses} headingId={headingId} />}
-      </>}
+      {status.classQueue && <AutomaticRepoGradeClassQueue queue={status.classQueue} courses={courses} pending={pending}
+        save={setClassQueue} />}
         </AccordionDetails>
       </Accordion>
-      {(status.preparations.length > 0 || recoveries.length > 0 || details.length > 0 || retryMessage) && <Accordion disableGutters elevation={0}>
+      {(recoveries.length > 0 || details.length > 0 || status.preparations.length > 0 || retryMessage) && <Accordion disableGutters elevation={0}>
         <AccordionSummary aria-controls={`${headingId}-details`} id={`${headingId}-details-summary`}
           expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
           <Typography>Grading details and recovery</Typography>
         </AccordionSummary>
         <AccordionDetails>
-      {status.preparations.length > 0 && (
-        <>
-          <h3>Rubric preparation</h3>
-          <p>A retry may use a model call to prepare the rubric. Repository grading remains separate.</p>
-          <List dense>
-            {status.preparations.map(({ id, label, folder }) => (
-              <ListItem key={id}>
-                <Button type="button" size="small" disabled={pending || active} onClick={async () => {
-                  const result = await retryPreparation(id);
-                  setRetryMessage(result.status === "ready" ? "Rubric preparation finished." :
-                    `Rubric preparation: ${result.status.replaceAll("-", " ")}.`);
-                }}>
-                  Retry rubric preparation for {label} / {folder}
-                </Button>
-              </ListItem>
-            ))}
-          </List>
-        </>
-      )}
-      {retryMessage && <p role="status">{retryMessage}</p>}
       {recoveries.length > 0 && (
         <>
           <h3>Feedback recovery</h3>
@@ -130,13 +107,21 @@ export function RepoGradesAutomaticStatus({ automatic }: { automatic: ReturnType
           ))}
         </>
       )}
-      {details.length > 0 && (
+      {(details.length > 0 || status.preparations.length > 0) && (
         <List dense aria-label="Automatic repository grading details">
+          {status.preparations.map(({ id, label, folder }) => <ListItem key={`preparation-${id}`} sx={{ display: "block" }}>
+            <Typography variant="body2">{label} / {folder}</Typography>
+            <Button type="button" size="small" disabled={pending || active} onClick={async () => {
+              const result = await retryPreparation(id);
+              setRetryMessage(result.status === "ready" ? "Retry completed." : `Retry: ${result.status.replaceAll("-", " ")}.`);
+            }}>Retry rubric preparation for {label} / {folder}</Button>
+          </ListItem>)}
           {details.map(({ courseId, label, reasons }) => (
             <ListItem key={courseId}><ListItemText primary={label} secondary={reasons.join(" ")} /></ListItem>
           ))}
         </List>
       )}
+      {retryMessage && <Typography role="status" variant="body2">{retryMessage}</Typography>}
         </AccordionDetails>
       </Accordion>}
     </section>

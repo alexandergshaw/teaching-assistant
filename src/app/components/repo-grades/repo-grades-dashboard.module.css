@@ -102,10 +102,24 @@
   min-width: 0;
 }
 
+.matrixSelection {
+  position: absolute !important;
+  inset: 0 auto auto 0;
+}
+
 .matrixScoreHead {
   box-sizing: border-box;
-  min-height: var(--rg-rubric-head, 4.5rem);
+  min-height: var(--rg-rubric-head, 2.5rem);
+  padding-left: 2.5rem;
   padding-right: 2.75rem;
+}
+
+.matrixScoreContent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: 2.5rem;
 }
 
 .matrixRepoHead {

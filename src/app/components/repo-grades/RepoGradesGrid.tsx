@@ -36,16 +36,13 @@
 // nothing here" posture as the rest of this file.
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Checkbox, Collapse, Link, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
-import { FeedbackDisclosure } from "./RepoDashboardFeedback";
 import { collectRubricOrder } from "./rubricAlignment";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
-import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
 import { activeTargetRequests, findTargetRequests, latestTargetRequest, RepoTargetGradeActions, TargetRequestChip, multipleTargetRequestMenuItems } from "./RepoTargetGradeActions";
 import type { TargetCommand, TargetRequest } from "./useRepoGradeTargetRequests";
 import { gradeSelectionKey } from "./repoGradeSelection";
 import type { RepoGradeQueueCommand, RepoGradeQueueSnapshot } from "./repoGradeQueue";
-import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeColumn, RepoGradeRow, RepoGradeSortState, SortDirection } from "./repoGradesRows";
 import { toggleRepoGradeSort } from "./repoGradesRows";
 import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
@@ -103,7 +100,6 @@ export interface RepoGradesGridProps {
   /** Display columns and grouped rows, including saved-only evaluations. */
   resultColumns: RepoGradeMatrix["columns"];
   gradebookRows: ReturnType<typeof visibleRepoGradebookRows>;
-  roster: RepoBindingRosterEntry[];
   /** A5 - the folder this view is currently scoped to, exactly as
    * index.tsx's resolveSelectedFolder produced it (a raw folder name, or
    * repoGradesFolderSelection.ts's ALL_FOLDERS sentinel), threaded straight
@@ -125,12 +121,6 @@ export interface RepoGradesGridProps {
   onSortChange: (next: RepoGradeSortState) => void;
   selected: ReadonlySet<string>;
   onToggleSelected: (repo: string) => void;
-  onAcceptBinding: (
-    repo: string,
-    canvasUserId: string,
-    student: string,
-    username: string | null
-  ) => Promise<{ ok: true } | { error: string }>;
   assignments: CanvasAssignmentBrief[];
   cellEdits: RepoGradeCellEditsByRepo;
   onScoreChange: (repo: string, folder: string, score: string) => void;
@@ -435,13 +425,11 @@ export default function RepoGradesGrid({
   rows,
   resultColumns,
   gradebookRows,
-  roster,
   selectedFolder,
   sort,
   onSortChange,
   selected,
   onToggleSelected,
-  onAcceptBinding,
   assignments,
   cellEdits,
   onGradeTarget,
@@ -612,8 +600,8 @@ export default function RepoGradesGrid({
                     onChange={() => onToggleGradeCells(rowTargets)}
                     slotProps={{ input: { "aria-label": `Select ${repo.name} for all visible assignments` } }} />
                   <RepoGradebookIdentity repo={repo.name} row={repo.active} linked={name !== null}
-                    roster={roster} selectedFolder={selectedFolder} selected={selected}
-                    onToggleSelected={onToggleSelected} onAcceptBinding={onAcceptBinding} />
+                    selectedFolder={selectedFolder} selected={selected}
+                    onToggleSelected={onToggleSelected} />
                 </div>;
               })}
             </TableCell>
@@ -636,7 +624,7 @@ export default function RepoGradesGrid({
                           hasGradedResult={repo.cells.get(folder)?.saved?.latest.status === "succeeded"}
                           available={durableGradeAvailable} pending={durableGradePending} root={!folder}
                           onStart={() => onGradeTarget(repo.name, folder)} onControl={onControlTarget} /></div>
-                        <Checkbox size="small" disabled={!folder}
+                        <Checkbox size="small" disabled={!folder} className={dashboardStyles.matrixSelection}
                           checked={selectedGradeCells.has(gradeSelectionKey(repo.name, folder))}
                           onChange={() => onToggleGradeCells([{ repo: repo.name, folder }])}
                           slotProps={{ input: { "aria-label": `Select ${repo.name} for ${label}` } }} />
@@ -663,11 +651,11 @@ export default function RepoGradesGrid({
   );
 }
 
-function RepoGradebookIdentity({ repo, row, linked, roster, selectedFolder, selected, onToggleSelected, onAcceptBinding }: {
+function RepoGradebookIdentity({ repo, row, linked, selectedFolder, selected, onToggleSelected }: {
   repo: string;
   row: RepoGradeRow | undefined;
   linked: boolean;
-} & Pick<RepoGradesGridProps, "roster" | "selectedFolder" | "selected" | "onToggleSelected" | "onAcceptBinding">) {
+} & Pick<RepoGradesGridProps, "selectedFolder" | "selected" | "onToggleSelected">) {
   if (!row) return (
     <div className={styles.repoIdentity}>
       {repo}
@@ -691,11 +679,7 @@ function RepoGradebookIdentity({ repo, row, linked, roster, selectedFolder, sele
         ) : row.repo}
       </div>
       {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
-      {row.binding.state !== "confirmed" && (
-        <FeedbackDisclosure compact title="Bind student" label={`Bind student to ${row.repo}`}>
-          <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
-        </FeedbackDisclosure>
-      )}
+
     </div>
   );
 }

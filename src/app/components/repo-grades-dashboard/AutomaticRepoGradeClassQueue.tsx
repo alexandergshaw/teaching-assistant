@@ -1,9 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Button, Stack, Typography } from "@mui/material";
+import { Button, Checkbox, FormControlLabel, List, ListItem, Stack, Typography } from "@mui/material";
 import type { AutomaticRepoGradeClassQueue as SavedClassQueue } from "@/lib/repo-grades-dashboard/automatic-status";
-import { RepoGradesStartupTable } from "./RepoGradesStartupTable";
 import type { CourseStartupProgress } from "./startup-progress";
 
 export function AutomaticRepoGradeClassQueue({ queue, courses, pending, save }: {
@@ -60,21 +59,28 @@ export function AutomaticRepoGradeClassQueue({ queue, courses, pending, save }: 
         Save which classes to check and in what order. Changes apply to the next run. New classes are included only in the default queue.
       </Typography>
       {rows.length === 0 ? <Typography variant="body2">No classes are available.</Typography> : (
-        <RepoGradesStartupTable courses={rows} headingId={headingId} classQueue={{
-          positions, classIds: new Set(known.keys()), pending, descriptionId: hintId,
-          toggle(id, checked) {
-            edit(checked ? [...included, id] : included.filter((courseId) => courseId !== id),
-              checked ? `${known.get(id)?.label} added at position ${included.length + 1}.` : `${known.get(id)?.label} removed from the queue.`);
-          },
-          move(id, direction) {
-            const current = included.indexOf(id);
-            const next = current + direction;
-            if (current < 0 || next < 0 || next >= included.length) return;
-            const reordered = included.slice();
-            [reordered[current], reordered[next]] = [reordered[next], reordered[current]];
-            edit(reordered, `${known.get(id)?.label} moved to position ${next + 1} of ${included.length}.`);
-          },
-        }} />
+        <List dense aria-describedby={hintId} aria-label="Classes in automatic grading queue">
+          {rows.map(({ courseId, label }) => {
+            const position = positions.get(courseId);
+            const editable = known.has(courseId);
+            return <ListItem key={courseId} disableGutters sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+              <FormControlLabel sx={{ flex: "1 1 220px", m: 0 }}
+                control={<Checkbox size="small" checked={position !== undefined} disabled={pending || !editable}
+                  onChange={(_, checked) => edit(checked ? [...included, courseId] : included.filter((id) => id !== courseId),
+                    checked ? `${label} added at position ${included.length + 1}.` : `${label} removed from the queue.`)} />}
+                label={label} />
+              {position !== undefined && <>
+                <Typography variant="body2">{position}</Typography>
+                {([-1, 1] as const).map((direction) => <Button key={direction} size="small" disabled={pending || position + direction < 1 || position + direction > included.length}
+                  aria-label={`Move ${direction < 0 ? "up" : "down"}: ${label}`} onClick={() => {
+                    const next = included.slice();
+                    [next[position - 1], next[position - 1 + direction]] = [next[position - 1 + direction], next[position - 1]];
+                    edit(next, `${label} moved to position ${position + direction} of ${included.length}.`);
+                  }}>{direction < 0 ? "Move up" : "Move down"}</Button>)}
+              </>}
+            </ListItem>;
+          })}
+        </List>
       )}
       <Typography variant="body2">
         {included.length === 0 ? "No classes selected." : `${included.length} ${included.length === 1 ? "class" : "classes"} selected.`}

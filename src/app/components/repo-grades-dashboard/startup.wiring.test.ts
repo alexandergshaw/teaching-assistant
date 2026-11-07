@@ -4,6 +4,16 @@ import { describe, expect, it } from "vitest";
 const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
 
 describe("Repo Grades startup wiring", () => {
+  it("keeps actionable status visible in the collapsed automatic grading summary", () => {
+    const component = source("./RepoGradesStartup.tsx");
+    expect(component).toContain("Status may be out of date");
+    expect(component).toContain("GitHub rate limit: retry at");
+    expect(component).toContain("Waiting for a previous startup check");
+    expect(component).toContain("Class queue settings unavailable");
+    expect(component).toContain("Feedback recovery available");
+    expect(component).toContain("Grading needs attention");
+    expect(component).toContain('variant="body2" color="text.secondary" role="status"');
+  });
   it("mounts the startup lifecycle outside tab content and scopes the unavailable message to Repo Grades", () => {
     const home = source("../../page.tsx");
     const mount = home.indexOf("<RepoGradesStartup>");

@@ -91,7 +91,8 @@ describe("class repository results wiring", () => {
     expect(props).toContain("cellEdits={cellEdits}");
     expect(props).toContain("resultColumns={matrix.columns}");
     expect(props).toContain("gradebookRows={gradebookRows}");
-    expect(index.indexOf("<RepoGradesDashboard")).toBeGreaterThan(index.indexOf("</RepoGradesStickyHeader>"));
+    expect(index.indexOf("<RepoGradesDashboard")).toBeLessThan(index.indexOf("<RepoGradesStickyHeader"));
+    expect(index).toContain("Grading profiles and saved data");
     expect(index).toMatch(/buildRepoGradeMatrix\(\s*buildRepoGradesDashboard\(cellEdits, scan\),\s*cellEdits, saved.results, columnsWithMapping, assignments, roster, effectiveStudentRepos/);
   });
 
@@ -105,9 +106,7 @@ describe("class repository results wiring", () => {
 
   it("scopes the tab to the account and routes existing grading mutations through the current cell scope", () => {
     expect(index).toContain("return !loading && user ? <AccountRepoGradesTab key={user.id} accountId={user.id} /> : null;");
-    const props = findCourseDashboardMount(index)?.attributes.properties.map((prop) => prop.getText());
-    expect(props).toContain("key={course.id}");
-    expect(props).toContain("courseId={course.id}");
+    expect(index).toMatch(/course && cellDraft && <RepoGradesDashboard key=\{course\.id\} courseId=\{course\.id\}/);
     expect(dashboard).toContain("const ownerId = user && isOwnerDecision(accessDecision) ? user.id : null");
     expect(index).toContain("isCellScopeCurrent: () => drafts.isCurrent(cellScope)");
     expect(index).toContain("setCellEdits: (update) => drafts.edit(cellScope, update)");

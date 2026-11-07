@@ -109,6 +109,7 @@
 
 .matrixScoreHead {
   box-sizing: border-box;
+  width: 100%;
   min-height: var(--rg-rubric-head, 2.5rem);
   padding-left: 2.5rem;
   padding-right: 2.75rem;
@@ -120,6 +121,7 @@
   align-items: center;
   column-gap: var(--space-2);
   min-height: 2.5rem;
+  align-content: center;
 }
 
 .matrixRepoHead {

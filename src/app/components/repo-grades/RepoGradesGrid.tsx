@@ -463,7 +463,7 @@ export default function RepoGradesGrid({
     const itemContent = items.map((item) => item.querySelector<HTMLElement>("[data-rubric-content]"));
     const headContent = heads.map((head) => head.querySelector<HTMLElement>("[data-rubric-head-content]"));
     const measure = () => {
-      const headHeight = Math.max(72, ...headContent.map((head) => head?.scrollHeight ?? 0));
+      const headHeight = Math.max(40, ...headContent.map((head) => head?.scrollHeight ?? 0));
       const update = (name: string, value: string) => {
         if (table.style.getPropertyValue(name) !== value) table.style.setProperty(name, value);
       };
@@ -471,7 +471,7 @@ export default function RepoGradesGrid({
       const heights = new Map<string, number>();
       for (const [position, item] of items.entries()) {
         const index = item.dataset.rubricIndex;
-        if (index !== undefined) heights.set(index, Math.max(heights.get(index) ?? 44, Math.ceil(itemContent[position]?.scrollHeight ?? 0)));
+        if (index !== undefined) heights.set(index, Math.max(heights.get(index) ?? 32, Math.ceil(itemContent[position]?.scrollHeight ?? 0)));
       }
       for (const [index, height] of heights) update(`--rg-rubric-${index}`, `${height}px`);
     };

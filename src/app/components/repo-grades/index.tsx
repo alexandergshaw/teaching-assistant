@@ -581,6 +581,29 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
       <RepoGradesLoadingStatus label={coursesLoading ? "Loading classes…"
         : course && scanLoading ? `Scanning ${course.githubOrg?.trim()} on GitHub for ${course.name}…` : null} />
 
+      {(course && cellDraft || trendsEntry) && <Accordion disableGutters elevation={0}>
+        <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
+          <Typography variant="subtitle2">Grading profiles and saved data</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          {course && cellDraft && <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />}
+          {trendsEntry && <div>
+            <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
+            <ClassTrendsPanel entry={trendsEntry} defaultExpanded
+              identity={{ kind: "unavailable", reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON }} />
+          </div>}
+          {cellDraft && <div>
+            {cellDraft.restoredNotice && <p className={pageStyles.fieldHint}>{cellDraft.restoredNotice}</p>}
+            {(cellDraft.discardNotice || cellDraft.saveNotice) && <p className={pageStyles.fieldHint} role="status">
+              {[cellDraft.discardNotice, cellDraft.saveNotice].filter(Boolean).join(" ")}
+            </p>}
+            <Button type="button" size="small" disabled={cellDraft.savePending} onClick={handleDiscardSavedResults}>
+              Discard saved results for this course
+            </Button>
+          </div>}
+        </AccordionDetails>
+      </Accordion>}
+
       {/* Setup stays collapsed until requested; binding and error notices remain visible. */}
       <Accordion
         className={gridStyles.setupRegion}
@@ -597,6 +620,8 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
           <Typography variant="subtitle2">Run setup</Typography>
           {course && <Chip size="small" variant="outlined" label={course.name} />}
+          {(coursesError || missingOrg || scanError || rosterError || assignmentsError || canvasGateBlockedReason || assignmentsEmpty || scan?.truncated || scan?.rateLimit) &&
+            <Chip size="small" color="warning" label="Needs attention" />}
         </Stack>
       </AccordionSummary>
       <AccordionDetails sx={{ display: "grid", gap: 2, p: 2 }}>
@@ -634,25 +659,14 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
         settingsOpen={effectiveOpen(uiState.settingsOpen, currentSelectedFolder === ALL_FOLDERS)}
         onSettingsOpenChange={(value) => setUiState((prev) => ({ ...prev, settingsOpen: value }))}
       />
-
+      <RepoGradesStatusBanners
+        hasCourse={!!course} coursesLoading={coursesLoading} courseName={course?.name ?? ""}
+        canvasGateBlockedReason={canvasGateBlockedReason} missingOrg={missingOrg} scanError={scanError}
+        rosterLoading={rosterLoading} rosterError={rosterError} assignmentsLoading={assignmentsLoading}
+        assignmentsError={assignmentsError} assignmentsEmpty={assignmentsEmpty} scanTruncated={!!scan?.truncated}
+        rateLimitMessage={scan?.rateLimit?.message ?? null} />
       </AccordionDetails>
       </Accordion>
-
-      <RepoGradesStatusBanners
-        hasCourse={!!course}
-        coursesLoading={coursesLoading}
-        courseName={course?.name ?? ""}
-        canvasGateBlockedReason={canvasGateBlockedReason}
-        missingOrg={missingOrg}
-        scanError={scanError}
-        rosterLoading={rosterLoading}
-        rosterError={rosterError}
-        assignmentsLoading={assignmentsLoading}
-        assignmentsError={assignmentsError}
-        assignmentsEmpty={assignmentsEmpty}
-        scanTruncated={!!scan?.truncated}
-        rateLimitMessage={scan?.rateLimit?.message ?? null}
-      />
 
       {/* AC5 item 31 / U5.20: results are announced through a role="status"
           aria-live="polite" region, matching TasksTab.tsx:717. This is the
@@ -680,16 +694,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           all" run's trends, gated on trendsEntry alone - no role/aria-live,
           matching classTrendsFolderEntry.ts's own header on why this is a
           reachability change, not a second live region. */}
-      {trendsEntry && (
-        <div>
-          <p className={pageStyles.fieldHint}>{repoRunTrendsLabel(trendsEntry)}</p>
-          <ClassTrendsPanel
-            entry={trendsEntry}
-            defaultExpanded
-            identity={{ kind: "unavailable", reason: REPO_TRENDS_SUBSET_UNAVAILABLE_REASON }}
-          />
-        </div>
-      )}
 
       {/* U1.3b - named counts, DISPLAY ONLY (see RepoGradesFolderHint). */}
       {model && currentSelectedFolder !== ALL_FOLDERS && (
@@ -827,23 +831,6 @@ function AccountRepoGradesTab({ accountId }: { accountId: string }) {
           {saved.olderComplete ? "All saved results loaded"
             : saved.pending ? "Loading saved results…" : "Load older results"}
         </Button>
-      )}
-      {course && cellDraft && (
-        <RepoGradesDashboard key={course.id} courseId={course.id} gradeColumns={columnsWithMapping} />
-      )}
-
-      {cellDraft && (
-        <div>
-          {cellDraft.restoredNotice && <p className={pageStyles.fieldHint}>{cellDraft.restoredNotice}</p>}
-          {(cellDraft.discardNotice || cellDraft.saveNotice) && (
-            <p className={pageStyles.fieldHint} role="status">
-              {[cellDraft.discardNotice, cellDraft.saveNotice].filter(Boolean).join(" ")}
-            </p>
-          )}
-          <Button type="button" size="small" disabled={cellDraft.savePending} onClick={handleDiscardSavedResults}>
-            Discard saved results for this course
-          </Button>
-        </div>
       )}
     </>
   );

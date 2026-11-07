@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useId, type ReactNode } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, List, ListItem, TextField } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, List, ListItem, SvgIcon, TextField, Typography } from "@mui/material";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { isOwnerDecision } from "@/lib/access";
 import { visuallyHidden } from "../ui/visuallyHidden";
@@ -81,19 +81,53 @@ export function RepoGradesStartupStatus() {
   const headingId = useId();
   const stopHintId = useId();
   const progress = startup?.progress;
-  if (automatic) return <>
-    <RepoGradesAutomaticStatus automatic={automatic} />
-    {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
-  </>;
+  if (automatic) {
+    const status = automatic.status;
+    const run = status?.status === "loaded" ? status.run : null;
+    const phase = status?.status === "unavailable" ? "Status unavailable"
+      : !status ? "Loading status"
+      : run ? PHASE_TEXT[run.phase === "discovering" ? "checking" : run.phase === "grading" ? "processing" : run.phase]
+      : "No automatic run has started.";
+    const notices = status?.status === "loaded" ? [
+      automatic.stale && "Status may be out of date",
+      status.githubRetryAt && `GitHub rate limit: retry at ${new Date(status.githubRetryAt).toLocaleString()}`,
+      run?.waitingForBrowserStartup && "Waiting for a previous startup check",
+      !status.classQueue && "Class queue settings unavailable",
+      status.recoveries.length > 0 && "Feedback recovery available",
+      (status.preparations.length > 0 || run?.courses.some((course) => course.reason || course.counts.some((item) => item.reason))) && "Grading needs attention",
+    ].filter(Boolean) : [];
+    return <Accordion disableGutters elevation={0}>
+      <AccordionSummary id={`${headingId}-automatic-summary`} aria-controls={`${headingId}-automatic-content`}
+        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
+        <span><Typography component="span" variant="subtitle2">Automatic repository grading</Typography>
+          <Typography component="span" variant="body2" color="text.secondary" role="status"> · {phase}
+            {notices.map((notice) => ` · ${notice}`).join("")}</Typography></span>
+      </AccordionSummary>
+      <AccordionDetails><RepoGradesAutomaticStatus automatic={automatic} />
+        {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
+      </AccordionDetails>
+    </Accordion>;
+  }
   if (!startup || !progress || progress.phase === "unavailable") {
-    return <Alert severity={pilotEnabled ? "warning" : "info"} role="status">
-      {PHASE_TEXT.unavailable} {pilotEnabled && MANUAL_PAUSE}
-    </Alert>;
+    return <Accordion disableGutters elevation={0}>
+      <AccordionSummary expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
+        <Typography variant="subtitle2">Automatic repository grading · Status unavailable</Typography>
+      </AccordionSummary>
+      <AccordionDetails><Alert severity={pilotEnabled ? "warning" : "info"} role="status">
+        {PHASE_TEXT.unavailable} {pilotEnabled && MANUAL_PAUSE}
+      </Alert></AccordionDetails>
+    </Accordion>;
   }
 
   const canStop = !!startup.stop && (progress.phase === "checking" || progress.phase === "processing");
   return (
-    <section aria-labelledby={headingId}>
+    <Accordion disableGutters elevation={0}>
+      <AccordionSummary id={`${headingId}-legacy-summary`} aria-controls={`${headingId}-legacy-content`}
+        expandIcon={<SvgIcon><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></SvgIcon>}>
+        <span><Typography component="span" variant="subtitle2">Automatic repository grading</Typography>
+          <Typography component="span" variant="body2" color="text.secondary"> · {PHASE_TEXT[progress.phase]}</Typography></span>
+      </AccordionSummary>
+      <AccordionDetails><section aria-labelledby={headingId}>
       <h2 id={headingId}>Startup repository checks</h2>
       <p>{PHASE_TEXT[progress.phase]}</p>
       {pilotEnabled && <Alert severity="info" role="status">{MANUAL_PAUSE}</Alert>}
@@ -134,7 +168,8 @@ export function RepoGradesStartupStatus() {
           })}
         </>
       )}
-    </section>
+    </section></AccordionDetails>
+    </Accordion>
   );
 }
 

@@ -808,24 +808,25 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
   }
   let linked: StudentSubmissionEntry[];
   let unreadableArchiveFiles = 0;
+  let unavailableArchiveVideos = 0;
   if (kind === "single") {
     const single = await buildSingleFileEntry(fetched.name, fetched.buffer, undefined, true);
     linked = single ? [single] : [];
   } else if (kind === "zip") {
     // Own ArrayBuffer, not Node's pooled one.
-    const ingested = await ingestZipEntries(new Uint8Array(fetched.buffer).slice().buffer);
+    const ingested = await ingestZipEntries(new Uint8Array(fetched.buffer).slice().buffer, { videoEnabled: true });
     linked = ingested.entries;
     unreadableArchiveFiles = ingested.failedSupportedFiles.length;
+    unavailableArchiveVideos = linked.reduce((count, item) => count + item.submittedFiles.filter((file) => VIDEO_EXTENSIONS.has(file.extension.toLowerCase()) && !file.videoRef).length, 0);
   } else {
     return assertNeverUploadKind(kind);
   }
   // M1 single-entry guard: an archive (or an unreadable file) must never fan
   // several students into this one row (the A44 blend).
   if (linked.length !== 1) {
-    if (unreadableArchiveFiles > 0) {
-      return withLinkNote(entry, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).`);
-    }
-    return withLinkNote(entry, "flagged", "the linked Drive file could not be used as a single submission");
+    const note = unreadableArchiveFiles > 0 ? `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable) or used as a single submission.` : "the linked Drive file could not be used as a single submission";
+    const videos = unavailableArchiveVideos > 0 ? ` ${unavailableArchiveVideos} video file(s) were not available for grading.` : "";
+    return withLinkNote(entry, unreadableArchiveFiles > 0 ? "failed" : "flagged", `${note}${videos}`);
   }
   const folded = withFoldedContent(
     entry,
@@ -833,9 +834,8 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
     linked[0].submittedFiles,
     { mergedFileCount: entry.mergedFileCount + linked[0].mergedFileCount }
   );
-  return unreadableArchiveFiles > 0
-    ? withLinkNote(folded, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).`)
-    : folded;
+  if (unreadableArchiveFiles > 0) return withLinkNote(folded, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).${unavailableArchiveVideos > 0 ? ` ${unavailableArchiveVideos} video file(s) were not available for grading.` : ""}`);
+  return unavailableArchiveVideos > 0 ? withLinkNote(folded, "flagged", `The linked Drive archive contains ${unavailableArchiveVideos} video file(s) that were not available for grading.`) : folded;
 }
 
 /**

@@ -336,6 +336,67 @@ describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
     expect(out.content).not.toContain("not a document");
   });
 
+  it("marks a corrupt nested archive as failed while keeping readable work", async () => {
+    const archive = await zipOf({ "ada_1_2_work.txt": "readable work", "ada_1_2_broken.zip": "not a zip" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.content).toContain("readable work");
+  });
+
+  it("does not blend a multi-student archive when another member is unreadable", async () => {
+    const archive = await zipOf({ "ann_1_2_a.txt": "Ann work", "bob_3_4_b.txt": "Bob work", "broken.zip": "not a zip" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.content).not.toContain("Ann work");
+    expect(out.content).not.toContain("Bob work");
+  });
+
+  it("reports unreadable members and unavailable video without blending a multi-student archive", async () => {
+    const archive = await zipOf({ "ann_1_2_a.txt": "Ann work", "ann_1_2_clip.mp4": "video bytes", "bob_3_4_b.txt": "Bob work", "broken.zip": "not a zip" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.repoReadNote).toContain("1 video file(s) were not available for grading");
+    expect(out.repoReadNote).toContain("single submission");
+    expect(out.content).not.toContain("Ann work");
+    expect(out.content).not.toContain("Bob work");
+  });
+
+  it("reports unavailable video when a multi-student archive has no unreadable files", async () => {
+    const archive = await zipOf({ "ann_1_2_a.txt": "Ann work", "ann_1_2_clip.mp4": "video bytes", "bob_3_4_b.txt": "Bob work" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("1 video file(s) were not available for grading");
+    expect(out.content).not.toContain("Ann work");
+    expect(out.content).not.toContain("Bob work");
+  });
+
+  it("marks unstaged video in a linked archive as unavailable while preserving readable work", async () => {
+    const archive = await zipOf({ "ada_1_2_work.txt": "readable work", "ada_1_2_presentation.mp4": "video bytes" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("1 video file(s) that were not available for grading");
+    expect(out.content).toContain("readable work");
+    expect(out.submittedFiles.some((file) => file.extension === "mp4" && !file.videoRef)).toBe(true);
+  });
+
+  it("reports both unreadable members and unstaged video in the same linked archive", async () => {
+    const archive = await zipOf({ "ada_1_2_work.txt": "readable work", "ada_1_2_broken.docx": "not a document", "ada_1_2_presentation.mp4": "video bytes" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.repoReadNote).toContain("1 video file(s) were not available for grading");
+    expect(out.content).toContain("readable work");
+  });
+
   it("I-reclamp: folded content over the cap is clamped", async () => {
     mockFetchRepo.mockResolvedValue(okRepo("o/r", "x".repeat(MAX_ENTRY_CONTENT_CHARS + 5_000)));
     const out = await resolveEntryLinks(linkEntry(GITHUB_GIT));

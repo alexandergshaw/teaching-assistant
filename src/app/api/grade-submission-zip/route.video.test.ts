@@ -190,13 +190,24 @@ describe("flag ON: the route hands extraction a stager", () => {
     ingestMock.mockImplementation(async (_b: unknown, options: { stageVideo: StageVideoFn }) => {
       const kept = (await options.stageVideo(BYTES, "mp4")) as { storagePath: string };
       const dropped = (await options.stageVideo(BYTES, "mp4")) as { storagePath: string };
-      return { entries: [videoEntry(kept.storagePath), videoEntry(dropped.storagePath, "x".repeat(4_000_000)), videoEntry(kept.storagePath, "x".repeat(4_000_000))], attemptedSupportedFiles: 0, failedSupportedFiles: [] };
+      void dropped;
+      return { entries: [videoEntry(kept.storagePath)], attemptedSupportedFiles: 0, failedSupportedFiles: [] };
     });
     const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
     const paths = uploadFileMock.mock.calls.map((call) => call[1]);
-    expect(lines.map((line) => line.type)).toEqual(["entry", "skip", "skip", "done"]);
+    expect(lines.map((line) => line.type)).toEqual(["entry", "done"]);
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [paths[1]]);
     expect(removeFilesMock).not.toHaveBeenCalledWith("course-files", [paths[0]]);
+  });
+
+  it("removes all staged videos when an oversized student refuses the archive", async () => {
+    ingestMock.mockImplementation(async (_b: unknown, options: { stageVideo: StageVideoFn }) => {
+      const staged = (await options.stageVideo(BYTES, "mp4")) as { storagePath: string };
+      return { entries: [videoEntry(staged.storagePath, "x".repeat(4_000_000))], attemptedSupportedFiles: 0, failedSupportedFiles: [] };
+    });
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
+    expect(lines).toEqual([{ type: "done", error: "No submissions were queued. Too large to grade: A." }]);
+    expect(removeFilesMock).toHaveBeenCalledWith("course-files", [uploadFileMock.mock.calls[0][1]]);
   });
 
   it("sabotage control: with the flag OFF the same route passes NO stager", async () => {

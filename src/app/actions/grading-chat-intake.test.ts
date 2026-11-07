@@ -20,6 +20,7 @@ vi.mock("@/lib/grade/extraction", () => ({
 vi.mock("@/lib/grade/repo-content", () => ({
   fetchGradableRepoContent: vi.fn(),
 }));
+vi.mock("@/lib/grade/google-drive-content", () => ({ fetchGoogleDriveFile: vi.fn() }));
 
 vi.mock("@/lib/canvas-url", () => ({
   detectCanvasUrlKind: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/lib/grade/rubric", async () => {
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { ingestZipEntries, extractCanvasEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent } from "@/lib/grade/repo-content";
+import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { generateRubric } from "@/lib/grade/rubric";
 import { prepareChatSubmissionAction, prepareCompositeSubmissionAction, resolveChatRunHeaderAction } from "./grading-chat-intake";
@@ -193,6 +195,27 @@ describe("prepareChatSubmissionAction - file", () => {
     }
   });
 
+  it("refuses a partially unreadable archive with the failed filename", async () => {
+    mockIngestZipEntries.mockResolvedValue({ ...ingested([canvasEntry]), failedSupportedFiles: ["Ada/broken.pdf"] });
+    const outcome = await prepareChatSubmissionAction(fileFormData(new File(["zip"], "work.zip")));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("Ada/broken.pdf");
+  });
+
+  it("refuses an archive when no submissions can be extracted", async () => {
+    mockIngestZipEntries.mockResolvedValue(ingested([]));
+    const outcome = await prepareChatSubmissionAction(fileFormData(new File(["zip"], "work.zip")));
+    expect(outcome.kind).toBe("refused");
+  });
+
+  it("refuses a class archive with an oversized student and names that student", async () => {
+    const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
+    const outcome = await prepareChatSubmissionAction(fileFormData(new File(["zip"], "work.zip")));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("Big");
+  });
+
   it("budget gate counts only bytes the grader reads: non-visual-heavy passes, visual-heavy is refused", async () => {
     const heavy = (mimeType: string): StudentSubmissionEntry => ({
       ...canvasEntry,
@@ -205,11 +228,39 @@ describe("prepareChatSubmissionAction - file", () => {
     expect((await prepareChatSubmissionAction(fileFormData(file))).kind).toBe("entries");
     mockIngestZipEntries.mockResolvedValue(ingested([heavy("application/pdf")]));
     const refused = await prepareChatSubmissionAction(fileFormData(file));
-    expect(refused).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface.", refusalClass: "entry-too-large" });
+    expect(refused).toEqual({ kind: "refused", reason: "No submissions were queued. Too large to grade: Ada Lovelace.", refusalClass: "entry-too-large" });
   });
 });
 
 describe("prepareChatSubmissionAction - url", () => {
+  it("refuses a Canvas batch with an oversized student and names that student", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue("assignment");
+    const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
+    mockExtractCanvasEntries.mockResolvedValue({ entries: [canvasEntry, large], pointsPossible: 50 });
+    const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://canvas.example.edu/courses/1/assignments/2" }));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("Big");
+  });
+
+  it("reports every oversized student when none can be queued", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue("assignment");
+    const large = { ...canvasEntry, content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
+    mockExtractCanvasEntries.mockResolvedValue({ entries: [large, { ...large, student: "Bob" }], pointsPossible: 50 });
+    const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://canvas.example.edu/courses/1/assignments/2" }));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") {
+      expect(outcome.reason).toContain(canvasEntry.student);
+      expect(outcome.reason).toContain("Bob");
+    }
+  });
+  it("refuses unreadable members of a Drive archive", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    vi.mocked(fetchGoogleDriveFile).mockResolvedValue({ name: "work.zip", buffer: Buffer.from("zip") } as Awaited<ReturnType<typeof fetchGoogleDriveFile>>);
+    mockIngestZipEntries.mockResolvedValue({ ...ingested([canvasEntry]), failedSupportedFiles: ["broken.docx"] });
+    const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://drive.google.com/file/d/12345678901234567890/view" }));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("broken.docx");
+  });
   // BLOCKER-1 (docs/grading-chat-waves.md section 5, requirement 1): the
   // Canvas branch must carry pointsPossible through to the intake outcome.
   // RED if the field is dropped (outcome.pointsPossible would be null/undefined
@@ -279,6 +330,18 @@ function compositeFormData(student: string, parts: Array<Record<string, string |
 }
 
 describe("prepareCompositeSubmissionAction", () => {
+  it("refuses a composite part when a class archive has oversized students", async () => {
+    const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "file", file: new File(["zip"], "work.zip") }]));
+    expect(outcome.kind).toBe("refused");
+  });
+  it("refuses a composite containing a partially unreadable archive", async () => {
+    mockIngestZipEntries.mockResolvedValue({ ...ingested([canvasEntry]), failedSupportedFiles: ["broken.pdf"] });
+    const outcome = await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "file", file: new File(["zip"], "work.zip") }]));
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("broken.pdf");
+  });
   it("calls requireAppOwner", async () => {
     await prepareCompositeSubmissionAction(compositeFormData("Ada", [{ kind: "text", content: "x" }]));
     expect(mockRequireAppOwner).toHaveBeenCalledTimes(1);
@@ -347,7 +410,7 @@ describe("prepareCompositeSubmissionAction", () => {
         { kind: "text", content: big },
       ])
     );
-    expect(outcome).toEqual({ kind: "refused", reason: "One submission is too large to grade on this surface.", refusalClass: "entry-too-large" });
+    expect(outcome).toEqual({ kind: "refused", reason: "No submissions were queued. Too large to grade: Ada.", refusalClass: "entry-too-large" });
   });
 
   it("refuses a bad part count", async () => {

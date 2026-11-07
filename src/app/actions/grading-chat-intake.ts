@@ -26,7 +26,7 @@ import {
   assertNeverUploadKind,
 } from "@/lib/grade/video-grading";
 import { VIDEO_HEAD_BYTES, sniffVideoContainer } from "@/lib/grade/video-magic";
-import { extractStudentEntries, extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
+import { extractCanvasEntries, ingestZipEntries } from "@/lib/grade/extraction";
 import { fetchGradableRepoContent, type GradableRepoContent } from "@/lib/grade/repo-content";
 import { parseSubmissionGithubUrl } from "@/lib/submission-repo";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -35,13 +35,13 @@ import { parseGoogleDriveUrl } from "@/lib/google-drive-url";
 import { fetchGoogleDriveFile } from "@/lib/grade/google-drive-content";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import type { GradingRunHeader, StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
-import { estimateNeededWireBytes, ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
 import {
   buildTextEntry,
   extractSingleEntry,
   mergeCompositeEntries,
 } from "@/app/components/grading-chat/chatSubmissionIntake";
 import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmissionIntake";
+import { oversizedIntakeReason } from "@/lib/grade/oversized-intake";
 
 // SEC-GC-3 (docs/grading-chat-security.md F4 Gap 1): bound before a
 // generateRubric model call is ever spent, at the same figures route.ts
@@ -115,12 +115,22 @@ function buildRepoUrlEntry(repo: GradableRepoContent): StudentSubmissionEntry {
  * this surface has no whole-run fallback to route an oversized entry to
  * (do-not-reuse, architecture section 6), so it is a plain refusal. */
 function firstOversizedEntryReason(entries: readonly StudentSubmissionEntry[]): string | null {
-  for (const entry of entries) {
-    if (estimateNeededWireBytes(entry) > ITEM_REQUEST_BYTE_BUDGET) {
-      return "One submission is too large to grade on this surface.";
-    }
-  }
-  return null;
+  return oversizedIntakeReason(entries);
+}
+
+/** A batch must be retried as a whole until selective retry is available. */
+function batchOutcome(entries: StudentSubmissionEntry[], pointsPossible: number | null, classification?: SubmissionZipClassification): IntakeOutcome {
+  const reason = oversizedIntakeReason(entries);
+  if (reason) return { kind: "refused", reason, refusalClass: "entry-too-large" };
+  return { kind: "entries", entries, pointsPossible, ...(classification ? { classification } : {}) };
+}
+
+/** Do not grade an archive when an unreadable member could belong to any row. */
+function unreadableArchiveReason(failedFiles: readonly string[]): string | null {
+  if (failedFiles.length === 0) return null;
+  const shown = failedFiles.slice(0, 3).join(", ");
+  const more = failedFiles.length > 3 ? ` and ${failedFiles.length - 3} more` : "";
+  return `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.`;
 }
 
 /**
@@ -222,16 +232,15 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
         const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+        const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
+        if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
+        if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };
         entries = ingested.entries;
         classification = ingested.classification;
       } else {
         return assertNeverUploadKind(uploadKind);
       }
-      const oversized = firstOversizedEntryReason(entries);
-      if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
-      return classification
-        ? { kind: "entries", entries, pointsPossible: null, classification }
-        : { kind: "entries", entries, pointsPossible: null };
+      return batchOutcome(entries, null, classification);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not read this file.";
       return { kind: "refused", reason: message, refusalClass: "read-failed" };
@@ -250,9 +259,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         if (entries.length === 0) {
           return { kind: "refused", reason: "Nothing to grade was found at this Canvas URL.", refusalClass: "canvas-empty" };
         }
-        const oversized = firstOversizedEntryReason(entries);
-        if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
-        return { kind: "entries", entries, pointsPossible };
+        return batchOutcome(entries, pointsPossible);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not read this Canvas URL.";
         return { kind: "refused", reason: message, refusalClass: "canvas-failed" };
@@ -292,6 +299,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           return { kind: "refused", reason: VIDEO_DRIVE_MESSAGE, videoFailure: "not supported here", refusalClass: "video-drive" };
         }
         let entries: StudentSubmissionEntry[];
+        let classification: SubmissionZipClassification | undefined;
         if (uploadKind === "single") {
           const entry = await buildSingleFileEntry(fetched.name, fetched.buffer, provider, data.labelled);
           if (!entry) return { kind: "refused", reason: "This file could not be read.", refusalClass: "unreadable-file" };
@@ -300,13 +308,16 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
           // throws from here and is surfaced verbatim by the catch below.
           const bytes = new Uint8Array(fetched.buffer).slice().buffer;
-          entries = await extractStudentEntries(bytes, { inferFileNamesWith: provider });
+          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider });
+          const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
+          if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
+          if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };
+          entries = ingested.entries;
+          classification = ingested.classification;
         } else {
           return assertNeverUploadKind(uploadKind);
         }
-        const oversized = firstOversizedEntryReason(entries);
-        if (oversized) return { kind: "refused", reason: oversized, refusalClass: "entry-too-large" };
-        return { kind: "entries", entries, pointsPossible: null };
+        return batchOutcome(entries, null, classification);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not read this Google Drive link.";
         return { kind: "refused", reason: message, refusalClass: "drive-failed" };

@@ -8,7 +8,7 @@
   blocked_by: []
   instrument: 'Exercise genuine image-only DOCX and PPTX, text-only and text-plus-visual Office submissions, corrupt and valid PDFs, and forced extraction failures across Canvas grading providers. Preserve every represented item or produce a named non-postable result; verify no affected partial evidence reaches grading and legitimate image-only and text-only submissions remain usable.'
   from: 'Canvas Office extraction failure and provider-specific visual coverage were found while addressing unsupported attachment evidence. An attempted blanket failure guard blocked an existing image-only DOCX workflow, so that guard was not shipped.'
-  note: 'Owner: coordinator. Do not assume successful raw transport proves a grader consumes all visual evidence. Establish exact provider capabilities and bounded inspection; preserve existing successful image-only behavior. Create the named executable acceptance test and verify actual downstream model and embedded paths.'
+  note: 'Owner: coordinator. Previously prepared documentVisuals can bypass fresh inspection; referenced header and footer visuals also need relationship-aware coverage without treating orphan parts as submissions. Do not assume successful raw transport proves a grader consumes all visual evidence. Establish exact provider capabilities and bounded inspection; preserve existing successful image-only behavior. Create the named executable acceptance test and verify actual downstream model and embedded paths.'
   question: null
 - id: 'CHAT-CANVAS-VIDEO-TRANSPORT'
   state: 'actionable'

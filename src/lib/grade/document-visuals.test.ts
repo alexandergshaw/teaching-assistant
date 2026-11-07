@@ -38,7 +38,7 @@ const fixture = async (kind: "docx" | "pptx", options: { text?: string; pictures
   const drawings = pic.repeat(pictures) + (unsupported ? pic.replace("rId1", "rId2") : "");
   const rels = `<Relationships><Relationship Id="rId1" Target="${kind === "pptx" ? "../" : ""}media/fixture.png"/><Relationship Id="rId2" Target="${kind === "pptx" ? "../" : ""}media/fixture.emf"/></Relationships>`;
   if (kind === "docx") {
-    zip.file("word/document.xml", `<w:document><w:body><w:p><w:r><w:t>${text}</w:t></w:r>${drawings}</w:p></w:body></w:document>`);
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>${text}</w:t></w:r>${drawings}</w:p></w:body></w:document>`);
     if (!broken) zip.file("word/_rels/document.xml.rels", rels);
     zip.file("word/media/fixture.png", png);
     if (unsupported) zip.file("word/media/fixture.emf", "unsupported");
@@ -118,6 +118,62 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
 });
 
 describe("coverage and boundaries", () => {
+  it.each(["word/document.xml"])("refuses legacy images in %s with alternate prefixes", async (part) => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    const pict = `<alt:pict><vector:shape><vector:imagedata rel:id="rId1"/></vector:shape></alt:pict>`;
+    if (part === "word/document.xml") zip.file(part, `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t>${pict}</w:r></w:p></w:body></w:document>`);
+    else zip.file(part, `<alt:header xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${pict}</alt:header>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it.each(["frame", "tile", "pattern"])("refuses a namespace-declared VML %s image fill without invoking the model", async (kind) => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:word="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><word:body><word:p><word:r><word:t>Answer</word:t><word:pict><vector:shape><vector:fill type="${kind}" rel:id="rId1"/></vector:shape></word:pict></word:r></word:p></word:body></w:document>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const coverage = await prepareDocumentVisuals("docx", bytes);
+    expect(coverage).toMatchObject({ status: "incomplete", reason: "unsupported-image", found: 1, omitted: 1 });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(callLlm).not.toHaveBeenCalled();
+  });  it("does not treat an unrelated pict element as Word VML", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:other="urn:unrelated" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:t>Answer</w:t><other:pict><v:imagedata/></other:pict></w:r></w:p></w:body></w:document>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    expect(await prepareDocumentVisuals("docx", bytes)).toMatchObject({ status: "complete", found: 0, omitted: 0 });
+  });
+  it("does not refuse an unreferenced orphan header with VML images", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/header1.xml", `<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:hdr>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await gradePost(request(body(entry)));
+    expect(response.status).toBe(200);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });  it("does not reject text-only VML shapes", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:fill type="solid" color="red"/><v:textbox>Caption</v:textbox></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const res = await gradePost(request(body(entry)));
+    expect(res.status).toBe(200);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });
+  it("does not grade a Canvas DOCX when a legacy VML picture was omitted", async () => {
+    const zip = new JSZip();
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Written answer</w:t><w:pict><v:shape><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships><Relationship Id="rId1" Target="media/legacy.png"/></Relationships>`);
+    zip.file("word/media/legacy.png", Buffer.from(PNG, "base64"));
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Synthetic Writer", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed");
+    expect(response.diagnostic).toMatchObject({ visualCoverage: "incomplete", picturesOmitted: 1, passes: 0 });
+    expect(callLlm).not.toHaveBeenCalled();
+  });
   it("Canvas image-only DOCX reaches the actual grading request", async () => {
     const bytes = await fixture("docx", { text: "" });
     const entry = await canvasWorkToEntry({ student: "Synthetic Writer", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });

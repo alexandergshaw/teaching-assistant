@@ -1,9 +1,27 @@
 import JSZip from "jszip";
+import { SaxesParser } from "saxes";
 import { assertContainerWithinCaps, createZipBudget, declaredSizesOf, readOfficeMember } from "../zip-caps";
 import { DOCUMENT_PICTURE_LIMIT, DOCUMENT_PICTURE_BYTE_LIMIT, DOCUMENT_VISUAL_BYTE_LIMIT, type DocumentVisuals } from "./document-visual-schema";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", heic: "image/heic", heif: "image/heif" };
 const attr = (xml: string, name: string) => xml.match(new RegExp(`(?:^|\\s)${name}=["']([^"']*)["']`))?.[1];
+/** Count VML image-bearing Word pict containers by namespace, not prefix. */
+function countLegacyPictures(xml: string): number {
+  if (!/<(?:[\w.-]+:)?pict\b/.test(xml)) return 0;
+  const parser = new SaxesParser({ xmlns: true });
+  const active: boolean[] = [];
+  let count = 0;
+  parser.on("doctype", () => { throw new Error("DTD not supported"); });
+  parser.on("opentag", (tag) => {
+    if (tag.uri === "http://schemas.openxmlformats.org/wordprocessingml/2006/main" && tag.local === "pict") active.push(false);
+    else if (active.length && tag.uri === "urn:schemas-microsoft-com:vml" && (tag.local === "imagedata" || (tag.local === "fill" && Object.values(tag.attributes).some((attr) => (attr.local === "type" && attr.value.toLowerCase() === "frame") || (attr.uri === "http://schemas.openxmlformats.org/officeDocument/2006/relationships" && attr.local === "id") || ["src", "href", "relid"].includes(attr.local.toLowerCase()))))) active[active.length - 1] = true;
+  });
+  parser.on("closetag", (tag) => {
+    if (tag.uri === "http://schemas.openxmlformats.org/wordprocessingml/2006/main" && tag.local === "pict" && active.pop()) count++;
+  });
+  parser.write(xml).close();
+  return count;
+}
 export async function prepareDocumentVisuals(extension: string, bytes?: Buffer, limits: { parts: number; bytes: number } = { parts: DOCUMENT_PICTURE_LIMIT, bytes: DOCUMENT_VISUAL_BYTE_LIMIT }): Promise<DocumentVisuals> {
   if (extension !== "docx" && extension !== "pptx") return { status: "unavailable", reason: "unsupported-format", found: 0, omitted: 0, parts: [] };
   const out: DocumentVisuals = { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] };
@@ -24,6 +42,8 @@ export async function prepareDocumentVisuals(extension: string, bytes?: Buffer, 
       const base = name.slice(0, name.lastIndexOf("/"));
       const rels = await read(`${base}/_rels/${name.slice(name.lastIndexOf("/") + 1)}.rels`);
       const drawings = xml.match(extension === "docx" ? /<w:drawing\b[\s\S]*?<\/w:drawing>/g : /<p:pic\b[\s\S]*?<\/p:pic>/g) ?? [];
+      const legacyPictures = extension === "docx" ? countLegacyPictures(xml) : 0;
+      if (legacyPictures) { out.found += legacyPictures; out.omitted += legacyPictures; out.status = "incomplete"; out.reason = "unsupported-image"; }
       for (const drawing of drawings) {
         out.found++;
         const omit = (reason: DocumentVisuals["reason"]) => { out.omitted++; out.status = "incomplete"; out.reason = reason; };

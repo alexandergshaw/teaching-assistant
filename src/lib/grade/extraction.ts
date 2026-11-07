@@ -807,26 +807,35 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
     return withLinkNote(entry, "flagged", VIDEO_LINK_NOTE);
   }
   let linked: StudentSubmissionEntry[];
+  let unreadableArchiveFiles = 0;
   if (kind === "single") {
     const single = await buildSingleFileEntry(fetched.name, fetched.buffer, undefined, true);
     linked = single ? [single] : [];
   } else if (kind === "zip") {
     // Own ArrayBuffer, not Node's pooled one.
-    linked = await extractStudentEntries(new Uint8Array(fetched.buffer).slice().buffer);
+    const ingested = await ingestZipEntries(new Uint8Array(fetched.buffer).slice().buffer);
+    linked = ingested.entries;
+    unreadableArchiveFiles = ingested.failedSupportedFiles.length;
   } else {
     return assertNeverUploadKind(kind);
   }
   // M1 single-entry guard: an archive (or an unreadable file) must never fan
   // several students into this one row (the A44 blend).
   if (linked.length !== 1) {
+    if (unreadableArchiveFiles > 0) {
+      return withLinkNote(entry, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).`);
+    }
     return withLinkNote(entry, "flagged", "the linked Drive file could not be used as a single submission");
   }
-  return withFoldedContent(
+  const folded = withFoldedContent(
     entry,
     `Linked Google Drive file (${fetched.name}):\n\n${linked[0].content}`,
     linked[0].submittedFiles,
     { mergedFileCount: entry.mergedFileCount + linked[0].mergedFileCount }
   );
+  return unreadableArchiveFiles > 0
+    ? withLinkNote(folded, "failed", `The linked Drive archive could not be fully read (${unreadableArchiveFiles} file(s) unreadable).`)
+    : folded;
 }
 
 /**

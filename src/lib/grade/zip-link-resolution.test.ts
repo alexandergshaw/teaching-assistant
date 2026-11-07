@@ -317,6 +317,25 @@ describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
     expect(out.mergedFileCount).toBe(1);
   });
 
+  it("preserves readable work while marking a partially unreadable linked archive as failed", async () => {
+    const archive = await zipOf({ "ada_1_2_work.txt": "readable student work", "ada_1_2_broken.docx": "not a document" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.content).toContain("readable student work");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.submittedFiles.some((file) => file.name.includes("work.txt"))).toBe(true);
+  });
+
+  it("marks a wholly unreadable linked archive as failed without inventing work", async () => {
+    const archive = await zipOf({ "ada_1_2_broken.docx": "not a document" });
+    mockFetchDrive.mockResolvedValue({ name: "bundle.zip", buffer: Buffer.from(archive) });
+    const out = await resolveEntryLinks(linkEntry(DRIVE_FILE_URL));
+    expect(out.linkFetch).toBe("failed");
+    expect(out.repoReadNote).toContain("1 file(s) unreadable");
+    expect(out.content).not.toContain("not a document");
+  });
+
   it("I-reclamp: folded content over the cap is clamped", async () => {
     mockFetchRepo.mockResolvedValue(okRepo("o/r", "x".repeat(MAX_ENTRY_CONTENT_CHARS + 5_000)));
     const out = await resolveEntryLinks(linkEntry(GITHUB_GIT));

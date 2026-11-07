@@ -224,6 +224,12 @@ export async function POST(req: NextRequest) {
   }
 
   const { entries, failedSupportedFiles, classification, videoOutcomes } = outcome.value.value;
+  if (failedSupportedFiles.length > 0) {
+    await discardStaged();
+    const shown = failedSupportedFiles.slice(0, 3).join(", ");
+    const more = failedSupportedFiles.length > 3 ? ` and ${failedSupportedFiles.length - 3} more` : "";
+    return ndjsonResponse([encodeIngestLine({ type: "done", error: `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.` })]);
+  }
   return ndjsonResponse(
     buildIngestLines(entries, failedSupportedFiles, undefined, classification, videoOutcomes).map(encodeIngestLine)
   );

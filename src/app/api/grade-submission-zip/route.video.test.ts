@@ -174,6 +174,17 @@ describe("flag ON: the route hands extraction a stager", () => {
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [stagedPath]);
   });
 
+  it("removes staged video and refuses the archive when another member is unreadable", async () => {
+    ingestMock.mockImplementation(async (_b: unknown, options: { stageVideo: StageVideoFn }) => {
+      await options.stageVideo(BYTES, "mp4");
+      return { entries: [], attemptedSupportedFiles: 1, failedSupportedFiles: ["broken.pdf"] };
+    });
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ type: "done", error: expect.stringContaining("broken.pdf") });
+    expect(removeFilesMock).toHaveBeenCalledWith("course-files", [uploadFileMock.mock.calls[0][1]]);
+  });
+
   it("sabotage control: with the flag OFF the same route passes NO stager", async () => {
     flag.on = false;
     ingestMock.mockResolvedValue({ entries: [], attemptedSupportedFiles: 0, failedSupportedFiles: [] });

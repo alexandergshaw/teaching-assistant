@@ -213,7 +213,7 @@ describe("POST /api/grade-submission-zip", () => {
         { student: "C", content: "c", mergedFileCount: 1, submittedFiles: [] },
       ],
       attemptedSupportedFiles: 3,
-      failedSupportedFiles: ["bad.pdf"],
+      failedSupportedFiles: [],
     });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH, provider: "gemini" }));
     expect(res.status).toBe(200);
@@ -224,7 +224,7 @@ describe("POST /api/grade-submission-zip", () => {
     expect(lines[3]).toMatchObject({
       studentsFound: 3,
       studentsEmitted: 2,
-      failedSupportedFiles: ["bad.pdf"],
+      failedSupportedFiles: [],
     });
     expect(lines[3]).not.toHaveProperty("nestedZipFailures");
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);

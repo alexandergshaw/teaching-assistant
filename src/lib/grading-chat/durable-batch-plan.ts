@@ -28,7 +28,8 @@ export function planDurableBatch(input: {
   readonly maxInFlight: number;
   readonly maxBatchSize: number;
 }): DurableBatchPlan {
-  if (!input.snapshotComplete) return { kind: "refused", reason: "incomplete-snapshot" };
+  if (input.snapshotComplete !== true) return { kind: "refused", reason: "incomplete-snapshot" };
+  if (!Array.isArray(input.items)) return { kind: "refused", reason: "invalid-snapshot" };
   if (!Number.isSafeInteger(input.maxInFlight) || input.maxInFlight < 1 ||
       !Number.isSafeInteger(input.maxBatchSize) || input.maxBatchSize < 1) {
     return { kind: "refused", reason: "invalid-capacity" };
@@ -37,7 +38,7 @@ export function planDurableBatch(input: {
   const ids = new Set<string>();
   const ordinals = new Set<number>();
   for (const item of input.items) {
-    if (typeof item.id !== "string" || !item.id.trim() || !Number.isSafeInteger(item.ordinal) || item.ordinal < 0 ||
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || !item.id.trim() || !Number.isSafeInteger(item.ordinal) || item.ordinal < 0 ||
         !STATES.includes(item.state) || ids.has(item.id) || ordinals.has(item.ordinal)) {
       return { kind: "refused", reason: "invalid-snapshot" };
     }

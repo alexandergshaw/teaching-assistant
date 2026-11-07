@@ -39,4 +39,14 @@ describe("durable grading batch planning", () => {
     expect(planDurableBatch({ ...input, items: [item, { ...item, id: "two" }] })).toEqual({ kind: "refused", reason: "invalid-snapshot" });
     expect(planDurableBatch({ ...input, maxBatchSize: 0 })).toEqual({ kind: "refused", reason: "invalid-capacity" });
   });
+
+  it("refuses malformed and sparse snapshots before selecting any work", () => {
+    const input = { items: [] as DurableBatchItem[], snapshotComplete: true, maxInFlight: 2, maxBatchSize: 2 };
+    const sparse = Array<DurableBatchItem>(2);
+    sparse[1] = { id: "queued", ordinal: 1, state: "queued" };
+    for (const items of [sparse, [null] as unknown as DurableBatchItem[], null as unknown as DurableBatchItem[]]) {
+      expect(planDurableBatch({ ...input, items })).toEqual({ kind: "refused", reason: "invalid-snapshot" });
+    }
+    expect(planDurableBatch({ ...input, snapshotComplete: 1 as unknown as boolean })).toEqual({ kind: "refused", reason: "incomplete-snapshot" });
+  });
 });

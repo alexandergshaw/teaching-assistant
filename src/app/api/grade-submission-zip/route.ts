@@ -230,7 +230,17 @@ export async function POST(req: NextRequest) {
     const more = failedSupportedFiles.length > 3 ? ` and ${failedSupportedFiles.length - 3} more` : "";
     return ndjsonResponse([encodeIngestLine({ type: "done", error: `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.` })]);
   }
-  return ndjsonResponse(
-    buildIngestLines(entries, failedSupportedFiles, undefined, classification, videoOutcomes).map(encodeIngestLine)
-  );
+  const lines = buildIngestLines(entries, failedSupportedFiles, undefined, classification, videoOutcomes);
+  const emittedRefs = new Set(lines.flatMap((line) => line.type === "entry"
+    ? line.entry.submittedFiles.flatMap((file) => file.videoRef ? [file.videoRef.storagePath] : [])
+    : []));
+  const unreferenced = staged.filter((path) => !emittedRefs.has(path));
+  if (unreferenced.length > 0) {
+    try {
+      await removeFiles(SYLLABUS_UPLOAD_BUCKET, unreferenced);
+    } catch {
+      // Best effort; the orphan sweep reaps anything not removed here.
+    }
+  }
+  return ndjsonResponse(lines.map(encodeIngestLine));
 }

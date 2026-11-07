@@ -62,6 +62,7 @@ async function readLines(res: Response): Promise<Array<Record<string, unknown>>>
 }
 
 const BYTES = Buffer.from([1, 2, 3, 4]);
+const videoEntry = (storagePath: string, content = "work") => ({ student: "A", content, mergedFileCount: 1, submittedFiles: [{ name: "a.mp4", extension: "mp4", previewContent: "", previewTruncated: false, mimeType: "video/mp4", videoRef: { storagePath, sizeBytes: 4 } }] });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -85,7 +86,7 @@ describe("flag ON: the route hands extraction a stager", () => {
     let staged: Awaited<ReturnType<StageVideoFn>> | undefined;
     ingestMock.mockImplementation(async (_buf: unknown, options: { stageVideo: StageVideoFn }) => {
       staged = await options.stageVideo(BYTES, "quicktime");
-      return { entries: [], attemptedSupportedFiles: 0, failedSupportedFiles: [], videoOutcomes: { accepted: 1, failed: {} } };
+      return { entries: [videoEntry((staged as { storagePath: string }).storagePath)], attemptedSupportedFiles: 0, failedSupportedFiles: [], videoOutcomes: { accepted: 1, failed: {} } };
     });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
     const lines = await readLines(res);
@@ -183,6 +184,19 @@ describe("flag ON: the route hands extraction a stager", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ type: "done", error: expect.stringContaining("broken.pdf") });
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [uploadFileMock.mock.calls[0][1]]);
+  });
+
+  it("removes only staged videos not referenced by any emitted entry", async () => {
+    ingestMock.mockImplementation(async (_b: unknown, options: { stageVideo: StageVideoFn }) => {
+      const kept = (await options.stageVideo(BYTES, "mp4")) as { storagePath: string };
+      const dropped = (await options.stageVideo(BYTES, "mp4")) as { storagePath: string };
+      return { entries: [videoEntry(kept.storagePath), videoEntry(dropped.storagePath, "x".repeat(4_000_000)), videoEntry(kept.storagePath, "x".repeat(4_000_000))], attemptedSupportedFiles: 0, failedSupportedFiles: [] };
+    });
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
+    const paths = uploadFileMock.mock.calls.map((call) => call[1]);
+    expect(lines.map((line) => line.type)).toEqual(["entry", "skip", "skip", "done"]);
+    expect(removeFilesMock).toHaveBeenCalledWith("course-files", [paths[1]]);
+    expect(removeFilesMock).not.toHaveBeenCalledWith("course-files", [paths[0]]);
   });
 
   it("sabotage control: with the flag OFF the same route passes NO stager", async () => {

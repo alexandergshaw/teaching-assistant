@@ -7,7 +7,7 @@ import { isGithubCommitSha } from "@/lib/github.repos";
 import { assignmentFolderPathsFromTree } from "@/lib/repo-assignment-folder-paths";
 import { DEFAULT_TREE_SCAN_CONCURRENCY } from "@/lib/repo-grade-tree-scan";
 import { createDiscoveryTransport, DiscoveryTransportError, type DiscoveryRateLimit, type DiscoveryTransportFailure } from "./discovery-transport";
-import { provenEmptyFolders } from "./empty-folders";
+import { provenEmptyFolders, provenTextRecoveryFolders } from "./empty-folders";
 
 type DiscoveryFailure = DiscoveryTransportFailure | "source-set-too-large" | "invalid-scope" | "invalid-source";
 type DiscoveryRequest = ReturnType<typeof createDiscoveryTransport>;
@@ -19,11 +19,11 @@ const ORG_PAGE_SIZE = 100;
 const MAX_CACHED_TREES = 512;
 const MAX_CACHED_FOLDERS = 256;
 const MAX_CACHED_FOLDER_BYTES = 16 * 1024;
-type FolderProjection = { folders: readonly string[]; emptyFolders?: readonly string[] };
+type FolderProjection = { folders: readonly string[]; emptyFolders?: readonly string[]; textRecoveryFolders?: readonly string[] };
 const cachedFolders = new Map<string, FolderProjection>();
 
 export type RepoGradeSourceRow =
-  | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[]; emptyFolders?: string[] }
+  | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[]; emptyFolders?: string[]; textRecoveryFolders?: string[] }
   | { status: "partial"; repo: string; sourceRef: string; sourceCommit: string; reason: "tree-truncated" }
   | { status: "blocked"; repo: string; sourceRef: string; sourceCommit?: string; reason: DiscoveryFailure };
 
@@ -143,15 +143,17 @@ async function readSource(
         const folders = readFolders(value, treeSha);
         if (!folders) return null;
         let emptyFolders: string[] | undefined;
+        let textRecoveryFolders: string[] | undefined;
         if (accountId && credential) {
           try {
             const verified = rememberVerifiedGithubTree({ accountId, credential, owner, repo: name, rootSha: treeSha }, value);
             emptyFolders = provenEmptyFolders(folders, verified.values());
+            textRecoveryFolders = provenTextRecoveryFolders(folders, verified.values());
           } catch {
             // Keep the existing folder projection, but never retain unverified grading evidence.
           }
         }
-        return { folders, ...(emptyFolders && { emptyFolders }) };
+        return { folders, ...(emptyFolders && { emptyFolders }), ...(textRecoveryFolders && { textRecoveryFolders }) };
       });
       if (cacheKey && loaded) rememberFolders(cacheKey, loaded);
       projection = loaded ?? undefined;
@@ -159,8 +161,9 @@ async function readSource(
     if (!projection) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
     const selectedFolders = projection.folders.filter(includesFolder);
     const emptyFolders = projection.emptyFolders?.filter(includesFolder);
+    const textRecoveryFolders = projection.textRecoveryFolders?.filter(includesFolder);
     request.checkActive();
-    return { status: "ready", repo, sourceRef, sourceCommit, folders: selectedFolders, ...(emptyFolders && { emptyFolders }) };
+    return { status: "ready", repo, sourceRef, sourceCommit, folders: selectedFolders, ...(emptyFolders && { emptyFolders }), ...(textRecoveryFolders && { textRecoveryFolders }) };
   } catch (error) {
     return { status: "blocked", repo, sourceRef, sourceCommit, reason: classifyFailure(error) };
   }

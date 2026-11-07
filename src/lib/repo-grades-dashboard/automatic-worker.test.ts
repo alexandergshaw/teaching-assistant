@@ -36,6 +36,22 @@ describe("durable repository grading discovery", () => {
       recoveryRun: { runId: "run", lease: "lease" },
     }));
     mocks.evaluate.mockClear();
+    prior = "recoverable-text";
+    // Legacy snapshots or missing proof must not permit the new retry.
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "partial", reason: "prior-attempt" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    const discovery = { status: "scanned", enumerationComplete: true, repos: [{ status: "ready", repo: work.repo,
+      sourceRef: work.ref, sourceCommit: sha, folders: ["lab"], textRecoveryFolders: ["lab"] }] };
+    mocks.snapshot.mockResolvedValue({ status: "ready", snapshot: { basis: "b".repeat(64), discovery } });
+    mocks.plan.mockResolvedValue({ discovery, folderSources: new Map() });
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "succeeded" });
+    expect(mocks.evaluate).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      recoveryRun: { runId: "run", lease: "lease", capability: "text-extension-v1" },
+    }));
+    mocks.evaluate.mockClear();
+    mocks.plan.mockResolvedValueOnce({ discovery: { ...discovery, repos: [{ ...discovery.repos[0], sourceCommit: "b".repeat(40) }] }, folderSources: new Map() });
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "partial", reason: "prior-attempt" });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
     prior = "partial";
     await expect(worker(work, "lease")).resolves.toEqual({ state: "partial", reason: "prior-attempt" });
     expect(mocks.evaluate).not.toHaveBeenCalled();

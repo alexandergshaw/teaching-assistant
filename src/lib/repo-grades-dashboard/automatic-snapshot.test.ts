@@ -38,6 +38,17 @@ describe("automatic course snapshot revalidation", () => {
       { ...candidate.discovery.repos[0], emptyFolders: ["other"] },
     ] } })).toBeNull();
   });
+  it("retains only well-formed recovery folders from the pinned inventory", () => {
+    const basis = "e".repeat(64);
+    const row = { status: "ready", repo: "School/Student", sourceRef: "main", sourceCommit: old,
+      folders: ["lab"], textRecoveryFolders: ["lab"] };
+    const snapshot = (value: unknown) => ({ version: 1, basis,
+      discovery: { status: "scanned", enumerationComplete: true, repos: [value] } });
+    expect(restoreAutomaticRepoGradeSnapshot(snapshot(row))).toMatchObject({ discovery: { repos: [{ textRecoveryFolders: ["lab"] }] } });
+    expect(restoreAutomaticRepoGradeSnapshot(snapshot({ ...row, textRecoveryFolders: ["other"] }))).toBeNull();
+    expect(restoreAutomaticRepoGradeSnapshot(snapshot({ ...row, textRecoveryFolders: ["lab", "lab"] }))).toBeNull();
+    expect(restoreAutomaticRepoGradeSnapshot(snapshot({ ...row, textRecoveryFolders: "lab" }))).toBeNull();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubEnv("GITHUB_TOKEN", "first-token");

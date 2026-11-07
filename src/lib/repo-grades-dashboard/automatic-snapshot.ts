@@ -67,6 +67,8 @@ export function restoreAutomaticRepoGradeSnapshot(value: unknown): AutomaticRepo
     const folders = row.folders;
     if (row.emptyFolders !== undefined && (!Array.isArray(row.emptyFolders) || !row.emptyFolders.every(exactFolder)
       || new Set(row.emptyFolders).size !== row.emptyFolders.length || row.emptyFolders.some((folder) => !folders.includes(folder)))) return null;
+    if (row.textRecoveryFolders !== undefined && (!Array.isArray(row.textRecoveryFolders) || !row.textRecoveryFolders.every(exactFolder)
+      || new Set(row.textRecoveryFolders).size !== row.textRecoveryFolders.length || row.textRecoveryFolders.some((folder) => !folders.includes(folder)))) return null;
     const [owner, repo, extra] = row.repo.split("/");
     if (!owner || !repo || extra !== undefined || !validateGithubOwnerRepo(owner, repo)) return null;
     const key = row.repo.toLowerCase();
@@ -75,7 +77,8 @@ export function restoreAutomaticRepoGradeSnapshot(value: unknown): AutomaticRepo
     refs.add(row.sourceRef);
     refsByRepo.set(key, refs);
     repos.push({ status: "ready", repo: row.repo, sourceRef: row.sourceRef, sourceCommit: row.sourceCommit, folders: row.folders,
-      ...(row.emptyFolders !== undefined && { emptyFolders: row.emptyFolders }) });
+      ...(row.emptyFolders !== undefined && { emptyFolders: row.emptyFolders }),
+      ...(row.textRecoveryFolders !== undefined && { textRecoveryFolders: row.textRecoveryFolders }) });
   }
   const defaults: Record<string, string> = {};
   if (defaultSourceRefs !== undefined) {

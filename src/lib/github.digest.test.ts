@@ -48,6 +48,25 @@ const opts = (overrides: Partial<SelectDigestFilesOpts> = {}): SelectDigestFiles
 });
 
 describe("selectDigestFiles", () => {
+  it("includes .text files without weakening the existing file budgets", () => {
+    const result = selectDigestFiles([blob("lab/output.text", 20), blob("lab/too-large.text", 500)], opts({ pathPrefix: "lab", requireCompleteSubmission: true, maxBlobBytes: 500 }));
+    expect(result.selected.map((entry) => entry.path)).toEqual(["lab/output.text"]);
+    expect(result.skipped.size).toBe(1);
+  });
+
+  it("only admits extensionless regular files for a verified pinned reader", () => {
+    const schema = blob("lab/schema", 30, "100644");
+    const withoutReader = selectDigestFiles([schema], opts({ pathPrefix: "lab", requireCompleteSubmission: true }));
+    expect(withoutReader.skipped.unsupported).toBe(1);
+    const withReader = selectDigestFiles([schema], opts({ pathPrefix: "lab", requireCompleteSubmission: true, allowVerifiedExtensionless: true }));
+    expect(withReader.selected.map((entry) => entry.path)).toEqual(["lab/schema"]);
+    expect(withReader.skipped.unsupported ?? 0).toBe(0);
+    for (const entry of [blob("lab/.secret", 12, "100644"), blob("lab/schema", 12, "120000"), blob("lab/schema", 12)]) {
+      const rejected = selectDigestFiles([entry], opts({ pathPrefix: "lab", requireCompleteSubmission: true, allowVerifiedExtensionless: true }));
+      expect(rejected.skipped.unsupported).toBe(1);
+    }
+    expect(selectDigestFiles([schema], opts({ pathPrefix: "lab" })).selected).toEqual([]);
+  });
   it("includes a subfolder file at depth when scoped to a prefix", () => {
     const tree: RepoTreeEntry[] = [
       blob("week1/src/app/deep/nested/handler.py"),

@@ -79,7 +79,7 @@ type PinnedEvaluation = RepoGradeResponse | { knownFailure: true };
 type AutomaticRuntime = {
   startupBatchId?: string;
   targetedRun?: { runId: string; lease: string };
-  recoveryRun?: { runId: string; lease: string };
+  recoveryRun?: { runId: string; lease: string; capability?: "text-extension-v1" };
   deferSourceThrottle?: boolean;
   loadPreparedProfile(scope: {
     accountId: string; courseId: string; folder: string;

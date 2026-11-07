@@ -87,6 +87,9 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
           switch (prior) {
             case "never-attempted":
             case "recoverable-partial": return selector;
+            case "recoverable-text":
+              return source?.status === "ready" && source.textRecoveryFolders?.includes(folder)
+                ? selector : { ...selector, state: "partial", reason: "prior-attempt" };
             case "succeeded":
             case "no-submission": return { ...selector, state: "already-processed" };
             case "claimed": return { ...selector, state: "busy", reason: "prior-attempt" };
@@ -111,7 +114,12 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const history = await readRepoGradeStartupHistory(accountId, courseId, [target]);
     const prior = history?.get(repoGradeStartupKey(target));
     if (!prior) return { state: "blocked", reason: "history-unavailable" };
-    if (!targeted && prior !== "never-attempted" && prior !== "recoverable-partial") {
+    if (!targeted && prior === "recoverable-text" && !(snapshot && plan.discovery.status === "scanned"
+      && plan.discovery.repos.some((row) => row.status === "ready" && row.repo === work.repo
+        && row.sourceRef === work.ref && row.sourceCommit === work.sha && row.textRecoveryFolders?.includes(work.folder)))) {
+      return { state: "partial", reason: "prior-attempt" };
+    }
+    if (!targeted && prior !== "never-attempted" && prior !== "recoverable-partial" && prior !== "recoverable-text") {
       if (prior === "succeeded" || prior === "no-submission") return { state: "already-processed" };
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
@@ -140,6 +148,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
     const outcome = await runRepoGradeTarget(plan, target, {
       ...(targeted && { targetedRun: { runId, lease } }),
       ...(!targeted && prior === "recoverable-partial" && { recoveryRun: { runId, lease } }),
+      ...(!targeted && prior === "recoverable-text" && { recoveryRun: { runId, lease, capability: "text-extension-v1" as const } }),
       deferSourceThrottle: work.retryGithubRateLimits === true,
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)

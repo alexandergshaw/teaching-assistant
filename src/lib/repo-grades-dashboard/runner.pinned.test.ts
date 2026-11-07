@@ -94,10 +94,11 @@ function fetchRepo(options: {
   omitFromArchive?: string;
   oversizedArchive?: boolean;
   throttleAfterBlobs?: number;
+  contentOverrides?: Record<string, string>;
 } = {}) {
-  const contents = (path: string) => path === files.readme.path ? options.readme ?? "Print the answer in a loop."
+  const contents = (path: string) => options.contentOverrides?.[path] ?? (path === files.readme.path ? options.readme ?? "Print the answer in a loop."
     : path === files.submission.path ? "print('captured submission')"
-      : path === files.otherFolder.path ? "WRONG_CASE_FOLDER" : `# submission helper ${path}`;
+      : path === files.otherFolder.path ? "WRONG_CASE_FOLDER" : `# submission helper ${path}`);
   const inventory = options.tree ?? [
     ...Object.values(files),
     ...Array.from({ length: 7 }, (_, i) => ({ ...files.submission, path: `lab/helpers/h${i}.py` })),
@@ -169,6 +170,32 @@ afterEach(() => {
 });
 
 describe("admitted pinned repository evaluator", () => {
+  it("grades verified extensionless and .text submission files together", async () => {
+    const schema = { ...files.submission, path: "lab/schema" };
+    const output = { ...files.submission, path: "lab/output.text" };
+    const fetcher = fetchRepo({ tree: [files.readme, files.submission, schema, output] });
+    await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });
+    const modelCall = fetcher.mock.calls.find(([url]) => url === modelUrl);
+    expect(modelCall?.[1].body).toContain("# submission helper lab/schema");
+    expect(modelCall?.[1].body).toContain("# submission helper lab/output.text");
+  });
+
+  it.each(["not\0text", "%PDF-1.7\nexample printable body", "value\x01binary", "%!PS-Adobe-3.0\n"]) (
+    "does not dispatch a model for extensionless binary-like verified bytes (%j)", async (payload) => {
+    const schema = { ...files.submission, path: "lab/schema" };
+    const fetcher = fetchRepo({ tree: [files.readme, files.submission, schema], contentOverrides: { "lab/schema": payload } });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
+  });
+
+  it("rejects an ASCII PDF extensionless blob after the oversized archive falls back to verified raw blobs", async () => {
+    const schema = { ...files.submission, path: "lab/schema" };
+    const output = { ...files.submission, path: "lab/output.text" };
+    const fetcher = fetchRepo({ tree: [files.readme, files.submission, schema, output], oversizedArchive: true, contentOverrides: { "lab/schema": "%PDF-1.7\nprintable body" } });
+    expect((await runRepoGradeTarget(plan, target, preparedRuntime())).status).toBe("partial");
+    expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
+    expect(fetcher.mock.calls.some(([url]) => url.includes("/git/blobs/"))).toBe(true);
+  });
   it("grades only the claimed SHA and exact folder using the restored rubric with code execution off", async () => {
     const fetcher = fetchRepo();
     await expect(runRepoGradeTarget(plan, target, preparedRuntime())).resolves.toEqual({ status: "succeeded" });

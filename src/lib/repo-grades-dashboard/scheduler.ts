@@ -42,7 +42,7 @@ type CourseInventory = Readonly<{
   discovery: RepoGradeDiscovery;
 }>;
 
-export type RepoGradeLedgerObservation = "never-attempted" | "recoverable-partial" | "claimed" | RepoGradeOutcome;
+export type RepoGradeLedgerObservation = "never-attempted" | "recoverable-partial" | "recoverable-text" | "claimed" | RepoGradeOutcome;
 export type RepoGradeHistoryObservation = RepoGradeLedgerObservation | "not-started" | "terminal";
 type RunnerStatus = Awaited<ReturnType<typeof runRepoGradeTarget>>["status"];
 type BlockReason = Exclude<RunnerStatus, RepoGradeOutcome | "terminal" | "storage-unavailable"> | "history-unavailable";
@@ -106,7 +106,7 @@ export function createRepoGradeStartupSchedule(
     const receipt = history.get(key);
     let state: TargetStatus;
     if (!receipt) state = { status: "blocked", reason: "history-unavailable" };
-    else if (receipt === "recoverable-partial") state = { status: "partial" };
+    else if (receipt === "recoverable-partial" || receipt === "recoverable-text") state = { status: "partial" };
     else if (receipt !== "never-attempted") state = { status: receipt };
     else if (!runtimeReady) state = { status: "blocked", reason: "runtime-unavailable" };
     else state = { status: "queued" };

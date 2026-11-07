@@ -52,6 +52,14 @@ describe("repository grading ledger RPC boundary", () => {
     await expect(claimRepoGrade({ ...automaticRequest, mode: "retry", recoveryRun: { runId: "invalid", lease: token } }))
       .resolves.toEqual({ status: "forbidden" });
   });
+  it("routes a supported-text capability retry to its separately fenced claim", async () => {
+    rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
+    await expect(claimRepoGrade({ ...automaticRequest, mode: "retry", recoveryRun: { runId: token, lease: token, capability: "text-extension-v1" } }))
+      .resolves.toEqual({ status: "claimed", claim: { mode: "retry", generation: 42, token } });
+    expect(rpc).toHaveBeenCalledWith("repo_grade_claim_text_recovery", expect.objectContaining({
+      p_run_id: token, p_lease: token, p_user_id: "owner", p_source_sha: automaticRequest.sha,
+    }));
+  });
   it("binds an explicit regrade claim to the exact live run and lease", async () => {
     rpc.mockReturnValue({ retry: () => Promise.resolve({ data: { status: "claimed", generation: 42, token }, error: null }) });
     const targetedRun = { runId: token, lease: token };

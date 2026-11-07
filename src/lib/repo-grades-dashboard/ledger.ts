@@ -74,7 +74,7 @@ export async function claimRepoGrade(request: RepoGradeClaimRequest): Promise<
     const { p_mode: mode, ...targetArgs } = args;
     if (mode !== "retry" || targetedRun || startupBatchId || !validRepoGradeCohortId(recoveryRun.runId)
       || !validRepoGradeCohortId(recoveryRun.lease)) return { status: "forbidden" };
-    response = await ledgerRpc("repo_grade_claim_prepared_recovery", {
+    response = await ledgerRpc(recoveryRun.capability === "text-extension-v1" ? "repo_grade_claim_text_recovery" : "repo_grade_claim_prepared_recovery", {
       ...targetArgs, p_run_id: recoveryRun.runId, p_lease: recoveryRun.lease,
       p_preparation_key: preparation?.key ?? null,
     }, true);

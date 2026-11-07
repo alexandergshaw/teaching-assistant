@@ -18,6 +18,7 @@ const CLAIM_AGE_LIMIT_MS = 15 * 60 * 1_000;
 const OBSERVATION_PRIORITY: Record<RepoGradeLedgerObservation, number> = {
   "never-attempted": 0,
   "recoverable-partial": 1,
+  "recoverable-text": 1,
   failed: 2,
   partial: 2,
   claimed: 3,
@@ -81,6 +82,21 @@ export async function readRepoGradeStartupHistory(
           : row.status === "partial" && row.mode === "automatic" && row.dispatch_state === "prepared" ? "recoverable-partial" : row.status;
         // Rows descend by generation, so equal priority keeps the newer receipt.
         if (OBSERVATION_PRIORITY[status] > OBSERVATION_PRIORITY[observed]) observationsByCommit.set(key, status);
+      }
+      // A prior retry can be considered only if the database also finds the
+      // linked unsupported-submission target and no spent capability marker.
+      // This is a scheduling hint; the claim repeats all checks atomically.
+      if ([...observationsByCommit.values()].some((status) => status === "partial")) {
+        const candidates = await client.rpc("repo_grade_text_recovery_candidates", {
+          p_user_id: ownerId, p_course_id: courseId, p_shas: [...subset],
+        }).abortSignal(signal).retry(false);
+        if (signal.aborted || candidates.error || !Array.isArray(candidates.data) || candidates.data.length > MAX_RECEIPTS) return null;
+        for (const candidate of candidates.data) {
+          if (!candidate || typeof candidate.repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate.repo)
+            || typeof candidate.folder !== "string" || typeof candidate.sha !== "string" || !subset.has(candidate.sha)) return null;
+          const key = commitKey({ accountId: ownerId, courseId, repo: candidate.repo, folder: candidate.folder, sha: candidate.sha });
+          if (observationsByCommit.get(key) === "partial") observationsByCommit.set(key, "recoverable-text");
+        }
       }
     }
     return new Map(targets.map((target) => [repoGradeStartupKey(target), observationsByCommit.get(commitKey(target))!]));

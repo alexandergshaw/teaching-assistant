@@ -14,7 +14,7 @@ import { isInstructionReadmeDocument } from "./repo-readme-instructions";
 // source maps (C3.9 boundary): "all code" is not "all bytes".
 const TEXT_EXT = new Set([
   // Docs / markup
-  "md", "mdx", "markdown", "adoc", "asciidoc", "txt", "rst", "tex", "xml",
+  "md", "mdx", "markdown", "adoc", "asciidoc", "txt", "text", "rst", "tex", "xml",
   // JS/TS family
   "js", "ts", "tsx", "jsx", "mjs", "cjs",
   // General-purpose languages
@@ -79,6 +79,14 @@ function isTextCandidate(path: string, mode?: string): boolean {
   if (ext) return TEXT_EXT.has(ext);
   const base = (path.split("/").pop() ?? path).toLowerCase();
   return NO_EXT_ALLOW.test(base) || mode === "100755";
+}
+
+/** Extensionless files have no type hint: reject known binary headers and
+ * control characters even if their bytes happen to be valid UTF-8. */
+function isSafeVerifiedExtensionlessText(text: string): boolean {
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/.test(text)) return false;
+  const prefix = text.slice(0, 1024);
+  return !prefix.includes("%PDF-") && !prefix.startsWith("%!PS-Adobe-");
 }
 
 // Read order: README first, then docs, then source — so the digest leads with intent.
@@ -197,6 +205,8 @@ export interface SelectDigestFilesOpts {
   maxBlobBytes: number;
   pathPrefix?: string;
   requireCompleteSubmission?: boolean;
+  /** Only when the selected blobs will be hash-verified and strictly decoded. */
+  allowVerifiedExtensionless?: boolean;
 }
 
 export interface DigestSelection {
@@ -244,7 +254,10 @@ export function selectDigestFiles(tree: RepoTreeEntry[], opts: SelectDigestFiles
         skipped.type += 1;
         continue;
       }
-      if (!isTextCandidate(t.path, t.mode)) {
+      const basename = t.path.split("/").pop() ?? "";
+      const verifiedExtensionless = opts.allowVerifiedExtensionless && !fileExt(t.path)
+        && !basename.startsWith(".") && (t.mode === "100644" || t.mode === "100755");
+      if (!isTextCandidate(t.path, t.mode) && !verifiedExtensionless) {
         skipped.type += 1;
         skipped.unsupported = (skipped.unsupported ?? 0) + 1;
         continue;
@@ -330,6 +343,7 @@ export async function ingestRepo(
   const selection = selectDigestFiles(scopedTree, {
     maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix,
     requireCompleteSubmission: sourceCommit !== undefined,
+    allowVerifiedExtensionless: sourceCommit !== undefined && !!opts.readPinnedFiles,
   });
   const inventory = boundSubmissionInventory({
     source: info.fullName + " @ " + readRef,
@@ -403,6 +417,9 @@ export async function ingestRepo(
       signal?.throwIfAborted();
       const text = archiveReader ? verifiedFiles?.get(f.path) : await getFileText(owner, repo, f.path, readRef, signal);
       if (text === undefined) throw new Error("Missing verified repository file.");
+      if (archiveReader && !fileExt(f.path) && !isSafeVerifiedExtensionlessText(text)) {
+        throw new Error("Extensionless repository file is not supported text.");
+      }
       body = text;
     } catch {
       signal?.throwIfAborted();

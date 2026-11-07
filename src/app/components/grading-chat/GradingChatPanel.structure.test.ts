@@ -52,7 +52,8 @@ describe("ChatComposer - slotProps.input vs top-level onKeyDown split (UX doc se
     expect(urlFieldIndex).toBeGreaterThan(-1);
     const fieldEnd = source.indexOf("/>", urlFieldIndex);
     const fieldMarkup = source.slice(urlFieldIndex, fieldEnd);
-    expect(fieldMarkup).toContain("onKeyDown={submitOnEnter(handleSendUrl)}");
+    expect(fieldMarkup).toContain("handleSendUrl()");
+    expect(fieldMarkup).toContain('event.key === "Enter"');
   });
 });
 
@@ -620,6 +621,17 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
 });
 
 describe("GradingChatPanel - controls #3: harshness control and wire", () => {
+  it("keeps grading options in a collapsed MUI accordion with the current strictness in its summary", () => {
+    const source = withoutLineComments(read(PANEL));
+    const start = source.indexOf('<Accordion className={chatStyles.gradingOptions}');
+    const summary = source.indexOf('Grading options ·', start);
+    const settings = source.indexOf('chatStyles.settingsGrid', summary);
+    expect(start).toBeGreaterThan(-1);
+    expect(summary).toBeGreaterThan(start);
+    expect(settings).toBeGreaterThan(summary);
+    expect(source.slice(start, summary)).not.toMatch(/defaultExpanded|expanded=/);
+    expect(source.slice(summary, settings)).toContain('harshness.charAt(0)');
+  });
   it("renders a SegmentedToggle with Lenient / Balanced / Strict, locked after the session starts", () => {
     const source = withoutLineComments(read(PANEL));
     const start = source.indexOf('label="Grading strictness"');

@@ -39,7 +39,8 @@ import { recordRepositoryCollection, recordRepositoryWorkflow } from "./chatRepo
 import { emptyRepositoryEvidence, type RepositoryEvidenceState } from "./chatRepositoryBatch";
 import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
-import { buildLedgerView, type LedgerView } from "./ingestLedger";
+import { buildLedgerView } from "./ingestLedger";
+import { LedgerNotice } from "./LedgerNotice";
 import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { visuallyHidden } from "../ui/visuallyHidden";
@@ -177,32 +178,6 @@ export interface GradingChatPanelProps {
   readonly copiedKey: string | null;
   readonly onCopy: (key: string, value: string) => Promise<void>;
   readonly onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
-}
-
-// BULK-ZIP BW4: the persistent ingest ledger. Session state, not a transient
-// alert: it renders from the retained driver ledger and the graded rows.
-function LedgerNotice({ view }: { view: LedgerView }) {
-  if (!view.hasAny) return null;
-  return (
-    <div className={controls.notice} aria-label="Zip ingest ledger">
-      {view.skipped.length > 0 && (
-        <p className={styles.ghMeta}>
-          {`Skipped (too large): ${view.skipped.map((s) => `${s.student} (${s.reason})`).join("; ")}`}
-        </p>
-      )}
-      {view.linkNotFetched.length > 0 && (
-        <p className={styles.ghMeta}>
-          {`Link could not be fetched (graded on the link note): ${view.linkNotFetched.map((s) => s.student).join(", ")}`}
-        </p>
-      )}
-      {view.failedFiles.length > 0 && (
-        <p className={styles.ghMeta}>{`Files that could not be read: ${view.failedFiles.join(", ")}`}</p>
-      )}
-      {!view.accountedFor && (
-        <p className={styles.ghMeta}>Some students in the zip are not accounted for. Re-upload the zip to check.</p>
-      )}
-    </div>
-  );
 }
 
 // WD run-diagnostics panel. Reads the hook's `diagnostics` view model. The copied
@@ -851,6 +826,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       )}
 
       </div>
+      <Accordion className={chatStyles.gradingOptions} disableGutters elevation={0}>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>
+          {`Grading options · ${harshness.charAt(0).toUpperCase()}${harshness.slice(1)}${applyNamingDeduction ? " · filename deduction" : ""}${applyLengthDeduction ? " · length deduction" : ""}${feedbackLengthText.trim() ? ` · ${feedbackLengthText.trim()}-word feedback` : ""}`}
+        </AccordionSummary>
+        <AccordionDetails>
       <div className={chatStyles.settingsGrid}>
         <SegmentedToggle
           label="Grading strictness"
@@ -911,6 +891,8 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           </Button>
         )}
       </div>
+        </AccordionDetails>
+      </Accordion>
 
         </AccordionDetails>
       </Accordion>
@@ -918,9 +900,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       <div className={chatStyles.sessionBar}>
         <div className={chatStyles.sessionMeta}>
           <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
-          {sessionReady && (
-            <p className={styles.ghMeta}>Instructions and rubric are locked for this session.</p>
-          )}
           {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
         </div>
       </div>

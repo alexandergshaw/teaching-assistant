@@ -21,10 +21,10 @@ import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
 import Accordion from "@mui/material/Accordion";
 import AccordionSummary from "@mui/material/AccordionSummary";
 import AccordionDetails from "@mui/material/AccordionDetails";
-import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
 import chatStyles from "./grading-chat.module.css";
 import type { CompositePartInput } from "./chatSubmissionIntake";
@@ -37,6 +37,7 @@ import { SubmissionDrop } from "./SubmissionDrop";
 import type { DirectFileOutcome } from "./chatDirectFileIntake";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { submitOneFileGroup } from "./submissionDropRoutes";
+import { dispatchComposite } from "./compositeSubmission";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -96,10 +97,17 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   // tray is empty by default, and while it is empty every mode submits
   // immediately exactly as before. "+ Add part" opts in.
   const [parts, setParts] = useState<CompositePartInput[]>([]);
+  const [compositePending, setCompositePending] = useState(false);
+  const [compositeUncertain, setCompositeUncertain] = useState(false);
+  const [compositeError, setCompositeError] = useState<string | null>(null);
+  const compositeLatch = useRef(false);
+  const mounted = useRef(true);
+  const controlsDisabled = disabled || compositePending;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [student, setStudent] = useState("");
   const trayActive = parts.length > 0;
 
-  const addParts = (added: CompositePartInput[]) => setParts((prev) => [...prev, ...added]);
+  const addParts = (added: CompositePartInput[]) => { if (!compositeLatch.current) setParts((prev) => [...prev, ...added]); };
   // A stopped recording hands back its frames as image Files; they join the
   // composite tray as file parts, so "Grade submission (N)" merges them into
   // ONE row through the existing composite path.
@@ -137,7 +145,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     const saved = persistComposerHeight(after);
     if (saved !== null) setComposerHeight(saved);
   };
-  const removePart = (index: number) => setParts((prev) => prev.filter((_, i) => i !== index));
+  const removePart = (index: number) => { if (!compositeLatch.current) setParts((prev) => prev.filter((_, i) => i !== index)); };
 
   const selectMode = (next: InputMode) => {
     setMode(next);
@@ -145,13 +153,13 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     // Selecting Record starts the capture directly. This MUST run here, inside
     // the click gesture: getDisplayMedia needs a user gesture, and an effect
     // watching `mode` would run after render and be blocked.
-    if (next === "record" && mode !== "record" && !disabled && !capture.recording && !capture.snapping && trayRoom >= 1) {
+    if (next === "record" && mode !== "record" && !controlsDisabled && !capture.recording && !capture.snapping && trayRoom >= 1) {
       void capture.start(trayRoom).catch(() => {});
     }
   };
 
   const handleAddTextPart = () => {
-    if (disabled || !text.trim()) return;
+    if (controlsDisabled || compositeLatch.current || !text.trim()) return;
     addParts([{ kind: "text", content: text }]);
     setText("");
     setLabel("");
@@ -168,12 +176,12 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const handlePickFile = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (files.length === 0 || disabled) return;
+    if (files.length === 0 || controlsDisabled || compositeLatch.current) return;
     addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
   };
 
   const handleSendUrl = () => {
-    if (disabled || !url.trim()) return;
+    if (controlsDisabled || compositeLatch.current || !url.trim()) return;
     if (trayActive) {
       handleAddUrlPart();
       return;
@@ -184,7 +192,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   };
 
   const handleAddUrlPart = () => {
-    if (disabled || !url.trim()) return;
+    if (controlsDisabled || compositeLatch.current || !url.trim()) return;
     addParts([{ kind: "url", url: url.trim() }]);
     setUrl("");
   };
@@ -193,7 +201,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   // then the EXISTING url submit takes over (meta-fill and the all-submissions
   // pull are inherited from it).
   const handleSendLms = async () => {
-    if (disabled || lmsBusy || !lms.canSubmit) return;
+    if (controlsDisabled || lmsBusy || !lms.canSubmit) return;
     setLmsBusy(true);
     setLmsError(null);
     try {
@@ -214,19 +222,30 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     else if (mode === "url") handleAddUrlPart();
   };
   const addPartDisabled =
-    disabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
+    controlsDisabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
 
-  const handleGrade = () => {
-    if (disabled || !trayActive) return;
-    onSubmitComposite(student.trim(), parts);
-    setParts([]);
-    setStudent("");
+  const handleGrade = async () => {
+    if (controlsDisabled || compositeLatch.current || compositeUncertain || !trayActive || capture.recording || capture.snapping) return;
+    compositeLatch.current = true;
+    setCompositePending(true);
+    setCompositeError(null);
+    const epoch = getSessionEpoch?.();
+    const outcome = await dispatchComposite(
+      () => onSubmitComposite(student.trim(), parts),
+      () => mounted.current && getSessionEpoch?.() === epoch,
+    );
+    compositeLatch.current = false;
+    if (!mounted.current) return;
+    setCompositePending(false);
+    if (outcome.kind === "accepted") { setParts([]); setStudent(""); }
+    else if (outcome.kind === "refused") setCompositeError(outcome.reason);
+    else setCompositeUncertain(true);
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    if (disabled) return;
+    if (controlsDisabled || compositeLatch.current) return;
     const files = Array.from(event.dataTransfer.files);
     if (!files.length) return;
     if (trayActive) {
@@ -237,7 +256,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
 
   return (
     <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <SubmissionDrop disabled={disabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
+      <SubmissionDrop disabled={controlsDisabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
         onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
         onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} />
       {dropNotice && <span role="status">Drop files in the submission area above.</span>}
@@ -245,11 +264,11 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
         <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>More submission options</AccordionSummary>
         <AccordionDetails>
       <div className={`${styles.ghActions} ${chatStyles.composerRow}`}>
-        <Button size="small" aria-pressed={mode === "text"} variant={mode === "text" ? "contained" : "outlined"} onClick={() => selectMode("text")} disabled={disabled}>Combine parts</Button>
-        <Button size="small" aria-pressed={mode === "url"} variant={mode === "url" ? "contained" : "outlined"} onClick={() => selectMode("url")} disabled={disabled}>Add link</Button>
-        <Button size="small" aria-pressed={mode === "record"} variant={mode === "record" ? "contained" : "outlined"} onClick={() => selectMode("record")} disabled={disabled}>Record</Button>
-        <Button size="small" aria-pressed={mode === "lms"} variant={mode === "lms" ? "contained" : "outlined"} onClick={() => selectMode("lms")} disabled={disabled}>From LMS</Button>
-        {mode === "text" && <><input ref={fileInputRef} type="file" multiple hidden onChange={handlePickFile} disabled={disabled} /><Button size="small" onClick={() => fileInputRef.current?.click()} disabled={disabled}>Add files as parts</Button></>}
+        <Button size="small" aria-pressed={mode === "text"} variant={mode === "text" ? "contained" : "outlined"} onClick={() => selectMode("text")} disabled={controlsDisabled}>Combine parts</Button>
+        <Button size="small" aria-pressed={mode === "url"} variant={mode === "url" ? "contained" : "outlined"} onClick={() => selectMode("url")} disabled={controlsDisabled}>Add link</Button>
+        <Button size="small" aria-pressed={mode === "record"} variant={mode === "record" ? "contained" : "outlined"} onClick={() => selectMode("record")} disabled={controlsDisabled}>Record</Button>
+        <Button size="small" aria-pressed={mode === "lms"} variant={mode === "lms" ? "contained" : "outlined"} onClick={() => selectMode("lms")} disabled={controlsDisabled}>From LMS</Button>
+        {mode === "text" && <><input ref={fileInputRef} type="file" multiple hidden onChange={handlePickFile} disabled={controlsDisabled} /><Button size="small" onClick={() => fileInputRef.current?.click()} disabled={controlsDisabled}>Add files as parts</Button></>}
         <Button variant="text" size="small" aria-label="Add part to composite submission" disabled={addPartDisabled} onClick={handleAddPart}>
           + Add part
         </Button>
@@ -257,7 +276,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
           variant="text"
           size="small"
           aria-label="Capture a screenshot of a window as a part"
-          disabled={disabled || trayRoom < 1 || capture.recording || capture.snapping}
+          disabled={controlsDisabled || trayRoom < 1 || capture.recording || capture.snapping}
           onClick={() => void capture.snapOnce()}
         >
           {capture.snapping ? "Capturing..." : "Snap screenshot"}
@@ -275,13 +294,15 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
         </span>
       )}
 
+      {compositeError && <Alert severity="warning">{compositeError}</Alert>}
+      {compositeUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setCompositeUncertain(false)}>I checked results</Button>}>The combined submission could not be confirmed. Check previous results before retrying.</Alert>}
       {trayActive && (
         <div role="group" aria-label="Composite submission parts">
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {parts.map((part, index) => (
               <li key={index} className={`${styles.adaptRow} ${chatStyles.composerRow}`}>
                 <span className={styles.ghMeta}>{describePart(part)}</span>
-                <Button variant="text" size="small" aria-label={`Remove part ${index + 1}`} disabled={disabled} onClick={() => removePart(index)}>
+                <Button variant="text" size="small" aria-label={`Remove part ${index + 1}`} disabled={controlsDisabled} onClick={() => removePart(index)}>
                   Remove
                 </Button>
               </li>
@@ -293,11 +314,11 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               className={chatStyles.composerLabel}
               label="Student name"
               value={student}
-              onChange={(event) => setStudent(event.target.value)}
-              onKeyDown={submitOnEnter(handleGrade)}
-              disabled={disabled}
+              onChange={(event) => { if (!compositeLatch.current) setStudent(event.target.value); }}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleGrade(); } }}
+              disabled={controlsDisabled}
             />
-            <Button variant="contained" aria-label="Grade submission" disabled={disabled} onClick={handleGrade}>
+            <Button variant="contained" aria-label="Grade submission" disabled={controlsDisabled || compositeUncertain || capture.recording || capture.snapping} onClick={() => void handleGrade()}>
               {`Grade submission (${parts.length})`}
             </Button>
           </div>
@@ -317,7 +338,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             placeholder="Paste text to add as a part"
             value={text}
             onChange={(event) => setText(event.target.value)}
-            disabled={disabled}
+            disabled={controlsDisabled}
             slotProps={{
               input: { onKeyDown: handleTextKeyDown },
               // resize reaches the real <textarea> (not .MuiInputBase-root):
@@ -332,7 +353,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               },
             }}
           />
-          <Button variant="outlined" disabled={disabled || !text.trim()} onClick={handleAddTextPart}>Add text part</Button>
+          <Button variant="outlined" disabled={controlsDisabled || !text.trim()} onClick={handleAddTextPart}>Add text part</Button>
         </div>
       )}
 
@@ -347,7 +368,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               variant="outlined"
               size="small"
               aria-label="Start recording the screen"
-              disabled={disabled || trayRoom < 1}
+              disabled={controlsDisabled || trayRoom < 1}
               onClick={() => void capture.start(trayRoom)}
             >
               Start recording
@@ -375,8 +396,8 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             label="Canvas, GitHub, or Google Drive URL"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            onKeyDown={submitOnEnter(handleSendUrl)}
-            disabled={disabled}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleSendUrl(); } }}
+            disabled={controlsDisabled}
           />
           <TextField
             size="small"
@@ -384,10 +405,10 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             label="Label (optional)"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
-            onKeyDown={submitOnEnter(handleSendUrl)}
-            disabled={disabled}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleSendUrl(); } }}
+            disabled={controlsDisabled}
           />
-          <Button variant="outlined" disabled={disabled || !url.trim()} onClick={handleSendUrl}>
+          <Button variant="outlined" disabled={controlsDisabled || !url.trim()} onClick={handleSendUrl}>
             Add
           </Button>
         </div>
@@ -395,7 +416,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
 
       {mode === "lms" && (() => {
         const instInd = lmsFieldIndication({
-          globallyDisabled: disabled,
+          globallyDisabled: controlsDisabled,
           parentSelected: true,
           loading: lms.loading.institutions,
           error: lms.errors.institutions,
@@ -404,7 +425,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
           ...LMS_INSTITUTION_COPY,
         });
         const courseInd = lmsFieldIndication({
-          globallyDisabled: disabled,
+          globallyDisabled: controlsDisabled,
           parentSelected: !!lms.institution,
           loading: lms.loading.courses,
           error: lms.errors.courses,
@@ -412,7 +433,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
           ...LMS_COURSE_COPY,
         });
         const assignmentInd = lmsFieldIndication({
-          globallyDisabled: disabled,
+          globallyDisabled: controlsDisabled,
           parentSelected: !!lms.courseId,
           loading: lms.loading.assignments,
           error: lms.errors.assignments,
@@ -472,7 +493,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               </MenuItem>
             ))}
           </TextField>
-          <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={disabled || lmsBusy || !lms.canSubmit} onClick={() => void handleSendLms()}>
+          <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={controlsDisabled || lmsBusy || !lms.canSubmit} onClick={() => void handleSendLms()}>
             {lmsBusy ? "Working..." : "Grade"}
           </Button>
           {lmsError && (

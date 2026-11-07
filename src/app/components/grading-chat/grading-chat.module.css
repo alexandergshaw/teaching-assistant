@@ -211,8 +211,17 @@
 }
 
 .settingsGrid {
-  margin-top: var(--space-4);
   align-items: start;
+}
+
+.gradingOptions {
+  margin-top: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md) !important;
+}
+
+.gradingOptions::before {
+  display: none;
 }
 
 .thresholdField {

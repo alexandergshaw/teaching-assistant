@@ -220,7 +220,26 @@
 }
 
 .repoIdentity {
-  margin-top: var(--space-1);
+  min-width: 0;
+}
+
+.columnSelectionHeading,
+.repoSelectionRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.columnSelectionHeading > :last-child,
+.repoSelectionRow > :last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.grid .selectionCheckbox {
+  flex: 0 0 auto;
+  padding: var(--space-1);
 }
 
 .repoIdentityControls {

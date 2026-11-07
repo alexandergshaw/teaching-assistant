@@ -85,6 +85,7 @@
 }
 
 .matrixResult {
+  --rg-cell-controls-top: 0px;
   display: grid;
   justify-items: start;
   gap: var(--space-1);
@@ -92,9 +93,13 @@
   width: 100%;
 }
 
+.matrixResultWithRepoHead {
+  --rg-cell-controls-top: calc(1.5rem + var(--space-1));
+}
+
 .matrixActions {
   position: absolute;
-  inset: 0 0 auto auto;
+  inset: var(--rg-cell-controls-top) 0 auto auto;
   z-index: 1;
 }
 
@@ -104,7 +109,7 @@
 
 .matrixSelection {
   position: absolute !important;
-  inset: 0 auto auto 0;
+  inset: var(--rg-cell-controls-top) auto auto 0;
 }
 
 .matrixScoreHead {

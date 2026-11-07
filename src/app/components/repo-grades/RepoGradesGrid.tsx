@@ -536,7 +536,8 @@ export default function RepoGradesGrid({
             return (
               <TableCell component="th" scope="col" role="columnheader" key={folder}
                 aria-sort={sortAriaValue(folderSortActive, sort.direction)}>
-                <Checkbox size="small" checked={columnTargets.length > 0 && selectedCount === columnTargets.length}
+                <div className={styles.columnSelectionHeading}>
+                <Checkbox size="small" className={styles.selectionCheckbox} checked={columnTargets.length > 0 && selectedCount === columnTargets.length}
                   indeterminate={selectedCount > 0 && selectedCount < columnTargets.length} disabled={!folder || columnTargets.length === 0}
                   onChange={() => onToggleGradeCells(columnTargets)}
                   slotProps={{ input: { "aria-label": `Select all repositories in ${label}` } }} />
@@ -580,6 +581,7 @@ export default function RepoGradesGrid({
                       pending={durableGradePending} root={!folder} onStart={() => onGradeColumn(folder)} onControl={onControlTarget} />
                   </div>
                 )}
+                </div>
               </TableCell>
             );
           })}
@@ -594,8 +596,8 @@ export default function RepoGradesGrid({
               {repos.map((repo) => {
                 const rowTargets = visibleColumns.filter(({ folder }) => !!folder).map(({ folder }) => ({ repo: repo.name, folder }));
                 const rowCount = rowTargets.filter(({ folder }) => selectedGradeCells.has(gradeSelectionKey(repo.name, folder))).length;
-                return <div key={repo.name}>
-                  <Checkbox size="small" checked={rowTargets.length > 0 && rowCount === rowTargets.length}
+                return <div key={repo.name} className={styles.repoSelectionRow}>
+                  <Checkbox size="small" className={styles.selectionCheckbox} checked={rowTargets.length > 0 && rowCount === rowTargets.length}
                     indeterminate={rowCount > 0 && rowCount < rowTargets.length} disabled={!rowTargets.length}
                     onChange={() => onToggleGradeCells(rowTargets)}
                     slotProps={{ input: { "aria-label": `Select ${repo.name} for all visible assignments` } }} />
@@ -614,7 +616,7 @@ export default function RepoGradesGrid({
                     const row = repo.active;
                     const cell = row?.cells[folder];
                     return (
-                      <div key={repo.name} className={dashboardStyles.matrixResult}>
+                      <div key={repo.name} className={`${dashboardStyles.matrixResult} ${hasMultipleRepos ? dashboardStyles.matrixResultWithRepoHead : ""}`}>
                         {hasMultipleRepos && <div className={dashboardStyles.matrixRepoHead} title={multipleRepos ? repo.name : undefined}>
                           {multipleRepos && <strong>{repo.name}</strong>}
                         </div>}
@@ -624,7 +626,7 @@ export default function RepoGradesGrid({
                           hasGradedResult={repo.cells.get(folder)?.saved?.latest.status === "succeeded"}
                           available={durableGradeAvailable} pending={durableGradePending} root={!folder}
                           onStart={() => onGradeTarget(repo.name, folder)} onControl={onControlTarget} /></div>
-                        <Checkbox size="small" disabled={!folder} className={dashboardStyles.matrixSelection}
+                        <Checkbox size="small" disabled={!folder} className={`${dashboardStyles.matrixSelection} ${styles.selectionCheckbox}`}
                           checked={selectedGradeCells.has(gradeSelectionKey(repo.name, folder))}
                           onChange={() => onToggleGradeCells([{ repo: repo.name, folder }])}
                           slotProps={{ input: { "aria-label": `Select ${repo.name} for ${label}` } }} />
@@ -668,7 +670,7 @@ function RepoGradebookIdentity({ repo, row, linked, selectedFolder, selected, on
   return (
     <div className={styles.repoIdentity}>
       <div className={styles.repoIdentityControls}>
-        <Checkbox size="small" checked={selected.has(row.repo)}
+        <Checkbox size="small" className={styles.selectionCheckbox} checked={selected.has(row.repo)}
           slotProps={{ input: { "aria-label": `Select ${row.repo}` } }}
           onChange={() => onToggleSelected(row.repo)} />
         {repoLinkHref ? (

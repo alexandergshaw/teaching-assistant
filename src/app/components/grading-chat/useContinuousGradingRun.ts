@@ -6,23 +6,8 @@
 // fixed-total drain over one FormData; this surface has no known total,
 // submissions keep arriving (docs/grading-chat-architecture.md section 2).
 //
-// Reuses the pure plan leaf (incrementalRunPlan.ts) unchanged:
-// mergeArrivedResults/buildIncrementalRun/classifyItemFailure/canonicalColumns
-// are all keyed on sourceIndex, which is exactly what makes them append-safe
-// for a growing queue. The transport shape (postGradeRunItem) and the
-// per-item try/catch idiom are copied from useIncrementalGradingRun.ts, not
-// imported (they are file-private there).
-//
-// RES-GC-9 (docs/grading-chat-reliability.md section 3): the wedge risk. A
-// hand-rolled event-driven pool that decrements `inFlight` and re-invokes
-// `pump()` only on the RESOLVED path of a dispatch permanently loses a slot
-// on every rejection - after INCREMENTAL_CONCURRENCY consecutive failures the
-// pool silently stops accepting real work while still returning `{kind:
-// "accepted"}`. This driver's `pump()` below uses a single `.finally()` on
-// every dispatch so the decrement-and-pump step runs on BOTH the resolved and
-// the rejected path, unconditionally - the same guarantee the batch pool gets
-// for free from its worker-loop shape (the retry is the next line of the same
-// function, not a second scheduled callback).
+// Reuses incrementalRunPlan's sourceIndex-based result merging. The pump frees
+// its slot on both successful and failed dispatches (RES-GC-9).
 //
 // react budget matches useIncrementalGradingRun.ts: only useRef/useState are
 // imported from "react", so this file can be driven by the same no-render
@@ -377,6 +362,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const pump = () => {
     while (inFlightRef.current < INCREMENTAL_CONCURRENCY && queueRef.current.length > 0) {
       const request = queueRef.current.shift()!;
+      const dispatchSessionId = sessionIdRef.current;
       inFlightRef.current += 1;
       setInFlight(inFlightRef.current);
       inFlightIndexRef.current.add(request.sourceIndex);
@@ -401,6 +387,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       });
       dispatchItem(request, sink)
         .then((result) => {
+          if (dispatchSessionId !== sessionIdRef.current) return;
           // Restore the FULL submittedFiles (the POST carried the stripped copy)
           // so the Files-UI download of non-visual files survives.
           const full = retainedBodiesRef.current.get(request.sourceIndex) ?? request;
@@ -420,6 +407,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           });
         })
         .catch((err) => {
+          if (dispatchSessionId !== sessionIdRef.current) return;
           safeDiagnostic(() => {
             const detail = buildGradeItemDetail({ ...attemptSignals(), failure: clientFailureClass(sink) }, sink.diagnostic);
             recordItem(request, itemStartedAtMs, classifyChatSeamFailure(err) === "timed out" ? "timed out" : "grade failed", detail);
@@ -436,6 +424,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           });
         })
         .finally(() => {
+          if (dispatchSessionId !== sessionIdRef.current) return;
           pendingRef.current.delete(request.sourceIndex);
           inFlightIndexRef.current.delete(request.sourceIndex);
           inFlightRef.current -= 1;
@@ -633,6 +622,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         // postPrepareVideo never throws; this guards an injected replacement.
         prepared = { kind: "refused", reason: "The video could not be prepared.", videoFailure: "upload failed" };
       }
+      if (sessionIdRef.current !== sessionAtStart) {
+        return { kind: "refused", reason: "The session was reset while the video was being prepared. Nothing was graded." };
+      }
       if (prepared.kind === "refused") {
         recordVideoSettled({ startedAtMs: prepareStartedAtMs, settledAtMs: chatSeamNowMs(), failure: prepared.videoFailure });
         return { kind: "refused", reason: prepared.reason };
@@ -652,7 +644,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
             rubric: header.effectiveRubric,
           });
         } finally {
-          setClassifyingRecording(false);
+          if (sessionIdRef.current === sessionAtStart) setClassifyingRecording(false);
         }
       }
       if (sessionIdRef.current !== sessionAtStart) {
@@ -746,6 +738,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         formData.set("label", input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "");
       }
       formData.set("provider", provider);
+      const prepareSessionId = sessionIdRef.current;
       const prepareStartedAtMs = chatSeamNowMs();
       let outcome: Awaited<ReturnType<typeof prepareChatSubmissionAction>>;
       try {
@@ -754,9 +747,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
             ? await prepareCompositeSubmissionAction(formData)
             : await prepareChatSubmissionAction(formData);
       } catch (err) {
+        if (sessionIdRef.current !== prepareSessionId) return { kind: "refused", reason: "The session was reset while the submission was being prepared. Nothing was graded." };
         recordChatSeamSettled({ operation: "prepare_submission", startedAtMs: prepareStartedAtMs, failureClass: "interrupted" });
         throw err;
       }
+      if (sessionIdRef.current !== prepareSessionId) return { kind: "refused", reason: "The session was reset while the submission was being prepared. Nothing was graded." };
       safeDiagnostic(() =>
         recordPrepareDetail({
           startedAtMs: prepareStartedAtMs,

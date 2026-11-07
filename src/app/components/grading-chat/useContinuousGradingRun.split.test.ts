@@ -154,6 +154,42 @@ function classifyDiag() {
 const SUBMIT = { kind: "storaged-video", storagePath: VIDEO_PATH, name: "demo.mp4" } as const;
 
 describe("useContinuousGradingRun - recording split (flag on)", () => {
+  it("does not classify a prepared video after its session was reset", async () => {
+    let completePreparation!: (value: Awaited<ReturnType<PrepareVideoFn>>) => void;
+    prepareVideoMock.mockReturnValueOnce(new Promise((resolve) => { completePreparation = resolve; }));
+    await beginReady(useTestDriver());
+    const oldSubmission = useTestDriver().submit(SUBMIT);
+    useTestDriver().reset();
+    await beginReady(useTestDriver());
+    completePreparation({ kind: "entry", entry: videoEntry("Old student") });
+    expect(await oldSubmission).toMatchObject({ kind: "refused", reason: expect.stringContaining("session was reset") });
+    expect(classifyMock).not.toHaveBeenCalled();
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old classification clear a new session's loading indicator", async () => {
+    let completeOld!: (value: Awaited<ReturnType<ClassifyRecordingFn>>) => void;
+    let completeNew!: (value: Awaited<ReturnType<ClassifyRecordingFn>>) => void;
+    classifyMock.mockReturnValueOnce(new Promise((resolve) => { completeOld = resolve; }));
+    classifyMock.mockReturnValueOnce(new Promise((resolve) => { completeNew = resolve; }));
+    await beginReady(useTestDriver());
+    const oldSubmission = useTestDriver().submit(SUBMIT);
+    await flushMicrotasks();
+    expect(useTestDriver().classifyingRecording).toBe(true);
+    useTestDriver().reset();
+    await beginReady(useTestDriver());
+    const newSubmission = useTestDriver().submit(SUBMIT);
+    await flushMicrotasks();
+    expect(useTestDriver().classifyingRecording).toBe(true);
+    completeOld({ split: { kind: "single" }, failed: false });
+    expect(await oldSubmission).toMatchObject({ kind: "refused", reason: expect.stringContaining("session was reset") });
+    expect(useTestDriver().classifyingRecording).toBe(true);
+    completeNew({ split: { kind: "single" }, failed: false });
+    expect(await newSubmission).toMatchObject({ kind: "accepted", entryCount: 1 });
+    expect(useTestDriver().classifyingRecording).toBe(false);
+    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+  });
+
   it("classifies once with the stored ref and the frozen assignment context", async () => {
     classifyMock.mockResolvedValue({ split: { kind: "single" }, failed: false });
     await beginReady(useTestDriver());

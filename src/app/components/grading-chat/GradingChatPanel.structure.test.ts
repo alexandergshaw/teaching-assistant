@@ -12,22 +12,14 @@ function read(relativePath: string): string {
 const PANEL = "src/app/components/grading-chat/GradingChatPanel.tsx";
 const COMPOSER = "src/app/components/grading-chat/ChatComposer.tsx";
 
-describe("GradingChatPanel - RES-GC-11 disclosure floor", () => {
-  it("renders the not-saved disclosure constant, not only defines it", () => {
+describe("GradingChatPanel - empty results", () => {
+  it("omits the introductory block while retaining active results", () => {
     const source = read(PANEL);
-    expect(source).toContain("CHAT_SESSION_NOT_SAVED_DISCLOSURE");
-    // The constant must actually be rendered in JSX, not merely declared -
-    // RED if the panel defines the string but never places it on screen.
-    expect(source).toMatch(/\{CHAT_SESSION_NOT_SAVED_DISCLOSURE\}/);
-  });
-
-  it("the disclosure text names both a reload and a tab close as loss triggers", () => {
-    const source = read(PANEL);
-    const match = source.match(/CHAT_SESSION_NOT_SAVED_DISCLOSURE\s*=\s*\n?\s*"([^"]*)"/);
-    expect(match, "expected to find the disclosure string literal").not.toBeNull();
-    const text = match![1];
-    expect(text.toLowerCase()).toContain("reload");
-    expect(text.toLowerCase()).toMatch(/closing this tab|close/);
+    expect(source).not.toContain("This session is not saved");
+    expect(source).not.toContain("first submission below");
+    expect(source).toContain("{hasRows && driver.run && (");
+    expect(source).toContain("<GradingResults");
+    expect(source).toContain("<RunDiagnostics");
   });
 });
 

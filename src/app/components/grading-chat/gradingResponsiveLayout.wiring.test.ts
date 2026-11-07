@@ -34,7 +34,6 @@ describe("responsive grading chat presentation wiring", () => {
     expect(panel.indexOf('setupSummaryRef.current?.focus()')).toBeLessThan(panel.indexOf("setSetupExpanded(false)"));
     const reset = panel.slice(panel.indexOf("const handleNewSession"), panel.indexOf("const withPreparing"));
     expect(reset.indexOf("window.confirm")).toBeLessThan(reset.indexOf("setSetupExpanded(true)"));
-    expect(panel.indexOf("{CHAT_SESSION_NOT_SAVED_DISCLOSURE}")).toBeGreaterThan(panel.indexOf("</Accordion>", panel.indexOf("<Accordion ref={setupRef}")));
   });
 
   it("turns sticking off for narrow or short viewports and bounds the rendered floor", () => {

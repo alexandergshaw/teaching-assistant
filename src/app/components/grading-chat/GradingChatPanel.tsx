@@ -74,13 +74,6 @@ import controls from "../recording/RecordingControls.module.css";
 // nothing. The setup fields start blank; the Canvas-scoped chat memory
 // (chatSetupMemory.ts, restored inside ensureSession) is the only persistence.
 
-// RES-GC-11 (docs/grading-chat-reliability.md section 4): the reliability
-// floor. This session is held in memory only - a reload, tab close, or crash
-// loses every accumulated row and anything still grading. Shown persistently
-// (not only after the loss), so the instructor can plan a stopping point.
-export const CHAT_SESSION_NOT_SAVED_DISCLOSURE =
-  "This session is not saved. Reloading or closing this tab loses every graded row and anything still grading.";
-
 // Grading harshness (docs/grading-chat-controls-scope.md item 3): persisted as
 // a UI preference, captured once at beginSession and frozen for the session.
 const HARSHNESS_STORAGE_KEY = "ta-grading-chat-harshness";
@@ -867,14 +860,9 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         </AccordionDetails>
       </Accordion>
 
-      <div className={chatStyles.sessionBar}>
-        <div className={chatStyles.sessionMeta}>
-          <p className={styles.ghMeta}>{CHAT_SESSION_NOT_SAVED_DISCLOSURE}</p>
-          {setupNote && <p className={styles.ghMeta}>{setupNote}</p>}
-        </div>
-      </div>
+      {setupNote && <p role="status" className={styles.ghMeta}>{setupNote}</p>}
 
-      {hasRows && driver.run ? (
+      {hasRows && driver.run && (
         <div className={chatStyles.stream}>
         {driver.run && <RubricProvenance run={driver.run} />}
         <SubmissionClassificationBadge classification={driver.run.submissionClassification} />
@@ -896,8 +884,6 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         />
         <RunDiagnostics items={driver.diagnostics} copiedKey={copiedKey} onCopy={onCopy} />
         </div>
-      ) : (
-        <p className={chatStyles.streamEmpty}>Set instructions and a rubric above, then drop in your first submission below.</p>
       )}
 
       <div className={chatStyles.auxiliary}>

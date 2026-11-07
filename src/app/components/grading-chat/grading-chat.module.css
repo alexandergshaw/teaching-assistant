@@ -40,38 +40,11 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
-/* Session metadata stays in the document flow below setup. */
-.sessionBar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.sessionMeta {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  flex: 1 1 320px;
-  min-width: 0;
-}
-
 /* Results region: keeps the provenance hint and rubric card close to the table. */
 .stream {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-}
-
-.streamEmpty {
-  padding: var(--space-6) var(--space-4);
-  border: 1px dashed var(--field-border);
-  border-radius: var(--radius-md);
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: var(--font-size-md);
-  line-height: var(--line-normal);
 }
 
 /* Composer rows inside the dock. */

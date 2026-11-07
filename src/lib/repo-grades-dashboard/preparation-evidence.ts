@@ -13,9 +13,18 @@ const README_DEADLINE_MS = 40_000;
 type TrustedPreparationRequest = Omit<RepoGradePreparationInput, "readmeEvidence">;
 type ReadmeRow = RepoGradePreparationInput["readmeEvidence"][number];
 type Capture = ReturnType<typeof captureRepoGradePreparationInput>;
-type Blocked = Extract<Capture, { status: "blocked" }> | Readonly<{
+export type RepoGradeReadmeExample = Readonly<{
+  kind: "absent" | "blank" | "conflict";
+  repo: string;
+  comparedRepo?: string;
+}>;
+export function isSafeReadmeExampleRepo(repo: string): boolean {
+  return repo.length <= 220 && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo);
+}
+type Blocked = Readonly<{
   status: "blocked";
-  reason: "readme-read-failed" | "readme-target-budget-exceeded" | "readme-deadline-exceeded";
+  reason: Extract<Capture, { status: "blocked" }>["reason"] | "readme-read-failed" | "readme-target-budget-exceeded" | "readme-deadline-exceeded";
+  example?: RepoGradeReadmeExample;
 }>;
 export type RepoGradePreparationEvidenceFailure = Blocked["reason"];
 
@@ -31,7 +40,11 @@ function boundEvidence(
   if (read.status === "present") {
     return { target, source: { kind: "pinned-readme", path: read.path, instructions: read.text } };
   }
-  if (!fallbackConfigured) return { status: "blocked", reason: "missing-instruction-evidence" };
+  if (!fallbackConfigured) {
+    const repo = `${target.owner}/${target.repo}`;
+    return { status: "blocked", reason: "missing-instruction-evidence",
+      ...(isSafeReadmeExampleRepo(repo) && { example: { kind: read.status, repo } }) };
+  }
   if (read.status === "absent") {
     return { target, source: { kind: "configured-fallback", readmeStatus: "absent" } };
   }
@@ -72,11 +85,14 @@ export async function composeRepoGradePreparationEvidence(input: TrustedPreparat
   const deadlineAt = performance.now() + README_DEADLINE_MS;
   let nextTarget = 0;
   let instructions: string | undefined;
+  let firstRepo: string | undefined;
+  let firstSourceIsReadme = false;
 
-  function stop(reason: Blocked["reason"]) {
+  function stop(reason: Blocked["reason"], example?: RepoGradeReadmeExample) {
     if (controller.signal.aborted) return;
     controller.abort();
-    blocked.resolve({ status: "blocked", reason });
+    blocked.resolve(example && (reason === "missing-instruction-evidence" || reason === "conflicting-instructions")
+      ? { status: "blocked", reason, example } : { status: "blocked", reason });
   }
 
   function active() {
@@ -90,10 +106,18 @@ export async function composeRepoGradePreparationEvidence(input: TrustedPreparat
       const read = await readPinnedRepoGradeReadme(target, configuration.folder, controller.signal, configuration.accountId);
       if (!active()) return;
       const row = boundEvidence(target, read, fallback !== undefined);
-      if ("status" in row) return stop(row.reason);
+      if ("status" in row) return stop(row.reason, "example" in row ? row.example : undefined);
       const exactInstructions = row.source.kind === "pinned-readme" ? row.source.instructions : fallback;
       instructions ??= exactInstructions;
-      if (instructions !== exactInstructions) return stop("conflicting-instructions");
+      const currentRepo = `${target.owner}/${target.repo}`;
+      if (instructions !== exactInstructions) return stop("conflicting-instructions", firstRepo
+        && firstSourceIsReadme && row.source.kind === "pinned-readme"
+        && isSafeReadmeExampleRepo(firstRepo) && isSafeReadmeExampleRepo(currentRepo)
+        ? { kind: "conflict", repo: currentRepo, comparedRepo: firstRepo } : undefined);
+      if (!firstRepo) {
+        firstRepo = currentRepo;
+        firstSourceIsReadme = row.source.kind === "pinned-readme";
+      }
       evidence.push(row);
     }
   }

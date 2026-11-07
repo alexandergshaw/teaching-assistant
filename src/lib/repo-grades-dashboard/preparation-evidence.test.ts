@@ -153,14 +153,14 @@ describe("composeRepoGradePreparationEvidence", () => {
     fetchMock.mockClear();
     await expect(composeRepoGradePreparationEvidence(request({
       inventory: { status: "complete", targets: [first, updated] },
-    }))).resolves.toEqual({ status: "blocked", reason: "conflicting-instructions" });
+    }))).resolves.toMatchObject({ status: "blocked", reason: "conflicting-instructions", example: { kind: "conflict" } });
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([a.urls.commit, ...Object.values(next.urls)].sort());
   });
 
   it.each([undefined, " \t\r\n"])("blocks a cohort with a missing or blank README without a configured fallback (%j)", async (text) => {
     mockFetch([githubFixture(first, text), githubFixture(second, exactInstructions)]);
-    await expect(composeRepoGradePreparationEvidence(request())).resolves.toEqual({
-      status: "blocked", reason: "missing-instruction-evidence",
+    await expect(composeRepoGradePreparationEvidence(request())).resolves.toMatchObject({
+      status: "blocked", reason: "missing-instruction-evidence", example: { kind: text === undefined ? "absent" : "blank", repo: `${first.owner}/${first.repo}` },
     });
   });
 
@@ -187,8 +187,10 @@ describe("composeRepoGradePreparationEvidence", () => {
       mockFetch([githubFixture(first, text), githubFixture(second, text === undefined ? "Different instructions" : exactInstructions)]);
       const instructionPolicy = text === undefined ? fallback : { kind: "readme" } as const;
       for (const targets of [[first, second], [second, first]]) {
-        await expect(composeRepoGradePreparationEvidence(request({ instructionPolicy, inventory: { status: "complete", targets } })))
-          .resolves.toEqual({ status: "blocked", reason: "conflicting-instructions" });
+        const result = await composeRepoGradePreparationEvidence(request({ instructionPolicy, inventory: { status: "complete", targets } }));
+        expect(result).toMatchObject({ status: "blocked", reason: "conflicting-instructions" });
+        if (text === undefined) expect(result).not.toHaveProperty("example");
+        else expect(result).toMatchObject({ example: { kind: "conflict" } });
       }
     }
   });

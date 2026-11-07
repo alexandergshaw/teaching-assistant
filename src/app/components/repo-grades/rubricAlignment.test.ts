@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { alignRubricScores, collectRubricOrder } from "./rubricAlignment";
+import { alignRubricScores, collectRubricOrder, rubricSlotHeight } from "./rubricAlignment";
 
 describe("rubric alignment", () => {
+  it("includes padding and borders in the shared border-box slot height", () => {
+    expect(rubricSlotHeight(40, 8)).toBe(48);
+    expect(rubricSlotHeight(40.2, 8)).toBe(49);
+    expect(rubricSlotHeight(0, 0)).toBe(0);
+  });
   it("places scores in a shared order and reserves missing criteria", () => {
     const groups = [[{ area: "Design", score: "3/4" }, { area: "Tests", score: "2/2" }],
       [{ area: "Tests", score: "1/2" }, { area: "Readability", score: "4/4" }]];

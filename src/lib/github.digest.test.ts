@@ -198,6 +198,42 @@ describe("ingestRepo - per-file truncated is computed per file, not guessed", ()
     archived: false,
   };
 
+  it("does not fetch an unpinned student's assignment README when template instructions are supplied", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ truncated: false, entries: [
+      blob("README.md"), blob("lab/README.md"), blob("lab/readme.txt"), blob("lab/docs/README.md"),
+      blob("lab/README-assignment.md"), blob("lab/assignment-readme.MD"),
+      blob("lab/README.html"), blob("lab/docs/assignment-readme.TEX"), blob("lab/README.xml"),
+      blob("lab/README.markdown"), blob("lab/README.adoc"), blob("lab/README.asciidoc"),
+      blob("lab/readme_processor.py"), blob("lab/main.py"), blob("other/README.md"),
+    ] });
+    vi.mocked(getFileText).mockReset().mockResolvedValue("student code");
+    const digest = await ingestRepo("org", "repo", { pathPrefix: "lab", excludeInstructionReadme: true });
+    expect(digest.files.map((file) => file.path).sort()).toEqual(["lab/main.py", "lab/readme_processor.py"]);
+    expect(vi.mocked(getFileText).mock.calls.map((call) => call[2]).sort()).toEqual(["lab/main.py", "lab/readme_processor.py"]);
+  });
+
+  it("loads markdown and AsciiDoc README documents when reading a template repository", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ truncated: false, entries: [
+      blob("module_01/README.markdown"), blob("module_02/README.adoc"), blob("module_03/README.asciidoc"),
+    ] });
+    vi.mocked(getFileText).mockReset().mockResolvedValue("template instructions");
+    const digest = await ingestRepo("org", "template");
+    expect(digest.files.map((file) => file.path).sort()).toEqual([
+      "module_01/README.markdown", "module_02/README.adoc", "module_03/README.asciidoc",
+    ]);
+  });
+
+  it("never treats a README outside the unpinned assignment folder as its instructions", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({ truncated: false, entries: [blob("README.md"), blob("lab/main.py")] });
+    vi.mocked(getFileText).mockReset().mockResolvedValue("student code");
+    const digest = await ingestRepo("org", "repo", { pathPrefix: "lab", excludeInstructionReadme: true });
+    expect(digest.files.map((file) => file.path)).toEqual(["lab/main.py"]);
+    expect(vi.mocked(getFileText).mock.calls.map((call) => call[2])).toEqual(["lab/main.py"]);
+  });
+
   it("a file entirely within perFileBytes is NOT truncated", async () => {
     vi.mocked(getRepo).mockResolvedValue(repoInfo);
     vi.mocked(getRepoTreeWithMeta).mockResolvedValue({

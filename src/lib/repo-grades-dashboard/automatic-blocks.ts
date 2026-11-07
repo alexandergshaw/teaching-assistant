@@ -1,7 +1,7 @@
 import type { AutomaticRepoGradeTargetState } from "./automatic-status";
 
 export const AUTOMATIC_GRADE_DETAIL_STATES: readonly AutomaticRepoGradeTargetState[] =
-  ["blocked", "embedded-profile-required", "partial"];
+  ["blocked", "embedded-profile-required", "partial", "no-submission"];
 
 export type AutomaticRepoGradeBlock = {
   repo: string;
@@ -9,6 +9,13 @@ export type AutomaticRepoGradeBlock = {
   sourceRef: string;
   explanation: string;
   partial?: true;
+  noSubmission?: true;
+  sourceSha?: string;
+  noSubmissionStale?: true;
+  noSubmissionExplicit?: true;
+  observedSourceSha?: string;
+  observedState?: string;
+  observedRunStartedAt?: string;
   runStartedAt?: string;
 };
 

@@ -6,17 +6,87 @@ import { PreparationGithubThrottle } from "./preparation-github-throttle";
 import { prepareRepoGradeStartupProfile } from "./preparation-runtime";
 import { PreparationEvidenceContinue } from "./automatic-evidence";
 
-const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn() }));
+const mocks = vi.hoisted(() => ({ plan: vi.fn(), evaluate: vi.fn(), history: vi.fn(), snapshot: vi.fn(), evidenceStore: vi.fn(), cooldown: vi.fn(), targeted: vi.fn(), authorize: vi.fn() }));
 vi.mock("@/lib/github-grade-archive", () => ({ confirmedGradeSourceCooldown: mocks.cooldown }));
 vi.mock("./runner", () => ({ planRepoGradeCourse: mocks.plan, runRepoGradeTarget: mocks.evaluate }));
 vi.mock("./automatic-store", () => ({ readAutomaticRepoGradeSnapshot: mocks.snapshot, automaticRepoGradeEvidenceStore: mocks.evidenceStore, isTargetedAutomaticRepoGrade: mocks.targeted }));
 vi.mock("./startup-history", () => ({ readRepoGradeStartupHistory: mocks.history }));
+vi.mock("./automatic-evidence", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./automatic-evidence")>(), authorizeAutomaticRepoGradeEvidence: mocks.authorize,
+}));
 vi.mock("./preparation-runtime", () => ({
   prepareEmbeddedRepoGradeStartupProfile: vi.fn(), prepareRepoGradeStartupProfile: vi.fn(),
 }));
 
 describe("durable repository grading discovery", () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.snapshot.mockResolvedValue({ status: "legacy" }); mocks.targeted.mockResolvedValue(false); mocks.authorize.mockResolvedValue(true); });
+
+  it("settles a targeted prior grade as verified empty without rubric or model work", async () => {
+    const sha = "a".repeat(40), work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+      repo: "Org/Student", folder: "lab", ref: "main", sha } as const;
+    const discovery = { status: "scanned", enumerationComplete: true, repos: [{ status: "ready", repo: work.repo,
+      sourceRef: work.ref, sourceCommit: sha, folders: ["lab"], emptyFolders: ["lab"] }] };
+    mocks.snapshot.mockResolvedValue({ status: "ready", snapshot: { basis: "b".repeat(64), discovery } });
+    mocks.plan.mockResolvedValue({ discovery, folderSources: new Map() });
+    mocks.targeted.mockResolvedValue(true);
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "succeeded"])));
+    const worker = createAutomaticRepoGradeWorker("coordinated");
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "verified-empty-regrade" });
+    expect(mocks.authorize).toHaveBeenCalledWith(work.repo, sha);
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    mocks.authorize.mockResolvedValueOnce(false);
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "blocked", reason: "source-unavailable" });
+    mocks.targeted.mockResolvedValue(false);
+    await expect(worker(work, "lease")).resolves.toEqual({ state: "already-processed" });
+  });
+
+  it("marks only verified empty automatic targets without a prior claim as no submission", async () => {
+    const sha = "a".repeat(40);
+    mocks.plan.mockResolvedValue({ snapshotBasis: "d".repeat(64), courseConfig: { github_org: "Org" },
+      discovery: { status: "scanned", enumerationComplete: true, repos: [
+        { status: "ready", repo: "Org/Empty", sourceCommit: sha, sourceRef: "main", folders: ["lab"], emptyFolders: ["lab"] },
+        { status: "ready", repo: "Org/Work", sourceCommit: sha, sourceRef: "main", folders: ["lab"], emptyFolders: [] },
+        { status: "ready", repo: "Org/Unverified", sourceCommit: sha, sourceRef: "main", folders: ["lab"] },
+        { status: "ready", repo: "Org/Uncertain", sourceCommit: sha, sourceRef: "main", folders: ["lab"], emptyFolders: ["lab"] },
+      ] } });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) => new Map(targets.map((target) => [
+      repoGradeStartupKey(target), target.repo === "Org/Uncertain" ? "unknown" : "never-attempted",
+    ])));
+    const work = { phase: "discovering", runId: "run", accountId: "owner", courseId: "course" } as const;
+    const result = await createAutomaticRepoGradeWorker("coordinated")(work, "lease");
+    expect(result).toMatchObject({ state: "scanned", targets: expect.arrayContaining([
+      expect.objectContaining({ repo: "Org/Empty", state: "no-submission" }),
+      expect.objectContaining({ repo: "Org/Uncertain", state: "unknown", reason: "prior-attempt" }),
+      expect.objectContaining({ repo: "Org/Work", folder: "lab" }),
+      expect.objectContaining({ repo: "Org/Unverified", folder: "lab" }),
+    ]) });
+    if (!("targets" in result)) throw new Error("Expected discovery targets");
+    expect(result.targets.find((row) => row.repo === "Org/Work")?.state).toBeUndefined();
+    expect(result.targets.find((row) => row.repo === "Org/Unverified")?.state).toBeUndefined();
+    const manual = await createAutomaticRepoGradeWorker("coordinated")({ ...work, targetFilter: { folders: ["lab"], repos: ["Org/Empty"] } }, "lease");
+    if (!("targets" in manual)) throw new Error("Expected targeted discovery");
+    expect(manual.targets[0].state).toBe("no-submission");
+  });
+
+  it("retains the first bounded README example with a blocked result", async () => {
+    const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",
+      folder: "lab", ref: "main", sha: "a".repeat(40) } as const;
+    mocks.plan.mockResolvedValue({ discovery: { status: "scanned", repos: [] }, folderSources: new Map() });
+    mocks.history.mockImplementation(async (_owner, _course, targets: RepoGradeStartupTarget[]) =>
+      new Map(targets.map((target) => [repoGradeStartupKey(target), "never-attempted"])));
+    vi.mocked(prepareRepoGradeStartupProfile).mockImplementation(async (_scope, _discovery, _ref, _target, _config, _basis, options) => {
+      options?.observeProfileFailure?.("missing-instruction-evidence", { kind: "blank", repo: "Org/Example" });
+      return null;
+    });
+    mocks.evaluate.mockImplementation(async (_plan, _target, runtime) => {
+      await runtime.loadPreparedProfile({ accountId: "owner", courseId: "course", folder: "lab" });
+      return { status: "profile-unavailable" };
+    });
+    await expect(createAutomaticRepoGradeWorker("coordinated")(work, "lease")).resolves.toEqual({
+      state: "blocked", reason: "missing-instruction-evidence", readmeExample: { kind: "blank", repo: "Org/Example" },
+    });
+  });
 
   it("regrades an explicit target while scheduled work still skips its existing grade", async () => {
     const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course", repo: "Org/Student",

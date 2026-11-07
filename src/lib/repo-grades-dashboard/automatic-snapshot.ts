@@ -64,6 +64,9 @@ export function restoreAutomaticRepoGradeSnapshot(value: unknown): AutomaticRepo
     if (!object(row) || row.status !== "ready" || typeof row.repo !== "string" || row.repo.length > 200
       || !exactRef(row.sourceRef) || typeof row.sourceCommit !== "string" || !/^[0-9a-f]{40}$/.test(row.sourceCommit)
       || !Array.isArray(row.folders) || !row.folders.every(exactFolder) || new Set(row.folders).size !== row.folders.length) return null;
+    const folders = row.folders;
+    if (row.emptyFolders !== undefined && (!Array.isArray(row.emptyFolders) || !row.emptyFolders.every(exactFolder)
+      || new Set(row.emptyFolders).size !== row.emptyFolders.length || row.emptyFolders.some((folder) => !folders.includes(folder)))) return null;
     const [owner, repo, extra] = row.repo.split("/");
     if (!owner || !repo || extra !== undefined || !validateGithubOwnerRepo(owner, repo)) return null;
     const key = row.repo.toLowerCase();
@@ -71,7 +74,8 @@ export function restoreAutomaticRepoGradeSnapshot(value: unknown): AutomaticRepo
     if (refs.has(row.sourceRef) || (refs.size > 0 && defaultSourceRefs === undefined)) return null;
     refs.add(row.sourceRef);
     refsByRepo.set(key, refs);
-    repos.push({ status: "ready", repo: row.repo, sourceRef: row.sourceRef, sourceCommit: row.sourceCommit, folders: row.folders });
+    repos.push({ status: "ready", repo: row.repo, sourceRef: row.sourceRef, sourceCommit: row.sourceCommit, folders: row.folders,
+      ...(row.emptyFolders !== undefined && { emptyFolders: row.emptyFolders }) });
   }
   const defaults: Record<string, string> = {};
   if (defaultSourceRefs !== undefined) {

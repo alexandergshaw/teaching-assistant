@@ -19,6 +19,7 @@ import {
   gradeRepoAction,
   saveGradingDraftAction,
   getRepoTreeAction,
+  ingestRepoAction,
 } from "@/app/actions";
 import { getStepDefinition } from "./registry";
 import type { StepRunHelpers } from "./registry-helpers";
@@ -50,7 +51,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     courseCode: null,
     term: null,
     canvasUrl: null,
-    repos: [],
+    repos: [{ repo: "templates/course", branch: "main" }],
     githubOrg: null,
     textbook: null,
     syllabusId: null,
@@ -129,6 +130,7 @@ describe("batch-grade-repos-to-draft: all-courses path (hubCourses input)", () =
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Generated rubric text");
+    vi.mocked(ingestRepoAction).mockResolvedValue({ digest: { files: [{ path: "week-3/README.md", content: "Template assignment instructions" }, { path: "week-4/README.md", content: "A different week" }] } } as never);
     vi.mocked(saveGradingDraftAction).mockResolvedValue({ id: "draft-multi" });
   });
 
@@ -169,8 +171,9 @@ describe("batch-grade-repos-to-draft: all-courses path (hubCourses input)", () =
     );
 
     // Only the in-progress tile's repo is ever graded.
-    expect(getRepoTreeAction).toHaveBeenCalledTimes(1);
     expect(getRepoTreeAction).toHaveBeenCalledWith("org/carol-repo");
+    expect(ingestRepoAction).toHaveBeenCalledWith("templates/course", "main");
+    expect(gradeRepoAction).toHaveBeenCalledWith("org/carol-repo", "Template assignment instructions", "Generated rubric text", "gemini", undefined, "week-3");
     expect(gradeRepoAction).toHaveBeenCalledTimes(1);
     expect(saveGradingDraftAction).toHaveBeenCalledTimes(1);
 
@@ -181,6 +184,20 @@ describe("batch-grade-repos-to-draft: all-courses path (hubCourses input)", () =
     expect(items.some((n) => n.includes("Complete Course") && n.includes("already finished"))).toBe(true);
     expect(items.some((n) => n.includes("In Progress Course") && n.includes("graded 1 repo"))).toBe(true);
   });
+
+  it.each(["markdown", "adoc", "asciidoc", "html", "htm", "tex", "xml"])(
+    "uses the course template README.%s for legacy batch grading", async (extension) => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: makeTiles() });
+      vi.mocked(ingestRepoAction).mockResolvedValue({ digest: { files: [
+        { path: `week-3/assignment-README.${extension}`, content: "Template assignment instructions" },
+      ] } } as never);
+      vi.mocked(getRepoTreeAction).mockResolvedValue(mockTree("week-3/starter.py"));
+      vi.mocked(gradeRepoAction).mockResolvedValue(mockGradeResult("Carol"));
+      await step.run({ hubCourses: "t-in-progress" }, testHelpers(), noProgress);
+      expect(gradeRepoAction).toHaveBeenCalledWith("org/carol-repo", "Template assignment instructions",
+        "Generated rubric text", "gemini", undefined, "week-3");
+    },
+  );
 
   it("isolates a per-course failure: a course with no repos configured does not stop the others", async () => {
     const tileA = baseCourse({
@@ -218,6 +235,7 @@ describe("batch-grade-repos-to-draft: single-course path (backward compatibility
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Generated rubric text");
+    vi.mocked(ingestRepoAction).mockResolvedValue({ digest: { files: [{ path: "week-3/README.md", content: "Template assignment instructions" }, { path: "week-4/README.md", content: "A different week" }] } } as never);
   });
 
   it("still grades the single hubCourse tile when hubCourses is blank", async () => {
@@ -243,25 +261,33 @@ describe("batch-grade-repos-to-draft: single-course path (backward compatibility
   // The single-course path does NOT skip a not-started tile - it grades
   // whatever repo content exists and labels the module "Not started"
   // (unchanged pre-existing behavior; only the all-courses path added a skip).
-  it("does not skip a not-started tile - unchanged behavior for the single-course path", async () => {
-    const tile = baseCourse({
-      id: "solo-future",
-      name: "Future Course",
-      startDate: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-      weeks: 15,
-      studentRepos: [{ student: "Frank", canvasUserId: "6", repo: "org/frank-repo" }],
-    });
+  it("fails closed when the course has no linked template", async () => {
+    const tile = baseCourse({ id: "solo-future", startDate: new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString(), weeks: 15, repos: [], studentRepos: [{ student: "Frank", canvasUserId: "6", repo: "org/frank-repo" }] });
     vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
-    vi.mocked(getRepoTreeAction).mockResolvedValue(mockTree());
-    vi.mocked(saveGradingDraftAction).mockResolvedValue({ id: "draft-future" });
-
-    const result = await step.run({ hubCourse: "solo-future" }, testHelpers(), noProgress);
-
-    expect(result.outputs.moduleName).toBe("Not started");
-    // gradeRepoAction is never reached because no week-0 folder exists in
-    // the (empty) tree - this asserts the pre-existing "no folder matching"
-    // note, not a status-based skip.
+    await expect(step.run({ hubCourse: "solo-future" }, testHelpers(), noProgress)).rejects.toThrow("course-linked template");
+    expect(getRepoTreeAction).not.toHaveBeenCalled();
     expect(gradeRepoAction).not.toHaveBeenCalled();
+  });
+
+  it("refuses ambiguous template README folders without grading", async () => {
+    const tile = baseCourse({ id: "ambiguous", startDate: new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString(), weeks: 15, studentRepos: [{ student: "Frank", canvasUserId: "6", repo: "org/frank-repo" }] });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(ingestRepoAction).mockResolvedValue({ digest: { files: [
+      { path: "week-3/README.md", content: "First" },
+      { path: "assignments/module-3/README.md", content: "Second" },
+    ] } } as never);
+    await expect(step.run({ hubCourse: "ambiguous" }, testHelpers(), noProgress)).rejects.toThrow("More than one template assignment README");
+    expect(getRepoTreeAction).not.toHaveBeenCalled();
+    expect(gradeRepoAction).not.toHaveBeenCalled();
+  });
+
+  it("does not grade a different student folder when the exact template folder is missing", async () => {
+    const tile = baseCourse({ id: "missing-folder", startDate: new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString(), weeks: 15, studentRepos: [{ student: "Frank", canvasUserId: "6", repo: "org/frank-repo" }] });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(getRepoTreeAction).mockResolvedValue(mockTree("week-4/starter.py"));
+    const result = await step.run({ hubCourse: "missing-folder" }, testHelpers(), noProgress);
+    expect(gradeRepoAction).not.toHaveBeenCalled();
+    expect(result.outputs.graded).toBe(0);
   });
 
   it("errors when neither hubCourse nor hubCourses is provided", async () => {

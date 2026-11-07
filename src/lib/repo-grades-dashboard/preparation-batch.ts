@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { captureRepoGradePreparationInput, type RepoGradePreparationInput, type RepoGradeTargetEvidence } from "./preparation-input";
-import { composeRepoGradePreparationEvidence } from "./preparation-evidence";
+import { composeRepoGradePreparationEvidence, isSafeReadmeExampleRepo } from "./preparation-evidence";
 
 type Request = Parameters<typeof composeRepoGradePreparationEvidence>[0];
 export type RepoGradeEvidenceBatchProgress = Readonly<{ version: 1; basis: string; key: string; instructions: string; rows: readonly RepoGradeTargetEvidence[] }>;
@@ -51,7 +51,13 @@ export async function collectPreparationEvidenceBatch(
   const captured = await collect({ ...input, inventory: { status: "complete", targets: next } });
   if (captured.status !== "ready") return captured;
   if (previousKey !== undefined && (captured.key !== previousKey || captured.instructions !== instructions)) {
-    return { status: "blocked", reason: "conflicting-instructions" };
+    const first = rows[0]?.target;
+    const other = captured.evidence[0]?.target;
+    return first && other && rows[0]?.source.kind === "pinned-readme"
+      && captured.evidence[0]?.source.kind === "pinned-readme" && isSafeReadmeExampleRepo(`${first.owner}/${first.repo}`)
+      && isSafeReadmeExampleRepo(`${other.owner}/${other.repo}`) ? { status: "blocked", reason: "conflicting-instructions", example: {
+      kind: "conflict", repo: `${other.owner}/${other.repo}`, comparedRepo: `${first.owner}/${first.repo}`,
+    } } : { status: "blocked", reason: "conflicting-instructions" };
   }
   const combined = [...rows, ...captured.evidence];
   const complete = captureRepoGradePreparationInput({ ...input,

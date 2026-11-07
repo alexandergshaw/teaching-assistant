@@ -3,9 +3,11 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { CourseKind } from "@/lib/course-kind";
 import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
+import { isInstructionReadmeDocument } from "@/lib/repo-readme-instructions";
 import type { RepoGradeProfile } from "./profile";
 
 const KEY_VERSION = "repo-grade-preparation-v1";
+const TEMPLATE_KEY_VERSION = "repo-grade-preparation-v2";
 const MAX_TARGETS = 4_000;
 const MAX_IDENTIFIER_BYTES = 256;
 const MAX_REF_BYTES = 1_024;
@@ -25,10 +27,13 @@ type InstructionPolicy =
 type FallbackEvidence =
   | Readonly<{ kind: "configured-fallback"; readmeStatus: "absent" }>
   | Readonly<{ kind: "configured-fallback"; readmeStatus: "blank"; path: string }>;
-type ReadmeSource = Readonly<{ kind: "pinned-readme"; path: string }> | FallbackEvidence;
+type TemplateSource = Readonly<{ kind: "template-readme"; path: string | null; repo: string; sourceRef: string;
+  sourceCommit: string; blobSha: string | null; readmeStatus: "present" | "absent" | "blank"; instructionSha256: string }>;
+type ReadmeSource = Readonly<{ kind: "pinned-readme"; path: string }> | TemplateSource | FallbackEvidence;
 type ReadmeEvidence = Readonly<{
   target: PinnedTarget;
-  source: (Readonly<{ kind: "pinned-readme"; path: string; instructions: string }>) | FallbackEvidence;
+  source: (Readonly<{ kind: "pinned-readme"; path: string; instructions: string }>)
+    | (TemplateSource & Readonly<{ instructions: string }>) | FallbackEvidence;
 }>;
 
 export type RepoGradePreparationInput = Readonly<{
@@ -50,7 +55,7 @@ type BlockedReason =
 export type RepoGradePreparationCapture =
   | Readonly<{
     status: "ready";
-    keyVersion: typeof KEY_VERSION;
+    keyVersion: typeof KEY_VERSION | typeof TEMPLATE_KEY_VERSION;
     key: string;
     instructionDigest: string;
     instructions: string;
@@ -112,10 +117,26 @@ function exactTarget(target: PinnedTarget, evidence: PinnedTarget): boolean {
 }
 
 function readmePath(path: unknown, folder: string): path is string {
-  return exactPath(path) && path.startsWith(`${folder}/`) && /readme/i.test(path.slice(path.lastIndexOf("/") + 1));
+  return exactPath(path) && path.startsWith(`${folder}/`) && isInstructionReadmeDocument(path);
 }
 
 function captureReadmeSource(value: unknown, folder: string, fallback: string | undefined) {
+  if (record(value, ["kind", "path", "instructions", "repo", "sourceRef", "sourceCommit", "blobSha", "readmeStatus", "instructionSha256"]) && value.kind === "template-readme"
+    && instructionText(value.instructions)
+    && typeof value.repo === "string" && value.repo.split("/").length === 2
+    && validateGithubOwnerRepo(...value.repo.split("/") as [string, string])
+    && pinnedTarget({ owner: value.repo.split("/")[0], repo: value.repo.split("/")[1], sourceRef: value.sourceRef, sourceCommit: value.sourceCommit })
+    && typeof value.instructionSha256 === "string" && /^[0-9a-f]{64}$/.test(value.instructionSha256)
+    && createHash("sha256").update(value.instructions, "utf8").digest("hex") === value.instructionSha256
+    && (value.readmeStatus === "absent" && value.path === null && value.blobSha === null && fallback === value.instructions
+      || value.readmeStatus === "blank" && readmePath(value.path, folder) && typeof value.blobSha === "string"
+        && /^[0-9a-f]{40}$/.test(value.blobSha) && fallback === value.instructions
+      || value.readmeStatus === "present" && readmePath(value.path, folder) && typeof value.blobSha === "string"
+        && createHash("sha1").update(`blob ${Buffer.byteLength(value.instructions, "utf8")}\0`).update(value.instructions, "utf8").digest("hex") === value.blobSha)) {
+    return { source: { kind: "template-readme", path: value.path, repo: value.repo, sourceRef: value.sourceRef as string,
+      sourceCommit: value.sourceCommit as string, blobSha: value.blobSha as string | null, readmeStatus: value.readmeStatus as "present" | "blank" | "absent", instructionSha256: value.instructionSha256 } as const,
+      instructions: value.instructions };
+  }
   if (record(value, ["kind", "path", "instructions"]) && value.kind === "pinned-readme"
     && readmePath(value.path, folder) && instructionText(value.instructions)) {
     return { source: { kind: "pinned-readme", path: value.path } as const, instructions: value.instructions };
@@ -136,6 +157,8 @@ function captureReadmeEvidence(
 ): { reason: BlockedReason } | { sources: ReadonlyMap<string, ReadmeSource>; instructions: string } {
   let instructions: string | undefined;
   let conflict = false;
+  let templateIdentity: string | undefined;
+  let sawOtherSource = false;
   const sources = new Map<string, ReadmeSource>();
   for (const row of rows) {
     if (!record(row, ["target", "source"]) || !pinnedTarget(row.target)) {
@@ -148,6 +171,14 @@ function captureReadmeEvidence(
 
     const captured = captureReadmeSource(row.source, folder, fallback);
     if (!captured) return { reason: "invalid-instruction-evidence" };
+    if (captured.source.kind === "template-readme") {
+      const identity = JSON.stringify(captured.source);
+      if (sawOtherSource || (templateIdentity !== undefined && templateIdentity !== identity)) return { reason: "invalid-instruction-evidence" };
+      templateIdentity = identity;
+    } else {
+      if (templateIdentity !== undefined) return { reason: "invalid-instruction-evidence" };
+      sawOtherSource = true;
+    }
     instructions ??= captured.instructions;
     conflict ||= instructions !== captured.instructions;
     sources.set(key, Object.freeze(captured.source));
@@ -208,15 +239,21 @@ export function captureRepoGradePreparationInput(raw: unknown): RepoGradePrepara
   }
 
   const instructionDigest = createHash("sha256").update(instructions, "utf8").digest("hex");
-  const key = createHash("sha256").update(JSON.stringify([
-    KEY_VERSION, config.accountId, config.courseId, config.folder, config.configurationFingerprint, policyKind,
+  const keyVersion = sources && [...sources.values()].some((source) => source.kind === "template-readme")
+    ? TEMPLATE_KEY_VERSION : KEY_VERSION;
+  const baseKey = createHash("sha256").update(JSON.stringify([
+    keyVersion, config.accountId, config.courseId, config.folder, config.configurationFingerprint, policyKind,
     instructionDigest, config.provider, config.model, config.graderVersion, config.promptParserVersion, config.courseKind,
   ]), "utf8").digest("hex");
+  const templateSource = sources && [...sources.values()].find((source) => source.kind === "template-readme");
+  const key = templateSource?.kind === "template-readme"
+    ? createHash("sha256").update(JSON.stringify(["repo-grade-template-key-v1", baseKey, templateSource.repo,
+      templateSource.sourceRef, templateSource.sourceCommit]), "utf8").digest("hex") : baseKey;
 
   // Target identity is execution provenance. New code commits with the same
   // instructions can reuse the cohort rubric while keeping their own evidence.
   const saved = Object.freeze({ kind: "saved" } as const);
   const evidence = [...targets.entries()].sort(([left], [right]) => left < right ? -1 : 1)
     .map(([repo, target]) => Object.freeze({ target, source: sources ? sources.get(repo)! : saved }));
-  return Object.freeze({ status: "ready", keyVersion: KEY_VERSION, key, instructionDigest, instructions, evidence: Object.freeze(evidence) });
+  return Object.freeze({ status: "ready", keyVersion, key, instructionDigest, instructions, evidence: Object.freeze(evidence) });
 }

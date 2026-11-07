@@ -9,6 +9,20 @@ beforeEach(() => {
   mocks.rpc.mockReturnValue({ retry: () => ({ abortSignal: async () => ({ data: true, error: null }) }) });
 });
 
+it("sends an empty regrade only to the exact lease-fenced proof transition", async () => {
+  const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
+    repo: "org/repo", folder: "lab", ref: "main", sha: "a".repeat(40) } as const;
+  expect(await finishAutomaticRepoGrade(work, "lease", { state: "verified-empty-regrade" })).toBe(true);
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("repo_grade_automatic_finish_empty_regrade", {
+    p_user_id: "owner", p_run_id: "run", p_lease: "lease", p_course_id: "course", p_repo: "org/repo",
+    p_folder: "lab", p_source_ref: "main", p_source_sha: "a".repeat(40),
+  });
+  mocks.rpc.mockClear();
+  expect(await finishAutomaticRepoGrade({ phase: "discovering", runId: "run", accountId: "owner", courseId: "course" },
+    "lease", { state: "verified-empty-regrade" })).toBe(false);
+  expect(mocks.rpc).not.toHaveBeenCalled();
+});
+
 it("sends a never-dispatched automatic claim only to the atomic retry transition", async () => {
   const work = { phase: "grading", runId: "run", accountId: "owner", courseId: "course",
     repo: "org/repo", folder: "lab", ref: "main", sha: "a".repeat(40) } as const;

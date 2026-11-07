@@ -92,12 +92,14 @@ export async function evaluateRepoGrade(
   const modelExecution = execution?.modelExecution;
   const automaticGrader = execution?.automaticGrader;
   const signal = automaticGrader ? modelExecution?.signal : undefined;
+  const excludeInstructionReadme = execution?.preparedReadme?.template === true || !useReadmeInstructions;
   const digest = sourceCommit
     ? await ingestRepo(parsed.owner, parsed.repo, {
       pathPrefix, sourceCommit, ...(signal && { signal }),
+      ...(excludeInstructionReadme && { excludeInstructionReadme: true }),
       ...(automaticGrader && { treeCacheAccountId: automaticGrader.accountId, readPinnedFiles: makePinnedArchiveReader({ ...parsed, accountId: automaticGrader.accountId, sha: sourceCommit }) }),
     })
-    : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, targetBranch);
+    : await ingestRepo(parsed.owner, parsed.repo, { pathPrefix, ...(excludeInstructionReadme && { excludeInstructionReadme: true }) }, targetBranch);
   if (sourceCommit && digest.truncated) {
     execution?.markKnownFailure();
     const reason = digest.treeTruncated ? "tree-truncated"
@@ -116,10 +118,10 @@ export async function evaluateRepoGrade(
   // error - the instructor still gets a grade using whatever instructions
   // they already had, and the UI surfaces `readmeMissing` so the fallback
   // is visible rather than silent.
-  let effectiveInstructions = assignmentInstructions;
+  let effectiveInstructions = execution?.preparedReadme?.template ? execution.preparedReadme.instructions : assignmentInstructions;
   let readmePath: string | undefined;
   let readmeMissing: boolean | undefined;
-  if (useReadmeInstructions) {
+  if (useReadmeInstructions && !execution?.preparedReadme?.template) {
     const pick = pickReadmeInstructions(digest.files, pathPrefix);
     if (pick) {
       effectiveInstructions = pick.instructions;

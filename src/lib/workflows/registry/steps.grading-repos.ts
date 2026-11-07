@@ -223,27 +223,11 @@ export const gradingRepoSteps: StepDefinition[] = [
         throw new Error(describeGradeRepoInputError("repo", { branch, folder }));
       }
 
-      // Instructions supplied -> unchanged behavior, no README read at all.
-      // Instructions blank -> fall back to the repo's (or folder's) README
-      // before failing; only when no README yields usable text does this fail,
-      // and the error names which paths were tried.
-      let instructions = String(values.instructions ?? "").trim();
-      let instructionsSourceNote = "";
+      // Legacy workflow inputs do not carry an owner-verified course template.
+      const instructions = String(values.instructions ?? "").trim();
+      const instructionsSourceNote = "";
       if (!instructions) {
-        onProgress("Assignment instructions blank - reading the repository README...");
-        const readmeRes = await resolveReadmeInstructions(repo, branch, folder);
-        if ("error" in readmeRes) {
-          throw new Error(
-            describeGradeRepoInputError("instructions", {
-              repo,
-              branch,
-              folder,
-              triedReadmePaths: readmeRes.tried,
-            })
-          );
-        }
-        instructions = readmeRes.text;
-        instructionsSourceNote = `Instructions read from ${readmeRes.path}.`;
+        throw new Error("Assignment instructions are required. Use the repository gradebook to read them from the course template.");
       }
 
       const rubric = String(values.rubric ?? "");

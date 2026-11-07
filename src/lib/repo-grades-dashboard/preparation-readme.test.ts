@@ -73,6 +73,22 @@ afterEach(() => {
 });
 
 describe("readPinnedRepoGradeReadme", () => {
+  it("does not mistake a source file containing readme in its name for template instructions", async () => {
+    const code = blob("Week/readme_processor.py", "print('student code')");
+    const fetchMock = stubGithub([code]);
+    await expect(readPinnedRepoGradeReadme(target, folder)).resolves.toEqual({ status: "absent", target });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("/blobs/"))).toBe(false);
+  });
+
+  it.each(["Week/README-assignment.md", "Week/assignment-README.MD", "Week/README.markdown", "Week/README.adoc",
+    "Week/README.asciidoc", "Week/README.html", "Week/README.htm", "Week/README.tex", "Week/README.xml"])("reads template instruction variant %s", async (path) => {
+    const document = blob(path, "Shared assignment instructions.");
+    stubGithub([document, blob("Week/readme_processor.py", "print('student code')")]);
+    await expect(readPinnedRepoGradeReadme(target, folder)).resolves.toMatchObject({
+      status: "present", target, path, text: "Shared assignment instructions.",
+    });
+  });
+
   it("fails all joined readers on a throttle without fan-out and does not retain the failed response", async () => {
     const readme = blob(preferred, "throttled concurrent instructions");
     const tree = makeTree([readme]);

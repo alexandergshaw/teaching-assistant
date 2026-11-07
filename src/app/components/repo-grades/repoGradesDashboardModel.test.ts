@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import { defaultRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import {
-  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
+  addRepoGradeSavedPage, buildRepoGradeMatrix, buildRepoGradesDashboard, mergeIncompleteRepoGradeResults, newerVerifiedNoSubmission, savedResultIsEarlierThanObservedPin, updateRepoGradesCourseEdits, visibleRepoGradebookRows,
   type RepoGradeSavedAttempt, type RepoGradeSavedResult,
 } from "./repoGradesDashboardModel";
 import { ALL_FOLDERS } from "./repoGradesFolderSelection";
@@ -36,6 +36,29 @@ function attempt(generation: number, repo: string, folder: string, score: number
 }
 
 describe("class repository results", () => {
+  it("replaces an older saved score only with a safely ordered verified empty new commit", () => {
+    const savedAttempt = { ...attempt(1, "org/a", "lab", 90), settledAt: "2026-11-06T13:00:00.000Z" };
+    const saved = { latest: savedAttempt, scored: savedAttempt };
+    const evidence = { repo: "org/a", folder: "lab", sourceRef: "main", sourceSha: "c".repeat(40),
+      explanation: "", noSubmission: true as const, runStartedAt: "2026-11-06T14:00:00.000Z" };
+    expect(newerVerifiedNoSubmission(saved, [evidence])).toBe(true);
+    expect(newerVerifiedNoSubmission(undefined, [evidence])).toBe(true);
+    expect(newerVerifiedNoSubmission(saved, [{ ...evidence, sourceSha: savedAttempt.commit }])).toBe(false);
+    expect(newerVerifiedNoSubmission(saved, [{ ...evidence, sourceSha: savedAttempt.commit, noSubmissionExplicit: true }])).toBe(true);
+    expect(newerVerifiedNoSubmission({ ...saved, latest: { ...savedAttempt, status: "unknown" } }, [{ ...evidence, sourceSha: savedAttempt.commit, noSubmissionExplicit: true }])).toBe(false);
+    expect(newerVerifiedNoSubmission(saved, [{ ...evidence, sourceRef: "other" }])).toBe(false);
+    expect(newerVerifiedNoSubmission(saved, [{ ...evidence, runStartedAt: "2026-11-06T12:30:00.000Z" }])).toBe(false);
+    expect(newerVerifiedNoSubmission({ ...saved, latest: { ...savedAttempt, status: "claimed", settledAt: null } }, [evidence])).toBe(false);
+    expect(newerVerifiedNoSubmission({ ...saved, latest: { ...savedAttempt, status: "unknown" } }, [evidence])).toBe(false);
+    expect(newerVerifiedNoSubmission(saved, [{ ...evidence, sourceSha: "bad" }])).toBe(false);
+    const pending = { ...evidence, noSubmissionStale: true as const, observedSourceSha: "d".repeat(40),
+      observedState: "blocked", observedRunStartedAt: "2026-11-07T15:00:00.000Z" };
+    expect(newerVerifiedNoSubmission(saved, [pending])).toBe(false);
+    expect(newerVerifiedNoSubmission(undefined, [pending])).toBe(false);
+    expect(savedResultIsEarlierThanObservedPin(saved, [pending])).toBe(true);
+    expect(savedResultIsEarlierThanObservedPin({ latest: { ...savedAttempt, commit: "d".repeat(40) }, scored: null }, [pending])).toBe(false);
+    expect(savedResultIsEarlierThanObservedPin({ latest: { ...savedAttempt, settledAt: "2026-11-08T13:00:00.000Z" }, scored: null }, [pending])).toBe(false);
+  });
   it("unions exact repo and folder keys without borrowing scores from another repo or folder", () => {
     const edits: RepoGradeCellEditsByRepo = {
       "org/a": { "Lab One": edit("0"), archive: edit("7/10") },

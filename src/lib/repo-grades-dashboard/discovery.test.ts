@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { DEFAULT_TREE_SCAN_CONCURRENCY } from "@/lib/repo-grade-tree-scan";
 import { discoverRepoGradeSources } from "./discovery";
 
@@ -17,6 +18,32 @@ afterEach(() => {
 });
 
 describe("discoverRepoGradeSources", () => {
+  it("projects placeholder-only folders only from a verified pinned tree and rechecks access", async () => {
+    const hash = (type: string, bytes: Buffer) => createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex");
+    const blob = hash("blob", Buffer.alloc(0));
+    const child = hash("tree", Buffer.concat([Buffer.from("100644 .gitkeep\0"), Buffer.from(blob, "hex")]));
+    const rootSha = hash("tree", Buffer.concat([Buffer.from("40000 lab\0"), Buffer.from(child, "hex")]));
+    let deny = false;
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("/orgs/")) return Response.json([repo("empty")]);
+      if (url.includes("/commits/")) return deny ? new Response(null, { status: 403 })
+        : Response.json({ sha, commit: { tree: { sha: rootSha } } });
+      return Response.json({ sha: rootSha, truncated: false, tree: [
+        { path: "lab", mode: "040000", type: "tree", sha: child },
+        { path: "lab/.gitkeep", mode: "100644", type: "blob", sha: blob, size: 0 },
+      ] });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const scope = { accountId: "empty-proof-account", organization: "classroom" };
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({ repos: [
+      { status: "ready", folders: ["lab"], emptyFolders: ["lab"] },
+    ] });
+    deny = true;
+    await expect(discoverRepoGradeSources(scope)).resolves.toMatchObject({ repos: [
+      { status: "blocked" },
+    ] });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/git/trees/"))).toHaveLength(1);
+  });
   it("uses saved scope and isolates a failed repo and a truncated tree from the other repos", async () => {
     const fetcher = vi.fn(async (url: string) => {
       if (url.startsWith(`${root}/orgs/classroom/repos?`)) {

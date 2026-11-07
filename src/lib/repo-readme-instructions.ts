@@ -12,6 +12,16 @@ export interface ReadmePick {
   path: string;
 }
 
+/** Assignment instruction documents, excluding code with "readme" in its name. */
+export function isInstructionReadmeDocument(path: string): boolean {
+  const basename = path.slice(path.lastIndexOf("/") + 1);
+  if (/^readme$/i.test(basename)) return true;
+  const extension = basename.match(/\.(?:md|mdx|markdown|txt|rst|adoc|asciidoc|html|htm|tex|xml)$/i);
+  if (!extension) return false;
+  const stem = basename.slice(0, -extension[0].length);
+  return /(?:^|[._ -])readme(?=$|[._ -])/i.test(stem);
+}
+
 /**
  * Depth of `path` relative to `base` (a `pathPrefix`, or "" for the digest
  * root). A file directly inside `base` is depth 0; each further folder

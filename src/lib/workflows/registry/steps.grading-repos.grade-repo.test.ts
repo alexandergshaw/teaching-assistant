@@ -484,77 +484,14 @@ describe("grade-repo step run()", () => {
     expect(mockSaveGradingDraftAction).not.toHaveBeenCalled();
   });
 
-  it("falls back to the repo README when instructions are blank, and names the path used in the summary", async () => {
-    mockGetRepoTreeAction.mockResolvedValue({
-      tree: [{ path: "README.md", type: "blob", size: 20, sha: "root" }],
-    });
-    mockGetFileTextAction.mockResolvedValue({ content: "Assignment: build a thing." });
-    mockGradeRepoAction.mockResolvedValue({
-      run: fakeGradeRun(),
-      rubric: "rubric text",
-      fullName: "octocat/hello-world",
-    });
-
-    const result = await step.run(
-      { repo: "octocat/hello-world", instructions: "" },
-      testHelpers(),
-      vi.fn()
-    );
-
-    expect(mockGradeRepoAction).toHaveBeenCalledWith(
-      "octocat/hello-world",
-      "Assignment: build a thing.",
-      "",
-      "gemini",
-      undefined,
-      undefined
-    );
-    const text = result.summary.kind === "text" ? result.summary.text : "";
-    expect(text).toContain("Instructions read from README.md.");
-  });
-
-  it("falls back to the folder README first when a folder is set", async () => {
-    mockGetRepoTreeAction.mockResolvedValue({
-      tree: [
-        { path: "README.md", type: "blob", size: 20, sha: "root" },
-        { path: "assignments/week-01/README.md", type: "blob", size: 20, sha: "folder" },
-      ],
-    });
-    mockGetFileTextAction.mockResolvedValue({ content: "Folder-specific assignment." });
-    mockGradeRepoAction.mockResolvedValue({
-      run: fakeGradeRun(),
-      rubric: "",
-      fullName: "octocat/hello-world",
-    });
-
-    const result = await step.run(
-      { repo: "octocat/hello-world", instructions: "", folder: "assignments/week-01" },
-      testHelpers(),
-      vi.fn()
-    );
-
-    expect(mockGradeRepoAction).toHaveBeenCalledWith(
-      "octocat/hello-world",
-      "Folder-specific assignment.",
-      "",
-      "gemini",
-      undefined,
-      "assignments/week-01"
-    );
-    const text = result.summary.kind === "text" ? result.summary.text : "";
-    expect(text).toContain("Instructions read from assignments/week-01/README.md.");
-  });
-
-  it("throws the diagnosable instructions error naming the tried paths when no README exists", async () => {
-    mockGetRepoTreeAction.mockResolvedValue({ tree: [] });
-
-    await expect(
-      step.run({ repo: "octocat/hello-world", instructions: "", branch: "main" }, testHelpers(), vi.fn())
-    ).rejects.toThrow(
-      'Grade a repository (octocat/hello-world, branch "main"): the Assignment instructions input resolved to empty and no usable README was found (tried README.md) - provide instructions directly, or add a README.md.'
-    );
+  it("refuses blank instructions without reading a student README", async () => {
+    await expect(step.run({ repo: "octocat/hello-world", instructions: "", folder: "week-1" }, testHelpers(), vi.fn()))
+      .rejects.toThrow("Use the repository gradebook to read them from the course template");
+    expect(mockGetRepoTreeAction).not.toHaveBeenCalled();
+    expect(mockGetFileTextAction).not.toHaveBeenCalled();
     expect(mockGradeRepoAction).not.toHaveBeenCalled();
   });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -694,51 +631,17 @@ describe("grade-repo step run() - org enumeration", () => {
     }
   });
 
-  it("falls back to each repo's own README when instructions are blank (per-repo, org mode)", async () => {
-    mockListCourseHubAction.mockResolvedValue({
-      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
-    });
-    mockListOrgReposAction.mockResolvedValue({
-      repos: [fakeGithubRepo("acme-university/alice-hw1")],
-    });
-    mockGetRepoTreeAction.mockResolvedValue({
-      tree: [{ path: "README.md", type: "blob", size: 20, sha: "root" }],
-    });
-    mockGetFileTextAction.mockResolvedValue({ content: "Assignment: build a thing." });
-    mockGradeRepoAction.mockResolvedValue({ run: fakeGradeRun(), rubric: "", fullName: "acme-university/alice-hw1" });
-
-    await step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn());
-
-    expect(mockGetRepoTreeAction).toHaveBeenCalledWith("acme-university/alice-hw1", undefined);
-    expect(mockGradeRepoAction).toHaveBeenCalledWith(
-      "acme-university/alice-hw1",
-      "Assignment: build a thing.",
-      "",
-      "gemini",
-      undefined,
-      undefined
-    );
-  });
-
-  it("records a note (not a thrown error) for one repo with no usable README, and continues the batch", async () => {
-    mockListCourseHubAction.mockResolvedValue({
-      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
-    });
-    mockListOrgReposAction.mockResolvedValue({
-      repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")],
-    });
-    // Neither repo has a README - both should be noted, not thrown.
-    mockGetRepoTreeAction.mockResolvedValue({ tree: [] });
-
+  it("skips org repositories without reading student READMEs when instructions are blank", async () => {
+    mockListCourseHubAction.mockResolvedValue({ courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })] });
+    mockListOrgReposAction.mockResolvedValue({ repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")] });
     const result = await step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn());
-
+    expect(mockGetRepoTreeAction).not.toHaveBeenCalled();
+    expect(mockGetFileTextAction).not.toHaveBeenCalled();
     expect(mockGradeRepoAction).not.toHaveBeenCalled();
     expect(result.summary.kind).toBe("list");
-    if (result.summary.kind === "list") {
-      expect(result.summary.items).toHaveLength(2);
-      expect(result.summary.items.every((i) => i.includes("no usable README was found"))).toBe(true);
-    }
+    if (result.summary.kind === "list") expect(result.summary.items.every((item) => item.includes("course template"))).toBe(true);
   });
+
 });
 
 // ---------------------------------------------------------------------------

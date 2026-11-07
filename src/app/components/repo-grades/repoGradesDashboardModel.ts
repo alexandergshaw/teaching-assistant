@@ -101,6 +101,40 @@ export type RepoGradeSavedResult = {
 
 export type RepoGradeSavedResults = ReadonlyMap<string, RepoGradeSavedResult>;
 
+/** A tree-proven empty folder supersedes an older result only when its run
+ * began after every saved receipt settled, on the same ref and a newer pin.
+ * Unknown or unorderable receipts must never be hidden by a timestamp guess. */
+export function newerVerifiedNoSubmission(
+  saved: RepoGradeSavedResult | undefined, blocks: readonly AutomaticRepoGradeBlock[] | undefined,
+): boolean {
+  const evidence = blocks?.find((block) => block.noSubmission && !block.noSubmissionStale && typeof block.sourceSha === "string"
+    && /^[0-9a-f]{40}$/.test(block.sourceSha) && Number.isFinite(Date.parse(block.runStartedAt ?? "")));
+  if (!evidence) return false;
+  if (!saved) return true;
+  const runAt = Date.parse(evidence.runStartedAt!);
+  return [saved.latest, saved.scored].every((attempt) => {
+    if (!attempt) return true;
+    if (attempt.status === "claimed" || attempt.status === "unknown" || attempt.sourceRef !== evidence.sourceRef
+      || !attempt.commit || (attempt.commit === evidence.sourceSha && !evidence.noSubmissionExplicit) || !attempt.settledAt) return false;
+    const settled = Date.parse(attempt.settledAt);
+    return Number.isFinite(settled) && settled < runAt;
+  });
+}
+
+/** A saved score from a different pin is historical while a newer observed
+ * pin has not reached a conclusive result. Do not sort it as a current grade. */
+export function savedResultIsEarlierThanObservedPin(
+  saved: RepoGradeSavedResult | undefined, blocks: readonly AutomaticRepoGradeBlock[] | undefined,
+): boolean {
+  return !!saved && !!blocks?.some((block) => {
+    const shown = saved.scored ?? saved.latest;
+    if (!block.noSubmissionStale || !block.observedSourceSha || block.observedSourceSha === shown.commit) return false;
+    const settled = Date.parse(shown.settledAt ?? "");
+    const observed = Date.parse(block.observedRunStartedAt ?? "");
+    return !Number.isFinite(settled) || !Number.isFinite(observed) || settled <= observed;
+  });
+}
+
 // GitHub repositories are case-insensitive. Assignment folder names are exact.
 function savedResultKey(repo: string, folder: string): string {
   return JSON.stringify([repo.toLowerCase(), folder]);
@@ -277,7 +311,8 @@ export function visibleRepoGradebookRows(
   const scoreForSort = (repo: MatrixRepository | undefined) => {
     if (!repo || sortFolder === undefined) return null;
     const cell = repo.cells.get(sortFolder);
-    return cell?.saved?.scored?.score ?? null;
+    return newerVerifiedNoSubmission(cell?.saved, cell?.automaticBlocks)
+      || savedResultIsEarlierThanObservedPin(cell?.saved, cell?.automaticBlocks) ? null : cell?.saved?.scored?.score ?? null;
   };
   const compareScores = (left: MatrixRepository | undefined, right: MatrixRepository | undefined) => {
     const a = scoreForSort(left);

@@ -625,6 +625,9 @@ export async function gradeRepoAction(
       return { error: "A full GitHub commit SHA is required." };
     }
     const sourceCommit = source?.sourceCommit.toLowerCase();
+    if (useReadmeInstructions) {
+      return { error: "Template instructions are required. Use the repository gradebook to grade with the course template." };
+    }
     return await runManualRepoGrade(`${parsed.owner}/${parsed.repo}`, (execution) => evaluateRepoGrade(
       parsed, assignmentInstructions, rubric, provider, targetBranch, pathPrefix,
       useReadmeInstructions, runCode, applyNamingDeduction, sourceCommit, execution,

@@ -13,7 +13,9 @@ export function useRepoGradesAutomaticBlocks(accountId: string | null, courseId:
   const runId = run?.id;
   const detailCount = course?.counts.reduce((total, { state, count }) =>
     AUTOMATIC_GRADE_DETAIL_STATES.includes(state) ? total + count : total, 0) ?? 0;
-  const scope = accountId && courseId && runId && (!course || detailCount > 0)
+  // Older cells can have a no-submission result even when a newer targeted
+  // run for this class only touched other cells.
+  const scope = accountId && courseId && runId
     ? JSON.stringify([accountId, courseId, runId]) : null;
   const [reload, setReload] = useState<{ scope: string; revision: number }>();
   const revision = scope && reload?.scope === scope ? reload.revision : 0;
@@ -37,7 +39,9 @@ export function useRepoGradesAutomaticBlocks(accountId: string | null, courseId:
     };
     void load();
     return () => { current = false; };
-  }, [accountId, courseId, detailCount, scope, revision]);
+  // A newly discovered target can move to a different pin while aggregate
+  // counts stay unchanged. Refresh with the polled run object, not counts alone.
+  }, [accountId, courseId, detailCount, scope, revision, run]);
 
   const scopedRead = scope && read?.scope === scope ? read : undefined;
   const result = scopedRead?.result;

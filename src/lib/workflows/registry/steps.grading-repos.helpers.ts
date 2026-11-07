@@ -27,7 +27,6 @@ import {
   ingestRepoAction,
   saveGradingDraftAction,
   getRepoTreeAction,
-  getFileTextAction,
 } from "@/app/actions";
 import {
   type StepRunHelpers,
@@ -37,6 +36,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { Course } from "@/lib/supabase/courses";
+import { isInstructionReadmeDocument } from "@/lib/repo-readme-instructions";
 import { courseProgressStatus, type CourseProgressStatus } from "@/lib/week-numbering";
 import {
   buildRepoGradingLogEntry,
@@ -81,12 +81,18 @@ export async function gradeTileRepos(opts: {
   helpers: StepRunHelpers;
   onProgress: (msg: string) => void;
 }): Promise<{ draftId: string; graded: number; moduleName: string; summaryText: string; repoGradingLog: RepoGradingRunLog }> {
-  const { tile, rawWeek, status, instrRepoRef, userRubric, assignmentUrl, pointsPossibleRaw, helpers, onProgress } = opts;
+  const { tile, rawWeek, status, userRubric, assignmentUrl, pointsPossibleRaw, helpers, onProgress } = opts;
+  const linkedRepos = tile.repos ?? [];
+  const requestedRepo = opts.instrRepoRef.trim();
+  const instrRepoRef = requestedRepo || (linkedRepos.length === 1 ? linkedRepos[0].repo : "");
 
   // Step 2: Get student repos.
   const students = (tile.studentRepos ?? []).filter((s) => s.repo && s.repo.trim());
   if (students.length === 0) {
     throw new Error("Add student repos to the course tile first (the Student repos tile).");
+  }
+  if (!instrRepoRef || !linkedRepos.some((entry) => entry.repo.toLowerCase() === instrRepoRef.toLowerCase())) {
+    throw new Error("Select a course-linked template repository for assignment instructions.");
   }
 
   // Step 3: Resolve the module name for the already-resolved week.
@@ -101,29 +107,33 @@ export async function gradeTileRepos(opts: {
         : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
 
   // Step 4-6: Grade each student repo (per-folder or shared-instructions mode).
-  const wk = displayWeek;
-  const weekRe = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
+  const weekRe = new RegExp(`^(week|wk|module|unit)[^0-9]?0*${displayWeek}(?![0-9])`, "i");
 
   // Shared-instructions fallback: read the instructions repo once if provided.
   let sharedInstructions = "";
+  let sharedFolder = "";
   let sharedRubric = userRubric;
   if (instrRepoRef) {
     try {
       onProgress("Reading the instructions repo...");
-      const r = await ingestRepoAction(instrRepoRef);
+      const template = linkedRepos.find((entry) => entry.repo.toLowerCase() === instrRepoRef.toLowerCase());
+      const r = await ingestRepoAction(instrRepoRef, template?.branch || undefined);
       if ("error" in r) {
         onProgress(`Note: could not ingest instructions repo: ${r.error}`);
       } else {
-        const matched = r.digest.files.filter((f) => weekRe.test(f.path));
-        if (matched.length > 0) {
-          const readmeFile = matched.find((f) => /readme/i.test(f.path));
-          sharedInstructions = readmeFile ? readmeFile.content : matched[0].content;
-        } else {
-          sharedInstructions = r.digest.text;
+        const matches = r.digest.files.filter((f) => {
+          const parts = f.path.split("/");
+          return parts.length >= 2 && isInstructionReadmeDocument(f.path)
+            && weekRe.test(parts.at(-2) ?? "");
+        });
+        if (matches.length > 1) throw new Error("More than one template assignment README matches this week.");
+        if (matches.length === 1) {
+          sharedFolder = matches[0].path.slice(0, matches[0].path.lastIndexOf("/"));
+          sharedInstructions = matches[0].content.trim();
         }
       }
     } catch (err) {
-      onProgress(`Note: error reading instructions repo: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Could not resolve assignment instructions from the course template: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (!sharedRubric && sharedInstructions) {
       onProgress("Generating rubric...");
@@ -138,6 +148,10 @@ export async function gradeTileRepos(opts: {
         onProgress(`Note: rubric generation failed: ${rr.error}`);
       }
     }
+  }
+
+  if (!sharedInstructions) {
+    throw new Error("No assignment README was found in the course-linked template repository.");
   }
 
   const results: GradeResult[] = [];
@@ -155,8 +169,6 @@ export async function gradeTileRepos(opts: {
   // entry list silently read as "there were none".
   let truncated = false;
   const notReached: string[] = [];
-  // Cache rubrics by README content to avoid redundant LLM calls.
-  const rubricCache = new Map<string, string>();
   const stopAt = repoGradingStopAt(helpers.deadlineMs, Date.now());
 
   for (let i = 0; i < students.length; i++) {
@@ -175,78 +187,21 @@ export async function gradeTileRepos(opts: {
     }
 
     try {
-      // Try per-student folder grading: find the week folder in the student repo.
-      let folderPath = "";
-      let folderInstructions = "";
-      let folderRubric = userRubric;
-
-      if (!instrRepoRef) {
-        // Folder-per-module mode: discover the week folder in the student repo.
-        const treeRes = await getRepoTreeAction(student.repo);
-        if ("error" in treeRes) {
-          notes.push(`${label}: ${treeRes.error}`);
-          logEntries.push(
-            buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason: treeRes.error, at: new Date().toISOString() })
-          );
-          continue;
-        }
-        // Find the first top-level folder matching the week pattern.
-        const topFolders = new Set<string>();
-        for (const entry of treeRes.tree) {
-          const seg = entry.path.split("/")[0];
-          topFolders.add(seg);
-        }
-        const matched = [...topFolders].find((seg) => weekRe.test(seg));
-        if (!matched) {
-          const reason = `no folder matching week ${wk}`;
-          notes.push(`${label}: ${reason}`);
-          logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason, at: new Date().toISOString() }));
-          continue;
-        }
-        folderPath = matched;
-
-        // Read the folder's README for instructions.
-        const readmeEntry = treeRes.tree.find(
-          (e) =>
-            e.path.toLowerCase().startsWith(`${matched.toLowerCase()}/`) &&
-            /\/readme\.md$/i.test(e.path) &&
-            e.path.split("/").length === 2
-        );
-        if (readmeEntry) {
-          const fileRes = await getFileTextAction(student.repo, readmeEntry.path);
-          if (!("error" in fileRes)) {
-            folderInstructions = fileRes.content;
-          }
-        }
-        if (!folderInstructions) {
-          folderInstructions = `Evaluate the contents of the ${matched} directory.`;
-        }
-
-        // Synthesize or retrieve cached rubric for this README content.
-        if (!folderRubric) {
-          const cached = rubricCache.get(folderInstructions);
-          if (cached) {
-            folderRubric = cached;
-          } else {
-            onProgress(`Generating rubric for ${matched}...`);
-            const rr = await generateAssignmentRubricAction(
-              moduleName + (topic ? `: ${topic}` : ""),
-              folderInstructions,
-              helpers.provider
-            );
-            if (typeof rr === "string") {
-              folderRubric = rr;
-              rubricCache.set(folderInstructions, rr);
-            } else {
-              onProgress(`Note: rubric generation failed for ${label}: ${rr.error}`);
-            }
-          }
-        }
-      } else {
-        // Shared-instructions mode (instructionsRepo provided).
-        folderInstructions = sharedInstructions;
-        folderRubric = sharedRubric;
+      const tree = await getRepoTreeAction(student.repo);
+      if ("error" in tree) {
+        notes.push(`${label}: ${tree.error}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason: tree.error, at: new Date().toISOString() }));
+        continue;
       }
+      const folderPath = sharedFolder;
+      if (!tree.tree.some((entry) => entry.path === folderPath || entry.path.startsWith(`${folderPath}/`))) {
+        const reason = "The assignment folder from the course template was not found in this repository.";
+        notes.push(`${label}: ${reason}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason, at: new Date().toISOString() }));
+        continue;
+      }
+      const folderInstructions = sharedInstructions;
+      const folderRubric = sharedRubric;
 
       if (!folderRubric && !folderInstructions) {
         const reason = "no rubric or instructions available";

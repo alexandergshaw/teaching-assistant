@@ -36,7 +36,7 @@
 // nothing here" posture as the rest of this file.
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Checkbox, Collapse, Link, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from "@mui/material";
-import { collectRubricOrder } from "./rubricAlignment";
+import { collectRubricOrder, rubricSlotHeight } from "./rubricAlignment";
 import { RepoGradeResultDetails } from "./RepoGradesDashboard";
 import RepoGradeActionsMenu from "./RepoGradeActionsMenu";
 import { activeTargetRequests, findTargetRequests, latestTargetRequest, RepoTargetGradeActions, TargetRequestChip, multipleTargetRequestMenuItems } from "./RepoTargetGradeActions";
@@ -471,7 +471,14 @@ export default function RepoGradesGrid({
       const heights = new Map<string, number>();
       for (const [position, item] of items.entries()) {
         const index = item.dataset.rubricIndex;
-        if (index !== undefined) heights.set(index, Math.max(heights.get(index) ?? 32, Math.ceil(itemContent[position]?.scrollHeight ?? 0)));
+        if (index !== undefined) {
+          const content = itemContent[position];
+          if (!content) continue;
+          const box = getComputedStyle(item);
+          const verticalChrome = [box.paddingTop, box.paddingBottom, box.borderTopWidth, box.borderBottomWidth]
+            .reduce((total, part) => total + (parseFloat(part) || 0), 0);
+          heights.set(index, Math.max(heights.get(index) ?? 32, rubricSlotHeight(content.scrollHeight, verticalChrome)));
+        }
       }
       for (const [index, height] of heights) update(`--rg-rubric-${index}`, `${height}px`);
     };

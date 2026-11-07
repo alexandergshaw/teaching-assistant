@@ -168,6 +168,7 @@ function classifyEvaluation(
   repo: string,
   profile: RepoGradeProfile,
   rubric: string,
+  preparedReadme?: PreparedRepoGradeReadme,
 ): Exclude<RunResult, { status: "deferred-source-throttle" }> & { settlement: RepoGradeAutomaticSettlement } {
   if ("knownFailure" in response) return { status: "failed", settlement: { outcome: "failed" } };
   if ("error" in response) {
@@ -181,7 +182,7 @@ function classifyEvaluation(
   if (response.digestTruncated !== false) {
     return { status: "partial", reason: response.digestTruncated ? "digest-truncated" : undefined, settlement: { outcome: "partial" } };
   }
-  if (profile.useReadmeInstructions && !response.readmePath && !profile.instructions) {
+  if (profile.useReadmeInstructions && !preparedReadme?.template && !response.readmePath && !profile.instructions) {
     return { status: "unknown", settlement: { outcome: "unknown" } };
   }
   if ("noSubmission" in response) {
@@ -292,7 +293,7 @@ export async function runRepoGradeTarget(
     const evaluation = classifyEvaluation(await evaluatePinned({
       repo: source.repo, folder, sourceCommit: source.sourceCommit, profile, rubric: receipt.rubric,
       runCode: profile.runCode === true, beforeDispatch, preparedReadme: prepared.preparedReadme,
-    }), source.sourceCommit, source.repo, profile, receipt.rubric);
+    }), source.sourceCommit, source.repo, profile, receipt.rubric, prepared.preparedReadme);
     const { settlement, ...value } = evaluation;
     // Settlement can fail after the evaluator has already returned. Keep the
     // exact payload for this caller even if durability cannot be confirmed.

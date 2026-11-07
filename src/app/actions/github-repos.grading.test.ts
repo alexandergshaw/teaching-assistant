@@ -141,6 +141,14 @@ beforeEach(() => {
   getRepoTreeWithMeta.mockResolvedValue({ entries: [], truncated: false });
 });
 
+it("excludes student assignment READMEs from a rubric-only unpinned grade", async () => {
+  ingestRepo.mockResolvedValue(digestOf([file("module_02/main.py", "print(1)")]));
+  await gradeRepoAction("org/student-repo", "", "Correctness: 100 points", "gemini", undefined, "module_02");
+  expect(ingestRepo).toHaveBeenCalledWith("org", "student-repo", {
+    pathPrefix: "module_02", excludeInstructionReadme: true,
+  }, undefined);
+});
+
 // An empty graded folder with no other branch holding it: a graded bare "0",
 // determination "no-submission", NO model call (the leverage removal test).
 function expectGradedZero(result: unknown): void {
@@ -155,98 +163,12 @@ function expectGradedZero(result: unknown): void {
 const SOLUTION_README = "How to complete this assignment:\n\ndef trip_math():\n    return 42  # full worked solution";
 
 describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must never also be graded as the submission", () => {
-  // THE HIGHEST-VALUE CASE, corrected to match the reported incident's real
-  // shape. The reported student's repo held `assignments/module_02/.gitkeep`,
-  // `assignments/module_02/README.md`, and a course-provided test harness at
-  // `tests/test_module_02.py` - OUTSIDE the graded folder. `ingestRepo` is
-  // mocked in this file, but pathPrefix scoping is real production behavior
-  // (selectDigestFiles, github.digest.ts) proven directly and unmocked by
-  // github.digest.test.ts's "includes a subfolder file at depth when scoped
-  // to a prefix" test, which shows a sibling top-level folder (there,
-  // "other/"; here, "tests/") never enters a prefix-scoped digest at all. So
-  // the digest gradeRepoAction actually receives for a run scoped to
-  // "assignments/module_02" never contains the test harness - it is simply
-  // out of scope, not excluded by any grading logic.
-  //
-  // Separately, `.gitkeep` is never in the mocked digest below either,
-  // because it is never in a REAL digest: `isTextCandidate` (github.digest.ts)
-  // rejects any extensionless file that is not a well-known project name or
-  // executable, and a 0-byte blob is dropped even earlier by ingestRepo's own
-  // `size <= 0` guard. So `isScaffoldingFile`'s ".gitkeep" branch
-  // (github-repos.ts) never actually fires in production - it is kept as
-  // cheap defense-in-depth in case that ingest-side filtering ever loosens,
-  // and is exercised directly (not through this realistic fixture) by the
-  // dedicated backstop test below.
-  //
-  // With both of those out of the picture, the digest gradeRepoAction
-  // actually sees holds only the README - which useReadmeInstructions then
-  // picks as the instructions and excludeInstructionsFromDigest removes. What
-  // is left to grade is empty, so noSubmission correctly fires. This is why
-  // the reported student was NOT graded on the course's test harness: it was
-  // never in scope to begin with.
-  it("THE HIGHEST-VALUE CASE: a folder scoped to just a solution README (its course-provided test harness sits outside the folder) produces a graded zero, never a model score", async () => {
-    ingestRepo.mockResolvedValue(digestOf([file("assignments/module_02/README.md", SOLUTION_README)]));
-
-    const result = await gradeRepoAction(
-      "org/student-repo",
-      /* assignmentInstructions */ "",
-      /* rubric */ "",
-      "gemini",
-      undefined,
-      "assignments/module_02",
-      /* useReadmeInstructions */ true
-    );
-
-    expectGradedZero(result);
-    // Never a MODEL score, and never the vector that produced the wrong grade
-    // in the reported case.
+  it.each(["gemini", "embedded"] as const)("refuses student README instruction mode before reading a repo for %s", async (provider) => {
+    const result = await gradeRepoAction("org/student-repo", "", "", provider, undefined, "module_02", true);
+    expect(result).toEqual({ error: "Template instructions are required. Use the repository gradebook to grade with the course template." });
+    expect(ingestRepo).not.toHaveBeenCalled();
     expect(gradeEntries).not.toHaveBeenCalled();
-    expect(generateRubric).not.toHaveBeenCalled();
-  });
-
-  // Backstop only - NOT a realistic ingestRepo shape (see the comment above):
-  // proves isScaffoldingFile's ".gitkeep" wiring still works if a future
-  // change to ingest-side filtering ever let such an entry through, even
-  // though nothing exercises this path today.
-  it("backstop: a .gitkeep entry, if it were ever present in the digest, is still excluded as scaffolding (not a realistic ingest shape - see comment above)", async () => {
-    ingestRepo.mockResolvedValue(
-      digestOf([file("module_02/README.md", SOLUTION_README), file("module_02/.gitkeep", "placeholder")])
-    );
-
-    const result = await gradeRepoAction(
-      "org/student-repo",
-      "",
-      "",
-      "gemini",
-      undefined,
-      "module_02",
-      /* useReadmeInstructions */ true
-    );
-
-    expectGradedZero(result);
-    expect(gradeEntries).not.toHaveBeenCalled();
-  });
-
-  it("the same folder is graded correctly once a real file is added - the fix does not over-exclude", async () => {
-    ingestRepo.mockResolvedValue(
-      digestOf([
-        file("module_02/README.md", SOLUTION_README),
-        file("module_02/trip_math.py", "def trip_math():\n    return 7  # the student's own (wrong) attempt"),
-      ])
-    );
-
-    const result = await gradeRepoAction("org/student-repo", "", "", "gemini", undefined, "module_02", true);
-
-    expect("noSubmission" in result).toBe(false);
-    expect("error" in result).toBe(false);
-    expect(gradeEntries).toHaveBeenCalledTimes(1);
-    // THE CORE OF FIX 1: the README (the instructions) must not be part of
-    // what was sent to the grader as the submission.
-    const [entries] = gradeEntries.mock.calls[0] as [Array<{ content: string; submittedFiles: Array<{ name: string }> }>];
-    const entry = entries[0];
-    expect(entry.content).not.toContain("full worked solution");
-    expect(entry.submittedFiles.map((f) => f.name)).not.toContain("module_02/README.md");
-    expect(entry.submittedFiles.map((f) => f.name)).toContain("module_02/trip_math.py");
+    expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
   });
 
   it("also excludes the README by CONTENT when a caller pre-fetches it itself and passes it as assignmentInstructions (no useReadmeInstructions flag)", async () => {
@@ -281,23 +203,7 @@ describe("gradeRepoAction - FIX 1 + FIX 2: a README used as instructions must ne
     expect(gradeEntries).not.toHaveBeenCalled();
   });
 
-  it("the embedded (deterministic) provider is covered by the same rule - no score from an empty folder", async () => {
-    ingestRepo.mockResolvedValue(digestOf([file("module_02/README.md", SOLUTION_README)]));
 
-    const result = await gradeRepoAction(
-      "org/student-repo",
-      "",
-      "",
-      "embedded",
-      undefined,
-      "module_02",
-      true
-    );
-
-    expectGradedZero(result);
-    expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
-    expect(buildEmbeddedRubric).not.toHaveBeenCalled();
-  });
 });
 
 describe("gradeRepoAction - compiler auto-run control", () => {

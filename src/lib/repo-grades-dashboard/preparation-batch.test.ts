@@ -48,6 +48,20 @@ describe("bounded preparation evidence batches", () => {
     const first = await collectPreparationEvidenceBatch(input, null, collector());
     if (first.status !== "continue") throw new Error("expected progress");
     expect(await collectPreparationEvidenceBatch(input, first.progress, collector("Different")))
-      .toEqual({ status: "blocked", reason: "conflicting-instructions" });
+      .toMatchObject({ status: "blocked", reason: "conflicting-instructions", example: { kind: "conflict" } });
+  });
+
+  it("does not label a fallback-versus-README conflict as two conflicting READMEs", async () => {
+    const withFallback: Request = { ...input, instructionPolicy: { kind: "readme-with-configured-fallback", fallbackInstructions: "Fallback" } };
+    const first = await collectPreparationEvidenceBatch(withFallback, null, async (request) => {
+      if (request.inventory.status !== "complete") throw new Error("unexpected inventory");
+      return captureRepoGradePreparationInput({ ...request, readmeEvidence: request.inventory.targets.map((target) => ({
+        target, source: { kind: "configured-fallback", readmeStatus: "absent" },
+      })) });
+    });
+    if (first.status !== "continue") throw new Error("expected progress");
+    const result = await collectPreparationEvidenceBatch(withFallback, first.progress, collector("Different"));
+    expect(result).toMatchObject({ status: "blocked", reason: "conflicting-instructions" });
+    expect(result).not.toHaveProperty("example");
   });
 });

@@ -366,18 +366,13 @@ export async function gradeOrgRepos(opts: {
     try {
       onProgress(`Grading ${i + 1}/${reposRes.repos.length}: ${fullName}...`);
 
-      let repoInstructions = instructions;
-      let instructionsSourceNote = "";
+      const repoInstructions = instructions;
+      const instructionsSourceNote = "";
       if (!repoInstructions) {
-        const readmeRes = await resolveReadmeInstructions(fullName, branch, folder);
-        if ("error" in readmeRes) {
-          const reason = `the Assignment instructions input resolved to empty and no usable README was found (tried ${readmeRes.tried.join(", ")})`;
-          notes.push(`${fullName}: ${reason}`);
-          logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "skipped", reason, at: new Date().toISOString() }));
-          continue;
-        }
-        repoInstructions = readmeRes.text;
-        instructionsSourceNote = ` (instructions from ${readmeRes.path})`;
+        const reason = "Assignment instructions are required. Use the repository gradebook to read them from the course template.";
+        notes.push(`${fullName}: ${reason}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "skipped", reason, at: new Date().toISOString() }));
+        continue;
       }
 
       const r = await gradeRepoAction(fullName, repoInstructions, rubric, helpers.provider, branch, folder);

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver, PreparationEvidenceContinue } from "./automatic-evidence";
 import type { composeRepoGradePreparationEvidence } from "./preparation-evidence";
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
+import { createHash } from "node:crypto";
+import type { RepoGradeCourseConfig } from "@/lib/supabase/types.repo-grades-dashboard";
 
 const { readPinned } = vi.hoisted(() => ({ readPinned: vi.fn() }));
 vi.mock("./preparation-readme", () => ({ readPinnedRepoGradeReadme: readPinned }));
@@ -35,6 +37,58 @@ describe("run-scoped automatic grading evidence", () => {
         : { status: "absent", target });
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it("uses the course's cross-organization template once for every student folder", async () => {
+    const { store } = storage();
+    const config: RepoGradeCourseConfig = { github_org: "Org", repos: [{ repo: "Teacher/template", branch: "main" }],
+      repo_module_pairing: null, rubric_name: null, rubric_data: null, student_repos: [] };
+    const templateSha = "a".repeat(40);
+    const blobSha = createHash("sha1").update(`blob ${Buffer.byteLength(instructions)}\0`).update(instructions).digest("hex");
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/git/commits/")
+      ? { sha: templateSha, tree: { sha: "b".repeat(40) } } : { sha: templateSha }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    readPinned.mockImplementation(async (target) => ({ status: "present", target, path: "lab/README.md", text: instructions, blobSha }));
+    const resolve = createAutomaticRepoGradeEvidenceResolver("snapshot", store, async () => true, config);
+    const firstResult = await resolve(input);
+    expect(firstResult).toMatchObject({ status: "ready", instructions, keyVersion: "repo-grade-preparation-v2", evidence: [
+      { target: first, source: { kind: "template-readme", repo: "Teacher/template", instructionSha256: createHash("sha256").update(instructions).digest("hex") } },
+      { target: second, source: { kind: "template-readme", repo: "Teacher/template", instructionSha256: createHash("sha256").update(instructions).digest("hex") } },
+    ] });
+    expect(readPinned).toHaveBeenCalledTimes(1);
+    expect(readPinned).toHaveBeenCalledWith(expect.objectContaining({ owner: "Teacher", repo: "template", sourceCommit: templateSha }), "lab", undefined, "owner");
+    expect(await resolve(input)).toEqual(firstResult);
+    expect(readPinned).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.every(([url]) => url.includes("/Teacher/template/"))).toBe(true);
+  });
+
+  it("refuses missing or ambiguous course template mappings rather than reading student READMEs", async () => {
+    const { store } = storage();
+    const config: RepoGradeCourseConfig = { github_org: "Org", repos: [], repo_module_pairing: null,
+      rubric_name: null, rubric_data: null, student_repos: [] };
+    await expect(createAutomaticRepoGradeEvidenceResolver("snapshot", store, async () => true, config)(input))
+      .resolves.toEqual({ status: "blocked", reason: "missing-instruction-evidence" });
+    expect(readPinned).not.toHaveBeenCalled();
+  });
+
+  it.each(["absent", "blank"] as const)("uses configured fallback when the template README is %s", async (status) => {
+    const { store } = storage();
+    const config: RepoGradeCourseConfig = { github_org: "Org", repos: [{ repo: "Teacher/template", branch: "main" }],
+      repo_module_pairing: null, rubric_name: null, rubric_data: null, student_repos: [] };
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/git/commits/")
+      ? { sha: "a".repeat(40), tree: { sha: "b".repeat(40) } } : { sha: "a".repeat(40) }), { status: 200 })));
+    readPinned.mockImplementation(async (target) => status === "absent" ? { status, target }
+      : { status, target, path: "lab/README.md", text: " ", blobSha: "b".repeat(40) });
+    const resolve = createAutomaticRepoGradeEvidenceResolver("snapshot", store, async () => true, config);
+    const result = await resolve(input);
+    expect(result).toMatchObject({ status: "ready", instructions, evidence: [
+      { source: { kind: "template-readme", repo: "Teacher/template", sourceRef: "main", sourceCommit: "a".repeat(40), readmeStatus: status } },
+      { source: { kind: "template-readme", repo: "Teacher/template", sourceRef: "main", sourceCommit: "a".repeat(40), readmeStatus: status } },
+    ] });
+    expect(await resolve(input)).toEqual(result);
+    expect(readPinned).toHaveBeenCalledTimes(1);
+  });
 
   it("resumes 101 pinned repositories across bounded batches and publishes only complete evidence", async () => {
     const { store } = storage();

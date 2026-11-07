@@ -1,5 +1,10 @@
 export type RubricScore = { area: string; score: string; comment?: string };
 
+/** Include the slot's vertical chrome when sharing a border-box height. */
+export function rubricSlotHeight(contentHeight: number, paddingAndBorder: number): number {
+  return Math.ceil(Math.max(0, contentHeight) + Math.max(0, paddingAndBorder));
+}
+
 /** Stable saved-result order with empty slots where a student's rubric omits an area. */
 export function alignRubricScores(order: readonly string[], areas: readonly RubricScore[]): RubricScore[] {
   const occurrences = new Map<string, number>();

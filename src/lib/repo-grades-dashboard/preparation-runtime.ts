@@ -5,7 +5,8 @@ import { getGeminiApiKey } from "@/lib/gemini";
 import type { RepoGradeCourseConfig } from "@/lib/supabase/types.repo-grades-dashboard";
 import type { RepoGradeDiscovery } from "./discovery";
 import { getRepoGraderIdentity } from "./grader-identity";
-import { composeRepoGradePreparationEvidence, type RepoGradePreparationEvidenceFailure } from "./preparation-evidence";
+import { createAutomaticRepoGradeEvidenceResolver } from "./automatic-evidence";
+import { composeRepoGradePreparationEvidence, type RepoGradePreparationEvidenceFailure, type RepoGradeReadmeExample } from "./preparation-evidence";
 import { captureRepoGradePreparationPolicy, generatePreparedRepoGradeRubric, type RepoGradeRubricGenerator } from "./preparation-generator";
 import type { RepoGradePreparationCapture, RepoGradePreparationInput } from "./preparation-input";
 import { captureRepoGradeProfile, isEmbeddedRepoGradeStartupProfile, resolveRepoGradeRubric, type RepoGradeProfile } from "./profile";
@@ -22,7 +23,7 @@ type Target = Pick<RepoGradeStartupTarget, "repo" | "sourceRef" | "sha">;
 type Inventory = RepoGradePreparationInput["inventory"];
 type Evidence = Extract<RepoGradePreparationCapture, { status: "ready" }>;
 
-export type PreparedRepoGradeReadme = Readonly<{ path: string | null; instructions: string }>;
+export type PreparedRepoGradeReadme = Readonly<{ path: string | null; instructions: string; template?: boolean }>;
 export type PreparedRepoGradeProfile = RepoGradeCohort & {
   profile: RepoGradeProfile;
   preparedReadme?: PreparedRepoGradeReadme;
@@ -45,7 +46,7 @@ export type RepoGradeProfilePreparationFailure = RepoGradePreparationEvidenceFai
   | "pinned-target-missing" | "rubric-freeze-unavailable" | "rubric-generation-unavailable";
 type PreparationOptions = {
   observePreparation?: (metric: RepoGradePreparationDiagnostic) => void;
-  observeProfileFailure?: (reason: RepoGradeProfilePreparationFailure) => void;
+  observeProfileFailure?: (reason: RepoGradeProfilePreparationFailure, example?: RepoGradeReadmeExample) => void;
   retry?: RepoGradePreparationRetry;
   resolveEvidence?: typeof composeRepoGradePreparationEvidence;
 };
@@ -56,7 +57,7 @@ function cohortId(key: string): string {
   return [key.slice(0, 8), key.slice(8, 12), key.slice(12, 16), key.slice(16, 20), key.slice(20, 32)].join("-");
 }
 
-function folderInventory(discovery: RepoGradeDiscovery, profile: RepoGradeProfile): Inventory {
+export function folderInventory(discovery: RepoGradeDiscovery, profile: RepoGradeProfile): Inventory {
   if (discovery.status !== "scanned" || !discovery.enumerationComplete) return { status: "incomplete" };
   const explicitRef = profile.sourceRef;
   const repositories = new Set<string>();
@@ -72,6 +73,9 @@ function folderInventory(discovery: RepoGradeDiscovery, profile: RepoGradeProfil
     resolved.add(repoKey);
     if (row.status !== "ready") return { status: "incomplete" };
     if (!row.folders.includes(profile.folder)) continue;
+    // A complete verified tree containing only .gitkeep is not a submission
+    // and therefore cannot supply or contradict assignment instructions.
+    if (row.emptyFolders?.includes(profile.folder)) continue;
     const [owner, repo, extra] = row.repo.split("/");
     if (!owner || !repo || extra !== undefined) return { status: "incomplete" };
     targets.push({ owner, repo, sourceRef: row.sourceRef, sourceCommit: row.sourceCommit });
@@ -194,7 +198,7 @@ export async function prepareRepoGradeStartupProfile(
 
 async function prepareRepoGradeStartupRubric(
   profile: RepoGradeProfile, discovery: RepoGradeDiscovery, target: Target | undefined, courseConfig: RepoGradeCourseConfig,
-  { observeProfileFailure, retry, resolveEvidence = composeRepoGradePreparationEvidence }: PreparationOptions,
+  { observeProfileFailure, retry, resolveEvidence }: PreparationOptions,
   bootstrap?: { courseKindBasis: RepoGradeCourseKindBasis | undefined; expectedFingerprint: string | null },
 ): Promise<PreparedRepoGradeProfile | RepoGradePreparationFailure | null> {
   function unavailable(reason: RepoGradeProfilePreparationFailure): null {
@@ -224,7 +228,10 @@ async function prepareRepoGradeStartupRubric(
     generator = policy.generator;
     promptParserVersion = policy.version;
   }
-  const evidence = await resolveEvidence({
+  const resolve = resolveEvidence ?? createAutomaticRepoGradeEvidenceResolver(
+    "startup", { read: async () => null, write: async () => {} }, async () => false, courseConfig,
+  );
+  const evidence = await resolve({
     configuration: {
       accountId, courseId, folder, configurationFingerprint, provider, model, graderVersion,
       promptParserVersion, courseKind: generator?.courseKind ?? "coding",
@@ -232,13 +239,18 @@ async function prepareRepoGradeStartupRubric(
     instructionPolicy: instructionPolicy(profile),
     inventory: folderInventory(discovery, profile),
   });
-  if (evidence.status !== "ready") return unavailable(evidence.reason);
+  if (evidence.status !== "ready") {
+    observeProfileFailure?.(evidence.reason, "example" in evidence ? evidence.example : undefined);
+    return null;
+  }
   if (retry && retry.key !== evidence.key) return { status: "configuration-changed" };
   const captured = target ? evidence.evidence.find(({ target: pin }) => `${pin.owner}/${pin.repo}` === target.repo
     && pin.sourceRef === target.sourceRef && pin.sourceCommit === target.sha) : retry && evidence.evidence[0];
   if (!captured) return unavailable("pinned-target-missing");
 
-  const preparedReadme: PreparedRepoGradeReadme | undefined = captured.source.kind === "saved" ? undefined : {
+  const preparedReadme: PreparedRepoGradeReadme | undefined = captured.source.kind === "template-readme"
+    ? { path: null, instructions: evidence.instructions, template: true }
+    : captured.source.kind === "saved" ? undefined : {
     path: captured.source.kind === "pinned-readme" ? captured.source.path : null,
     instructions: evidence.instructions,
   };

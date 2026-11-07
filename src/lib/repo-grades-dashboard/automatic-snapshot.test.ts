@@ -28,6 +28,16 @@ async function capture() {
 }
 
 describe("automatic course snapshot revalidation", () => {
+  it("preserves verified empty folders and rejects invalid empty projections", () => {
+    const basis = "e".repeat(64);
+    const candidate = { version: 1, basis, discovery: { status: "scanned", enumerationComplete: true, repos: [
+      { status: "ready", repo: "School/Student", sourceRef: "main", sourceCommit: old, folders: ["lab"], emptyFolders: ["lab"] },
+    ] } };
+    expect(restoreAutomaticRepoGradeSnapshot(candidate)).toMatchObject({ discovery: { repos: [{ emptyFolders: ["lab"] }] } });
+    expect(restoreAutomaticRepoGradeSnapshot({ ...candidate, discovery: { ...candidate.discovery, repos: [
+      { ...candidate.discovery.repos[0], emptyFolders: ["other"] },
+    ] } })).toBeNull();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubEnv("GITHUB_TOKEN", "first-token");

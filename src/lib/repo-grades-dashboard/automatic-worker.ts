@@ -9,6 +9,7 @@ import { readRepoGradeStartupHistory } from "./startup-history";
 import { automaticRepoGradeEvidenceStore, isTargetedAutomaticRepoGrade, readAutomaticRepoGradeSnapshot, type AutomaticRepoGradeCompletion, type AutomaticRepoGradeWork } from "./automatic-store";
 import { captureAutomaticRepoGradeSnapshot } from "./automatic-snapshot";
 import { authorizeAutomaticRepoGradeEvidence, createAutomaticRepoGradeEvidenceResolver, PreparationEvidenceContinue } from "./automatic-evidence";
+import type { RepoGradeReadmeExample } from "./preparation-evidence";
 import { confirmedGradeSourceCooldown } from "@/lib/github-grade-archive";
 import { PreparationGithubThrottle } from "./preparation-github-throttle";
 
@@ -73,6 +74,13 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
           const { repo, folder, sourceRef, sha } = target;
           const selector = { repo, folder, ref: sourceRef, sha };
           const prior = history.get(repoGradeStartupKey(target));
+          const source = discovery.repos.find((row) => row.status === "ready" && row.repo === repo
+            && row.sourceRef === sourceRef && row.sourceCommit === sha);
+          // This projection is established only from a complete verified tree
+          // immediately after the live source was authorized during discovery.
+          // Prior attempts keep their normal path, including explicit regrades.
+          if (prior === "never-attempted" && source?.status === "ready"
+            && source.emptyFolders?.includes(folder)) return { ...selector, state: "no-submission" as const };
           // An explicit request asks for a fresh evaluation, but the database
           // independently blocks any unresolved prior attempt before dispatch.
           if (work.targetFilter && prior) return selector;
@@ -106,8 +114,26 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       if (prior === "succeeded" || prior === "no-submission") return { state: "already-processed" };
       return { state: prior === "claimed" ? "busy" : prior, reason: "prior-attempt" };
     }
+    // Explicit regrades of a previously graded, now empty folder must not
+    // prepare a rubric or redispatch a model. The database independently
+    // verifies this exact pinned snapshot and fences unresolved attempts.
+    const emptySource = snapshot && plan.discovery.status === "scanned" && plan.discovery.repos.find((row) =>
+      row.status === "ready" && row.repo === work.repo && row.sourceRef === work.ref
+      && row.sourceCommit === work.sha && row.emptyFolders?.includes(work.folder));
+    if (targeted && emptySource) {
+      try {
+        if (!await authorizeAutomaticRepoGradeEvidence(work.repo, work.sha)) return { state: "blocked", reason: "source-unavailable" };
+      } catch (error) {
+        if (work.retryGithubRateLimits && error instanceof PreparationGithubThrottle) {
+          return { state: "github-throttled", rateLimit: error.rateLimit };
+        }
+        return { state: "blocked", reason: "source-unavailable" };
+      }
+      return { state: "verified-empty-regrade" };
+    }
     const expectedRef = plan.folderSources.get(target.folder) ?? null;
     let profileFailure: RepoGradeProfilePreparationFailure | undefined;
+    let readmeExample: RepoGradeReadmeExample | undefined;
     let preparationThrottle: PreparationGithubThrottle | undefined;
     let evidenceContinue: PreparationEvidenceContinue | undefined;
     const outcome = await runRepoGradeTarget(plan, target, {
@@ -116,11 +142,12 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       loadPreparedProfile: (scope) => mode === "embedded-only"
         ? prepareEmbeddedRepoGradeStartupProfile(scope, expectedRef)
         : prepareRepoGradeStartupProfile(scope, plan.discovery, expectedRef, target, plan.courseConfig, plan.courseKindBasis, {
-          observeProfileFailure: (reason) => { profileFailure = reason; },
-          ...(snapshot && { resolveEvidence: createAutomaticRepoGradeEvidenceResolver(
-            snapshot.basis, automaticRepoGradeEvidenceStore(work, lease),
-            () => authorizeAutomaticRepoGradeEvidence(work.repo, work.sha),
-          ) }),
+          observeProfileFailure: (reason, example) => { profileFailure = reason; readmeExample = example; },
+          resolveEvidence: createAutomaticRepoGradeEvidenceResolver(
+            snapshot?.basis ?? plan.snapshotBasis ?? "legacy",
+            snapshot ? automaticRepoGradeEvidenceStore(work, lease) : { read: async () => null, write: async () => {} },
+            () => authorizeAutomaticRepoGradeEvidence(work.repo, work.sha), plan.courseConfig,
+          ),
         }).catch((error: unknown) => {
           if (error instanceof PreparationGithubThrottle) preparationThrottle = error;
           if (error instanceof PreparationEvidenceContinue) evidenceContinue = error;
@@ -163,7 +190,7 @@ export function createAutomaticRepoGradeWorker(mode: AutomaticRepoGradeMode) {
       case "partial":
         return { state: "partial", reason: outcome.feedbackRetention ? "feedback-not-retained" : outcome.reason };
       case "profile-unavailable":
-        return { state: "blocked", reason: profileFailure ?? outcome.status };
+        return { state: "blocked", reason: profileFailure ?? outcome.status, ...(readmeExample && { readmeExample }) };
       default:
         return { state: "blocked", reason: outcome.status };
     }

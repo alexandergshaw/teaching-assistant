@@ -7,6 +7,7 @@ import { isGithubCommitSha } from "@/lib/github.repos";
 import { assignmentFolderPathsFromTree } from "@/lib/repo-assignment-folder-paths";
 import { DEFAULT_TREE_SCAN_CONCURRENCY } from "@/lib/repo-grade-tree-scan";
 import { createDiscoveryTransport, DiscoveryTransportError, type DiscoveryRateLimit, type DiscoveryTransportFailure } from "./discovery-transport";
+import { provenEmptyFolders } from "./empty-folders";
 
 type DiscoveryFailure = DiscoveryTransportFailure | "source-set-too-large" | "invalid-scope" | "invalid-source";
 type DiscoveryRequest = ReturnType<typeof createDiscoveryTransport>;
@@ -18,10 +19,11 @@ const ORG_PAGE_SIZE = 100;
 const MAX_CACHED_TREES = 512;
 const MAX_CACHED_FOLDERS = 256;
 const MAX_CACHED_FOLDER_BYTES = 16 * 1024;
-const cachedFolders = new Map<string, readonly string[]>();
+type FolderProjection = { folders: readonly string[]; emptyFolders?: readonly string[] };
+const cachedFolders = new Map<string, FolderProjection>();
 
 export type RepoGradeSourceRow =
-  | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[] }
+  | { status: "ready"; repo: string; sourceRef: string; sourceCommit: string; folders: string[]; emptyFolders?: string[] }
   | { status: "partial"; repo: string; sourceRef: string; sourceCommit: string; reason: "tree-truncated" }
   | { status: "blocked"; repo: string; sourceRef: string; sourceCommit?: string; reason: DiscoveryFailure };
 
@@ -103,10 +105,11 @@ function readFolders(value: unknown, treeSha: string): string[] | null {
   return assignmentFolderPathsFromTree(paths);
 }
 
-function rememberFolders(key: string, folders: readonly string[]) {
+function rememberFolders(key: string, projection: FolderProjection) {
+  const { folders } = projection;
   if (folders.length > MAX_CACHED_FOLDERS
     || folders.reduce((bytes, folder) => bytes + Buffer.byteLength(folder), 0) > MAX_CACHED_FOLDER_BYTES) return;
-  cachedFolders.set(key, folders);
+  cachedFolders.set(key, projection);
   if (cachedFolders.size > MAX_CACHED_TREES) {
     const oldest = cachedFolders.keys().next().value;
     if (oldest !== undefined) cachedFolders.delete(oldest);
@@ -134,26 +137,30 @@ async function readSource(
     // resolved its immutable tree. Reuse only complete, validated projections.
     const credential = accountId && request.treeCacheScope();
     const cacheKey = credential && JSON.stringify([accountId, credential, repo, treeSha]);
-    let folders = cacheKey ? cachedFolders.get(cacheKey) : undefined;
-    if (!folders) {
+    let projection = cacheKey ? cachedFolders.get(cacheKey) : undefined;
+    if (!projection) {
       const loaded = await request.getJson(`${base}/git/trees/${treeSha}?recursive=1`, (value) => {
-        const result = readFolders(value, treeSha);
-        if (result && accountId && credential) {
+        const folders = readFolders(value, treeSha);
+        if (!folders) return null;
+        let emptyFolders: string[] | undefined;
+        if (accountId && credential) {
           try {
-            rememberVerifiedGithubTree({ accountId, credential, owner, repo: name, rootSha: treeSha }, value);
+            const verified = rememberVerifiedGithubTree({ accountId, credential, owner, repo: name, rootSha: treeSha }, value);
+            emptyFolders = provenEmptyFolders(folders, verified.values());
           } catch {
             // Keep the existing folder projection, but never retain unverified grading evidence.
           }
         }
-        return result;
+        return { folders, ...(emptyFolders && { emptyFolders }) };
       });
       if (cacheKey && loaded) rememberFolders(cacheKey, loaded);
-      folders = loaded ?? undefined;
+      projection = loaded ?? undefined;
     }
-    if (!folders) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
-    const selectedFolders = folders.filter(includesFolder);
+    if (!projection) return { status: "partial", repo, sourceRef, sourceCommit, reason: "tree-truncated" };
+    const selectedFolders = projection.folders.filter(includesFolder);
+    const emptyFolders = projection.emptyFolders?.filter(includesFolder);
     request.checkActive();
-    return { status: "ready", repo, sourceRef, sourceCommit, folders: selectedFolders };
+    return { status: "ready", repo, sourceRef, sourceCommit, folders: selectedFolders, ...(emptyFolders && { emptyFolders }) };
   } catch (error) {
     return { status: "blocked", repo, sourceRef, sourceCommit, reason: classifyFailure(error) };
   }

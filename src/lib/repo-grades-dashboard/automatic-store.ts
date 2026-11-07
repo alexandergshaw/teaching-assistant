@@ -10,12 +10,13 @@ import type { RepoGradeRepositoryCoverage } from "./scheduler";
 import { parseAutomaticRepoGradeSchedule, type AutomaticRepoGradeScheduleDraft } from "./automatic-schedule";
 import type { RepoGradeClaim } from "./state";
 import type { RepoGradeEvidenceBatchProgress } from "./preparation-batch";
+import type { RepoGradeReadmeExample } from "./preparation-evidence";
 
 type Selector = { repo: string; folder: string; ref: string; sha: string };
 type ClaimScope = { runId: string; accountId: string; courseId: string; retryGithubRateLimits?: boolean };
 export type AutomaticRepoGradeWork = (ClaimScope & { phase: "discovering"; targetFilter?: { folders: string[] | null; repos: string[] | null; pairs?: { folder: string; repo: string }[] | null } }) | (ClaimScope & Selector & { phase: "grading" });
 type StagedSelector = Selector & {
-  state?: Extract<AutomaticRepoGradeTargetState, "already-processed" | "busy" | "failed" | "partial" | "unknown">;
+  state?: Extract<AutomaticRepoGradeTargetState, "already-processed" | "no-submission" | "busy" | "failed" | "partial" | "unknown">;
   reason?: "prior-attempt";
 };
 type DiscoveryCompletion = {
@@ -28,9 +29,11 @@ type TargetCompletion = {
   reason?: string;
   preparationRetry?: RepoGradePreparationRetry;
   recovery?: string;
+  readmeExample?: RepoGradeReadmeExample;
 };
 export type AutomaticRepoGradeCompletion = DiscoveryCompletion | TargetCompletion
   | { state: "evidence-continue"; basis: string; progress: RepoGradeEvidenceBatchProgress }
+  | { state: "verified-empty-regrade" }
   | { state: "github-throttled"; rateLimit: DiscoveryRateLimit; claim?: RepoGradeClaim & { mode: "automatic" | "retry" } };
 
 async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -201,6 +204,13 @@ export function automaticRepoGradeEvidenceStore(
 }
 
 export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lease: string, result: AutomaticRepoGradeCompletion) {
+  if (result.state === "verified-empty-regrade") {
+    if (work.phase !== "grading") return false;
+    return await rpc("repo_grade_automatic_finish_empty_regrade", {
+      p_user_id: work.accountId, p_run_id: work.runId, p_lease: lease, p_course_id: work.courseId,
+      p_repo: work.repo, p_folder: work.folder, p_source_ref: work.ref, p_source_sha: work.sha,
+    }) === true;
+  }
   if (result.state === "evidence-continue") {
     if (work.phase !== "grading") return false;
     return await rpc("repo_grade_automatic_continue_evidence", {
@@ -223,6 +233,12 @@ export async function finishAutomaticRepoGrade(work: AutomaticRepoGradeWork, lea
       p_discovering: work.phase === "discovering",
       p_retry_at: retryAtMs === null ? null : new Date(retryAtMs).toISOString(),
       p_primary_limit: primary,
+    }) === true;
+  }
+  if ("readmeExample" in result && result.readmeExample && work.phase === "grading" && result.state === "blocked") {
+    return await rpc("repo_grade_automatic_finish_readme_example", {
+      p_run_id: work.runId, p_lease: lease, p_user_id: work.accountId, p_course_id: work.courseId,
+      p_reason: result.reason, p_example: result.readmeExample,
     }) === true;
   }
   const discovery = "targets" in result;

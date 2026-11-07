@@ -4,11 +4,24 @@
 // to the documented rules, never derived from re-running the implementation.
 
 import { describe, it, expect } from "vitest";
-import { pickReadmeInstructions } from "./repo-readme-instructions";
+import { isInstructionReadmeDocument, pickReadmeInstructions } from "./repo-readme-instructions";
 
 function file(path: string, content: string) {
   return { path, content };
 }
+
+describe("assignment README document names", () => {
+  it.each(["README", "lab/README.md", "lab/README-assignment.md", "lab/assignment-readme.md",
+    "lab/ASSIGNMENT_readME.TXT", "lab/readme.notes.rst", "lab/README-assignment.markdown",
+    "lab/assignment-readme.adoc", "lab/README.asciidoc", "lab/README.html", "lab/README.htm",
+    "lab/README.tex", "lab/README.xml"])("recognizes %s", (path) => {
+    expect(isInstructionReadmeDocument(path)).toBe(true);
+  });
+  it.each(["lab/readme_processor.py", "lab/readme-helper.ts", "lab/readmetool.md", "lab/README-assignment.py",
+    "lab/readme-assignment", "lab/README.md.exe"])("preserves non-instruction file %s", (path) => {
+    expect(isInstructionReadmeDocument(path)).toBe(false);
+  });
+});
 
 describe("pickReadmeInstructions", () => {
   it("returns null when there is no README at all", () => {

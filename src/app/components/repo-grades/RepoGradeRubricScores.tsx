@@ -4,21 +4,22 @@ import { formatScorePercent, scorePercentValue } from "./repoGradeScoreDisplay";
 import styles from "./repo-grades.module.css";
 import { alignRubricScores } from "./rubricAlignment";
 
-export default function RepoGradeRubricScores({ areas, label, criterionOrder }: {
+export default function RepoGradeRubricScores({ areas, label, criterionOrder, placeholderOnly = false }: {
   areas: readonly Pick<RepoGradeCellEdit["rubricAreas"][number], "area" | "score" | "comment">[];
   label: string;
   criterionOrder?: readonly string[];
+  placeholderOnly?: boolean;
 }) {
   const slots = criterionOrder ? alignRubricScores(criterionOrder, areas) : areas;
   if (!slots.length) return null;
   return (
-    <List aria-label={label} className={styles.rubricBreakdown} disablePadding dense>
+    <List aria-label={placeholderOnly ? undefined : label} aria-hidden={placeholderOnly || undefined} className={styles.rubricBreakdown} disablePadding dense>
       {slots.map((area, index) => {
         const percent = scorePercentValue(area.score) === null ? null : formatScorePercent(area.score);
         return (
           <ListItem key={index} disableGutters disablePadding className={styles.rubricBreakdownArea} data-rubric-index={index}
-            sx={{ alignItems: "flex-start", justifyContent: "space-between", minHeight: `var(--rg-rubric-${index}, 2rem)` }}>
-            <Box className={styles.rubricBreakdownContent} data-rubric-content>
+            sx={{ alignItems: "flex-start", boxSizing: "border-box", justifyContent: "space-between", minHeight: `var(--rg-rubric-${index}, 2rem)` }}>
+            {!placeholderOnly && <Box className={styles.rubricBreakdownContent} data-rubric-content>
               <Box className={styles.rubricBreakdownHeading}>
                 <Typography component="span" variant="body2" className={styles.rubricBreakdownName}>{area.area}</Typography>
                 <Typography component="span" variant="body2" className={styles.rubricBreakdownScore}>
@@ -26,7 +27,7 @@ export default function RepoGradeRubricScores({ areas, label, criterionOrder }: 
                 </Typography>
               </Box>
               {area.comment?.trim() && <Typography component="p" variant="body2" className={styles.rubricBreakdownComment}>{area.comment}</Typography>}
-            </Box>
+            </Box>}
           </ListItem>
         );
       })}

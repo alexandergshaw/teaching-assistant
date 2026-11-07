@@ -42,7 +42,7 @@ const claim = { mode: "automatic" as const, generation: 7, token: "server-owned-
 const grader = { provider: "gemini", model, graderVersion: "repo-grader-v1" };
 const frozenRubric = "Correctness (100%):  Evaluate the printed value.";
 
-function preparedRuntime(settings = {}, graderIdentity = grader, preparedReadme?: { path: string | null; instructions: string }) {
+function preparedRuntime(settings = {}, graderIdentity = grader, preparedReadme?: { path: string | null; instructions: string; template?: boolean }) {
   const captured = captureRepoGradeProfile(
     { accountId: plan.accountId, courseId: plan.courseId, folder: target.folder }, settings, graderIdentity,
   );
@@ -305,6 +305,32 @@ describe("admitted pinned repository evaluator", () => {
     await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "failed" });
     expect(fetcher.mock.calls.some(([url]) => url === modelUrl)).toBe(false);
     expect(beginRepoGradeDispatch).not.toHaveBeenCalled();
+  });
+
+  it("uses template instructions without reading the student's README as grading input", async () => {
+    const studentReadme = "Student-specific instructions must not be used.";
+    const secondReadme = { ...files.readme, path: "lab/docs/readme.txt" };
+    const variantReadme = { ...files.readme, path: "lab/assignment-README.md" };
+    const htmlReadme = { ...files.readme, path: "lab/README.html" };
+    const xmlReadme = { ...files.readme, path: "lab/README.xml" };
+    const studentCode = { ...files.submission, path: "lab/readme_processor.py" };
+    const fetcher = fetchRepo({ readme: studentReadme, tree: [files.readme, secondReadme, variantReadme, htmlReadme, xmlReadme, studentCode, files.submission] });
+    const instructions = "Shared template assignment instructions.";
+    const runtime = preparedRuntime({}, grader, { path: null, instructions, template: true });
+    await expect(runRepoGradeTarget(plan, target, runtime)).resolves.toEqual({ status: "succeeded" });
+    const modelCall = fetcher.mock.calls.find(([url]) => url === modelUrl);
+    expect(modelCall?.[1].body).toContain(instructions);
+    expect(modelCall?.[1].body).not.toContain("Student-specific instructions must not be used.");
+    expect(modelCall?.[1].body).not.toContain("# submission helper lab/docs/readme.txt");
+    expect(modelCall?.[1].body).not.toContain("# submission helper lab/assignment-README.md");
+    expect(modelCall?.[1].body).not.toContain("# submission helper lab/README.html");
+    expect(modelCall?.[1].body).not.toContain("# submission helper lab/README.xml");
+    expect(modelCall?.[1].body).toContain("# submission helper lab/readme_processor.py");
+    const studentReadmeSha = createHash("sha1").update(`blob ${Buffer.byteLength(studentReadme)}\0`).update(studentReadme).digest("hex");
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith(`/git/blobs/${studentReadmeSha}`))).toBe(false);
+    const secondReadmeText = "# submission helper lab/docs/readme.txt";
+    const secondReadmeSha = createHash("sha1").update(`blob ${Buffer.byteLength(secondReadmeText)}\0`).update(secondReadmeText).digest("hex");
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith(`/git/blobs/${secondReadmeSha}`))).toBe(false);
   });
 
   it.each([undefined, "  "])("fails safely without effective instructions when the pinned README is %s", async (readme) => {

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { normalizeTargetBranch, validateGithubOwnerRepo } from "@/lib/github-ref-name";
-import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
+import { isInstructionReadmeDocument, pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 import { rememberVerifiedGithubTree, reuseVerifiedGithubTree, verifyGithubTree } from "@/lib/github-verified-tree";
 import { readVerifiedReadmeBlob } from "@/lib/github-verified-readme-blob";
 import { PreparationGithubThrottle, preparationGithubThrottle } from "./preparation-github-throttle";
@@ -180,7 +180,7 @@ export async function readPinnedRepoGradeReadme(
     // Give the existing picker nonempty placeholders to determine precedence
     // independently of content, then read only the winning object.
     const candidates = [...entries.values()]
-      .filter(({ path, mode }) => mode !== "040000" && path.startsWith(`${folder}/`))
+      .filter(({ path, mode }) => mode !== "040000" && path.startsWith(`${folder}/`) && isInstructionReadmeDocument(path))
       .map(({ path }) => ({ path, content: "candidate" }));
     const pick = pickReadmeInstructions(candidates, folder);
     if (!pick) return verified({ status: "absent" });

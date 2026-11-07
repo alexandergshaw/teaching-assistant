@@ -6,6 +6,7 @@ import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "./github.f
 import { ghFetch } from "./github.repos";
 import { GithubGradeSourceRateLimitError } from "./github-http-error";
 import { encodeRefSegment } from "./github-ref-name";
+import { isInstructionReadmeDocument } from "./repo-readme-instructions";
 
 // Text/code file extensions worth feeding to a model. Broad on purpose - a
 // student submission can be written in almost anything - but deliberately
@@ -13,7 +14,7 @@ import { encodeRefSegment } from "./github-ref-name";
 // source maps (C3.9 boundary): "all code" is not "all bytes".
 const TEXT_EXT = new Set([
   // Docs / markup
-  "md", "mdx", "txt", "rst", "tex", "xml",
+  "md", "mdx", "markdown", "adoc", "asciidoc", "txt", "rst", "tex", "xml",
   // JS/TS family
   "js", "ts", "tsx", "jsx", "mjs", "cjs",
   // General-purpose languages
@@ -292,6 +293,7 @@ export async function ingestRepo(
   opts: {
     maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number;
     pathPrefix?: string; sourceCommit?: string; signal?: AbortSignal; treeCacheAccountId?: string;
+    excludeInstructionReadme?: boolean;
     readPinnedFiles?: (files: readonly RepoTreeEntry[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   } = {},
   ref?: string
@@ -316,9 +318,15 @@ export async function ingestRepo(
   const folder = opts.pathPrefix?.replace(/\/$/, "");
   // Discovery produces exact Git paths. Legacy manually typed folder names
   // keep their existing case-insensitive matching.
-  const scopedTree = sourceCommit !== undefined
+  const scoped = sourceCommit !== undefined
     ? tree.filter((entry) => (!folder || entry.path.startsWith(`${folder}/`)) && !isScaffoldingFile(entry.path))
     : tree;
+  const scopedTree = opts.excludeInstructionReadme ? scoped.filter((entry) => {
+    const isRegularFile = entry.type === "blob"
+      && (entry.mode === "100644" || entry.mode === "100755" || (sourceCommit === undefined && !entry.mode));
+    const inFolder = !folder || entry.path.toLowerCase().startsWith(`${folder.toLowerCase()}/`);
+    return !(isRegularFile && inFolder && isInstructionReadmeDocument(entry.path));
+  }) : scoped;
   const selection = selectDigestFiles(scopedTree, {
     maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix,
     requireCompleteSubmission: sourceCommit !== undefined,

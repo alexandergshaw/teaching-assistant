@@ -13,6 +13,20 @@ const success = (value: unknown) => ({ ok: true as const, status: 200, headers: 
 beforeEach(() => fetchMock.mockReset());
 
 describe("Canvas omitted video intake", () => {
+  it.each(["gif", "bmp"])("marks unsupported %s image evidence even if Canvas labels it PNG", async (ext) => {
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 1, text: "answer", files: [{ name: `image.${ext}`, mimeType: "image/png", base64: "AAAA" }], contributionCount: 1 });
+    expect(entry.submittedFiles).toContainEqual(expect.objectContaining({ name: `image.${ext}`, mimeType: "application/x-canvas-attachment-unreadable" }));
+  });
+  it("marks downloaded but unsupported Canvas attachments as unavailable evidence", async () => {
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 1, text: "answer", files: [{ name: "drawing.psd", mimeType: "application/octet-stream", base64: "AAAA" }], contributionCount: 1 });
+    expect(entry.submittedFiles).toContainEqual(expect.objectContaining({ name: "drawing.psd", mimeType: "application/x-canvas-attachment-unreadable" }));
+  });
+  it("does not mark empty text as unavailable", async () => {
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 1, text: "", files: [
+      { name: "empty.txt", mimeType: "text/plain", base64: "" },
+    ], contributionCount: 1 });
+    expect(entry.submittedFiles.some((file) => file.mimeType === "application/x-canvas-attachment-unavailable" || file.mimeType === "application/x-canvas-attachment-unreadable")).toBe(false);
+  });
   it.each([
     ["missing URL", { filename: "paper.pdf" }, undefined],
     ["declared oversize", { filename: "paper.pdf", url: "https://test.instructure.com/file", size: 16 * 1024 * 1024 }, undefined],

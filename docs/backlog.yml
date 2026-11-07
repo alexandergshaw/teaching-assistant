@@ -1,3 +1,15 @@
+- id: 'CHAT-CANVAS-OFFICE-VISUAL-COVERAGE'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-setup-interaction-cost'
+  title: 'Preserve Canvas Office and PDF evidence when extraction or visual inspection is incomplete.'
+  owns: ['src/lib/office-extract.ts', 'src/lib/grade/extraction.ts', 'src/lib/grade/document-visuals.ts', 'src/lib/grade/engine.ts', 'src/lib/embedded-grader', 'src/app/actions/grading.ts', 'src/app/actions/grading.canvas-video.test.ts', 'src/app/actions/grading-zip-engine.ts', 'src/lib/grading-engine.ts', 'src/app/api/grade-run-item', 'src/lib/grade/canvas-office-coverage.test.ts']
+  verify: 'npm.cmd run test:paths -- src/lib/grade/canvas-office-coverage.test.ts src/lib/grade/document-visuals.test.ts'
+  blocked_by: []
+  instrument: 'Exercise genuine image-only DOCX and PPTX, text-only and text-plus-visual Office submissions, corrupt and valid PDFs, and forced extraction failures across Canvas grading providers. Preserve every represented item or produce a named non-postable result; verify no affected partial evidence reaches grading and legitimate image-only and text-only submissions remain usable.'
+  from: 'Canvas Office extraction failure and provider-specific visual coverage were found while addressing unsupported attachment evidence. An attempted blanket failure guard blocked an existing image-only DOCX workflow, so that guard was not shipped.'
+  note: 'Owner: coordinator. Do not assume successful raw transport proves a grader consumes all visual evidence. Establish exact provider capabilities and bounded inspection; preserve existing successful image-only behavior. Create the named executable acceptance test and verify actual downstream model and embedded paths.'
+  question: null
 - id: 'CHAT-CANVAS-VIDEO-TRANSPORT'
   state: 'actionable'
   kind: 'feature'

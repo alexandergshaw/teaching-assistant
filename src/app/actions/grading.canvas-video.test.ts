@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })), requireUser: vi.fn() }));
-vi.mock("@/lib/canvas", async (original) => ({ ...(await original<typeof import("@/lib/canvas")>()), fetchCanvasWork: vi.fn(), fetchSubmissionDetail: vi.fn(), canvasWorkToZipBase64: vi.fn(), fetchAssignmentPointsPossible: vi.fn(async () => 10), getSpeedGraderUrl: vi.fn(async () => null) }));
+vi.mock("@/lib/canvas", async (original) => ({ ...(await original<typeof import("@/lib/canvas")>()), fetchCanvasWork: vi.fn(), fetchSubmissionDetail: vi.fn(), fetchCanvasMeta: vi.fn(async () => ({ description: "instructions", rubricText: "rubric", linkedFileIds: [] })), canvasWorkToZipBase64: vi.fn(), fetchAssignmentPointsPossible: vi.fn(async () => 10), getSpeedGraderUrl: vi.fn(async () => null) }));
 vi.mock("@/lib/grade", async (original) => ({ ...(await original<typeof import("@/lib/grade")>()), gradeEntries: vi.fn(), gradeCanvasUrl: vi.fn(), synthesizeFullCreditChecklist: vi.fn(), generateSampleAnswer: vi.fn() }));
 vi.mock("@/lib/grading-engine", async (original) => ({ ...(await original<typeof import("@/lib/grading-engine")>()), gradeViaGradingEngine: vi.fn() }));
 vi.mock("@/lib/code-runner", async (original) => ({ ...(await original<typeof import("@/lib/code-runner")>()), attachCodeRuns: vi.fn(async () => undefined) }));
@@ -118,6 +118,39 @@ describe("Canvas action video safety", () => {
     expect(gradeCanvasUrl).not.toHaveBeenCalled();
     expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
     expect(attachCodeRuns).not.toHaveBeenCalled();
+  });
+  it("refuses a downloaded unsupported file before individual grading", async () => {
+    const detail = { ...work, omittedVideos: [], files: [{ name: "drawing.psd", mimeType: "application/octet-stream", base64: "AAAA" }], canvasUrl: "https://test.instructure.com/courses/1/assignments/1", assignmentName: "A", pointsPossible: 10 };
+    vi.mocked(fetchSubmissionDetail).mockResolvedValue(detail as never);
+    const result = await gradeOneSubmissionAction("TEST", "1", "1", 1);
+    expect("error" in result && result.error).toContain("drawing.psd");
+    expect(gradeEntries).not.toHaveBeenCalled();
+    expect(gradeEntriesEmbedded).not.toHaveBeenCalled();
+  });
+  it("refuses an unsupported Canvas file before external ZIP or service invocation", async () => {
+    const student = { ...work, omittedVideos: [], submissionUrl: "https://github.com/example/student", files: [{ name: "drawing.psd", mimeType: "application/octet-stream", base64: "AAAA" }] };
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ students: [student], kind: "assignment", dueAt: null });
+    const form = new FormData();
+    form.set("canvasUrl", "https://test.instructure.com/courses/1/assignments/1");
+    form.set("provider", "other");
+    const result = await gradeAction({} as never, form);
+    expect(result.error).toContain("drawing.psd");
+    expect(canvasWorkToZipBase64).not.toHaveBeenCalled();
+    expect(gradeViaGradingEngine).not.toHaveBeenCalled();
+  });
+  it("still submits a normal external Canvas assignment to the ZIP service", async () => {
+    const healthy = { student: "Student", userId: 2, text: "answer", files: [], contributionCount: 1 };
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ students: [healthy], kind: "assignment", dueAt: null });
+    vi.mocked(canvasWorkToZipBase64).mockResolvedValue("ZIP");
+    vi.mocked(gradeViaGradingEngine).mockResolvedValue({ result_id: "result", criteria: [], students: [], warnings: [], csv: "" });
+    const form = new FormData();
+    form.set("canvasUrl", "https://test.instructure.com/courses/1/assignments/1");
+    form.set("provider", "other");
+    form.set("rubric", "Correctness");
+    const result = await gradeAction({} as never, form);
+    expect(result.error).toBeNull();
+    expect(canvasWorkToZipBase64).toHaveBeenCalledWith([healthy]);
+    expect(gradeViaGradingEngine).toHaveBeenCalledTimes(1);
   });
   it.each(["other"])("refuses a mixed %s whole-run before model fan-out", async (provider) => {
     const healthy = { student: "Student", userId: 2, text: "written answer", files: [], contributionCount: 1 };

@@ -37,7 +37,7 @@ import {
   type SubmittedFileInfo,
   type StudentSubmissionEntry,
 } from "./types";
-import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED, getMimeType } from "./constants";
+import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED, getMimeType, graderNeedsFileBytes } from "./constants";
 import {
   VIDEO_LINK_NOTE,
   assertNeverUploadKind,
@@ -872,6 +872,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
 
   const contentParts: string[] = [];
   const submittedFiles: SubmittedFileInfo[] = [];
+  const unreadableFiles: SubmittedFileInfo[] = [];
   let gradedRepo: string | null = null;
   let gradedRef: string | null = null;
   let repoReadNote: string | null = null;
@@ -924,6 +925,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
       const mimeType = GEMINI_IMAGE_MIME_TYPES.has(file.mimeType)
         ? file.mimeType
         : getMimeType(extension);
+      if (!graderNeedsFileBytes(mimeType) || !GEMINI_IMAGE_MIME_TYPES.has(getMimeType(extension))) unreadableFiles.push({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unreadable", previewContent: "Image format cannot be graded.", previewTruncated: false });
       submittedFiles.push({
         name: file.name,
         extension,
@@ -942,6 +944,9 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
       extracted = null;
     }
 
+    if (extracted === null && !DOCUMENT_EXTENSIONS.has(extension) && !graderNeedsFileBytes(file.mimeType) && !file.mimeType.trim().toLowerCase().startsWith("video/") && !VIDEO_EXTENSIONS.has(extension)) {
+      unreadableFiles.push({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unreadable", previewContent: "Attachment could not be read.", previewTruncated: false });
+    }
     if (extracted && extracted.trim()) {
       contentParts.push(`File: ${file.name}\n\n${extracted}`);
       const preview = toPreviewContent(extracted);
@@ -969,7 +974,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     student: work.student,
     content: contentParts.join("\n\n---\n\n"),
     mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
-    submittedFiles: [...submittedFiles, ...(work.omittedVideos ?? []).map((video) => ({ name: video.name, extension: "mp4", mimeType: "video/mp4", previewContent: `Video unavailable: ${video.reason}.`, previewTruncated: false })), ...(work.omittedAttachments ?? []).map((file) => ({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unavailable", previewContent: `Attachment unavailable: ${file.reason}.`, previewTruncated: false }))],
+    submittedFiles: [...submittedFiles, ...unreadableFiles, ...(work.omittedVideos ?? []).map((video) => ({ name: video.name, extension: "mp4", mimeType: "video/mp4", previewContent: `Video unavailable: ${video.reason}.`, previewTruncated: false })), ...(work.omittedAttachments ?? []).map((file) => ({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unavailable", previewContent: `Attachment unavailable: ${file.reason}.`, previewTruncated: false }))],
     userId: work.userId,
     submissionUrl: work.submissionUrl ?? null,
     repositoryInventories,

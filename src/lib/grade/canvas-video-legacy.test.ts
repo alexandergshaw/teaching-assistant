@@ -12,6 +12,12 @@ beforeEach(() => {
 });
 
 describe("legacy Canvas grading video safety", () => {
+  it("does not grade a mixed submission with an unsupported downloaded file", async () => {
+    vi.mocked(fetchCanvasWork).mockResolvedValue({ kind: "assignment", dueAt: null, students: [{ student: "Blocked", userId: 1, text: "written work", files: [{ name: "drawing.psd", mimeType: "application/octet-stream", base64: "AAAA" }], contributionCount: 1 }] });
+    const run = await gradeCanvasUrl("https://test.instructure.com/courses/1/assignments/1", "instructions", "rubric", "gemini");
+    expect(run.results[0].ungraded?.message).toContain("drawing.psd");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
   it("refuses ambiguous Canvas IDs in chat intake before producing entries", async () => {
     vi.mocked(fetchCanvasWork).mockResolvedValue({ kind: "assignment", dueAt: null, students: [
       { student: "A", userId: 1, text: "answer", files: [], contributionCount: 1, omittedAttachments: [{ name: "paper.pdf", reason: "download failed" }] },

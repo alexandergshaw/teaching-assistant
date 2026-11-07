@@ -12,13 +12,12 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta, fetchAssignmentPointsPossible, getSpeedGraderUrl, postCanvasGrades, fetchSubmissionDetail, listAssignmentNonSubmitters, listAssignmentBriefsWithDue, type CanvasSubmissionDetail, type CanvasStudentWork } from "@/lib/canvas";
 import { resolveInstitution } from "@/lib/canvas-core";
 import { normalizeProvider, type LlmProvider } from "@/lib/llm";
-import { gradeViaGradingEngine, detectRubricSource } from "@/lib/grading-engine";
+import { gradeZipViaEngine } from "./grading-zip-engine";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
-import { gradingApiToRun } from "./grading-run-mapping";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
@@ -631,6 +630,8 @@ export async function gradeOneSubmissionAction(
     // entries at once cannot forget the disambiguation - see
     // extraction.ts's disambiguateCanvasEntries.
     const [entry] = disambiguateCanvasEntries([await canvasWorkToEntry(work)]);
+    const unreadableRefusal = canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]);
+    if (unreadableRefusal) return { error: unreadableRefusal };
     const speedGraderUrl = await getSpeedGraderUrl(submission.canvasUrl);
     // The external "other" engine needs a zip; fall back to gemini for a single submission.
     const gradeProvider: LlmProvider = provider === "other" ? "gemini" : provider;
@@ -670,45 +671,6 @@ export async function generateModelAnswerAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate a model answer." };
   }
-}
-
-// Grade a submissions zip with the deterministic ("Other") grading service.
-// Shared by the uploaded-zip path and the Canvas path (which synthesizes a zip).
-async function gradeZipViaEngine(
-  zipBase64: string,
-  rubric: string,
-  rubricFile: File | null,
-  institutionCode?: string,
-  // Canvas points_possible when grading from a Canvas URL; null for zip uploads.
-  pointsPossible: number | null = null
-): Promise<GradeActionState> {
-  let rubricText = "";
-  let rubricName: string | undefined;
-  if (rubricFile && rubricFile.size > 0) {
-    rubricText = await rubricFile.text();
-    rubricName = rubricFile.name;
-  } else if (rubric.trim()) {
-    rubricText = rubric;
-  }
-  if (!rubricText.trim()) {
-    return {
-      run: null,
-      error:
-        "Provide a rubric (upload a CSV/JSON file or paste one) to grade with the deterministic grader.",
-    };
-  }
-  const resp = await gradeViaGradingEngine(
-    zipBase64,
-    detectRubricSource(rubricText, rubricName),
-    institutionCode
-  );
-  const warnings = [
-    ...resp.warnings,
-    ...(resp.unmapped_criteria?.length
-      ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
-      : []),
-  ];
-  return { run: gradingApiToRun(resp, pointsPossible, rubricText), error: null, warnings };
 }
 
 // attachCodeRuns/CODE_RUN_CONCURRENCY moved to @/lib/code-runner (imported
@@ -773,6 +735,9 @@ export async function gradeAction(
         if (students.length === 0) {
           return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };
         }
+        const inspected = await Promise.all(students.map((work) => canvasWorkToEntry({ ...work, submissionUrl: null })));
+        const unreadableRefusal = canvasVideoRefusal(inspected.map((entry) => ({ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) })));
+        if (unreadableRefusal) return { run: null, error: unreadableRefusal };
         const zipBase64 = await canvasWorkToZipBase64(students);
         const state = await gradeZipViaEngine(zipBase64, rubric, rubricFile, institution, pointsPossible);
         return state.run ? { ...state, run: { ...state.run, speedGraderUrl } } : state;

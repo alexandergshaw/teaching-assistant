@@ -2,6 +2,7 @@ import { VIDEO_EXTENSIONS } from "../grade/constants";
 
 export type OmittedCanvasVideo = { name: string; reason: string };
 export const OMITTED_CANVAS_ATTACHMENT_MIME = "application/x-canvas-attachment-unavailable";
+export const UNREADABLE_CANVAS_ATTACHMENT_MIME = "application/x-canvas-attachment-unreadable";
 
 export function safeCanvasLabel(value: string): string {
   return value.replace(/https?:\/\/\S+/gi, "[link]").replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160) || "unnamed";
@@ -29,6 +30,8 @@ export function canvasVideoRefusal(students: readonly { student: string; files: 
     if (missing) return `Attachment "${safeCanvasLabel(missing.name)}" for ${safeCanvasLabel(student.student)} could not be downloaded (${safeCanvasLabel(missing.reason)}). No grade was produced.`;
     const missingFile = student.files.find((file) => file.mimeType === OMITTED_CANVAS_ATTACHMENT_MIME);
     if (missingFile) return `Attachment "${safeCanvasLabel(missingFile.name)}" for ${safeCanvasLabel(student.student)} could not be downloaded. No grade was produced.`;
+    const unreadable = student.files.find((file) => file.mimeType === UNREADABLE_CANVAS_ATTACHMENT_MIME);
+    if (unreadable) return `Attachment "${safeCanvasLabel(unreadable.name)}" for ${safeCanvasLabel(student.student)} could not be read. No grade was produced.`;
     const omitted = student.omittedVideos?.[0];
     if (omitted) return `Video "${safeCanvasLabel(omitted.name)}" for ${safeCanvasLabel(student.student)} could not be downloaded (${safeCanvasLabel(omitted.reason)}). No grade was produced.`;
     const found: OmittedCanvasVideo[] = [];

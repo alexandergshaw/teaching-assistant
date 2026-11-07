@@ -9,7 +9,7 @@ import { gradeEntries } from "@/lib/grade/engine";
 import { resolveEntryLinks } from "@/lib/grade/extraction";
 import { VIDEO_EXTENSIONS, VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { isVideoName } from "@/lib/grade/video-grading";
-import { OMITTED_CANVAS_ATTACHMENT_MIME, safeCanvasLabel } from "@/lib/canvas/omitted-video";
+import { OMITTED_CANVAS_ATTACHMENT_MIME, UNREADABLE_CANVAS_ATTACHMENT_MIME, safeCanvasLabel } from "@/lib/canvas/omitted-video";
 import { videoFilesOf, videoRefsOwnedBy, withEntryVideos, type VideoSeamDeps } from "@/lib/grade/video-grade-seam";
 import { createGeminiFilesClient } from "@/lib/gemini-files";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
@@ -365,6 +365,8 @@ export async function POST(req: NextRequest) {
     const outcome = await raceWithTimeout(
       (async () => {
         const resolved = await resolveEntryLinks(entry);
+        const unreadableAttachment = resolved.submittedFiles.find((file) => file.mimeType === UNREADABLE_CANVAS_ATTACHMENT_MIME);
+        if (unreadableAttachment) return { unreadableAttachment: { name: unreadableAttachment.name } };
         const omittedAttachment = resolved.submittedFiles.find((file) => file.mimeType === OMITTED_CANVAS_ATTACHMENT_MIME);
         if (omittedAttachment) return { omittedAttachment: { name: omittedAttachment.name } };
         const unhandledStagedVideo = !videoMode && videoFilesOf(resolved)[0];
@@ -406,6 +408,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: describeError(outcome.error), ...diagnosticFor("route error") }, { status: 502 });
     }
 
+    if (outcome.value.unreadableAttachment) {
+      return NextResponse.json({ error: `Attachment "${safeCanvasLabel(outcome.value.unreadableAttachment.name)}" could not be read. No grade was produced.`, ...diagnosticFor("route error") }, { status: 422 });
+    }
     if (outcome.value.omittedAttachment) {
       return NextResponse.json({ error: `Attachment "${safeCanvasLabel(outcome.value.omittedAttachment.name)}" could not be downloaded. No grade was produced.`, ...diagnosticFor("route error") }, { status: 422 });
     }

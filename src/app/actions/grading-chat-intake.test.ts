@@ -208,12 +208,11 @@ describe("prepareChatSubmissionAction - file", () => {
     expect(outcome.kind).toBe("refused");
   });
 
-  it("refuses a class archive with an oversized student and names that student", async () => {
+  it("isolates an oversized student in a class archive and retains the eligible student", async () => {
     const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
     const outcome = await prepareChatSubmissionAction(fileFormData(new File(["zip"], "work.zip")));
-    expect(outcome.kind).toBe("refused");
-    if (outcome.kind === "refused") expect(outcome.reason).toContain("Big");
+    expect(outcome).toMatchObject({ kind: "entries", entries: [canvasEntry], oversizedOmissions: [{ index: 1, student: "Big" }] });
   });
 
   it("budget gate counts only bytes the grader reads: non-visual-heavy passes, visual-heavy is refused", async () => {
@@ -233,13 +232,12 @@ describe("prepareChatSubmissionAction - file", () => {
 });
 
 describe("prepareChatSubmissionAction - url", () => {
-  it("refuses a Canvas batch with an oversized student and names that student", async () => {
+  it("isolates an oversized Canvas student while preserving the point scale", async () => {
     mockDetectCanvasUrlKind.mockReturnValue("assignment");
     const large = { ...canvasEntry, student: "Big", content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
     mockExtractCanvasEntries.mockResolvedValue({ entries: [canvasEntry, large], pointsPossible: 50 });
     const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://canvas.example.edu/courses/1/assignments/2" }));
-    expect(outcome.kind).toBe("refused");
-    if (outcome.kind === "refused") expect(outcome.reason).toContain("Big");
+    expect(outcome).toMatchObject({ kind: "entries", entries: [canvasEntry], pointsPossible: 50, oversizedOmissions: [{ index: 1, student: "Big" }] });
   });
 
   it("reports every oversized student when none can be queued", async () => {
@@ -260,6 +258,14 @@ describe("prepareChatSubmissionAction - url", () => {
     const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://drive.google.com/file/d/12345678901234567890/view" }));
     expect(outcome.kind).toBe("refused");
     if (outcome.kind === "refused") expect(outcome.reason).toContain("broken.docx");
+  });
+  it("isolates an oversized student in a Drive archive", async () => {
+    mockDetectCanvasUrlKind.mockReturnValue(null);
+    vi.mocked(fetchGoogleDriveFile).mockResolvedValue({ name: "work.zip", buffer: Buffer.from("zip") } as Awaited<ReturnType<typeof fetchGoogleDriveFile>>);
+    const large = { ...canvasEntry, student: canvasEntry.student, content: "x".repeat(ITEM_REQUEST_BYTE_BUDGET + 1) };
+    mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
+    const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://drive.google.com/file/d/12345678901234567890/view" }));
+    expect(outcome).toMatchObject({ kind: "entries", entries: [canvasEntry], oversizedOmissions: [{ index: 1, student: canvasEntry.student }] });
   });
   // BLOCKER-1 (docs/grading-chat-waves.md section 5, requirement 1): the
   // Canvas branch must carry pointsPossible through to the intake outcome.

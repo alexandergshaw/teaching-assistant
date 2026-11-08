@@ -205,7 +205,7 @@ describe("POST /api/grade-submission-zip", () => {
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
   });
 
-  it("refuses the whole archive and names the oversized student; the object is deleted", async () => {
+  it("isolates the oversized student and emits the other entries; the object is deleted", async () => {
     ingestZipEntriesMock.mockResolvedValue({
       entries: [
         { student: "A", content: "a", mergedFileCount: 1, submittedFiles: [] },
@@ -219,7 +219,9 @@ describe("POST /api/grade-submission-zip", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/x-ndjson");
     const lines = await readLines(res);
-    expect(lines).toEqual([{ type: "done", error: "No submissions were queued. Too large to grade: Big." }]);
+    expect(lines.map((line) => line.type)).toEqual(["entry", "skip", "entry", "done"]);
+    expect(lines[1]).toMatchObject({ student: "Big (item 2)", reason: "too large to grade on this surface" });
+    expect(lines[3]).toMatchObject({ studentsFound: 3, studentsEmitted: 2 });
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
   });
 

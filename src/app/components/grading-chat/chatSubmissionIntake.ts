@@ -101,6 +101,8 @@ export type IntakeOutcome =
       readonly pointsPossible: number | null;
       /** Present only for a zip upload (ZIP-CLASS-VS-SINGLE); absent otherwise. */
       readonly classification?: SubmissionZipClassification;
+      /** Source positions identify omissions even when student labels collide. */
+      readonly oversizedOmissions?: readonly { readonly index: number; readonly student: string }[];
     }
   | {
       readonly kind: "refused";
@@ -191,6 +193,9 @@ export function extractSingleEntry(
     return outcome.refusalClass !== undefined
       ? { ok: false, reason: outcome.reason, refusalClass: outcome.refusalClass }
       : { ok: false, reason: outcome.reason };
+  }
+  if (outcome.oversizedOmissions?.length) {
+    return { ok: false, reason: `${partLabel} contains submissions that are too large to grade; a composite must contain exactly one complete submission.`, refusalClass: "entry-too-large" };
   }
   if (outcome.entries.length === 0) return { ok: false, reason: `${partLabel} had nothing to grade.` };
   if (outcome.entries.length > 1) {

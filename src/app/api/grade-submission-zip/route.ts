@@ -9,7 +9,7 @@ import { ingestZipEntries } from "@/lib/grade/extraction";
 import { SYLLABUS_UPLOAD_BUCKET, isKnownUploadPath, withUploadedSyllabusFile } from "@/lib/syllabus-upload-source";
 import { GRADING_ZIP_MAX_BYTES } from "@/lib/grade/grading-zip-transport";
 import { buildIngestLines, encodeIngestLine } from "@/lib/grade/ndjson-ingest-parser";
-import { oversizedIntakeReason } from "@/lib/grade/oversized-intake";
+import { oversizedIntakeReason, partitionOversizedEntries } from "@/lib/grade/oversized-intake";
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import type { StageVideoFn } from "@/lib/grade/video-leaf";
 import type { VideoFailureClass } from "@/lib/grade/video-failure";
@@ -231,10 +231,10 @@ export async function POST(req: NextRequest) {
     const more = failedSupportedFiles.length > 3 ? ` and ${failedSupportedFiles.length - 3} more` : "";
     return ndjsonResponse([encodeIngestLine({ type: "done", error: `Some files in the archive could not be read: ${shown}${more}. Fix the archive and try again.` })]);
   }
-  const oversized = oversizedIntakeReason(entries);
-  if (oversized) {
+  const partition = partitionOversizedEntries(entries);
+  if (!partition.admitted.length && partition.omitted.length) {
     await discardStaged();
-    return ndjsonResponse([encodeIngestLine({ type: "done", error: oversized })]);
+    return ndjsonResponse([encodeIngestLine({ type: "done", error: oversizedIntakeReason(entries)! })]);
   }
   const lines = buildIngestLines(entries, failedSupportedFiles, undefined, classification, videoOutcomes);
   const emittedRefs = new Set(lines.flatMap((line) => line.type === "entry"

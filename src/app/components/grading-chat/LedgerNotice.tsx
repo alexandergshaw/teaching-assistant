@@ -8,10 +8,10 @@ import controls from "../recording/RecordingControls.module.css";
 export function LedgerNotice({ view }: { view: LedgerView }) {
   if (!view.hasAny) return null;
   return (
-    <div className={controls.notice} aria-label="Zip ingest ledger">
+    <div className={controls.notice} aria-label="Submission intake ledger">
       {view.skipped.length > 0 && (
         <p className={styles.ghMeta}>
-          {`Skipped (too large): ${view.skipped.map((s) => `${s.student} (${s.reason})`).join("; ")}`}
+          {`Not queued: ${view.skipped.map((s) => `${s.student} (${s.reason})`).join("; ")}`}
         </p>
       )}
       {view.linkNotFetched.length > 0 && (
@@ -23,7 +23,7 @@ export function LedgerNotice({ view }: { view: LedgerView }) {
         <p className={styles.ghMeta}>{`Files that could not be read: ${view.failedFiles.join(", ")}`}</p>
       )}
       {!view.accountedFor && (
-        <p className={styles.ghMeta}>Some students in the zip are not accounted for. Re-upload the zip to check.</p>
+        <p className={styles.ghMeta}>Some submissions are not accounted for. Check results and submit only missing work.</p>
       )}
     </div>
   );

@@ -43,6 +43,7 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
+import { partialBatchNotice } from "./partialBatchNotice";
 import { gradeFailureFromBody, postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
@@ -557,6 +558,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // refused zip never overwrites a prior ingest's badge.
     let zipClassification: SubmissionZipClassification | undefined;
     let ingestSkipped: readonly { readonly student: string; readonly reason: string }[] = [];
+    let storageLedger: IngestLedger | undefined;
 
     if (input.kind === "storaged-zip") {
       // R4: a reset while the zip is being prepared must not spend grading
@@ -590,7 +592,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       // Retained structurally (skipped AND unreadable files) so it outlives this
       // submit's transient outcome string.
       const completedLedger = ingest.ledger;
-      setIngestLedger((prev) => mergeIngestLedgers(prev, completedLedger));
+      storageLedger = completedLedger;
       zipClassification = completedLedger.classification;
       // VIDEO-GRADING W4: one prepare_video entry per counted in-zip video outcome.
       recordZipVideoOutcomes({
@@ -765,6 +767,9 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       entries = outcome.entries;
       pointsPossible = outcome.pointsPossible;
       zipClassification = outcome.classification;
+      if (outcome.oversizedOmissions?.length) {
+        ingestSkipped = outcome.oversizedOmissions.map((item) => ({ student: `${item.student || "Unnamed submission"} (item ${item.index + 1})`, reason: "too large to grade" }));
+      }
       recordClassifySettled({
         startedAtMs: prepareStartedAtMs,
         settledAtMs: chatSeamNowMs(),
@@ -777,6 +782,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // the remainder, never the whole event.
     const available = maxEntries - dispatchedCountRef.current;
     if (available <= 0) {
+      const notQueued = entries.map((entry, index) => ({ student: `${entry.student || "Unnamed submission"} (eligible item ${index + 1})`, reason: "session limit reached" }));
+      if (entries.length || storageLedger || ingestSkipped.length) setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: entries.length + ingestSkipped.length, studentsEmitted: 0, skipped: [...ingestSkipped, ...notQueued] }));
       safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "cap exceeded", signals: { requested: entries.length, admitted: 0, clipped: entries.length, cap: maxEntries, reason: "cap-reached" } }));
       return {
         kind: "refused",
@@ -790,6 +797,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (zipClassification !== undefined) classificationRef.current = zipClassification;
     const admitted = entries.slice(0, available);
     const refusedCount = entries.length - admitted.length;
+    const clipped = entries.slice(available).map((entry, index) => ({ student: `${entry.student || "Unnamed submission"} (eligible item ${available + index + 1})`, reason: "session limit reached" }));
+    if (storageLedger || ingestSkipped.length || clipped.length) {
+      setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: entries.length + ingestSkipped.length, studentsEmitted: admitted.length, skipped: [...ingestSkipped, ...clipped] }));
+    }
 
     // Optional submit-time label for a file or url submission. Applied ONLY
     // when the submission resolved to exactly one entry: a zip or a whole
@@ -797,7 +808,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // distinct students. Blank/absent leaves the derived student untouched.
     const submitLabel =
       (input.kind === "file" || input.kind === "url" || input.kind === "storaged-video" || input.kind === "storaged-file") &&
-      entries.length === 1
+      entries.length === 1 && ingestSkipped.length === 0
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
@@ -810,20 +821,11 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           signals: { requested: entries.length, admitted: admitted.length, clipped: refusedCount, skipped: ingestSkipped.length, cap: maxEntries, reason: refusedCount > 0 ? "cap-clipped" : "zip-skipped" },
         })
       );
-      const skipNote =
-        ingestSkipped.length > 0
-          ? ` Skipped: ${ingestSkipped.map((s) => `${s.student} (${s.reason})`).join("; ")}.`
-          : "";
-      const clipNote =
-        refusedCount > 0
-          ? `Graded the first ${admitted.length} of ${entries.length} students in this submission; ` +
-            `the session's ${maxEntries}-submission limit was reached. Start a new session to grade the rest.`
-          : `Graded ${admitted.length} of ${admitted.length + ingestSkipped.length} students in this zip.`;
       return {
         kind: "partial",
         dispatchedCount: admitted.length,
         refusedCount: refusedCount + ingestSkipped.length,
-        reason: clipNote + skipNote,
+        reason: partialBatchNotice(admitted.length, entries.length, maxEntries, ingestSkipped, clipped),
       };
     }
     return { kind: "accepted", entryCount: admitted.length };

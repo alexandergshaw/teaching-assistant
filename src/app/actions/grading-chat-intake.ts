@@ -41,7 +41,7 @@ import {
   mergeCompositeEntries,
 } from "@/app/components/grading-chat/chatSubmissionIntake";
 import type { IntakeOutcome } from "@/app/components/grading-chat/chatSubmissionIntake";
-import { oversizedIntakeReason } from "@/lib/grade/oversized-intake";
+import { oversizedIntakeReason, partitionOversizedEntries } from "@/lib/grade/oversized-intake";
 
 // SEC-GC-3 (docs/grading-chat-security.md F4 Gap 1): bound before a
 // generateRubric model call is ever spent, at the same figures route.ts
@@ -119,11 +119,10 @@ function firstOversizedEntryReason(entries: readonly StudentSubmissionEntry[]): 
   return oversizedIntakeReason(entries);
 }
 
-/** A batch must be retried as a whole until selective retry is available. */
 function batchOutcome(entries: StudentSubmissionEntry[], pointsPossible: number | null, classification?: SubmissionZipClassification): IntakeOutcome {
-  const reason = oversizedIntakeReason(entries);
-  if (reason) return { kind: "refused", reason, refusalClass: "entry-too-large" };
-  return { kind: "entries", entries, pointsPossible, ...(classification ? { classification } : {}) };
+  const partition = partitionOversizedEntries(entries);
+  if (!partition.admitted.length && partition.omitted.length) return { kind: "refused", reason: oversizedIntakeReason(entries)!, refusalClass: "entry-too-large" };
+  return { kind: "entries", entries: [...partition.admitted], pointsPossible, ...(classification ? { classification } : {}), ...(partition.omitted.length ? { oversizedOmissions: partition.omitted } : {}) };
 }
 
 /** Do not grade an archive when an unreadable member could belong to any row. */

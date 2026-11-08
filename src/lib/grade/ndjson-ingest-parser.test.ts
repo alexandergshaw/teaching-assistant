@@ -49,12 +49,12 @@ describe("buildIngestLines (the partition)", () => {
   it("turns ONE oversized student into ONE skip line, keeps the rest, and lists it in the sentinel", () => {
     const lines = buildIngestLines([entryOf("A"), entryOf("Big", 500), entryOf("C")], [], 100);
     expect(lines.map((l) => l.type)).toEqual(["entry", "skip", "entry", "done"]);
-    expect(lines[1]).toEqual({ type: "skip", student: "Big", reason: OVERSIZED_SKIP_REASON });
+    expect(lines[1]).toEqual({ type: "skip", student: "Big (item 2)", reason: OVERSIZED_SKIP_REASON });
     expect(lines[3]).toMatchObject({
       type: "done",
       studentsFound: 3,
       studentsEmitted: 2,
-      skipped: [{ student: "Big", reason: OVERSIZED_SKIP_REASON }],
+      skipped: [{ student: "Big (item 2)", reason: OVERSIZED_SKIP_REASON }],
     });
   });
 });
@@ -75,7 +75,7 @@ describe("ingestStoragedZip (never throws)", () => {
       ledger: {
         studentsFound: 3,
         studentsEmitted: 2,
-        skipped: [{ student: "Big", reason: OVERSIZED_SKIP_REASON }],
+        skipped: [{ student: "Big (item 2)", reason: OVERSIZED_SKIP_REASON }],
         failedSupportedFiles: ["f.docx"],
       },
     });
@@ -176,11 +176,11 @@ describe("buildIngestLines (W2: budget counts only bytes the grader reads)", () 
     ],
   });
   it("emits a student over budget ONLY from non-visual base64", () => {
-    const lines = buildIngestLines([withFile("application/zip", 500)], [], 100);
+    const lines = buildIngestLines([withFile("application/zip", 500)], [], 250);
     expect(lines[0].type).toBe("entry");
   });
   it("still skips a student whose VISUAL base64 alone is over budget (RES-VIS-1)", () => {
-    const lines = buildIngestLines([withFile("application/pdf", 500)], [], 100);
+    const lines = buildIngestLines([withFile("application/pdf", 500)], [], 250);
     expect(lines[0].type).toBe("skip");
   });
 });

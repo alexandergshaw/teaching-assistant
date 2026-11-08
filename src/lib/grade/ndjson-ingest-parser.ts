@@ -6,7 +6,8 @@
 // both the Route Handler and the client driver import it and vitest can
 // exercise every decision (no component is rendered there).
 
-import { ITEM_REQUEST_BYTE_BUDGET, estimateNeededWireBytes } from "@/app/components/grading/incrementalRunPlan";
+import { ITEM_REQUEST_BYTE_BUDGET } from "@/app/components/grading/incrementalRunPlan";
+import { oversizedEntry } from "@/lib/grade/oversized-intake";
 import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/grade/types";
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { VIDEO_PENDING_MESSAGE, isVideoOnlyEntry } from "@/lib/grade/video-grading";
@@ -52,7 +53,7 @@ export function buildIngestLines(
   const lines: IngestLine[] = [];
   const skipped: IngestSkip[] = [];
   let emitted = 0;
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     // VIDEO-GRADING W3: with the flag on, a video-only student is graded at
     // grade time through the Files API (the entry carries videoRef), so it is no
     // longer a pending skip. Flag off: unchanged.
@@ -62,8 +63,8 @@ export function buildIngestLines(
       const skip: IngestSkip = { student: entry.student, reason: VIDEO_PENDING_MESSAGE };
       skipped.push(skip);
       lines.push({ type: "skip", ...skip });
-    } else if (estimateNeededWireBytes(entry) > budget) {
-      const skip: IngestSkip = { student: entry.student, reason: OVERSIZED_SKIP_REASON };
+    } else if (oversizedEntry(entry, budget)) {
+      const skip: IngestSkip = { student: `${entry.student || "Unnamed submission"} (item ${index + 1})`, reason: OVERSIZED_SKIP_REASON };
       skipped.push(skip);
       lines.push({ type: "skip", ...skip });
     } else {

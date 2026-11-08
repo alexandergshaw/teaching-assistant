@@ -231,6 +231,7 @@ export default function AnnouncementDraftSlot({
             label="Subject"
             value={slot.draft.draft.title}
             onChange={(e) => onEdit(slot.id, "title", e.target.value)}
+            disabled={slot.posting}
             fullWidth
           />
           <div className={styles.adaptFieldGrid2}>
@@ -239,6 +240,7 @@ export default function AnnouncementDraftSlot({
               label="Message (Markdown)"
               value={slot.draft.draft.message}
               onChange={(e) => onEdit(slot.id, "message", e.target.value)}
+              disabled={slot.posting}
               multiline
               minRows={6}
               fullWidth
@@ -301,6 +303,7 @@ export default function AnnouncementDraftSlot({
             />
             <ConfirmArmButtons
               armed={slot.regenerateArmed}
+              disabled={slot.posting}
               idleLabel="Regenerate"
               confirmLabel="Confirm regenerate"
               tone="warning"

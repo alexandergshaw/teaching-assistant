@@ -154,7 +154,7 @@ describe("WA-POST-LOCK: postLocked", () => {
     });
   }
 
-  it("AC-4: edit after a post leaves postedTo and isRunComplete unchanged", () => {
+  it("edit after a post keeps its history but prevents a new-run reset", () => {
     let state: readonly DraftSlot[] = [drafted(FIRST_SLOT_ID, { posting: true })];
     state = slotsReducer(state, {
       type: "post-result",
@@ -165,15 +165,25 @@ describe("WA-POST-LOCK: postLocked", () => {
     expect(state[0].postedTo).toBe("CS 101");
     expect(state[0].postedScheduledLabel).toBe("label-x");
     expect(state[0].postLocked).toBe(false);
-    expect(isRunComplete(state)).toBe(true);
+    expect(isRunComplete(state)).toBe(false);
   });
 
   it("AC-12: posting then edit then post-result success ends locked (fails safe)", () => {
     let state: readonly DraftSlot[] = [drafted(FIRST_SLOT_ID)];
     state = slotsReducer(state, { type: "posting", id: FIRST_SLOT_ID });
     state = slotsReducer(state, { type: "edit", id: FIRST_SLOT_ID, field: "title", value: "newer" });
+    expect(state[0].draft.phase === "drafted" && state[0].draft.draft.title).toBe(DRAFTED.title);
     state = slotsReducer(state, { type: "post-result", id: FIRST_SLOT_ID, result: POST_OK });
     expect(state[0].postLocked).toBe(true);
+  });
+
+  it("cannot begin regeneration while a post is pending", () => {
+    let state: readonly DraftSlot[] = [drafted(FIRST_SLOT_ID)];
+    state = slotsReducer(state, { type: "posting", id: FIRST_SLOT_ID });
+    state = slotsReducer(state, { type: "arm-regenerate", id: FIRST_SLOT_ID });
+    state = slotsReducer(state, { type: "regenerate-started", id: FIRST_SLOT_ID });
+    expect(state[0].draft.phase).toBe("drafted");
+    expect(state[0].regenerateArmed).toBe(false);
   });
 
   it("a locked slot is not committable until an edit unlocks it; reverting the text does not re-lock", () => {

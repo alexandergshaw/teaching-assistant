@@ -25,6 +25,7 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   cachedResearchFor,
+  draftMatchesCourse,
   postArgsFor,
   postResultFor,
   postSignatureFor,
@@ -36,6 +37,17 @@ import { makeSlot, type ResourceOutcome } from "./announcement-draft-slots";
 
 const FOUND: ResourceOutcome = { kind: "found", links: [{ title: "A", url: "https://example.edu/a" }] };
 const OFF: ResourceOutcome = { kind: "off" };
+
+describe("course-bound drafts and pending research", () => {
+  it("rejects a different or missing course and changes the armed signature", () => {
+    expect(draftMatchesCourse("course-a", "course-a")).toBe(true);
+    expect(draftMatchesCourse("course-a", "course-b")).toBe(false);
+    expect(draftMatchesCourse(null, "course-a")).toBe(false);
+    const slot = { ...makeSlot("one", { kind: "default" }, "beginning-of-week"), draft: { phase: "drafted" as const, draft: { title: "Title", message: "Body", builtFrom: { kind: "none" as const }, researchNotice: { kind: "off" as const }, timing: "beginning-of-week" as const }, error: null } };
+    expect(postSignatureFor(slot, "course-a")).not.toBe(postSignatureFor(slot, "course-b"));
+  });
+
+});
 
 describe("cachedResearchFor - Ruling 17/33", () => {
   it("returns null when there is no cache at all", () => {

@@ -12,6 +12,7 @@
 // - that is C2 (useReplyRows.ts) and C3 (useDiscussionReplies.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createCapturePicker } from "./capture-picker";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import type { FrameTicker } from "@/lib/frame-ticker";
 import {
@@ -74,7 +75,7 @@ export interface UseDiscussionCaptureReturn {
    *  discipline as `recordingError`. */
   frameEncodeNotice: string | null;
   previewRef: React.RefObject<HTMLVideoElement | null>;
-  start: (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string }) => Promise<void>;
+  start: (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => Promise<void>;
   stop: () => void;
   /** Removes and returns up to `max` frames, oldest first, packed to fit
    *  `maxWireBytes` (AC10a). Never returns more than asked for; always
@@ -134,6 +135,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   const tickerRef = useRef<FrameTicker | null>(null);
   const startedAtRef = useRef(0);
   const capturingRef = useRef(false);
+  const pickerRef = useRef(createCapturePicker());
 
   // Offscreen canvases (AC8a full-width draw, AC9a dedicated 32x32 signature
   // canvas), created lazily once and reused across sessions.
@@ -392,8 +394,10 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
 
   useEffect(() => {
     mountedRef.current = true;
+    const picker = pickerRef.current;
     return () => {
       mountedRef.current = false;
+      picker.cancel();
       teardownRef.current();
       // AC31: revoked on unmount, but NOT on a plain session stop - the
       // user may still want to download a recording after Stop.
@@ -402,15 +406,21 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const start = useCallback(async (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string }) => {
+  const start = useCallback(async (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string; onStarted?: () => void }) => {
     if (capturingRef.current) return;
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
+      const selected = await pickerRef.current.request(() => navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: 5 } },
         audio: false,
+      }), (admitted) => {
+        capturingRef.current = true;
+        displayStreamRef.current = admitted;
+        opts.onStarted?.();
       });
+      if (!selected) return;
+      stream = selected;
     } catch (err) {
       // AC5: a cancelled picker is not a failure - return to idle with no
       // error banner. Any other rejection propagates for the caller to
@@ -419,7 +429,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       throw err;
     }
 
-    displayStreamRef.current = stream;
+    // Teardown can run after admission and before this continuation resumes.
+    if (!mountedRef.current || displayStreamRef.current !== stream) return;
 
     // Reset per-session bookkeeping.
     pendingQueueRef.current = [];
@@ -540,6 +551,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   }, [handleTick, revokeRecordingUrl]);
 
   const stop = useCallback(() => {
+    pickerRef.current.cancel();
     teardownRef.current();
   }, []);
 

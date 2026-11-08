@@ -30,7 +30,6 @@ import { jsonObjectSlice } from "@/lib/json-slice";
 import { getWritingStyleBlock } from "./writing-style-block";
 import {
   fnv1aHash,
-  redactSensitiveText,
   unattemptedLlmDiag,
   type ScriptGenerationLlmDiag,
 } from "@/lib/lms-generation/generation-diag";
@@ -456,10 +455,10 @@ export async function draftWalkthroughAnnouncementAction(
       ok: r.ok,
       finishReason: r.ok ? r.finishReason : undefined,
       textLength: r.ok ? r.text.length : 0,
-      failureBodyRedacted: !r.ok ? redactSensitiveText(r.body) : undefined,
+      failureBodyRedacted: undefined,
     };
 
-    if (!r.ok) return { error: `Draft failed: HTTP ${r.status} — ${r.body.slice(0, 200)}`, diag: diagBase };
+    if (!r.ok) return { error: `Draft failed (HTTP ${r.status}). Try again.`, diag: diagBase };
     if (!r.text.trim()) return { error: "The model returned no announcement. Try again.", diag: diagBase };
 
     const jsonText = jsonObjectSlice(r.text);
@@ -500,9 +499,9 @@ export async function draftWalkthroughAnnouncementAction(
     const researchNotice = researchNoticeFor(input.researchOutcome);
 
     return { title, message: enforcedMessage, researchNotice, diag: diagBase };
-  } catch (err) {
+  } catch {
     return {
-      error: err instanceof Error ? err.message : "Could not draft the announcement.",
+      error: "Could not draft the announcement. Try again.",
       diag: unattemptedLlmDiag(provider),
     };
   }
@@ -572,14 +571,14 @@ export async function draftWalkthroughVideoScriptAction(
       ok: r.ok,
       finishReason: r.ok ? r.finishReason : undefined,
       textLength: r.ok ? r.text.length : 0,
-      failureBodyRedacted: !r.ok ? redactSensitiveText(r.body) : undefined,
+      failureBodyRedacted: undefined,
     };
 
     if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again.", diag };
     return { script: r.text.trim(), diag };
-  } catch (err) {
+  } catch {
     return {
-      error: err instanceof Error ? err.message : "Could not generate the script.",
+      error: "Could not generate the script. Try again.",
       diag: unattemptedLlmDiag(provider),
     };
   }

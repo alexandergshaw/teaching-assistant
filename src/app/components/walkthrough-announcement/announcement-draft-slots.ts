@@ -74,6 +74,8 @@ export type ResolvedTemplate =
   | { readonly kind: "none" };
 
 export interface Drafted {
+  /** Course selected when this draft was generated. */
+  readonly sourceCourseId?: string | null;
   readonly title: string;
   readonly message: string;
   readonly builtFrom: ResolvedTemplate;
@@ -478,6 +480,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     }
     case "edit": {
       return updateSlot(state, action.id, (slot) => {
+        if (slot.posting) return slot;
         if (action.field === "revisionNote") return { ...slot, revisionNote: action.value.slice(0, 2000), regenerateArmed: false };
         if (slot.draft.phase !== "drafted") return slot;
         const draft = { ...slot.draft.draft, [action.field]: action.value };
@@ -505,13 +508,13 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     }
     case "regenerate-started": {
       return updateSlot(state, action.id, (slot) => {
-        if (slot.draft.phase !== "drafted") return slot;
+        if (slot.draft.phase !== "drafted" || slot.posting) return slot;
         return { ...slot, draft: { phase: "drafting", restore: slot.draft.draft }, regenerateArmed: false };
       });
     }
     case "arm-regenerate": {
       return updateSlot(state, action.id, (slot) => {
-        if (slot.draft.phase !== "drafted") return slot;
+        if (slot.draft.phase !== "drafted" || slot.posting) return slot;
         if (slot.regenerateArmed) return slot;
         return { ...slot, regenerateArmed: true };
       });

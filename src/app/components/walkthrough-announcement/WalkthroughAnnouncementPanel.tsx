@@ -41,6 +41,7 @@ import { useAnnouncementLibrary } from "./useAnnouncementLibrary";
 import AnnouncementLibrary from "./AnnouncementLibrary";
 import { listAnnouncementLibraryAction, saveAnnouncementLibraryEntryAction, deleteAnnouncementLibraryEntryAction } from "@/app/actions/announcement-library";
 import { Button, TextField } from "@mui/material";
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import annChat from "../recording/announcement-chat.module.css";
@@ -67,7 +68,7 @@ import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from 
 import { MAX_NOTES_CHARS, useWalkthroughSetup } from "./useWalkthroughSetup";
 import { useWalkthroughAutoDraft } from "./useWalkthroughAutoDraft";
 import { useWalkthroughGenerationAdapters } from "./useWalkthroughGenerationAdapters";
-import { isRunComplete, shouldWarnBeforeUnload } from "./walkthrough-run-decisions";
+import { resetCompletedRun, shouldWarnBeforeUnload } from "./walkthrough-run-decisions";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
 import AnnouncementCourseFieldset from "./AnnouncementCourseFieldset";
 import {
@@ -202,6 +203,8 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
 
       batchBlocksRef.current = [...batchBlocksRef.current, result.blocks];
       setLegibleBlockCount((prev) => prev + result.blocks.length);
+    } catch {
+      if (epoch === extractionEpoch.current) pushNotice("danger", "Could not read this batch of captured frames. Scroll back over that section to capture it again.");
     } finally {
       if (epoch === extractionEpoch.current) {
         batchInFlightRef.current = false;
@@ -252,6 +255,11 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const [scriptGenerating, setScriptGenerating] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
   const [scriptText, setScriptText] = useState("");
+  const [scriptRegenerateFor, setScriptRegenerateFor] = useState<string | null>(null);
+  const scriptRevisionRef = useRef(0);
+  const scriptRegenerateContext = JSON.stringify([courseId, moduleLabel, notesText, provider, capturing, legibleBlockCount, scriptText, inputKind, upload.result]);
+  const scriptRegenerateArmed = scriptRegenerateFor === scriptRegenerateContext;
+  if (scriptRegenerateFor !== null && !scriptRegenerateArmed) setScriptRegenerateFor(null);
 
   // Every slot's dropdown reads the SAME options source, fetched eagerly by
   // the course-change effect above.
@@ -278,6 +286,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP - narration.length - 2);
     const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks)) + (uploadSnapshot.current?.coverage ?? "");
     return {
+      courseId: selectedCourse?.id ?? null,
       courseLabel: selectedCourse?.name ?? "",
       moduleLabel: moduleLabel.trim() || null,
       materialsText: uploadedVideoMaterialText(batchBlocksRef.current, narration, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP),
@@ -319,7 +328,10 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     armRegenerate,
     cancelRegenerate,
     postSignatureFor,
-  } = useAnnouncementDraftSlots({ scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" });
+  } = useAnnouncementDraftSlots({ courseId: selectedCourse?.id ?? null, scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" });
+
+  const currentSlotsRef = useRef(slots);
+  useLayoutEffect(() => { currentSlotsRef.current = slots; }, [slots]);
 
   const pairPreferences = usePairPreferences(library.scopeKey, library.enabled, chooseTemplate);
   useLayoutEffect(() => {
@@ -337,14 +349,14 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   // WA-DRAFT-LOSS: warn on a full page unload while a capture, a draft, or an
   // unposted drafted slot would be lost. Declared after `slots` on purpose.
   useEffect(() => {
-    if (!upload.busy && !library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots })) return;
+    if (!upload.busy && !library.controller.dirty() && !shouldWarnBeforeUnload({ capturing, pendingFrames, slots, extracting: extracting || batchInFlightRef.current })) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [capturing, pendingFrames, slots, library.controller, library.state, upload.busy]);
+  }, [capturing, pendingFrames, slots, extracting, library.controller, library.state, upload.busy]);
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 
@@ -377,19 +389,21 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     setInputKind("live");
     setStartError(null);
     setAutoDrafted(false);
-    if (isRunComplete(slots)) {
-      batchBlocksRef.current = [];
-      setLegibleBlockCount(0);
-      reset();
-    }
     (async () => {
       try {
-        await start({ saveVideo: false });
+        await start({ saveVideo: false, onStarted: () => {
+          resetCompletedRun(currentSlotsRef, () => {
+            extractionEpoch.current += 1;
+            batchBlocksRef.current = [];
+            setLegibleBlockCount(0);
+            reset();
+          });
+        } });
       } catch (err) {
         setStartError(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     })();
-  }, [capturing, extracting, pendingFrames, start, stop, slots, reset, inputKind, upload.busy, pushNotice]);
+  }, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice]);
 
   const publishUpload = (value: VideoReadResult, pinnedProvider: LlmProvider) => {
     batchBlocksRef.current = value.blocks;
@@ -412,6 +426,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     if (capturing || extracting || pendingFrames > 0 || batchInFlightRef.current || upload.busy || upload.result?.status === "needs-visible-only" || !hasMaterial) return;
     setScriptGenerating(true);
     const epoch = extractionEpoch.current;
+    const revision = scriptRevisionRef.current;
     setScriptError(null);
     try {
       const narration = uploadSnapshot.current?.narration ?? "";
@@ -427,7 +442,14 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         setScriptError(result.error);
         return;
       }
+      if (revision !== scriptRevisionRef.current) {
+        setScriptError("The script changed while generating. Your edits were kept.");
+        return;
+      }
+      scriptRevisionRef.current += 1;
       setScriptText(result.script);
+    } catch {
+      if (epoch === extractionEpoch.current) setScriptError("Could not generate the video script. Please try again.");
     } finally {
       if (epoch === extractionEpoch.current) setScriptGenerating(false);
     }
@@ -606,7 +628,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             onRetryOptions={
               savedFormatsState === "failed" || savedFormatsState === "timedout" ? () => void loadSavedExemplars() : null
             }
-            postArmed={isConfirmArmed(slot.postArmedFor, postSignatureFor(slot) ?? "")}
+            postArmed={isConfirmArmed(slot.postArmedFor, postSignatureFor(slot, selectedCourse?.id ?? null) ?? "")}
             courseName={selectedCourse?.name ?? null}
             canRemove={index > 1}
             onChooseTemplate={pairPreferences.choose}
@@ -651,7 +673,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
                 size="small"
                 label="Script"
                 value={scriptText}
-                onChange={(e) => setScriptText(e.target.value)}
+                onChange={(e) => { scriptRevisionRef.current += 1; setScriptRegenerateFor(null); setScriptText(e.target.value); }}
                 multiline
                 minRows={8}
                 fullWidth
@@ -685,6 +707,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         <Button size="small" variant="outlined" disabled={capturing || extracting || pendingFrames > 0} onClick={() => {
           if (capturing || extracting || pendingFrames > 0 || batchInFlightRef.current) return;
           if ((hasMaterial || upload.busy || upload.result || slots.some(slot => slot.draft.phase !== "empty")) && !window.confirm("Start a new walkthrough? This cancels video reading and clears captured material and drafts; saved examples stay available.")) return;
+          stop();
           extractionEpoch.current += 1;
           batchBlocksRef.current = [];
           upload.reset(); uploadSnapshot.current = null; setInputKind(null); setSelectedVideo(null);
@@ -712,17 +735,19 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         >
           {anyDrafting ? "Generating…" : "Generate both"}
         </Button>
-        <Button
-          variant="outlined"
-          color="primary"
-          size="small"
+        <ConfirmArmButtons
+          armed={scriptRegenerateArmed}
+          idleLabel={scriptGenerating ? "Generating…" : scriptText ? "Regenerate video script" : "Generate video script"}
+          confirmLabel="Confirm regenerate script"
+          tone="warning"
+          consequenceId="script-regeneration-consequence"
           loading={scriptGenerating}
-          loadingPosition="start"
           disabled={capturing || extracting || pendingFrames > 0 || upload.busy || upload.result?.status === "needs-visible-only" || !hasMaterial || scriptGenerating}
-          onClick={() => void handleGenerateScript()}
-        >
-          {scriptGenerating ? "Generating…" : "Generate video script"}
-        </Button>
+          onArm={() => { if (scriptText) { setScriptRegenerateFor(scriptRegenerateContext); return; } void handleGenerateScript(); }}
+          onConfirm={() => { setScriptRegenerateFor(null); void handleGenerateScript(); }}
+          onCancel={() => setScriptRegenerateFor(null)}
+        />
+        {scriptRegenerateArmed && <span id="script-regeneration-consequence">Regenerating replaces the current script.</span>}
       </div>
 
       {probeOpen && <LegibilityProbeModal onClose={() => setProbeOpen(false)} restoreFocusRef={probeButtonRef} />}

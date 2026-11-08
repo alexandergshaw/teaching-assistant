@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   shouldAutoDraft,
   isRunComplete,
+  resetCompletedRun,
   courseToAutoSelect,
   shouldWarnBeforeUnload,
   type AutoDraftState,
@@ -58,8 +59,9 @@ describe("shouldAutoDraft", () => {
 
 describe("isRunComplete", () => {
   // Emitted shape: a posted slot carries the course NAME string; unposted is null.
-  const P = { postedTo: "Course X" };
-  const U = { postedTo: null };
+  const draft = { phase: "drafted" as const, draft: { title: "A", message: "B", builtFrom: { kind: "none" as const }, researchNotice: { kind: "off" as const }, timing: "beginning-of-week" as const }, error: null };
+  const P = { postedTo: "Course X", postLocked: true, draft };
+  const U = { postedTo: null, postLocked: false, draft };
 
   it("C0 [] -> false (length guard; vacuous truth is unrepresentable)", () => {
     expect(isRunComplete([])).toBe(false);
@@ -79,6 +81,27 @@ describe("isRunComplete", () => {
   it("C5 [U, U] -> false", () => {
     expect(isRunComplete([U, U])).toBe(false);
   });
+  it("a posted draft edited since posting is incomplete", () => {
+    expect(isRunComplete([{ ...P, postLocked: false }])).toBe(false);
+  });
+  it("does not complete while a posted draft is regenerating", () => {
+    expect(isRunComplete([{ ...P, draft: { phase: "drafting", restore: draft.draft } }])).toBe(false);
+  });
+});
+
+it("rechecks a draft edited while the picker is pending", async () => {
+  const original = makeSlot("one", { kind: "default" }, "beginning-of-week");
+  const draft: Drafted = { title: "Title", message: "Body", builtFrom: { kind: "none" }, researchNotice: { kind: "off" }, timing: "beginning-of-week" };
+  const posted: DraftSlot = { ...original, postedTo: "Course", postLocked: true, draft: { phase: "drafted", draft, error: null } };
+  const current = { current: [posted] as readonly DraftSlot[] };
+  let release!: () => void;
+  const picker = new Promise<void>((resolve) => { release = resolve; });
+  let resets = 0;
+  const admission = picker.then(() => resetCompletedRun(current, () => { resets += 1; }));
+  current.current = [{ ...posted, postLocked: false }];
+  release();
+  await admission;
+  expect(resets).toBe(0);
 });
 
 describe("courseToAutoSelect (reading R; row A8 is the owner-routed T-RULING-1)", () => {
@@ -162,7 +185,10 @@ describe("shouldWarnBeforeUnload (WA-DRAFT-LOSS AC-A1, frozen literal table)", (
   ];
   for (const r of rows) {
     it(`${r.row} -> ${r.expected}`, () => {
-      expect(shouldWarnBeforeUnload({ capturing: r.capturing, pendingFrames: r.pendingFrames, slots: r.slots })).toBe(r.expected);
+      expect(shouldWarnBeforeUnload({ capturing: r.capturing, pendingFrames: r.pendingFrames, extracting: false, slots: r.slots })).toBe(r.expected);
     });
   }
+  it("warns while a drained frame batch is still extracting", () => {
+    expect(shouldWarnBeforeUnload({ capturing: false, pendingFrames: 0, extracting: true, slots: [slot()] })).toBe(true);
+  });
 });

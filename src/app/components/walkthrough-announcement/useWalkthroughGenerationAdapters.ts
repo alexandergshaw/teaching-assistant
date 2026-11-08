@@ -62,10 +62,12 @@ export function useWalkthroughGenerationAdapters(selectedCourse: WtaCourseOption
   const researchFingerprint = useCallback((ctx: AnnouncementDraftRequestContext): string => {
     return JSON.stringify([
       ctx.courseLabel,
+      ctx.courseId,
       ctx.moduleLabel ?? "",
       ctx.materialsText.length,
       fnv1aHash(ctx.materialsText),
       ctx.researchOn,
+      ctx.provider,
     ]);
   }, []);
 

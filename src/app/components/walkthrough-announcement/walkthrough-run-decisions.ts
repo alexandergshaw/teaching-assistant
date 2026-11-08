@@ -37,16 +37,21 @@ export function shouldAutoDraft(s: AutoDraftState): boolean {
   );
 }
 
-/** A run is complete when there is at least one slot and every slot has been
- * posted. The length guard makes the vacuous-true empty list unrepresentable
- * (production never passes []). */
-export function isRunComplete(slots: readonly Pick<DraftSlot, "postedTo">[]): boolean {
-  return slots.length > 0 && slots.every((s) => s.postedTo !== null);
+/** A run is complete only when every current draft remains posted. Editing a
+ * posted draft clears its lock while retaining its earlier posting record. */
+export function isRunComplete(slots: readonly Pick<DraftSlot, "postedTo" | "postLocked" | "draft">[]): boolean {
+  return slots.length > 0 && slots.every((s) => s.draft.phase === "drafted" && s.postedTo !== null && s.postLocked);
+}
+
+/** Recheck the latest slots when the asynchronous capture picker succeeds. */
+export function resetCompletedRun(slots: { current: readonly DraftSlot[] }, reset: () => void): void {
+  if (isRunComplete(slots.current)) reset();
 }
 
 export interface BeforeUnloadState {
   readonly capturing: boolean;
   readonly pendingFrames: number;
+  readonly extracting: boolean;
   readonly slots: readonly Pick<DraftSlot, "draft" | "postLocked">[];
 }
 
@@ -58,6 +63,7 @@ export function shouldWarnBeforeUnload(s: BeforeUnloadState): boolean {
   return (
     s.capturing ||
     s.pendingFrames > 0 ||
+    s.extracting ||
     s.slots.some((slot) => slot.draft.phase === "drafting" || (slot.draft.phase === "drafted" && !slot.postLocked))
   );
 }

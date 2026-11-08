@@ -28,6 +28,7 @@ import { resolveScheduledVisibility } from "./scheduled-visibility";
  * draft EXCEPT the research result, which cannot exist until after an await
  * buildRequest itself cannot perform (Ruling 4/9). */
 export interface AnnouncementDraftRequestContext {
+  readonly courseId?: string | null;
   readonly sourceKind?: "live" | "upload";
   readonly courseLabel: string;
   readonly moduleLabel: string | null;
@@ -195,7 +196,7 @@ export function postResultFor(
 export const POST_TRANSPORT_FAILURE_MESSAGE =
   "Could not reach the server - the post may or may not have gone through. Check the course's announcements in Canvas before posting again.";
 
-export function postSignatureFor(slot: DraftSlot): string | null {
+export function postSignatureFor(slot: DraftSlot, courseId?: string | null): string | null {
   if (slot.draft.phase !== "drafted") return null;
   return JSON.stringify([
     "walkthrough-announcement",
@@ -203,13 +204,26 @@ export function postSignatureFor(slot: DraftSlot): string | null {
     slot.draft.draft.title,
     slot.draft.draft.message,
     slot.scheduledAt,
+    courseId ?? null,
   ]);
+}
+
+export function draftMatchesCourse(sourceCourseId: string | null | undefined, courseId: string | null): boolean {
+  return Boolean(sourceCourseId) && sourceCourseId === courseId;
+}
+
+export function settlePostIfCurrent<T>(promise: Promise<T>, generation: number, currentGeneration: () => number, settle: (result: T) => void, fail: () => void): void {
+  void promise.then(
+    result => { if (generation === currentGeneration()) settle(result); },
+    () => { if (generation === currentGeneration()) fail(); },
+  );
 }
 
 export { dispatchResolvedAnnouncementDraft } from "./pair-dispatch";
 import { createPairDraftRunner } from "./pair-dispatch";
 
 export function useAnnouncementDraftSlots(args: {
+  readonly courseId: string | null;
   readonly scopeKey?: string;
   readonly mayGenerate?: () => boolean;
   readonly buildRequest: () => AnnouncementDraftRequestContext;
@@ -256,6 +270,7 @@ export function useAnnouncementDraftSlots(args: {
   const [slots, reactDispatch] = useReducer(slotsReducer, FIRST_SLOT_ID, initialSlotsFromId);
   const argsRef = useRef(args);
   const slotsRef = useRef(slots);
+  const postGenerationRef = useRef(0);
   const [researching, setResearching] = useState(false);
   const dispatch = useCallback((action: Parameters<typeof slotsReducer>[1]) => {
     slotsRef.current = slotsReducer(slotsRef.current, action);
@@ -265,7 +280,7 @@ export function useAnnouncementDraftSlots(args: {
   const runnerRef = useRef<ReturnType<typeof createPairDraftRunner> | null>(null);
   useLayoutEffect(() => {
     runnerRef.current = createPairDraftRunner(() => slotsRef.current, dispatch, () => argsRef.current, setResearching);
-    return () => runnerRef.current?.invalidate();
+    return () => { postGenerationRef.current += 1; runnerRef.current?.invalidate(); };
   }, [dispatch]);
   const nextIdRef = useRef(3);
 
@@ -278,6 +293,7 @@ export function useAnnouncementDraftSlots(args: {
   // A new run preserves explicit pair selections; a scope change clears them
   // before that scope's saved preferences load. Optional slots are per run.
   const reset = useCallback(() => {
+    postGenerationRef.current += 1;
     const choices = slotsRef.current.slice(0, 2).map(slot => slot.choice);
     runnerRef.current?.invalidate();
     nextIdRef.current = 3;
@@ -311,6 +327,10 @@ export function useAnnouncementDraftSlots(args: {
     (id: string) => {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot || slot.draft.phase !== "drafted") return;
+      if (!draftMatchesCourse(slot.draft.draft.sourceCourseId, argsRef.current.courseId)) {
+        dispatch({ type: "post-result", id, result: { error: "The selected course changed since this draft was generated. Select the original course or regenerate the draft." } });
+        return;
+      }
       // WA-POST-LOCK: a locked (already posted) or in-flight slot never commits.
       if (!mayCommitPost(slot)) return;
       // A32/REQ-A32-1, RULING 65: resolve ONCE, through resolvePostCommit -
@@ -335,7 +355,7 @@ export function useAnnouncementDraftSlots(args: {
         return;
       }
       dispatch({ type: "posting", id });
-      promise.then(
+      settlePostIfCurrent(promise, postGenerationRef.current, () => postGenerationRef.current,
         (result) =>
           dispatch({
             type: "post-result",
@@ -359,7 +379,7 @@ export function useAnnouncementDraftSlots(args: {
       if (!slot) return;
       // WA-POST-LOCK: nothing arms or commits while locked or in flight.
       if (!mayCommitPost(slot)) return;
-      const signature = postSignatureFor(slot);
+      const signature = postSignatureFor(slot, argsRef.current.courseId);
       if (signature === null) return;
       if (slot.postArmedFor === signature) {
         commitPost(id);

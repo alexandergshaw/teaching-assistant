@@ -288,10 +288,10 @@ describe("draftWalkthroughAnnouncementAction", () => {
     });
 
     expect(result).toHaveProperty("error");
+    expect(JSON.stringify("error" in result ? result.error : "")).not.toContain("AIzaSyREALLOOKINGSECRET123");
     expect(result.diag.ok).toBe(false);
-    expect(result.diag.failureBodyRedacted).toBeDefined();
-    expect(result.diag.failureBodyRedacted).not.toContain("AIzaSyREALLOOKINGSECRET123");
-    expect(result.diag.failureBodyRedacted).toContain("[url redacted]");
+    expect(result.diag.failureBodyRedacted).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(CREDENTIAL_SHAPED_BODY);
   });
 
   it("an ok:true, empty-text response (P7's documented failure mode: thinking tokens starved the whole budget) is reported as a real error, not a silently blank draft", async () => {

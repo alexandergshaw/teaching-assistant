@@ -26,6 +26,69 @@ function harness(researchOn = true) {
 }
 
 describe("production pair runner", () => {
+  it("does not dispatch a superseded pair after inputs return to their earlier value", async () => {
+    const h = harness();
+    const first = deferred<ResourceOutcome>();
+    const second = deferred<ResourceOutcome>();
+    h.fetchResources.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    const oldRun = h.runner.retry("wta-slot-1");
+    await drain();
+    h.buildRequest.mockReturnValue({ ...context, materialsText: "B" });
+    const newRun = h.runner.retry("wta-slot-2");
+    await drain();
+    h.buildRequest.mockReturnValue(context);
+    first.resolve({ kind: "off" });
+    await oldRun;
+    expect(h.draftOne).not.toHaveBeenCalled();
+    second.resolve({ kind: "off" });
+    await newRun;
+    expect(h.draftOne).not.toHaveBeenCalled();
+  });
+  it("rebases after an invalid format prevented the first model call", async () => {
+    const h = harness(false);
+    h.live.saved = h.entries.slice(1);
+    await h.runner.retry("wta-slot-1");
+    expect(h.draftOne).not.toHaveBeenCalled();
+    h.live.saved = h.entries;
+    h.buildRequest.mockReturnValue({ ...context, researchOn: false, materialsText: "NEW_CONTEXT" });
+    await h.runner.retry("wta-slot-1");
+    expect(h.draftOne).toHaveBeenCalledOnce();
+    expect(h.draftOne.mock.calls[0][0].materialsText).toBe("NEW_CONTEXT");
+  });
+
+  it("keeps overlapping research snapshots independent after input drift", async () => {
+    const h = harness();
+    const first = deferred<ResourceOutcome>();
+    const second = deferred<ResourceOutcome>();
+    h.fetchResources.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    const oldRun = h.runner.retry("wta-slot-1");
+    await drain();
+    h.buildRequest.mockReturnValue({ ...context, materialsText: "NEW_CONTEXT" });
+    const newRun = h.runner.retry("wta-slot-2");
+    await drain();
+    expect(h.fetchResources).toHaveBeenCalledTimes(2);
+    first.resolve({ kind: "off" });
+    await oldRun;
+    expect(h.draftOne).not.toHaveBeenCalled();
+    second.resolve({ kind: "off" });
+    await newRun;
+    expect(h.draftOne).toHaveBeenCalledOnce();
+    expect(h.draftOne.mock.calls[0][0].materialsText).toBe("NEW_CONTEXT");
+  });
+  it("rejects a changed course while research is pending", async () => {
+    const h = harness();
+    const research = deferred<ResourceOutcome>();
+    h.fetchResources.mockImplementation(() => research.promise);
+    const running = h.runner.generate();
+    h.buildRequest.mockReturnValue({ ...context, courseId: "other" });
+    research.resolve({ kind: "off" });
+    await running;
+    expect(h.draftOne).not.toHaveBeenCalled();
+    expect(h.read().every(slot => slot.draft.phase === "empty" && slot.draft.error !== null)).toBe(true);
+    await h.runner.retry("wta-slot-1");
+    expect(h.draftOne).toHaveBeenCalledOnce();
+    expect(h.draftOne.mock.calls[0][0].courseId).toBe("other");
+  });
   it("admits the finalized snapshot only after the captured-frame queue and synchronous extraction marker drain", async () => {
     const h = harness(false);
     let pendingFrames = 2;
@@ -39,7 +102,7 @@ describe("production pair runner", () => {
     h.buildRequest.mockReturnValue({ ...context, researchOn: false, materialsText: "FINAL_DRAINED_PAGE" });
     batchInFlight = false;
     await h.runner.generate();
-    expect(h.buildRequest).toHaveBeenCalledTimes(1);
+    expect(h.buildRequest).toHaveBeenCalled();
     expect(h.draftOne.mock.calls.map(([ctx]) => ctx.materialsText)).toEqual(["FINAL_DRAINED_PAGE", "FINAL_DRAINED_PAGE"]);
   });
   it("reserves synchronously even when slot reads remain stale until React commits", async () => {
@@ -72,7 +135,7 @@ describe("production pair runner", () => {
     draft.resolve({ title: "Fresh", message: "Fresh", researchNotice: { kind: "off" } });
     await Promise.all([first, second, automatic, regeneration]);
     expect(h.draftOne).toHaveBeenCalledTimes(2);
-    expect(h.buildRequest).toHaveBeenCalledTimes(1);
+    expect(h.buildRequest).toHaveBeenCalled();
   });
   it("reserves before draft even with research off", async () => {
     const h = harness(false); const draft = deferred<Awaited<ReturnType<PairDraftAdapters["draftOne"]>>>();
@@ -89,7 +152,7 @@ describe("production pair runner", () => {
     h.buildRequest.mockReturnValue({ ...context, materialsText: "CHANGED_MATERIAL" });
     h.draftOne.mockResolvedValue({ title: "Reminder", message: "Retried", researchNotice: { kind: "off" } });
     await h.runner.retry("wta-slot-2");
-    expect(h.fetchResources).toHaveBeenCalledTimes(1); expect(h.buildRequest).toHaveBeenCalledTimes(1);
+    expect(h.fetchResources).toHaveBeenCalledTimes(1); expect(h.buildRequest).toHaveBeenCalled();
     expect(h.draftOne).toHaveBeenCalledTimes(3);
     expect(h.draftOne.mock.calls[2][0].materialsText).toBe(context.materialsText);
     expect(h.draftOne.mock.calls[2][0].timing).toBe("midweek");

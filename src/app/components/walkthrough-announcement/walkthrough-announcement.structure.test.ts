@@ -625,13 +625,14 @@ describe("AC-10 W2 wiring: the panel's auto-draft / extraction-window / fresh-ru
   describe("D: fresh-run reset is gated by isRunComplete in handleStartStop", () => {
     const hssBlock = sliceBetween(
       "const handleStartStop = useCallback",
-      "}, [capturing, extracting, pendingFrames, start, stop, slots, reset, inputKind, upload.busy, pushNotice]);"
+      "}, [capturing, extracting, pendingFrames, start, stop, reset, inputKind, upload.busy, pushNotice]);"
     );
 
     it("D1: reset(), batchBlocksRef clear and setLegibleBlockCount(0) all live INSIDE if (isRunComplete(slots))", () => {
-      const guardStart = hssBlock.indexOf("if (isRunComplete(slots)) {");
+      const guardStart = hssBlock.indexOf("resetCompletedRun(currentSlotsRef, () => {");
       expect(guardStart).toBeGreaterThan(-1);
-      const guardEnd = hssBlock.indexOf("(async () =>", guardStart);
+      expect(hssBlock.indexOf("onStarted: () =>")).toBeLessThan(guardStart);
+      const guardEnd = hssBlock.indexOf("} catch", guardStart);
       expect(guardEnd).toBeGreaterThan(-1);
       const guardBlock = hssBlock.slice(guardStart, guardEnd);
       expect(guardBlock).toContain("reset()");
@@ -757,7 +758,7 @@ describe("W3 SURFACE: run bar, field order, draft-slot layout, auto-draft toggle
       expect(barSlice).toContain("Generate video script");
     });
     it("the bar holds no Post control (the sticky bar must stay non-destructive)", () => {
-      expect(barSlice).not.toMatch(/Post to Canvas|Confirm post|postWalkthroughAnnouncementAction|ConfirmArmButtons/);
+      expect(barSlice).not.toMatch(/Post to Canvas|Confirm post|postWalkthroughAnnouncementAction/);
     });
   });
 

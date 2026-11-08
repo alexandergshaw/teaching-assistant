@@ -117,7 +117,11 @@ describe("uploaded video production runner", () => {
     const runner = createPairDraftRunner(() => slots, action => { slots = [...slotsReducer(slots, action)]; }, () => ({ buildRequest,
       resolveLive: () => ({ pastedOutline: null, mostRecent: null }), fetchResources: async () => ({ kind: "off" }), researchFingerprint: () => "fixed", draftOne }), vi.fn());
     await runner.generate();
-    expect(buildRequest).toHaveBeenCalledOnce(); expect(draftOne).toHaveBeenCalledTimes(2);
+    expect(buildRequest).toHaveBeenCalledTimes(3); expect(draftOne).toHaveBeenCalledTimes(2);
+    const snapshots = buildRequest.mock.results.map(result => result.value);
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots.every(snapshot => snapshot.sourceKind === "upload" && snapshot.materialsText === material)).toBe(true);
+    expect((draftOne.mock.calls as unknown as Array<[{ timing: string }]>).map(call => call[0].timing)).toEqual(["beginning-of-week", "midweek"]);
     for (const call of draftOne.mock.calls as unknown as Array<[{ materialsText: string }]>) {
       expect(call[0].materialsText).toBe(material); expect(call[0].materialsText.split("SPOKEN_ONLY_FACT")).toHaveLength(2);
     }

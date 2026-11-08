@@ -125,13 +125,13 @@ function collectTaKeys(source: string): string[] {
   return Array.from(found).sort();
 }
 
-// Frozen at 84 keys (82 measured by the command in the header comment above,
-// plus ta-grading-one-upload, N15a Wave 1, plus ta-grade-zip-course, A45 W3).
+// Frozen key set, including Auto Build's independently stored form values.
 // Sorted; do not reorder by hand - EXPECTED_TA_KEYS.sort() below is the
 // actual comparison basis, this literal ordering is only for a readable
 // diff when this test goes red.
 const EXPECTED_TA_KEYS = [
   "ta--prefixed",
+  "ta-auto-build-values",
   "ta-canvas-saved-courses",
   "ta-cartridge-assignment",
   "ta-cartridge-course",

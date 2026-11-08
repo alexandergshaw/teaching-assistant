@@ -1,4 +1,6 @@
 import { canvasOmissionIdentityRefusal } from "../canvas/omitted-video";
+import { prepareDocumentVisuals } from "./document-visuals";
+import type { DocumentVisuals } from "./document-visual-schema";
 import { hasCanvasPdfEnvelope } from "./canvas-pdf";
 import { dotFreeContributionName, uniqueContributionName } from "./discussion-file-names";
 import { isSubmissionFileInventories, type SubmissionFileInventory } from "./submission-file-inventory";
@@ -65,6 +67,7 @@ export { MAX_ENTRY_CONTENT_CHARS } from "./link-evidence";
 interface LeafOutcome {
   readonly fullName: string;
   readonly isImage: boolean;
+  readonly visuals?: DocumentVisuals;
   /** VIDEO-GRADING W1: a video member. Never carries bytes (ops O-1). */
   readonly isVideo?: boolean;
   readonly staging?: VideoStaging;
@@ -98,6 +101,7 @@ export async function extractSubmissions(
 ): Promise<{
   submissions: Record<string, string>;
   rawData: Record<string, string>;
+  documentVisuals: Record<string, DocumentVisuals>;
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
   unsupportedFiles: string[];
@@ -114,6 +118,7 @@ export async function extractSubmissions(
 }> {
   const submissions: Record<string, string> = {};
   const rawData: Record<string, string> = {};
+  const documentVisuals: Record<string, DocumentVisuals> = {};
   const zipParents: Record<string, string[]> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
@@ -210,11 +215,21 @@ export async function extractSubmissions(
 
       try {
         const bytes = await readMemberBounded(entry, declared, fullName, zipChain, budget.limits);
-        const extractedText = await extractTextFromBuffer(name, bytes, { budget });
-        outcomes[index] =
-          extractedText && extractedText.trim()
-            ? { fullName, isImage: false, submission: extractedText, raw: bytes.toString("base64") }
-            : { fullName, isImage: false, submission: null, raw: null };
+        let extractedText: string | null = null;
+        let extractionFailed = false;
+        try { extractedText = await extractTextFromBuffer(name, bytes, { budget }); }
+        catch (err) { if (err instanceof ZipCapError) throw err; extractionFailed = true; }
+        const visuals = extension === "docx" || extension === "pptx"
+          ? await prepareDocumentVisuals(extension, bytes) : undefined;
+        if ((extractionFailed || extractedText === null) && visuals) {
+          outcomes[index] = { fullName, isImage: false, submission: null, raw: null };
+          return;
+        }
+        const content = extractedText?.trim() ? extractedText
+          : visuals && visuals.found > 0 ? `[Document with embedded pictures: ${name}; no extracted text]` : null;
+        outcomes[index] = content
+          ? { fullName, isImage: false, submission: content, raw: bytes.toString("base64"), visuals }
+          : { fullName, isImage: false, submission: null, raw: null };
       } catch (err) {
         // A cap breach refuses the whole archive; every other failure is this
         // one file failing to extract, exactly as before.
@@ -239,6 +254,7 @@ export async function extractSubmissions(
       }
       submissions[outcome.fullName] = outcome.submission;
       if (!outcome.isVideo) rawData[outcome.fullName] = outcome.raw;
+      if (outcome.visuals) documentVisuals[outcome.fullName] = outcome.visuals;
       if (zipChain.length > 0) zipParents[outcome.fullName] = zipChain;
     }
 
@@ -273,6 +289,7 @@ export async function extractSubmissions(
   return {
     submissions,
     rawData,
+    documentVisuals,
     attemptedSupportedFiles,
     failedSupportedFiles,
     unsupportedFiles,
@@ -339,7 +356,7 @@ export async function ingestZipEntries(
   classification: SubmissionZipClassification;
   videoOutcomes?: VideoOutcomes;
 }> {
-  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles, unsupportedFiles, videoStaging, videoOutcomes } =
+  const { submissions, rawData, documentVisuals, zipParents, attemptedSupportedFiles, failedSupportedFiles, unsupportedFiles, videoStaging, videoOutcomes } =
     await extractSubmissions(zipBuffer, { videoEnabled: options?.videoEnabled, stageVideo: options?.stageVideo });
   const incompleteReason = options?.requireSupportedFiles ? (unsupportedArchiveReason(unsupportedFiles) ?? unreadableArchiveReason(failedSupportedFiles)) : null;
   if (incompleteReason) throw new Error(incompleteReason);
@@ -368,7 +385,7 @@ export async function ingestZipEntries(
   const inferredLookup = options?.inferFileNamesWith
     ? await inferFileNameConvention(Object.keys(submissions), options.inferFileNamesWith)
     : undefined;
-  const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging);
+  const entries: StudentSubmissionEntry[] = groupSubmissionsByStudent(submissions, inferredLookup, rawData, zipParents, videoStaging, documentVisuals);
   if (deferredLinks && deferredLinks.size > 0) {
     attachDeferredLinkUrls(entries, deferredLinks, inferredLookup, zipParents);
   }

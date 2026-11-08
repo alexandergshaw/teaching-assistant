@@ -443,7 +443,8 @@ export function groupSubmissionsByStudent(
   zipParents?: Record<string, string[]>,
   // VIDEO-GRADING W2: per-file staged-video refs (keyed like `submissions`). A
   // staged video gets `videoRef` + its sniffed MIME and never a rawBase64.
-  videoStaging?: Record<string, { videoRef: VideoRef; mimeType: string }>
+  videoStaging?: Record<string, { videoRef: VideoRef; mimeType: string }>,
+  documentVisuals?: Record<string, import("./document-visual-schema").DocumentVisuals>
 ): Array<{
   student: string;
   content: string;
@@ -528,6 +529,7 @@ export function groupSubmissionsByStudent(
         previewContent: preview.text,
         previewTruncated: preview.truncated,
         rawBase64: rawData?.[filePath],
+        ...(documentVisuals?.[filePath] ? { documentVisuals: documentVisuals[filePath] } : {}),
         mimeType: staged ? staged.mimeType : getMimeType(parsed.extension),
         ...(staged ? { videoRef: staged.videoRef } : {}),
       };

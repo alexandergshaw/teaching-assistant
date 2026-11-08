@@ -9,6 +9,15 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ storage: 
 vi.mock("@/lib/llm", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/llm")>(), callLlm: vi.fn() }));
 vi.mock("@/lib/gemini", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/gemini")>(), getGeminiInterRequestDelayMs: () => 0 }));
 vi.mock("@/lib/code-runner", () => ({ runSubmittedCode: vi.fn(async () => null) }));
+const extraction = vi.hoisted(() => ({ fail: false, returnNull: false }));
+vi.mock("../office-extract", async importOriginal => {
+  const original = await importOriginal<typeof import("../office-extract")>();
+  return { ...original, extractTextFromBuffer: (...args: Parameters<typeof original.extractTextFromBuffer>) => {
+    if (extraction.fail) throw new Error("simulated text extraction failure");
+    if (extraction.returnNull) return Promise.resolve(null);
+    return original.extractTextFromBuffer(...args);
+  } };
+});
 
 import { callLlm } from "../llm";
 import { prepareChatSubmissionAction } from "@/app/actions/grading-chat-intake";
@@ -19,7 +28,7 @@ import { buildGradeItemDetail } from "@/app/components/grading-chat/chatGradeDet
 import { sanitizeSessionDiagnosticDetail } from "../session-diagnostic-log";
 import { prepareDocumentVisuals } from "./document-visuals";
 import { DOCUMENT_PICTURE_LIMIT, DOCUMENT_PICTURE_BYTE_LIMIT, DOCUMENT_VISUAL_BYTE_LIMIT, isDocumentVisuals } from "./document-visual-schema";
-import { canvasWorkToEntry } from "./extraction";
+import { canvasWorkToEntry, ingestZipEntries } from "./extraction";
 import { gradeEntries } from "./engine";
 import { collectInlineVisualEvidence } from "./inline-visuals";
 import { serializeGradeItemWithOfficeSource } from "@/app/components/grading/officeSourceWire";
@@ -79,8 +88,59 @@ function body(entry: StudentSubmissionEntry) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  extraction.fail = false;
+  extraction.returnNull = false;
   storage.remove.mockResolvedValue({ error: null });
   vi.mocked(callLlm).mockResolvedValue({ ok: true, text: JSON.stringify({ overallComment: "Clear.", rubricResults: [{ area: "Clarity", score: "9/10" }], totalScore: "9/10" }) });
+});
+
+describe("image-only Office documents in class archives", () => {
+  it("retains each student and original file while sending bounded picture bytes to grading", async () => {
+    const zip = new JSZip();
+    zip.file("Ada_100_1_answer.docx", await fixture("docx", { text: "" }));
+    zip.file("Bob_101_1_slides.pptx", await fixture("pptx", { text: "" }));
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    const { entries } = await ingestZipEntries(bytes.buffer as ArrayBuffer, { deferLinks: true, requireSupportedFiles: true });
+    expect(entries.map(e => e.student)).toEqual(["Ada", "Bob"]);
+    expect(entries.map(e => e.submittedFiles.map(f => f.name))).toEqual([["answer.docx"], ["slides.pptx"]]);
+    for (const entry of entries) {
+      const wire = body(entry);
+      expect(wire.entry.submittedFiles[0].rawBase64).toBeUndefined();
+      expect(wire.entry.submittedFiles[0].documentVisuals?.parts[0].base64).toBe(PNG);
+      const res = await gradePost(request(wire));
+      expect(res.status).toBe(200);
+      expect((await res.json()).result.ungraded).toBeUndefined();
+    }
+    expect(callLlm).toHaveBeenCalledTimes(2);
+    for (const [sent] of vi.mocked(callLlm).mock.calls) {
+      expect(sent.contents.flatMap(c => c.parts).filter(p => "inlineData" in p)).toEqual([{ inlineData: { mimeType: "image/png", data: PNG } }]);
+    }
+  });
+  it("keeps incomplete visual evidence non-postable", async () => {
+    const zip = new JSZip();
+    zip.file("Ada_100_1_answer.docx", await fixture("docx", { text: "", unsupported: true }));
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    const { entries } = await ingestZipEntries(bytes.buffer as ArrayBuffer, { deferLinks: true, requireSupportedFiles: true });
+    const res = await gradePost(request(body(entries[0])));
+    expect((await res.json()).result.ungraded).toMatchObject({ kind: "grading-failed", student: "Ada" });
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("refuses an archive when picture-bearing document text cannot be extracted", async () => {
+    const zip = new JSZip();
+    zip.file("Ada_100_1_answer.docx", await fixture("docx", { text: "Important hidden text" }));
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    extraction.fail = true;
+    await expect(ingestZipEntries(bytes.buffer as ArrayBuffer, { deferLinks: true, requireSupportedFiles: true })).rejects.toThrow(/answer\.docx/);
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+  it("refuses an archive when Office extraction returns no readable result", async () => {
+    const zip = new JSZip();
+    zip.file("Ada_100_1_answer.docx", await fixture("docx", { text: "Important hidden text" }));
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    extraction.returnNull = true;
+    await expect(ingestZipEntries(bytes.buffer as ArrayBuffer, { deferLinks: true, requireSupportedFiles: true })).rejects.toThrow(/answer\.docx/);
+    expect(callLlm).not.toHaveBeenCalled();
+  });
 });
 
 describe.each(["docx", "pptx"] as const)("%s intake through actual model request", kind => {

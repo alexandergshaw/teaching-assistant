@@ -34,6 +34,7 @@ import { RecordingSplitConfirm } from "./RecordingSplitConfirm";
 import { useContinuousGradingRun, type ItemDiagnostic, type SubmitOutcome } from "./useContinuousGradingRun";
 import { buildLedgerView } from "./ingestLedger";
 import { LedgerNotice } from "./LedgerNotice";
+import { claimIntake, releaseIntake, resetIntake } from "./intakeFence";
 import { describeRunStatus, type RunStatus } from "./runStatus";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { visuallyHidden } from "../ui/visuallyHidden";
@@ -377,6 +378,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   }, [sessionReady]);
 
   const dropSessionEpoch = useRef(0); const [visibleDropEpoch, setVisibleDropEpoch] = useState(0);
+  const [sharedIntakeLatch] = useState(() => ({ busy: false, generation: 0 }));
   const handleNewSession = () => {
     if (
       typeof window !== "undefined" &&
@@ -385,6 +387,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       return;
     }
     dropSessionEpoch.current += 1; setVisibleDropEpoch(dropSessionEpoch.current);
+    resetIntake(sharedIntakeLatch);
     directIntake.current.cancel();
     setDirectPreparing(false);
     setPreparing(false);
@@ -398,11 +401,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
   // Marks the submit intake (extraction, session start) as in progress so the
   // composer shows busy until the awaits settle, success or failure.
   const withPreparing = async <T,>(work: () => Promise<T>): Promise<T> => {
+    const epoch = dropSessionEpoch.current;
     setPreparing(true);
     try {
       return await work();
     } finally {
-      setPreparing(false);
+      if (dropSessionEpoch.current === epoch) setPreparing(false);
     }
   };
 
@@ -611,9 +615,12 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
 
   const handleSubmitUrl = (url: string, label?: string) =>
     withPreparing(async () => {
-      if (!(await ensureSession(url))) return;
+      const epoch = dropSessionEpoch.current;
+      if (!(await ensureSession(url, undefined, () => dropSessionEpoch.current === epoch))) return { kind: "refused" as const, reason: sessionRefusalRef.current ?? "Session setup was not completed." };
+      if (dropSessionEpoch.current !== epoch) return { kind: "refused" as const, reason: "The session changed before the submission was queued." };
       const outcome = await driver.submit({ kind: "url", url, label });
-      setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      if (dropSessionEpoch.current === epoch) setSubmitError(outcome.kind === "accepted" ? null : outcome.reason);
+      return outcome;
     });
 
   const handleSubmitComposite = (student: string, parts: CompositePartInput[]) =>
@@ -647,7 +654,11 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
     event.preventDefault();
     setIsDragging(false);
     const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) handleSubmitFiles(files);
+    if (files.length > 0) {
+      const token = claimIntake(sharedIntakeLatch);
+      if (token === null) { setSubmitError("Wait for the current submission to finish, then drop these files again."); return; }
+      void handleSubmitFiles(files).finally(() => { releaseIntake(sharedIntakeLatch, token); });
+    }
   };
 
   return (
@@ -917,6 +928,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
       </div>
       <div className={chatStyles.stickyComposer}>
         <ChatComposer
+          sharedLatch={sharedIntakeLatch}
           disabled={busy || preparing}
           getSessionEpoch={() => dropSessionEpoch.current}
           sessionEpoch={visibleDropEpoch}

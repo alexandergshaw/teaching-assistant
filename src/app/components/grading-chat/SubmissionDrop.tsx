@@ -22,6 +22,7 @@ import type { DirectFileOutcome } from "./chatDirectFileIntake";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { ROLE_FILE_LIMIT } from "./chatFileRoles";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
+import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 
 type State = "ready" | "refused" | "identity" | "queued" | "staged" | "uncertain";
 interface Row { id: number; file: File; state: State; reason?: string; assigned?: string }
@@ -31,8 +32,9 @@ export function reconcileRowAfterReset(row: Row): Row {
   return { ...row, state: "uncertain", reason: "The session changed. Check the previous results before retrying." };
 }
 /** File intake stays visible while text, URL, and composite tools remain available. */
-export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onOne, onMany, onText }: {
+export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onOne, onMany, onText }: {
   disabled: boolean;
+  sharedLatch?: IntakeFence;
   reviewFiles?: boolean;
   getSessionEpoch?: () => number;
   sessionEpoch?: number;
@@ -50,13 +52,22 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
   const [pending, setPending] = useState(false);
   const [clearing, setClearing] = useState(false);
   const picker = useRef<HTMLInputElement | null>(null);
-  const nextId = useRef(0), latch = useRef(false), alive = useRef(true);
+  const nextId = useRef(0), alive = useRef(true);
+  const activeRows = useRef<ReadonlySet<number> | null>(null);
+  const textPending = useRef(false);
+  const [localLatch] = useState<IntakeFence>(() => ({ busy: false, generation: 0 }));
+  const latch = sharedLatch ?? localLatch;
   const previousEpoch = useRef(sessionEpoch);
   useEffect(() => {
     if (previousEpoch.current === sessionEpoch) return;
     previousEpoch.current = sessionEpoch;
-    setRows((previous) => previous.map(reconcileRowAfterReset));
-  }, [sessionEpoch]);  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+    if (!sharedLatch) resetIntake(localLatch);
+    if (textPending.current) setTextUncertain(true);
+    const attempted = activeRows.current;
+    activeRows.current = null; textPending.current = false;
+    setPending(false);
+    setRows((previous) => previous.map((row) => attempted?.has(row.id) ? { ...row, state: "uncertain", reason: "The session changed. Check the previous results before retrying." } : reconcileRowAfterReset(row)));
+  }, [sessionEpoch, sharedLatch, localLatch, pending, submissionText]);  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     if (!pending && !submissionText && !rows.some((row) => row.state === "ready" || row.state === "refused" || row.state === "identity" || row.state === "uncertain")) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -76,24 +87,24 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
   const attentionRows = rows.filter((row) => row.state !== "queued");
 
   async function gradeText() {
-    if (busy || latch.current || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())) return;
-    latch.current = true; setPending(true); setError(null);
+    if (busy || latch.busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())) return;
+    const token = claimIntake(latch); if (token === null) return; textPending.current = true; setPending(true); setError(null);
     const epoch = getSessionEpoch?.();
     try {
       const outcome = await onText(mode === "one" ? student.trim() : textStudent.trim(), submissionText);
-      if (!alive.current) return;
+      if (!alive.current || latch.generation !== token) return;
       if (getSessionEpoch?.() !== epoch || outcome.kind === "partial" || (outcome.kind === "accepted" && outcome.entryCount !== 1)) {
         setTextUncertain(true);
         setError("The text submission status could not be confirmed. Check the previous results before retrying.");
       } else if (outcome.kind === "refused") setError(outcome.reason);
       else { setSubmissionText(""); if (mode === "many") setTextStudent(""); }
     } catch {
-      if (alive.current) { setTextUncertain(true); setError("The text submission status could not be confirmed. Check the results before retrying."); }
-    } finally { latch.current = false; if (alive.current) setPending(false); }
+      if (alive.current && latch.generation === token) { setTextUncertain(true); setError("The text submission status could not be confirmed. Check the results before retrying."); }
+    } finally { if (releaseIntake(latch, token) && alive.current) { textPending.current = false; setPending(false); } }
   }
 
   function addFiles(files: File[]) {
-    if (busy || latch.current) { setError("Wait for the current upload to finish, then choose these files again."); return; }
+    if (busy || latch.busy) { setError("Wait for the current upload to finish, then choose these files again."); return; }
     if (files.length === 0) return;
     if (rows.length + files.length > ROLE_FILE_LIMIT) { setError(`Choose up to ${ROLE_FILE_LIMIT} files at a time. Your current list is unchanged.`); return; }
     const added = files.map((file) => ({ id: nextId.current++, file, state: "ready" as const }));
@@ -115,7 +126,7 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (busy || latch.current) { setError("Wait for the current upload to finish, then drop these files again."); return; }
+    if (busy || latch.busy) { setError("Wait for the current upload to finish, then drop these files again."); return; }
     const entries = Array.from(event.dataTransfer.items ?? []).filter((item) => item.kind === "file");
     if (entries.some((item) => item.webkitGetAsEntry?.()?.isDirectory || !item.getAsFile())) {
       setError("Folders cannot be dropped here. Choose files, or put the folder in a ZIP archive.");
@@ -125,14 +136,14 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
   }
 
   async function grade(batch: Row[], selectedMode: "one" | "many", selectedStudent: string) {
-    if (busy || latch.current || batch.length === 0 || (!reviewFiles && selectedMode === "one" && (unresolved || batch.length > 12))) return;
-    latch.current = true;
+    if (busy || latch.busy || batch.length === 0 || (!reviewFiles && selectedMode === "one" && (unresolved || batch.length > 12))) return;
+    const token = claimIntake(latch); if (token === null) return; activeRows.current = new Set(batch.map((row) => row.id));
     setPending(true);
     setError(null);
     const epoch = getSessionEpoch?.();
     try {
       const outcomes = reviewFiles ? await onMany(batch.map((row) => row.file)) : await submitDropBatch(selectedMode, selectedStudent, batch.map((row) => row.file), onOne, onMany, () => alive.current && getSessionEpoch?.() === epoch);
-      if (!alive.current) return;
+      if (!alive.current || latch.generation !== token) return;
       const byId = new Map(batch.map((row, index) => { const outcome = outcomes[index] ?? { kind: "unknown" as const, reason: "The upload status could not be confirmed. Check results before retrying." }; return [row.id, getSessionEpoch?.() === epoch ? outcome : markSessionChanged(outcome)] as const; }));
       setRows((previous) => previous.map((row) => {
         const outcome = byId.get(row.id);
@@ -144,19 +155,19 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
         return { ...row, state: "uncertain", reason: outcome.reason };
       }));
     } catch {
-      if (alive.current) setRows((previous) => previous.map((row) => batch.some((entry) => entry.id === row.id)
+      if (alive.current && latch.generation === token) setRows((previous) => previous.map((row) => batch.some((entry) => entry.id === row.id)
         ? { ...row, state: "uncertain", reason: "The submission status could not be confirmed. Check results before retrying." }
         : row));
-    } finally { latch.current = false; if (alive.current) setPending(false); }
+    } finally { if (releaseIntake(latch, token) && alive.current) { activeRows.current = null; setPending(false); } }
   }
 
   async function gradeAssigned(batch: Row[] = assigned) {
-    if (busy || latch.current || batch.length === 0) return;
-    latch.current = true; setPending(true); setError(null);
+    if (busy || latch.busy || batch.length === 0) return;
+    const token = claimIntake(latch); if (token === null) return; activeRows.current = new Set(batch.map((row) => row.id)); setPending(true); setError(null);
     const epoch = getSessionEpoch?.();
     try {
       const outcomes = reviewFiles ? await onMany(batch.map((row) => row.file)) : await submitAssignedFiles(batch.map((row) => row.file), batch.map((row) => row.assigned ?? ""), onOne, () => alive.current && getSessionEpoch?.() === epoch);
-      if (!alive.current) return;
+      if (!alive.current || latch.generation !== token) return;
       const byId = new Map(batch.map((row, index) => { const outcome = outcomes[index] ?? { kind: "unknown" as const, reason: "The upload status could not be confirmed. Check results before retrying." }; return [row.id, getSessionEpoch?.() === epoch ? outcome : markSessionChanged(outcome)] as const; }));
       setRows((previous) => previous.map((row) => {
         const outcome = byId.get(row.id);
@@ -166,7 +177,7 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
         if (outcome.kind === "refused" || outcome.kind === "identity") return { ...row, state: "identity", reason: outcome.reason };
         return { ...row, state: "uncertain", reason: outcome.reason };
       }));
-    } finally { latch.current = false; if (alive.current) setPending(false); }
+    } finally { if (releaseIntake(latch, token) && alive.current) { activeRows.current = null; setPending(false); } }
   }
 
   return (

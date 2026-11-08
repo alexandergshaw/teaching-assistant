@@ -211,7 +211,7 @@ describe("actual role controller -> Panel setup/transport callbacks -> continuou
   });
   it("routes loose-file entry points directly and removes setup-file review controls", () => {
     expect(panel).not.toContain("Include assignment or rubric files"); expect(panel).not.toContain("roleIntake.stage");
-    expect(panel).toContain("if (files.length > 0) handleSubmitFiles(files)"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
+    expect(panel).toContain("claimIntake(sharedIntakeLatch)"); expect(panel).toContain("handleSubmitFiles(files).finally"); expect(panel).toContain("onSubmitFiles={handleSubmitFiles}");
     expect(panel).not.toContain("<ChatFileRolePreview"); expect(panel).toContain("disabled={busy || preparing}");
     expect(panel).toContain('label="Deduct when at least N words below the minimum"'); expect(panel).toContain("disabled={!applyLengthDeduction || sessionReady || busy || preparing}");
     expect(panel).toContain('aria-label="Clear all setup fields" disabled={sessionReady || busy || preparing}');

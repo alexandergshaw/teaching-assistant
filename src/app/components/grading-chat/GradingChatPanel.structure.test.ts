@@ -336,7 +336,7 @@ describe("GradingChatPanel - LMS-META-OVERRIDE-OFFER wiring (reachability pins)"
   it("the offer is computed only in ensureSession, which the Canvas URL submit reaches", () => {
     const source = withoutLineComments(read(PANEL));
     expect(source.split("computeOverrideOffer(").length - 1).toBe(1);
-    expect(source).toMatch(/ensureSession\(url\)/);
+    expect(source).toMatch(/ensureSession\(url,\s*undefined,\s*\(\)\s*=>\s*dropSessionEpoch\.current === epoch\)/);
   });
 });
 
@@ -519,7 +519,7 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
     const source = withoutLineComments(read(COMPOSER));
     expect(source).toContain('addParts([{ kind: "text", content: text }])');
     expect(source).toContain('addParts(files.map((file): CompositePartInput => ({ kind: "file", file })))');
-    expect(source).toContain("onSubmitUrl(url.trim(), ");
+    expect(source).toContain("onSubmitUrl(capturedUrl.trim(), capturedLabel.trim() || undefined)");
     expect(source).toContain("handleAddUrlPart()");
     expect(source).toContain('event.stopPropagation()');
     expect(source).toContain('Drop files in the submission area above.');
@@ -531,11 +531,11 @@ describe("submission labels: file and url modes carry the optional label", () =>
   it("the composer declares a label field in file mode and in url mode, and threads it into the callbacks", () => {
     const source = withoutLineComments(read(COMPOSER));
     expect(source).toMatch(/onSubmitFiles:\s*\(files: File\[\], label\?: string\) => Promise<DirectFileOutcome\[\]>/);
-    expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => void/);
+    expect(source).toMatch(/onSubmitUrl:\s*\(url: string, label\?: string\) => Promise<SubmitOutcome>/);
     const urlBlock = source.slice(source.indexOf('mode === "url" && ('));
     expect(urlBlock).toContain("chatStyles.composerLabel");
     expect(urlBlock).toContain("Label (optional)");
-    expect(source).toContain("onSubmitUrl(url.trim(), ");
+    expect(source).toContain("onSubmitUrl(capturedUrl.trim(), capturedLabel.trim() || undefined)");
   });
 
   it("the panel forwards the label to the driver only for a single-file pick", () => {
@@ -547,7 +547,8 @@ describe("submission labels: file and url modes carry the optional label", () =>
     const url = source.slice(source.indexOf("const handleSubmitUrl"), source.indexOf("const handleSubmitComposite"));
     expect(url).toContain('kind: "url", url, label');
     // The whole-view drop supplies no label.
-    expect(source).toContain("handleSubmitFiles(files);");
+    expect(source).toContain("handleSubmitFiles(files).finally");
+    expect(source).toContain("claimIntake(sharedIntakeLatch)");
   });
 });
 
@@ -595,8 +596,8 @@ describe("GradingChatPanel - controls #4: loading indicators", () => {
       expect(start, name).toBeGreaterThan(-1);
       expect(source.slice(start, start + 200), name).toContain("withPreparing(");
     }
-    expect(source).toMatch(/finally\s*\{\s*setPreparing\(false\)/);
-    expect(source).toMatch(/<ChatComposer\s+disabled=\{busy\s*\|\|\s*preparing\}/);
+    expect(source).toMatch(/finally\s*\{\s*if\s*\(dropSessionEpoch\.current === epoch\)\s*setPreparing\(false\)/);
+    expect(source).toMatch(/<ChatComposer\s+sharedLatch=\{sharedIntakeLatch\}\s+disabled=\{busy\s*\|\|\s*preparing\}/);
   });
 
   it("the grading indicator is driven by OUTSTANDING work (dispatched - completed), not driver.inFlight", () => {

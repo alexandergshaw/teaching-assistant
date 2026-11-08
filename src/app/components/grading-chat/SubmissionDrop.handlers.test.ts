@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
+import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 
 type Node = { type: string; props: Record<string, any> };
 const slots: { value: any; deps?: unknown[] }[] = [];
 let cursor = 0;
-const useState = (initial: unknown) => { const slot = slots[cursor++] ??= { value: initial }; return [slot.value, (next: any) => { slot.value = typeof next === "function" ? next(slot.value) : next; }]; };
+const useState = (initial: unknown) => { const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial }; return [slot.value, (next: any) => { slot.value = typeof next === "function" ? next(slot.value) : next; }]; };
 const useRef = (initial: unknown) => { const slot = slots[cursor++] ??= { value: { current: initial } }; return slot.value; };
 const useEffect = (effect: () => unknown, deps: unknown[]) => { const slot = slots[cursor++] ??= { value: undefined }; if (!slot.deps || deps.some((v, i) => v !== slot.deps?.[i])) { slot.deps = deps; effect(); } };
 const source = readFileSync("src/app/components/grading-chat/SubmissionDrop.tsx", "utf8");
@@ -17,15 +18,15 @@ const declarations = file.statements.filter((statement) => ts.isFunctionDeclarat
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
 const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
-const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "window", ...components, `${code}; return SubmissionDrop;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, { addEventListener() {}, removeEventListener() {} }, ...components);
+const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "window", ...components, `${code}; return SubmissionDrop;`);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 beforeEach(() => { slots.length = 0; cursor = 0; });
-function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 }))) {
+function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence) {
   let epoch = 0;
-  const render = () => { cursor = 0; return component({ disabled: false, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
+  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
   const reset = () => { epoch++; };
@@ -34,6 +35,28 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("marks only the attempted group uncertain after reset, leaving other held files assignable", async () => {
+    let finish!: (value: any) => void;
+    const onOne = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const h = harness(onOne); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    h.find(tree, "input").props.onChange({ target: { files: [work("Alice_101_1_a.pdf"), work("Bob_102_1_b.pdf")], value: "x" } }); await flush(); tree = h.render();
+    nodes(tree).find((n) => n.type === "Button" && text(n) === "Accept and grade this group")!.props.onClick();
+    h.reset(); tree = h.render(); tree = h.render();
+    const items = nodes(tree).filter((n) => n.type === "li");
+    expect(items.find((n) => text(n).includes("Alice_101_1_a.pdf")) && text(items.find((n) => text(n).includes("Alice_101_1_a.pdf")))).toContain("Needs review");
+    expect(items.find((n) => text(n).includes("Bob_102_1_b.pdf")) && text(items.find((n) => text(n).includes("Bob_102_1_b.pdf")))).toContain("Student needed");
+    finish({ kind: "accepted", entryCount: 1 }); await flush();
+  });
+  it("shares a synchronous fence with other intake controls", async () => {
+    const shared = { busy: true, generation: 0 }, onText = vi.fn().mockResolvedValue({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText, shared); let tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "work" } });
+    tree = h.render(); h.button(tree, "Grade text").props.onClick();
+    h.find(tree, "input").props.onChange({ target: { files: [work("one.pdf")], value: "x" } });
+    expect(onText).not.toHaveBeenCalled(); expect(h.onOne).not.toHaveBeenCalled();
+    shared.busy = false; h.button(tree, "Grade text").props.onClick(); expect(shared.busy).toBe(true);
+    await flush(); expect(shared.busy).toBe(false); expect(onText).toHaveBeenCalledTimes(1);
+  });
   it("submits named text separately in multiple-student mode and preserves refused text", async () => {
     const onText = vi.fn().mockResolvedValueOnce({ kind: "refused", reason: "setup incomplete" }).mockResolvedValueOnce({ kind: "accepted", entryCount: 1 });
     const h = harness(undefined, undefined, onText); let tree = h.render();

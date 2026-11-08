@@ -38,6 +38,7 @@ import type { DirectFileOutcome } from "./chatDirectFileIntake";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import { submitOneFileGroup } from "./submissionDropRoutes";
 import { dispatchComposite } from "./compositeSubmission";
+import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 
 const INPUT_MODE_STORAGE_KEY = "ta-grading-chat-input-mode";
 
@@ -68,9 +69,10 @@ export interface ChatComposerProps {
   readonly reviewFiles?: boolean;
   readonly getSessionEpoch?: () => number;
   readonly sessionEpoch?: number;
+  readonly sharedLatch?: IntakeFence;
   readonly onSubmitText: (content: string, label: string | undefined) => void;
   readonly onSubmitFiles: (files: File[], label?: string) => Promise<DirectFileOutcome[]>;
-  readonly onSubmitUrl: (url: string, label?: string) => void;
+  readonly onSubmitUrl: (url: string, label?: string) => Promise<SubmitOutcome>;
   readonly onSubmitComposite: (student: string, parts: CompositePartInput[]) => Promise<SubmitOutcome>;
 }
 
@@ -82,7 +84,7 @@ function describePart(part: CompositePartInput): string {
   return `URL: ${part.url}`;
 }
 
-export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
+export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSessionEpoch, sessionEpoch, onSubmitFiles, onSubmitUrl, onSubmitComposite }: ChatComposerProps) {
   const [mode, setMode] = useState<InputMode>(() => loadInputMode());
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
@@ -90,6 +92,10 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const lms = useLmsSubmissionPicker();
   const [lmsBusy, setLmsBusy] = useState(false);
   const [lmsError, setLmsError] = useState<string | null>(null);
+  const [urlPending, setUrlPending] = useState(false);
+  const [urlUncertain, setUrlUncertain] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [lmsUncertain, setLmsUncertain] = useState(false);
   const [dropNotice, setDropNotice] = useState(false);
   const textFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -100,14 +106,24 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const [compositePending, setCompositePending] = useState(false);
   const [compositeUncertain, setCompositeUncertain] = useState(false);
   const [compositeError, setCompositeError] = useState<string | null>(null);
-  const compositeLatch = useRef(false);
+  const [localLatch] = useState<IntakeFence>(() => ({ busy: false, generation: 0 }));
+  const intakeLatch = sharedLatch ?? localLatch;
   const mounted = useRef(true);
-  const controlsDisabled = disabled || compositePending;
+  const [previousEpoch, setPreviousEpoch] = useState(sessionEpoch);
+  const controlsDisabled = disabled || compositePending || urlPending || lmsBusy;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { if (!sharedLatch) resetIntake(localLatch); }, [sessionEpoch, sharedLatch, localLatch]);
+  if (previousEpoch !== sessionEpoch) {
+    setPreviousEpoch(sessionEpoch);
+    if (urlPending) setUrlUncertain(true);
+    if (lmsBusy) setLmsUncertain(true);
+    if (compositePending) setCompositeUncertain(true);
+    setUrlPending(false); setLmsBusy(false); setCompositePending(false);
+  }
   const [student, setStudent] = useState("");
   const trayActive = parts.length > 0;
 
-  const addParts = (added: CompositePartInput[]) => { if (!compositeLatch.current) setParts((prev) => [...prev, ...added]); };
+  const addParts = (added: CompositePartInput[]) => { if (!intakeLatch.busy) setParts((prev) => [...prev, ...added]); };
   // A stopped recording hands back its frames as image Files; they join the
   // composite tray as file parts, so "Grade submission (N)" merges them into
   // ONE row through the existing composite path.
@@ -145,9 +161,10 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     const saved = persistComposerHeight(after);
     if (saved !== null) setComposerHeight(saved);
   };
-  const removePart = (index: number) => { if (!compositeLatch.current) setParts((prev) => prev.filter((_, i) => i !== index)); };
+  const removePart = (index: number) => { if (!intakeLatch.busy) setParts((prev) => prev.filter((_, i) => i !== index)); };
 
   const selectMode = (next: InputMode) => {
+    if (intakeLatch.busy) return;
     setMode(next);
     persistInputMode(next);
     // Selecting Record starts the capture directly. This MUST run here, inside
@@ -159,7 +176,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   };
 
   const handleAddTextPart = () => {
-    if (controlsDisabled || compositeLatch.current || !text.trim()) return;
+    if (controlsDisabled || intakeLatch.busy || !text.trim()) return;
     addParts([{ kind: "text", content: text }]);
     setText("");
     setLabel("");
@@ -176,23 +193,31 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const handlePickFile = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (files.length === 0 || controlsDisabled || compositeLatch.current) return;
+    if (files.length === 0 || controlsDisabled || intakeLatch.busy) return;
     addParts(files.map((file): CompositePartInput => ({ kind: "file", file })));
   };
 
-  const handleSendUrl = () => {
-    if (controlsDisabled || compositeLatch.current || !url.trim()) return;
+  const handleSendUrl = async () => {
+    if (controlsDisabled || intakeLatch.busy || urlUncertain || !url.trim()) return;
     if (trayActive) {
       handleAddUrlPart();
       return;
     }
-    onSubmitUrl(url.trim(), label.trim() ? label.trim() : undefined);
-    setUrl("");
-    setLabel("");
+    const capturedUrl = url, capturedLabel = label, epoch = getSessionEpoch?.();
+    const token = claimIntake(intakeLatch); if (token === null) return;
+    setUrlPending(true); setUrlError(null);
+    try {
+      const outcome = await onSubmitUrl(capturedUrl.trim(), capturedLabel.trim() || undefined);
+      if (!mounted.current || intakeLatch.generation !== token) return;
+      if (getSessionEpoch?.() !== epoch || outcome.kind === "partial" || (outcome.kind === "accepted" && outcome.entryCount === 0)) setUrlUncertain(true);
+      else if (outcome.kind === "refused") setUrlError(outcome.reason);
+      else { setUrl((current) => current === capturedUrl ? "" : current); setLabel((current) => current === capturedLabel ? "" : current); }
+    } catch { if (mounted.current && intakeLatch.generation === token) setUrlUncertain(true); }
+    finally { if (releaseIntake(intakeLatch, token) && mounted.current) setUrlPending(false); }
   };
 
   const handleAddUrlPart = () => {
-    if (controlsDisabled || compositeLatch.current || !url.trim()) return;
+    if (controlsDisabled || intakeLatch.busy || !url.trim()) return;
     addParts([{ kind: "url", url: url.trim() }]);
     setUrl("");
   };
@@ -201,17 +226,26 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   // then the EXISTING url submit takes over (meta-fill and the all-submissions
   // pull are inherited from it).
   const handleSendLms = async () => {
-    if (controlsDisabled || lmsBusy || !lms.canSubmit) return;
-    setLmsBusy(true);
+    if (controlsDisabled || intakeLatch.busy || lmsUncertain || !lms.canSubmit) return;
+    const epoch = getSessionEpoch?.(); const token = claimIntake(intakeLatch); if (token === null) return; setLmsBusy(true);
     setLmsError(null);
+    let submitted = false;
     try {
       const built = await buildLmsAssignmentUrlAction(lms.institution, lms.courseId, lms.assignmentId);
+      if (!mounted.current || intakeLatch.generation !== token) return;
+      if (getSessionEpoch?.() !== epoch) { setLmsUncertain(true); return; }
       if ("error" in built) setLmsError(built.error);
-      else onSubmitUrl(built.url, label.trim() ? label.trim() : undefined);
+      else {
+        submitted = true;
+        const outcome = await onSubmitUrl(built.url, label.trim() || undefined);
+        if (!mounted.current || intakeLatch.generation !== token) return;
+        if (getSessionEpoch?.() !== epoch || outcome.kind === "partial" || (outcome.kind === "accepted" && outcome.entryCount === 0)) setLmsUncertain(true);
+        else if (outcome.kind === "refused") setLmsError(outcome.reason);
+      }
     } catch {
-      setLmsError("Could not build the assignment link.");
+      if (mounted.current && intakeLatch.generation === token) { if (submitted) setLmsUncertain(true); else setLmsError("Could not build the assignment link."); }
     } finally {
-      setLmsBusy(false);
+      if (releaseIntake(intakeLatch, token) && mounted.current) setLmsBusy(false);
     }
   };
 
@@ -225,17 +259,16 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
     controlsDisabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
 
   const handleGrade = async () => {
-    if (controlsDisabled || compositeLatch.current || compositeUncertain || !trayActive || capture.recording || capture.snapping) return;
-    compositeLatch.current = true;
+    if (controlsDisabled || intakeLatch.busy || compositeUncertain || !trayActive || capture.recording || capture.snapping) return;
+    const token = claimIntake(intakeLatch); if (token === null) return;
     setCompositePending(true);
     setCompositeError(null);
     const epoch = getSessionEpoch?.();
     const outcome = await dispatchComposite(
       () => onSubmitComposite(student.trim(), parts),
-      () => mounted.current && getSessionEpoch?.() === epoch,
+      () => mounted.current && getSessionEpoch?.() === epoch && intakeLatch.generation === token,
     );
-    compositeLatch.current = false;
-    if (!mounted.current) return;
+    if (!releaseIntake(intakeLatch, token) || !mounted.current) return;
     setCompositePending(false);
     if (outcome.kind === "accepted") { setParts([]); setStudent(""); }
     else if (outcome.kind === "refused") setCompositeError(outcome.reason);
@@ -245,7 +278,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    if (controlsDisabled || compositeLatch.current) return;
+    if (controlsDisabled || intakeLatch.busy) return;
     const files = Array.from(event.dataTransfer.files);
     if (!files.length) return;
     if (trayActive) {
@@ -256,7 +289,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
 
   return (
     <div className={chatStyles.composer} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <SubmissionDrop disabled={controlsDisabled} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
+      <SubmissionDrop disabled={controlsDisabled} sharedLatch={intakeLatch} reviewFiles={reviewFiles} getSessionEpoch={getSessionEpoch} sessionEpoch={sessionEpoch} onMany={(files) => onSubmitFiles(files)}
         onOne={(name, files) => submitOneFileGroup(name, files, onSubmitFiles, onSubmitComposite)}
         onText={(name, content) => onSubmitComposite(name, [{ kind: "text", content }])} />
       {dropNotice && <span role="status">Drop files in the submission area above.</span>}
@@ -314,7 +347,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               className={chatStyles.composerLabel}
               label="Student name"
               value={student}
-              onChange={(event) => { if (!compositeLatch.current) setStudent(event.target.value); }}
+              onChange={(event) => { if (!intakeLatch.busy) setStudent(event.target.value); }}
               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleGrade(); } }}
               disabled={controlsDisabled}
             />
@@ -396,7 +429,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             label="Canvas, GitHub, or Google Drive URL"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleSendUrl(); } }}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleSendUrl(); } }}
             disabled={controlsDisabled}
           />
           <TextField
@@ -405,12 +438,14 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             label="Label (optional)"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleSendUrl(); } }}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleSendUrl(); } }}
             disabled={controlsDisabled}
           />
-          <Button variant="outlined" disabled={controlsDisabled || !url.trim()} onClick={handleSendUrl}>
+          <Button variant="outlined" disabled={controlsDisabled || urlUncertain || !url.trim()} onClick={() => void handleSendUrl()}>
             Add
           </Button>
+          {urlError && <Alert severity="warning">{urlError}</Alert>}
+          {urlUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setUrlUncertain(false)}>I checked results</Button>}>This link may have queued work. Check results before retrying.</Alert>}
         </div>
       )}
 
@@ -448,7 +483,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             className={chatStyles.composerLabel}
             label="Institution"
             value={lms.institution}
-            onChange={(event) => lms.selectInstitution(event.target.value)}
+            onChange={(event) => { if (!intakeLatch.busy) lms.selectInstitution(event.target.value); }}
             disabled={instInd.disabled}
             error={instInd.error}
             helperText={instInd.helperText}
@@ -465,7 +500,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             className={chatStyles.composerGrow}
             label="Course"
             value={lms.courseId}
-            onChange={(event) => lms.selectCourse(event.target.value)}
+            onChange={(event) => { if (!intakeLatch.busy) lms.selectCourse(event.target.value); }}
             disabled={courseInd.disabled}
             error={courseInd.error}
             helperText={courseInd.helperText}
@@ -482,7 +517,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
             className={chatStyles.composerGrow}
             label="Assignment"
             value={lms.assignmentId}
-            onChange={(event) => lms.selectAssignment(event.target.value)}
+            onChange={(event) => { if (!intakeLatch.busy) lms.selectAssignment(event.target.value); }}
             disabled={assignmentInd.disabled}
             error={assignmentInd.error}
             helperText={assignmentInd.helperText}
@@ -493,7 +528,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               </MenuItem>
             ))}
           </TextField>
-          <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={controlsDisabled || lmsBusy || !lms.canSubmit} onClick={() => void handleSendLms()}>
+          <Button variant="outlined" aria-label="Grade the picked LMS assignment" disabled={controlsDisabled || lmsUncertain || !lms.canSubmit} onClick={() => void handleSendLms()}>
             {lmsBusy ? "Working..." : "Grade"}
           </Button>
           {lmsError && (
@@ -501,6 +536,7 @@ export function ChatComposer({ disabled, reviewFiles = false, getSessionEpoch, s
               {lmsError}
             </span>
           )}
+          {lmsUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setLmsUncertain(false)}>I checked results</Button>}>This assignment may have queued work. Check results before retrying.</Alert>}
         </div>
         );
       })()}

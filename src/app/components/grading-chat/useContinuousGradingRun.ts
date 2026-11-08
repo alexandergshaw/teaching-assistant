@@ -15,7 +15,7 @@
 import { useRef, useState } from "react";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT } from "@/lib/grade/length-deduction-policy";
 import { lengthDeductionThresholdError } from "./chatLengthDeduction";
-import { createContinuousRepositoryAdapter, listRepositoryStudents, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
+import { createContinuousRepositoryAdapter, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
 import {
   resolveChatRunHeaderAction,
   prepareChatSubmissionAction,
@@ -43,7 +43,7 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
-import { countPendingVideos } from "./pendingVideoCount";
+import { countPendingVideos, pendingDisplay } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
 import { bindVersionedResultRows, projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
 import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
@@ -115,6 +115,8 @@ export interface UseContinuousGradingRunParams {
   /** Opt in to the did-right/did-wrong comment split on every grade request.
    * Absent = body byte-identical to before. */
   readonly commentSplit?: boolean;
+  /** Internal test gate; the page must not enable until mixed-version operations are safe. */
+  readonly enableSetupCorrections?: boolean;
 }
 
 export interface UseContinuousGradingRunResult {
@@ -134,6 +136,7 @@ export interface UseContinuousGradingRunResult {
     readonly applyLengthDeduction?: boolean;
     readonly lengthDeductionThresholdWords?: number;
   }) => Promise<{ kind: "ready" } | { kind: "refused"; reason: string }>;
+  readonly correctSetup: UseContinuousGradingRunResult["beginSession"];
   readonly submit: (input: ChatSubmissionInput) => Promise<SubmitOutcome>;
   readonly reset: () => void;
   /** Re-dispatches the ORIGINAL request body of a failed row in place (same
@@ -142,7 +145,7 @@ export interface UseContinuousGradingRunResult {
   /** Re-dispatches the retained body of an already-arrived row (graded or
    * failed) so it is re-graded and REPLACED in place. Keyed by the row's
    * student label. A no-op for an unknown student or a row already in flight. */
-  readonly regrade: (student: string) => void;
+  readonly regrade: (student: string, useCurrentSetup?: boolean) => void;
   readonly regradeCandidates: ReadonlyMap<string, GradeResult>;
   readonly regradeFailures: ReadonlySet<string>;
   readonly acceptRegrade: (student: string, candidate: GradeResult) => boolean;
@@ -255,7 +258,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [classifyingRecording, setClassifyingRecording] = useState(false);
   const [diagnostics, setDiagnostics] = useState<readonly ItemDiagnostic[]>([]);
   const [repositoryStudents, setRepositoryStudents] = useState<readonly RepositorySessionStudent[]>([]);
-  const regradeCandidatesRef = useRef(new Map<string, { sourceIndex: number; result: GradeResult; revision: number }>());
+  const regradeCandidatesRef = useRef(new Map<string, { sourceIndex: number; result: GradeResult; revision: number; body: GradeRunItemRequestBody; setupVersion: number }>());
+  const regradeBodiesRef = useRef(new Map<number, { body: GradeRunItemRequestBody; setupVersion: number }>());
   const regradeStartRef = useRef(new Map<number, number>());
   const [regradeCandidates, setRegradeCandidates] = useState<ReadonlyMap<string, GradeResult>>(new Map());
   const [regradeFailures, setRegradeFailures] = useState<ReadonlySet<string>>(new Set());
@@ -264,23 +268,13 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const attempts = dispatchMetaRef.current.get(sourceIndex)?.attempts ?? 0;
     dispatchMetaRef.current.set(sourceIndex, { trigger, queuedAtMs: chatSeamNowMs(), attempts });
   };
+  const registerSetup = (setup: ChatGradingSetup, pointsPossible: number | null) => { const signature = JSON.stringify({ ...setup, pointsPossible }); if (!setupNumbersRef.current.has(signature)) setupNumbersRef.current.set(signature, setupNumbersRef.current.size + 1); return setupNumbersRef.current.get(signature)!; };
+  const currentSetup = (header: ResolvedRunHeader): ChatGradingSetup => ({ assignmentInstructions: assignmentInstructionsRef.current, rubric: header.effectiveRubric, provider, pointsPossible: null, ...(commentSplit ? { commentSplit: true } : {}), ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}), ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}), ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}), ...(applyLengthDeductionRef.current ? { applyLengthDeduction: true, lengthDeductionThresholdWords: lengthDeductionThresholdWordsRef.current } : {}) });
 
   // Presentation only: mirrors pendingRef / inFlightIndexRef as student labels.
   const publishPending = () => {
-    setRepositoryStudents(listRepositoryStudents("grading-chat-" + sessionIdRef.current, retainedBodiesRef.current));
-    const labelOf = (index: number) => retainedBodiesRef.current.get(index)?.entry.student;
-    const pending = new Set<string>();
-    for (const index of pendingRef.current) {
-      const label = labelOf(index);
-      if (label !== undefined) pending.add(label);
-    }
-    const active: string[] = [];
-    for (const index of inFlightIndexRef.current) {
-      const label = labelOf(index);
-      if (label !== undefined) active.push(label);
-    }
-    setPendingStudents(pending);
-    setInFlightStudents(active);
+    const view = pendingDisplay("grading-chat-" + sessionIdRef.current, pendingRef.current, inFlightIndexRef.current, retainedBodiesRef.current);
+    setRepositoryStudents(view.repositoryStudents); setPendingStudents(view.pendingStudents); setInFlightStudents(view.inFlightStudents);
   };
 
   const rebuildRun = () => {
@@ -381,9 +375,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           const completed = { ...result, submittedFiles: full.entry.submittedFiles };
           if (trigger === "regrade") {
             const revision = regradeStartRef.current.get(request.sourceIndex);
-            if (completed.ungraded || revision === undefined || revision !== (repositoryRevisionsRef.current.get(request.sourceIndex) ?? 0)) setRegradeFailures((previous) => new Set(previous).add(request.entry.student));
+            const admitted = regradeBodiesRef.current.get(request.sourceIndex);
+            if (completed.ungraded || revision === undefined || revision !== (repositoryRevisionsRef.current.get(request.sourceIndex) ?? 0) || !admitted || admitted.body !== request) setRegradeFailures((previous) => new Set(previous).add(request.entry.student));
             else {
-              regradeCandidatesRef.current.set(request.entry.student, { sourceIndex: request.sourceIndex, result: completed, revision });
+              regradeCandidatesRef.current.set(request.entry.student, { sourceIndex: request.sourceIndex, result: completed, revision, ...admitted });
               setRegradeCandidates(new Map([...regradeCandidatesRef.current].map(([student, candidate]) => [student, candidate.result])));
             }
           } else recordArrival({ sourceIndex: request.sourceIndex, result: completed });
@@ -457,7 +452,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
-      const signature = JSON.stringify({ ...opts.setup, pointsPossible: opts.pointsPossible }); if (!setupNumbersRef.current.has(signature)) setupNumbersRef.current.set(signature, setupNumbersRef.current.size + 1); rowSetupsRef.current.set(sourceIndex, setupNumbersRef.current.get(signature)!);
+      rowSetupsRef.current.set(sourceIndex, registerSetup(opts.setup, opts.pointsPossible));
       pendingRef.current.add(sourceIndex);
       queueRef.current.push(body);
       markQueued(sourceIndex, "first");
@@ -470,14 +465,15 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     pump();
   };
 
-  const beginSession = async (sessionParams: { assignmentInstructions: string; rubric: string; isCurrent?: () => boolean; harshness?: GradeHarshness; feedbackWordTarget?: number; applyNamingDeduction?: boolean; applyLengthDeduction?: boolean; lengthDeductionThresholdWords?: number }) => {
+  const beginSession = async (input: Parameters<UseContinuousGradingRunResult["beginSession"]>[0], replace = false) => {
+    const sessionParams = { ...input };
     const sessionAtStart = sessionIdRef.current;
     const stale = () => ({ kind: "refused" as const, reason: "The session changed while setup was resolving. Nothing was submitted." });
     // Idempotent: a header already resolved for this session is a no-op, so
     // a second call (e.g. from every submit()) never re-spends a
     // generateRubric model call.
     if (sessionParams.isCurrent?.() === false) return stale();
-    if (headerRef.current) return { kind: "ready" as const };
+    if (headerRef.current && !replace) return { kind: "ready" as const };
     const thresholdError = lengthDeductionThresholdError(sessionParams.applyLengthDeduction === true, sessionParams.lengthDeductionThresholdWords);
     if (thresholdError) return { kind: "refused" as const, reason: thresholdError };
     const previous = headerAttemptRef.current?.epoch === sessionAtStart ? headerAttemptRef.current : null;
@@ -507,7 +503,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       failureClass: header.kind === "refused" ? classifyChatSeamFailure(header.error) : null,
     });
     if (header.kind === "refused") {
-      setHeaderState("refused");
+      setHeaderState(replace && headerRef.current ? "ready" : "refused");
       setSessionError(header.error);
       return { kind: "refused" as const, reason: header.error };
     }
@@ -529,7 +525,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!header) {
       return { kind: "refused", reason: "Set instructions and a rubric before submitting." };
     }
-    const setup: ChatGradingSetup = { assignmentInstructions: assignmentInstructionsRef.current, rubric: header.effectiveRubric, provider, pointsPossible: null, ...(commentSplit ? { commentSplit: true } : {}), ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}), ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}), ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}), ...(applyLengthDeductionRef.current ? { applyLengthDeduction: true, lengthDeductionThresholdWords: lengthDeductionThresholdWordsRef.current } : {}) };
+    const setup = currentSetup(header);
 
     let entries: StudentSubmissionEntry[];
     let pointsPossible: number | null = null;
@@ -864,7 +860,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // Unlike retry, works on an already-GRADED row. Resolves student -> sourceIndex
   // through the retained bodies (entry.student is the unique session label), then
   // re-dispatches that body; recordArrival overwrites the arrival in place.
-  const regrade = (student: string) => {
+  const regrade = (student: string, useCurrentSetup = false) => {
     let sourceIndex = -1;
     for (const [idx, body] of retainedBodiesRef.current) {
       if (body.entry.student === student) {
@@ -873,8 +869,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       }
     }
     if (sourceIndex < 0 || pendingRef.current.has(sourceIndex) || regradeCandidatesRef.current.has(student)) return;
-    const body = retainedBodiesRef.current.get(sourceIndex);
+    let body = retainedBodiesRef.current.get(sourceIndex);
     if (!body) return;
+    let setupVersion = rowSetupsRef.current.get(sourceIndex);
+    if (useCurrentSetup) { if (!params.enableSetupCorrections || !headerRef.current) return; const setup = currentSetup(headerRef.current); setupVersion = registerSetup(setup, body.pointsPossible); body = { ...body, ...setup, pointsPossible: body.pointsPossible }; }
+    if (setupVersion === undefined) return;
+    regradeBodiesRef.current.set(sourceIndex, { body, setupVersion });
     regradeStartRef.current.set(sourceIndex, repositoryRevisionsRef.current.get(sourceIndex) ?? 0);
     setRegradeFailures((previous) => { const next = new Set(previous); next.delete(student); return next; });
     pendingRef.current.add(sourceIndex);
@@ -894,6 +894,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (held.revision !== (repositoryRevisionsRef.current.get(held.sourceIndex) ?? 0)) {
       discardRegrade(student); setRegradeFailures((previous) => new Set(previous).add(student)); return false;
     }
+    retainedBodiesRef.current.set(held.sourceIndex, held.body); rowSetupsRef.current.set(held.sourceIndex, held.setupVersion);
     recordArrival(held);
     discardRegrade(student);
     rebuildRun();
@@ -907,6 +908,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     sessionIdRef.current += 1;
     regradeCandidatesRef.current = new Map();
     regradeStartRef.current = new Map();
+    regradeBodiesRef.current = new Map();
     setRegradeCandidates(new Map());
     setRegradeFailures(new Set());
     headerAttemptRef.current = null;
@@ -959,6 +961,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       publish: () => { rebuildRun(); publishPending(); } }),
     repositoryStudents,
     beginSession,
+    correctSetup: (setup) => params.enableSetupCorrections && headerRef.current ? beginSession(setup, true) : Promise.resolve({ kind: "refused", reason: "Setup correction is unavailable." }),
     submit,
     reset,
     retry,

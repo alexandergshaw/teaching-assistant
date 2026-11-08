@@ -91,11 +91,12 @@ const dispatchItemMock = vi.fn();
 const prepareVideoMock = vi.fn<PrepareVideoFn>();
 const classifyMock = vi.fn<ClassifyRecordingFn>();
 
-function useTestDriver(maxEntries = 40, provider: "gemini" | "other" = "gemini", commentSplit = false) {
+function useTestDriver(maxEntries = 40, provider: "gemini" | "other" = "gemini", commentSplit = false, enableSetupCorrections = false) {
   h0.begin();
   return useContinuousGradingRun({
     provider,
     commentSplit,
+    enableSetupCorrections,
     dispatchItem: dispatchItemMock,
     prepareVideo: prepareVideoMock,
     classifyRecording: classifyMock,
@@ -155,6 +156,29 @@ function classifyDiag() {
 const SUBMIT = { kind: "storaged-video", storagePath: VIDEO_PATH, name: "demo.mp4" } as const;
 
 describe("useContinuousGradingRun - recording split (flag on)", () => {
+  it("keeps an already staged recording on its original setup when a correction completes", async () => {
+    classifyMock.mockResolvedValue({ split: SAME_LABEL_SPLIT, failed: false });
+    await beginReady(useTestDriver(40, "gemini", false, true));
+    expect(await useTestDriver(40, "gemini", false, true).submit(SUBMIT)).toMatchObject({ kind: "accepted", entryCount: 0 });
+    resolveChatRunHeaderActionMock.mockResolvedValueOnce({ ...readyHeader, effectiveRubric: "New rubric" });
+    expect(await useTestDriver(40, "gemini", false, true).correctSetup({ assignmentInstructions: "New instructions", rubric: "New rubric" })).toEqual({ kind: "ready" });
+    expect(useTestDriver(40, "gemini", false, true).confirmRecordingSplit()).toMatchObject({ kind: "accepted", entryCount: 2 });
+    await flushMicrotasks();
+    await useTestDriver(40, "gemini", false, true).submit({ kind: "text", content: "New submission" });
+    await flushMicrotasks();
+    expect(dispatchItemMock.mock.calls.map(([body]) => [body.assignmentInstructions, body.rubric])).toEqual([["Each student presents.", "1. Correctness"], ["Each student presents.", "1. Correctness"], ["New instructions", "New rubric"]]);
+    expect(useTestDriver(40, "gemini", false, true).getVersionedResults().map((row) => row.setupVersion)).toEqual([1, 1, 2]);
+    useTestDriver(40, "gemini", false, true).regrade("Presenter", true);
+    await flushMicrotasks();
+    expect(dispatchItemMock.mock.calls[3][0]).toMatchObject({ assignmentInstructions: "New instructions", rubric: "New rubric", entry: { student: "Presenter" } });
+    let current = useTestDriver(40, "gemini", false, true);
+    expect(current.getVersionedResults().map((row) => row.setupVersion)).toEqual([1, 1, 2]);
+    expect(current.acceptRegrade("Presenter", current.regradeCandidates.get("Presenter")!)).toBe(true);
+    current = useTestDriver(40, "gemini", false, true);
+    expect(current.getVersionedResults().map((row) => row.setupVersion)).toEqual([2, 1, 2]);
+    expect(await useTestDriver().correctSetup({ assignmentInstructions: "x", rubric: "y" })).toMatchObject({ kind: "refused" });
+  });
+
   it("retains submission settings through delayed preparation and split confirmation after a rerender", async () => {
     let completePreparation!: (value: Awaited<ReturnType<PrepareVideoFn>>) => void;
     prepareVideoMock.mockReturnValueOnce(new Promise((resolve) => { completePreparation = resolve; }));

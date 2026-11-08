@@ -16,7 +16,7 @@ const routeSource = readFileSync(ROUTE_PATH, "utf8");
 function checkAuthOrder(src: string): boolean {
   const post = src.indexOf("export async function POST");
   const idxGuard = src.indexOf("requireAppOwner(", post);
-  const anchors = ["await statObjectSize(", "withUploadedSyllabusFile(\n", "await ingestZipEntries(", "return ingestZipEntries("]
+  const anchors = ["await statBeforeDeadline(", "await statObjectSize(", "withUploadedSyllabusFile(\n", "await ingestZipEntries(", "return ingestZipEntries("]
     .map((a) => src.indexOf(a, post))
     .filter((i) => i >= 0);
   const idxFirst = Math.min(...anchors);
@@ -203,6 +203,38 @@ describe("POST /api/grade-submission-zip", () => {
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
     expect(res.status).toBe(503); expect((await res.json()).error).toContain("size could not be verified");
     expect(downloadFileMock).not.toHaveBeenCalled(); expect(ingestZipEntriesMock).not.toHaveBeenCalled(); expect(removeFilesMock).not.toHaveBeenCalled();
+  });
+  it("times out and aborts a stalled lookup without continuing a late page", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: (value: unknown) => void;
+      listMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const pending = POST(jsonRequest({ storagePath: GOOD_PATH }));
+      await vi.advanceTimersByTimeAsync(35_100);
+      const response = await pending;
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toContain("Choose the ZIP again");
+      expect(listMock.mock.calls[0][2].signal.aborted).toBe(true);
+      finish({ data: Array.from({ length: 100 }, (_, i) => ({ name: `abc.zip-${i}`, metadata: { size: 1 } })), error: null });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listMock).toHaveBeenCalledTimes(1);
+      expect(downloadFileMock).not.toHaveBeenCalled();
+      expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it("uses the remaining request budget for download after a slow lookup", async () => {
+    vi.useFakeTimers();
+    try {
+      listMock.mockImplementationOnce(async () => { await new Promise((resolve) => setTimeout(resolve, 34_000)); return { data: [{ name: "abc.zip", metadata: { size: 64 } }], error: null }; });
+      const cancel = vi.fn();
+      downloadFileMock.mockResolvedValue({ data: { stream: () => new ReadableStream({ cancel }) }, error: null });
+      const pending = POST(jsonRequest({ storagePath: GOOD_PATH }));
+      await vi.advanceTimersByTimeAsync(35_100);
+      const lines = await readLines(await pending);
+      expect(lines[0].error).toContain("too large to prepare in time");
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
   it("finds the exact upload after a page of substring matches", async () => {
     listMock.mockResolvedValueOnce({ data: Array.from({ length: 100 }, (_, i) => ({ name: `abc.zip-${i}`, metadata: { size: 1 } })), error: null })

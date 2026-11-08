@@ -31,7 +31,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// A SOFT budget for download + extraction, strictly under maxDuration so this
+// A SOFT budget for lookup, download and extraction, strictly under maxDuration so this
 // handler stops itself with a worded line instead of the platform killing it
 // silently, and leaves the remainder for writing the stream.
 const TOTAL_BUDGET_MS = 35_000;
@@ -49,14 +49,16 @@ function describeError(err: unknown): string {
 }
 
 /** The stored object's nonnegative integer size, or null when it cannot be verified. */
-async function statObjectSize(storagePath: string): Promise<number | null> {
+async function statObjectSize(storagePath: string, signal: AbortSignal): Promise<number | null> {
   try {
     const at = storagePath.lastIndexOf("/");
     const dir = storagePath.slice(0, at);
     const name = storagePath.slice(at + 1);
     const supabase = await createServerSupabaseClient();
     for (let offset = 0; offset < 1000; offset += 100) {
-      const { data, error } = await supabase.storage.from(SYLLABUS_UPLOAD_BUCKET).list(dir, { limit: 100, offset, search: name, sortBy: { column: "name", order: "asc" } });
+      if (signal.aborted) return null;
+      const { data, error } = await supabase.storage.from(SYLLABUS_UPLOAD_BUCKET).list(dir, { limit: 100, offset, search: name, sortBy: { column: "name", order: "asc" } }, { signal });
+      if (signal.aborted) return null;
       if (error || !data) return null;
       const match = data.find((o) => o.name === name);
       if (match) {
@@ -68,6 +70,20 @@ async function statObjectSize(storagePath: string): Promise<number | null> {
     return null;
   } catch {
     return null;
+  }
+}
+
+async function statBeforeDeadline(storagePath: string, budgetMs: number): Promise<number | null | "timeout"> {
+  if (budgetMs <= 0) return "timeout";
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      statObjectSize(storagePath, controller.signal),
+      new Promise<"timeout">((resolve) => { timer = setTimeout(() => { controller.abort(); resolve("timeout"); }, budgetMs); }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -134,7 +150,10 @@ export async function POST(req: NextRequest) {
 
   // S4: a server-side size gate on the stored object BEFORE download - the
   // client pre-flight is not trusted.
-  const storedSize = await statObjectSize(storagePath);
+  const storedSize = await statBeforeDeadline(storagePath, startedAtMs + TOTAL_BUDGET_MS - Date.now());
+  if (storedSize === "timeout" || Date.now() >= startedAtMs + TOTAL_BUDGET_MS) {
+    return NextResponse.json({ error: "The uploaded ZIP could not be checked in time. Choose the ZIP again; no submissions were queued." }, { status: 503 });
+  }
   if (storedSize === null) {
     return NextResponse.json({ error: "The uploaded ZIP size could not be verified. Choose the ZIP again; no submissions were queued." }, { status: 503 });
   }
@@ -189,7 +208,7 @@ export async function POST(req: NextRequest) {
   // from the code, never from text.
   let ingestError: unknown;
 
-  const budgetMs = Math.max(1_000, startedAtMs + TOTAL_BUDGET_MS - Date.now());
+  const budgetMs = Math.max(1, startedAtMs + TOTAL_BUDGET_MS - Date.now());
   const downloadAbort = new AbortController();
   const outcome = await raceWithTimeout(
     withUploadedSyllabusFile(

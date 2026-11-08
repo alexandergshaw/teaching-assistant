@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode, Ref } from "react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import { Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
 import TextField from "@mui/material/TextField";
@@ -13,6 +13,7 @@ import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
 import { FilesCell } from "./grading-results/FilesCell";
 import { RegradeButton } from "./grading-results/RegradeButton";
+import { RegradeCandidate } from "./grading-results/RegradeCandidate";
 import { useResultsSort } from "./grading-results/useResultsSort";
 import { ResultsTableHeaderRow } from "./grading-results/ResultsTableHeaderRow";
 import { FeedbackExpandModal } from "./grading-results/FeedbackExpandModal";
@@ -179,6 +180,10 @@ export type GradingResultsProps = {
    * re-runs that row's grading in place. Only the chat grading mount passes it.
    * Receives the row's student (the driver's bijective key). */
   onRegrade?: (student: string) => void;
+  regradeCandidates?: ReadonlyMap<string, GradeRow>;
+  regradeFailures?: ReadonlySet<string>;
+  onAcceptRegrade?: (student: string, candidate: GradeRow) => boolean;
+  onDiscardRegrade?: (student: string) => void;
   /** Students whose grading is queued or in flight; their Regrade button shows busy. */
   regradingStudents?: ReadonlySet<string>;
   /** Opt-in, default off: students whose name was not found and who carry no
@@ -219,6 +224,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   compactContext,
   filterPlaceholder = "Search by student name or feedback",
   onRegrade,
+  regradeCandidates,
+  regradeFailures,
+  onAcceptRegrade,
+  onDiscardRegrade,
   regradingStudents,
   unresolvedStudents,
   repositoryProposals,
@@ -243,6 +252,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // GR-POST-ONE-CONFIRM: which single row is armed to post (first post only).
   const [armedPostOne, setArmedPostOne] = useState<PostOneArm | null>(null);
   const [posting, setPosting] = useState(false);
+  const postingRowsRef = useRef(new Set<string>());
+  const acceptingRowsRef = useRef(new Set<string>());
+  useEffect(() => { acceptingRowsRef.current.clear(); }, [run]);
   // Which student + which of the three feedback boxes is expanded, or null.
   const [expandedBox, setExpandedBox] = useState<{ student: string; field: FeedbackField } | null>(null);
   const [codeRuns, setCodeRuns] = useState<Record<string, CodeRunResult | null>>({});
@@ -292,19 +304,15 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return next;
     });
 
-  // Regrade: drop the shadowing edits entry so the row falls through to
-  // defaultRowEdit(result) and tracks the live run.results row the driver is
-  // about to replace in place. Discards that row's manual edits (fresh-grade
-  // semantics); the posted status is stale too.
   const handleRegradeRow = (student: string) => {
-    setEdits((prev) => {
-      if (!(student in prev)) return prev;
-      const next = { ...prev };
-      delete next[student];
-      return next;
-    });
-    clearPostStatus(student);
     onRegrade?.(student);
+  };
+  const handleAcceptRegrade = (student: string) => {
+    const candidate = regradeCandidates?.get(student);
+    if (!candidate || postingRowsRef.current.has(student) || !onAcceptRegrade?.(student, candidate)) return;
+    acceptingRowsRef.current.add(student);
+    setEdits((previous) => { const next = { ...previous }; delete next[student]; return next; });
+    clearPostStatus(student);
   };
 
   // docs/rubric-criteria-breakdown-acceptance-criteria.md B5 item 1: a
@@ -363,7 +371,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const canvasGradable = gradableResults.length > 0;
 
   const handlePostGrades = useCallback(async (confirm = true): Promise<GradingPostOutcome | null> => {
-    if (gradableResults.length === 0) return null;
+    if (gradableResults.length === 0 || postingRowsRef.current.size || acceptingRowsRef.current.size) return null;
     if (
       confirm &&
       !window.confirm(
@@ -405,6 +413,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       buildRowPostPayload(r, r.userId as number, edits[r.student] ?? defaultRowEdit(r)),
     );
 
+    for (const row of postableResults) postingRowsRef.current.add(row.student);
     setPosting(true);
     setPostSummary("");
     setPostStatus(() => {
@@ -415,8 +424,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return next;
     });
 
-    const result = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload));
-    setPosting(false);
+    const result = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload)).finally(() => {
+      for (const row of postableResults) postingRowsRef.current.delete(row.student);
+      setPosting(false);
+    });
 
     if ("error" in result) {
       setPostSummary(result.error);
@@ -472,7 +483,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Post a single student's grade, leaving the rest untouched. Same payload
   // shape as the bulk post, with a one-element array.
   const handlePostOne = async (row: GradeRow) => {
-    if (typeof row.userId !== "number") return;
+    if (typeof row.userId !== "number" || postingRowsRef.current.size || acceptingRowsRef.current.has(row.student)) return;
     const edit = edits[row.student] ?? defaultRowEdit(row);
     const evidenceRefusal = evidencePostRefusal(row, reviewedEvidence);
     if (evidenceRefusal) { setPostStatus((prev) => ({ ...prev, [row.student]: { status: "skipped", message: evidenceRefusal } })); return; }
@@ -498,8 +509,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setArmedPostOne(null);
     const payload = [buildRowPostPayload(row, row.userId, edit)];
 
+    postingRowsRef.current.add(row.student);
     setPostStatus((prev) => ({ ...prev, [row.student]: { status: "posting" } }));
-    const res = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload));
+    const res = await timePostGrades(() => postCanvasGradesAction(canvasUrl, payload)).finally(() => { postingRowsRef.current.delete(row.student); });
     if ("error" in res) {
       setPostStatus((prev) => ({ ...prev, [row.student]: { status: "error", message: res.error } }));
       return;
@@ -707,9 +719,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     )}
                     {onRegrade && (
                       <div style={{ marginTop: "var(--space-1)" }}>
-                        <RegradeButton busy={regradingStudents?.has(result.student) ?? false} onClick={() => handleRegradeRow(result.student)} />
+                        {!regradeCandidates?.has(result.student) && <RegradeButton busy={regradingStudents?.has(result.student) ?? false} onClick={() => handleRegradeRow(result.student)} />}
                       </div>
                     )}
+                    {regradeFailures?.has(result.student) && <div role="alert">Regrade failed or the current grade changed. Your current grade and edits are unchanged; you can retry.</div>}
+                    {regradeCandidates?.get(result.student) && <RegradeCandidate candidate={regradeCandidates.get(result.student)!} disabled={rowPosting}
+                      onDiscard={() => onDiscardRegrade?.(result.student)}
+                      onAccept={() => handleAcceptRegrade(result.student)} />}
                     {repositoryProposals && <RepositoryProposalReview row={result} edit={edit} adapter={repositoryProposals} onAccepted={(next, scoreChanged) => {
                       setEdits((previous) => ({ ...previous, [result.student]: next }));
                       if (scoreChanged) clearPostStatus(result.student);

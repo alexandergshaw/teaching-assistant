@@ -879,6 +879,10 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
           searchable
           compactContext
           onRegrade={driver.regrade}
+          regradeCandidates={driver.regradeCandidates}
+          regradeFailures={driver.regradeFailures}
+          onAcceptRegrade={driver.acceptRegrade}
+          onDiscardRegrade={driver.discardRegrade}
           regradingStudents={driver.pendingStudents}
           unresolvedStudents={driver.unresolvedStudents}
         />

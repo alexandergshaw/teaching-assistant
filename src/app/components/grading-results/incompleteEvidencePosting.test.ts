@@ -19,7 +19,7 @@ const row = (student: string, linkFetch?: "failed" | "ok"): GradeResult => ({ st
 function setup(rows: GradeResult[], reviewedEvidence: ReadonlySet<GradeResult>) {
   const write = vi.fn(async () => ({ posted: 1, failures: [], skipped: [] }));
   let status: Record<string, unknown> = {};
-  const bindings = { gradableResults: rows, reviewedEvidence, evidencePostRefusal, edits: {}, defaultRowEdit: () => ({ total: "1", overall: "ok" }),
+  const bindings = { gradableResults: rows, reviewedEvidence, evidencePostRefusal, edits: {}, postingRowsRef: { current: new Set<string>() }, acceptingRowsRef: { current: new Set<string>() }, defaultRowEdit: () => ({ total: "1", overall: "ok" }),
     checkRowPostability: () => ({ postable: true }), parseEarnedPoints: (v: string) => v, buildRowPostPayload: (r: GradeResult) => ({ userId: r.userId }),
     setPostStatus: (update: (old: typeof status) => typeof status) => { status = update(status); }, setPostSummary: vi.fn(), setPosting: vi.fn(),
     timePostGrades: (fn: () => unknown) => fn(), postCanvasGradesAction: write, canvasUrl: "https://example.test", onPosted: undefined,
@@ -27,6 +27,20 @@ function setup(rows: GradeResult[], reviewedEvidence: ReadonlySet<GradeResult>) 
   return { bindings, write, getStatus: () => status };
 }
 describe("posting with incomplete evidence", () => {
+  it("does not accept a replacement while an old grade is being posted", async () => {
+    const alice = row("Alice", "ok"), candidate = { ...alice, totalScore: "2/2" };
+    const h = setup([alice], new Set());
+    let finish!: (value: { posted: number; failures: never[]; skipped: never[] }) => void;
+    h.write.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const accept = vi.fn(() => true), clear = vi.fn(), edits = vi.fn();
+    const bindings = { ...h.bindings, regradeCandidates: new Map([["Alice", candidate]]), onAcceptRegrade: accept, clearPostStatus: clear, setEdits: edits };
+    const post = handler("handlePostGrades", bindings)(false);
+    handler("handleAcceptRegrade", bindings)("Alice");
+    expect(accept).not.toHaveBeenCalled(); expect(clear).not.toHaveBeenCalled(); expect(edits).not.toHaveBeenCalled();
+    finish({ posted: 1, failures: [], skipped: [] }); await post;
+    handler("handleAcceptRegrade", bindings)("Alice");
+    expect(accept).toHaveBeenCalledWith("Alice", candidate);
+  });
   it("bulk posts complete rows and refuses incomplete rows until explicitly reviewed", async () => {
     const alice = row("Alice", "failed"), bob = row("Bob", "ok"); const h = setup([alice, bob], new Set());
     await handler("handlePostGrades", h.bindings)(false);

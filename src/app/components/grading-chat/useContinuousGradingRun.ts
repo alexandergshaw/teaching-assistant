@@ -38,13 +38,13 @@ import { buildGradeItemDetail, clientFailureClass, resultSignals, type ChatDetai
 import { RECORDING_SPLIT_ENABLED } from "@/lib/grade/constants";
 import type { RecordingSplit, RecordingWindow } from "@/lib/grade/recording-split";
 import { buildSplitEntries, classifyVideoEntry, videoRefOf, type PendingSplit } from "./recordingSplitDriver";
-import { serializeGradeItemWithOfficeSource } from "@/app/components/grading/officeSourceWire";
+import { postGradeRunItem, safeDiagnostic } from "./gradeItemClient";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
 import { partialBatchNotice } from "./partialBatchNotice";
-import { gradeFailureFromBody, postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
+import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
 import { intakeExtBucket, intakeSignalsFor, ledgerSignals, recordAdmitAnomaly, recordPrepareDetail, recordSplitDecision } from "./chatIntakeDiagnostic";
@@ -73,16 +73,6 @@ const DEFAULT_MAX_ENTRIES = 40;
 export type { ItemDiagnostic, ItemDiagnosticSink };
 
 const ITEM_DIAGNOSTIC_CAP = 200;
-
-/** Diagnostics must never change a grade (scope 4.6, AC-24): any throw in
- * diagnostic code is swallowed here, never rethrown into the grade path. */
-function safeDiagnostic(fn: () => void): void {
-  try {
-    fn();
-  } catch {
-    // Deliberately empty.
-  }
-}
 
 export type HeaderState = "unset" | "resolving" | "ready" | "refused";
 
@@ -150,6 +140,10 @@ export interface UseContinuousGradingRunResult {
    * failed) so it is re-graded and REPLACED in place. Keyed by the row's
    * student label. A no-op for an unknown student or a row already in flight. */
   readonly regrade: (student: string) => void;
+  readonly regradeCandidates: ReadonlyMap<string, GradeResult>;
+  readonly regradeFailures: ReadonlySet<string>;
+  readonly acceptRegrade: (student: string, candidate: GradeResult) => boolean;
+  readonly discardRegrade: (student: string) => void;
   /** The one Canvas URL pinned for this session (F3=A); "" until a Canvas URL
    * submission is accepted. */
   readonly canvasUrl: string;
@@ -197,29 +191,6 @@ export interface UseContinuousGradingRunResult {
    * Hook-local, not read from the session log, so it is not subject to the
    * log's entry cap. */
   readonly diagnostics: readonly ItemDiagnostic[];
-}
-
-interface GradeRunItemResponse {
-  sourceIndex: number;
-  result: GradeResult;
-}
-
-async function postGradeRunItem(request: GradeRunItemRequestBody, sink?: ItemDiagnosticSink): Promise<GradeResult> {
-  const res = await fetch("/api/grade-run-item", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: serializeGradeItemWithOfficeSource(request),
-  });
-  const body = (await res.json().catch(() => ({}))) as Partial<GradeRunItemResponse> & { error?: string; videoFailure?: unknown; diagnostic?: unknown };
-  if (sink) {
-    sink.httpStatus = res.status;
-    sink.diagnostic = body.diagnostic;
-  }
-  if (!res.ok || !body.result) {
-    // A typed `videoFailure` rides the error so the driver records the class.
-    throw gradeFailureFromBody(body);
-  }
-  return body.result;
 }
 
 export function useContinuousGradingRun(params: UseContinuousGradingRunParams): UseContinuousGradingRunResult {
@@ -276,6 +247,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const [classifyingRecording, setClassifyingRecording] = useState(false);
   const [diagnostics, setDiagnostics] = useState<readonly ItemDiagnostic[]>([]);
   const [repositoryStudents, setRepositoryStudents] = useState<readonly RepositorySessionStudent[]>([]);
+  const regradeCandidatesRef = useRef(new Map<string, { sourceIndex: number; result: GradeResult; revision: number }>());
+  const regradeStartRef = useRef(new Map<number, number>());
+  const [regradeCandidates, setRegradeCandidates] = useState<ReadonlyMap<string, GradeResult>>(new Map());
+  const [regradeFailures, setRegradeFailures] = useState<ReadonlySet<string>>(new Set());
 
   const markQueued = (sourceIndex: number, trigger: GradeTrigger) => {
     const attempts = dispatchMetaRef.current.get(sourceIndex)?.attempts ?? 0;
@@ -392,10 +367,15 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           // Restore the FULL submittedFiles (the POST carried the stripped copy)
           // so the Files-UI download of non-visual files survives.
           const full = retainedBodiesRef.current.get(request.sourceIndex) ?? request;
-          recordArrival({
-            sourceIndex: request.sourceIndex,
-            result: { ...result, submittedFiles: full.entry.submittedFiles },
-          });
+          const completed = { ...result, submittedFiles: full.entry.submittedFiles };
+          if (trigger === "regrade") {
+            const revision = regradeStartRef.current.get(request.sourceIndex);
+            if (completed.ungraded || revision === undefined || revision !== (repositoryRevisionsRef.current.get(request.sourceIndex) ?? 0)) setRegradeFailures((previous) => new Set(previous).add(request.entry.student));
+            else {
+              regradeCandidatesRef.current.set(request.entry.student, { sourceIndex: request.sourceIndex, result: completed, revision });
+              setRegradeCandidates(new Map([...regradeCandidatesRef.current].map(([student, candidate]) => [student, candidate.result])));
+            }
+          } else recordArrival({ sourceIndex: request.sourceIndex, result: completed });
           // Everything below recordArrival is diagnostics only: a throw here would
           // fall into .catch and OVERWRITE the graded row (last-wins by sourceIndex).
           // The detail is produced INSIDE the guard, before it is handed on.
@@ -419,10 +399,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           if (videoFailure !== null) {
             recordVideoSettled({ startedAtMs: itemStartedAtMs, settledAtMs: chatSeamNowMs(), failure: videoFailure });
           }
-          recordArrival({
-            sourceIndex: request.sourceIndex,
-            result: classifyItemFailure(request.sourceIndex, request.entry, err),
-          });
+          if (trigger === "regrade") setRegradeFailures((previous) => new Set(previous).add(request.entry.student));
+          else recordArrival({ sourceIndex: request.sourceIndex, result: classifyItemFailure(request.sourceIndex, request.entry, err) });
         })
         .finally(() => {
           if (dispatchSessionId !== sessionIdRef.current) return;
@@ -893,14 +871,32 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         break;
       }
     }
-    if (sourceIndex < 0 || pendingRef.current.has(sourceIndex)) return;
+    if (sourceIndex < 0 || pendingRef.current.has(sourceIndex) || regradeCandidatesRef.current.has(student)) return;
     const body = retainedBodiesRef.current.get(sourceIndex);
     if (!body) return;
+    regradeStartRef.current.set(sourceIndex, repositoryRevisionsRef.current.get(sourceIndex) ?? 0);
+    setRegradeFailures((previous) => { const next = new Set(previous); next.delete(student); return next; });
     pendingRef.current.add(sourceIndex);
     queueRef.current.push(body);
     markQueued(sourceIndex, "regrade");
     publishPending();
     pump();
+  };
+
+  const discardRegrade = (student: string) => {
+    regradeCandidatesRef.current.delete(student);
+    setRegradeCandidates(new Map([...regradeCandidatesRef.current].map(([name, candidate]) => [name, candidate.result])));
+  };
+  const acceptRegrade = (student: string, candidate: GradeResult): boolean => {
+    const held = regradeCandidatesRef.current.get(student);
+    if (!held || held.result !== candidate || pendingRef.current.has(held.sourceIndex)) return false;
+    if (held.revision !== (repositoryRevisionsRef.current.get(held.sourceIndex) ?? 0)) {
+      discardRegrade(student); setRegradeFailures((previous) => new Set(previous).add(student)); return false;
+    }
+    recordArrival(held);
+    discardRegrade(student);
+    rebuildRun();
+    return true;
   };
 
   // Pending (queued or in flight) rows whose entry carries a video ref.
@@ -915,6 +911,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
   const reset = () => {
     sessionIdRef.current += 1;
+    regradeCandidatesRef.current = new Map();
+    regradeStartRef.current = new Map();
+    setRegradeCandidates(new Map());
+    setRegradeFailures(new Set());
     headerAttemptRef.current = null;
     canvasUrlRef.current = "";
     takenLabelsRef.current = new Set();
@@ -967,6 +967,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     reset,
     retry,
     regrade,
+    regradeCandidates,
+    regradeFailures,
+    acceptRegrade,
+    discardRegrade,
     canvasUrl: canvasUrlRef.current,
     pendingVideoCount,
     runKey: "grading-chat-" + sessionIdRef.current,

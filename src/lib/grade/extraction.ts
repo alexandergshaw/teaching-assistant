@@ -1,4 +1,6 @@
 import { canvasOmissionIdentityRefusal } from "../canvas/omitted-video";
+import { hasCanvasPdfEnvelope } from "./canvas-pdf";
+import { dotFreeContributionName, uniqueContributionName } from "./discussion-file-names";
 import { isSubmissionFileInventories, type SubmissionFileInventory } from "./submission-file-inventory";
 import { repoFilesToSubmittedFiles } from "./repo-file-submissions";
 import JSZip from "jszip";
@@ -462,40 +464,6 @@ export function disambiguateCanvasEntries(
 }
 
 /**
- * A8 wave 2 (docs/a8-architecture.md section 3, docs/a8-waves.md WAVE 2): make
- * a contribution's `submittedFiles.name` unique against every name already
- * used by an earlier contribution in the same entry, appending " (2)", " (3)"
- * etc on collision - a student with two replies to the same classmate would
- * otherwise produce two identical "Reply to X" names, which would collide
- * FilesCell's React key (`` `${student}-file-name-${file.name}` ``,
- * FilesCell.tsx:41).
- */
-function uniqueContributionName(base: string, used: Set<string>): string {
-  if (!used.has(base)) {
-    used.add(base);
-    return base;
-  }
-  let n = 2;
-  while (used.has(`${base} (${n})`)) n += 1;
-  const unique = `${base} (${n})`;
-  used.add(unique);
-  return unique;
-}
-
-/**
- * A8 wave 2 (docs/a8-architecture.md D-1 / F-1): the submittedFiles NAME must
- * be dot-free so a dotted display name (e.g. "Dr. Alan Turing") cannot make
- * `buildSubmittedFileNamesBlock` (prompts.ts:271-274) mistake a reply label
- * for a real submitted file and inject a fake filename into the model's
- * file-list block - that filter drops a name only when it contains NO ".".
- * The `content` sections (below) keep the full display name; only this
- * submittedFiles-facing label is stripped.
- */
-function dotFreeContributionName(name: string): string {
-  return name.replace(/\./g, "");
-}
-
-/**
  * A8 wave 2 (docs/a8-architecture.md section 3, the G1 choke-point fix): build
  * a discussion contribution's `content` and `submittedFiles` from the already
  * split `DiscussionActivity` (initialPosts vs replies) instead of the flat
@@ -933,6 +901,11 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
 
   for (const file of work.files) {
     const extension = getFileExtension(file.name);
+    if (extension === "pdf" && !hasCanvasPdfEnvelope(file.base64)) {
+      submittedFiles.push({ name: file.name, extension, mimeType: "application/pdf", previewContent: "PDF could not be read.", previewTruncated: false });
+      unreadableFiles.push({ name: file.name, extension: "", mimeType: "application/x-canvas-attachment-unreadable", previewContent: "PDF could not be read.", previewTruncated: false });
+      continue;
+    }
 
     if (IMAGE_EXTENSIONS.has(extension) && !file.mimeType.trim().toLowerCase().startsWith("video/")) {
       const mimeType = GEMINI_IMAGE_MIME_TYPES.has(file.mimeType)
@@ -969,7 +942,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
         previewContent: preview.text,
         previewTruncated: preview.truncated,
         rawBase64: file.base64,
-        mimeType: file.mimeType,
+        mimeType: extension === "pdf" ? "application/pdf" : file.mimeType,
       });
     } else {
       submittedFiles.push({
@@ -978,7 +951,7 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
         previewContent: "No extractable text available for this file.",
         previewTruncated: false,
         rawBase64: file.base64,
-        mimeType: file.mimeType,
+        mimeType: extension === "pdf" ? "application/pdf" : file.mimeType,
       });
     }
   }

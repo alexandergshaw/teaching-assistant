@@ -45,6 +45,7 @@ import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/
 import { mergeIngestLedgers } from "./ingestLedger";
 import { countPendingVideos } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
+import { projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
 import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
@@ -161,6 +162,8 @@ export interface UseContinuousGradingRunResult {
   readonly generatedRubric: string | undefined;
   readonly headerState: HeaderState;
   readonly results: readonly GradeResult[];
+  /** Unreconciled row criteria with session-local setup attribution. */
+  readonly getVersionedResults: () => readonly VersionedResultRow[];
   readonly run: GradingRun | null;
   readonly dispatchedCount: number;
   readonly completedCount: number;
@@ -220,6 +223,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const sessionIdRef = useRef(0);
   const takenLabelsRef = useRef<Set<string>>(new Set());
   const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
+  const setupNumbersRef = useRef(new Map<string, number>()), rowSetupsRef = useRef(new Map<number, number>());
   const repositoryRevisionsRef = useRef(new Map<number, number>());
   const repositoryOriginalsRef = useRef(new Map<number, GradeRunItemRequestBody>());
   const pendingRef = useRef<Set<number>>(new Set());
@@ -305,9 +309,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // completedCount never double-counts (W1-R2).
   const recordArrival = (arrived: ArrivedItemResult) => {
     repositoryRevisionsRef.current.set(arrived.sourceIndex, (repositoryRevisionsRef.current.get(arrived.sourceIndex) ?? 0) + 1);
+    const tracked: VersionedArrival = { ...arrived, resultRevision: repositoryRevisionsRef.current.get(arrived.sourceIndex)!, setupVersion: rowSetupsRef.current.get(arrived.sourceIndex) ?? null };
     const at = arrivedRef.current.findIndex((a) => a.sourceIndex === arrived.sourceIndex);
-    if (at >= 0) arrivedRef.current[at] = arrived;
-    else arrivedRef.current.push(arrived);
+    if (at >= 0) arrivedRef.current[at] = tracked;
+    else arrivedRef.current.push(tracked);
   };
 
   // Records one dispatch attempt: the log entry (the existing grade_item entry,
@@ -448,6 +453,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
+      const signature = JSON.stringify({ ...opts.setup, pointsPossible: opts.pointsPossible }); if (!setupNumbersRef.current.has(signature)) setupNumbersRef.current.set(signature, setupNumbersRef.current.size + 1); rowSetupsRef.current.set(sourceIndex, setupNumbersRef.current.get(signature)!);
       pendingRef.current.add(sourceIndex);
       queueRef.current.push(body);
       markQueued(sourceIndex, "first");
@@ -903,6 +909,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     canvasUrlRef.current = "";
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();
+    setupNumbersRef.current = new Map(); rowSetupsRef.current = new Map();
     repositoryRevisionsRef.current = new Map();
     repositoryOriginalsRef.current = new Map();
     pendingRef.current = new Set();
@@ -964,6 +971,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     generatedRubric: headerRef.current?.generatedRubric,
     headerState,
     results,
+    getVersionedResults: () => projectVersionedResults(arrivedRef.current.map((item) => { const tracked = item as Partial<VersionedArrival>; const revision = repositoryRevisionsRef.current.get(item.sourceIndex) ?? 0; return { ...item, resultRevision: revision, setupVersion: tracked.resultRevision === revision ? tracked.setupVersion ?? null : null }; }), new Set(setupNumbersRef.current.values())),
     run,
     dispatchedCount,
     completedCount,

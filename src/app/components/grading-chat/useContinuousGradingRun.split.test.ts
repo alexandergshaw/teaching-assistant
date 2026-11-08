@@ -170,6 +170,10 @@ describe("useContinuousGradingRun - recording split (flag on)", () => {
       { provider: "gemini", commentSplit: true, rubric: "1. Correctness" },
       { provider: "gemini", commentSplit: true, rubric: "1. Correctness" },
     ]);
+    await flushMicrotasks();
+    await useTestDriver(40, "other", false).submit({ kind: "text", content: "Another submission" });
+    await flushMicrotasks();
+    expect(useTestDriver(40, "other", false).getVersionedResults().map((row) => [row.sourceIndex, row.setupVersion, row.resultRevision])).toEqual([[0, 1, 1], [1, 1, 1], [2, 2, 1]]);
   });
 
   it("does not classify a prepared video after its session was reset", async () => {

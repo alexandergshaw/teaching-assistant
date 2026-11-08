@@ -274,6 +274,20 @@ describe("useContinuousGradingRun - reset() genuinely clears the run for a new s
 });
 
 describe("useContinuousGradingRun - BLOCKER-1: pointsPossible threading", () => {
+  it("binds different Canvas point totals to different setup versions", async () => {
+    await useTestDriver().beginSession({ assignmentInstructions: "Grade it.", rubric: "" });
+    const entry = (student: string) => ({ student, content: "work", mergedFileCount: 1, submittedFiles: [] });
+    prepareChatSubmissionActionMock.mockResolvedValueOnce({ kind: "entries", entries: [entry("Ada")], pointsPossible: 10 }).mockResolvedValueOnce({ kind: "entries", entries: [entry("Bea")], pointsPossible: 20 });
+    dispatchItemMock.mockImplementation(async (body: { entry: StudentSubmissionEntry }) => gradedRow(body.entry.student));
+    const input = { kind: "url" as const, url: "https://canvas.example.edu/courses/1/assignments/2" };
+    await useTestDriver().submit(input);
+    await flushMicrotasks();
+    await useTestDriver().submit(input);
+    await flushMicrotasks();
+    expect(dispatchItemMock.mock.calls.map(([body]) => body.pointsPossible)).toEqual([10, 20]);
+    expect(useTestDriver().getVersionedResults().map((row) => row.setupVersion)).toEqual([1, 2]);
+  });
+
   it("a Canvas-URL submission's dispatched body carries the Canvas pointsPossible, not null", async () => {
     let driver = useTestDriver();
     await driver.beginSession({ assignmentInstructions: "Grade it.", rubric: "" });

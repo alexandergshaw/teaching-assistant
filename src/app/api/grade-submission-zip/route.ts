@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { requireAppOwner } from "@/lib/supabase/auth";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
-import { downloadFile, removeFiles, uploadFile } from "@/lib/supabase/storage";
+import { removeFiles, uploadFile } from "@/lib/supabase/storage";
+import { readBoundedZipStream } from "@/lib/grade/bounded-zip-stream";
 import { normalizeProvider } from "@/lib/llm";
 import { raceWithTimeout } from "@/lib/bounded-race";
 import { ingestZipEntries } from "@/lib/grade/extraction";
@@ -189,18 +190,33 @@ export async function POST(req: NextRequest) {
   let ingestError: unknown;
 
   const budgetMs = Math.max(1_000, startedAtMs + TOTAL_BUDGET_MS - Date.now());
+  const downloadAbort = new AbortController();
   const outcome = await raceWithTimeout(
     withUploadedSyllabusFile(
       {
-        download: (path) => downloadFile(SYLLABUS_UPLOAD_BUCKET, path),
+        download: async (path) => {
+          try {
+            const supabase = await createServerSupabaseClient();
+            const { data, error } = await supabase.storage.from(SYLLABUS_UPLOAD_BUCKET)
+              .download(path, {}, { signal: downloadAbort.signal }).asStream();
+            if (error || !data) return { data: null, error: error ?? { message: "Could not download the uploaded ZIP." } };
+            const blob = await readBoundedZipStream(data, GRADING_ZIP_MAX_BYTES, downloadAbort.signal, OVER_CEILING_MESSAGE);
+            return { data: blob, error: null };
+          } catch (error) {
+            return { data: null, error: { message: describeError(error) } };
+          }
+        },
         remove: (paths) => removeFiles(SYLLABUS_UPLOAD_BUCKET, paths),
       },
       userId,
       storagePath,
       async (blob: Blob) => {
+        if (downloadAbort.signal.aborted) throw new Error(TIMED_OUT_MESSAGE);
         if (blob.size > GRADING_ZIP_MAX_BYTES) throw new Error(OVER_CEILING_MESSAGE);
         try {
-          return await ingestZipEntries(await blob.arrayBuffer(), { inferFileNamesWith: provider, deferLinks: true, stageVideo, requireSupportedFiles: true });
+          const bytes = await blob.arrayBuffer();
+          if (downloadAbort.signal.aborted) throw new Error(TIMED_OUT_MESSAGE);
+          return await ingestZipEntries(bytes, { inferFileNamesWith: provider, deferLinks: true, stageVideo, requireSupportedFiles: true });
         } catch (err) {
           ingestError = err;
           throw err;
@@ -211,6 +227,7 @@ export async function POST(req: NextRequest) {
   );
 
   if (outcome.kind === "timedout") {
+    downloadAbort.abort();
     await discardStaged();
     return ndjsonResponse([
       encodeIngestLine({ type: "done", error: TIMED_OUT_MESSAGE, ...(stageVideo ? { videoFailure: "timed out" as const } : {}) }),

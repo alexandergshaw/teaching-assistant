@@ -81,7 +81,7 @@ vi.mock("@/lib/supabase/auth", () => ({
 
 const listMock = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ storage: { from: () => ({ list: (...args: unknown[]) => listMock(...args) }) } }),
+  createClient: async () => ({ storage: { from: () => ({ list: (...args: unknown[]) => listMock(...args), download: (...args: unknown[]) => ({ asStream: async () => { const result = await downloadFileMock(...args); return { ...result, data: result.data?.stream() ?? null }; } }) }) } }),
 }));
 
 const downloadFileMock = vi.fn();
@@ -180,8 +180,8 @@ describe("POST /api/grade-submission-zip", () => {
 
   it("W2 (T6): both ceiling uses in route.ts read the ONE imported constant", () => {
     const uses = routeSource.match(/GRADING_ZIP_MAX_BYTES/g) ?? [];
-    // the import, the stat gate and the post-download re-check
-    expect(uses.length).toBe(3);
+    // the import, the stat gate, stream bound and post-download re-check
+    expect(uses.length).toBe(4);
     expect(routeSource).not.toMatch(/\d+\s*\*\s*1024\s*\*\s*1024/);
   });
 
@@ -228,10 +228,47 @@ describe("POST /api/grade-submission-zip", () => {
     expect(res.status).toBe(503); expect(downloadFileMock).not.toHaveBeenCalled(); expect(removeFilesMock).not.toHaveBeenCalled();
   });
   it("retains the post-download size backstop for stale metadata", async () => {
-    downloadFileMock.mockResolvedValue({ data: { size: GRADING_ZIP_MAX_BYTES + 1, arrayBuffer: vi.fn() }, error: null });
+    const cancel = vi.fn();
+    downloadFileMock.mockResolvedValue({ data: { stream: () => new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(GRADING_ZIP_MAX_BYTES + 1)); }, cancel }) }, error: null });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
     const lines = await readLines(res); expect(lines[0]).toMatchObject({ type: "done", error: expect.any(String) });
     expect(ingestZipEntriesMock).not.toHaveBeenCalled(); expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("aborts a stalled download at the route deadline without extracting", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn();
+      downloadFileMock.mockResolvedValue({ data: { stream: () => new ReadableStream({ cancel }) }, error: null });
+      const pending = POST(jsonRequest({ storagePath: GOOD_PATH }));
+      await vi.advanceTimersByTimeAsync(35_100);
+      const lines = await readLines(await pending);
+      expect(lines[0]).toMatchObject({ type: "done", error: expect.stringContaining("too large to prepare in time") });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+      expect(downloadFileMock.mock.calls[0][2].signal.aborted).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+  it("cleans up after a Storage stream fails without extracting", async () => {
+    downloadFileMock.mockResolvedValue({ data: { stream: () => new ReadableStream({ start(c) { c.error(new Error("stream failed")); } }) }, error: null });
+    const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
+    expect(lines[0]).toMatchObject({ type: "done", error: "stream failed" });
+    expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+    expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
+  });
+  it("does not start extraction when byte conversion finishes after the deadline", async () => {
+    vi.useFakeTimers();
+    let finish!: (value: ArrayBuffer) => void;
+    const conversion = vi.spyOn(Blob.prototype, "arrayBuffer").mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    try {
+      const pending = POST(jsonRequest({ storagePath: GOOD_PATH }));
+      await vi.advanceTimersByTimeAsync(35_100);
+      expect((await readLines(await pending))[0].error).toContain("too large to prepare in time");
+      expect(finish).toBeTypeOf("function");
+      finish(new ArrayBuffer(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingestZipEntriesMock).not.toHaveBeenCalled();
+    } finally { conversion.mockRestore(); vi.useRealTimers(); }
   });
 
   it("isolates the oversized student and emits the other entries; the object is deleted", async () => {

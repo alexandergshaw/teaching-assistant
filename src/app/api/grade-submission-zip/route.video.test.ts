@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: (...args: unknown[]) => requireAppOwnerMock(...args),
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ storage: { from: () => ({ list: async () => ({ data: [{ name: "abc.zip", metadata: { size: 64 } }], error: null }) }) } }),
+  createClient: async () => ({ storage: { from: () => ({ list: async () => ({ data: [{ name: "abc.zip", metadata: { size: 64 } }], error: null }), download: (...args: unknown[]) => ({ asStream: async () => { const result = await downloadFileMock(...args); return { ...result, data: result.data?.stream() ?? null }; } }) }) } }),
 }));
 
 const downloadFileMock = vi.fn();

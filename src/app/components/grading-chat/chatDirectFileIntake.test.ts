@@ -6,6 +6,7 @@ import { ROLE_BYTE_LIMIT, ROLE_FILE_LIMIT } from "./chatFileRoles";
 import type { ConfirmedRoleSetup } from "./chatFileRoles";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
 import * as diagnostic from "./chatFileRoleDiagnostic";
+import { claimIntake, releaseIntake, resetIntake } from "./intakeFence";
 
 const source = ts.createSourceFile("Panel.tsx", readFileSync("src/app/components/grading-chat/GradingChatPanel.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function actual(name: string, bindings: Record<string, unknown>) {
@@ -64,6 +65,18 @@ describe("actual Panel direct upload router", () => {
     expect(outcomes.map((outcome: { kind: string }) => outcome.kind)).toEqual(["unknown", "refused", "accepted"]);
     expect(h.submit).toHaveBeenCalledTimes(3);
   });
+  it.each<{ outcomes: SubmitOutcome[] }>([
+    { outcomes: [] },
+    { outcomes: [{ kind: "accepted", entryCount: 1 }, { kind: "refused", reason: "too large" }] },
+  ])("warns when a file's admission cannot be reconciled", async ({ outcomes }) => {
+    const h = harness();
+    h.submit.mockResolvedValueOnce(outcomes);
+    const result = await h.route()([file("large.zip"), file("next.pdf")]);
+    expect(result.map((outcome: { kind: string }) => outcome.kind)).toEqual(["unknown", "accepted"]);
+    expect(h.errors.at(-1)).toContain("large.zip: The file's admission could not be confirmed. Check results before resubmitting.");
+    expect(h.errors.at(-1)).not.toContain("large.zip: too large");
+    expect(h.submit).toHaveBeenCalledTimes(2);
+  });
   it.each(["header", "upload"])("reset invalidates old %s without releasing newer busy/error", async (phase) => {
     const h = harness(); let finish!: () => void;
     if (phase === "header") h.start.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = () => resolve(true); }));
@@ -76,10 +89,15 @@ describe("actual Panel direct upload router", () => {
   });
   it("confirmed reset cancels; canceled confirmation leaves intent and attempt intact", () => {
     const h = harness(), reset = vi.fn(), cancel = vi.fn(), intent = vi.fn();
-    const bindings = { window: { confirm: () => false }, dropSessionEpoch: { current: 0 }, setVisibleDropEpoch: vi.fn(), directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
+    const sharedIntakeLatch = { busy: false, generation: 0 }, oldToken = claimIntake(sharedIntakeLatch)!;
+    const bindings = { window: { confirm: () => false }, dropSessionEpoch: { current: 0 }, setVisibleDropEpoch: vi.fn(), sharedIntakeLatch, resetIntake, directIntake: { current: { cancel } }, setIncludeSetupFiles: intent, setDirectPreparing: vi.fn(), setPreparing: vi.fn(), setZipPhase: vi.fn(), driver: { reset },
       setSetupExpanded: vi.fn(), roleIntake: { cancel: vi.fn() }, repositoryProposals: { reset: vi.fn() }, setRepositoryEvidence: vi.fn(), emptyRepositoryEvidence: vi.fn(), setRepositoryEvidenceSession: vi.fn(), setSubmitError: vi.fn(), setSetupNote: vi.fn() };
-    actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled(); expect(bindings.dropSessionEpoch.current).toBe(0);
+    actual("handleNewSession", bindings)(); expect(cancel).not.toHaveBeenCalled(); expect(intent).not.toHaveBeenCalled(); expect(bindings.dropSessionEpoch.current).toBe(0); expect(sharedIntakeLatch).toEqual({ busy: true, generation: oldToken });
     bindings.window.confirm = () => true; actual("handleNewSession", bindings)(); expect(cancel).toHaveBeenCalledOnce(); expect(intent).not.toHaveBeenCalled(); expect(reset).toHaveBeenCalledOnce(); expect(bindings.setSetupExpanded).toHaveBeenCalledWith(true); expect(bindings.dropSessionEpoch.current).toBe(1); expect(bindings.setVisibleDropEpoch).toHaveBeenCalledWith(1); expect(h.intake.isPending()).toBe(false);
+    expect(sharedIntakeLatch).toEqual({ busy: false, generation: oldToken + 1 });
+    const newToken = claimIntake(sharedIntakeLatch)!;
+    expect(releaseIntake(sharedIntakeLatch, oldToken)).toBe(false); expect(sharedIntakeLatch.busy).toBe(true);
+    expect(releaseIntake(sharedIntakeLatch, newToken)).toBe(true);
   });
   it.each(["count", "bytes"])("admits exact %s limits and refuses overflow before header", async (kind) => {
     const h = harness(); const boundary = kind === "count" ? Array.from({ length: ROLE_FILE_LIMIT }, () => file()) : [Object.assign(file(), { })];

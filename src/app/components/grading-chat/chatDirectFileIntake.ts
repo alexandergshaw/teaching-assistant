@@ -34,7 +34,7 @@ export function createDirectFileIntake() {
             const outcomes = await args.submit([file], files.length === 1 ? args.label : undefined, current);
             const outcome = outcomes.length === 1 ? outcomes[0] : { kind: "unknown" as const, reason: "The file's admission could not be confirmed. Check results before resubmitting." };
             results.push(outcome);
-            for (const outcome of outcomes) if (outcome.kind !== "accepted") reasons.push(`${file.name}: ${outcome.reason}`);
+            if (outcome.kind !== "accepted") reasons.push(`${file.name}: ${outcome.reason}`);
           } catch { const reason = "The file's admission could not be confirmed. Check results before resubmitting."; results.push({ kind: "unknown", reason }); reasons.push(`${file.name}: ${reason}`); }
           if (!current()) break;
           args.error(reasons.length ? reasons.join(" ") : null);

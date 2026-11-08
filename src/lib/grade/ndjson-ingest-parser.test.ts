@@ -9,6 +9,7 @@ import {
   type IngestLine,
 } from "./ndjson-ingest-parser";
 import type { StudentSubmissionEntry } from "./types";
+import { ZIP_MAX_CUMULATIVE_ENTRIES } from "@/lib/zip-caps";
 
 function entryOf(student: string, contentLength = 10): StudentSubmissionEntry {
   return { student, content: "x".repeat(contentLength), mergedFileCount: 1, submittedFiles: [] };
@@ -60,6 +61,13 @@ describe("buildIngestLines (the partition)", () => {
 });
 
 describe("ingestStoragedZip (never throws)", () => {
+  it("refuses an excessive entry stream rather than completing a partial import", async () => {
+    const lines = buildIngestLines(Array.from({ length: ZIP_MAX_CUMULATIVE_ENTRIES + 1 }, (_, i) => entryOf(`Student ${i}`)), []);
+    const seen: string[] = [];
+    const outcome = await ingestStoragedZip("p", "gemini", entry => seen.push(entry.student), okFetch(lines));
+    expect(outcome).toMatchObject({ kind: "refused", reason: expect.stringContaining("too many submissions") });
+    expect(seen).toHaveLength(ZIP_MAX_CUMULATIVE_ENTRIES);
+  });
   it("delivers every entry and resolves the ledger when the sentinel arrives (chunked reads)", async () => {
     const seen: string[] = [];
     const outcome = await ingestStoragedZip(

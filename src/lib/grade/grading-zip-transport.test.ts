@@ -14,6 +14,7 @@ import {
   type GradingZipStorage,
 } from "./grading-zip-transport";
 import { isKnownUploadPath } from "@/lib/syllabus-upload-source";
+import { maxFileBytesForWireBudget } from "@/lib/upload-budget";
 
 const MB = 1024 * 1024;
 
@@ -115,8 +116,27 @@ describe("chooseSingleFileTransport (large-single-file W1)", () => {
     expect(chooseSingleFileTransport({ name: "a.docx", size: SINGLE_FILE_MAX_BYTES }).kind).toBe("storage");
   });
 
-  it("pdf, images and unknown kinds over budget keep the body path (their own refusal)", () => {
-    for (const name of ["a.pdf", "a.png", "a.exe", "noext"]) {
+  it("refuses oversized visual files with a useful limit without routing through text-only storage", () => {
+    for (const name of ["a.pdf", "a.png", "a.JPG", "a.webp", "a.gif", "a.bmp", "a.heic", "a.heif"]) {
+      const result = chooseSingleFileTransport({ name, size: 20 * MB });
+      expect(result.kind).toBe("refused");
+      if (result.kind === "refused") {
+        expect(result.message).toContain("visual grading");
+        expect(result.message).toContain("Reduce its size");
+      }
+      expect(chooseSingleFileTransport({ name, size: 1 * MB }).kind).toBe("body");
+      expect(chooseSingleFileTransport({ name, size: 20 * MB }, false).kind).toBe("refused");
+    }
+  });
+
+  it("accepts the file-budget boundary and refuses the next byte for visual files", () => {
+    const max = maxFileBytesForWireBudget();
+    expect(chooseSingleFileTransport({ name: "work.pdf", size: max }).kind).toBe("body");
+    expect(chooseSingleFileTransport({ name: "work.pdf", size: max + 1 }).kind).toBe("refused");
+  });
+
+  it("unknown kinds over budget retain the body path", () => {
+    for (const name of ["a.exe", "noext"]) {
       expect(chooseSingleFileTransport({ name, size: 20 * MB }).kind).toBe("body");
     }
   });

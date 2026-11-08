@@ -10,8 +10,9 @@
 // the transport is gated by GRADING_ZIP_STORAGE_INGEST_ENABLED.
 
 import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabus-upload-source";
-import { checkFileWireBudget, formatMB } from "@/lib/upload-budget";
+import { checkFileWireBudget, formatMB, maxFileBytesForWireBudget } from "@/lib/upload-budget";
 import { ZIP_MAX_CUMULATIVE_DECLARED_BYTES } from "@/lib/zip-caps";
+import { IMAGE_EXTENSIONS } from "./constants";
 
 /**
  * Whether the server-side streaming ingest (BW2, POST /api/grade-submission-zip)
@@ -92,14 +93,21 @@ export function singleFileExtension(name: string): string {
  * (unchanged, keeps rawBase64 and images). Over the budget, an office/text
  * kind, ingest enabled, and within SINGLE_FILE_MAX_BYTES -> storage. Over the
  * ceiling -> a worded refusal. Any other over-budget kind (pdf, image, unknown)
- * or ingest disabled -> body, so the caller's existing preflight produces its
- * own refusal exactly as before.
+ * are refused with a format-specific explanation rather than being sent to the
+ * text-only Storage lane. Unknown kinds or disabled ingest keep the body path.
  */
 export function chooseSingleFileTransport(
   file: { readonly name: string; readonly size: number },
   ingestEnabled: boolean = GRADING_ZIP_STORAGE_INGEST_ENABLED
 ): ZipTransport {
   if (checkFileWireBudget(file.size, "This file").ok) return { kind: "body" };
+  const extension = singleFileExtension(file.name);
+  if (extension === "pdf" || IMAGE_EXTENSIONS.has(extension)) {
+    return {
+      kind: "refused",
+      message: `This PDF or image exceeds the ${formatMB(maxFileBytesForWireBudget())} single-file limit for visual grading. Reduce its size, then try again.`,
+    };
+  }
   if (!ingestEnabled) return { kind: "body" };
   if (!SINGLE_FILE_STORAGE_EXTENSIONS.has(singleFileExtension(file.name))) return { kind: "body" };
   if (file.size > SINGLE_FILE_MAX_BYTES) {

@@ -12,6 +12,8 @@ import type { StudentSubmissionEntry, SubmissionZipClassification } from "@/lib/
 import { VIDEO_GRADING_ENABLED } from "@/lib/grade/constants";
 import { VIDEO_PENDING_MESSAGE, isVideoOnlyEntry } from "@/lib/grade/video-grading";
 import { isVideoFailureClass, parseVideoOutcomes, type VideoFailureClass, type VideoOutcomes } from "@/lib/grade/video-failure";
+import { IngestResponseLimitError, readBoundedIngestLines } from "./bounded-ingest-lines";
+import { ZIP_MAX_CUMULATIVE_ENTRIES } from "@/lib/zip-caps";
 
 export interface IngestSkip {
   readonly student: string;
@@ -173,27 +175,6 @@ function classificationFrom(value: unknown): SubmissionZipClassification | undef
   };
 }
 
-async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    pending += decoder.decode(value, { stream: true });
-    let at = pending.indexOf("\n");
-    while (at >= 0) {
-      const line = pending.slice(0, at).trim();
-      pending = pending.slice(at + 1);
-      if (line.length > 0) yield line;
-      at = pending.indexOf("\n");
-    }
-  }
-  pending += decoder.decode();
-  const tail = pending.trim();
-  if (tail.length > 0) yield tail;
-}
-
 async function refusalFromResponse(response: { status: number; text(): Promise<string> }): Promise<string> {
   try {
     const parsed: unknown = JSON.parse(await response.text());
@@ -230,7 +211,7 @@ export async function ingestStoragedZip(
     if (!response.ok) return { kind: "refused", reason: await refusalFromResponse(response) };
     if (!response.body) return { kind: "refused", reason: "The zip could not be prepared (empty response)." };
 
-    for await (const raw of readLines(response.body)) {
+    for await (const raw of readBoundedIngestLines(response.body)) {
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
@@ -240,6 +221,7 @@ export async function ingestStoragedZip(
       if (!isRecord(parsed)) return { kind: "refused", reason: UNREADABLE };
       if (parsed.type === "entry") {
         if (!isEntry(parsed.entry)) return { kind: "refused", reason: UNREADABLE };
+        if (entryCount >= ZIP_MAX_CUMULATIVE_ENTRIES) return { kind: "refused", reason: "The zip response contains too many submissions. Nothing was graded." };
         entryCount += 1;
         onEntry(parsed.entry);
       } else if (parsed.type === "done") {
@@ -274,6 +256,7 @@ export async function ingestStoragedZip(
       reason: `Preparation was interrupted after ${entryCount} ${entryCount === 1 ? "student" : "students"}; nothing was graded. Try the zip again.`,
     };
   } catch (err) {
+    if (err instanceof IngestResponseLimitError) return { kind: "refused", reason: "The zip response exceeded the preparation size limit. Nothing was graded." };
     const detail = err instanceof Error && err.message.trim().length > 0 ? ` (${err.message})` : "";
     return { kind: "refused", reason: `The zip could not be prepared${detail}.` };
   }

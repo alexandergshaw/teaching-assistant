@@ -5,6 +5,7 @@ import ts from "typescript";
 import { markSessionChanged, submitAssignedFiles, submitDropBatch, suggestFileGroups } from "./submissionDropRoutes";
 import { claimIntake, releaseIntake, resetIntake, type IntakeFence } from "./intakeFence";
 import type { SubmitOutcome } from "./useContinuousGradingRun";
+import { hasSubmissionContent, parsePastedSubmissions } from "./pastedSubmissions";
 
 type Node = { type: string; props: Record<string, any> };
 const slots: { value: any; deps?: unknown[] }[] = [];
@@ -18,8 +19,8 @@ const declarations = file.statements.filter((statement) => ts.isFunctionDeclarat
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
 const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
-const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "window", ...components, `${code}; return SubmissionDrop;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, { addEventListener() {}, removeEventListener() {} }, ...components);
+const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "claimIntake", "releaseIntake", "resetIntake", "parsePastedSubmissions", "hasSubmissionContent", "window", ...components, `${code}; return SubmissionDrop;`);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, claimIntake, releaseIntake, resetIntake, parsePastedSubmissions, hasSubmissionContent, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -35,6 +36,51 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("does not grade a heading without student work", () => {
+    const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nStudent: Bob\nB" } });
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); tree = h.render();
+    expect(h.onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("beyond the heading");
+  });
+  it("preserves reviewed edits when an original-paste change arrives before rerender", () => {
+    const h = harness(); let tree = h.render(); h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } });
+    tree = h.render(); const original = nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!;
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 1")!.props.onChange({ target: { value: "Corrected A" } });
+    original.props.onChange({ target: { value: "replacement" } }); tree = h.render();
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 1")!.props.value).toBe("Corrected A");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.disabled).toBe(true);
+  });
+  it("stops a pasted batch on an uncertain outcome and keeps unattempted text", async () => {
+    const onText = vi.fn().mockResolvedValueOnce({ kind: "partial", dispatchedCount: 1, refusedCount: 1, reason: "partial" });
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } });
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onText).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toBe("Student: Bob\nB");
+    expect(h.button(tree, "Grade reviewed submissions").props.disabled).toBe(true);
+  });
+  it("fences a pasted batch on session reset and never starts the next student", async () => {
+    let finish!: (value: SubmitOutcome) => void; const onText = vi.fn(() => new Promise<SubmitOutcome>((resolve) => { finish = resolve; }));
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nA\nStudent: Bob\nB" } });
+    tree = h.render(); h.button(tree, "Grade reviewed submissions").props.onClick(); h.reset(); tree = h.render(); finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = h.render();
+    expect(onText).toHaveBeenCalledTimes(1); expect(text(tree)).toContain("Needs review");
+    expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission 2")!.props.value).toBe("Student: Bob\nB");
+  });
+  it("reviews and grades pasted students separately without retrying accepted work", async () => {
+    const onText = vi.fn().mockResolvedValueOnce({ kind: "accepted", entryCount: 1 }).mockResolvedValueOnce({ kind: "refused", reason: "not ready" }).mockResolvedValueOnce({ kind: "accepted", entryCount: 1 });
+    const h = harness(undefined, undefined, onText); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Submission text")!.props.onChange({ target: { value: "Student: Ada\nFirst answer\nStudent: Bob\nSecond answer" } });
+    tree = h.render(); expect(onText).not.toHaveBeenCalled(); expect(text(tree)).toContain("Review each name");
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush(); tree = h.render();
+    expect(onText.mock.calls).toEqual([["Ada", "Student: Ada\nFirst answer"], ["Bob", "Student: Bob\nSecond answer"]]); expect(text(tree)).toContain("Queued"); expect(text(tree)).toContain("not ready");
+    h.button(tree, "Grade reviewed submissions").props.onClick(); await flush();
+    expect(onText.mock.calls).toEqual([["Ada", "Student: Ada\nFirst answer"], ["Bob", "Student: Bob\nSecond answer"], ["Bob", "Student: Bob\nSecond answer"]]);
+  });
   it("marks assigned files uncertain when the review callback rejects after dispatch", async () => {
     let fail!: (error: Error) => void;
     const onMany = vi.fn().mockResolvedValueOnce([{ kind: "identity", reason: "student needed" }]).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));

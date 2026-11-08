@@ -43,6 +43,8 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
+import { countPendingVideos } from "./pendingVideoCount";
+import type { ChatGradingSetup } from "./chatVersionedSetup";
 import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
@@ -227,7 +229,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const classificationRef = useRef<SubmissionZipClassification | null>(null);
   // Multi-submission recordings held for confirm, oldest first (a batch of
   // videos can hold several). The state mirrors the head for the confirm card.
-  const pendingSplitsRef = useRef<PendingSplit[]>([]);
+  const pendingSplitsRef = useRef<Array<PendingSplit & { setup: ChatGradingSetup }>>([]);
   // Per-row dispatch bookkeeping for the diagnostics: why the next dispatch
   // happens (first / retry / regrade), when it was queued, attempts so far.
   const dispatchMetaRef = useRef<Map<number, { trigger: GradeTrigger; queuedAtMs: number; attempts: number }>>(new Map());
@@ -422,9 +424,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // in the queue. `windows` is index-aligned and carries a split segment's grade
   // window onto its request body.
   const enqueueAdmitted = (
-    header: ResolvedRunHeader,
     admitted: readonly StudentSubmissionEntry[],
-    opts: { pointsPossible: number | null; submitLabel: string; windows?: readonly RecordingWindow[] }
+    opts: { pointsPossible: number | null; submitLabel: string; setup: ChatGradingSetup; windows?: readonly RecordingWindow[] }
   ) => {
     const flaggedNow: string[] = [];
     admitted.forEach((rawEntry, index) => {
@@ -442,16 +443,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
       const body: GradeRunItemRequestBody = {
         sourceIndex,
         entry,
-        assignmentInstructions: assignmentInstructionsRef.current,
-        rubric: header.effectiveRubric,
-        provider,
+        ...opts.setup,
         pointsPossible: opts.pointsPossible,
-        ...(commentSplit ? { commentSplit: true } : {}),
-        ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}),
-        ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}),
-        ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}),
-        ...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {}),
-        ...(applyLengthDeductionRef.current === true ? { lengthDeductionThresholdWords: lengthDeductionThresholdWordsRef.current } : {}),
         ...(window ? { gradeWindowSec: { startSec: window.startSec, endSec: window.endSec } } : {}),
       };
       retainedBodiesRef.current.set(sourceIndex, body);
@@ -526,6 +519,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     if (!header) {
       return { kind: "refused", reason: "Set instructions and a rubric before submitting." };
     }
+    const setup: ChatGradingSetup = { assignmentInstructions: assignmentInstructionsRef.current, rubric: header.effectiveRubric, provider, pointsPossible: null, ...(commentSplit ? { commentSplit: true } : {}), ...(harshnessRef.current !== "balanced" ? { harshness: harshnessRef.current } : {}), ...(feedbackWordTargetRef.current !== undefined ? { feedbackWordTarget: feedbackWordTargetRef.current } : {}), ...(applyNamingDeductionRef.current === false ? { applyNamingDeduction: false } : {}), ...(applyLengthDeductionRef.current ? { applyLengthDeduction: true, lengthDeductionThresholdWords: lengthDeductionThresholdWordsRef.current } : {}) };
 
     let entries: StudentSubmissionEntry[];
     let pointsPossible: number | null = null;
@@ -620,7 +614,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           split = await classifyVideoEntry({
             classify: classifyRecording,
             entry: prepared.entry,
-            assignmentInstructions: assignmentInstructionsRef.current,
+            assignmentInstructions: setup.assignmentInstructions,
             rubric: header.effectiveRubric,
           });
         } finally {
@@ -637,6 +631,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
           segments: split.segments,
           name: input.name,
           label: input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "",
+          setup,
         });
         setPendingSplit(pendingSplitsRef.current[0]);
         return { kind: "accepted", entryCount: 0 };
@@ -794,7 +789,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         ? (input.label?.trim().slice(0, CHAT_LABEL_MAX_CHARS) ?? "")
         : "";
 
-    enqueueAdmitted(header, admitted, { pointsPossible, submitLabel });
+    enqueueAdmitted(admitted, { pointsPossible, submitLabel, setup });
 
     if (refusedCount > 0 || ingestSkipped.length > 0) {
       safeDiagnostic(() =>
@@ -818,8 +813,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   // ONE whole-video row (split=false, today's path with its submit-time label).
   const settlePendingSplit = (split: boolean): SubmitOutcome => {
     const pending = pendingSplitsRef.current[0];
-    const header = headerRef.current;
-    if (!pending || !header) return { kind: "refused", reason: "There is no recording waiting to be graded." };
+    if (!pending || !headerRef.current) return { kind: "refused", reason: "There is no recording waiting to be graded." };
     const available = maxEntries - dispatchedCountRef.current;
     if (available <= 0) {
       safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "cap exceeded", signals: { requested: split ? pending.segments.length : 1, admitted: 0, clipped: split ? pending.segments.length : 1, cap: maxEntries, reason: "cap-reached" } }));
@@ -836,7 +830,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setPendingSplit(pendingSplitsRef.current[0] ?? null);
     const built = split ? buildSplitEntries(pending) : { entries: [pending.entry], windows: [] };
     const admitted = built.entries.slice(0, available);
-    enqueueAdmitted(header, admitted, { pointsPossible: null, submitLabel: split ? "" : pending.label, windows: built.windows });
+    enqueueAdmitted(admitted, { pointsPossible: null, submitLabel: split ? "" : pending.label, setup: pending.setup, windows: built.windows });
     safeDiagnostic(() =>
       recordSplitDecision({ decision: split ? "confirm" : "reject", segments: pending.segments.length, admitted: admitted.length, clipped: 0 })
     );
@@ -897,14 +891,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   };
 
   // Pending (queued or in flight) rows whose entry carries a video ref.
-  const pendingVideoCount = (): number => {
-    let count = 0;
-    for (const sourceIndex of pendingRef.current) {
-      const body = retainedBodiesRef.current.get(sourceIndex);
-      if (body && body.entry.submittedFiles.some((file) => file.videoRef !== undefined)) count += 1;
-    }
-    return count;
-  };
+  const pendingVideoCount = (): number => countPendingVideos(pendingRef.current, retainedBodiesRef.current);
 
   const reset = () => {
     sessionIdRef.current += 1;

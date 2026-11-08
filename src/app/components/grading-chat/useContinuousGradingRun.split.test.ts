@@ -91,10 +91,11 @@ const dispatchItemMock = vi.fn();
 const prepareVideoMock = vi.fn<PrepareVideoFn>();
 const classifyMock = vi.fn<ClassifyRecordingFn>();
 
-function useTestDriver(maxEntries = 40) {
+function useTestDriver(maxEntries = 40, provider: "gemini" | "other" = "gemini", commentSplit = false) {
   h0.begin();
   return useContinuousGradingRun({
-    provider: "gemini",
+    provider,
+    commentSplit,
     dispatchItem: dispatchItemMock,
     prepareVideo: prepareVideoMock,
     classifyRecording: classifyMock,
@@ -154,6 +155,23 @@ function classifyDiag() {
 const SUBMIT = { kind: "storaged-video", storagePath: VIDEO_PATH, name: "demo.mp4" } as const;
 
 describe("useContinuousGradingRun - recording split (flag on)", () => {
+  it("retains submission settings through delayed preparation and split confirmation after a rerender", async () => {
+    let completePreparation!: (value: Awaited<ReturnType<PrepareVideoFn>>) => void;
+    prepareVideoMock.mockReturnValueOnce(new Promise((resolve) => { completePreparation = resolve; }));
+    classifyMock.mockResolvedValue({ split: SAME_LABEL_SPLIT, failed: false });
+    await beginReady(useTestDriver(40, "gemini", true));
+    const submission = useTestDriver(40, "gemini", true).submit(SUBMIT);
+    useTestDriver(40, "other", false);
+    completePreparation({ kind: "entry", entry: videoEntry() });
+    expect(await submission).toEqual({ kind: "accepted", entryCount: 0 });
+    expect(classifyMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentInstructions: "Each student presents.", rubric: "1. Correctness" }));
+    expect(useTestDriver(40, "other", false).confirmRecordingSplit()).toEqual({ kind: "accepted", entryCount: 2 });
+    expect(dispatchItemMock.mock.calls.map(([body]) => ({ provider: body.provider, commentSplit: body.commentSplit, rubric: body.rubric }))).toEqual([
+      { provider: "gemini", commentSplit: true, rubric: "1. Correctness" },
+      { provider: "gemini", commentSplit: true, rubric: "1. Correctness" },
+    ]);
+  });
+
   it("does not classify a prepared video after its session was reset", async () => {
     let completePreparation!: (value: Awaited<ReturnType<PrepareVideoFn>>) => void;
     prepareVideoMock.mockReturnValueOnce(new Promise((resolve) => { completePreparation = resolve; }));

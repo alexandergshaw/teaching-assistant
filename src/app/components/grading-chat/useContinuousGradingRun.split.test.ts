@@ -308,14 +308,16 @@ describe("useContinuousGradingRun - recording split (flag on)", () => {
     expect(useTestDriver().classifyingRecording).toBe(false);
   });
 
-  it("confirm clips to the session ceiling: first N dispatch, the rest are a worded partial", async () => {
+  it("keeps the whole recording unqueued when its split exceeds the remaining session capacity", async () => {
     classifyMock.mockResolvedValue({ split: SAME_LABEL_SPLIT, failed: false });
     await beginReady(useTestDriver(1));
     await useTestDriver(1).submit(SUBMIT);
     const outcome = useTestDriver(1).confirmRecordingSplit();
-    expect(outcome.kind).toBe("partial");
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") expect(outcome.reason).toContain("No part was queued");
     await flushMicrotasks();
-    expect(dispatchItemMock).toHaveBeenCalledTimes(1);
+    expect(dispatchItemMock).not.toHaveBeenCalled();
+    expect(useTestDriver(1).pendingSplit?.segments).toHaveLength(2);
   });
 
   it("reset drops a held recording", async () => {

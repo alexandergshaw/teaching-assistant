@@ -824,25 +824,18 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
       };
     }
+    if (split && pending.segments.length > available) {
+      safeDiagnostic(() => recordAdmitAnomaly({ failureClass: "cap exceeded", signals: { requested: pending.segments.length, admitted: 0, clipped: pending.segments.length, cap: maxEntries, reason: "cap-reached" } }));
+      return { kind: "refused", reason: `This recording has ${pending.segments.length} submissions but only ${available} slots remain. No part was queued. Start a new session and upload the recording again, or choose Grade as one.` };
+    }
     pendingSplitsRef.current.shift();
     setPendingSplit(pendingSplitsRef.current[0] ?? null);
     const built = split ? buildSplitEntries(pending) : { entries: [pending.entry], windows: [] };
     const admitted = built.entries.slice(0, available);
     enqueueAdmitted(header, admitted, { pointsPossible: null, submitLabel: split ? "" : pending.label, windows: built.windows });
-    const refusedCount = built.entries.length - admitted.length;
     safeDiagnostic(() =>
-      recordSplitDecision({ decision: split ? "confirm" : "reject", segments: pending.segments.length, admitted: admitted.length, clipped: refusedCount })
+      recordSplitDecision({ decision: split ? "confirm" : "reject", segments: pending.segments.length, admitted: admitted.length, clipped: 0 })
     );
-    if (refusedCount > 0) {
-      return {
-        kind: "partial",
-        dispatchedCount: admitted.length,
-        refusedCount,
-        reason:
-          `Graded the first ${admitted.length} of ${built.entries.length} submissions in this recording; ` +
-          `the session's ${maxEntries}-submission limit was reached. Start a new session to grade the rest.`,
-      };
-    }
     return { kind: "accepted", entryCount: admitted.length };
   };
   const confirmRecordingSplit = () => settlePendingSplit(true);

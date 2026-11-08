@@ -16,6 +16,8 @@ import { useRef, useState } from "react";
 import { LENGTH_DEDUCTION_THRESHOLD_WORDS_DEFAULT } from "@/lib/grade/length-deduction-policy";
 import { lengthDeductionThresholdError } from "./chatLengthDeduction";
 import { createContinuousRepositoryAdapter, type ContinuousRepositoryAdapter, type RepositorySessionStudent } from "./continuousRepositoryAdapter";
+import { continuousSessionView, type SubmitOutcome } from "./continuousSessionView";
+export type { SubmitOutcome } from "./continuousSessionView";
 import {
   resolveChatRunHeaderAction,
   prepareChatSubmissionAction,
@@ -78,15 +80,6 @@ export type { ItemDiagnostic, ItemDiagnosticSink };
 const ITEM_DIAGNOSTIC_CAP = 200;
 
 export type HeaderState = "unset" | "resolving" | "ready" | "refused";
-
-export type SubmitOutcome =
-  | { readonly kind: "accepted"; readonly entryCount: number }
-  | { readonly kind: "refused"; readonly reason: string }
-  // RES-GC-8 (docs/grading-chat-reliability.md section 2): a multi-entry
-  // submission (a zip or Canvas URL) that would carry dispatchedCount past
-  // maxEntries dispatches what fits and refuses only the remainder - never a
-  // whole-event refusal after the extraction cost was already paid.
-  | { readonly kind: "partial"; readonly dispatchedCount: number; readonly refusedCount: number; readonly reason: string };
 
 export interface UseContinuousGradingRunParams {
   readonly provider: LlmProvider;
@@ -244,6 +237,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const dispatchMetaRef = useRef<Map<number, { trigger: GradeTrigger; queuedAtMs: number; attempts: number }>>(new Map());
 
   const [headerState, setHeaderState] = useState<HeaderState>("unset");
+  const [displaySession, setDisplaySession] = useState<{ sessionId: number; header: ResolvedRunHeader | null; canvasUrl: string }>({ sessionId: 0, header: null, canvasUrl: "" });
   const [results, setResults] = useState<readonly GradeResult[]>([]);
   const [run, setRun] = useState<GradingRun | null>(null);
   const [dispatchedCount, setDispatchedCount] = useState(0);
@@ -509,6 +503,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     }
 
     headerRef.current = header;
+    setDisplaySession((previous) => ({ ...previous, header }));
     assignmentInstructionsRef.current = sessionParams.assignmentInstructions;
     harshnessRef.current = sessionParams.harshness ?? "balanced";
     feedbackWordTargetRef.current = sessionParams.feedbackWordTarget;
@@ -773,7 +768,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         reason: `This session has reached its ${maxEntries}-submission limit. Start a new session to grade more.`,
       };
     }
-    if (canvasUrlToPin !== null) canvasUrlRef.current = canvasUrlToPin;
+    if (canvasUrlToPin !== null) {
+      canvasUrlRef.current = canvasUrlToPin;
+      setDisplaySession((previous) => ({ ...previous, canvasUrl: canvasUrlToPin }));
+    }
     // The storaged-zip and file/url/composite branches share this point. Assign
     // ONLY when a classification is present (NIT-A): a text/single-file/URL
     // submit must never wipe a prior zip's badge.
@@ -906,6 +904,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
 
   const reset = () => {
     sessionIdRef.current += 1;
+    setDisplaySession({ sessionId: sessionIdRef.current, header: null, canvasUrl: "" });
     regradeCandidatesRef.current = new Map();
     regradeStartRef.current = new Map();
     regradeBodiesRef.current = new Map();
@@ -953,12 +952,16 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     setRepositoryStudents([]);
   };
 
+  const currentRepositoryAdapter = () => createContinuousRepositoryAdapter({
+      epoch: () => "grading-chat-" + sessionIdRef.current, bodies: retainedBodiesRef.current, arrived: arrivedRef.current, pending: pendingRef.current,
+      revisions: repositoryRevisionsRef.current, rubricFingerprint: displaySession.header?.rubricFingerprint ?? "", originals: repositoryOriginalsRef.current, publish: () => { rebuildRun(); publishPending(); },
+  });
   return {
-    repositoryAdapter: createContinuousRepositoryAdapter({ epoch: () => "grading-chat-" + sessionIdRef.current,
-      bodies: retainedBodiesRef.current, arrived: arrivedRef.current, pending: pendingRef.current,
-      revisions: repositoryRevisionsRef.current, rubricFingerprint: headerRef.current?.rubricFingerprint ?? "",
-      originals: repositoryOriginalsRef.current,
-      publish: () => { rebuildRun(); publishPending(); } }),
+    ...continuousSessionView(displaySession),
+    repositoryAdapter: {
+      capture: (key) => sessionIdRef.current === displaySession.sessionId ? currentRepositoryAdapter().capture(key) : null,
+      adopt: (snapshot, result, entry) => sessionIdRef.current === displaySession.sessionId && currentRepositoryAdapter().adopt(snapshot, result, entry),
+    },
     repositoryStudents,
     beginSession,
     correctSetup: (setup) => params.enableSetupCorrections && headerRef.current ? beginSession(setup, true) : Promise.resolve({ kind: "refused", reason: "Setup correction is unavailable." }),
@@ -970,13 +973,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     regradeFailures,
     acceptRegrade,
     discardRegrade,
-    canvasUrl: canvasUrlRef.current,
     pendingVideoCount,
-    runKey: "grading-chat-" + sessionIdRef.current,
-    sessionId: sessionIdRef.current,
-    effectiveRubric: headerRef.current?.effectiveRubric ?? "",
-    rubricFingerprint: headerRef.current?.rubricFingerprint ?? "",
-    generatedRubric: headerRef.current?.generatedRubric,
     headerState,
     results,
     getVersionedResults: readVersionedResults,

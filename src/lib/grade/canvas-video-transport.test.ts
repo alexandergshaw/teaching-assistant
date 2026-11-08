@@ -1,16 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NextRequest } from "next/server";
 
 vi.mock("@/lib/canvas-fetch", () => ({ canvasFetch: vi.fn() }));
+vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: vi.fn(async () => ({ id: "owner" })) }));
+vi.mock("@/lib/llm", async original => ({ ...await original<typeof import("@/lib/llm")>(), callLlm: vi.fn() }));
+vi.mock("@/lib/code-runner", () => ({ runSubmittedCode: vi.fn(async () => null) }));
 import { canvasFetch } from "@/lib/canvas-fetch";
+import { callLlm } from "@/lib/llm";
 import { fetchAssignment } from "@/lib/canvas/submissions";
 import { canvasVideoRefusal } from "@/lib/canvas/omitted-video";
 import { canvasWorkToEntry } from "@/lib/grade/extraction";
+import { POST } from "@/app/api/grade-run-item/route";
+import { buildRunItemRequests, stripUnneededRawBase64 } from "@/app/components/grading/incrementalRunPlan";
 
 const fetchMock = vi.mocked(canvasFetch);
 const institution = { code: "TEST", name: "Test", host: "test.instructure.com" };
 const success = (value: unknown) => ({ ok: true as const, status: 200, headers: {}, body: Buffer.from(JSON.stringify(value)) });
 
-beforeEach(() => fetchMock.mockReset());
+beforeEach(() => { fetchMock.mockReset(); vi.mocked(callLlm).mockReset(); });
 
 describe("Canvas omitted video intake", () => {
   it.each(["gif", "bmp"])("marks unsupported %s image evidence even if Canvas labels it PNG", async (ext) => {
@@ -75,5 +82,25 @@ describe("Canvas omitted video intake", () => {
     expect(JSON.stringify(students[0].omittedVideos)).not.toContain("private detail");
     const entry = await canvasWorkToEntry(students[0]);
     expect(entry.submittedFiles).toContainEqual(expect.objectContaining({ name: "demo.mp4", mimeType: "video/mp4" }));
+  });
+
+  it.each([
+    ["missing URL", { filename: "demo.mp4" }, undefined],
+    ["declared size", { filename: "demo.mp4", url: "https://test.instructure.com/file", size: 16 * 1024 * 1024 }, undefined],
+    ["non-OK download", { filename: "demo.mp4", url: "https://test.instructure.com/file" }, { ok: false, status: 404, headers: {}, body: Buffer.alloc(0) }],
+    ["download failure", { filename: "demo.mp4", url: "https://test.instructure.com/file" }, "throw"],
+    ["downloaded size", { filename: "demo.mp4", url: "https://test.instructure.com/file" }, { ok: true, status: 200, headers: {}, body: Buffer.alloc(16 * 1024 * 1024) }],
+  ].flatMap(([label, attachment, download]) => ["", "written answer"].map(body => [label, attachment, download, body] as const)))("does not grade work with a video omitted after %s", async (_label, attachment, download, submittedText) => {
+    fetchMock.mockResolvedValueOnce(success([{ user_id: 1, workflow_state: "submitted", user: { name: "Student" }, body: submittedText, attachments: [attachment] }]));
+    if (download === "throw") fetchMock.mockRejectedValueOnce(new Error("private detail"));
+    else if (download) fetchMock.mockResolvedValueOnce(download as never);
+    const [student] = await fetchAssignment("https://test.instructure.com", "token", institution, "1", "1");
+    const entry = await canvasWorkToEntry(student);
+    const [body] = buildRunItemRequests({ tickets: [{ sourceIndex: 0, entry: stripUnneededRawBase64(entry) }], assignmentInstructions: "Read the answer.", rubric: "Correctness (10 pts)", provider: "gemini", pointsPossible: 10 });
+    const request = { headers: { get: () => "application/json" }, json: async () => body } as unknown as NextRequest;
+    const response = await POST(request);
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(await response.json())).toContain("demo.mp4");
+    expect(callLlm).not.toHaveBeenCalled();
   });
 });

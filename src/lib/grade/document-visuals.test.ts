@@ -37,14 +37,14 @@ const fixture = async (kind: "docx" | "pptx", options: { text?: string; pictures
     ? '<w:drawing><wp:docPr id="1" name="Fixture"/><a:blip r:embed="rId1"/></w:drawing>'
     : '<p:pic><p:nvPicPr><p:cNvPr id="1" name="Fixture"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId1"/></p:blipFill></p:pic>';
   const drawings = pic.repeat(pictures) + (unsupported ? pic.replace("rId1", "rId2") : "");
-  const rels = `<Relationships><Relationship Id="rId1" Target="${kind === "pptx" ? "../" : ""}media/fixture.png"/><Relationship Id="rId2" Target="${kind === "pptx" ? "../" : ""}media/fixture.emf"/></Relationships>`;
+  const rels = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${kind === "pptx" ? "../" : ""}media/fixture.png"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${kind === "pptx" ? "../" : ""}media/fixture.emf"/></Relationships>`;
   if (kind === "docx") {
-    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>${text}</w:t></w:r>${drawings}</w:p></w:body></w:document>`);
+    zip.file("word/document.xml", `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>${text}</w:t></w:r>${drawings}</w:p></w:body></w:document>`);
     if (!broken) zip.file("word/_rels/document.xml.rels", rels);
     zip.file("word/media/fixture.png", png);
     if (unsupported) zip.file("word/media/fixture.emf", "unsupported");
   } else {
-    zip.file("ppt/slides/slide1.xml", `<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>${text}</a:t></a:r></a:p>${drawings}</p:spTree></p:cSld></p:sld>`);
+    zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><a:p><a:r><a:t>${text}</a:t></a:r></a:p>${drawings}</p:spTree></p:cSld></p:sld>`);
     if (!broken) zip.file("ppt/slides/_rels/slide1.xml.rels", rels);
     zip.file("ppt/media/fixture.png", png);
     if (unsupported) zip.file("ppt/media/fixture.emf", "unsupported");
@@ -98,7 +98,8 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
       const entry = await intake(kind, await fixture(kind, { text: imageOnly ? "" : TEXT }), stored);
       expect(entry.student).toBe("Synthetic Writer"); expect(entry.mergedFileCount).toBe(1);
       expect(entry.submittedFiles.map(f => f.name)).toEqual([`Synthetic Writer.${kind}`]);
-      expect(entry.content).toContain(imageOnly ? "no extracted text" : TEXT);
+      if (imageOnly) { expect(entry.content).not.toContain(TEXT); expect(entry.content).toMatch(/no extracted text|\[Image:/); }
+      else expect(entry.content).toContain(TEXT);
       if (!stored) expect(entry.submittedFiles[0].rawBase64).toBeDefined();
       const wire = body(entry);
       expect(wire.entry.submittedFiles[0].rawBase64).toBeUndefined();
@@ -109,7 +110,8 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
       expect(callLlm).toHaveBeenCalledTimes(1);
       const sent = vi.mocked(callLlm).mock.calls[0][0];
       expect(sent.contents.flatMap(c => c.parts).filter(p => "inlineData" in p)).toEqual([{ inlineData: { mimeType: "image/png", data: PNG } }]);
-      expect(JSON.stringify(sent)).toContain(imageOnly ? "no extracted text" : TEXT);
+      if (imageOnly) expect(JSON.stringify(sent)).toMatch(/no extracted text|\[Image:/);
+      else expect(JSON.stringify(sent)).toContain(TEXT);
       const detail = sanitizeSessionDiagnosticDetail(buildGradeItemDetail({}, response.diagnostic));
       expect(detail).toMatchObject({ picturesPrepared: 1, picturesSent: 1, picturesOmitted: 0, visualCoverage: "complete", passes: 1 });
       expect(JSON.stringify(detail)).not.toContain("Synthetic"); expect(JSON.stringify(detail)).not.toContain(PNG);
@@ -121,7 +123,7 @@ describe.each(["docx", "pptx"] as const)("%s intake through actual model request
 describe("coverage and boundaries", () => {
   it("reinspects raw DOCX instead of trusting stale complete visual metadata", async () => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
-    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    zip.file("word/document.xml", `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:imagedata/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
     const bytes = await zip.generateAsync({ type: "nodebuffer" });
     const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
     entry.submittedFiles[0].documentVisuals = { status: "complete", reason: "none", found: 0, omitted: 0, parts: [] };
@@ -150,7 +152,7 @@ describe("coverage and boundaries", () => {
   it.each(["word/document.xml"])("refuses legacy images in %s with alternate prefixes", async (part) => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
     const pict = `<alt:pict><vector:shape><vector:imagedata rel:id="rId1"/></vector:shape></alt:pict>`;
-    if (part === "word/document.xml") zip.file(part, `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t>${pict}</w:r></w:p></w:body></w:document>`);
+    if (part === "word/document.xml") zip.file(part, `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t>${pict}</w:r></w:p></w:body></w:document>`);
     else zip.file(part, `<alt:header xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${pict}</alt:header>`);
     const bytes = await zip.generateAsync({ type: "nodebuffer" });
     const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
@@ -185,6 +187,53 @@ describe("coverage and boundaries", () => {
     expect(response.result.ungraded.kind).toBe("grading-failed");
     expect(callLlm).not.toHaveBeenCalled();
   });
+  it.each(["header", "footer"])("sends pictures in an active Canvas DOCX %s to the model", async (kind) => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    const root = kind === "header" ? "hdr" : "ftr";
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:sectPr><w:${kind}Reference r:id="rSection"/></w:sectPr></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rSection" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}" Target="${kind}1.xml"/></Relationships>`);
+    zip.file(`word/${kind}1.xml`, `<w:${root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:p><w:r><w:drawing><a:blip r:embed="rImage"/></w:drawing></w:r></w:p></w:${root}>`);
+    zip.file(`word/_rels/${kind}1.xml.rels`, `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/fixture.png"/></Relationships>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded).toBeUndefined();
+    expect(JSON.stringify(vi.mocked(callLlm).mock.calls[0][0])).toContain(PNG);
+  });
+  it.each(["header", "footer"])("resolves alternate namespace prefixes in an active Canvas %s", async (kind) => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    const root = kind === "header" ? "hdr" : "ftr";
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:sectPr><w:${kind}Reference r:id="rSection"/></w:sectPr></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rSection" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}" Target="${kind}1.xml"/></Relationships>`);
+    zip.file(`word/${kind}1.xml`, `<word:${root} xmlns:word="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:draw="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><word:p><word:r><word:drawing><draw:blip rel:embed="rImage"/></word:drawing></word:r></word:p></word:${root}>`);
+    zip.file(`word/_rels/${kind}1.xml.rels`, `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/fixture.png"/></Relationships>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded).toBeUndefined();
+    expect(JSON.stringify(vi.mocked(callLlm).mock.calls[0][0])).toContain(PNG);
+  });
+  it("resolves default-namespace drawing and blip in an active Canvas header", async () => {
+    const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
+    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:sectPr><w:headerReference r:id="header"/></w:sectPr></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="header" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>`);
+    zip.file("word/header1.xml", `<hdr xmlns="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><drawing><blip xmlns="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="image"/></drawing></hdr>`);
+    zip.file("word/_rels/header1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="image" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/fixture.png"/></Relationships>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded).toBeUndefined(); expect(JSON.stringify(vi.mocked(callLlm).mock.calls[0][0])).toContain(PNG);
+  });
+  it.each(["comment", "wrong-type", "foreign-namespace", "duplicate", "nested"])("does not trust a %s image relationship", async (problem) => {
+    const zip = await JSZip.loadAsync(await fixture("docx"));
+    const relation = `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${problem === "wrong-type" ? "hyperlink" : "image"}" Target="media/fixture.png"/>`;
+    const content = problem === "comment" ? `<!--${relation}-->` : problem === "duplicate" ? relation + relation : problem === "nested" ? `<Wrapper>${relation}</Wrapper>` : relation;
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="${problem === "foreign-namespace" ? "https://example.test/fake" : "http://schemas.openxmlformats.org/package/2006/relationships"}">${content}</Relationships>`);
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
+    const response = await (await gradePost(request(body(entry)))).json();
+    expect(response.result.ungraded.kind).toBe("grading-failed"); expect(callLlm).not.toHaveBeenCalled();
+  });
   it("keeps a text-only active header gradeable", async () => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
     zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="h"/></w:sectPr></w:body></w:document>`);
@@ -210,7 +259,7 @@ describe("coverage and boundaries", () => {
     expect(callLlm).toHaveBeenCalledTimes(1);
   });  it("does not reject text-only VML shapes", async () => {
     const zip = await JSZip.loadAsync(await fixture("docx", { pictures: 0 }));
-    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:fill type="solid" color="red"/><v:textbox>Caption</v:textbox></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    zip.file("word/document.xml", `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Answer</w:t><w:pict><v:shape><v:fill type="solid" color="red"/><v:textbox>Caption</v:textbox></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
     const bytes = await zip.generateAsync({ type: "nodebuffer" });
     const entry = await canvasWorkToEntry({ student: "Student", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });
     const res = await gradePost(request(body(entry)));
@@ -219,8 +268,8 @@ describe("coverage and boundaries", () => {
   });
   it("does not grade a Canvas DOCX when a legacy VML picture was omitted", async () => {
     const zip = new JSZip();
-    zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Written answer</w:t><w:pict><v:shape><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
-    zip.file("word/_rels/document.xml.rels", `<Relationships><Relationship Id="rId1" Target="media/legacy.png"/></Relationships>`);
+    zip.file("word/document.xml", `<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:alt="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:vector="urn:schemas-microsoft-com:vml" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Written answer</w:t><w:pict><v:shape><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/legacy.png"/></Relationships>`);
     zip.file("word/media/legacy.png", Buffer.from(PNG, "base64"));
     const bytes = await zip.generateAsync({ type: "nodebuffer" });
     const entry = await canvasWorkToEntry({ student: "Synthetic Writer", userId: 17, text: "", contributionCount: 1, files: [{ name: "Canvas.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: bytes.toString("base64") }] });

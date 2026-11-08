@@ -1,5 +1,6 @@
 "use server";
 import { canvasOmissionIdentityRefusal, canvasVideoRefusal } from "@/lib/canvas/omitted-video";
+import { canvasEmbeddedOfficeRefusals } from "@/lib/grade/canvas-embedded-office";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
 import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractSubmissions, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, disambiguateCanvasEntries, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
@@ -644,8 +645,9 @@ export async function gradeOneSubmissionAction(
       if (builtRubric.checks.length === 0) {
         return { error: "No rubric or instructions were available to grade this with the deterministic engine." };
       }
-      await attachCodeRuns([entry]);
-      run = gradeEntriesEmbedded([entry], builtRubric, submission.pointsPossible);
+      const canvasOfficeRefusals = await canvasEmbeddedOfficeRefusals([entry]);
+      await attachCodeRuns(canvasOfficeRefusals.has(0) ? [] : [entry]);
+      run = gradeEntriesEmbedded([entry], builtRubric, submission.pointsPossible, { canvasOfficeRefusals });
     } else {
       const effectiveRubric = meta.rubricText.trim()
         ? meta.rubricText
@@ -784,9 +786,10 @@ export async function gradeAction(
         }
         // Grow the rubric bank from human-authored rubrics (fire-and-forget).
         if (rubric.trim()) void rememberRubric(assignmentInstructions, rubric);
-        const safeEntries = entries.filter((entry) => !canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]));
+        const canvasOfficeRefusals = await canvasEmbeddedOfficeRefusals(entries);
+        const safeEntries = entries.filter((entry, index) => !canvasOfficeRefusals.has(index) && !canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]));
         await attachCodeRuns(safeEntries);
-        const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible, { rejectCanvasVideo: true });
+        const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible, { rejectCanvasVideo: true, canvasOfficeRefusals });
         return {
           run: { ...run, speedGraderUrl },
           error: null,

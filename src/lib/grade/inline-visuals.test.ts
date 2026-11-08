@@ -22,12 +22,12 @@ async function docxWithImage(ext: string): Promise<string> {
   const zip = new JSZip();
   zip.file(
     "word/document.xml",
-    `<w:document><w:body><w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="Pic" descr="shot"/>` +
+    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="Pic" descr="shot"/>` +
       `<a:graphic><a:blip r:embed="rId5"/></a:graphic></wp:inline></w:drawing></w:r></w:p></w:body></w:document>`
   );
   zip.file(
     "word/_rels/document.xml.rels",
-    `<Relationships><Relationship Id="rId5" Type="image" Target="media/image1.${ext}"/></Relationships>`
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.${ext}"/></Relationships>`
   );
   zip.file(`word/media/image1.${ext}`, IMG_BYTES);
   return Buffer.from(await zip.generateAsync({ type: "uint8array" })).toString("base64");
@@ -37,12 +37,12 @@ async function pptxWithJpeg(): Promise<string> {
   const zip = new JSZip();
   zip.file(
     "ppt/slides/slide1.xml",
-    `<p:sld><p:cSld><p:spTree><p:pic><p:nvPicPr><p:cNvPr id="4" name="Shot" descr="x"/></p:nvPicPr>` +
+    `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:pic><p:nvPicPr><p:cNvPr id="4" name="Shot" descr="x"/></p:nvPicPr>` +
       `<p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`
   );
   zip.file(
     "ppt/slides/_rels/slide1.xml.rels",
-    `<Relationships><Relationship Id="rId2" Type="image" Target="../media/image1.jpeg"/></Relationships>`
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.jpeg"/></Relationships>`
   );
   zip.file("ppt/media/image1.jpeg", IMG_BYTES);
   zip.file("ppt/presentation.xml", `<p:presentation><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`);

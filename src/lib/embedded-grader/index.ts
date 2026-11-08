@@ -123,7 +123,7 @@ export function gradeEntriesEmbedded(
   entries: StudentSubmissionEntry[],
   rubric: EmbeddedRubric,
   pointsPossible: number | null = null,
-  options: { rejectCanvasVideo?: boolean } = {}
+  options: { rejectCanvasVideo?: boolean; canvasOfficeRefusals?: ReadonlyMap<number, string> } = {}
 ): GradingRun {
   // A run that errored (network/timeout) or that failed solely because this
   // sandbox's hardcoded empty stdin starved a required input read
@@ -144,7 +144,7 @@ export function gradeEntriesEmbedded(
   ];
 
   const results = entries.map((entry, sourceIndex) => {
-    const refusal = options.rejectCanvasVideo ? canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]) : null;
+    const refusal = options.canvasOfficeRefusals?.get(sourceIndex) ?? (options.rejectCanvasVideo ? canvasVideoRefusal([{ student: entry.student, files: entry.submittedFiles.map((file) => ({ name: file.name, mimeType: file.mimeType ?? "" })) }]) : null);
     if (refusal) return {
       student: entry.student, overallComment: refusal, strengths: refusal, improvements: "", resubmitNotice: "", feedback: refusal,
       totalScore: "", rubricAreas: [], mergedFileCount: entry.mergedFileCount, submittedFiles: entry.submittedFiles,

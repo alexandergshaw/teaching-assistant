@@ -25,6 +25,7 @@ import {
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
 import { checkRowPostability } from "@/lib/grade/postable";
+import { incompleteEvidenceReason } from "@/lib/grade/evidence-review";
 import { repoGradingStopAt } from "@/lib/workflows/registry/steps.grading-repos.grade-repo";
 
 export const gradingDraftFlowSteps: StepDefinition[] = [
@@ -482,7 +483,9 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
           // with null and this transform is never called). A failure here is
           // swallowed because markGradingDraftReviewedAction is idempotent -
           // reviewing the same draft again later just marks it reviewed again.
-          void markGradingDraftReviewedAction(draftId).catch(() => {});
+          if (!runs.some((entry) => entry.run.results.some((row) => incompleteEvidenceReason(row)))) {
+            void markGradingDraftReviewedAction(draftId).catch(() => {});
+          }
           return rows;
         },
       };
@@ -604,6 +607,8 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
               continue;
             }
 
+            const evidenceReason = incompleteEvidenceReason(result);
+            if (evidenceReason) { lines.push(`${approvedRow.student}: ${evidenceReason}`); continue; }
             const grade = (approvedRow.grade ?? "").trim();
             if (grade && !grade.match(/^-?\d+(\.\d+)?$/)) {
               lines.push(`${approvedRow.student}: invalid grade "${grade}" - skipped`);

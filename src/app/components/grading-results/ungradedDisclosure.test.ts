@@ -517,9 +517,9 @@ describe("GradingResults.tsx source-text wiring", () => {
     const stripped = stripComments(source);
     const mapStart = stripped.indexOf("visibleResults.map(");
     if (mapStart === -1) throw new Error("visibleResults.map( not found in GradingResults.tsx");
-    const trClose = stripped.indexOf("</tr>", mapStart);
-    if (trClose === -1) throw new Error("</tr> not found after visibleResults.map( in GradingResults.tsx");
-    return stripped.slice(mapStart, trClose + "</tr>".length);
+    const close = /<\/(?:tr|TableRow)>/.exec(stripped.slice(mapStart));
+    if (!close) throw new Error("row close not found after visibleResults.map(");
+    return stripped.slice(mapStart, mapStart + close.index + close[0].length);
   }
 
   describe("AC-5: a per-row marker inside the tbody map region", () => {

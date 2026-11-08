@@ -390,7 +390,7 @@ export interface GradingRunOptions {
  * commit, which sandbox run) that exists to defend a grade to a student.
  */
 function buildUngradedRow(
-  entry: Pick<StudentSubmissionEntry, "student" | "mergedFileCount" | "submittedFiles" | "gradedRepo" | "gradedRef">,
+  entry: Pick<StudentSubmissionEntry, "student" | "mergedFileCount" | "submittedFiles" | "gradedRepo" | "gradedRef" | "linkFetch">,
   outcome: UngradedOutcome,
   codeRun: CodeRunResult | null = null,
   submissionTruncated: boolean | undefined = undefined
@@ -411,6 +411,7 @@ function buildUngradedRow(
     codeExecution: codeRun ?? undefined,
     gradedRepo: entry.gradedRepo,
     gradedRef: entry.gradedRef,
+    linkFetch: entry.linkFetch,
     submissionTruncated,
     ungraded: outcome,
   };
@@ -568,6 +569,7 @@ async function gradeStudentEntries(
         codeExecution: codeRun ?? undefined,
         gradedRepo,
         gradedRef,
+        linkFetch: limitedEntries[i].linkFetch,
         submissionTruncated,
       });
     } catch (error) {
@@ -582,7 +584,7 @@ async function gradeStudentEntries(
       // byte-identical to the pre-union failure row's strengths text).
       results.push(
         buildUngradedRow(
-          { student, mergedFileCount, submittedFiles, gradedRepo, gradedRef },
+          limitedEntries[i],
           {
             kind: "grading-failed",
             sourceIndex: i,

@@ -573,7 +573,8 @@ describe("resolveEntryLinks (BW3 grade-time resolver)", () => {
     mockFetchRepo.mockResolvedValue(okRepo("o/r", "x".repeat(MAX_ENTRY_CONTENT_CHARS + 5_000)));
     const out = await resolveEntryLinks(linkEntry(GITHUB_GIT));
     expect(out.content.length).toBeLessThanOrEqual(MAX_ENTRY_CONTENT_CHARS);
-    expect(out.linkFetch).toBe("ok");
+    expect(out.linkFetch).toBe("flagged");
+    expect(out.repoReadNote).toContain("truncated");
   });
 
   it("an entry with no submissionUrl is returned unchanged and gets no linkFetch", async () => {

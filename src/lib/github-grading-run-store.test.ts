@@ -105,6 +105,8 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
         gradedRepo: "student/hw1",
         gradedRef: "abc123def456",
         submissionTruncated: undefined,
+        linkFetch: undefined,
+        evidenceProvenanceUnknown: false,
         determination: undefined,
       },
     ]);

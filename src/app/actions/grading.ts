@@ -18,6 +18,7 @@ import { requireUser, requireAppOwner } from "@/lib/supabase/auth";
 import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
 import { checkRowPostability } from "@/lib/grade/postable";
+import { incompleteEvidenceReason } from "@/lib/grade/evidence-review";
 import { resolveRunHeader } from "@/lib/grade/run-header";
 import { checkFileWireBudget } from "@/lib/upload-budget";
 import { classifyGradingUpload, buildSingleFileEntry } from "@/lib/grade/single-file-entry";
@@ -522,6 +523,7 @@ export async function postGradingDraftAction(
       }> = [];
       for (const r of entry.run.results) {
         if (typeof r.userId !== "number") continue;
+        if (incompleteEvidenceReason(r)) { skipped += 1; continue; }
         const m = r.totalScore.match(fractionRegex);
         const grade = m ? m[1] : (r.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
         // A13: refuse a row no human has touched (blank producer score/areas,

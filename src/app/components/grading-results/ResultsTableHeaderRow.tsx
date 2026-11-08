@@ -8,6 +8,7 @@
 // prop, computed by useResultsSort.ts exactly as it was computed inline
 // before).
 import Button from "@mui/material/Button";
+import { TableRow, TableCell } from "@mui/material";
 import { sortColumnKey, type SortColumn, type SortDirection } from "./gradingResultsHelpers";
 
 export interface ResultsTableHeaderRowProps {
@@ -31,8 +32,8 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
     sortAriaValue(sortColumnKey(column) === sortColumnKey(sortState.column), sortState.direction === "asc");
 
   return (
-    <tr>
-      <th aria-sort={ariaSortFor({ kind: "student" })}>
+    <TableRow>
+      <TableCell component="th" scope="col" aria-sort={ariaSortFor({ kind: "student" })}>
         <Button
           variant="text"
           size="small"
@@ -41,8 +42,8 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
         >
           Student <span>{sortLabel({ kind: "student" })}</span>
         </Button>
-      </th>
-      <th aria-sort={ariaSortFor({ kind: "files" })}>
+      </TableCell>
+      <TableCell component="th" scope="col" aria-sort={ariaSortFor({ kind: "files" })}>
         <Button
           variant="text"
           size="small"
@@ -51,9 +52,9 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
         >
           Files <span>{sortLabel({ kind: "files" })}</span>
         </Button>
-      </th>
+      </TableCell>
       {rubricAreaNames.map((area) => (
-        <th key={area} aria-sort={ariaSortFor({ kind: "rubric", area })}>
+        <TableCell component="th" scope="col" key={area} aria-sort={ariaSortFor({ kind: "rubric", area })}>
           <Button
             variant="text"
             size="small"
@@ -62,9 +63,9 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
           >
             {area} <span>{sortLabel({ kind: "rubric", area })}</span>
           </Button>
-        </th>
+        </TableCell>
       ))}
-      <th aria-sort={ariaSortFor({ kind: "total" })}>
+      <TableCell component="th" scope="col" aria-sort={ariaSortFor({ kind: "total" })}>
         <Button
           variant="text"
           size="small"
@@ -73,8 +74,8 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
         >
           Total <span>{sortLabel({ kind: "total" })}</span>
         </Button>
-      </th>
-      <th aria-sort={ariaSortFor({ kind: "overall" })}>
+      </TableCell>
+      <TableCell component="th" scope="col" aria-sort={ariaSortFor({ kind: "overall" })}>
         <Button
           variant="text"
           size="small"
@@ -83,8 +84,8 @@ export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sort
         >
           Feedback <span>{sortLabel({ kind: "overall" })}</span>
         </Button>
-      </th>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 

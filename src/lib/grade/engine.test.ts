@@ -445,3 +445,14 @@ it("threads the shortfall policy into both independently scored discussion axes"
   expect(mockCallLlm).toHaveBeenCalledTimes(2);
   for (const call of mockCallLlm.mock.calls) expect(JSON.stringify(call[0])).toContain("shortfall >= 25 words");
 });
+
+describe("gradeEntries evidence provenance", () => {
+  it("retains link evidence for graded and failed results", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+    const graded = await gradeEntries([entry({ linkFetch: "flagged" })], "Grade.", "Rubric.", "gemini");
+    expect(graded.results[0].linkFetch).toBe("flagged");
+    mockCallLlm.mockResolvedValueOnce({ ok: false, status: 500, body: "server error" });
+    const failed = await gradeEntries([entry({ linkFetch: "failed" })], "Grade.", "Rubric.", "gemini");
+    expect(failed.results[0].linkFetch).toBe("failed");
+  });
+});

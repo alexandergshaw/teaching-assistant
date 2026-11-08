@@ -255,6 +255,8 @@ function parseGradeResult(raw: unknown): GradeResult | null {
     gradedRepo,
     gradedRef,
     submissionTruncated,
+    evidenceProvenanceUnknown: raw.evidenceProvenanceUnknown !== false || (raw.submissionTruncated !== undefined && typeof raw.submissionTruncated !== "boolean"),
+    linkFetch: raw.linkFetch === "ok" || raw.linkFetch === "failed" || raw.linkFetch === "flagged" ? raw.linkFetch : raw.linkFetch === undefined ? undefined : "flagged" as "ok" | "failed" | "flagged" | undefined,
     determination,
   };
 

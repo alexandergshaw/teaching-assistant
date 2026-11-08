@@ -74,6 +74,7 @@ const ALL_GRADE_RESULT_FIELDS = [
   "gradedRepo",
   "gradedRef",
   "linkFetch",
+  "evidenceProvenanceUnknown",
   "submissionTruncated",
   "determination",
   "ungraded",
@@ -122,10 +123,6 @@ const _exhaustiveOutcomeCheck: MissingOutcomeFields extends never
 // silently - kept here as the one place all three DROP lists are visible
 // side by side.
 const DROPS_FILE_BYTES_AND_CODE_EXECUTION = new Set<keyof GradeResult>(["codeExecution"]);
-// BULK-ZIP BW3: linkFetch is a TRANSIENT per-run link-resolution outcome, read
-// only by the live ledger off the in-memory run. It is INTENTIONALLY dropped by
-// all three allowlists (drafts and persisted runs never carry it).
-const DROPS_TRANSIENT_LINK_FETCH = new Set<keyof GradeResult>(["linkFetch"]);
 // submittedFiles is always rebuilt (emptied, or re-mapped through its own
 // coercer) rather than value-compared below - see each describe block.
 
@@ -162,6 +159,7 @@ function gradedSentinel(): GradedResult {
     gradedRepo: "SENTINEL_gradedRepo",
     gradedRef: "SENTINEL_gradedRef",
     linkFetch: "failed",
+    evidenceProvenanceUnknown: true,
     submissionTruncated: true,
     determination: "no-submission",
   };
@@ -199,6 +197,7 @@ function ungradedSentinel(): UngradedResult {
     gradedRepo: "SENTINEL_gradedRepo",
     gradedRef: "SENTINEL_gradedRef",
     linkFetch: "failed",
+    evidenceProvenanceUnknown: true,
     submissionTruncated: true,
     determination: "no-submission",
     ungraded: {
@@ -276,10 +275,6 @@ describe("stripGradeResultForDraft (grading-review-rows.ts) carries every field 
         expect(stripped.codeExecution, `codeExecution should be dropped`).toBeUndefined();
         continue;
       }
-      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
-        expect(stripped.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
-        continue;
-      }
       if (field === "submittedFiles") {
         expect(stripped.submittedFiles, `submittedFiles should be emptied`).toEqual([]);
         continue;
@@ -309,10 +304,6 @@ describe("coerceGradeResult, via coerceGradingDraftPayload (grading-drafts.ts), 
         expect(result.codeExecution, `codeExecution should be dropped`).toBeUndefined();
         continue;
       }
-      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
-        expect(result.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
-        continue;
-      }
       if (field === "submittedFiles") {
         expect(result.submittedFiles, `submittedFiles should round-trip (minus rawBase64)`).toEqual(
           sentinel.submittedFiles
@@ -340,10 +331,6 @@ describe("parseGradeResult, via serializeGithubGradingRun/parseStoredGithubGradi
     for (const field of fieldsFor(sentinel)) {
       if (DROPS_FILE_BYTES_AND_CODE_EXECUTION.has(field)) {
         expect(result.codeExecution, `codeExecution should be dropped`).toBeUndefined();
-        continue;
-      }
-      if (DROPS_TRANSIENT_LINK_FETCH.has(field)) {
-        expect(result.linkFetch, `linkFetch is transient and should be dropped`).toBeUndefined();
         continue;
       }
       if (field === "submittedFiles") {
@@ -444,5 +431,31 @@ describe("parseGradingRun, via serializeGithubGradingRun/parseStoredGithubGradin
     for (const field of RUN_FIELDS_TO_COMPARE) {
       expect(run[field], `field "${field}" was not preserved by parseGradingRun`).toEqual(sentinel[field]);
     }
+  });
+});
+
+describe("legacy evidence provenance", () => {
+  it("treats old and malformed draft provenance as unknown", () => {
+    for (const value of [undefined, "invalid"]) {
+      const raw = { ...gradedSentinel(), evidenceProvenanceUnknown: value };
+      const payload = coerceGradingDraftPayload({ runs: [{ courseName: "C", assignmentName: "A", canvasUrl: "https://canvas.example.com", run: { results: [raw], rubricAreaNames: [], fullCreditChecklist: [] } }] });
+      expect(payload.runs[0].run.results[0].evidenceProvenanceUnknown).toBe(true);
+    }
+  });
+  it("does not treat malformed truncation evidence as complete even when the known marker is present", () => {
+    const raw = { ...gradedSentinel(), evidenceProvenanceUnknown: false, submissionTruncated: "invalid" };
+    const payload = coerceGradingDraftPayload({ runs: [{ courseName: "C", assignmentName: "A", canvasUrl: "https://canvas.example.com", run: { results: [raw], rubricAreaNames: [], fullCreditChecklist: [] } }] });
+    expect(payload.runs[0].run.results[0].evidenceProvenanceUnknown).toBe(true);
+    const json = serializeGithubGradingRun({ run: { results: [gradedSentinel()], rubricAreaNames: [], fullCreditChecklist: [] }, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [], undeterminedRepos: [] });
+    const stored = JSON.parse(json); stored.run.results[0].evidenceProvenanceUnknown = false; stored.run.results[0].submissionTruncated = "invalid";
+    expect(parseStoredGithubGradingRun(JSON.stringify(stored))?.run.results[0].evidenceProvenanceUnknown).toBe(true);
+  });  it("keeps newly saved complete provenance known and old saved provenance unknown", () => {
+    const json = serializeGithubGradingRun({ run: { results: [{ ...gradedSentinel(), evidenceProvenanceUnknown: false }], rubricAreaNames: [], fullCreditChecklist: [] }, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [], undeterminedRepos: [] });
+    expect(parseStoredGithubGradingRun(json)?.run.results[0].evidenceProvenanceUnknown).toBe(false);
+    const legacy = JSON.parse(json); delete legacy.run.results[0].evidenceProvenanceUnknown;
+    const restored = parseStoredGithubGradingRun(JSON.stringify(legacy))!;
+    expect(restored.run.results[0].evidenceProvenanceUnknown).toBe(true);
+    const resaved = serializeGithubGradingRun({ ...restored, run: restored.run });
+    expect(parseStoredGithubGradingRun(resaved)?.run.results[0].evidenceProvenanceUnknown).toBe(true);
   });
 });

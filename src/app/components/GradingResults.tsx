@@ -3,6 +3,7 @@
 import type { ReactNode, Ref } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
+import { Table, TableHead, TableBody, TableRow, TableCell } from "@mui/material";
 import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
@@ -58,6 +59,8 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // safe submodule) to keep this client bundle away from @/lib/grade's
 // server-only barrel.
 import { checkRowPostability } from "../../lib/grade/postable";
+import { evidencePostRefusal } from "../../lib/grade/evidence-review";
+import { IncompleteEvidenceReview } from "./grading-results/IncompleteEvidenceReview";
 import { decidePostOneClick, isPostOneArmed, postOneRowSignature, type PostOneArm } from "./grading-results/postOneArming";
 import { buildRowPostPayload } from "./grading-results/rowPostPayload";
 // A12/A13 (docs/a12-a13-scope.md): classifyRow gives a count-bound/deadline-
@@ -233,6 +236,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const identity = runResetKey(runKey, run);
   const [prevIdentity, setPrevIdentity] = useState<unknown>(identity);
   const [editsKeyUrl, setEditsKeyUrl] = useState(canvasUrl);
+  const [evidenceReview, setEvidenceReview] = useState<{ run: GradingRun; rows: ReadonlySet<GradeRow> }>(() => ({ run, rows: new Set() }));
+  const reviewedEvidence = useMemo(() => evidenceReview.run === run ? evidenceReview.rows : new Set<GradeRow>(), [evidenceReview, run]);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   // GR-POST-ONE-CONFIRM: which single row is armed to post (first post only).
@@ -373,7 +378,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     // overallComment) BEFORE it ever reaches the payload - never post the
     // grader's internal error text or raw model output to a student. Every
     // refusal carries its own reason, never dropped silently.
-    const refusals: Record<string, string> = {};
+    const refusals: Record<string, string> = Object.create(null);
     for (const r of gradableResults) {
       const edit = edits[r.student] ?? defaultRowEdit(r);
       const check = checkRowPostability({
@@ -381,13 +386,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         submittedScore: parseEarnedPoints(edit.total),
         submittedComment: edit.overall,
       });
-      if (!check.postable) refusals[r.student] = check.reason;
+      const evidenceRefusal = evidencePostRefusal(r, reviewedEvidence);
+      if (!check.postable || evidenceRefusal) refusals[r.student] = !check.postable ? check.reason : evidenceRefusal!;
     }
     const postableResults = gradableResults.filter((r) => !refusals[r.student]);
 
     if (postableResults.length === 0) {
       setPostStatus(() => {
-        const next: Record<string, PostState> = {};
+        const next: Record<string, PostState> = Object.create(null);
         for (const r of gradableResults) next[r.student] = { status: "skipped", message: refusals[r.student] };
         return next;
       });
@@ -402,7 +408,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setPosting(true);
     setPostSummary("");
     setPostStatus(() => {
-      const next: Record<string, PostState> = {};
+      const next: Record<string, PostState> = Object.create(null);
       for (const r of gradableResults) {
         next[r.student] = refusals[r.student] ? { status: "skipped", message: refusals[r.student] } : { status: "posting" };
       }
@@ -415,7 +421,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     if ("error" in result) {
       setPostSummary(result.error);
       setPostStatus(() => {
-        const next: Record<string, PostState> = {};
+        const next: Record<string, PostState> = Object.create(null);
         for (const r of gradableResults) {
           next[r.student] = refusals[r.student]
             ? { status: "skipped", message: refusals[r.student] }
@@ -431,7 +437,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     // never folded into "posted" just because it is absent from `failures`.
     const fanout = fanOutGradingPostResult(gradableResults, result);
     setPostStatus(() => {
-      const next: Record<string, PostState> = {};
+      const next: Record<string, PostState> = Object.create(null);
       for (const r of gradableResults) {
         next[r.student] = refusals[r.student]
           ? { status: "skipped", message: refusals[r.student] }
@@ -456,7 +462,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       failed: result.failures.length,
       skipped: result.skipped.length + Object.keys(refusals).length,
     };
-  }, [gradableResults, edits, canvasUrl, onPosted]);
+  }, [gradableResults, edits, canvasUrl, onPosted, reviewedEvidence]);
 
   // Expose post-all so the Live Feed pane's "Post & Next" can drive it.
   useImperativeHandle(ref, () => ({ postAll: (confirm = true) => handlePostGrades(confirm) }), [
@@ -468,6 +474,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const handlePostOne = async (row: GradeRow) => {
     if (typeof row.userId !== "number") return;
     const edit = edits[row.student] ?? defaultRowEdit(row);
+    const evidenceRefusal = evidencePostRefusal(row, reviewedEvidence);
+    if (evidenceRefusal) { setPostStatus((prev) => ({ ...prev, [row.student]: { status: "skipped", message: evidenceRefusal } })); return; }
     // A13 guard.
     const check = checkRowPostability({ producer: row, submittedScore: parseEarnedPoints(edit.total), submittedComment: edit.overall });
     if (!check.postable) {
@@ -631,9 +639,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           {filterQuery.trim() !== "" && (
             <p className={styles.fieldHint}>
               {`Showing ${visibleResults.length} of ${sortedResults.length} row${sortedResults.length === 1 ? "" : "s"}.`}{" "}
-              <button type="button" className={styles.linkButton} onClick={() => setFilterQuery("")}>
+              <Button type="button" variant="text" className={styles.linkButton} onClick={() => setFilterQuery("")}>
                 Clear
-              </button>
+              </Button>
             </p>
           )}
         </>
@@ -641,25 +649,25 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
 
       <p className={styles.fieldHint}>Scroll the table sideways for all criteria and actions.</p>
       <div className={`${styles.matrixWrap} ${layout.tableScroll}`} role="region" aria-label="Grading results table" tabIndex={0}>
-        <table className={styles.matrix}>
-          <thead>
+        <Table className={styles.matrix}>
+          <TableHead>
             <ResultsTableHeaderRow
               rubricAreaNames={run.rubricAreaNames}
               sortState={sortState}
               onSort={handleSort}
               sortLabel={sortLabel}
             />
-          </thead>
-          <tbody>
+          </TableHead>
+          <TableBody>
             {searchable && filterQuery.trim() !== "" && visibleResults.length === 0 && (
-              <tr>
-                <td colSpan={2 + run.rubricAreaNames.length + 2}>
+              <TableRow>
+                <TableCell colSpan={2 + run.rubricAreaNames.length + 2}>
                   {`No rows match "${filterQuery.trim()}". `}
-                  <button type="button" className={styles.linkButton} onClick={() => setFilterQuery("")}>
+                  <Button type="button" variant="text" className={styles.linkButton} onClick={() => setFilterQuery("")}>
                     Clear
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </TableCell>
+              </TableRow>
             )}
             {visibleResults.map((result) => {
               const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
@@ -673,14 +681,15 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               const ungradedRowLabel = describeUngradedRowLabel(ungradedState);
 
               return (
-                <tr key={`${result.student}-matrix`} data-ungraded-state={ungradedState}>
-                  <td>
+                <TableRow key={`${result.student}-matrix`} data-ungraded-state={ungradedState}>
+                  <TableCell>
                     <StudentNameCell
                       student={result.student}
                       ungradedRowLabel={ungradedRowLabel}
                       speedGraderHref={sgHref}
                       unresolved={unresolvedStudents?.has(result.student) ?? false}
                     />
+                    <IncompleteEvidenceReview row={result} reviewed={reviewedEvidence.has(result)} onChange={(value) => setEvidenceReview((previous) => { const next = new Set(previous.run === run ? previous.rows : []); if (value) next.add(result); else next.delete(result); return { run, rows: next }; })} />
                     {canPostRow && (
                       <div style={{ marginTop: "var(--space-1)" }}>
                         <Button
@@ -781,8 +790,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         </div>
                       );
                     })()}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <FilesCell
                       result={result}
                       filesRetained={filesRetained}
@@ -790,7 +799,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       onDownloadFile={handleDownloadFile}
                       onBrowseAll={setBrowseFilesFor}
                     />
-                  </td>
+                  </TableCell>
                   {run.rubricAreaNames.map((areaName) => {
                     const area = areaMap.get(areaName);
                     const areaEdit = area
@@ -809,7 +818,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         ? formatScorePercent(areaEdit.score)
                         : null;
                     return (
-                      <td key={`${result.student}-${areaName}`}>
+                      <TableCell key={`${result.student}-${areaName}`}>
                         {area && areaEdit ? (
                           <div className={styles.rubricAreaCell}>
                             <TextField
@@ -832,10 +841,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         ) : (
                           "-"
                         )}
-                      </td>
+                      </TableCell>
                     );
                   })}
-                  <td>
+                  <TableCell>
                     <TextField
                       size="small"
                       value={edit.total}
@@ -851,8 +860,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         },
                       }}
                     />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <RowFeedbackBoxes
                       student={result.student}
                       edit={edit}
@@ -861,12 +870,12 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       onChangeField={(field, value) => updateFeedbackField(result.student, field, value)}
                       onExpand={(field) => setExpandedBox({ student: result.student, field })}
                     />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {expandedBox && (
@@ -891,13 +900,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                 <p className={styles.previewMeta}>Student: {codeOutputStudent}</p>
                 <h3>Code execution{cr && !cr.error ? ` (${cr.language})` : ""}</h3>
               </div>
-              <button
+              <Button
                 type="button"
                 className={styles.previewCloseButton}
                 onClick={() => setCodeOutputStudent(null)}
               >
                 Close
-              </button>
+              </Button>
             </div>
             {!cr ? (
               <p className={styles.previewNotice}>No code was run for this submission.</p>

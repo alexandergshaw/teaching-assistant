@@ -4,7 +4,9 @@ export const MAX_ENTRY_CONTENT_CHARS = 2_000_000;
 
 function clampEntryContent(entry: StudentSubmissionEntry): StudentSubmissionEntry {
   if (entry.content.length <= MAX_ENTRY_CONTENT_CHARS) return entry;
-  return { ...entry, content: entry.content.slice(0, MAX_ENTRY_CONTENT_CHARS) };
+  return { ...entry, content: entry.content.slice(0, MAX_ENTRY_CONTENT_CHARS),
+    linkFetch: entry.linkFetch === "failed" ? "failed" : "flagged",
+    repoReadNote: [entry.repoReadNote, "Linked submission content exceeded the intake limit and was truncated."].filter(Boolean).join(" ") };
 }
 
 export function withLinkNote(entry: StudentSubmissionEntry, linkFetch: "failed" | "flagged", repoReadNote: string): StudentSubmissionEntry {

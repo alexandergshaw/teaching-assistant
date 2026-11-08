@@ -308,6 +308,8 @@ interface GradeResultBase {
   // for every submission that carried no link. Stamped by the grade-run-item
   // route from the resolved entry; BW4's ledger reads it.
   linkFetch?: LinkFetchOutcome;
+  // Legacy saved results may have lost link evidence before it was persisted.
+  evidenceProvenanceUnknown?: boolean;
   // True when this submission's merged content exceeded the per-submission
   // character cap (GRADE_MAX_CHARS_PER_SUBMISSION / getGeminiMaxCharsPerSubmission
   // in ../gemini) and was cut down before being sent to the model - see

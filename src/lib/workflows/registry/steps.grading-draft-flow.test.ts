@@ -22,6 +22,7 @@ import {
   listGradingQueueAction,
   gradeAction,
   saveGradingDraftAction,
+  postCanvasGradesAction,
 } from "@/app/actions";
 import { gradingDraftFlowSteps } from "./steps.grading-draft-flow";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
@@ -143,5 +144,19 @@ describe("grade-to-draft: A35 - the per-row summary line reports graded work, no
     // which includes Bob's never-attempted row. It must report 1, the graded count.
     const digit = line?.match(/graded (\d+) submission/)?.[1];
     expect(digit).toBe("1");
+  });
+});
+
+describe("post-grades evidence guard", () => {
+  it("skips incomplete or unknown rows even if the workflow input asserts approval", async () => {
+    const post = vi.mocked(postCanvasGradesAction); post.mockReset().mockResolvedValue({ posted: 1, failures: [], skipped: [] });
+    const run = { rubricAreaNames: [], fullCreditChecklist: [], results: [
+      { ...makeGradedResult("Alice"), userId: 1, linkFetch: "failed" },
+      { ...makeGradedResult("Bob"), userId: 2, evidenceProvenanceUnknown: true },
+      { ...makeGradedResult("Carol"), userId: 3, linkFetch: "ok" },
+    ] };
+    const result = await gradingDraftFlowSteps.find((s) => s.type === "post-grades")!.run({ runs: [{ courseName: "Course", assignmentName: "Assignment", canvasUrl: "https://canvas.test", run }], approvedGrades: run.results.map((r, index) => ({ student: r.student, runIndex: "0", resultIndex: String(index), grade: "9", evidenceReviewed: "true" })) }, testHelpers(), () => {});
+    expect(post).toHaveBeenCalledOnce(); expect(post.mock.calls[0][1]).toEqual([expect.objectContaining({ userId: 3 })]);
+    expect(result.summary?.kind === "list" ? result.summary.items.join(" ") : "").toContain("Review before posting");
   });
 });

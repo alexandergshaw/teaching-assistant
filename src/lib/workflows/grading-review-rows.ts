@@ -79,6 +79,8 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // compensating re-attachment of its own - should see the same fact a
     // restored run does.
     submissionTruncated: result.submissionTruncated,
+    linkFetch: result.linkFetch,
+    evidenceProvenanceUnknown: result.evidenceProvenanceUnknown ?? false,
   };
   if (isUngraded(result)) {
     return { ...shared, ungraded: result.ungraded };

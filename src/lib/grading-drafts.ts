@@ -144,6 +144,8 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     // idiom as the fields above: wrong type or absent both default to
     // undefined.
     submissionTruncated: typeof o.submissionTruncated === "boolean" ? o.submissionTruncated : undefined,
+    evidenceProvenanceUnknown: o.evidenceProvenanceUnknown !== false || (o.submissionTruncated !== undefined && typeof o.submissionTruncated !== "boolean"),
+    linkFetch: o.linkFetch === "ok" || o.linkFetch === "failed" || o.linkFetch === "flagged" ? o.linkFetch : o.linkFetch === undefined ? undefined : "flagged" as "ok" | "failed" | "flagged" | undefined,
   };
 
   // N13a Ruling 3: userId and ungraded cannot both live on one object

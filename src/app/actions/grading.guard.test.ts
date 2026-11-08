@@ -381,6 +381,13 @@ describe("grading.ts permissive sites stay requireUser()", () => {
     expect(result).not.toEqual(OWNER_ONLY_ERROR);
   });
 
+  it("postGradingDraftAction keeps incomplete and unknown evidence out of Canvas and the draft pending", async () => {
+    const base = { student: "Alice", userId: 1, totalScore: "9/10", overallComment: "Good", rubricAreas: [], submittedFiles: [], mergedFileCount: 1 };
+    vi.mocked(getGradingDraft).mockResolvedValue({ payload: { runs: [{ canvasUrl: "https://canvas.test/courses/1/assignments/2", run: { results: [{ ...base, linkFetch: "failed" }, { ...base, student: "Bob", userId: 2, evidenceProvenanceUnknown: true }], rubricAreaNames: [], fullCreditChecklist: [] } }] } } as never);
+    const result = await postGradingDraftAction("draft-1");
+    expect(result).toEqual({ posted: 0, failed: 0, skipped: 2, attempted: 0 });
+    expect(postCanvasGrades).not.toHaveBeenCalled(); expect(markGradingDraftReviewed).not.toHaveBeenCalled();
+  });
   it("pullSubmissionAction admits an active, signed-in non-owner - Canvas reach is contained by resolveCanvasCredential", async () => {
     const result = await pullSubmissionAction("ABC123", "1", "2", 3);
     expect(result).not.toEqual(OWNER_ONLY_ERROR);

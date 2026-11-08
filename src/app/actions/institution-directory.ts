@@ -18,13 +18,9 @@ import {
   saveInstitutionDirectoryValue,
 } from "@/lib/institution-directory-storage";
 
-async function authorizedDirectoryUser() {
-  try { return await requireUser(); } catch { return null; }
-}
-
 export async function listInstitutionDirectoryAction() {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     const state = await listInstitutionDirectory(createServiceClient(), user.id);
     return { ok: true as const, state };
@@ -35,7 +31,7 @@ export async function listInstitutionDirectoryAction() {
 
 export async function saveInstitutionDirectoryProfileAction(input: unknown, mode: "create" | "update") {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     if (mode !== "create" && mode !== "update") return { ok: false as const, code: "invalid-profile" as const };
     const supabase = createServiceClient();
@@ -68,7 +64,7 @@ export async function saveInstitutionDirectoryProfileAction(input: unknown, mode
 
 export async function removeInstitutionDirectoryProfileAction(rawAcronym: string) {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     const acronym = normalizeInstitutionAcronym(rawAcronym);
     if (!/^[A-Z0-9][A-Z0-9_-]{0,19}$/.test(acronym)) return { ok: false as const, code: "invalid-acronym" as const };
@@ -84,7 +80,7 @@ export async function removeInstitutionDirectoryProfileAction(rawAcronym: string
 
 export async function saveInstitutionDirectoryColumnAction(input: unknown) {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     if (containsInstitutionCredentialProperties(input) || !input || typeof input !== "object" || Array.isArray(input)) {
       return { ok: false as const, code: "invalid-column" as const };
@@ -109,7 +105,7 @@ export async function saveInstitutionDirectoryColumnAction(input: unknown) {
 
 export async function saveInstitutionDirectoryValueAction(input: unknown) {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     if (!input || typeof input !== "object" || Array.isArray(input) || containsInstitutionCredentialProperties(input)) {
       return { ok: false as const, code: "invalid-value" as const };
@@ -134,7 +130,7 @@ export async function saveInstitutionDirectoryValueAction(input: unknown) {
 
 export async function removeInstitutionDirectoryColumnAction(id: string) {
   try {
-    const user = await authorizedDirectoryUser();
+    const user = await requireUser().catch(() => null);
     if (!user) return { ok: false as const, code: "unauthenticated" as const };
     if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false as const, code: "invalid-column" as const };
     const supabase = createServiceClient();

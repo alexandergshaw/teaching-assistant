@@ -40,13 +40,9 @@ function isRequest(value: unknown): value is { id: number; courseId: string; fol
   return !!owner && !!name && extra === undefined && validateGithubOwnerRepo(owner, name);
 }
 
-async function ownerId(expectedAccountId: unknown) {
-  const owner = await requireAppOwner().catch(() => null);
-  return owner && owner.id === expectedAccountId && repoGradeDurableStartupAvailable() ? owner.id : null;
-}
-
 export async function readRepoGradeTargetRequestsAction(expectedAccountId: unknown) {
-  const accountId = await ownerId(expectedAccountId);
+  const owner = await requireAppOwner().catch(() => null);
+  const accountId = owner && owner.id === expectedAccountId && repoGradeDurableStartupAvailable() ? owner.id : null;
   if (!accountId) return { status: "unavailable" } as const;
   try {
     const { data, error } = await createServiceClient().rpc("repo_grade_target_request_status", { p_user_id: accountId }).retry(false).abortSignal(AbortSignal.timeout(10_000));
@@ -58,7 +54,8 @@ export async function readRepoGradeTargetRequestsAction(expectedAccountId: unkno
 }
 
 export async function controlRepoGradeTargetRequestAction(expectedAccountId: unknown, id: unknown, action: unknown) {
-  const accountId = await ownerId(expectedAccountId);
+  const owner = await requireAppOwner().catch(() => null);
+  const accountId = owner && owner.id === expectedAccountId && repoGradeDurableStartupAvailable() ? owner.id : null;
   if (!accountId || typeof id !== "number" || !Number.isSafeInteger(id) || id < 1
     || (action !== "pause" && action !== "resume" && action !== "stop")) return { status: "unavailable" } as const;
   try {

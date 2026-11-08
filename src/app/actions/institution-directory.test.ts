@@ -17,7 +17,7 @@ vi.mock("@/lib/institution-directory-storage", () => ({
   removeInstitutionDirectoryColumn: vi.fn(),
 }));
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getAppUser, ensureAppUser, type AppUserRow } from "@/lib/supabase/app-users";
 import {
   listInstitutionDirectory,
@@ -88,7 +88,16 @@ describe("institution directory server actions", () => {
 
   it("runs the real requireUser guard and refuses an unsigned session before storage", async () => {
     vi.mocked(createClient).mockResolvedValue(fakeAuthClient(false) as never);
-    expect(await listInstitutionDirectoryAction()).toEqual({ ok: false, code: "unauthenticated" });
+    const calls = [
+      () => listInstitutionDirectoryAction(),
+      () => saveInstitutionDirectoryProfileAction({}, "create"),
+      () => removeInstitutionDirectoryProfileAction("WWU"),
+      () => saveInstitutionDirectoryColumnAction({}),
+      () => saveInstitutionDirectoryValueAction({}),
+      () => removeInstitutionDirectoryColumnAction("column-a"),
+    ];
+    for (const call of calls) expect(await call()).toEqual({ ok: false, code: "unauthenticated" });
+    expect(createServiceClient).not.toHaveBeenCalled();
     expect(listInstitutionDirectory).not.toHaveBeenCalled();
   });
 

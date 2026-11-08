@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ owner: vi.fn(), rpc: vi.fn(), client: vi.fn() }));
 vi.mock("@/lib/supabase/auth", () => ({ requireAppOwner: mocks.owner }));
 vi.mock("@/lib/repo-grades-dashboard/admission-mode", () => ({ repoGradeDurableStartupAvailable: () => true }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc: mocks.rpc }) }));
+vi.mock("@/lib/supabase/server", () => ({ createServiceClient: mocks.client }));
 import { controlRepoGradeTargetRequestAction, readRepoGradeTargetRequestsAction } from "./repo-grade-target-request";
 
 const owner = "11111111-1111-4111-8111-111111111111";
@@ -14,12 +14,23 @@ function respond(data: unknown, error: unknown = null) {
 }
 
 describe("targeted grading queue controls", () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.owner.mockResolvedValue({ id: owner }); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.owner.mockResolvedValue({ id: owner }); mocks.client.mockReturnValue({ rpc: mocks.rpc }); });
 
   it("rejects foreign owners and malformed controls before reaching storage", async () => {
     expect(await controlRepoGradeTargetRequestAction("foreign", 1, "stop")).toEqual({ status: "unavailable" });
     expect(await controlRepoGradeTargetRequestAction(owner, -1, "stop")).toEqual({ status: "unavailable" });
     expect(await controlRepoGradeTargetRequestAction(owner, 1, "delete")).toEqual({ status: "unavailable" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-owner and a mismatched owner before either RPC", async () => {
+    mocks.owner.mockRejectedValue(new Error("not owner"));
+    expect(await readRepoGradeTargetRequestsAction(owner)).toEqual({ status: "unavailable" });
+    expect(await controlRepoGradeTargetRequestAction(owner, 1, "stop")).toEqual({ status: "unavailable" });
+    mocks.owner.mockResolvedValue({ id: owner });
+    expect(await readRepoGradeTargetRequestsAction("foreign")).toEqual({ status: "unavailable" });
+    expect(await controlRepoGradeTargetRequestAction("foreign", 1, "stop")).toEqual({ status: "unavailable" });
+    expect(mocks.client).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 

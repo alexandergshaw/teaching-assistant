@@ -20,6 +20,13 @@ const success = (value: unknown) => ({ ok: true as const, status: 200, headers: 
 beforeEach(() => { fetchMock.mockReset(); vi.mocked(callLlm).mockReset(); });
 
 describe("Canvas omitted video intake", () => {
+  it("requests the bounded attachment allowance for an eligible video", async () => {
+    fetchMock.mockResolvedValueOnce(success([{ user_id: 1, workflow_state: "submitted", user: { name: "Student" }, attachments: [{ filename: "demo.mp4", url: "https://test.instructure.com/file" }] }]));
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, headers: {}, body: Buffer.alloc(6 * 1024 * 1024) });
+    const [student] = await fetchAssignment("https://test.instructure.com", "token", institution, "1", "1");
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ responseByteLimit: 15 * 1024 * 1024 });
+    expect(student.files[0].name).toBe("demo.mp4");
+  });
   it.each(["gif", "bmp"])("marks unsupported %s image evidence even if Canvas labels it PNG", async (ext) => {
     const entry = await canvasWorkToEntry({ student: "Student", userId: 1, text: "answer", files: [{ name: `image.${ext}`, mimeType: "image/png", base64: "AAAA" }], contributionCount: 1 });
     expect(entry.submittedFiles).toContainEqual(expect.objectContaining({ name: `image.${ext}`, mimeType: "application/x-canvas-attachment-unreadable" }));

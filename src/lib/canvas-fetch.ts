@@ -148,6 +148,8 @@ export interface CanvasFetchInit {
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string | Buffer;
   readonly timeoutMs?: number;
+  /** Caller-specific bounded body allowance, capped at MAX_ATTACHMENT_RESPONSE_BYTES. */
+  readonly responseByteLimit?: number;
 }
 
 /**
@@ -186,6 +188,7 @@ export const MAX_REDIRECT_HOPS = 3;
  * stream. Exported for the same reason as `MAX_REDIRECT_HOPS` above.
  */
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENT_RESPONSE_BYTES = 15 * 1024 * 1024;
 
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 
@@ -449,7 +452,9 @@ function performRequest(
             return;
           }
           received += chunk.length;
-          if (received > MAX_RESPONSE_BYTES) {
+          const limit = Number.isSafeInteger(init.responseByteLimit) && init.responseByteLimit! > 0
+            ? Math.min(init.responseByteLimit!, MAX_ATTACHMENT_RESPONSE_BYTES) : MAX_RESPONSE_BYTES;
+          if (received > limit) {
             res.destroy();
             req.destroy();
             settle({ kind: "network-error", facts: { phase: "body", code: "BYTE_CAP" } });

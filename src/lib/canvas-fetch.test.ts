@@ -25,7 +25,7 @@ vi.mock("node:https", () => ({
 import { promises as dnsPromises } from "node:dns";
 import type { LookupAddress } from "node:dns";
 import * as https from "node:https";
-import { canvasFetch, MAX_REDIRECT_HOPS, MAX_RESPONSE_BYTES } from "./canvas-fetch";
+import { canvasFetch, MAX_REDIRECT_HOPS, MAX_RESPONSE_BYTES, MAX_ATTACHMENT_RESPONSE_BYTES } from "./canvas-fetch";
 
 /**
  * `dns.promises.lookup` is overloaded (a single-address form and an
@@ -357,6 +357,37 @@ describe("canvasFetch - redirects (step 4)", () => {
 });
 
 describe("canvasFetch - the byte cap (step 5)", () => {
+  it("allows an attachment above the default cap with an explicit bounded allowance", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    requestMock.mockImplementation((_options, callback) => {
+      const req = new FakeClientRequest();
+      queueMicrotask(() => {
+        const res = new FakeIncomingMessage(200, {});
+        (callback as (res: unknown) => void)(res);
+        res.emit("data", Buffer.alloc(MAX_RESPONSE_BYTES + 1));
+        res.emit("end");
+      });
+      return req as unknown as ReturnType<typeof https.request>;
+    });
+    const result = await canvasFetch("https://canvas.example.edu/file", { responseByteLimit: MAX_ATTACHMENT_RESPONSE_BYTES }, credential);
+    expect(result.ok && result.body.length).toBe(MAX_RESPONSE_BYTES + 1);
+  });
+  it("clamps even an excessive requested allowance and destroys the response", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    let req: FakeClientRequest | undefined;
+    requestMock.mockImplementation((_options, callback) => {
+      req = new FakeClientRequest();
+      queueMicrotask(() => {
+        const res = new FakeIncomingMessage(200, {});
+        (callback as (res: unknown) => void)(res);
+        res.emit("data", Buffer.alloc(MAX_ATTACHMENT_RESPONSE_BYTES + 1));
+      });
+      return req as unknown as ReturnType<typeof https.request>;
+    });
+    const result = await canvasFetch("https://canvas.example.edu/file", { responseByteLimit: Number.MAX_SAFE_INTEGER, timeoutMs: 20 }, credential);
+    expect(result).toMatchObject({ ok: false, kind: "unreachable", failure: { code: "BYTE_CAP" } });
+    expect(req?.destroyed).toBe(true);
+  });
   it("aborts and reports unreachable once the response exceeds the byte cap, before it is ever parsed", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     let destroyedReq: FakeClientRequest | undefined;

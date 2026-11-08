@@ -141,7 +141,7 @@ export async function fetchAssignment(
         // malformed attachment URL throws here and is caught below, skipping
         // just that attachment rather than the whole fetch.
         const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
-        const fileRes = await canvasGet(safeAttachmentUrl, token);
+        const fileRes = await canvasGet(safeAttachmentUrl, token, MAX_ATTACHMENT_BYTES);
         if (!fileRes.ok) { noteOmittedCanvasAttachment(omittedVideos, omittedAttachments, attachment, "download failed"); continue; }
         const buffer = await fileRes.arrayBuffer();
         if (buffer.byteLength > MAX_ATTACHMENT_BYTES) { noteOmittedCanvasAttachment(omittedVideos, omittedAttachments, attachment, "attachment exceeds the download size limit"); continue; }

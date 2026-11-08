@@ -151,7 +151,7 @@ export function canvasFetchResultToResponse(result: CanvasFetchResult): Response
  * `fetch` rather than being routed through here. */
 export async function canvasRequest(
   url: string,
-  init: { method?: string; headers?: Readonly<Record<string, string>>; body?: string },
+  init: { method?: string; headers?: Readonly<Record<string, string>>; body?: string; responseByteLimit?: number },
   token: string
 ): Promise<Response> {
   const result = await canvasFetch(url, init, { token });
@@ -159,6 +159,6 @@ export async function canvasRequest(
 }
 
 /** `canvasRequest` with no method/headers/body - the common bearer-carrying GET. */
-export async function canvasGet(url: string, token: string): Promise<Response> {
-  return canvasRequest(url, {}, token);
+export async function canvasGet(url: string, token: string, responseByteLimit?: number): Promise<Response> {
+  return canvasRequest(url, responseByteLimit === undefined ? {} : { responseByteLimit }, token);
 }

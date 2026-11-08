@@ -366,8 +366,15 @@ describe("the merged tabs are one navigation level deep", () => {
       const at = slice.indexOf(guard);
       expect(at, `page.tsx has no '${guard}' render branch, so that Automate sub-view is a blank pane`).toBeGreaterThan(-1);
       expect(slice.indexOf(components[view], at), `the ${view} branch does not render ${components[view]}`).toBeGreaterThan(at);
-      // Exactly one mount site per surface: a mirror would paint it twice.
-      expect(slice.split(components[view]).length - 1).toBe(1);
+      // Auto Build owns a second, independently hidden workflow runner.
+      // The Automate view itself must still have exactly one plain mount.
+      if (view === "workflows") {
+        expect(slice).toMatch(/manualView === "artifact-design" && automateView === "workflows"\s*&&\s*<WorkflowsTab\s*\/>/);
+        expect(slice.match(/<WorkflowsTab\s*\/>/g)).toHaveLength(1);
+        expect(slice.match(/<WorkflowsTab\s+autoBuild\s*\/>/g)).toHaveLength(1);
+      } else {
+        expect(slice.split(components[view]).length - 1).toBe(1);
+      }
     }
     // The three sub-views are registered with the same members the branches cover.
     expect(Object.keys(components).sort()).toEqual([...AUTOMATE_VIEWS].sort());

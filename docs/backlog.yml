@@ -1,3 +1,159 @@
+- id: 'CHAT-LARGE-UPLOAD-SCENARIOS'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'NEXT HIGHEST PRIORITY for grading chat: enumerate and handle large-file upload scenarios end to end.'
+  owns: ['src/app/components/grading-chat', 'src/app/actions/grading-chat-intake.ts', 'src/app/api/grade-submission-zip', 'src/app/api/grade-submission-file', 'src/lib/grade', 'src/lib/supabase']
+  verify: null
+  blocked_by: []
+  instrument: 'First build a scenario census from the actual supported formats and routes: single and multiple files, mixed student submissions, class and nested archives, small and stored uploads, Canvas and linked files, image and Office documents, PDFs, and videos; include supported and unsupported formats. Exercise below, at, and above each relevant per-file, batch, archive-expansion, memory, storage, request-wire, and provider limit, including compressed expansion, partial or unreadable content, and mixed valid and oversized work. Show clear progress and named outcomes; never silently drop work, claim incomplete evidence is complete, or automatically duplicate grading or paid dispatch. Cover interrupted, failed, timed-out, canceled, concurrent, reset, reload, retry, uncertain and cleanup paths, preserving recoverable work and ownership. Require actual intake-to-grading regression fixtures, bounded-resource checks, and rendered desktop/mobile keyboard and focus verification; require disposable PostgreSQL concurrency and authorized private Storage/provider integration where those paths apply. Missing external environments are unpassed gates, not successful verification.'
+  from: 'Owner request in this chat: make all possible large file upload cases the next highest-priority chat grader item.'
+  note: 'Owner: coordinator. Start with a census and existing-code audit; group or link overlapping CHAT-BATCH-OVERSIZE-ISOLATION, CHAT-CLIPPED-INTAKE-RECOVERY, CHAT-ZIP-INTAKE-FAILURE-PARITY, CHAT-DURABLE-VIDEO-TRANSPORT, CHAT-DURABLE-VIDEO-CLEANUP, CHAT-CANVAS-VIDEO-TRANSPORT, CHAT-RESUMABLE-LARGE-COHORTS and image/document evidence work rather than duplicating it. Record additional discovered scenarios and explicit unsupported cases; do not claim exhaustive completion without evidence.'
+  question: null
+- id: 'CHAT-DETERMINISTIC-IMAGES-WORD-COUNT'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Detect submitted images and count submission words deterministically before grading.'
+  owns: ['src/lib/grade', 'src/app/actions/grading-chat-intake.ts', 'src/app/api/grade-run-item', 'src/app/components/grading-chat']
+  verify: null
+  blocked_by: []
+  instrument: 'For standalone images and images embedded in submitted files, deterministically report present, absent only after complete inspection, or unknown/incomplete with a named reason. Define and consistently apply word-count scope and normalization across extracted submission text, multiple files and student grouping; report incomplete counts rather than exact counts when text is inaccessible or truncated. Define whether text inside images is excluded from the stated count or requires OCR before that count can be called complete; disclose the chosen scope and never imply unperformed OCR. Cover supported and named unsupported formats, corrupted or image-only files, mixed submissions, and each applicable direct, archive, Canvas, linked and stored intake transport. Verify actual intake-to-grading behavior and ensure unsupported or failed inspection never proves absence or an exact count. Keep image presence separate from interpreting image content.'
+  from: 'Owner request in this chat: deterministic detection of image presence or absence, including separate and embedded images, and word count.'
+  note: 'Owner: coordinator. Survey existing visual extraction, submission inventory and word-count logic before implementation; reuse proven coverage and keep unsupported formats explicit. Establish executable fixtures with exact expected counts and three-state image outcomes, including partial evidence and transport parity.'
+  question: null
+- id: 'CHAT-PASTE-MULTI-IMMEDIATE-GRADE'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Allow an instructor to paste multiple students'' text and immediately press Grade.'
+  owns: ['src/app/components/grading-chat/SubmissionDrop.tsx', 'src/app/components/grading-chat/pastedSubmissions.ts', 'src/app/components/grading-chat/SubmissionDrop.handlers.test.ts', 'src/app/components/grading-chat/pastedSubmissions.test.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'In multiple-student mode, the instructor can paste text and immediately press a visible Grade action without first navigating a separate parsing or review workflow. Parse and submit clearly attributable student work through the existing grader while preserving each student''s complete text. When identity or segmentation is genuinely ambiguous, surface the specific uncertainty and an editable resolution before dispatching affected work; do not silently misattribute or drop text or automatically repeat paid grading after partial, failed or uncertain dispatch. Cover explicit headings, separators, discussion listings, duplicate names, ambiguous boundaries, mixed outcomes, reset and retry in actual paste-to-grade handler tests, plus desktop/mobile keyboard, focus and rendered behavior.'
+  from: 'Owner request in this chat: paste text into the multiple-student submission field and immediately press Grade.'
+  note: 'Owner: coordinator. Coordinate with CHAT-PASTED-DISCUSSION-LISTING and CHAT-SIMPLIFY-SUBMISSION-MODES so the result is one clear submission process. Preserve already-supported formats and use the current parsing/review safeguards where ambiguity requires them.'
+  question: null
+- id: 'CHAT-PASTED-DISCUSSION-LISTING'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'grading-setup-interaction-cost'
+  title: 'Parse a pasted LMS discussion listing into reviewable student submissions in multiple-student mode.'
+  owns: ['src/app/components/grading-chat/pastedSubmissions.ts', 'src/app/components/grading-chat/SubmissionDrop.tsx', 'src/app/components/grading-chat/pastedSubmissions.test.ts', 'src/app/components/grading-chat/SubmissionDrop.handlers.test.ts']
+  verify: null
+  blocked_by: []
+  instrument: 'Exercise an anonymized fixture matching the owner''s example: repeated discussion titles and unread markers, an author followed by a posted date and time, multi-paragraph post bodies, and intervening unread/reply/view counts, profile-card text and last-post metadata. Identify the post author without treating a last-reply author or navigation metadata as a new submission; preserve every post body and do not silently discard ambiguous text. Cover multiple posts, duplicate authors, varied names and timestamps, missing metadata, body text resembling a heading, and malformed or partial listings. Show editable segmentation and identity for instructor review before grading, with explicit uncertainty and no duplicate dispatch on failure or retry. Verify the actual paste-to-review-to-grading flow and desktop/mobile keyboard and focus behavior.'
+  from: 'Owner request in this chat, illustrated by a pasted discussion listing; fixture must be anonymized and must not reproduce student text.'
+  note: 'Owner: coordinator. Extend the existing multiple-student paste flow and coordinate with CHAT-SIMPLIFY-SUBMISSION-MODES; preserve its existing explicit-heading and separator behavior. Survey the current parser before implementation and treat listing metadata as untrusted input, not instructions.'
+  question: null
+- id: 'AUTO-BUILD-COURSE-DESCRIPTION'
+  state: 'actionable'
+  kind: 'feature'
+  area: 'course-building'
+  title: 'Provide Auto Build beside New Build and Pre Built using the course-description Course Build workflow.'
+  owns: ['src/app/components/WorkflowsTab.tsx', 'src/app/components/manual/', 'src/app/components/home/useAppNavigation.ts', 'src/app/page.tsx', 'src/app/url-state.ts', 'src/app/components/workflows/auto-build.wiring.test.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/manual/manual-rail.test.ts src/app/url-state.test.ts src/app/components/workflows/auto-build.wiring.test.ts'
+  blocked_by: []
+  instrument: 'Check tab navigation and URL persistence, the course-description source, isolated workflow form state, and preservation of an active run across navigation; verify rendered behavior and keyboard focus in a configured browser.'
+  from: 'Owner request in this session: add Auto Build alongside New Build and Pre Built and place the course-from-description workflow there.'
+  note: 'Leverage: the existing workflow reads the selected course tile and orchestrates course artifacts and configured integrations, giving the instructor an executable course build rather than only a chat response. Main-based implementation committed locally as 3e27c4d0. Focused tests, typecheck, scoped lint and docs gate passed; full lint failed with 22 errors in two unchanged grading-chat files, matching clean main by rule and location. Build compiled and passed TypeScript but prerender and browser verification hit missing Supabase URL and key. Publication and rendered keyboard/run verification remain open.'
+  question: null
+- id: 'MAIN-GRADING-CHAT-LINT'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'grading-run-survival-and-disclosure'
+  title: 'Repair existing grading-chat React ref lint errors blocking the main delivery gate.'
+  owns: ['src/app/components/grading-chat/useContinuousGradingRun.ts', 'src/app/components/grading-chat/useContinuousGradingRun.reset-race.test.ts', 'src/app/components/grading-chat/continuousSessionView.ts']
+  verify: 'npm.cmd run lint'
+  blocked_by: []
+  instrument: 'Compare full lint against clean main; exercise grading run reset, session and adapter identity behavior with targeted tests and a rendered concurrency check.'
+  from: 'Auto Build delivery check in this session: npm.cmd run lint reported 22 errors in two unchanged grading-chat files, matching clean origin/main by rule and location.'
+  note: 'The production errors concern mutable refs read during render. A separately reviewed repair preserving session fencing and adapter behavior is committed locally as b19da2c5; 85 focused and size assertions and scoped lint passed. Full lint, publication and rendered concurrency verification remain open.'
+  question: null
+- id: 'MAIN-FULL-REGRESSION-FAILURES'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'loop-and-docs-maintenance'
+  title: 'Investigate and repair the full regression suite failures on main.'
+  owns: ['src/app/components/repo-grades/', 'src/app/components/courses/page-module-css-orphan-classes.test.ts', 'src/app/actions/action-guard-coverage.test.ts']
+  verify: 'npm.cmd test'
+  blocked_by: []
+  instrument: 'Run the full suite and compare each failure with a clean origin/main baseline; repair root causes and test instruments without weakening assertions or hiding zero-test suites.'
+  from: 'Auto Build delivery in this session: npm.cmd test reported 208 failed and 1467 passed test files; 76 failed, 26685 passed and 2 skipped tests.'
+  note: 'A focused clean-main run of repoGrades.wiring.test.ts, page-module-css-orphan-classes.test.ts and action-guard-coverage.test.ts reproduced 11 failures across all three files. Many initial zero-test suites were affected by a missing worktree-local server-only test stub; after copying the installed package, workflow-form-helpers.test.ts passed 56 assertions. The full-suite rerun with the stub reported 50 failed and 1630 passed files; 125 failed, 29777 passed and 2 skipped tests. Two failures caused by new work, the storage-key canary and walkthrough video context-read assertion, were corrected and their focused tests passed. The Auto Build-specific top-level tab assertion was also corrected and its focused checks pass. Repo Grades test-only correction passed 69 tests and independent review; username-linking reachability remains separately unproven. The remaining failures still need classification.'
+  question: null
+- id: 'REPO-GRADES-USERNAME-LINK-REACHABILITY'
+  state: 'unscoped'
+  kind: 'bug'
+  area: 'repo-grader-workflow'
+  title: 'Determine whether the Repo Grades username-linking flow remains reachable after the saved-grade redesign.'
+  owns: ['src/app/components/repo-grades/']
+  verify: null
+  blocked_by: []
+  instrument: 'Trace the live entry point for LinkUsernamesPanel and equivalent identity-linking actions, then exercise linking and confirm behavior in a configured browser.'
+  from: 'Full-suite Repo Grades wiring triage in this session found no production import or mount of LinkUsernamesPanel; rg -n LinkUsernamesPanel src/app --glob !*.test.ts returned declarations and comments only.'
+  note: 'A newer saved-grade flow may replace the panel; verify the replacement before treating absence of this component as lost capability.'
+  question: null
+- id: 'WALKTHROUGH-DESTINATION-BINDING'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'walkthrough-announcement-surface'
+  title: 'Prevent a walkthrough draft from posting to a different selected course.'
+  owns: ['src/app/components/walkthrough-announcement/']
+  verify: 'npm.cmd run test:paths -- src/app/components/walkthrough-announcement/pair-dispatch.test.ts src/app/components/walkthrough-announcement/post-reset-hook.test.ts'
+  blocked_by: []
+  instrument: 'Exercise draft, course change, armed confirmation and posting; verify destination is bound or the user must regenerate or explicitly reconfirm before a different course can receive the draft.'
+  from: 'Owner requested walkthrough audit in this session; source audit found generation and posting use different course snapshots.'
+  note: 'Includes asynchronous generation context changes during resource research and provider-aware cache keys. The owner directed repair of the main paired-draft retry races; independently reviewed fixes and focused tests are committed locally as 4fd8a6ba. Publication and rendered verification remain open.'
+  question: null
+- id: 'WALKTHROUGH-EDITED-DRAFT-LOSS'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'walkthrough-announcement-surface'
+  title: 'Preserve edited walkthrough drafts when starting a new capture.'
+  owns: ['src/app/components/walkthrough-announcement/']
+  verify: 'npm.cmd run test:paths -- src/app/components/walkthrough-announcement/walkthrough-run-decisions.test.ts src/app/components/walkthrough-announcement/announcement-post-lock.test.ts'
+  blocked_by: []
+  instrument: 'Exercise a posted draft edited after posting, then start a capture; verify the changed draft is not treated as fully posted or silently reset.'
+  from: 'Owner requested walkthrough audit in this session; source audit found completion checks retained postedTo without checking the current edited state.'
+  note: 'Independently reviewed safeguards and focused tests are committed locally as 4fd8a6ba, including post-response fencing after slot reuse. Publication and rendered verification remain open.'
+  question: null
+- id: 'WALKTHROUGH-FAILURE-REPORTING'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'walkthrough-announcement-surface'
+  title: 'Handle walkthrough script transport failure and avoid exposing raw provider errors.'
+  owns: ['src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx', 'src/app/actions/walkthrough-announcement.ts']
+  verify: 'npm.cmd run test:paths -- src/app/actions/walkthrough-announcement.test.ts src/app/components/walkthrough-announcement/walkthrough-async-execution.test.ts'
+  blocked_by: []
+  instrument: 'Reject the script action and verify a visible safe error with existing draft preserved; return a sensitive provider error and verify its raw contents are not sent to the client.'
+  from: 'Owner requested walkthrough audit in this session; static audit found an uncaught transport rejection and raw provider error forwarding.'
+  note: 'Independently reviewed error handling and tests are committed locally as 4fd8a6ba. Publication and rendered verification remain open.'
+  question: null
+- id: 'WALKTHROUGH-SCRIPT-OVERWRITE'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'walkthrough-announcement-surface'
+  title: 'Protect an existing walkthrough script and hand edits from accidental regeneration.'
+  owns: ['src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx']
+  verify: 'npm.cmd run test:paths -- src/app/components/walkthrough-announcement/walkthrough-async-execution.test.ts src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts'
+  blocked_by: []
+  instrument: 'Exercise regeneration of an existing and edited script, including edits made while the request is pending; require explicit overwrite confirmation or retain the edits.'
+  from: 'Owner requested walkthrough audit in this session; existing A17 residual and source review show the generate action replaces script text directly.'
+  note: 'The shared confirmation control and edit-preserving correction are committed locally as 4fd8a6ba. Publication and rendered keyboard and focus verification remain open.'
+  question: null
+- id: 'WALKTHROUGH-CAPTURE-EXTRACTION'
+  state: 'actionable'
+  kind: 'bug'
+  area: 'walkthrough-announcement-surface'
+  title: 'Prevent silent capture batch loss and stale extraction crossing walkthrough runs.'
+  owns: ['src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx', 'src/app/components/recording/capture-picker.ts', 'src/app/components/recording/useDiscussionCapture.ts']
+  verify: 'npm.cmd run test:paths -- src/app/components/recording/capture-picker.test.ts src/app/components/recording/useDiscussionCapture.teardown-race.test.ts src/app/components/walkthrough-announcement/walkthrough-async-execution.test.ts'
+  blocked_by: ['WALKTHROUGH-DESTINATION-BINDING']
+  instrument: 'Exercise rejected frame extraction and delayed extraction completing after a fresh run starts; require a visible failure and prevent old blocks contaminating the new run.'
+  from: 'Owner requested walkthrough audit in this session; code review identified unhandled extraction rejection and absent run fencing.'
+  note: 'Independently reviewed capture, extraction and unload safeguards are committed locally as 4fd8a6ba. Publication and rendered verification remain open.'
+  question: null
 - id: 'CHAT-CANVAS-OFFICE-VISUAL-COVERAGE'
   state: 'actionable'
   kind: 'bug'
@@ -32,7 +188,7 @@
   blocked_by: []
   instrument: 'Exercise actual regrade request and result callbacks: refused, failed, interrupted and pending work preserve existing score, comments and posted state; a successful candidate remains separate until explicitly accepted; acceptance updates the intended row once.'
   from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingResults.tsx handleRegradeRow clears edits before dispatch.'
-  note: 'Owner: coordinator. Preserve existing review and posting safeguards. The named regression test must be created as an executable acceptance oracle; do not close this row on source-only assertions.'
+  note: 'Owner: coordinator. Preserve existing review and posting safeguards. The named regression test must be created as an executable acceptance oracle; do not close this row on source-only assertions. Rendered main backlog record: Owner: coordinator. Implementation pushed in 3c847a80 retains existing grade and edits pending candidate acceptance and fences posting and stale-source races. Checked with npm.cmd run test:paths -- src/app/components/grading-results/chatRegradeRetention.test.ts src/app/components/grading-results/incompleteEvidencePosting.test.ts src/app/components/grading-chat/useContinuousGradingRun.lifecycle.test.ts src/file-size-ceiling.structure.test.ts. Remaining: verify rendered candidate review, keyboard/focus and live posting in an authorized browser.'
   question: null
 - id: 'CHAT-INCOMPLETE-EVIDENCE-REVIEW'
   state: 'actionable'
@@ -44,7 +200,7 @@
   blocked_by: []
   instrument: 'Carry row-specific link-fetch and truncation provenance into displayed and posted grades; require explicit instructor review or a successful source retry before posting an affected row. Cover mixed complete and incomplete batches without leaking work between students.'
   from: 'Owner requested all six grading-chat audit recommendations; source base f4efbf80: GradingChatPanel.tsx reports link-note grading while grade/postable.ts does not inspect evidence completeness.'
-  note: 'Owner: coordinator. The named executable acceptance test must be created; verify actual posting callbacks and visible failure/recovery states, not only a pure helper.'
+  note: 'Owner: coordinator. The named executable acceptance test must be created; verify actual posting callbacks and visible failure/recovery states, not only a pure helper. Rendered main backlog record: Owner: coordinator. Partial implementation pushed in 635e0393 preserves link and truncation provenance, flags legacy unknown evidence, requires row review in results and refuses incomplete evidence in saved-draft and workflow posting. Checked with npm.cmd run test:paths -- src/app/actions/grading.guard.test.ts src/lib/workflows/registry/steps.grading-draft-flow.test.ts src/lib/grade-result-allowlist-coverage.test.ts src/app/components/grading-results/incompleteEvidencePosting.test.ts src/app/components/grading-results/incompleteEvidenceReview.test.ts. Remaining: generic postCanvasGradesAction accepts flattened grades without trusted provenance, so this is not a universal server-side invariant; verify other posting paths, browser review and provider posting.'
   question: null
 - id: 'CHAT-DURABLE-ASSIGNMENT-SESSIONS'
   state: 'actionable'
@@ -140,7 +296,7 @@
   blocked_by: []
   instrument: 'Exercise small uploaded, Google Drive and stored ZIPs with readable and corrupt or unsupported entries; surface named omissions and accurate counts without treating partial evidence as complete, while preserving successful submissions and existing bounds.'
   from: 'Owner-requested submission scenario audit at 1a6eeaad: small and Drive ZIP paths discard extraction metadata retained by stored ZIP intake.'
-  note: 'Owner: coordinator. Create the executable acceptance test and verify the actual visible ledger in a browser; do not infer parity from storage-path tests.'
+  note: 'Owner: coordinator. Create the executable acceptance test and verify the actual visible ledger in a browser; do not infer parity from storage-path tests. Rendered main backlog record: Owner: coordinator. Safety slice pushed in db56872c reports unsupported archive members and refuses incomplete archives across direct, Drive, stored and legacy paths instead of silently dropping evidence; common OS and internal VCS metadata are excluded. Checked with npm.cmd run test:paths -- src/lib/grade/chatZipIntakeFailures.test.ts src/lib/grade/extraction.test.ts src/lib/grade/extraction.zip-caps.test.ts src/lib/zip-caps.test.ts src/app/actions/grading-chat-intake.test.ts src/app/api/grade-submission-zip/route.test.ts. Planner 186be6a5 and type fix 2870086d are not connected to intake: recovery needs immutable-source binding, complete member inventory, instructor identity mapping and idempotent dispatch. Whole archives still refuse on omissions; selective recovery and browser/provider verification remain open.'
   question: null
 - id: 'CHAT-BATCH-OVERSIZE-ISOLATION'
   state: 'actionable'
@@ -152,7 +308,7 @@
   blocked_by: []
   instrument: 'For Canvas and each ZIP transport, grade admissible entries and identify oversized skipped entries; cover mixed and all-oversized batches, and keep an oversized composite as one refused submission. Preserve wire limits and avoid duplicate dispatch on retry.'
   from: 'Owner-requested submission scenario audit at 1a6eeaad: one oversized entry can refuse the entire batch.'
-  note: 'Owner: coordinator. Create the executable acceptance test and surface recovery without claiming omitted work was graded.'
+  note: 'Owner: coordinator. Create the executable acceptance test and surface recovery without claiming omitted work was graded. Rendered main backlog record: Owner: coordinator. Partial implementation pushed in 7989eee5 partitions oversized entries, queues eligible entries, and reports named omissions. Checked with npm.cmd run test:paths -- src/lib/grade/oversized-intake.test.ts src/app/actions/grading-chat-intake.test.ts src/app/api/grade-submission-zip/route.test.ts src/lib/grade/ndjson-ingest-parser.test.ts src/app/components/grading-chat/chatBatchOversizeIsolation.test.ts src/app/components/grading-chat/LedgerNotice.test.ts. Remaining: full request size includes rubric and header overhead, so entry size is only a lower bound; verify recovery, all transports, and rendered browser behavior.'
   question: null
 - id: 'CHAT-CLIPPED-INTAKE-RECOVERY'
   state: 'actionable'
@@ -164,7 +320,7 @@
   blocked_by: []
   instrument: 'Cover delayed dispatch, later failures and partial ZIP, Canvas and split-recording admission: queued is never called graded, omitted work is identifiable and recoverable without duplicate dispatch, and counts distinguish accepted, skipped and completed.'
   from: 'Owner-requested submission scenario audit at 1a6eeaad: current partial-admission notices claim queued items were graded and do not identify the omitted work.'
-  note: 'Owner: coordinator. Immediate accurate notices are separate from durable automatic resumption tracked by CHAT-RESUMABLE-LARGE-COHORTS; create the executable acceptance test and verify rendered notices.'
+  note: 'Owner: coordinator. Immediate accurate notices are separate from durable automatic resumption tracked by CHAT-RESUMABLE-LARGE-COHORTS; create the executable acceptance test and verify rendered notices. Rendered main backlog record: Owner: coordinator. Partial progress in 7989eee5: notices and ledger distinguish queued work from named skipped or session-limit entries. Inspect delayed failure, split-recording and recovery paths before closing. Gate: npm.cmd run test:paths -- src/app/components/grading-chat/chatClippedIntakeRecovery.test.ts and rendered verification. Durable resumption remains CHAT-RESUMABLE-LARGE-COHORTS.'
   question: null
 - id: 'CHAT-GRADING-DIRECT-STUDENT-UPLOADS'
   state: 'verification'

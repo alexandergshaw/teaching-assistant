@@ -68,14 +68,16 @@ describe("one autosaved walkthrough announcement collection", () => {
     expect(panel).toContain("outline: e.outline");
     expect(panel).toContain("label: e.label || new Date(e.createdAt).toLocaleDateString()");
     expect(panel).toContain("optionSource={optionSource}");
-    expect(panel).toContain('useAnnouncementDraftSlots({ scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" })');
+    expect(panel).toContain('useAnnouncementDraftSlots({ courseId: selectedCourse?.id ?? null, scopeKey: library.scopeKey, buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint, mayGenerate: () => !capturing && !extracting && pendingFrames === 0 && !batchInFlightRef.current && !upload.busy && hasMaterial && upload.result?.status !== "needs-visible-only" })');
   });
 
   it("keeps capture, manual generation, and draft posting controls connected", () => {
     expect(panel).toContain("onClick={handleStartStop}");
-    expect(panel).toContain("await start({ saveVideo: false })");
+    expect(panel).toContain("await start({ saveVideo: false, onStarted: () => {");
+    expect(panel).toContain("resetCompletedRun(currentSlotsRef, () => {");
     expect(panel).toContain("onClick={() => void generate()}");
-    expect(panel).toContain("onClick={() => void handleGenerateScript()}");
+    expect(panel).toMatch(/onArm=\{\(\)\s*=>\s*\{\s*if\s*\(scriptText\)\s*\{\s*setScriptRegenerateFor\(scriptRegenerateContext\);\s*return;\s*\}\s*void handleGenerateScript\(\);\s*\}\}/);
+    expect(panel).toMatch(/onConfirm=\{\(\)\s*=>\s*\{\s*setScriptRegenerateFor\(null\);\s*void handleGenerateScript\(\);\s*\}\}/);
     expect(panel).toContain("onRegenerateConfirm={regenerate}");
     expect(panel).toContain("onPostArm={armPost}");
     expect(panel).toContain("onPostCancel={cancelPost}");

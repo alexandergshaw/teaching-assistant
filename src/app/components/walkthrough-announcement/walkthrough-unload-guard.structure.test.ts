@@ -30,13 +30,15 @@ describe("WA-DRAFT-LOSS: beforeunload wiring", () => {
     const eff = effectContaining('addEventListener("beforeunload"');
     expect(eff).toContain('removeEventListener("beforeunload"');
     expect(eff).toContain("shouldWarnBeforeUnload(");
+    expect(eff).toContain("extracting: extracting || batchInFlightRef.current");
+    expect(eff).toContain("!upload.busy && !library.controller.dirty()");
     expect(eff).not.toContain("capturing || pendingFrames > 0");
     expect(src).not.toContain("capturing || pendingFrames > 0");
   });
   it("A4: the cleanup is returned and the dependency array lists everything the predicate reads", () => {
     const eff = effectContaining('addEventListener("beforeunload"');
     expect(eff).toMatch(/return \(\) => window\.removeEventListener\("beforeunload"/);
-    expect(eff).toMatch(/\}, \[capturing, pendingFrames, slots, library.controller, library.state, upload.busy\]\);$/);
+    expect(eff).toMatch(/\}, \[capturing, pendingFrames, slots, extracting, library.controller, library.state, upload.busy\]\);$/);
   });
   it("A3: the effect sits below the slots declaration", () => {
     expect(src.indexOf("useAnnouncementDraftSlots({")).toBeLessThan(src.indexOf('addEventListener("beforeunload"'));

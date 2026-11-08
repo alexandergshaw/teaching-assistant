@@ -82,6 +82,9 @@ export default function Home() {
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
   const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, gradingView, setGradingView, presentationsView, setPresentationsView, announcementsView, setAnnouncementsView, automateView, setAutomateView, tasksView, setTasksView } = nav;
+  const autoBuildVisible = activeTab === "manual" && toolsSection === "manual" && manualView === "course-planning" && buildView === "auto";
+  const [autoBuildVisited, setAutoBuildVisited] = useState(false);
+  if (autoBuildVisible && !autoBuildVisited) setAutoBuildVisited(true);
 
   // The full URL-addressable nav state, used only to build each tab's deep-link
   // href (tab-link.ts). Kept here, not in the nav hook, so that hook stays off
@@ -675,7 +678,7 @@ export default function Home() {
                   }}
                 />
 
-                {manualView === "course-planning" && (
+                {manualView === "course-planning" && buildView !== "auto" && (
                   <TabShell>
                     {buildView === "new" ? (
                       <CoursePlanningTab />
@@ -781,6 +784,12 @@ export default function Home() {
               </>
             )}
           </>
+        )}
+
+        {autoBuildVisited && (
+          <div style={{ display: autoBuildVisible ? undefined : "none" }}>
+            <WorkflowsTab autoBuild />
+          </div>
         )}
 
         {/* Kept mounted at all times so an in-progress recording survives switching

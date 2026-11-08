@@ -192,7 +192,7 @@ export function normalizeManualView(value: string | null): ManualViewType {
   return isManualViewType(value) ? value : "course-planning";
 }
 
-const BUILD_VIEW_VALUES: ReadonlySet<string> = new Set<BuildViewType>(["new", "prebuilt"]);
+const BUILD_VIEW_VALUES: ReadonlySet<string> = new Set<BuildViewType>(["new", "prebuilt", "auto"]);
 
 export function isBuildView(value: unknown): value is BuildViewType {
   return typeof value === "string" && BUILD_VIEW_VALUES.has(value);

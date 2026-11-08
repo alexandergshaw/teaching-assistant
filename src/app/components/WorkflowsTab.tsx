@@ -46,7 +46,7 @@ import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workfl
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
 
-export default function WorkflowsTab() {
+export default function WorkflowsTab({ autoBuild = false }: { autoBuild?: boolean }) {
   const { supabase, user } = useSupabase();
   const { institutions, active: activeInstitution } = useInstitutionSelection();
 
@@ -67,12 +67,13 @@ export default function WorkflowsTab() {
     typeof window === "undefined" ? "" : localStorage.getItem("ta-workflows-search") ?? ""
   );
   useEffect(() => {
+    if (autoBuild) return;
     try {
       localStorage.setItem("ta-workflows-search", workflowSearch);
     } catch {
       // ignore storage write failures
     }
-  }, [workflowSearch]);
+  }, [autoBuild, workflowSearch]);
 
   // Honor a saved (or deep-linked) id UNVALIDATED against `workflows`: custom
   // defs live in Supabase and arrive async (customLoaded below), so at mount
@@ -84,6 +85,7 @@ export default function WorkflowsTab() {
   // values/disabledSteps once it does, and falls back explicitly only if the
   // id is still unresolved after the custom load has settled.
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(() => {
+    if (autoBuild) return "course-build";
     if (typeof window === "undefined") return COURSE_KICKOFF.id;
     const saved = localStorage.getItem("ta-workflows-selected");
     if (saved) return saved;
@@ -100,16 +102,17 @@ export default function WorkflowsTab() {
   const loadedForIdRef = useRef<string | null>(selectedDef?.id ?? null);
 
   const [values, setValues] = useState<Record<string, string>>(() => {
-    if (typeof window === "undefined" || !selectedDef) return {};
-    const saved = localStorage.getItem(`ta-workflow-values-${selectedDef.id}`);
+    if (typeof window === "undefined" || !selectedDef) return autoBuild ? { source: "course-description" } : {};
+    const saved = localStorage.getItem(autoBuild ? "ta-auto-build-values" : `ta-workflow-values-${selectedDef.id}`);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return autoBuild ? { ...parsed, source: "course-description" } : parsed;
       } catch {
-        return {};
+        return autoBuild ? { source: "course-description" } : {};
       }
     }
-    return {};
+    return autoBuild ? { source: "course-description" } : {};
   });
 
   // Per-user overlay of disabled TOP-LEVEL step indices for the selected
@@ -117,7 +120,7 @@ export default function WorkflowsTab() {
   // never mutates the workflow def itself. Loaded/saved the same way as
   // `values` above.
   const [disabledSteps, setDisabledSteps] = useState<Set<number>>(() =>
-    selectedDef ? new Set(loadDisabledSteps(selectedDef.id)) : new Set()
+    selectedDef ? new Set(loadDisabledSteps(autoBuild ? "auto-build" : selectedDef.id)) : new Set()
   );
 
   // Load a workflow's persisted values + disabled-steps overlay by id (not via
@@ -126,17 +129,18 @@ export default function WorkflowsTab() {
   // effect below (deep-link resolution / stale-id fallback) so both apply the
   // exact same reload semantics.
   const loadWorkflowFormState = useCallback((id: string) => {
-    const saved = localStorage.getItem(`ta-workflow-values-${id}`);
-    let nextValues: Record<string, string> = {};
+    const saved = localStorage.getItem(autoBuild ? "ta-auto-build-values" : `ta-workflow-values-${id}`);
+    let nextValues: Record<string, string> = autoBuild ? { source: "course-description" } : {};
     if (saved) {
       try {
         nextValues = JSON.parse(saved);
+        if (autoBuild) nextValues.source = "course-description";
       } catch {
-        nextValues = {};
+        nextValues = autoBuild ? { source: "course-description" } : {};
       }
     }
-    return { values: nextValues, disabledSteps: new Set(loadDisabledSteps(id)) };
-  }, []);
+    return { values: nextValues, disabledSteps: new Set(loadDisabledSteps(autoBuild ? "auto-build" : id)) };
+  }, [autoBuild]);
 
 
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null>(null);
@@ -418,7 +422,9 @@ export default function WorkflowsTab() {
         const dbRows = await listWorkflowDefs(supabase, user.id);
 
         if (!cancelled) {
-          if (dbRows.length === 0) {
+          if (autoBuild) {
+            setCustom(dbRows);
+          } else if (dbRows.length === 0) {
             const localRows = loadCustomWorkflows();
             if (localRows.length > 0) {
               let allUpserted = true;
@@ -457,11 +463,11 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [user, supabase]);
+  }, [autoBuild, user, supabase]);
 
   useEffect(() => {
-    localStorage.setItem("ta-workflows-selected", selectedWorkflowId);
-  }, [selectedWorkflowId]);
+    if (!autoBuild) localStorage.setItem("ta-workflows-selected", selectedWorkflowId);
+  }, [autoBuild, selectedWorkflowId]);
 
   // Consume the legacy `ta-workflows-panel` key once per mount (it may have
   // just been written by the Automations tab's "jump to this workflow's
@@ -469,6 +475,7 @@ export default function WorkflowsTab() {
   // shipped) so it can't linger and keep overriding the per-disclosure keys
   // below on a later, unrelated mount.
   useEffect(() => {
+    if (autoBuild) return;
     try {
       if (localStorage.getItem("ta-workflows-panel") !== null) {
         localStorage.removeItem("ta-workflows-panel");
@@ -477,54 +484,58 @@ export default function WorkflowsTab() {
       // ignore storage failures
     }
     // Intentionally runs once on mount only - see comment above.
-  }, []);
+  }, [autoBuild]);
 
   useEffect(() => {
+    if (autoBuild) return;
     try {
       localStorage.setItem("ta-workflows-steps-open", stepsOpen ? "true" : "false");
     } catch {
       // ignore storage write failures
     }
-  }, [stepsOpen]);
+  }, [autoBuild, stepsOpen]);
 
   useEffect(() => {
+    if (autoBuild) return;
     try {
       localStorage.setItem("ta-workflows-run-history-open", runHistoryOpen ? "true" : "false");
     } catch {
       // ignore storage write failures
     }
-  }, [runHistoryOpen]);
+  }, [autoBuild, runHistoryOpen]);
 
   useEffect(() => {
+    if (autoBuild) return;
     try {
       localStorage.setItem("ta-workflows-automation-open", automationOpen ? "true" : "false");
     } catch {
       // ignore storage write failures
     }
-  }, [automationOpen]);
+  }, [autoBuild, automationOpen]);
 
   useEffect(() => {
+    if (autoBuild) return;
     try {
       localStorage.setItem("ta-workflows-recent", JSON.stringify(recentWorkflowIds));
     } catch {
       // ignore storage write failures
     }
-  }, [recentWorkflowIds]);
+  }, [autoBuild, recentWorkflowIds]);
 
   useEffect(() => {
     if (selectedDef) {
       localStorage.setItem(
-        `ta-workflow-values-${selectedDef.id}`,
+        autoBuild ? "ta-auto-build-values" : `ta-workflow-values-${selectedDef.id}`,
         JSON.stringify(values)
       );
     }
-  }, [values, selectedDef]);
+  }, [autoBuild, values, selectedDef]);
 
   useEffect(() => {
     if (selectedDef) {
-      saveDisabledSteps(selectedDef.id, Array.from(disabledSteps));
+      saveDisabledSteps(autoBuild ? "auto-build" : selectedDef.id, Array.from(disabledSteps));
     }
-  }, [disabledSteps, selectedDef]);
+  }, [autoBuild, disabledSteps, selectedDef]);
 
   // Reconciles selectedWorkflowId against `workflows` whenever it drifts
   // WITHOUT a click - i.e. handleWorkflowChange did not just update
@@ -626,6 +637,7 @@ export default function WorkflowsTab() {
   // (customLoaded); only then are they treated as deleted, and their schedule
   // is disabled so a repeating schedule cannot grab the tab forever.
   useEffect(() => {
+    if (autoBuild) return;
     const consume = () => {
       if (workflowRun.running || pendingHandoff) return;
       const next = peekScheduledRun();
@@ -719,6 +731,7 @@ export default function WorkflowsTab() {
   };
 
   const handleValueChange = (fieldKey: string, value: string) => {
+    if (autoBuild && fieldKey === "source") return;
     const field = runtimeFields.find((f) => f.fieldKey === fieldKey);
 
     // Picking a repo that is attached to a course tile pre-selects that tile
@@ -794,12 +807,12 @@ export default function WorkflowsTab() {
     <TabShell>
       <TabHeader
         eyebrow="Workflows"
-        title="Composite actions"
-        subtitle="Kick off multi-step jobs that chain the app's tools together: schedules, repos, lecture materials, and LMS population in one run."
+        title={autoBuild ? "Auto Build" : "Composite actions"}
+        subtitle={autoBuild ? "Build a course from the description on a course tile." : "Kick off multi-step jobs that chain the app's tools together: schedules, repos, lecture materials, and LMS population in one run."}
       />
 
       <div style={{ display: "flex", gap: "var(--space-5)", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <WorkflowListSidebar
+        {!autoBuild && <WorkflowListSidebar
           workflows={workflows}
           selectedWorkflowId={selectedWorkflowId}
           onSelectWorkflow={handleWorkflowChange}
@@ -823,7 +836,7 @@ export default function WorkflowsTab() {
             handleWorkflowChange(newDef.id);
             setEditing(true);
           }}
-        />
+        />}
 
         <div className={styles.form} style={{ flex: 1, minWidth: 320 }}>
           {!selectedDef ? (
@@ -853,7 +866,7 @@ export default function WorkflowsTab() {
               runPause={workflowRun.runPause}
               runInput={workflowRun.runInput}
               selectedWorkflowId={selectedWorkflowId}
-              runtimeFields={runtimeFields}
+              runtimeFields={autoBuild ? runtimeFields.filter((field) => field.fieldKey !== "source") : runtimeFields}
               values={values}
               onValueChange={handleValueChange}
               validationError={workflowRun.validationError}

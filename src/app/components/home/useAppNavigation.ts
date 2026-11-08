@@ -68,7 +68,7 @@ export type ManualView =
   | "announcements";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
-export type BuildView = "new" | "prebuilt";
+export type BuildView = "new" | "prebuilt" | "auto";
 const BUILD_VIEW_KEY = "ta-build-view";
 // The Grading sub-tab's own inner selection (GRAD-SUBTAB wave 1).
 const GRADING_VIEW_KEY = "ta-grading-view";
@@ -323,7 +323,7 @@ export function useAppNavigation() {
     }
     // Users who last used the old Pre Built Courses tab land on that subtab.
     if (localStorage.getItem("ta-active-tab") === "lesson-planning") return "prebuilt";
-    return localStorage.getItem(BUILD_VIEW_KEY) === "new" ? "new" : "prebuilt";
+    return normalizeBuildView(localStorage.getItem(BUILD_VIEW_KEY));
   });
   const setBuildView = (v: BuildView) => {
     setBuildViewState(v);

@@ -57,6 +57,14 @@ describe("manual-rail", () => {
       expect(id).toBe("build-prebuilt");
     });
 
+    it("selects Auto Build and resolves its destination", () => {
+      expect(getDestinationById("build-auto")?.label).toBe("Auto Build");
+      expect(getActiveDestinationId("course-planning", "auto", "modules", "chat")).toBe("build-auto");
+      const state = resolveStateFromDestinationId("build-auto", "content", "new", "modules", "chat");
+      expect(state.manualView).toBe("course-planning");
+      expect(state.buildView).toBe("auto");
+    });
+
     it("should return lms-{view} when manualView is content", () => {
       expect(getActiveDestinationId("content", "new", "modules", "chat")).toBe("lms-modules");
       expect(getActiveDestinationId("content", "new", "assignments", "chat")).toBe("lms-assignments");
@@ -232,7 +240,7 @@ describe("manual-rail", () => {
   describe("getInnerDestinations (the level below a rail chip)", () => {
     it("should return the Build destinations for course-planning", () => {
       const inner = getInnerDestinations("course-planning");
-      expect(inner?.map((d) => d.id)).toEqual(["build-new", "build-prebuilt"]);
+      expect(inner?.map((d) => d.id)).toEqual(["build-new", "build-prebuilt", "build-auto"]);
     });
 
     it("should return the LMS destinations for content", () => {

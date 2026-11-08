@@ -278,6 +278,7 @@ describe("url-state", () => {
     it("accepts valid build views", () => {
       expect(normalizeBuildView("new")).toBe("new");
       expect(normalizeBuildView("prebuilt")).toBe("prebuilt");
+      expect(normalizeBuildView("auto")).toBe("auto");
       expect(isBuildView("new")).toBe(true);
     });
 
@@ -599,6 +600,9 @@ describe("url-state", () => {
     });
 
     it("includes buildView only when manual + course-planning, and only when non-default", () => {
+      const autoUrl = buildUrlSearch({ ...DEFAULT_STATE, buildView: "auto" });
+      expect(autoUrl).toBe("?tab=manual&buildView=auto");
+      expect(parseUrlState(autoUrl).buildView).toBe("auto");
       expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", buildView: "new" })).toBe(
         "?tab=manual&buildView=new"
       );

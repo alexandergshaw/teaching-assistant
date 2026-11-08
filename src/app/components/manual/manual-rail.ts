@@ -21,7 +21,7 @@ export type ManualViewType =
   | "grading"
   | "presentations"
   | "announcements";
-export type BuildViewType = "new" | "prebuilt";
+export type BuildViewType = "new" | "prebuilt" | "auto";
 
 // The Grading sub-tab's own inner selection: which of its two surfaces is
 // showing. Lives here, not in url-state.ts, for the same reason WorkflowsView
@@ -147,6 +147,7 @@ export const destinations: DestinationGroup[] = [
     destinations: [
       { id: "build-new", label: "New Build", description: "Create a new course from scratch" },
       { id: "build-prebuilt", label: "Pre Built", description: "Start from a prebuilt template" },
+      { id: "build-auto", label: "Auto Build", description: "Build a course from its description" },
     ],
   },
   {
@@ -321,7 +322,7 @@ export function getActiveDestinationId(
   automateView: AutomateView = "templates",
 ): string {
   if (manualView === "course-planning") {
-    return buildView === "new" ? "build-new" : "build-prebuilt";
+    return `build-${buildView}`;
   } else if (manualView === "content") {
     return `lms-${contentView}`;
   } else if (manualView === "version-control") {
@@ -427,6 +428,7 @@ export function resolveStateFromDestinationId(
   const buildView: BuildViewType = (() => {
     if (id === "build-new") return "new";
     if (id === "build-prebuilt") return "prebuilt";
+    if (id === "build-auto") return "auto";
     return currentBuildView;
   })();
 

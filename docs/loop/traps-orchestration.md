@@ -121,6 +121,20 @@ an automatic host wakeup. If no wait/resume capability exists, report the missin
 capability and outstanding handoff instead of promising background delivery.
 Evidence and limits: `docs/agnostic-manual-handoff-rca.md`.
 
+**A status report is not a completion boundary.** In the 2026-11-08 Codex
+session, the owner asked to finish in-flight work and then add Auto Build. The
+host ended one turn with the first task still running and ended the next after
+reporting a failed test, before starting the requested feature. Before a final
+response, list each active user-requested outcome in order and its actual
+state: completed with evidence, actively being advanced, or blocked by a
+specific condition. If an outcome can still be advanced in this turn, continue
+it rather than using the report as a stopping point. A failed test triggers
+repair and rerun; it is not by itself a handoff. If the user has sequenced two
+outcomes, consume the first result and start the second in the same turn. A
+running worker does not satisfy either step. This is a host checklist, not an
+automatic stop hook, and it does not override a user stop request or a real
+permission or safety boundary.
+
 **While `docs/BACKLOG.md` has ANY item in it, do not end a turn without work
 already started on the next item.** This is the single most repeated correction
 in this project's history, and the owner restated it in the strong form on

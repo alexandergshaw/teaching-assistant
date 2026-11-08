@@ -1,5 +1,12 @@
 import type { IngestSkip } from "@/lib/grade/ndjson-ingest-parser";
 
+/** No paid grading started, so the original batch may safely be retried. */
+export function noBatchAdmittedNotice(skipped: readonly IngestSkip[]): string {
+  const names = skipped.slice(0, 10).map((item) => `${item.student} (${item.reason})`).join("; ");
+  const more = skipped.length > 10 ? ` and ${skipped.length - 10} more (see the submission list)` : "";
+  return `No submissions were queued. Not queued: ${names}${more}. Correct the files and retry the batch.`;
+}
+
 /** A queued entry may still fail; never describe admission as a completed grade. */
 export function partialBatchNotice(admitted: number, eligible: number, cap: number, oversized: readonly IngestSkip[], clipped: readonly IngestSkip[]): string {
   const missing = [...oversized, ...clipped];

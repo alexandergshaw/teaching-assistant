@@ -43,7 +43,7 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { assignUnclaimedLabel } from "@/lib/grade/utils";
 import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/grade/ndjson-ingest-parser";
 import { mergeIngestLedgers } from "./ingestLedger";
-import { partialBatchNotice } from "./partialBatchNotice";
+import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
 import { recordVideoSettled, recordZipVideoOutcomes } from "./videoDiagnostic";
@@ -759,6 +759,10 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     // RES-GC-8: clip to what the session ceiling still allows; refuse only
     // the remainder, never the whole event.
     const available = maxEntries - dispatchedCountRef.current;
+    if (!entries.length && ingestSkipped.length) {
+      setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: ingestSkipped.length, studentsEmitted: 0, skipped: ingestSkipped }));
+      return { kind: "refused", reason: noBatchAdmittedNotice(ingestSkipped) };
+    }
     if (available <= 0) {
       const notQueued = entries.map((entry, index) => ({ student: `${entry.student || "Unnamed submission"} (eligible item ${index + 1})`, reason: "session limit reached" }));
       if (entries.length || storageLedger || ingestSkipped.length) setIngestLedger((prev) => mergeIngestLedgers(prev, { ...(storageLedger ?? { failedSupportedFiles: [] }), studentsFound: entries.length + ingestSkipped.length, studentsEmitted: 0, skipped: [...ingestSkipped, ...notQueued] }));

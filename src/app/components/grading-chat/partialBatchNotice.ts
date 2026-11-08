@@ -10,7 +10,9 @@ export function noBatchAdmittedNotice(skipped: readonly IngestSkip[]): string {
 /** A queued entry may still fail; never describe admission as a completed grade. */
 export function partialBatchNotice(admitted: number, eligible: number, cap: number, oversized: readonly IngestSkip[], clipped: readonly IngestSkip[]): string {
   const missing = [...oversized, ...clipped];
-  const detail = missing.length ? ` Not queued: ${missing.map((item) => `${item.student} (${item.reason})`).join("; ")}.` : "";
+  const shown = missing.slice(0, 10).map((item) => `${item.student} (${item.reason})`).join("; ");
+  const remaining = missing.length > 10 ? ` and ${missing.length - 10} more (see the submission list)` : "";
+  const detail = missing.length ? ` Not queued: ${shown}${remaining}.` : "";
   const heading = clipped.length
     ? `Queued the first ${admitted} of ${eligible} submissions; the session's ${cap}-submission limit was reached. Start a new session to grade the rest.`
     : `Queued ${admitted} of ${admitted + oversized.length} submissions.`;

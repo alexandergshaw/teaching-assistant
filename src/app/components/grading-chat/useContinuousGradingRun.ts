@@ -45,7 +45,7 @@ import { ingestStoragedZip, type IngestLedger, type IngestOutcome } from "@/lib/
 import { mergeIngestLedgers } from "./ingestLedger";
 import { countPendingVideos } from "./pendingVideoCount";
 import type { ChatGradingSetup } from "./chatVersionedSetup";
-import { projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
+import { bindVersionedResultRows, projectVersionedResults, type VersionedArrival, type VersionedResultRow } from "./versionedResultProjection";
 import { noBatchAdmittedNotice, partialBatchNotice } from "./partialBatchNotice";
 import { postClassifyRecording, postPrepareVideo, videoFailureOf, type ClassifyRecordingFn, type PrepareVideoFn } from "./videoClient";
 import { postPrepareSingleFile, type PrepareSingleFileFn } from "./singleFileClient";
@@ -164,6 +164,7 @@ export interface UseContinuousGradingRunResult {
   readonly results: readonly GradeResult[];
   /** Unreconciled row criteria with session-local setup attribution. */
   readonly getVersionedResults: () => readonly VersionedResultRow[];
+  readonly getVersionedResult: (result: GradeResult) => VersionedResultRow | undefined;
   readonly run: GradingRun | null;
   readonly dispatchedCount: number;
   readonly completedCount: number;
@@ -224,6 +225,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
   const takenLabelsRef = useRef<Set<string>>(new Set());
   const retainedBodiesRef = useRef<Map<number, GradeRunItemRequestBody>>(new Map());
   const setupNumbersRef = useRef(new Map<string, number>()), rowSetupsRef = useRef(new Map<number, number>());
+  const versionedBindingsRef = useRef(new WeakMap<GradeResult, VersionedResultRow>());
   const repositoryRevisionsRef = useRef(new Map<number, number>());
   const repositoryOriginalsRef = useRef(new Map<number, GradeRunItemRequestBody>());
   const pendingRef = useRef<Set<number>>(new Set());
@@ -285,8 +287,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     const header = headerRef.current;
     if (!header) return;
     setResults(mergeArrivedResults(dispatchedCountRef.current, arrivedRef.current));
-    setRun(
-      buildIncrementalRun({
+    const built = buildIncrementalRun({
         header,
         speedGraderUrl: null,
         totalTicketCount: dispatchedCountRef.current,
@@ -294,9 +295,12 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
         phase: "running",
         tier2: null,
         submissionClassification: classificationRef.current ?? undefined,
-      })
-    );
+      });
+    bindVersionedResultRows(built.results, readVersionedResults(), versionedBindingsRef.current);
+    setRun(built);
   };
+
+  const readVersionedResults = () => projectVersionedResults(arrivedRef.current.map((item) => { const tracked = item as Partial<VersionedArrival>; const revision = repositoryRevisionsRef.current.get(item.sourceIndex) ?? 0; return { ...item, resultRevision: revision, setupVersion: tracked.resultRevision === revision ? tracked.setupVersion ?? null : null }; }), new Set(setupNumbersRef.current.values()));
 
   // pump(): the bounded in-flight dispatcher. Dispatches from the head of the
   // queue while inFlightRef is under INCREMENTAL_CONCURRENCY. THE WEDGE FIX
@@ -910,6 +914,7 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     takenLabelsRef.current = new Set();
     retainedBodiesRef.current = new Map();
     setupNumbersRef.current = new Map(); rowSetupsRef.current = new Map();
+    versionedBindingsRef.current = new WeakMap();
     repositoryRevisionsRef.current = new Map();
     repositoryOriginalsRef.current = new Map();
     pendingRef.current = new Set();
@@ -971,7 +976,8 @@ export function useContinuousGradingRun(params: UseContinuousGradingRunParams): 
     generatedRubric: headerRef.current?.generatedRubric,
     headerState,
     results,
-    getVersionedResults: () => projectVersionedResults(arrivedRef.current.map((item) => { const tracked = item as Partial<VersionedArrival>; const revision = repositoryRevisionsRef.current.get(item.sourceIndex) ?? 0; return { ...item, resultRevision: revision, setupVersion: tracked.resultRevision === revision ? tracked.setupVersion ?? null : null }; }), new Set(setupNumbersRef.current.values())),
+    getVersionedResults: readVersionedResults,
+    getVersionedResult: (result) => versionedBindingsRef.current.get(result),
     run,
     dispatchedCount,
     completedCount,

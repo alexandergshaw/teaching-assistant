@@ -880,6 +880,7 @@ export function GradingChatPanel({ copiedKey, onCopy, onOpenPreview }: GradingCh
         {driver.generatedRubric && <GeneratedRubricCard generatedRubric={driver.generatedRubric} />}
         <GradingResults
           run={driver.run}
+          getVersionedResult={driver.getVersionedResult}
           canvasUrl={driver.canvasUrl}
           runKey={driver.runKey}
           editsSurface={driver.runKey}

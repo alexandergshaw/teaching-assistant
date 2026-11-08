@@ -46,3 +46,9 @@ export function projectVersionedResults(
     return { sourceIndex, resultRevision: item.resultRevision, setupVersion, result, areas: result.rubricAreas.map((area) => ({ ...area })) };
   });
 }
+
+/** Bind only the exact rendered objects from the same source-ordered build. */
+export function bindVersionedResultRows(rendered: readonly GradeResult[], rows: readonly VersionedResultRow[], bindings: WeakMap<GradeResult, VersionedResultRow>): void {
+  if (rendered.length !== rows.length || rendered.some((result, index) => result.student !== rows[index].result.student)) return;
+  rendered.forEach((result, index) => bindings.set(result, rows[index]));
+}

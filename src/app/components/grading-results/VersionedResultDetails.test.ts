@@ -9,7 +9,7 @@ const result: GradeResult = { student: "Ada", totalScore: "4/5", strengths: "", 
 describe("versioned result details", () => {
   it("renders the original score, feedback and version without edit or posting controls", () => {
     const html = renderToStaticMarkup(createElement(VersionedResultDetails, { row: { sourceIndex: 0, resultRevision: 1, setupVersion: 2, result, areas: result.rubricAreas } }));
-    expect(html).toContain("Setup version 2");
+    expect(html).toContain("Original grading; setup version 2");
     expect(html).toContain("Correctness");
     expect(html).toContain("4/5");
     expect(html).toContain("Good work");
@@ -18,6 +18,6 @@ describe("versioned result details", () => {
   });
   it("discloses unknown provenance", () => {
     const html = renderToStaticMarkup(createElement(VersionedResultDetails, { row: { sourceIndex: 0, resultRevision: 1, setupVersion: null, result, areas: [] } }));
-    expect(html).toContain("Setup version unknown");
+    expect(html).toContain("Original grading; setup version unknown");
   });
 });

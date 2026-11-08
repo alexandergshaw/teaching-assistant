@@ -174,6 +174,9 @@ describe("useContinuousGradingRun - recording split (flag on)", () => {
     await useTestDriver(40, "other", false).submit({ kind: "text", content: "Another submission" });
     await flushMicrotasks();
     expect(useTestDriver(40, "other", false).getVersionedResults().map((row) => [row.sourceIndex, row.setupVersion, row.resultRevision])).toEqual([[0, 1, 1], [1, 1, 1], [2, 2, 1]]);
+    const current = useTestDriver(40, "other", false);
+    expect(current.run!.results.map((result) => current.getVersionedResult(result)?.setupVersion)).toEqual([1, 1, 2]);
+    expect(current.getVersionedResult({ ...current.run!.results[0] })).toBeUndefined();
   });
 
   it("does not classify a prepared video after its session was reset", async () => {

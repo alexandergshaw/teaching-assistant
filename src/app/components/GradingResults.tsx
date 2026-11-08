@@ -81,6 +81,8 @@ import { StudentNameCell } from "./grading-results/StudentNameCell";
 import { timePostGrades } from "./grading/gradingActionSeam";
 import { RepositoryProposalReview } from "./grading-results/RepositoryProposalReview";
 import type { RepositoryWorkflowAdapter } from "./grading-chat/chatRepositoryWorkflow";
+import type { VersionedResultRow } from "./grading-chat/versionedResultProjection";
+import { VersionedResultDetails } from "./grading-results/VersionedResultDetails";
 
 // B1 (ux-audit-grading.md): "skipped" is a genuine third outcome, distinct
 // from "posted" and "error" - postCanvasGradesAction's own `skipped` array
@@ -105,6 +107,7 @@ export interface GradingPostOutcome {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export type GradingResultsProps = {
+  getVersionedResult?: (result: GradeRow) => VersionedResultRow | undefined;
   repositoryProposals?: RepositoryWorkflowAdapter;
   /** The grading run to display (non-null; callers gate on results.length). */
   run: GradingRun;
@@ -231,6 +234,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   regradingStudents,
   unresolvedStudents,
   repositoryProposals,
+  getVersionedResult,
 }: GradingResultsProps, ref) {
   // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
   // edits persist under an assignment-scoped key - `edits` is keyed by bare
@@ -682,6 +686,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               </TableRow>
             )}
             {visibleResults.map((result) => {
+              const versionedResult = getVersionedResult?.(result);
               const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
               const edit = edits[result.student] ?? defaultRowEdit(result);
               const status = postStatus[result.student];
@@ -701,6 +706,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       speedGraderHref={sgHref}
                       unresolved={unresolvedStudents?.has(result.student) ?? false}
                     />
+                    {versionedResult && <VersionedResultDetails row={versionedResult} displayCriteria={JSON.stringify(versionedResult.areas) !== JSON.stringify(result.rubricAreas)} />}
                     <IncompleteEvidenceReview row={result} reviewed={reviewedEvidence.has(result)} onChange={(value) => setEvidenceReview((previous) => { const next = new Set(previous.run === run ? previous.rows : []); if (value) next.add(result); else next.delete(result); return { run, rows: next }; })} />
                     {canPostRow && (
                       <div style={{ marginTop: "var(--space-1)" }}>

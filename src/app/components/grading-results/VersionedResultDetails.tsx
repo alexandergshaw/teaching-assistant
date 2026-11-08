@@ -3,10 +3,10 @@ import Typography from "@mui/material/Typography";
 import type { VersionedResultRow } from "../grading-chat/versionedResultProjection";
 
 /** Read-only original criteria; this does not authorize editing or posting. */
-export function VersionedResultDetails({ row }: { readonly row: VersionedResultRow }) {
+export function VersionedResultDetails({ row, displayCriteria = true }: { readonly row: VersionedResultRow; readonly displayCriteria?: boolean }) {
   return <Box component="section" aria-label={`Original grading criteria for ${row.result.student}`} sx={{ mt: 1 }}>
-    <Typography variant="caption" component="p">{row.setupVersion === null ? "Setup version unknown" : `Setup version ${row.setupVersion}`}</Typography>
-    {row.areas.map((area, index) => <Box key={index} sx={{ mt: 0.5 }}>
+    <Typography variant="caption" component="p">{row.setupVersion === null ? "Original grading; setup version unknown" : `Original grading; setup version ${row.setupVersion}`}</Typography>
+    {displayCriteria && row.areas.map((area, index) => <Box key={index} sx={{ mt: 0.5 }}>
       <Typography variant="body2"><strong>{area.area}</strong>{area.score ? `: ${area.score}` : ""}</Typography>
       {area.comment && <Typography variant="body2">{area.comment}</Typography>}
     </Box>)}

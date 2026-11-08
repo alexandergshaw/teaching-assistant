@@ -165,10 +165,10 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
   }
 
   return (
-    <Box component="section" aria-label="Add submission files" sx={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-md)", p: 2, display: "grid", gap: 1 }}>
-      <Typography variant="subtitle1">Add submission files</Typography>
+    <Box component="section" aria-label="Add submissions" sx={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-md)", p: 2, display: "grid", gap: 1 }}>
+      <Typography variant="subtitle1">Add submissions</Typography>
       <FormControl disabled={busy}>
-        <FormLabel id="submission-file-mode">Who are these files for?</FormLabel>
+        <FormLabel id="submission-file-mode">Who is the work for?</FormLabel>
         <RadioGroup row aria-labelledby="submission-file-mode" value={mode} onChange={(_, value) => setMode(value as "one" | "many")}>
           <FormControlLabel value="one" control={<Radio size="small" />} label="One student" />
           <FormControlLabel value="many" control={<Radio size="small" />} label="Multiple students" />
@@ -176,16 +176,20 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
       </FormControl>
       {mode === "one" ? <TextField size="small" label="Student name (optional)" value={student} disabled={busy} onChange={(event) => setStudent(event.target.value)} /> :
         <Typography variant="body2">Assign files to students before grading. A ZIP can contain several students.</Typography>}
-      <Box onDragOver={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); event.stopPropagation(); }} onDrop={drop}
-        sx={{ border: "1px dashed var(--field-border)", borderRadius: "var(--radius-sm)", p: 2 }}>
-        <Typography variant="body2">Drop files here, or choose files. Preparation starts immediately.</Typography>
-        <input ref={picker} type="file" multiple hidden onChange={pick} disabled={busy} />
-        <Button size="small" variant="outlined" disabled={busy} onClick={() => picker.current?.click()}>Choose files</Button>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1 }}>
+        <Box onDragOver={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); event.stopPropagation(); }} onDrop={drop}
+          sx={{ border: "1px dashed var(--field-border)", borderRadius: "var(--radius-sm)", p: 1.5 }}>
+          <Typography variant="body2">Drop files here, or choose files. Preparation starts immediately.</Typography>
+          <input ref={picker} type="file" multiple hidden onChange={pick} disabled={busy} />
+          <Button size="small" variant="outlined" disabled={busy} onClick={() => picker.current?.click()}>Choose files</Button>
+        </Box>
+        <Box sx={{ display: "grid", gap: 1, alignContent: "start" }}>
+          <TextField label="Submission text" placeholder="Paste a student's submission" multiline minRows={3} fullWidth value={submissionText} disabled={busy} onChange={(event) => setSubmissionText(event.target.value)} />
+          {mode === "many" && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="Submit each student's text separately." />}
+          <Box><Button size="small" variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>
+        </Box>
       </Box>
       <Typography variant="body2">Text and files are graded separately. To combine them, open More submission options and choose Combine parts.</Typography>
-      <TextField label="Submission text" placeholder="Paste a student's submission" multiline minRows={3} value={submissionText} disabled={busy} onChange={(event) => setSubmissionText(event.target.value)} />
-      {mode === "many" && <TextField size="small" label="Student for this text" value={textStudent} disabled={busy} onChange={(event) => setTextStudent(event.target.value)} helperText="Submit each student's text separately." />}
-      <Box><Button variant="outlined" disabled={busy || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())} onClick={() => void gradeText()}>Grade text</Button></Box>
       {textUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setTextUncertain(false)}>I checked results</Button>}>Check the previous results before retrying this text.</Alert>}
       {error && <Alert severity="warning">{error}</Alert>}
       {rows.some((row) => row.state === "identity") && <Alert severity="info">Assign students to files from any drop. All assigned files with the same name will be graded together when you select Grade assigned files; submit students with identical names separately.</Alert>}
@@ -199,7 +203,7 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
       </Box>}
       {unresolved && <Alert severity="warning">Some uploads were partly queued or could not be confirmed. Check the results before resubmitting them.</Alert>}
       <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-        {pending && <Typography role="status" variant="body2">Preparing files...</Typography>}
+        {pending && <Typography role="status" variant="body2">Preparing submission...</Typography>}
         {assigned.length > 0 && <Button variant="outlined" disabled={busy} onClick={() => void gradeAssigned()}>Grade assigned files</Button>}
         {!pending && ready.length > 0 && <Button variant="outlined" disabled={busy || (!reviewFiles && mode === "one" && (unresolved || ready.length > 12))} onClick={() => void grade(ready, mode, student)}>Retry unsubmitted files</Button>}
         {rows.length > 0 && <Button disabled={busy} onClick={() => setClearing(true)}>Clear list</Button>}

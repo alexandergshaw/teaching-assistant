@@ -6,7 +6,7 @@ import { reconcileRowAfterReset, SubmissionDrop } from "./SubmissionDrop";
 describe("SubmissionDrop", () => {
   it("renders the grouping choice and a file selection control without requiring a name", () => {
     const html = renderToStaticMarkup(createElement(SubmissionDrop, { disabled: false, onOne: vi.fn(), onMany: vi.fn(), onText: vi.fn() }));
-    expect(html).toContain('aria-label="Add submission files"');
+    expect(html).toContain('aria-label="Add submissions"');
     expect(html).toContain("One student");
     expect(html).toContain("Multiple students");
     expect(html).toContain("Student name (optional)");

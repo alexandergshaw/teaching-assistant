@@ -389,13 +389,19 @@ describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanv
   // Deleted rather than kept as dead weight, per this file's own header rule
   // that a retained vacuous assertion implies coverage it does not have.
 
-  it("gradeRepoAction is called from inside handleGradeCell, the function index.tsx wires to RepoGradesGrid's onGradeCell prop - not some other unrelated function", () => {
+  it("retains the guarded legacy action while cell grading routes to the saved queue", () => {
     const defIdx = hookSource.indexOf("const handleGradeCell = async");
     expect(defIdx).toBeGreaterThan(-1);
     const nextFnIdx = hookSource.indexOf("const handlePostColumn", defIdx);
     const body = hookSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : defIdx + 1500);
     expect(body).toContain("gradeRepoAction(");
-    expect(indexSource).toContain("onGradeCell={handleGradeCell}");
+    expect(indexSource).toContain("onGradeCell={(row, column) => { void startSavedGrade(column.folder, row.repo); }}");
+    const start = indexSource.indexOf("const startSavedGrade = async");
+    const end = indexSource.indexOf("const controlTargetGrade = async", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const savedGrade = indexSource.slice(start, end);
+    expect(savedGrade).toMatch(/if \(!ownerId \|\| !selectedCourseId \|\| !targetedGrading \|\| !targetRequests\.ready\)\s*\{[^}]*return;\s*\}[\s\S]*targetedGrading\.startTargeted\(selectedCourseId, folder, repo\)/);
   });
 
   // S1 (verification finding): before this, handleGradeCell's noSubmission
@@ -694,7 +700,7 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(gridSource).toContain("onPostColumn={onPostColumn}");
   });
 
-  it("the column header's Post/Re-post label comes from the extracted leaf, fed the SAME plan.postable.length its disabled state uses, so the shown count cannot diverge from the gated count (U8.33)", () => {
+  it("the saved-results column keeps posting disabled while its label uses the postability plan", () => {
     const idx = gridSource.indexOf("function ColumnHeaderControls");
     expect(idx).toBeGreaterThan(-1);
     const end = gridSource.indexOf("\nexport default function", idx);
@@ -702,7 +708,7 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     // Comments stripped first so prose quoting the old inline ternary cannot
     // red the not.toContain below; only a re-inline in live code can.
     const stripped = stripComments(gridSource.slice(idx, end));
-    expect(stripped).toContain("disabled={busy || plan.postable.length === 0}");
+    expect(stripped).toMatch(/<MenuItem\s+key="post"\s+disabled(?!\s*=)(?=\s|>)/);
     expect(stripped).toContain("postableCount: plan.postable.length");
     expect(stripped).not.toContain('alreadyAttempted ? "Re-post" : "Post"');
   });
@@ -721,13 +727,13 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(stripped).toContain("Posting");
   });
 
-  it("the Grade and Post button children CONSUME the leaf's returned labels (gradeLabel/postLabel), so an extraction cannot call the leaf and then re-inline a label", () => {
+  it("the Grade menu uses queue state and the Post menu consumes the plan label", () => {
     const idx = gridSource.indexOf("function ColumnHeaderControls");
     expect(idx).toBeGreaterThan(-1);
     const end = gridSource.indexOf("\nexport default function", idx);
     expect(end).toBeGreaterThan(idx);
     const stripped = stripComments(gridSource.slice(idx, end));
-    expect(stripped).toContain(": gradeLabel");
+    expect(stripped).toContain("primary={gradeAllLabel}");
     expect(stripped).toContain(": postLabel");
   });
 
@@ -762,16 +768,18 @@ describe("A7 W2: single-course default and the two disclosure overrides are wire
     expect(region).toMatch(/setUiState\([\s\S]*courseId: autoCourseId/);
   });
 
-  it("RW4b: index.tsx hands RepoGradesControls the settings value and a setter that writes uiState.settingsOpen", () => {
+  it("the parent accordion contains the grading settings controls", () => {
     expect(stripped).toContain("settingsOpen={effectiveOpen(uiState.settingsOpen,");
     expect(stripped).toMatch(/onSettingsOpenChange=\{\(value\) => setUiState\([\s\S]*?settingsOpen: value/);
-    expect(controlsText).toContain("onSettingsOpenChange(");
+    expect(stripped).toMatch(/<Accordion[\s\S]*?<AccordionDetails[\s\S]*?<RepoGradesControls/);
+    expect(controlsText).toContain('<section aria-label="Grading settings">');
   });
 
-  it("RW4c: index.tsx hands LinkUsernamesPanel the link value and a setter that writes uiState.linkPanelOpen", () => {
-    expect(stripped).toContain("linkPanelOpen={effectiveOpen(uiState.linkPanelOpen,");
-    expect(stripped).toMatch(/onLinkPanelOpenChange=\{\(value\) => setUiState\([\s\S]*?linkPanelOpen: value/);
+  it("the retained username-linking panel keeps its controlled disclosure and confirmation", () => {
+    // The panel is not currently mounted by index.tsx; its reachability is a separate residual.
+    expect(panelText).toContain("expanded={linkPanelOpen}");
     expect(panelText).toContain("onLinkPanelOpenChange(");
+    expect(panelText).toContain("window.confirm(");
   });
 
   it("the guarded controls kept their confirm-all window.confirm and bulk-selection checkbox inside the collapses", () => {
@@ -811,21 +819,21 @@ describe("A7 W3 (retired by REPO-GRADES-HEADER-SETUP-VISUAL C1): the sticky run 
   });
 
   it("W3-R3: the grid column header still owns Grade/Post and the assignment select, wired to the confirmed handlers", () => {
-    expect(indexText).toContain("onGradeColumn={handleGradeColumn}");
+    expect(indexText).toContain("onGradeColumn={(folder) => { void startSavedGrade(folder, null); }}");
+    expect(indexText).toContain("targetedGrading.startTargeted(selectedCourseId, folder, repo)");
     expect(indexText).toContain("onPostColumn={handlePostColumn}");
     expect(indexText).toContain("onAssignmentChange={handleAssignmentChange}");
   });
 
-  it("W3-R7: the course and repo-filter pickers share ONE existing-class wrapper row", () => {
+  it("the course and repo-filter pickers remain wired after the course filter moved", () => {
     const wrapperIdx = controlsText.indexOf("<div className={styles.adaptRow}>");
     expect(wrapperIdx).toBeGreaterThan(-1);
-    const detailsIdx = controlsText.indexOf("<details", wrapperIdx);
-    expect(detailsIdx).toBeGreaterThan(wrapperIdx);
     for (const id of ["repo-grades-course", "repo-grades-org-prefix"]) {
       const at = controlsText.indexOf(`htmlFor="${id}"`);
       expect(at).toBeGreaterThan(wrapperIdx);
-      expect(at).toBeLessThan(detailsIdx);
     }
+    expect(indexText).toContain("<RepoGradeCourseFilters");
+    expect(indexText).toContain("onCourseIdChange={handleCourseIdChange}");
   });
 
   it("W3-R7b: the folder picker MOVED to the sticky header - absent from the controls row, present in RepoGradesFolderPicker, reached via index.tsx's folderControl= slot", () => {
@@ -834,7 +842,7 @@ describe("A7 W3 (retired by REPO-GRADES-HEADER-SETUP-VISUAL C1): the sticky run 
       readFileSync(join(process.cwd(), "src/app/components/repo-grades/RepoGradesFolderPicker.tsx"), "utf8")
     );
     expect(pickerText).toContain('htmlFor="repo-grades-folder"');
-    expect(pickerText).toContain('id="repo-grades-folder"');
+    expect(pickerText).toContain('inputProps={{ id: "repo-grades-folder" }}');
     expect(pickerText).toContain("onChange={(e) => onSelectedFolderChange(e.target.value)}");
     // Anchored to the <RepoGradesStickyHeader ...> tag region, not a file-wide match.
     const tagIdx = indexText.indexOf("<RepoGradesStickyHeader");

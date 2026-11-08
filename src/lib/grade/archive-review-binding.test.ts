@@ -16,7 +16,7 @@ const NOW = 1_000_000;
 
 async function fixture() {
   const bytes = await new JSZip().file("ada.txt", "Ada's work", { createFolders: false }).generateAsync({ type: "uint8array", compression: "STORE" });
-  const record: StoredArchiveReview = { reviewId: REVIEW, ownerId: OWNER, authSessionId: AUTH, gradingSessionId: GRADING, storagePath: `${OWNER}/grading-uploads/${FILE}.zip`, snapshot: snapshotReviewArchive(bytes), createdAtMs: NOW - 10, expiresAtMs: NOW + 1000 };
+  const record: StoredArchiveReview = { reviewId: REVIEW, ownerId: OWNER, authSessionId: AUTH, gradingSessionId: GRADING, storagePath: `${OWNER}/grading-review-uploads/${REVIEW}/${FILE}.zip`, snapshot: snapshotReviewArchive(bytes), createdAtMs: NOW - 10, expiresAtMs: NOW + 1000 };
   const deps: ArchiveReviewDependencies = { authenticate: vi.fn().mockResolvedValue({ ownerId: OWNER, authSessionId: AUTH }), readOwnedReview: vi.fn().mockResolvedValue(record), readPrivateSource: vi.fn().mockResolvedValue(bytes), now: () => NOW };
   const input = { reviewId: REVIEW, gradingSessionId: GRADING, assignments: [{ memberId: "0", studentKey: "ada", studentLabel: "Ada" }] };
   return { bytes, record, deps, input };
@@ -35,8 +35,8 @@ describe("owner-bound archive review", () => {
     const { deps, input, record } = await fixture();
     for (const changed of [
       { ownerId: AUTH }, { authSessionId: OWNER }, { gradingSessionId: REVIEW },
-      { storagePath: `${AUTH}/grading-uploads/${FILE}.zip` }, { storagePath: `${OWNER}/syllabus-uploads/${FILE}.zip` },
-      { storagePath: `${OWNER}/grading-uploads/../${FILE}.zip` }, { expiresAtMs: NOW }, { createdAtMs: NOW + 1 },
+      { storagePath: `${AUTH}/grading-review-uploads/${REVIEW}/${FILE}.zip` }, { storagePath: `${OWNER}/syllabus-uploads/${FILE}.zip` },
+      { storagePath: `${OWNER}/grading-review-uploads/../${FILE}.zip` }, { storagePath: `${OWNER}/grading-uploads/${FILE}.zip` }, { expiresAtMs: NOW }, { createdAtMs: NOW + 1 },
     ]) {
       vi.mocked(deps.readOwnedReview).mockResolvedValueOnce({ ...record, ...changed });
       expect((await planOwnedArchiveReview(input, deps)).ok).toBe(false);

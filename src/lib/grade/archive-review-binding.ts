@@ -1,8 +1,8 @@
 import "server-only";
-import { isKnownUploadPath } from "@/lib/syllabus-upload-source";
 import { ARCHIVE_REVIEW_MAX_BYTES, type ArchiveReviewSnapshot } from "./archive-review-snapshot";
 import { planValidatedArchive } from "./archive-review-validation";
 import { validReviewId, type ArchiveReviewPrincipal } from "./archive-review-principal";
+import { isArchiveReviewSourcePath } from "./archive-review-source";
 import type { ArchiveReviewPlan, ReviewArchiveAssignment } from "./archive-omission-review";
 
 /** Supplied by an owner-scoped server store, never directly by a client. */
@@ -29,11 +29,6 @@ export interface ArchiveReviewDependencies {
 
 const MAX_LIFETIME_MS = 60 * 60 * 1000;
 const UNAVAILABLE = "The archive review is unavailable or expired. Upload the archive again.";
-
-function ownGradingArchive(ownerId: string, path: string): boolean {
-  const segments = path.split("/");
-  return isKnownUploadPath(ownerId, path) && segments.length === 3 && segments[1] === "grading-uploads" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.zip$/i.test(segments[2]);
-}
 
 /** Copies only bounded fields from a server-store result before awaiting. */
 function copySnapshot(snapshot: ArchiveReviewSnapshot): ArchiveReviewSnapshot | null {
@@ -70,7 +65,7 @@ export async function planOwnedArchiveReview(
     const { ownerId, authSessionId, storagePath, createdAtMs, expiresAtMs } = found;
     const snapshot = copySnapshot(found.snapshot);
     const now = deps.now();
-    if (found.reviewId !== reviewId || ownerId !== authenticatedOwner || authSessionId !== authenticatedSession || found.gradingSessionId !== gradingSessionId || !snapshot || typeof storagePath !== "string" || storagePath.length > 200 || !ownGradingArchive(authenticatedOwner, storagePath) || !Number.isSafeInteger(now) || !Number.isSafeInteger(createdAtMs) || !Number.isSafeInteger(expiresAtMs) || createdAtMs > now || expiresAtMs <= now || expiresAtMs - createdAtMs > MAX_LIFETIME_MS) return { ok: false, reason: UNAVAILABLE };
+    if (found.reviewId !== reviewId || ownerId !== authenticatedOwner || authSessionId !== authenticatedSession || found.gradingSessionId !== gradingSessionId || !snapshot || typeof storagePath !== "string" || !isArchiveReviewSourcePath(authenticatedOwner, reviewId, storagePath) || !Number.isSafeInteger(now) || !Number.isSafeInteger(createdAtMs) || !Number.isSafeInteger(expiresAtMs) || createdAtMs > now || expiresAtMs <= now || expiresAtMs - createdAtMs > MAX_LIFETIME_MS) return { ok: false, reason: UNAVAILABLE };
     const source = await deps.readPrivateSource(storagePath, ARCHIVE_REVIEW_MAX_BYTES);
     if (!(source instanceof Uint8Array) || source.byteLength > ARCHIVE_REVIEW_MAX_BYTES) return { ok: false, reason: UNAVAILABLE };
     const plan = await planValidatedArchive(source, snapshot, assignments);

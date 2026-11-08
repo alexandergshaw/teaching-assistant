@@ -114,6 +114,34 @@ describe("grade-run-item with VIDEO_GRADING_ENABLED forced on", () => {
     expect(mockRemove).toHaveBeenCalledTimes(1);
   });
 
+  it("retains a shared recording across successful segment grades", async () => {
+    const files = fakeFiles(); let stored = true;
+    mockDownload.mockImplementation((async () => stored ? { data: { size: MP4.byteLength, arrayBuffer: async () => MP4.buffer.slice(0) }, error: null } : { data: null, error: { message: "missing" } }) as never);
+    mockRemove.mockImplementation((async () => { stored = false; return { error: null }; }) as never);
+    mockGrade.mockResolvedValue({ results: [{ student: "Alice" }] } as never);
+    const segment = async (startSec: number, endSec: number) => {
+      const base = request(OWN); const body = await base.json();
+      return { ...base, json: async () => ({ ...body, gradeWindowSec: { startSec, endSec } }) } as unknown as NextRequest;
+    };
+    expect((await POST(await segment(0, 10))).status).toBe(200);
+    expect((await POST(await segment(10, 20))).status).toBe(200);
+    expect(mockGrade).toHaveBeenCalledTimes(2);
+    expect(mockRemove).not.toHaveBeenCalled();
+    expect(files.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains the recording through a failed segment and its retry", async () => {
+    const files = fakeFiles(); storageHas(OWN);
+    mockGrade.mockRejectedValueOnce(new Error("temporary service failure"))
+      .mockResolvedValueOnce({ results: [{ student: "Alice" }] } as never);
+    const base = request(OWN); const body = await base.json();
+    const segment = { ...base, json: async () => ({ ...body, gradeWindowSec: { startSec: 0, endSec: 10 } }) } as unknown as NextRequest;
+    expect((await POST(segment)).status).toBe(502);
+    expect((await POST(segment)).status).toBe(200);
+    expect(mockGrade).toHaveBeenCalledTimes(2); expect(mockRemove).not.toHaveBeenCalled();
+    expect(files.delete).toHaveBeenCalledTimes(2);
+  });
+
   it("a non-video body behind a video path is a typed 422 and the model is never called", async () => {
     const files = fakeFiles();
     mockDownload.mockResolvedValue({

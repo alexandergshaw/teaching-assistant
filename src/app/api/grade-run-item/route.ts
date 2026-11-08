@@ -385,7 +385,7 @@ export async function POST(req: NextRequest) {
               gradeStartedAtMs = Date.now();
               return gradeEntries([resolved], assignmentInstructions, rubric, provider, pointsPossible, { ...options, extraAttachments });
             },
-            (run) => run.results[0]?.ungraded?.kind === "grading-failed"
+            (run) => Boolean(videoGradeWindowSec) || run.results[0]?.ungraded?.kind === "grading-failed"
           );
           if (!videoOutcome.ok) return { videoFailure: { failure: videoOutcome.failure, message: videoOutcome.message } };
           return { graded: videoOutcome.value, linkFetch: resolved.linkFetch };

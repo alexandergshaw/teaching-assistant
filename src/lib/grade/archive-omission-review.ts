@@ -49,7 +49,7 @@ export function planReviewedArchive(members: readonly ReviewArchiveMember[], ass
     if ((labelOwner && labelOwner !== normalizedKey) || (existing && (existing.studentKey !== studentKey || existing.studentLabel !== studentLabel))) return { ok: false, reason: "Student identities and labels must be unambiguous." };
     labels.set(normalizedLabel, normalizedKey);
     seen.add(member.id);
-    const group = existing ?? { studentKey, studentLabel, memberIds: [], incomplete: false };
+    const group = existing ?? { studentKey, studentLabel, memberIds: [] as string[], incomplete: false };
     group.memberIds.push(member.id);
     group.incomplete ||= !member.readable;
     groups.set(normalizedKey, group);

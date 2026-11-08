@@ -23,9 +23,9 @@ import { ZipCapError } from "@/lib/zip-caps";
 // grade-run-item/route.ts for the guard-first / soft-budget-under-hard-cap
 // shape.
 //
-// The Storage object is deleted by withUploadedSyllabusFile on EVERY path, and
-// its bytes are fully in memory before any line is streamed, so the delete
-// happens before the stream starts (safe: nothing re-reads the object).
+// After the size check, withUploadedSyllabusFile removes the Storage object
+// before the response stream starts. Early refusals leave cleanup to the
+// client or the orphan sweep.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -47,19 +47,24 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : "an unexpected error";
 }
 
-/** The stored object's size from Storage metadata, or null when it cannot be
- * determined (the post-download byte-length check still applies then). */
+/** The stored object's nonnegative integer size, or null when it cannot be verified. */
 async function statObjectSize(storagePath: string): Promise<number | null> {
   try {
     const at = storagePath.lastIndexOf("/");
     const dir = storagePath.slice(0, at);
     const name = storagePath.slice(at + 1);
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.storage.from(SYLLABUS_UPLOAD_BUCKET).list(dir, { limit: 1, search: name });
-    if (error || !data) return null;
-    const match = data.find((o) => o.name === name);
-    const size = (match?.metadata as { size?: unknown } | null | undefined)?.size;
-    return typeof size === "number" ? size : null;
+    for (let offset = 0; offset < 1000; offset += 100) {
+      const { data, error } = await supabase.storage.from(SYLLABUS_UPLOAD_BUCKET).list(dir, { limit: 100, offset, search: name, sortBy: { column: "name", order: "asc" } });
+      if (error || !data) return null;
+      const match = data.find((o) => o.name === name);
+      if (match) {
+        const size = (match.metadata as { size?: unknown } | null | undefined)?.size;
+        return typeof size === "number" && Number.isSafeInteger(size) && size >= 0 ? size : null;
+      }
+      if (data.length < 100) return null;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -129,7 +134,10 @@ export async function POST(req: NextRequest) {
   // S4: a server-side size gate on the stored object BEFORE download - the
   // client pre-flight is not trusted.
   const storedSize = await statObjectSize(storagePath);
-  if (storedSize !== null && storedSize > GRADING_ZIP_MAX_BYTES) {
+  if (storedSize === null) {
+    return NextResponse.json({ error: "The uploaded ZIP size could not be verified. Choose the ZIP again; no submissions were queued." }, { status: 503 });
+  }
+  if (storedSize > GRADING_ZIP_MAX_BYTES) {
     return NextResponse.json({ error: OVER_CEILING_MESSAGE }, { status: 413 });
   }
 

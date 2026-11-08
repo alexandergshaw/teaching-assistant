@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/auth", () => ({
   requireAppOwner: (...args: unknown[]) => requireAppOwnerMock(...args),
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ storage: { from: () => ({ list: async () => ({ data: [], error: null }) }) } }),
+  createClient: async () => ({ storage: { from: () => ({ list: async () => ({ data: [{ name: "abc.zip", metadata: { size: 64 } }], error: null }) }) } }),
 }));
 
 const downloadFileMock = vi.fn();
@@ -206,7 +206,7 @@ describe("flag ON: the route hands extraction a stager", () => {
       return { entries: [videoEntry(staged.storagePath, "x".repeat(4_000_000))], attemptedSupportedFiles: 0, failedSupportedFiles: [] };
     });
     const lines = await readLines(await POST(jsonRequest({ storagePath: GOOD_PATH })));
-    expect(lines).toEqual([{ type: "done", error: "No submissions were queued. Too large to grade: A." }]);
+    expect(lines).toEqual([{ type: "skip", student: "A (item 1)", reason: "too large to grade on this surface" }, { type: "done", studentsFound: 1, studentsEmitted: 0, skipped: [{ student: "A (item 1)", reason: "too large to grade on this surface" }], failedSupportedFiles: [] }]);
     expect(removeFilesMock).toHaveBeenCalledWith("course-files", [uploadFileMock.mock.calls[0][1]]);
   });
 

@@ -192,17 +192,46 @@ describe("POST /api/grade-submission-zip", () => {
     expect(downloadFileMock).not.toHaveBeenCalled();
     expect(ingestZipEntriesMock).not.toHaveBeenCalled();
   });
+  it("allows metadata exactly at the ceiling to reach the download backstop", async () => {
+    listMock.mockResolvedValue({ data: [{ name: "abc.zip", metadata: { size: GRADING_ZIP_MAX_BYTES } }], error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(200); expect(downloadFileMock).toHaveBeenCalledTimes(1);
+  });
 
-  it("S4 backstop: an unknown stat size with an over-ceiling blob is refused before extraction, and the object is deleted", async () => {
+  it("refuses unknown size before download and leaves cleanup to the caller", async () => {
     listMock.mockResolvedValue({ data: [], error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(503); expect((await res.json()).error).toContain("size could not be verified");
+    expect(downloadFileMock).not.toHaveBeenCalled(); expect(ingestZipEntriesMock).not.toHaveBeenCalled(); expect(removeFilesMock).not.toHaveBeenCalled();
+  });
+  it("finds the exact upload after a page of substring matches", async () => {
+    listMock.mockResolvedValueOnce({ data: Array.from({ length: 100 }, (_, i) => ({ name: `abc.zip-${i}`, metadata: { size: 1 } })), error: null })
+      .mockResolvedValueOnce({ data: [{ name: "abc.zip", metadata: { size: 64 } }], error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(200); expect(downloadFileMock).toHaveBeenCalledTimes(1);
+    expect(listMock.mock.calls[1][1]).toMatchObject({ offset: 100, search: "abc.zip" });
+  });
+  it("stops after the bounded lookup when no exact name is found", async () => {
+    listMock.mockResolvedValue({ data: Array.from({ length: 100 }, (_, i) => ({ name: `abc.zip-${i}`, metadata: { size: 1 } })), error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(503); expect(listMock).toHaveBeenCalledTimes(10); expect(downloadFileMock).not.toHaveBeenCalled();
+  });
+  it.each(["error", "throw"])("refuses a Storage list %s before downloading", async (mode) => {
+    if (mode === "throw") listMock.mockRejectedValueOnce(new Error("storage unavailable"));
+    else listMock.mockResolvedValueOnce({ data: null, error: { message: "storage unavailable" } });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(503); expect(downloadFileMock).not.toHaveBeenCalled(); expect(removeFilesMock).not.toHaveBeenCalled();
+  });
+  it.each([null, "123", -1, NaN, Infinity, 1.5])("refuses invalid stored size %s before download", async (size) => {
+    listMock.mockResolvedValue({ data: [{ name: "abc.zip", metadata: { size } }], error: null });
+    const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
+    expect(res.status).toBe(503); expect(downloadFileMock).not.toHaveBeenCalled(); expect(removeFilesMock).not.toHaveBeenCalled();
+  });
+  it("retains the post-download size backstop for stale metadata", async () => {
     downloadFileMock.mockResolvedValue({ data: { size: GRADING_ZIP_MAX_BYTES + 1, arrayBuffer: vi.fn() }, error: null });
     const res = await POST(jsonRequest({ storagePath: GOOD_PATH }));
-    const lines = await readLines(res);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatchObject({ type: "done" });
-    expect(typeof lines[0].error).toBe("string");
-    expect(ingestZipEntriesMock).not.toHaveBeenCalled();
-    expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
+    const lines = await readLines(res); expect(lines[0]).toMatchObject({ type: "done", error: expect.any(String) });
+    expect(ingestZipEntriesMock).not.toHaveBeenCalled(); expect(removeFilesMock).toHaveBeenCalledWith("course-files", [GOOD_PATH]);
   });
 
   it("isolates the oversized student and emits the other entries; the object is deleted", async () => {

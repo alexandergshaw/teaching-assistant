@@ -220,22 +220,23 @@ describe("GradingChatPanel - regrade-after-batch: the chat mount opts in, the ot
     expect(source).toMatch(/busy=\{regradingStudents\?\.has\(result\.student\)/);
   });
 
-  it("the Regrade handler clears edits[student] and the post status, then calls onRegrade", () => {
+  it("regrading preserves edits and posting status until a candidate is accepted", () => {
     const source = withoutLineComments(read(RESULTS));
     const start = source.indexOf("const handleRegradeRow");
     expect(start).toBeGreaterThan(-1);
     const body = source.slice(start, source.indexOf("onRegrade?.(student)", start) + 25);
-    expect(body).toMatch(/setEdits\(/);
-    expect(body).toMatch(/delete next\[student\]/);
-    expect(body).toMatch(/clearPostStatus\(student\)/);
+    expect(body).not.toMatch(/setEdits\(|clearPostStatus\(/);
     expect(body).toContain("onRegrade?.(student)");
+    const accept = source.slice(source.indexOf("const handleAcceptRegrade"), source.indexOf("const updateEdit"));
+    expect(accept).toContain("onAcceptRegrade?.(student, candidate)");
+    expect(accept.indexOf("delete next[student]")).toBeGreaterThan(accept.indexOf("onAcceptRegrade?.(student, candidate)"));
+    expect(accept).toContain("clearPostStatus(student)");
   });
 
-  it("the guard pattern discriminates: an unguarded button and a non-clearing handler do not match", () => {
+  it("the guard pattern discriminates an unguarded button", () => {
     const guarded = /\{onRegrade\s*&&\s*\([\s\S]{0,400}handleRegradeRow\(result\.student\)/;
     expect("<Button onClick={() => handleRegradeRow(result.student)}>Regrade</Button>").not.toMatch(guarded);
     expect("{onRegrade && (<Button onClick={() => handleRegradeRow(result.student)}>").toMatch(guarded);
-    expect("const handleRegradeRow = (s) => { onRegrade?.(s); };").not.toMatch(/delete next\[student\]/);
   });
 });
 

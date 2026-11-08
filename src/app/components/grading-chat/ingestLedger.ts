@@ -22,6 +22,11 @@ export interface LedgerView {
   readonly hasAny: boolean;
 }
 
+/** Copy only omitted work, retaining the exact names and individual reasons. */
+export function formatNotQueuedList(skipped: LedgerView["skipped"]): string {
+  return skipped.map((item) => `${item.student} (${item.reason})`).join("\n");
+}
+
 /** Folds a later zip's ledger into the retained one, so a second zip never erases the first. */
 export function mergeIngestLedgers(prev: IngestLedger | null, next: IngestLedger): IngestLedger {
   if (prev === null) return next;

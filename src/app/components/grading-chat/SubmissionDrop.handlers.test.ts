@@ -24,9 +24,9 @@ function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap
 const text = (node: any): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : !node || typeof node !== "object" ? "" : text(node.props?.children);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 beforeEach(() => { slots.length = 0; cursor = 0; });
-function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence) {
+function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })), onMany = vi.fn(async () => [] as any[]), onText: (student: string, content: string) => Promise<SubmitOutcome> = vi.fn(async (): Promise<SubmitOutcome> => ({ kind: "accepted", entryCount: 1 })), sharedLatch?: IntakeFence, reviewFiles = false) {
   let epoch = 0;
-  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
+  const render = () => { cursor = 0; return component({ disabled: false, sharedLatch, reviewFiles, onOne, onMany, onText, getSessionEpoch: () => epoch, sessionEpoch: epoch }); };
   const find = (tree: Node, type: string) => nodes(tree).find((node) => node.type === type)!;
   const button = (tree: Node, label: string) => nodes(tree).find((node) => node.type === "Button" && text(node) === label)!;
   const reset = () => { epoch++; };
@@ -35,6 +35,20 @@ function harness(onOne = vi.fn(async () => ({ kind: "accepted", entryCount: 1 })
 const work = (name: string) => new File(["work"], name);
 
 describe("SubmissionDrop actual handlers", () => {
+  it("marks assigned files uncertain when the review callback rejects after dispatch", async () => {
+    let fail!: (error: Error) => void;
+    const onMany = vi.fn().mockResolvedValueOnce([{ kind: "identity", reason: "student needed" }]).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const h = harness(undefined, onMany, undefined, undefined, true); let tree = h.render();
+    h.find(tree, "RadioGroup").props.onChange(null, "many"); tree = h.render();
+    h.find(tree, "input").props.onChange({ target: { files: [work("assignment.pdf")], value: "x" } }); await flush(); tree = h.render();
+    nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student for assignment.pdf")!.props.onChange({ target: { value: "Ada" } });
+    tree = h.render(); h.button(tree, "Grade assigned files").props.onClick();
+    fail(new Error("lost response")); await flush(); tree = h.render();
+    expect(text(tree)).toContain("Needs review");
+    expect(text(tree)).toContain("Check results before retrying");
+    expect(nodes(tree).some((n) => n.type === "Button" && text(n) === "Grade assigned files")).toBe(false);
+    expect(onMany).toHaveBeenCalledTimes(2);
+  });
   it("marks only the attempted group uncertain after reset, leaving other held files assignable", async () => {
     let finish!: (value: any) => void;
     const onOne = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));

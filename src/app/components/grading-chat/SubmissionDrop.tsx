@@ -177,6 +177,10 @@ export function SubmissionDrop({ disabled, sharedLatch, reviewFiles = false, get
         if (outcome.kind === "refused" || outcome.kind === "identity") return { ...row, state: "identity", reason: outcome.reason };
         return { ...row, state: "uncertain", reason: outcome.reason };
       }));
+    } catch {
+      if (alive.current && latch.generation === token) setRows((previous) => previous.map((row) => batch.some((entry) => entry.id === row.id)
+        ? { ...row, state: "uncertain", reason: "The submission status could not be confirmed. Check results before retrying." }
+        : row));
     } finally { if (releaseIntake(latch, token) && alive.current) { activeRows.current = null; setPending(false); } }
   }
 

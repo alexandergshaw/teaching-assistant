@@ -512,7 +512,7 @@ describe("ChatComposer - composite W2: tray controls and the preserved single-pa
     expect(source).toMatch(/Remove part/);
     expect(source).toContain('label="Student name"');
     expect(source).toMatch(/Grade submission \(\$\{parts\.length\}\)/);
-    expect(source).toMatch(/onSubmitComposite\(student\.trim\(\), parts\)/);
+    expect(source).toMatch(/onSubmitComposite\(submittedStudent\.trim\(\), submittedParts\)/);
   });
 
   it("stages text and files in the composite tray and preserves link submission", () => {
@@ -726,7 +726,7 @@ describe("GradingChatPanel - deduction controls W2: length deduction control and
 
   it("the driver conditional-spreads the flag only when ON, default wire byte-identical", () => {
     const driver = withoutLineComments(read(DRIVER));
-    expect(driver).toContain("...(applyLengthDeductionRef.current === true ? { applyLengthDeduction: true } : {})");
+    expect(driver).toMatch(/\.\.\.\(applyLengthDeductionRef\.current\s*\?\s*\{\s*applyLengthDeduction:\s*true,\s*lengthDeductionThresholdWords:\s*lengthDeductionThresholdWordsRef\.current\s*\}\s*:\s*\{\}\)/);
     expect(driver).not.toMatch(/^\s*applyLengthDeduction(:|,)/m);
   });
 });
@@ -783,7 +783,7 @@ describe("ChatComposer - record-a-submission: frames become composite parts", ()
     expect(source).toContain("useChatScreenFrameCapture(");
     const start = source.indexOf("useChatScreenFrameCapture(");
     const call = source.slice(start, source.indexOf(");", start));
-    expect(call).toContain("addParts(");
+    expect(call).toContain("setParts(");
     expect(call).toContain('kind: "file"');
   });
 

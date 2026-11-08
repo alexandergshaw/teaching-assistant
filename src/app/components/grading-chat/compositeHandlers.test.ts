@@ -17,12 +17,46 @@ const code = ts.transpileModule(declaration.getText(file).replace(/^export\s+/, 
 const jsx = (type: string, props: any) => ({ type, props });
 const names = ["TextField", "MenuItem", "Button", "Alert", "Accordion", "AccordionSummary", "AccordionDetails", "SubmissionDrop"];
 const buildLms = vi.fn();
+let capturedFrames: ((files: File[]) => void) | undefined;
 const lms = { canSubmit: true, institution: "A", courseId: "1", assignmentId: "2", institutions: ["A"], courses: [{ id: "1", name: "Course" }], assignments: [{ id: "2", name: "Assignment" }], loading: {}, errors: {}, selectInstitution: vi.fn(), selectCourse: vi.fn(), selectAssignment: vi.fn() };
 const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "loadInputMode", "useLmsSubmissionPicker", "useChatScreenFrameCapture", "MAX_RECORDING_FRAMES", "loadComposerHeight", "persistComposerHeight", "persistInputMode", "describePart", "submitOnEnter", "dispatchComposite", "claimIntake", "releaseIntake", "resetIntake", "buildLmsAssignmentUrlAction", "lmsFieldIndication", "LMS_INSTITUTION_COPY", "LMS_COURSE_COPY", "LMS_ASSIGNMENT_COPY", "styles", "chatStyles", ...names, `${code}; return ChatComposer;`);
-const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx, Fragment: "Fragment" } : {}, useState, useRef, useEffect, () => "text", () => lms, () => ({ recording: false, snapping: false }), 30, () => null, () => null, () => {}, (part: any) => part.content ?? part.file.name, () => () => {}, dispatchComposite, claimIntake, releaseIntake, resetIntake, buildLms, () => ({ disabled: false }), {}, {}, {}, {}, {}, ...names);
+const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx, Fragment: "Fragment" } : {}, useState, useRef, useEffect, () => "text", () => lms, (callback: (files: File[]) => void) => { capturedFrames = callback; return { recording: false, snapping: false }; }, 30, () => null, () => null, () => {}, (part: any) => part.content ?? part.file.name, () => () => {}, dispatchComposite, claimIntake, releaseIntake, resetIntake, buildLms, () => ({ disabled: false }), {}, {}, {}, {}, {}, ...names);
 function nodes(value: any): any[] { if (Array.isArray(value)) return value.flatMap(nodes); if (!value || typeof value !== "object") return []; return [value, ...nodes(value.props?.children)]; }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
-beforeEach(() => { slots.length = 0; cursor = 0; buildLms.mockReset(); });
+beforeEach(() => { slots.length = 0; cursor = 0; buildLms.mockReset(); capturedFrames = undefined; });
+it("retains frames completed during intake and clears only submitted composite parts", async () => {
+  let finish!: (result: any) => void;
+  const submit = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const render = () => { cursor = 0; return component({ disabled: false, onSubmitFiles: vi.fn(), onSubmitUrl: vi.fn(), onSubmitComposite: submit, getSessionEpoch: () => 1 }); };
+  let tree = render();
+  nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Text for combined submission").props.onChange({ target: { value: "first" } });
+  tree = render(); nodes(tree).find((n) => n.type === "Button" && n.props.children === "Add text part").props.onClick();
+  tree = render(); nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student name").props.onChange({ target: { value: "Ada" } });
+  tree = render(); nodes(tree).find((n) => n.type === "Button" && n.props["aria-label"] === "Grade submission").props.onClick();
+  capturedFrames!([{ name: "capture.png" } as File]);
+  finish({ kind: "accepted", entryCount: 1 }); await flush(); tree = render();
+  expect(nodes(tree).some((n) => n.type === "span" && n.props.children === "capture.png")).toBe(true);
+  expect(nodes(tree).find((n) => n.type === "TextField" && n.props.label === "Student name").props.value).toBe("Ada");
+  expect(nodes(tree).find((n) => n.type === "Button" && n.props["aria-label"] === "Grade submission").props.children).toBe("Grade submission (1)");
+});
+it("retains frames that finish after a session reset", () => {
+  let epoch = 1;
+  const render = () => { cursor = 0; return component({ disabled: false, sessionEpoch: epoch, onSubmitFiles: vi.fn(), onSubmitUrl: vi.fn(), onSubmitComposite: vi.fn(), getSessionEpoch: () => epoch }); };
+  render(); const finishCapture = capturedFrames!;
+  epoch++; render(); finishCapture([{ name: "after-reset.png" } as File]);
+  const tree = render();
+  expect(nodes(tree).some((n) => n.type === "span" && n.props.children === "after-reset.png")).toBe(true);
+});
+it("preserves all frames and blocks grading when they exceed the part limit", () => {
+  const submit = vi.fn();
+  const render = () => { cursor = 0; return component({ disabled: false, onSubmitFiles: vi.fn(), onSubmitUrl: vi.fn(), onSubmitComposite: submit, getSessionEpoch: () => 1 }); };
+  render(); capturedFrames!(Array.from({ length: 31 }, (_, i) => ({ name: `frame-${i}.png` } as File)));
+  const tree = render();
+  const grade = nodes(tree).find((n) => n.type === "Button" && n.props["aria-label"] === "Grade submission");
+  expect(grade.props.disabled).toBe(true); grade.props.onClick(); expect(submit).not.toHaveBeenCalled();
+  expect(nodes(tree).some((n) => n.type === "Alert" && String(n.props.children).includes("too many parts"))).toBe(true);
+  expect(nodes(tree).find((n) => n.type === "Button" && n.props["aria-label"] === "Remove part 31")).toBeDefined();
+});
 it("blocks same-turn add and remove while a deferred submission is pending", async () => {
   let finish!: (result: any) => void;
   const submit = vi.fn(() => new Promise((resolve) => { finish = resolve; }));

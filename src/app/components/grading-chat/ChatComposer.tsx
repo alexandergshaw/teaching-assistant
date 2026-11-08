@@ -121,15 +121,17 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
     setUrlPending(false); setLmsBusy(false); setCompositePending(false);
   }
   const [student, setStudent] = useState("");
+  const captureRevision = useRef(0);
   const trayActive = parts.length > 0;
 
   const addParts = (added: CompositePartInput[]) => { if (!intakeLatch.busy) setParts((prev) => [...prev, ...added]); };
   // A stopped recording hands back its frames as image Files; they join the
   // composite tray as file parts, so "Grade submission (N)" merges them into
   // ONE row through the existing composite path.
-  const capture = useChatScreenFrameCapture((files) =>
-    addParts(files.map((file): CompositePartInput => ({ kind: "file", file })))
-  );
+  const capture = useChatScreenFrameCapture((files) => {
+    captureRevision.current += 1;
+    setParts((previous) => [...previous, ...files.map((file): CompositePartInput => ({ kind: "file", file }))]);
+  });
   const trayRoom = MAX_RECORDING_FRAMES - parts.length;
   // Vertical expand (docs/grading-chat-consolidation-scope.md W1, A): the
   // persisted floor is a min-height on the TEXTAREA (see composerHeight.ts for
@@ -259,18 +261,24 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
     controlsDisabled || mode === "record" || mode === "lms" || (mode === "text" && !text.trim()) || (mode === "url" && !url.trim());
 
   const handleGrade = async () => {
-    if (controlsDisabled || intakeLatch.busy || compositeUncertain || !trayActive || capture.recording || capture.snapping) return;
+    if (controlsDisabled || intakeLatch.busy || compositeUncertain || !trayActive || parts.length > MAX_RECORDING_FRAMES || capture.recording || capture.snapping) return;
     const token = claimIntake(intakeLatch); if (token === null) return;
     setCompositePending(true);
     setCompositeError(null);
     const epoch = getSessionEpoch?.();
+    const submittedParts = parts;
+    const submittedStudent = student;
+    const submittedCaptureRevision = captureRevision.current;
     const outcome = await dispatchComposite(
-      () => onSubmitComposite(student.trim(), parts),
+      () => onSubmitComposite(submittedStudent.trim(), submittedParts),
       () => mounted.current && getSessionEpoch?.() === epoch && intakeLatch.generation === token,
     );
     if (!releaseIntake(intakeLatch, token) || !mounted.current) return;
     setCompositePending(false);
-    if (outcome.kind === "accepted") { setParts([]); setStudent(""); }
+    if (outcome.kind === "accepted") {
+      setParts((current) => submittedParts.every((part, index) => current[index] === part) ? current.slice(submittedParts.length) : current);
+      if (captureRevision.current === submittedCaptureRevision) setStudent((current) => current === submittedStudent ? "" : current);
+    }
     else if (outcome.kind === "refused") setCompositeError(outcome.reason);
     else setCompositeUncertain(true);
   };
@@ -329,6 +337,7 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
 
       {compositeError && <Alert severity="warning">{compositeError}</Alert>}
       {compositeUncertain && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setCompositeUncertain(false)}>I checked results</Button>}>The combined submission could not be confirmed. Check previous results before retrying.</Alert>}
+      {parts.length > MAX_RECORDING_FRAMES && <Alert severity="warning">This submission has too many parts. Remove parts until it has at most {MAX_RECORDING_FRAMES} before grading.</Alert>}
       {trayActive && (
         <div role="group" aria-label="Composite submission parts">
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -351,7 +360,7 @@ export function ChatComposer({ disabled, sharedLatch, reviewFiles = false, getSe
               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleGrade(); } }}
               disabled={controlsDisabled}
             />
-            <Button variant="contained" aria-label="Grade submission" disabled={controlsDisabled || compositeUncertain || capture.recording || capture.snapping} onClick={() => void handleGrade()}>
+            <Button variant="contained" aria-label="Grade submission" disabled={controlsDisabled || compositeUncertain || parts.length > MAX_RECORDING_FRAMES || capture.recording || capture.snapping} onClick={() => void handleGrade()}>
               {`Grade submission (${parts.length})`}
             </Button>
           </div>

@@ -5,10 +5,10 @@ import { ZIP_MAX_CUMULATIVE_DECLARED_BYTES, ZIP_MAX_CUMULATIVE_ENTRIES } from "@
 /** A deliberately narrow snapshot; unsupported archive forms remain refused. */
 export interface ArchiveReviewSnapshot {
   readonly sourceSha256: string;
-  readonly members: readonly { readonly id: string; readonly path: string }[];
+  readonly members: readonly { readonly id: string; readonly path: string; readonly crc32: number; readonly uncompressedSize: number }[];
 }
 
-const MAX_ARCHIVE_BYTES = ZIP_MAX_CUMULATIVE_DECLARED_BYTES + 5 * 1024 * 1024;
+export const ARCHIVE_REVIEW_MAX_BYTES = ZIP_MAX_CUMULATIVE_DECLARED_BYTES + 5 * 1024 * 1024;
 const MAX_COMMENT = 65535;
 const fail = (): never => { throw new Error("This archive cannot be safely inventoried for review."); };
 
@@ -18,7 +18,7 @@ const fail = (): never => { throw new Error("This archive cannot be safely inven
  * archives only. This does not extract bytes or establish readability.
  */
 export function snapshotReviewArchive(bytes: Uint8Array): ArchiveReviewSnapshot {
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 22 || bytes.byteLength > MAX_ARCHIVE_BYTES) return fail();
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 22 || bytes.byteLength > ARCHIVE_REVIEW_MAX_BYTES) return fail();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const u16 = (offset: number) => view.getUint16(offset, true);
   const u32 = (offset: number) => view.getUint32(offset, true);
@@ -31,7 +31,7 @@ export function snapshotReviewArchive(bytes: Uint8Array): ArchiveReviewSnapshot 
   if (diskEntries !== totalEntries || totalEntries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff || totalEntries > ZIP_MAX_CUMULATIVE_ENTRIES || centralOffset + centralSize !== end) return fail();
   const seenPaths = new Set<string>(), regularPaths = new Set<string>(), localOffsets = new Set<number>();
   const ranges: { start: number; end: number }[] = [];
-  const members: { id: string; path: string }[] = [];
+  const members: { id: string; path: string; crc32: number; uncompressedSize: number }[] = [];
   let cursor = centralOffset;
   for (let index = 0; index < totalEntries; index++) {
     if (cursor + 46 > end || u32(cursor) !== 0x02014b50) return fail();
@@ -59,7 +59,7 @@ export function snapshotReviewArchive(bytes: Uint8Array): ArchiveReviewSnapshot 
     ranges.push({ start: local, end: dataStart + compressedSize });
     if (!name.endsWith("/")) {
       if (path.toLowerCase().endsWith(".zip")) return fail();
-      members.push({ id: String(index), path });
+      members.push({ id: String(index), path, crc32: u32(cursor + 16), uncompressedSize: u32(cursor + 24) });
     }
     cursor = next;
   }
@@ -79,6 +79,6 @@ export function snapshotReviewArchive(bytes: Uint8Array): ArchiveReviewSnapshot 
 export function matchesReviewArchive(bytes: Uint8Array, expected: ArchiveReviewSnapshot): boolean {
   try {
     const actual = snapshotReviewArchive(bytes);
-    return actual.sourceSha256 === expected.sourceSha256 && actual.members.length === expected.members.length && actual.members.every((member, i) => member.id === expected.members[i]?.id && member.path === expected.members[i]?.path);
+    return actual.sourceSha256 === expected.sourceSha256 && actual.members.length === expected.members.length && actual.members.every((member, i) => member.id === expected.members[i]?.id && member.path === expected.members[i]?.path && member.crc32 === expected.members[i]?.crc32 && member.uncompressedSize === expected.members[i]?.uncompressedSize);
   } catch { return false; }
 }

@@ -20,7 +20,7 @@ describe("archive review snapshots", () => {
   it("binds every flat member to the exact retained source bytes", async () => {
     const bytes = await archive({ "Ada/essay.txt": "Ada", "Bea/essay.txt": "Bea" });
     const snapshot = snapshotReviewArchive(bytes);
-    expect(snapshot.members).toEqual([{ id: "0", path: "Ada/essay.txt" }, { id: "1", path: "Bea/essay.txt" }]);
+    expect(snapshot.members).toMatchObject([{ id: "0", path: "Ada/essay.txt", uncompressedSize: 3 }, { id: "1", path: "Bea/essay.txt", uncompressedSize: 3 }]);
     expect(snapshot.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(matchesReviewArchive(bytes, snapshot)).toBe(true);
     const changed = bytes.slice();

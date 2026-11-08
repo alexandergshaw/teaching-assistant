@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import Alert from "@mui/material/Alert";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
@@ -69,6 +72,8 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
     name, files: suggestedRows.filter((_, index) => suggestions[index] === name),
   }));
   const unresolved = rows.some((row) => row.state === "uncertain");
+  const queuedRows = rows.filter((row) => row.state === "queued");
+  const attentionRows = rows.filter((row) => row.state !== "queued");
 
   async function gradeText() {
     if (busy || latch.current || textUncertain || !submissionText.trim() || (mode === "many" && !textStudent.trim())) return;
@@ -196,8 +201,12 @@ export function SubmissionDrop({ disabled, reviewFiles = false, getSessionEpoch,
       {suggestions.some(Boolean) && <Alert severity="info">Suggested groups are based on filenames and may combine different students or split one submission. Review the files in each group. To correct a group, enter student names below and use Grade assigned files.</Alert>}
       {suggestedGroups.length > 0 && <Button variant="outlined" disabled={busy} onClick={() => void gradeAssigned(suggestedGroups.flatMap((group) => group.files.map((row) => ({ ...row, assigned: group.name }))))}>Accept and grade all reviewed groups</Button>}
       {suggestedGroups.map((group) => <Box key={group.name} sx={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", p: 1 }}><Typography variant="body2">Suggested: {group.name}</Typography><Typography variant="body2">{group.files.map((row) => row.file.name).join(", ")}</Typography><Button size="small" disabled={busy} onClick={() => void gradeAssigned(group.files.map((row) => ({ ...row, assigned: group.name })))}>Accept and grade this group</Button></Box>)}
-      {rows.length > 0 && <Box component="ul" sx={{ m: 0, pl: 3 }}>
-        {rows.map((row) => <li key={row.id}><Typography component="span" variant="body2">{`${row.file.name}: ${row.state === "ready" ? "Ready" : row.state === "queued" ? "Queued" : row.state === "staged" ? "Awaiting review" : row.state === "refused" ? "Not submitted" : row.state === "identity" ? "Student needed" : "Needs review"}${row.reason ? ` - ${row.reason}` : ""}`}</Typography>
+      {queuedRows.length > 0 && <Accordion disableGutters elevation={0}>
+        <AccordionSummary expandIcon={<span aria-hidden="true">+</span>}>{`Queued: ${queuedRows.length} ${queuedRows.length === 1 ? "file" : "files"}`}</AccordionSummary>
+        <AccordionDetails><Box component="ul" sx={{ m: 0, pl: 3 }}>{queuedRows.map((row) => <li key={row.id}><Typography variant="body2">{row.file.name}</Typography></li>)}</Box></AccordionDetails>
+      </Accordion>}
+      {attentionRows.length > 0 && <Box component="ul" sx={{ m: 0, pl: 3 }}>
+        {attentionRows.map((row) => <li key={row.id}><Typography component="span" variant="body2">{`${row.file.name}: ${row.state === "ready" ? "Ready" : row.state === "staged" ? "Awaiting review" : row.state === "refused" ? "Not submitted" : row.state === "identity" ? "Student needed" : "Needs review"}${row.reason ? ` - ${row.reason}` : ""}`}</Typography>
           {row.state === "identity" && suggestions[suggestedRows.findIndex((entry) => entry.id === row.id)] && <Typography variant="body2">Suggested student: {suggestions[suggestedRows.findIndex((entry) => entry.id === row.id)]}</Typography>}
           {row.state === "identity" && <TextField size="small" label={`Student for ${row.file.name}`} value={row.assigned ?? ""} disabled={busy} onChange={(event) => { const value = event.target.value; setRows((previous) => previous.map((item) => item.id === row.id ? { ...item, assigned: value } : item)); }} />}</li>)}
       </Box>}

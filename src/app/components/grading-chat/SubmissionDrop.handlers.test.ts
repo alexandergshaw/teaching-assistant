@@ -16,7 +16,7 @@ const file = ts.createSourceFile("SubmissionDrop.tsx", source, ts.ScriptTarget.L
 const declarations = file.statements.filter((statement) => ts.isFunctionDeclaration(statement) && ["SubmissionDrop", "reconcileRowAfterReset"].includes(statement.name?.text ?? ""));
 const code = ts.transpileModule(declarations.map((d) => d.getText(file).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
 const jsx = (type: string, props: Record<string, unknown>) => ({ type, props });
-const components = ["Alert", "Box", "Button", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
+const components = ["Alert", "Accordion", "AccordionDetails", "AccordionSummary", "Box", "Button", "Dialog", "DialogActions", "DialogContent", "DialogTitle", "FormControl", "FormControlLabel", "FormLabel", "Radio", "RadioGroup", "TextField", "Typography"];
 const factory = new Function("exports", "require", "useState", "useRef", "useEffect", "ROLE_FILE_LIMIT", "submitAssignedFiles", "submitDropBatch", "suggestFileGroups", "markSessionChanged", "window", ...components, `${code}; return SubmissionDrop;`);
 const component = factory({}, (id: string) => id === "react/jsx-runtime" ? { jsx, jsxs: jsx } : {}, useState, useRef, useEffect, 40, submitAssignedFiles, submitDropBatch, suggestFileGroups, markSessionChanged, { addEventListener() {}, removeEventListener() {} }, ...components);
 function nodes(node: any): Node[] { if (Array.isArray(node)) return node.flatMap(nodes); if (!node || typeof node !== "object") return []; return [node, ...nodes(node.props?.children)]; }
@@ -76,6 +76,6 @@ describe("SubmissionDrop actual handlers", () => {
     area().props.onDrop(event()); await flush(); tree = h.render(); expect(text(tree)).toContain("too large");
     h.button(tree, "Retry unsubmitted files").props.onClick(); await flush(); tree = h.render(); expect(text(tree)).toContain("Needs review");
     void drop;
-    const h2 = harness(); slots.length = 0; tree = h2.render(); nodes(tree).find((n) => typeof n.props?.onDrop === "function")!.props.onDrop(event()); await flush(); tree = h2.render(); expect(text(tree)).toContain("Queued"); h2.reset(); tree = h2.render(); tree = h2.render(); expect(text(tree)).toContain("Needs review");
+    const h2 = harness(); slots.length = 0; tree = h2.render(); nodes(tree).find((n) => typeof n.props?.onDrop === "function")!.props.onDrop(event()); await flush(); tree = h2.render(); expect(text(tree)).toContain("Queued: 1 file"); expect(nodes(tree).find((n) => n.type === "AccordionSummary")).toBeDefined(); h2.reset(); tree = h2.render(); tree = h2.render(); expect(text(tree)).toContain("Needs review"); expect(text(tree)).not.toContain("Queued: 1 file");
   });
 });

@@ -697,7 +697,7 @@ export async function gradeSubmissions(
     entries: studentSubmissions,
     attemptedSupportedFiles,
     failedSupportedFiles,
-  } = await ingestZipEntries(zipBuffer, { inferFileNamesWith: provider, knownStudents: options.knownStudents });
+  } = await ingestZipEntries(zipBuffer, { inferFileNamesWith: provider, knownStudents: options.knownStudents, requireSupportedFiles: true });
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {
       const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");

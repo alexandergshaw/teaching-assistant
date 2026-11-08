@@ -240,7 +240,7 @@ describe("POST /api/grade-submission-zip", () => {
     await POST(jsonRequest({ storagePath: GOOD_PATH }));
     const options = ingestZipEntriesMock.mock.calls[0][1] as Record<string, unknown>;
     expect(options.stageVideo).toBeUndefined();
-    expect(options).toMatchObject({ deferLinks: true });
+    expect(options).toMatchObject({ deferLinks: true, requireSupportedFiles: true });
   });
 
   it("a thrown video-count ZipCapError becomes a done-with-error line carrying the TYPED class", async () => {

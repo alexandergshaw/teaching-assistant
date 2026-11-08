@@ -55,6 +55,7 @@ function ingested(entries: StudentSubmissionEntry[]): Awaited<ReturnType<typeof 
     entries,
     attemptedSupportedFiles: entries.length,
     failedSupportedFiles: [],
+    unsupportedFiles: [],
     classification: {
       kind: entries.length > 1 ? "class" : "single",
       studentCount: entries.length,
@@ -213,6 +214,7 @@ describe("prepareChatSubmissionAction - file", () => {
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
     const outcome = await prepareChatSubmissionAction(fileFormData(new File(["zip"], "work.zip")));
     expect(outcome).toMatchObject({ kind: "entries", entries: [canvasEntry], oversizedOmissions: [{ index: 1, student: "Big" }] });
+    expect(mockIngestZipEntries).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.objectContaining({ requireSupportedFiles: true }));
   });
 
   it("budget gate counts only bytes the grader reads: non-visual-heavy passes, visual-heavy is refused", async () => {
@@ -266,6 +268,7 @@ describe("prepareChatSubmissionAction - url", () => {
     mockIngestZipEntries.mockResolvedValue(ingested([canvasEntry, large]));
     const outcome = await prepareChatSubmissionAction(textFormData({ kind: "url", url: "https://drive.google.com/file/d/12345678901234567890/view" }));
     expect(outcome).toMatchObject({ kind: "entries", entries: [canvasEntry], oversizedOmissions: [{ index: 1, student: canvasEntry.student }] });
+    expect(mockIngestZipEntries).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.objectContaining({ requireSupportedFiles: true }));
   });
   // BLOCKER-1 (docs/grading-chat-waves.md section 5, requirement 1): the
   // Canvas branch must carry pointsPossible through to the intake outcome.

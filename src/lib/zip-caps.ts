@@ -248,6 +248,7 @@ export function chargeArchiveLevel(
     readonly parentPath: string;
     readonly chain: readonly string[];
     readonly classify: (name: string) => ZipMemberKind;
+    readonly onSkip?: (name: string) => void;
   }
 ): PlannedZipMember[] {
   const { limits } = budget;
@@ -271,7 +272,7 @@ export function chargeArchiveLevel(
 
     if (entry.dir) continue;
     const kind = ctx.classify(name);
-    if (kind === "skip") continue;
+    if (kind === "skip") { ctx.onSkip?.(fullName); continue; }
 
     const { declared, compressed } = declaredSizesOf(entry, fullName, ctx.chain, limits);
 

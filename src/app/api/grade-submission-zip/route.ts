@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
       async (blob: Blob) => {
         if (blob.size > GRADING_ZIP_MAX_BYTES) throw new Error(OVER_CEILING_MESSAGE);
         try {
-          return await ingestZipEntries(await blob.arrayBuffer(), { inferFileNamesWith: provider, deferLinks: true, stageVideo });
+          return await ingestZipEntries(await blob.arrayBuffer(), { inferFileNamesWith: provider, deferLinks: true, stageVideo, requireSupportedFiles: true });
         } catch (err) {
           ingestError = err;
           throw err;

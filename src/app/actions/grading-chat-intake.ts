@@ -231,7 +231,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
         // before any ticket exists - caught below, surfaced verbatim (AC-9).
         // ingestZipEntries is called directly (not extractStudentEntries) so
         // the zip's class-vs-single classification is not discarded.
-        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider });
+        const ingested = await ingestZipEntries(await file.arrayBuffer(), { inferFileNamesWith: provider, requireSupportedFiles: true });
         const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
         if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
         if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };
@@ -308,7 +308,7 @@ async function resolveOnePart(kind: string, data: PartData): Promise<IntakeOutco
           // Own ArrayBuffer, not Node's pooled one; A44's collision refusal
           // throws from here and is surfaced verbatim by the catch below.
           const bytes = new Uint8Array(fetched.buffer).slice().buffer;
-          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider });
+          const ingested = await ingestZipEntries(bytes, { inferFileNamesWith: provider, requireSupportedFiles: true });
           const unreadable = unreadableArchiveReason(ingested.failedSupportedFiles);
           if (unreadable) return { kind: "refused", reason: unreadable, refusalClass: "read-failed" };
           if (ingested.entries.length === 0) return { kind: "refused", reason: "No student submissions were found in this archive.", refusalClass: "read-failed" };

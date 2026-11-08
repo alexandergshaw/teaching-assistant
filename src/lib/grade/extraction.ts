@@ -56,6 +56,7 @@ import { planLinkResolution } from "./link-resolution-plan";
 import { fetchGoogleDriveFile } from "./google-drive-content";
 import { classifyGradingUpload, buildSingleFileEntry } from "./single-file-entry";
 import { inlineRepositoryIssue, linkedArchiveIssue, mergeLinkIssues, withFoldedContent, withLinkNote, type LinkIssue } from "./link-evidence";
+import { isArchiveBookkeeping, unreadableArchiveReason, unsupportedArchiveReason } from "./unsupported-archive";
 export { MAX_ENTRY_CONTENT_CHARS } from "./link-evidence";
 
 /** What one leaf member produced; merged into the result maps in ARCHIVE order. */
@@ -97,6 +98,7 @@ export async function extractSubmissions(
   rawData: Record<string, string>;
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
+  unsupportedFiles: string[];
   // A14: for every key also present in `submissions`/`rawData`, the whole
   // sequence of zip-archive entry names this file crossed to reach its
   // current path, OUTERMOST FIRST. A file that never crossed a zip boundary
@@ -113,6 +115,7 @@ export async function extractSubmissions(
   const zipParents: Record<string, string[]> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
+  const unsupportedFiles: string[] = [];
   const budget = createZipBudget(options?.limits);
   const videoEnabled = options?.videoEnabled ?? VIDEO_GRADING_ENABLED;
   const videoStaging: Record<string, VideoStaging> = {};
@@ -128,7 +131,9 @@ export async function extractSubmissions(
     const planned = chargeArchiveLevel(zip, budget, {
       parentPath,
       chain: zipChain,
+      onSkip: (name) => { if (!isArchiveBookkeeping(name)) unsupportedFiles.push(name); },
       classify: (name) => {
+        if (isArchiveBookkeeping(parentPath ? `${parentPath}/${name}` : name)) return "skip";
         const extension = getFileExtension(name);
         if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) return "nested";
         if (IMAGE_EXTENSIONS.has(extension)) return "leaf";
@@ -268,6 +273,7 @@ export async function extractSubmissions(
     rawData,
     attemptedSupportedFiles,
     failedSupportedFiles,
+    unsupportedFiles,
     zipParents,
     videoStaging,
     videoOutcomes,
@@ -290,7 +296,7 @@ export async function extractStudentEntries(
   zipBuffer: ArrayBuffer,
   options?: { readonly inferFileNamesWith?: LlmProvider; readonly knownStudents?: readonly string[] }
 ): Promise<StudentSubmissionEntry[]> {
-  const { entries } = await ingestZipEntries(zipBuffer, options);
+  const { entries } = await ingestZipEntries(zipBuffer, { ...options, requireSupportedFiles: true });
   return entries;
 }
 
@@ -320,16 +326,21 @@ export async function ingestZipEntries(
     readonly stageVideo?: StageVideoFn;
     /** A45: course roster names the collision check corroborates against. */
     readonly knownStudents?: readonly string[];
+    /** Refuse unsupported or unreadable members before inference or linked fetches. */
+    readonly requireSupportedFiles?: boolean;
   }
 ): Promise<{
   entries: StudentSubmissionEntry[];
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
+  unsupportedFiles: string[];
   classification: SubmissionZipClassification;
   videoOutcomes?: VideoOutcomes;
 }> {
-  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles, videoStaging, videoOutcomes } =
+  const { submissions, rawData, zipParents, attemptedSupportedFiles, failedSupportedFiles, unsupportedFiles, videoStaging, videoOutcomes } =
     await extractSubmissions(zipBuffer, { videoEnabled: options?.videoEnabled, stageVideo: options?.stageVideo });
+  const incompleteReason = options?.requireSupportedFiles ? (unsupportedArchiveReason(unsupportedFiles) ?? unreadableArchiveReason(failedSupportedFiles)) : null;
+  if (incompleteReason) throw new Error(incompleteReason);
   // A44 wave 2: refuse rather than silently blend a colliding parse. Placed
   // before grouping - the same seam Wave 1's fold lives in - and NOT inside
   // extractSubmissions/groupSubmissionsByStudent themselves (docs/a44-waves.md
@@ -384,7 +395,7 @@ export async function ingestZipEntries(
   }
   for (const [entry, issues] of issuesByEntry) { const issue = mergeLinkIssues(issues); if (issue) { entry.linkFetch = issue.status; entry.repoReadNote = issue.note; } }
   const classification = classifySubmissionZip(submissions, inferredLookup, zipParents);
-  return { entries, attemptedSupportedFiles, failedSupportedFiles, classification, videoOutcomes };
+  return { entries, attemptedSupportedFiles, failedSupportedFiles, unsupportedFiles, classification, videoOutcomes };
 }
 
 /**
@@ -792,6 +803,7 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
   }
   let linked: StudentSubmissionEntry[];
   let unreadableArchiveFiles = 0;
+  let unsupportedArchiveFiles = 0;
   let unavailableArchiveVideos = 0;
   if (kind === "single") {
     const single = await buildSingleFileEntry(fetched.name, fetched.buffer, undefined, true);
@@ -801,13 +813,14 @@ async function resolveEntryLinksUnsafe(entry: StudentSubmissionEntry): Promise<S
     const ingested = await ingestZipEntries(new Uint8Array(fetched.buffer).slice().buffer, { videoEnabled: true });
     linked = ingested.entries;
     unreadableArchiveFiles = ingested.failedSupportedFiles.length;
+    unsupportedArchiveFiles = ingested.unsupportedFiles.length;
     unavailableArchiveVideos = linked.reduce((count, item) => count + item.submittedFiles.filter((file) => VIDEO_EXTENSIONS.has(file.extension.toLowerCase()) && !file.videoRef).length, 0);
   } else {
     return assertNeverUploadKind(kind);
   }
   // M1 single-entry guard: an archive (or an unreadable file) must never fan
   // several students into this one row (the A44 blend).
-  const issue = linkedArchiveIssue(unreadableArchiveFiles, unavailableArchiveVideos, linked);
+  const issue = linkedArchiveIssue(unreadableArchiveFiles, unavailableArchiveVideos, linked, unsupportedArchiveFiles);
   if (linked.length !== 1) {
     return withLinkNote(entry, issue?.status ?? "flagged", `The linked Drive file could not be used as a single submission.${issue ? ` ${issue.note}` : ""}`);
   }

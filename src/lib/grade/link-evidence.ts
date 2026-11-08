@@ -38,9 +38,10 @@ export function inlineRepositoryIssue(repos: readonly { gradedRepo: string | nul
 }
 
 /** Report unreadable files, unstaged videos and nested-link problems together. */
-export function linkedArchiveIssue(unreadable: number, videos: number, nested: readonly StudentSubmissionEntry[]): LinkIssue | null {
+export function linkedArchiveIssue(unreadable: number, videos: number, nested: readonly StudentSubmissionEntry[], unsupported = 0): LinkIssue | null {
   const notes: string[] = [];
   if (unreadable) notes.push(`The linked Drive archive could not be fully read (${unreadable} file(s) unreadable).`);
+  if (unsupported) notes.push(`The linked Drive archive contains ${unsupported} file(s) with unsupported types.`);
   if (videos) notes.push(unreadable || nested.length !== 1 ? `${videos} video file(s) were not available for grading.` : `The linked Drive archive contains ${videos} video file(s) that were not available for grading.`);
   const nestedIssues = nested.filter((entry) => entry.linkFetch === "failed" || entry.linkFetch === "flagged");
   const prioritized = [...nestedIssues.filter((entry) => entry.linkFetch === "failed"), ...nestedIssues.filter((entry) => entry.linkFetch === "flagged")];

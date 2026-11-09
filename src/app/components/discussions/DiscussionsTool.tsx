@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormControlLabel, FormLabel, Paper, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { generateDiscussionTemplateAction } from "@/app/actions/discussions-tool";
+import { listDiscussionRostersAction, saveDiscussionRosterAction } from "@/app/actions/discussion-rosters";
+import { discussionRosterNames } from "@/lib/discussion-rosters";
 import { defaultDiscussionPrompt, detectDiscussionRosterExport, discussionDraftKey, discussionRosterProblem, discussionRosterWarnings, discussionTemplateProblem, parseDiscussionRoster, personalizeDiscussionReply, readDiscussionDraft, writeDiscussionDraft } from "@/lib/discussions-tool";
 import { writeClipboardText } from "../ui/clipboard";
 import { useSupabase } from "@/context/SupabaseProvider";
 
 type ReplyRow = { name: string; reply: string; key: string };
+type ClassRoster = { id: string; name: string; roster: string | null; courseCode: string | null; term: string | null; institution: string | null };
+const courseDescription = (course: ClassRoster) => [course.name, course.courseCode, course.term, course.institution].filter(Boolean).join(" - ");
 
 export default function DiscussionsTool() {
   const { user, loading } = useSupabase();
@@ -16,6 +20,22 @@ export default function DiscussionsTool() {
 }
 
 function DiscussionsSession({ userId }: { userId: string | null }) {
+  const [view, setView] = useState<"responses" | "rosters">("responses");
+  const [courses, setCourses] = useState<ClassRoster[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(Boolean(userId));
+  const [coursesError, setCoursesError] = useState("");
+  const [selectedCourse, setSelectedCourse] = useState("");
+  const [responseCourse, setResponseCourse] = useState("");
+  const [responseSource, setResponseSource] = useState<string | null>(null);
+  const [editorText, setEditorText] = useState("");
+  const [editorBaseline, setEditorBaseline] = useState("");
+  const [editorSource, setEditorSource] = useState<string | null>(null);
+  const [editorProblem, setEditorProblem] = useState("");
+  const [editorUnavailable, setEditorUnavailable] = useState(false);
+  const [editorReviewed, setEditorReviewed] = useState(false);
+  const [savingRoster, setSavingRoster] = useState(false);
+  const [pendingCourse, setPendingCourse] = useState<ClassRoster | null>(null);
+  const [pendingUse, setPendingUse] = useState<ClassRoster | null>(null);
   const [discussion, setDiscussion] = useState("");
   const [roster, setRoster] = useState("");
   const [promptOverride, setPromptOverride] = useState<string | null>(null);
@@ -34,8 +54,21 @@ function DiscussionsSession({ userId }: { userId: string | null }) {
   const [storageFailed, setStorageFailed] = useState(false);
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const lock = useRef(false);
+  const rosterSaveLock = useRef(false);
+  const courseDataRevision = useRef(0);
   const rosterRevision = useRef(0);
   const draftKey = discussionDraftKey(userId);
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    void listDiscussionRostersAction().then((result) => {
+      if (!active) return;
+      if ("error" in result) setCoursesError(result.error);
+      else setCourses(result.rosters);
+    }).catch(() => { if (active) setCoursesError("Could not load class rosters."); })
+      .finally(() => { if (active) setCoursesLoading(false); });
+    return () => { active = false; };
+  }, [userId]);
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
@@ -60,6 +93,10 @@ function DiscussionsSession({ userId }: { userId: string | null }) {
   const rosterExport = useMemo(() => detectDiscussionRosterExport(roster), [roster]);
   const templateProblem = template.trim() ? discussionTemplateProblem(template) : null;
   const visible = useMemo(() => rows.filter((row) => `${row.name}\n${row.reply}`.toLowerCase().includes(search.trim().toLowerCase())), [rows, search]);
+  const courseLabel = (course: ClassRoster) => {
+    const description = courseDescription(course);
+    return courses.some((other) => other.id !== course.id && courseDescription(other) === description) ? `${description} (${course.id})` : description;
+  };
   const generateTemplate = async (): Promise<string | null> => {
     if (promptStale) { setError("The discussion prompt changed. Update or reset the model prompt before generating a template."); return null; }
     if (!discussion.trim() || !prompt.trim()) { setError("Enter the discussion prompt and model prompt first."); return null; }
@@ -91,17 +128,67 @@ function DiscussionsSession({ userId }: { userId: string | null }) {
     try { await writeClipboardText(row.reply); setCopyStatus({ key: row.key, reply: row.reply, text: "Copied" }); }
     catch { setCopyStatus({ key: row.key, reply: row.reply, text: "Copy failed. Select and copy the reply." }); }
   };
+  const chooseEditor = (course: ClassRoster) => {
+    const parsed = discussionRosterNames(course.roster);
+    setSelectedCourse(course.id);
+    setEditorSource(course.roster);
+    if ("error" in parsed) { setEditorUnavailable(true); setEditorProblem(parsed.error); setEditorText(""); setEditorBaseline(""); return; }
+    const text = parsed.names.join("\n");
+    setEditorUnavailable(false); setEditorProblem(""); setEditorText(text); setEditorBaseline(text); setEditorReviewed(false);
+  };
+  const applyCourse = (course: ClassRoster) => {
+    const parsed = discussionRosterNames(course.roster);
+    if ("error" in parsed) { setError(parsed.error); return; }
+    rosterRevision.current++; setRoster(parsed.names.join("\n")); setResponseCourse(course.id); setResponseSource(course.roster); setRows([]); setRosterReviewed(false); setError("");
+  };
+  const retryCourses = async () => {
+    const revision = rosterRevision.current;
+    const courseRevision = ++courseDataRevision.current;
+    setCoursesLoading(true); setCoursesError("");
+    try {
+      const result = await listDiscussionRostersAction();
+      if (courseRevision !== courseDataRevision.current) return;
+      if ("error" in result) setCoursesError(result.error);
+      else {
+        setCourses(result.rosters);
+        if (revision === rosterRevision.current && responseCourse && result.rosters.find((course) => course.id === responseCourse)?.roster !== responseSource) {
+          setResponseCourse(""); setRoster(""); setRows([]); setNotice("The class roster changed. Select it again to use the updated names.");
+        }
+      }
+    } catch { if (courseRevision === courseDataRevision.current) setCoursesError("Could not load class rosters."); }
+    finally { if (courseRevision === courseDataRevision.current) setCoursesLoading(false); }
+  };
+  const saveCourse = async () => {
+    const course = courses.find((item) => item.id === selectedCourse);
+    if (!course || rosterSaveLock.current || editorUnavailable) return;
+    const problem = discussionRosterProblem(editorText, editorReviewed);
+    if (problem) { setEditorProblem(problem); return; }
+    rosterRevision.current++; courseDataRevision.current++; rosterSaveLock.current = true; setCoursesLoading(false); setSavingRoster(true); setCoursesError("");
+    try {
+      const result = await saveDiscussionRosterAction({ courseId: course.id, expectedRoster: editorSource, names: parseDiscussionRoster(editorText) });
+      if ("error" in result) { setCoursesError(result.error); return; }
+      setCourses((previous) => previous.map((item) => item.id === course.id ? { ...item, roster: result.roster } : item));
+      setEditorSource(result.roster);
+      setEditorBaseline(editorText);
+      if (responseCourse === course.id) { setResponseCourse(""); setRoster(""); setRows([]); setNotice("The class roster changed. Select it again to use the updated names."); }
+    } catch { setCoursesError("Could not save the roster. Your changes are still here."); }
+    finally { rosterSaveLock.current = false; setSavingRoster(false); }
+  };
   if (!draftReady) return <Alert severity="info" role="status">Loading your discussion draft...</Alert>;
   return <Stack spacing={2}>
     <Box><Typography variant="h5" component="h1">Discussions</Typography><Typography>Make one generic reply for each student. The reply uses their name but does not assume what they posted.</Typography></Box>
+    <Tabs value={view} onChange={(_, next: "responses" | "rosters") => setView(next)} aria-label="Discussions views"><Tab value="responses" label="Responses" id="discussions-tab-responses" aria-controls="discussions-panel-responses" disabled={savingRoster} /><Tab value="rosters" label="Rosters" id="discussions-tab-rosters" aria-controls="discussions-panel-rosters" disabled={savingRoster} /></Tabs>
+    {coursesError && <Alert severity="error" onClose={() => setCoursesError("")}>{coursesError} <Button size="small" onClick={() => void retryCourses()} disabled={coursesLoading || savingRoster}>Retry loading classes</Button></Alert>}
+    <Box role="tabpanel" id="discussions-panel-responses" aria-labelledby="discussions-tab-responses" hidden={view !== "responses"}><Stack spacing={2}>
     <Typography variant="body2">{draftKey ? "Draft inputs are saved on this browser for your account. Generated replies and review confirmations are not saved." : "Sign in to save your draft on this browser."} Changing an input clears the generated replies; you can generate them again.</Typography>
     {storageFailed && <Alert severity="warning">Draft storage is unavailable. Your inputs may be lost if you leave this page.</Alert>}
     {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
     {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
     <TextField label="Discussion prompt" multiline minRows={5} fullWidth value={discussion} disabled={busy} onChange={(event) => { setDiscussion(event.target.value); setRows([]); }} />
-    <TextField label="Class roster" helperText="Paste one student name per line or a labeled CSV/TSV roster. Names stay in your browser." multiline minRows={4} fullWidth value={roster} disabled={busy} onChange={(event) => { rosterRevision.current++; setRoster(event.target.value); setRows([]); setRosterReviewed(false); }} />
-    <Button component="label" variant="outlined" disabled={busy} sx={{ alignSelf: "flex-start" }}>Choose roster file<input type="file" accept=".txt,.csv,.tsv,text/plain,text/csv,text/tab-separated-values" hidden onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; const revision = ++rosterRevision.current; if (file.size > 1024 * 1024) { setError("Choose a roster file no larger than 1 MB."); return; } try { const text = await file.text(); if (revision !== rosterRevision.current) return; setRoster(text); setRows([]); setRosterReviewed(false); setError(""); } catch { if (revision === rosterRevision.current) setError("Could not read the roster file."); } }} /></Button>
-    {rosterExport && <Alert severity="info"><Typography>Detected {rosterExport.length} names. Review them before using this import:</Typography><Typography sx={{ whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto" }}>{rosterExport.join("\n")}</Typography><Button onClick={() => { rosterRevision.current++; setRoster(rosterExport.join("\n")); setRows([]); setRosterReviewed(false); }} disabled={busy}>Use these names</Button></Alert>}
+    {courses.length > 0 && <FormControl component="fieldset"><FormLabel component="legend">Use a class roster</FormLabel><Stack direction="row" useFlexGap sx={{ flexWrap: "wrap" }} spacing={1}>{courses.map((course) => <Chip key={course.id} component="button" type="button" label={courseLabel(course)} color={responseCourse === course.id ? "primary" : "default"} variant={responseCourse === course.id ? "filled" : "outlined"} aria-pressed={responseCourse === course.id} onClick={() => { if (responseCourse === course.id) return; if (roster.trim()) setPendingUse(course); else applyCourse(course); }} disabled={busy} />)}</Stack></FormControl>}
+    <TextField label="Class roster" helperText="Paste one student name per line or a labeled CSV/TSV roster. Names stay in your browser." multiline minRows={4} fullWidth value={roster} disabled={busy} onChange={(event) => { rosterRevision.current++; setRoster(event.target.value); setResponseCourse(""); setRows([]); setRosterReviewed(false); }} />
+    <Button component="label" variant="outlined" disabled={busy} sx={{ alignSelf: "flex-start" }}>Choose roster file<input type="file" accept=".txt,.csv,.tsv,text/plain,text/csv,text/tab-separated-values" hidden onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; const revision = ++rosterRevision.current; if (file.size > 1024 * 1024) { setError("Choose a roster file no larger than 1 MB."); return; } try { const text = await file.text(); if (revision !== rosterRevision.current) return; setRoster(text); setResponseCourse(""); setRows([]); setRosterReviewed(false); setError(""); } catch { if (revision === rosterRevision.current) setError("Could not read the roster file."); } }} /></Button>
+    {rosterExport && <Alert severity="info"><Typography>Detected {rosterExport.length} names. Review them before using this import:</Typography><Typography sx={{ whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto" }}>{rosterExport.join("\n")}</Typography><Button onClick={() => { rosterRevision.current++; setRoster(rosterExport.join("\n")); setResponseCourse(""); setRows([]); setRosterReviewed(false); }} disabled={busy}>Use these names</Button></Alert>}
     {rosterWarnings.length > 0 && <Alert severity="warning">{rosterWarnings.map((warning) => <div key={warning}>{warning}</div>)}<FormControlLabel control={<Checkbox checked={rosterReviewed} onChange={(event) => { setRosterReviewed(event.target.checked); if (!event.target.checked) setRows([]); }} disabled={busy} />} label="I checked the roster lines and duplicates" /></Alert>}
     <Accordion><AccordionSummary expandIcon={<span aria-hidden="true">+</span>}><Typography>Model prompt {promptOverride !== null ? "(edited)" : ""}</Typography></AccordionSummary><AccordionDetails><Stack spacing={1}><TextField label="Prompt sent to the model" helperText="Edit this prompt when generating a template. The roster is not included." multiline minRows={5} fullWidth value={prompt} disabled={busy} onChange={(event) => { setPromptOverride(event.target.value); setOverrideDiscussion(discussion); setRows([]); }} /><Button size="small" onClick={() => { setPromptOverride(null); setRows([]); }} disabled={busy || promptOverride === null}>Reset model prompt</Button></Stack></AccordionDetails></Accordion>
     {promptStale && <Alert severity="warning">The discussion prompt changed. Open and update or reset the model prompt before generating a template.</Alert>}
@@ -111,5 +198,17 @@ function DiscussionsSession({ userId }: { userId: string | null }) {
     <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}><Button variant="outlined" onClick={() => { if (template.trim()) setConfirmReplacement(true); else void run(true); }} disabled={busy}>Generate template</Button><Button variant="contained" onClick={() => void run(false)} disabled={busy}>{busy ? "Generating..." : "Generate replies"}</Button></Stack>
     <Dialog open={confirmReplacement} onClose={() => setConfirmReplacement(false)} aria-labelledby="replace-template-title"><DialogTitle id="replace-template-title">Replace the reply template?</DialogTitle><DialogContent>A new template will replace the current text and clear any generated replies. Your current template stays if generation fails.</DialogContent><DialogActions><Button onClick={() => setConfirmReplacement(false)}>Cancel</Button><Button onClick={() => { setConfirmReplacement(false); void run(true); }} variant="contained">Generate replacement</Button></DialogActions></Dialog>
     {rows.length > 0 && <Box><TextField label="Search replies" fullWidth size="small" value={search} onChange={(event) => setSearch(event.target.value)} /><TableContainer component={Paper} sx={{ mt: 1 }}><Table size="small"><TableHead><TableRow><TableCell>Student</TableCell><TableCell>Reply</TableCell><TableCell>Copy</TableCell></TableRow></TableHead><TableBody>{visible.map((row) => <TableRow key={row.key}><TableCell>{row.name}</TableCell><TableCell sx={{ whiteSpace: "pre-wrap" }}>{row.reply}</TableCell><TableCell><Button onClick={() => void copy(row)} aria-label={`Copy reply for ${row.name}`}>Copy</Button>{copyStatus?.key === row.key && copyStatus.reply === row.reply && <Typography role="status" variant="caption">{copyStatus.text}</Typography>}</TableCell></TableRow>)}</TableBody></Table></TableContainer><Typography role="status">{visible.length} of {rows.length} replies shown</Typography></Box>}
+    </Stack></Box>
+    <Box role="tabpanel" id="discussions-panel-rosters" aria-labelledby="discussions-tab-rosters" hidden={view !== "rosters"}><Stack spacing={2}>
+      <Typography>Select a class, then paste one student name per line. Existing roster usernames are preserved when their names are unchanged.</Typography>
+      {!userId && <Alert severity="info">Sign in to manage class rosters.</Alert>}
+      {coursesLoading && <Typography role="status">Loading class rosters...</Typography>}
+      {userId && !coursesLoading && !coursesError && courses.length === 0 && <Alert severity="info">No classes found. Add a class in Courses first.</Alert>}
+      {courses.length > 0 && <FormControl component="fieldset"><FormLabel component="legend">Class</FormLabel><Stack direction="row" useFlexGap sx={{ flexWrap: "wrap" }} spacing={1}>{courses.map((course) => <Chip key={course.id} component="button" type="button" label={courseLabel(course)} color={selectedCourse === course.id ? "primary" : "default"} variant={selectedCourse === course.id ? "filled" : "outlined"} aria-pressed={selectedCourse === course.id} disabled={savingRoster} onClick={() => { if (selectedCourse === course.id) return; if (selectedCourse && editorText !== editorBaseline) setPendingCourse(course); else chooseEditor(course); }} />)}</Stack></FormControl>}
+      {selectedCourse && courses.find((course) => course.id === selectedCourse && course.roster !== editorSource) && <Alert severity="warning">The class roster changed since you started editing. <Button onClick={() => { const course = courses.find((item) => item.id === selectedCourse); if (course) { if (editorText !== editorBaseline) setPendingCourse(course); else chooseEditor(course); } }} disabled={savingRoster}>Reload selected class</Button></Alert>}
+      {selectedCourse && <><TextField label="Student names" multiline minRows={8} fullWidth value={editorText} disabled={savingRoster || editorUnavailable} onChange={(event) => { setEditorText(event.target.value); setEditorReviewed(false); setEditorProblem(""); }} helperText="One name per line. Review the list before saving." />{editorProblem && <Alert severity="warning">{editorProblem}</Alert>}{discussionRosterWarnings(parseDiscussionRoster(editorText)).length > 0 && <Alert severity="warning">{discussionRosterWarnings(parseDiscussionRoster(editorText)).map((warning) => <div key={warning}>{warning}</div>)}<FormControlLabel control={<Checkbox checked={editorReviewed} onChange={(event) => setEditorReviewed(event.target.checked)} disabled={savingRoster} />} label="I checked the roster lines and duplicates" /></Alert>}<Button variant="contained" onClick={() => void saveCourse()} disabled={savingRoster || editorUnavailable || editorText === editorBaseline} sx={{ alignSelf: "flex-start" }}>{savingRoster ? "Saving..." : "Save roster"}</Button></>}
+    </Stack></Box>
+    <Dialog open={Boolean(pendingUse)} onClose={() => setPendingUse(null)} aria-labelledby="replace-response-roster-title"><DialogTitle id="replace-response-roster-title">Replace the current response roster?</DialogTitle><DialogContent>The current names and generated replies will be replaced by the selected class roster.</DialogContent><DialogActions><Button onClick={() => setPendingUse(null)}>Cancel</Button><Button variant="contained" onClick={() => { if (pendingUse) applyCourse(pendingUse); setPendingUse(null); }}>Use class roster</Button></DialogActions></Dialog>
+    <Dialog open={Boolean(pendingCourse)} onClose={() => setPendingCourse(null)} aria-labelledby="discard-roster-title"><DialogTitle id="discard-roster-title">Discard roster edits?</DialogTitle><DialogContent>Your unsaved changes to the current class roster will be lost.</DialogContent><DialogActions><Button onClick={() => setPendingCourse(null)}>Cancel</Button><Button variant="contained" onClick={() => { if (pendingCourse) chooseEditor(pendingCourse); setPendingCourse(null); }}>Discard edits</Button></DialogActions></Dialog>
   </Stack>;
 }

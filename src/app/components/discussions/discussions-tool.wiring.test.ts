@@ -26,4 +26,20 @@ describe("discussions wiring", () => {
     expect(run).toContain("discussionRosterProblem(roster, rosterReviewed)");
     expect(run.indexOf("if (rosterProblem)")).toBeLessThan(run.indexOf("setRows(names.map"));
   });
+  it("exposes responses and roster views with saved-class selection and conditional saves", () => {
+    expect(source).toContain('value="responses" label="Responses"');
+    expect(source).toContain('value="rosters" label="Rosters"');
+    expect(source).toContain('aria-pressed={responseCourse === course.id}');
+    expect(source).toContain('aria-pressed={selectedCourse === course.id}');
+    expect(source).toContain('expectedRoster: editorSource');
+    expect(source).toContain('Replace the current response roster?');
+    expect(source).toContain('Discard roster edits?');
+  });
+  it("invalidates an older class refresh when a roster save starts", () => {
+    const retry = source.slice(source.indexOf("const retryCourses = async"), source.indexOf("const saveCourse = async"));
+    const save = source.slice(source.indexOf("const saveCourse = async"), source.indexOf("if (!draftReady)"));
+    expect(retry).toContain("const courseRevision = ++courseDataRevision.current");
+    expect(retry.indexOf("if (courseRevision !== courseDataRevision.current) return")).toBeLessThan(retry.indexOf("setCourses(result.rosters)"));
+    expect(save).toContain("courseDataRevision.current++");
+  });
 });

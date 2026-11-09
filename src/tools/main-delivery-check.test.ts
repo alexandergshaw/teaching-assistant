@@ -30,7 +30,10 @@ describe("ordinary main delivery check", () => {
   });
   it("requires an explicit full commit", () => expect(() => checkMainDelivery("abc", runner())).toThrow("full 40-character"));
   it("refuses nonempty grafts before assessing ancestry", () => {
-    expect(() => checkMainDelivery(candidate, runner(), () => "legacy graft")).toThrow("grafts alter ancestry");
+    // The injected reader is called with utf8; readFileSync's public type also
+    // includes binary overloads that this single-purpose test double does not use.
+    const readGrafts = (() => "legacy graft") as unknown as typeof import("node:fs").readFileSync;
+    expect(() => checkMainDelivery(candidate, runner(), readGrafts)).toThrow("grafts alter ancestry");
   });
   it("refuses an inherited graft-file override", () => {
     const previous = process.env.GIT_GRAFT_FILE;

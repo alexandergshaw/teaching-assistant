@@ -1,6 +1,6 @@
 import { resetSessionDiagnosticLogForTests, readSessionDiagnosticLogState } from "@/lib/session-diagnostic-log";
 import { describe, it, expect, vi } from "vitest";
-import { handoffTemplate, SELECTED_TEMPLATE_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
+import { handoffTemplate, SELECTED_TEMPLATE_KEY, SELECTED_ROLE_LIBRARY_KEY, recordPowerPointDiagnostic, sourceSlidePage } from "./panel-logic";
 it("pages all source slides in order without dropping the last partial page", () => {
   const slides = Array.from({ length: 14 }, (_, i) => i + 1);
   expect(sourceSlidePage(slides, 1)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -26,6 +26,15 @@ describe("synchronous template selection handoff", () => {
       code: "PPT_SELECTION", error: "Could not remember the selected template. Allow browser storage and retry.",
     });
     expect(navigate).not.toHaveBeenCalled();
+  });
+  it("carries the selected library and source together and clears older library choices", () => {
+    const values = new Map<string, string>();
+    const storage = { setItem: (key: string, value: string) => { values.set(key, value); } };
+    const navigate = vi.fn();
+    expect(handoffTemplate("source", storage, navigate, "library")).toEqual({ ok: true });
+    expect(JSON.parse(values.get(SELECTED_ROLE_LIBRARY_KEY)!)).toEqual({ libraryId: "library", sourceFileId: "source" });
+    expect(handoffTemplate("other", storage, navigate)).toEqual({ ok: true });
+    expect(JSON.parse(values.get(SELECTED_ROLE_LIBRARY_KEY)!)).toBeNull();
   });
 });
 

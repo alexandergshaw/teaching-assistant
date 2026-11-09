@@ -1,12 +1,18 @@
 import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import { failure, type TemplateFailure } from "@/lib/powerpoint-template-library/types";
 export const SELECTED_TEMPLATE_KEY = "ta-ppt-template-file-id";
+export const SELECTED_ROLE_LIBRARY_KEY = "ta-ppt-role-library";
+export const ROLE_LIBRARY_CHANGED = "ta-ppt-role-library-changed";
 export function sourceSlidePage<T>(slides: readonly T[], page: number, pageSize = 6): readonly T[] {
   const safePage = Number.isInteger(page) && page > 0 ? page : 1;
   return slides.slice((safePage - 1) * pageSize, safePage * pageSize);
 }
-export function handoffTemplate(sourceFileId: string, storage: Pick<Storage, "setItem">, navigate: () => void): { ok: true } | TemplateFailure {
-  try { storage.setItem(SELECTED_TEMPLATE_KEY, JSON.stringify(sourceFileId)); }
+export function handoffTemplate(sourceFileId: string, storage: Pick<Storage, "setItem">, navigate: () => void, libraryId?: string): { ok: true } | TemplateFailure {
+  try {
+    storage.setItem(SELECTED_ROLE_LIBRARY_KEY, JSON.stringify(libraryId ? { libraryId, sourceFileId } : null));
+    storage.setItem(SELECTED_TEMPLATE_KEY, JSON.stringify(sourceFileId));
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(ROLE_LIBRARY_CHANGED));
+  }
   catch { return failure(null, "PPT_SELECTION"); }
   navigate();
   return { ok: true };

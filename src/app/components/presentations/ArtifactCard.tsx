@@ -4,7 +4,7 @@
 // produced artifact (content + optional critique + Regenerate), or an error
 // (PRES-1 wave 3).
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Button, CircularProgress } from "@mui/material";
 import type { ContentArtifactKind, ProducedArtifact } from "@/lib/presentations/types";
 import { useTemplateFillReview } from "./TemplateFillReview";
@@ -15,6 +15,7 @@ import {
   deckDownloadFilename,
 } from "./panel-logic";
 import SlideDeckPreview from "./SlideDeckPreview";
+import RoleAwareTemplateFill from "./RoleAwareTemplateFill";
 
 export type ArtifactCardState =
   | { phase: "idle" }
@@ -196,12 +197,18 @@ function DeckArtifact({
   templateFileId: string;
 }) {
   const [downloading, setDownloading] = useState(false);
+  const [roleDownloading, setRoleDownloading] = useState(false);
+  const outputLock = useRef(false);
+  const startRoleDownload = useCallback(() => { if (outputLock.current) return false; outputLock.current = true; setRoleDownloading(true); return true; }, []);
+  const finishRoleDownload = useCallback(() => { outputLock.current = false; setRoleDownloading(false); }, []);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const { fill, dialog } = useTemplateFillReview();
   const current = useRef({ deck, templateFileId });
   useLayoutEffect(() => { current.current = { deck, templateFileId }; }, [deck, templateFileId]);
 
   async function handleDownload() {
+    if (outputLock.current) return;
+    outputLock.current = true;
     setDownloading(true);
     setDownloadError(null);
     try {
@@ -236,6 +243,7 @@ function DeckArtifact({
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not build the .pptx file.");
     } finally {
+      outputLock.current = false;
       setDownloading(false);
     }
   }
@@ -249,13 +257,14 @@ function DeckArtifact({
           variant="contained"
           size="small"
           onClick={handleDownload}
-          disabled={downloading}
+          disabled={downloading || roleDownloading}
           sx={{ textTransform: "none" }}
         >
           {downloading ? "Preparing..." : "Download .pptx"}
         </Button>
       </div>
       {downloadError && <p style={{ color: "var(--danger)", margin: 0 }}>{downloadError}</p>}
+      <RoleAwareTemplateFill sourceFileId={templateFileId} title={deck.presentationTitle} slides={deck.slides} disabled={downloading} onStart={startRoleDownload} onEnd={finishRoleDownload} />
       <SlideDeckPreview slides={deck.slides} />
     </div>
   );

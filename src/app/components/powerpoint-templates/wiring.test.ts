@@ -49,7 +49,7 @@ describe("PowerPoint template UI wiring (source, not rendering)", () => {
     expect(source).toContain('librariesError && <Alert');
     expect(source).toContain('sourceSlidePage(definition.slides, slidePage)');
     expect(source).toContain('aria-label="Source slide pages"');
-    expect(source).toContain('classifications do not control slide mapping');
+    expect(source).toContain('choose Match slides by role in Slide Deck Creation to use your classifications');
     expect(source).toContain('Slides need editable text');
   });
   it("offers manual classification and states textless fill limits", () => {

@@ -148,7 +148,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
       const result = requireSuccess(await reusePowerPointTemplateLibraryAction(savedId));
       if (!current()) return;
       let handed;
-      try { handed = handoffTemplate(result.sourceFileId, window.localStorage, onUseInSlideDeckCreation); }
+      try { handed = handoffTemplate(result.sourceFileId, window.localStorage, onUseInSlideDeckCreation, savedId); }
       catch { throw failure(null, "PPT_SELECTION"); }
       if ("error" in handed) throw handed;
       diagnostic("reuse", started);
@@ -171,7 +171,7 @@ function PowerPointTemplatesSession({ onUseInSlideDeckCreation, active }: { onUs
     if (!preserveName) setName(next.name.replace(/\.pptx$/i, "").slice(0, 160));
   }
   return <div className={styles.page}>
-    <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Reuse fills the original deck by position; classifications do not control slide mapping. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
+    <TabHeader eyebrow="Presentations" title="PowerPoint Templates" subtitle="Review extracted slide text and save classifications. Standard download fills the original deck by position; choose Match slides by role in Slide Deck Creation to use your classifications. Slides need editable text, and slide and bullet capacity limits apply. Image previews are not available." />
     <div className={styles.workspace}>
       <section className={styles.panel} aria-labelledby="ppt-template-heading">
         <header className={styles.panelHeader}>

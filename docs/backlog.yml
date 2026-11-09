@@ -8,7 +8,7 @@
   blocked_by: []
   instrument: 'Paste rich content containing font sizes, colors, bold and lists; verify the same safe visible formatting immediately and after course-scoped save and reload, preserving legacy plain examples and non-executable HTML. Browser verification must cover paste, keyboard focus and reopen.'
   from: 'Owner request in this chat to preserve font size, color and styling in announcements pasted into the walkthrough page.'
-  note: 'Implemented visual rich paste with a safe versioned stored representation and legacy plain-text compatibility. Supports common inline font size, font family, color, emphasis and lists; arbitrary CSS, images and executable elements are excluded. Authenticated browser paste, keyboard focus, storage reopen and live model fidelity verification remain open.'
+  note: 'Implemented visual rich paste with a safe versioned stored representation and legacy plain-text compatibility. Supports common inline font size, font family, color, emphasis, lists, safe tables and cell spans, borders, spacing and alignment; arbitrary CSS, images and executable elements are excluded. Authenticated browser paste, keyboard focus, storage reopen and live model fidelity verification remain open.'
   question: null
 - id: 'RECORDING-ANNOUNCEMENT-FORMAT-CONTROLS'
   state: 'actionable'

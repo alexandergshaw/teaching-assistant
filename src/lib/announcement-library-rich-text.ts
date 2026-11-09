@@ -2,7 +2,7 @@ import { parse, HTMLElement, NodeType, type Node } from "node-html-parser";
 import { htmlToMarkdown } from "@/lib/markdown";
 
 const PREFIX = "<!--announcement-rich-v1-->";
-const allowed = new Set(["p", "div", "br", "span", "strong", "b", "em", "i", "u", "s", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "a", "blockquote", "font"]);
+const allowed = new Set(["p", "div", "br", "span", "strong", "b", "em", "i", "u", "s", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "a", "blockquote", "font", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption"]);
 const discard = new Set(["script", "style", "iframe", "object", "embed", "svg", "math", "template", "form", "input", "img"]);
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function safeStyle(value: string): string {
@@ -17,6 +17,13 @@ function safeStyle(value: string): string {
     else if (name === "font-style" && /^(?:normal|italic|oblique)$/i.test(v)) out.push(`${name}:${v}`);
     else if (name === "text-decoration" && /^(?:none|underline|line-through|underline line-through)$/i.test(v)) out.push(`${name}:${v}`);
     else if (name === "text-align" && /^(?:left|right|center|justify|start|end)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (name === "vertical-align" && /^(?:baseline|top|middle|bottom|text-top|text-bottom)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (name === "white-space" && /^(?:normal|pre|pre-wrap|pre-line|nowrap)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (name === "border-collapse" && /^(?:collapse|separate)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (name === "text-decoration-line" && /^(?:none|underline|line-through|underline line-through)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (name === "line-height" && /^(?:normal|\d{1,3}(?:\.\d{1,2})?(?:px|pt|em|rem|%)?)$/i.test(v)) out.push(`${name}:${v}`);
+    else if (["width", "height", "padding", "padding-left", "padding-right", "padding-top", "padding-bottom", "margin", "margin-left", "margin-right", "margin-top", "margin-bottom", "letter-spacing"].includes(name) && /^(?:0|\d{1,3}(?:\.\d{1,2})?(?:px|pt|em|rem|%))$/i.test(v)) out.push(`${name}:${v}`);
+    else if (["border", "border-top", "border-right", "border-bottom", "border-left"].includes(name) && /^(?:0|none|\d{1,2}(?:\.\d{1,2})?(?:px|pt)\s+(?:solid|dashed|dotted|double)(?:\s+(?:#[0-9a-f]{3,8}|[a-z]{1,20}|rgba?\(\s*[0-9.,%\s]+\)))?)$/i.test(v)) out.push(`${name}:${v}`);
   }
   return out.join(";");
 }
@@ -32,6 +39,10 @@ function render(node: Node): string {
   const fontStyle = tag === "font" ? [node.getAttribute("color") ? `color:${node.getAttribute("color")}` : "", node.getAttribute("face") ? `font-family:${node.getAttribute("face")}` : "", fontSizes[node.getAttribute("size") ?? ""] ? `font-size:${fontSizes[node.getAttribute("size") ?? ""]}` : ""].join(";") : "";
   const style = safeStyle([node.getAttribute("style") ?? "", fontStyle].join(";"));
   let attrs = style ? ` style="${escape(style)}"` : "";
+  if (tag === "td" || tag === "th") for (const name of ["colspan", "rowspan"]) {
+    const span = node.getAttribute(name) ?? "";
+    if (/^(?:[1-9]|[1-9]\d|100)$/.test(span)) attrs += ` ${name}="${span}"`;
+  }
   if (tag === "a") { const href = (node.getAttribute("href") ?? "").trim(); if (/^(?:https?:\/\/|mailto:|#|\/(?![\\/]))/i.test(href) && !/[\x00-\x20\x7f]/.test(href)) attrs += ` href="${escape(href)}"`; }
   const outputTag = tag === "font" ? "span" : tag;
   return `<${outputTag}${attrs}>${inner}</${outputTag}>`;

@@ -15,6 +15,17 @@ describe("previous announcement rich paste", () => {
   it("retains legacy font element color, face and size", () => {
     expect(sanitizePreviousAnnouncementHtml('<font color="red" face="Arial" size="4">Hello</font>')).toBe('<span style="color:red;font-family:Arial;font-size:18px">Hello</span>');
   });
+  it("retains table structure, cell spans and common safe layout styles on reopen", () => {
+    const pasted = '<table style="border-collapse:collapse;width:100%"><tbody><tr><th colspan="2" style="border:1px solid #333;padding:4px">Title</th></tr><tr><td style="vertical-align:top;line-height:1.5">One</td><td>Two</td></tr></tbody></table>';
+    const reopened = previousAnnouncementHtml(encodePreviousAnnouncementHtml(pasted));
+    expect(reopened).toBe(sanitizePreviousAnnouncementHtml(pasted));
+    expect(reopened).toContain('<th style="border:1px solid #333;padding:4px" colspan="2">Title</th>');
+    expect(previousAnnouncementText(encodePreviousAnnouncementHtml(pasted))).toContain("Title");
+  });
+  it("rejects unsafe layout values and invalid table spans", () => {
+    const pasted = '<table style="width:expression(alert(1));background-image:url(https://x);border:1px solid red"><tr><td colspan="1000" rowspan="2" style="position:fixed;padding:2px;line-height:url(x)">Text</td></tr></table>';
+    expect(sanitizePreviousAnnouncementHtml(pasted)).toBe('<table style="border:1px solid red"><tr><td style="padding:2px" rowspan="2">Text</td></tr></table>');
+  });
   it("drops scripts, event handlers, unsafe links and unsafe CSS", () => {
     const safe = sanitizePreviousAnnouncementHtml('<script>alert(1)</script><p onclick="evil()" style="color:red;background-image:url(x);font-size:20px"><a href="javascript:evil()">Hello</a></p>');
     expect(safe).toBe('<p style="color:red;font-size:20px"><a>Hello</a></p>');
